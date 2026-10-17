@@ -20,7 +20,7 @@ Service 在同一交易讀取使用者、訂單及指定寄出 movement（一般
 
 只更新同一份 orders 文件：新增 deliveryRecords、deliveryHistory，以及品項／訂單 deliveredQty 與 isDelivered 投影。**不讀 inventory、warehouseStocks、inventoryReservations、inventoryLots 或成本集合，不新增 movement、不寫任何庫存資料**。
 
-固定 operationId 保存在同一筆 deliveryRecord，綁定原 UID、角色、完整意圖 hash 與原確認結果。未知回覆沿用原 ID；同 ID 同意圖只回傳原結果，不重複新增，即使訂單後續取消也不恢復操作。重試仍檢查帳號有效與目前訂單所有權；換人、角色或意圖不能沿用。回覆的 already-applied 結果是原操作結果，畫面未來接線時應另刷新目前總進度。
+固定 operationId 保存在同一筆 deliveryRecord，綁定原 UID、角色、完整意圖 hash 與原確認結果。未知回覆沿用原 ID；同 ID 同意圖只回傳原結果，不重複新增，即使訂單後續取消也不恢復操作。若原確認已移除／撤銷而歷史仍有該 ID，原 ID 會拒絕，不把已撤銷送達重新建立；此批只驗證該歷史防護，不表示已實作撤銷 Service。重試仍檢查帳號有效與目前訂單所有權；換人、角色或意圖不能沿用。回覆的 already-applied 結果是原操作結果，畫面未來接線時應另刷新目前總進度。
 
 兩個不同 ID 同時確認相同出貨，都會重讀同一訂單／來源事件；Firestore 衝突重試後仍須通過單筆剩餘額度，不能超額。同 ID 同時提交僅有一筆事件，另一筆回傳 already-applied。更新／回覆失敗可用原 ID 重試。
 
@@ -42,4 +42,4 @@ A 倉寄 2 → 客戶確認 1 → B 倉寄 6 → 確認 B 倉 6 → 確認 A 倉
 
 ## 本機驗證紀錄
 
-Node 1,502／1,502 通過，0 失敗。Firestore Emulator 合跑既有／新增出貨與送達19、單品項預留12、分組預留5，共36／36通過，0失敗。新增送達案例8組涵蓋多個角色、拒絕情境及併發。app與Functions Core建置一致、語法及diff檢查通過；完整Rules、Auth Callable與六組Chrome仍待本批GitHub CI，不等同Preview真人驗收。
+Node 1,502／1,502 通過，0 失敗。Firestore Emulator 合跑出貨／送達20、單品項預留12、分組預留5，最終37／37通過，0失敗。新增送達案例9組涵蓋多個角色、拒絕情境及併發。app與Functions Core建置一致、語法及diff檢查通過；完整Rules、Auth Callable與六組Chrome結果以本批GitHub CI／PR紀錄為準，不等同Preview真人驗收。

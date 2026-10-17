@@ -289,3 +289,17 @@ test('late acknowledgement write failure rolls back the event and retains same-I
  const before=await snapshot(x);await assert.rejects(x.confirm(x.deliveryRequest(),x.uid,wrapper));
  assert.deepEqual(await snapshot(x),before);assert.equal((await x.confirm()).status,'applied');
 });
+
+test('removed or reversed acknowledgement cannot be resurrected by retrying its original operation ID',async()=>{
+ const x=await acknowledgementFixture('reversed-retry');await x.confirm();
+ const order=await x.read('orders',x.orderId);
+ const restoredItems=order.items.map(row=>({...row,deliveredQty:0}));
+ // Simulate a future acknowledged reversal checkpoint, without claiming a
+ // reversal Service/UI is already implemented or accepted in this batch.
+ await db.collection('orders').doc(x.orderId).update({deliveryRecords:[],deliveredQty:0,isDelivered:false,
+  items:restoredItems,deliveryHistory:[...order.deliveryHistory,
+   {action:'delete',recordId:x.deliveryRequest().operationId,by:'admin',at:'2026-10-18T12:00:00Z'}]});
+ const before=await snapshot(x);
+ await assert.rejects(x.confirm(),/歷史紀錄/);assert.deepEqual(await snapshot(x),before);
+ assert.equal((await x.confirm(x.deliveryRequest(1,'delivery_reversed_new'))).status,'applied');
+});

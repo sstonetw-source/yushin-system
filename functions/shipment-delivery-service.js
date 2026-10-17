@@ -52,6 +52,8 @@ async function commitShipmentDelivery(db,uid,data){
     fault('送達操作識別碼已用於其他交易','already-exists');
    return {...record.result,status:'already-applied',recordId:operationId};
   }
+  if((order.deliveryHistory||[]).some(row=>row.recordId===operationId))
+   fault('此送達操作已有歷史紀錄，不能以原識別碼重新確認');
   if(order.inventoryReservationStatus!=='completed'||order.inventoryReservationAttemptId!==syncAttemptId)
    fault('庫存同步未完成或來源同步識別碼已變更');
   if(!['active','normal'].includes(order.status)||![undefined,'','normal','active'].includes(order.orderStatus))
