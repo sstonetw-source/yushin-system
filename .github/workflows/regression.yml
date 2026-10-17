@@ -67,11 +67,13 @@ jobs:
       - name: Check authoritative lot display and batch search in desktop and mobile Chrome
         run: node tests/inventory-lot-browser-smoke.js
       - name: Install Firestore rules test dependencies
-        run: npm install --no-save @firebase/rules-unit-testing firebase
+        run: npm install --no-save @firebase/rules-unit-testing firebase firebase-admin@14.2.0
       - name: Set up Java 21 for Firestore emulator
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
+      - name: Emulator Admin SDK grouped reservation integration
+        run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --test tests/emulator-grouped-reservation.cjs"
       - name: Compile and test Firestore rules
         run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --test tests/firestore-rules.test.js"

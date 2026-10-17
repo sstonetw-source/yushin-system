@@ -337,3 +337,5 @@ Service 不再直接呼叫快取函式，改接收可選的同步 `onStockCommit
 - `functions/index.js` 的 Callable `commitGroupedWarehouseReservation` **預設回傳尚未啟用**（須明確 `ENABLE_GROUPED_RESERVATION=true`），因為目前沒有把前端工作流程接到新後端，也未完成 Preview 的 Firebase Functions Emulator / 真實 SDK 同步驗收。此批不能解決 PR #131 的 Rules CI，也沒有解除 v2 位置欄位阻擋。僅本批 Node mock 的單交易與冪等測試屬已驗證；完整 E2E、不同角色實際 SDK 與並發及與歷史非標準 inventory ID 的相容性仍待驗收。
 
 備註：後端剩餘交付需求採用與瀏覽器相同的 `fulfillment-core.projectOrderDelivery`（含 CLOSE 結案退貨處理），函式部署的產生副本與原始模組逐位元一致；來源產品主檔辨識為 Service 時必須拒絕實貨預留，並不把已結案退貨算為重新補送需求。
+
+2026-10-17 後端試點補充驗收：`tests/emulator-grouped-reservation.cjs` 以 Firebase Admin SDK 對真正 Firestore Emulator 執行公司／雙倉／預留／憑證的完整同交易更新、冪等重試、權限拒絕、超額拒絕及兩次併發更新的守恆檢查。CI 不依賴正式服務憑證。**這仍不是 Functions Callable 真實 Auth SDK、正式環境部署或前端流程全接線驗收**。
