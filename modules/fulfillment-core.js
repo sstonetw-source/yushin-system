@@ -143,6 +143,38 @@
         confirmedQty:row.confirmedQty,pendingQty:row.shipment.qty-row.confirmedQty}))};
   }
 
+  // Physical returns do not erase historical shipments/acknowledgements.
+  // CLOSE fulfils that quantity commercially; REPLACE reopens demand.
+  function projectShipmentReturns(input={}) {
+    const base=projectShipmentDelivery(input),records=input.returns??[];
+    if(!Array.isArray(records)||records.length>200)throw Error('退貨紀錄格式不正確或超過安全上限。');
+    const seen=new Set(),totals=new Map();let returnedQty=0,closedQty=0;
+    for(const row of records){
+      const source=(input.shipments||[]).find(s=>s.id===row?.shipmentId);
+      const delivered=base.shipments.find(s=>s.shipmentId===row?.shipmentId);
+      if(typeof row?.id!=='string'||!row.id||seen.has(row.id)||!source||!delivered
+        ||row.orderId!==input.orderId||row.itemId!==input.itemId||row.productKey!==input.productKey
+        ||row.warehouseId!==source.warehouseId||row.sourceType!=='WAREHOUSE_CUSTOMER_RETURN'
+        ||!['CLOSE','REPLACE'].includes(row.settlement)||row.condition!=='RESTOCKABLE'
+        ||!Number.isSafeInteger(row.qty)||row.qty<=0
+        ||typeof row.date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(row.date)
+        ||!Number.isFinite(Date.parse(row.date+'T00:00:00Z'))
+        ||new Date(row.date+'T00:00:00Z').toISOString().slice(0,10)!==row.date
+        ||row.date<source.date||(input.deliveries||[]).some(d=>d.shipmentId===row.shipmentId&&d.date>row.date))
+        throw Error('退貨未對應有效出貨／送達來源或結案方式不正確。');
+      seen.add(row.id);const total=(totals.get(row.shipmentId)||0)+row.qty;
+      if(!Number.isSafeInteger(total)||total>delivered.confirmedQty)throw Error('退貨超過該筆已送達量。');
+      totals.set(row.shipmentId,total);returnedQty+=row.qty;
+      if(row.settlement==='CLOSE')closedQty+=row.qty;
+    }
+    const replacementQty=returnedQty-closedQty;
+    const effectiveDeliveredQty=projectOrderDelivery({grossDeliveredQty:base.confirmedQty,returnedQty,
+      returnRecords:records}).effectiveDelivered;
+    return {...base,returnedQty,closedQty,replacementQty,effectiveDeliveredQty,
+      outstandingQty:input.orderedQty-base.shippedQty+replacementQty,
+      isDelivered:input.orderedQty>0&&effectiveDeliveredQty===input.orderedQty};
+  }
+
   function pendingDispatchQty(item) {
     return dispatchState(item).pending;
   }
@@ -180,6 +212,7 @@
     dispatchState,
     warehouseShipmentState,
     projectShipmentDelivery,
+    projectShipmentReturns,
     pendingDispatchQty,
     shippableQty,
     prepareDispatch,

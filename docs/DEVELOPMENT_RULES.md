@@ -55,3 +55,5 @@
 - v2送達確認一律使用 `commitShipmentDelivery`／`projectShipmentDelivery`，目前僅demo-yushin Emulator；來源必須連結真實倉庫出貨及扣帳movement。確認不能呼叫現有會再扣庫存的delivery-stock Service，不可將新版與legacy事件混用。權限沿現有商業生命週期：admin或本人sales／engineer。修改須驗證真實預留→分倉寄送→分批送達／再寄下一批，並在執行時檢查送達確認僅讀3份文件、只寫orders；退貨／撤銷與前端／需求投影未整合前不可開放。
 
 - v2送達撤銷必須使用 reverseShipmentDelivery，不能呼叫會補回實貨的舊delivery-stock撤銷。確認／撤銷／批次追溯須共用原身份、投影與shipment proof；操作ID不可跨動作重用。部分送達混合批次的實物退貨，須由操作者明確指定lotId／qty，不可猜FEFO或最後批次。planLocationReturnTrace僅唯讀，不可直接套其預覽進正式寫入；真正退貨入庫仍需另案整合所有帳與重試證據。
+
+- v2實物原倉退貨一律走 `commitLocationReturn`（僅demo-yushin Emulator），共用 `projectShipmentReturns`／`planExplicitShipmentReturn`／`planReservationReturn`／`planLotRestoration`。不得直接提交唯讀追溯結果；須同交易重讀原出貨、先前入庫憑證、全部來源倉批次及原始帳。CLOSE／REPLACE 不可覆蓋他倉預留。已有退貨後的新打單／出貨／送達仍須獨立整合，不得解除現行入口阻擋來宣稱補送已完成。修改須跑 emulator-location-shipment 的分次、五角色、重送、競爭與末端失敗回滾。

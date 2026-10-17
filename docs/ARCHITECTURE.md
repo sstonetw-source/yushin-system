@@ -369,3 +369,6 @@ Callable Emulator 啟動修正：在 `firebase.json` 明確配置 `auth:9099`、
 ## 送達撤銷及原批次追溯（2026-10-17，僅 Emulator）
 
 確認、撤銷及追溯共用 shipment-delivery-service 的 actor／order／projection／shipment proof helpers。reverseShipmentDelivery只修正orders送達事件與投影，不動實貨；location-return-trace-service僅依明確lotId／qty核對真實原批次並產生不可提交的預覽。Inventory.planExplicitShipmentReturn補上混合包裹部分送達的明確選批契約，還原計算仍沿既有planLotRestoration。實物退貨入庫、UI、工作清單／需求及Preview仍待完成。詳見 delivery-reversal-return-trace-emulator-20261017.md。
+
+### 原倉實物退貨交易（2026-10-17，Emulator）
+`functions/location-return-service.js` 使用共同出貨來源驗證、`projectShipmentReturns`、明確原批次退貨、`planReservationReturn` 與 `planLotRestoration`，在單一交易還原原倉實貨及 CLOSE／REPLACE 預留，保存不可重複入庫的 movement。已支援分次退貨，但後續補送出貨及 UI／需求同步仍未完成；詳見 `location-return-receipt-emulator-20261017.md`，不得視為正式上線。
