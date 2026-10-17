@@ -177,3 +177,7 @@ deliveryHistory 的 shipment_confirmation_reversal 事件以operationId識別本
 無新持久欄位。`warehouseShipmentContext` 僅為 Core 呼叫參數，包含 orderId／itemId／productKey 與既有 warehouseShipmentRecords／deliveryRecords，不寫入 items。Fulfillment 回傳 unshippedQty；Workflow 在此明確 context 回傳 stockOutstandingQty／pendingDeliveryQty，outstandingQty 保留待客戶確認語意。舊 Core 呼叫的回傳格式維持相容。
 
 原 receiving transaction 新增逐筆原出貨 movement 讀取（沿用最多 200 筆出貨的 Core 上限），核對 `location-ship-{shipment.id}`、action/type、來源、倉庫、負 qty 與 lotAllocations；不更動出貨／送達／既有批次配置，不讀既有受保護成本。無新查詢、索引、集合或 Rules；採購顯示用同一既有紀錄投影。
+
+### 雙倉自由庫存自動分配 checkpoint（2026-10-18）
+
+`reservationOperationReceipts/single-v2-free-batch-{runId}` 新增 Emulator-only 協調進度文件。它是工作執行 checkpoint，**不是實體庫存權威**；欄位包含 action、actorUid、actorRole、intentHash、productKey、warehouseId、maxQty、allocatedQty、processedSteps、pending、status、createdAt、updatedAt 及完成原因。pending 保存 orderId、itemId、syncAttemptId、quantity、固定 operationId。每步真正變更由既有 `inventoryMovements/single-v2-free-{operationId}` 證明；相同 operationId 重送不重扣，job 進度在獨立 checkpoint transaction 內做單次累加。沒有新增 collection、Rules 或索引；全部 Admin SDK 寫入嚴格限制 `demo-yushin` Emulator。待 Preview 正式啟用前需處理大型候選索引、checkpoint 清理政策與完整身分入口。
