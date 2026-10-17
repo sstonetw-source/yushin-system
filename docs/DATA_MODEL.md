@@ -55,6 +55,7 @@ Rules 新增管理員／採購對「不存在 audit ID」的單筆 get；未開�
 | `pendingInventoryItems` | 暫待處理的庫存項目 |
 | `inventoryMovements` | 庫存異動明細／來源憑證 |
 | `stockOperations` | 安全交易的操作證明（Rules 檢查） |
+| `reservationOperationReceipts` | 僅後端 Cloud Functions 可建立與讀取的雙倉預留原子操作憑證／冪等 checkpoint；尚未啟用 |
 | `auditLogs` | 系統稽核記錄 |
 | `equipment` | 儀器、保養與維修管理 |
 
@@ -112,3 +113,7 @@ Rules 新增管理員／採購對「不存在 audit ID」的單筆 get；未開�
 無新 Firestore 欄位、集合、Rules 或 composite index。批次顯示直接讀 inventoryLots 的 productKey／warehouseId／lotNo／expiryDate／remainingQty／receivedAt，以真正文件 ID 為識別；唯讀白名單投影不包含成本。群組頁面、cursor、載入錯誤與完整性僅保留記憶體，角色切換清除，未持久化。
 
 新增單欄查詢：productKey in 最多 30 值，單次 101 文件 lookahead；完整 lotNo 等值／YYYY-MM-DD expiryDate 等值各 51 文件 lookahead；命中產品以 inventory.productKey in 批讀。全部沿用既有自動單欄索引，不需要部署新 composite index。舊 inventory.lots／批號 searchTokens 不遷移或刪除；目前清單與後驗證不再依它們判斷批次命中，舊 tokens 仍可能增加索引候選讀取。
+
+## 後端預留操作憑證（待 Preview 驗收）
+
+`reservationOperationReceipts/{grouped-attemptId}`：Cloud Functions Admin SDK 管理的交易冪等 checkpoint，保存來源訂單、actorUid／actorRole、意圖雜湊、產品、公司 reserved 差額、各倉及預留 ID。Rules 明確拒絕所有客戶端讀寫；不新增集合索引。此端點預設停用，正式資料不存在遷移及資料填補。新端點限同產品不同品項分兩倉，未實作單品項 v2 多位置 ledger。

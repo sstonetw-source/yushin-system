@@ -133,6 +133,20 @@ function db(uid) {
   return env.authenticatedContext(uid).firestore();
 }
 
+test('server-only grouped reservation receipts reject browser SDK reads and writes for all roles',async()=>{
+ const path='reservationOperationReceipts/grouped-test_123456789';
+ await env.withSecurityRulesDisabled(async ctx=>{
+  await setDoc(doc(ctx.firestore(),path),{action:'grouped_reservation',actorUid:'buyer1',intentHash:'h'});
+ });
+ for(const uid of ['admin','buyer1','wh1','sales1','eng1']){
+  const ref=doc(db(uid),path);
+  await assertFails(getDoc(ref));
+  await assertFails(setDoc(ref,{action:'grouped_reservation',actorUid:uid}));
+  await assertFails(updateDoc(ref,{actorUid:uid}));
+  await assertFails(deleteDoc(ref));
+ }
+});
+
 test('inactive user is denied', async () => {
   await assertFails(getDoc(doc(db('off1'), 'settings/company')));
 });
