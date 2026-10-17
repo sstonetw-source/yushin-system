@@ -165,3 +165,9 @@ deliveryHistory 的 shipment_confirmation_reversal 事件以operationId識別本
 正常收貨仍使用單一 `inventoryReservations/{orderId}__{itemId}`：保留 locationSchemaVersion=2、locations（其他倉原量不變），quantity／shortageQty 由同一 Core 更新，不新增 warehouseId。取消中收貨不改 reservation。公司及實際收貨倉 onHand／reserved／incoming、orders.items[].receivedQty／reservedQty／shortageQty／receiptEvents、supplyOrders 收貨進度、procurementDemands 收貨投影、原 receipts／inventoryLots／inventoryLotCosts／inventoryMovements 同交易提交；其他倉僅讀取驗證，無寫入。
 
 原 receipts 新增 `reservationLocationSchemaVersion:2`（只有 v2 收貨寫入），供冪等重送使用相同 Emulator／真角色閘門；lotId、批號、效期、actor 與固定 receipt operationId 沿用原欄位。倉管成本仍只寫 costSourceSupplyId，不由前端產生採購單價。無新增 collection／index／Rules。自由庫存後續分配仍使用既有 receipt checkpoint；未宣稱 v2 對其他缺貨訂單的第二階段分配已完成。
+
+### 已收貨生命週期的權威證明（2026-10-17，Emulator-only）
+
+不新增欄位或集合。原 receipts（orderId／demandId 聯集最多 50 筆）核對 supplyOrderId、v2 位置標記、來源訂單／品項／產品／倉、PO、method、qty 與 cumulativeReceivedQty；由 receiptId + type=receipt 查唯一 inventoryMovements（limit 2），按 receipt.lotId 讀原 inventoryLots，核對來源、原入庫數量與仍合法的 remainingQty。已出貨消耗的 lot 可為零，不把剩餘量誤當歷史收貨量；不讀受保護 inventoryLotCosts，不改批號／成本／receipt。
+
+逐供應累計憑證與 supply.receivedQty 相等，再由既有 Demand Core 與 orders.items[].receivedQty／採購需求交叉核對。CANCELLED／CLOSED 供應仍保留已收部分的 ordered contribution；已全收的 supply 不因 PO 因其他餘量結案而遺失。取消／恢復只原子更改訂單、預留、reserved、生命週期 movement／receipt 及需求投影。新增 bounded receipt／lot／入庫 movement 讀取，未新增索引定義／Rules／正式資料遷移。

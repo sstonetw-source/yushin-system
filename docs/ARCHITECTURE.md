@@ -401,3 +401,9 @@ Callable Emulator 啟動修正：在 `firebase.json` 明確配置 `auth:9099`、
 `src/services/receiving.js::receiveSupplyOrderRecord` 延用同一個收貨寫入流程與既有 Receiving／Supply／Reservation Core；未另建平行收貨 Service。新增交易內 `validateV2ReceiptSource`，對位置版本 2 重讀真實 users 角色、原候選倉／分倉、PO 與需求來源；只准 `demo-yushin` Admin Firestore Emulator（process.env.FIRESTORE_EMULATOR_HOST + db.projectId），瀏覽器入口仍拒絕，StockPermissions／Rules 未放寬。正常來源只將本次到貨的實貨及預留加到供應紀錄指定倉，保留其他 locations，不回填單倉 warehouseId。取消來源須有原採購 KEEP_STOCK 決策，增加實貨及來源 receivedQty、減少採購 incoming，原 released ledger 完全不寫、不占回庫存。
 
 同筆收貨的原 receipt、lot、protected lot cost／warehouse costSourceSupplyId、movement、supply、demand、order 及庫存維持原交易；新增 receipt 位置版本標記讓重送同樣重讀真實角色。原 src 建置產生 app.js，未只改生成檔。此試點只支援尚未出貨／退貨的單品項雙倉來源與分次收貨；非來源自由庫存對其他 v2 缺貨的自動分配、收貨後 v2 取消／恢復、Callable／前端／Preview 尚未整合。
+
+### 已收貨後的 v2 取消／恢復（2026-10-17，僅 Emulator）
+
+本節更新「已收貨一律拒絕」的生命週期限制。既有 `commitSingleItemLocationLifecycle` 現核對部分／全部收貨及已停止供應：供應狀態使用原 Receiving Core `normalizeSupply`、承諾使用原 Demand Core `reconcileLinkedSupplies`。同交易以 orderId／demandId 各限 51 筆查 receipts，聯集最多接受 50 筆；逐筆核對 v2 receipt 來源、唯一入庫 movement、原 lot 與逐供應累計，不以訂單或供應上的 receivedQty 快取當作入庫證明。
+
+取消仍只釋放 reserved，不更改 onHand／incoming／批號／receipt／PO／供應履約；恢復以真實有效供應承諾減已收貨計算 inTransit，再傳給同一 Reservation／Workflow／Demand Core。已收貨歷史保留，需求 requestedQty 仍涵蓋累計收貨與目前缺口，不把收到的量重算為在途。Functions 的 receiving-core.js 由原 modules/ 建置產生並驗證一致，沒有第二個核心或新的 Service。仍只在 demo-yushin Emulator；途中貨、剩餘打單、退貨與正式 Callable／UI／Preview 尚未接線。

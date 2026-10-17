@@ -48,3 +48,11 @@ Emulator harness 實際呼叫原 `commitFormalPurchaseOrder`、`registerPurchase
 Emulator harness 呼叫原正式 PO／incoming 登記、原收貨 Service 及 `keepCancelledPurchaseAsStock` handler（UI adapter 由測試提供）。新增分次 1+2 收貨、取消後實收自由庫存、錯帳／錯 PO／缺失或混合 ledger 拒絕、相同與不同 ID 併發、disabled replay、後段 receipt 衝突全回滾、正式入口阻擋及 admin／purchaser／warehouse 成本憑證與 sales／engineer 拒絕。測試結果以本機及完整 CI 實際結果為準。
 
 尚未完成：來源出貨或退貨後的 v2 收貨、收貨後的 v2 取消／恢復、自由庫存對其他 v2 缺貨的重新分配、多品項／完整初始化與 Callable／前端／Preview 全流程。沒有 Firebase 正式部署或資料遷移。
+
+## 收貨後取消／恢復接續（2026-10-17，Emulator-only）
+
+本節更新前述「收貨後 v2 生命週期尚未整合」的限制。原 Service 已支援部分／全收及取消中 KEEP_STOCK 到貨後的取消恢復；供應餘量另取消仍沿用採購原 Service。逐筆 receipt、原入庫 movement、lot 與累計收貨同交易核對，不改其內容、不讀成本；receipt 聯集最多 50 筆，重用批次或 cumulative 中斷拒絕。來源單曾有已確認送達且批次已消耗的合法出貨，仍用既有 shipment proof 核對，不能把 lot remainingQty=0 視為從未收過貨。
+
+取消只釋放預留，恢復傳入有效承諾減已收貨的在途。Emulator 以原採購／incoming／收貨／KEEP_STOCK／供應取消及出貨／送達 Service 串接，新增部分收貨→取消→恢復→再收貨、全收且 PO 結案、取消中收到貨再恢復、部分到貨後供應餘量取消、偽造／缺失／重用證明拒絕、收貨與取消併發、後段寫入失敗全回滾，以及收到的 lot 已出貨後取消剩餘需求。以實際本機及完整 CI 結果為準。
+
+尚未完成：已出貨後再收貨、途中貨／剩餘打單取消、退貨混合情境、自由庫存對其他 v2 缺貨再分配、多品項／完整初始化及 Callable／前端／Preview 全流程。無 Firebase 正式部署或正式資料遷移。
