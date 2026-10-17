@@ -3,6 +3,7 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const admin=require('firebase-admin'),{getFirestore}=require('firebase-admin/firestore');
 const {commitSingleItemTwoWarehouse}=require('../functions/single-item-location-service');
 const {commitLocationShipment}=require('../functions/location-shipment-service');
+const {commitLocationDispatchPreparation}=require('../functions/location-dispatch-service');
 let app,db;
 const plan={mode:'CUSTOMER_SHIP',contact:'客戶',phone:'02-12345678',address:'台北市測試地址'};
 const A='SHIP-A',B='SHIP-B';
@@ -27,14 +28,14 @@ async function seed(name,{role='warehouse',prepared=10}={}){
   set('inventoryLots',key+'-'+suffix,{productKey:key,warehouseId,remainingQty:qty,receivedQty:qty,
    lotNo:suffix,expiryDate,unitCost:98765,receivedAt:'2026-10-01T00:00:00Z'});
  await batch.commit();
- // Actual #136 reservation transaction, followed by an explicit test fixture
- // checkpoint for completed sync/dispatch. This is not UI dispatch acceptance.
+ // Initial reservation is real; final sync checkpoint remains an isolated
+ // fixture write until full order-initialization integration is available.
  if(['sales','engineer'].includes(role))await db.collection('users').doc(uid).update({role:'warehouse'});
  await commitSingleItemTwoWarehouse(db,uid,{orderId,itemId:'I',warehouseIds:[A,B],attemptId:'reserve_'+name,
   syncAttemptId:'sync_ship_12345'});
- const fresh=(await db.collection('orders').doc(orderId).get()).data();
- fresh.items[0].dispatchPreparedQty=prepared;
- await db.collection('orders').doc(orderId).update({items:fresh.items,inventoryReservationStatus:'completed'});
+ await db.collection('orders').doc(orderId).update({inventoryReservationStatus:'completed'});
+ if(prepared>0)await commitLocationDispatchPreparation(db,uid,{orderId,itemId:'I',quantity:prepared,
+  operationId:'prepare_'+name,syncAttemptId:'sync_ship_12345'});
  if(['sales','engineer'].includes(role))await db.collection('users').doc(uid).update({role});
  const request=(wh=A,quantity=2,operationId='shipment_'+name)=>({orderId,itemId:'I',warehouseId:wh,quantity,
   operationId,syncAttemptId:'sync_ship_12345',date:'2026-10-17',expectedPlan:plan});
