@@ -849,6 +849,8 @@ service cloud.firestore {
           && data.get('warehouseId', '') == before.get('warehouseId', ''))
         || (data.get('quantity', 0) == 0 && before.get('quantity', 0) == 0)
         || (e.get('movementId', '') != '' && id in e.get('reservationIds', [])
+          && (e.get('crossWarehouse', false) != true || before.get('quantity', 0) == 0
+            || before.get('warehouseId', '') == data.warehouseId)
           && e == getAfter(/databases/$(database)/documents/inventoryMovements/$(e.movementId)).data.get('reservationStockEvidence', {})
           && operationalReservationMovement(e.movementId, data, before));
     }
@@ -865,12 +867,15 @@ service cloud.firestore {
         && e.previousWarehouseStockId is string && e.previousWarehouseStockId.size() > 0
         && e.reservationIds is list && e.reservationIds.size() > 0 && e.reservationIds.size() <= 5
         && e.reservationIds.toSet().size() == e.reservationIds.size()
+        && e.get('crossWarehouse', false) is bool
         && request.resource.data.productKey == data.productKey
-        && (before.get('quantity', 0) == 0 || before.get('warehouseId', data.warehouseId) == data.warehouseId
+        && (!e.get('crossWarehouse', false)
+          && (before.get('quantity', 0) == 0 || before.get('warehouseId', data.warehouseId) == data.warehouseId)
           ? sameWarehouseReservationStocks(e, data.productKey, data.warehouseId)
           : operationalReservedStockMatches(/databases/$(database)/documents/inventory/$(e.inventoryId), e, data.productKey, '')
             && operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId), e, data.productKey, data.warehouseId)
-            && ((request.resource.data.get('sourceType', '') == 'WAREHOUSE_TRANSFER' && operationalTransferReservationArrival(e, data, before))
+            && (before.get('quantity', 0) == 0 || before.get('warehouseId', data.warehouseId) == data.warehouseId
+              || (request.resource.data.get('sourceType', '') == 'WAREHOUSE_TRANSFER' && operationalTransferReservationArrival(e, data, before))
               || operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.previousWarehouseStockId), e, data.productKey, before.warehouseId)));
     }
     function operationalTransferReservationArrival(e, data, before) {

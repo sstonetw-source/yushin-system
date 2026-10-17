@@ -132,3 +132,66 @@ test('browser script order resolves shared projection at transaction time and mi
  await f.run({engine:c.YushinStockPermissions});
  assert.equal(f.docs.get('inventory/P').reserved,2);
 });
+
+function operationalFixture(count=2){
+ const f=fixture();f.docs.get('orders/O').items=Array.from({length:count},(_,i)=>({itemId:'I'+i,productId:'P',warehouseId:i%2?'B':'A'}));
+ f.docs.set('warehouseStocks/B__P',{productKey:'P',warehouseId:'B',onHand:10,reserved:0});
+ let attempt=0;
+ f.apply=async(quantities,{role='purchaser',missingMovement='',globalMovement=false}={})=>permissions.run(f.db,async tx=>{
+  const items=f.docs.get('orders/O').items,old=[];
+  for(const path of ['inventory/P','warehouseStocks/A__P','warehouseStocks/B__P'])await tx.get(f.db.collection(path.split('/')[0]).doc(path.split('/')[1]));
+  for(const item of items)old.push((await tx.get(f.db.collection('inventoryReservations').doc('O__'+item.itemId))).data()?.quantity||0);
+  tx.update(f.db.collection('inventory').doc('P'),{reserved:quantities.reduce((a,b)=>a+b,0)});
+  for(const warehouseId of ['A','B']){
+   const total=items.reduce((sum,item,i)=>sum+(item.warehouseId===warehouseId?quantities[i]:0),0);
+   tx.update(f.db.collection('warehouseStocks').doc(warehouseId+'__P'),{reserved:total});
+  }
+  items.forEach((item,i)=>tx.set(f.db.collection('inventoryReservations').doc('O__'+item.itemId),{
+   orderId:'O',itemId:item.itemId,productKey:'P',warehouseId:item.warehouseId,quantity:quantities[i],shortageQty:5-quantities[i]},{merge:true}));
+  const id=++attempt;
+  for(const warehouseId of globalMovement?['']:['A','B']){
+   if(missingMovement&&warehouseId===missingMovement)continue;
+   tx.set(f.db.collection('inventoryMovements').doc('M'+id+'-'+warehouseId),{
+    productKey:'P',...(warehouseId?{warehouseId}:{}),sourceId:'O',sourceType:'order',
+    type:'reserve',qty:items.reduce((sum,item,i)=>sum+(!warehouseId||item.warehouseId===warehouseId?quantities[i]-old[i]:0),0)});
+  }
+ },'U',false,role);
+ return f;
+}
+test('operational cross-warehouse groups prove company totals and use a representative from each actual warehouse',async()=>{
+ for(const role of ['purchaser','warehouse']){
+  const f=operationalFixture(5);await f.apply([1,2,1,2,1],{role});
+  assert.equal(f.docs.get('inventory/P').reserved,7);
+  assert.equal(f.docs.get('warehouseStocks/A__P').reserved,3);assert.equal(f.docs.get('warehouseStocks/B__P').reserved,4);
+  for(let i=0;i<5;i++){
+   const r=f.docs.get('inventoryReservations/O__I'+i),e=r.stockEvidence;
+   assert.equal(e.crossWarehouse,true);assert.equal(e.reservationIds.length,5);
+   assert.equal(f.docs.get('inventoryReservations/'+e.reservationIds[0]).warehouseId,r.warehouseId);
+   assert.deepEqual(f.docs.get('inventoryMovements/'+e.movementId).reservationStockEvidence,e);
+  }
+  assert.equal(new Set(f.reads).size,f.reads.length);
+ }
+});
+test('cross-warehouse reserve, partial release, zero-company exchange and full release preserve physical stock',async()=>{
+ const f=operationalFixture();
+ for(const quantities of [[2,3],[1,2],[2,1],[0,0]]){
+  await f.apply(quantities);
+  assert.equal(f.docs.get('inventory/P').reserved,quantities[0]+quantities[1]);
+  assert.equal(f.docs.get('warehouseStocks/A__P').reserved,quantities[0]);assert.equal(f.docs.get('warehouseStocks/B__P').reserved,quantities[1]);
+ }
+ assert.equal(f.docs.get('inventory/P').onHand,10);assert.equal(f.docs.get('warehouseStocks/B__P').onHand,10);
+});
+test('missing warehouse-specific movement cannot be replaced by another warehouse or a company-wide record',async()=>{
+ for(const options of [{missingMovement:'A'},{missingMovement:'B'},{globalMovement:true}]){
+  const f=operationalFixture(),before=structuredClone([...f.docs]);
+  await assert.rejects(f.apply([2,3],options),/缺少.*庫存紀錄/);
+  assert.deepEqual([...f.docs],before);assert.equal(f.writes.length,0);
+ }
+});
+test('cross-warehouse groups retain the five-reservation bound and reject mixing a move with grouped holds',async()=>{
+ const tooMany=operationalFixture(6);await assert.rejects(tooMany.apply([1,1,1,1,1,1]),/最多.*5/);assert.equal(tooMany.writes.length,0);
+ const moving=operationalFixture(3);
+ moving.docs.set('inventoryReservations/O__I0',{orderId:'O',itemId:'I0',productKey:'P',warehouseId:'B',quantity:1});
+ const before=structuredClone([...moving.docs]);await assert.rejects(moving.apply([1,1,1]),/原調撥流程/);
+ assert.deepEqual([...moving.docs],before);assert.equal(moving.writes.length,0);
+});

@@ -2778,3 +2778,102 @@ for(const status of ['cancelled','normal'])test('actual '+status+' refuses impos
   assert.equal((await getDoc(doc(db('admin'),paths[1]))).data().reserved,status==='normal'?3:0);
  }
 });
+
+async function crossWarehouseEvidenceFixture(uid,role,count=2,{mutate=null}={}){
+ const id='cross-'+uid,productKey=id,ownerUid=role==='engineer'?'eng1':'sales1',salesCode=role==='engineer'?'E01':'S01';
+ const items=Array.from({length:count},(_,i)=>({itemId:'I'+i,productId:productKey,qty:5,warehouseId:i%2?'B':'A'}));
+ await seed('orders/'+id,{ownerUid,salesCode,status:'active',inventoryReservationStatus:'completed',items});
+ await seed('inventory/'+productKey,{productKey,onHand:40,reserved:0,incoming:0});
+ for(const warehouseId of ['A','B'])await seed('warehouseStocks/'+warehouseId+'__'+productKey,{productKey,warehouseId,onHand:20,reserved:0,incoming:0});
+ const client=compatDb(uid),native=client.runTransaction;
+ if(mutate)client.runTransaction=fn=>native(tx=>fn({...tx,
+  set:(ref,data,options)=>{const next=mutate(ref.path,data);if(next===null)return;if(options)tx.set(ref,next,options);else tx.set(ref,next);},
+  update:(ref,data)=>{const next=mutate(ref.path,data);if(next!==null)tx.update(ref,next);}}));
+ let attempt=0;
+ const run=(quantities,{movementAttempt=null}={})=>stockPermissions.run(client,async tx=>{
+  const inv=client.collection('inventory').doc(productKey),stocks={},old=[];
+  await tx.get(inv);
+  for(const warehouseId of ['A','B']){
+   stocks[warehouseId]=client.collection('warehouseStocks').doc(warehouseId+'__'+productKey);await tx.get(stocks[warehouseId]);
+  }
+  for(const item of items)old.push((await tx.get(client.collection('inventoryReservations').doc(id+'__'+item.itemId))).data()?.quantity||0);
+  tx.update(inv,{reserved:quantities.reduce((a,b)=>a+b,0)});
+  for(const warehouseId of ['A','B'])tx.update(stocks[warehouseId],{reserved:items.reduce((sum,item,i)=>sum+(item.warehouseId===warehouseId?quantities[i]:0),0)});
+  items.forEach((item,i)=>tx.set(client.collection('inventoryReservations').doc(id+'__'+item.itemId),{
+   orderId:id,itemId:item.itemId,productKey,warehouseId:item.warehouseId,quantity:quantities[i],shortageQty:5-quantities[i]},{merge:true}));
+  const movementId=movementAttempt||++attempt;
+  for(const warehouseId of ['A','B'])tx.set(client.collection('inventoryMovements').doc(id+'-'+movementId+'-'+warehouseId),{
+   productKey,warehouseId,sourceType:'order',sourceId:id,ownerUid,salesCode,type:'reserve',
+   qty:items.reduce((sum,item,i)=>sum+(item.warehouseId===warehouseId?quantities[i]-old[i]:0),0)});
+ },uid,['sales','engineer'].includes(role),role);
+ const paths=['inventory/'+productKey,...['A','B'].map(w=>'warehouseStocks/'+w+'__'+productKey),
+  ...items.map(i=>'inventoryReservations/'+id+'__'+i.itemId)];
+ const snapshot=()=>Promise.all(paths.map(async p=>{const s=await getDoc(doc(db('admin'),p));return s.exists()?s.data():null;}));
+ return {id,productKey,items,run,snapshot};
+}
+test('actual cross-warehouse wrapper retains authorized five-role access with one company and separate warehouse totals',async()=>{
+ for(const [uid,role] of [['admin','admin'],['buyer1','purchaser'],['wh1','warehouse'],['sales1','sales'],['eng1','engineer']]){
+  const f=await crossWarehouseEvidenceFixture(uid,role);await assertSucceeds(f.run([2,3]));
+  const [company,a,b,...reservations]=await f.snapshot();
+  assert.equal(company.reserved,5);assert.equal(a.reserved,2);assert.equal(b.reserved,3);
+  assert.equal(company.onHand,40);assert.equal(a.onHand,20);
+  if(['purchaser','warehouse'].includes(role))for(const r of reservations){
+   assert.equal(r.stockEvidence.crossWarehouse,true);
+   const representative=(await getDoc(doc(db('admin'),'inventoryReservations/'+r.stockEvidence.reservationIds[0]))).data();
+   assert.equal(representative.warehouseId,r.warehouseId);
+  }
+ }
+});
+test('five operational reservations across two warehouses stay within Rules evaluation and document access limits',async()=>{
+ for(const [uid,role] of [['buyer1','purchaser'],['wh1','warehouse']]){
+  const f=await crossWarehouseEvidenceFixture(uid,role,5);await assertSucceeds(f.run([1,2,1,2,1]));
+  const [company,a,b]=await f.snapshot();assert.equal(company.reserved,7);assert.equal(a.reserved,3);assert.equal(b.reserved,4);
+ }
+});
+test('operational warehouse-specific proofs permit partial release and a zero-company exchange but reject movement reuse',async()=>{
+ for(const [uid,role] of [['buyer1','purchaser'],['wh1','warehouse']]){
+  const f=await crossWarehouseEvidenceFixture(uid,role);await assertSucceeds(f.run([2,3]));
+  const before=await f.snapshot();await assertFails(f.run([1,4],{movementAttempt:1}));assert.deepEqual(await f.snapshot(),before);
+  for(const quantities of [[1,2],[2,1],[0,0]]){
+   await assertSucceeds(f.run(quantities));const [company,a,b]=await f.snapshot();
+   assert.equal(company.reserved,quantities[0]+quantities[1]);assert.equal(a.reserved,quantities[0]);assert.equal(b.reserved,quantities[1]);
+  }
+ }
+});
+test('native corruption of company warehouse or proof metadata cannot bypass cross-warehouse reservation evidence',async()=>{
+ const mutations=[
+  (path,data)=>path.startsWith('inventory/')?{...data,reserved:data.reserved+1}:data,
+  (path,data)=>path.startsWith('warehouseStocks/A__')?{...data,reserved:data.reserved+1}:data,
+  (path,data)=>path.startsWith('warehouseStocks/B__')?null:data,
+  (path,data)=>path.startsWith('inventoryMovements/')&&path.endsWith('-B')?null:data,
+  (path,data)=>{const key=data.stockEvidence?'stockEvidence':data.reservationStockEvidence?'reservationStockEvidence':'';return key?{...data,[key]:{...data[key],crossWarehouse:'true'}}:data;},
+  (path,data)=>{const key=data.stockEvidence?'stockEvidence':data.reservationStockEvidence?'reservationStockEvidence':'';return key?{...data,[key]:{...data[key],crossWarehouse:false}}:data;}
+ ];
+ for(const [uid,role] of [['buyer1','purchaser'],['wh1','warehouse']])for(const mutate of mutations){
+  const f=await crossWarehouseEvidenceFixture(uid,role,2,{mutate}),before=await f.snapshot();
+  await assertFails(f.run([2,3]));assert.deepEqual(await f.snapshot(),before);
+  assert.equal((await getDoc(doc(db('admin'),'inventoryMovements/'+f.id+'-1-A'))).exists(),false);
+ }
+});
+test('native grouped proofs cannot conceal a nonrepresentative reservation move from an unproved third warehouse',async()=>{
+ await seed('orders/hidden-move',{ownerUid:'sales1',salesCode:'S01',items:[
+  {itemId:'I0',productId:'P',qty:5,warehouseId:'A'},{itemId:'I1',productId:'P',qty:5,warehouseId:'A'},{itemId:'I2',productId:'P',qty:5,warehouseId:'B'}]});
+ await seed('inventory/P',{productKey:'P',onHand:20,reserved:3,incoming:0});
+ for(const [warehouseId,reserved] of [['A',1],['B',0],['C',2]])await seed('warehouseStocks/'+warehouseId+'__P',{productKey:'P',warehouseId,onHand:10,reserved,incoming:0});
+ for(const [i,warehouseId,quantity] of [[0,'A',1],[1,'C',2],[2,'B',0]])await seed('inventoryReservations/hidden-move__I'+i,{
+  orderId:'hidden-move',itemId:'I'+i,orderItemIndex:i,productKey:'P',warehouseId,quantity,ownerUid:'sales1',salesCode:'S01',shortageQty:5-quantity});
+ for(const uid of ['buyer1','wh1']){
+  const client=db(uid),b=writeBatch(client),evidence={};
+  for(const warehouseId of ['A','B']){
+   const ids=warehouseId==='A'?[0,1,2]:[2,0,1];
+   evidence[warehouseId]={inventoryId:'P',warehouseStockId:warehouseId+'__P',previousWarehouseStockId:warehouseId+'__P',movementId:'hidden-'+warehouseId,
+    reservationIds:ids.map(i=>'hidden-move__I'+i),crossWarehouse:true};
+   b.update(doc(client,'warehouseStocks/'+warehouseId+'__P'),{reserved:warehouseId==='A'?2:1});
+   b.set(doc(client,'inventoryMovements/hidden-'+warehouseId),{productKey:'P',warehouseId,sourceId:'hidden-move',type:'reserve',qty:1,reservationStockEvidence:evidence[warehouseId]});
+  }
+  for(let i=0;i<3;i++)b.update(doc(client,'inventoryReservations/hidden-move__I'+i),{warehouseId:i===2?'B':'A',quantity:1,stockEvidence:evidence[i===2?'B':'A']});
+  await assertFails(b.commit());
+  assert.equal((await getDoc(doc(db('admin'),'warehouseStocks/C__P'))).data().reserved,2);
+  assert.equal((await getDoc(doc(db('admin'),'warehouseStocks/A__P'))).data().reserved,1);
+ }
+});
