@@ -84,3 +84,5 @@ Emulator harness 呼叫原正式 PO／incoming 登記、原收貨 Service 及 `k
 在既有 `reservationOperationReceipts/single-v2-free-batch-{runId}` 保存 actor、原請求 hash、最大量、累計已分配量、processedSteps、pending 目標與固定 operationId；與目標庫存異動之間是**可恢復兩階段工作**而非整批原子交易。先 durable 記錄待執行目標，再用固定 operationId 套用原交易，最後在 checkpoint transaction 累計；若已扣帳但進度寫入失敗，下次相同 runId 會從原 movement 重送取得原結果，且只計算一次。雙重繼續與同 ID 並發不得突破最大量。無候選、用盡額度或來源倉無自由庫存才標記 completed；需要新庫存時使用新 runId，不能以舊 completed job 偷做第二批。狀態為 active 的 job 必須持續以原參數重送，角色變更／停用或錯誤來源時拒絕。
 
 **限制：** 目前仍為 demo-yushin 內部逐步執行，需呼叫端重複執行至 completed；不是排程自動觸發，也沒有 Callable、前端、Preview 或正式部署。每個狀態 50 筆上限是正確性閘門，不是大量候選最終方案；遇到已有供應／退貨或錯誤帳目將安全停止，等待稽核，不能偷偷跳過；需後續改善索引排序、分頁與跨批續傳。可恢復 checkpoint 只保證同一目標確定性重送，不宣稱所有品項／訂單合併為一個原子交易。
+
+初始單品項 v2 writer 現在即使兩倉現貨皆不足、locations 為空，也將已驗證並排序的兩個候選實體倉存至同一 ledger 的 `lifecycleWarehouseIds`（僅位置證據、非額外預留）。之後相同來源重試若換成其他候選倉會拒絕；此欄讓 FIFO 協調器判斷零預留缺貨單可安全從第二倉分配，不准憑空加第三倉。舊 ledger 不做自動回填或正式資料遷移。
