@@ -56,3 +56,8 @@ test('physical return is unavailable outside demo Emulator and has no Callable e
  finally{if(host!==undefined)process.env.FIRESTORE_EMULATOR_HOST=host;}
  assert.doesNotMatch(fs.readFileSync('functions/index.js','utf8'),/commitLocationReturn/);
 });
+test('unspecified new return settlement defaults to CLOSE while explicit historical replacement remains bound',()=>{
+ const closed=normalizeLocationReturnIntent(request({settlement:undefined}));assert.equal(closed.settlement,'CLOSE');
+ assert.equal(closed.hash,normalizeLocationReturnIntent(request({settlement:'CLOSE'})).hash);
+ assert.notEqual(closed.hash,normalizeLocationReturnIntent(request({settlement:'REPLACE'})).hash);
+});

@@ -13,6 +13,7 @@ function normalizeLocationReturnIntent(data){
  if(!data||typeof data!=='object'||Array.isArray(data)||Object.keys(data).some(k=>!keys.includes(k)))
   fault('退貨入庫請求含未授權欄位','invalid-argument');
  const intent=normalizeReturnTraceIntent(Object.fromEntries(['orderId','itemId','shipmentId','syncAttemptId','selections'].map(k=>[k,data[k]])));
+ const settlement=data.settlement===undefined?'CLOSE':data.settlement;
  if(typeof data.operationId!=='string'||!/^[a-zA-Z0-9_-]{12,96}$/.test(data.operationId)
   ||typeof data.warehouseId!=='string'||!data.warehouseId||data.warehouseId!==data.warehouseId.trim()
   ||data.warehouseId.includes('/')||data.warehouseId.length>160)
@@ -22,12 +23,12 @@ function normalizeLocationReturnIntent(data){
   ||new Date(data.date+'T00:00:00Z').toISOString().slice(0,10)!==data.date)
   fault('退貨入庫日期不正確','invalid-argument');
  if(typeof data.reason!=='string'||!data.reason.trim()||data.reason.length>1000
-  ||data.condition!=='RESTOCKABLE'||!['CLOSE','REPLACE'].includes(data.settlement))
+  ||data.condition!=='RESTOCKABLE'||!['CLOSE','REPLACE'].includes(settlement))
   fault('退貨原因、品質或補送／結案決策不正確','invalid-argument');
  // Lot order has no business meaning. Stable ordering makes retries deterministic.
  intent.selections.sort((a,b)=>a.lotId.localeCompare(b.lotId));
  Object.assign(intent,{operationId:data.operationId,warehouseId:data.warehouseId,date:data.date,
-  reason:data.reason.trim(),condition:data.condition,settlement:data.settlement});
+  reason:data.reason.trim(),condition:data.condition,settlement});
  return {...intent,hash:createHash('sha256').update(JSON.stringify(intent)).digest('hex')};
 }
 async function commitLocationReturn(db,uid,data){

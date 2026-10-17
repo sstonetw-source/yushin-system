@@ -3049,6 +3049,12 @@ async function commitOrderCreation(orderId,data,{actorUid=currentUser?.uid,actor
     if(typeof orderId!=='string'||!orderId.trim()||orderId.includes('/'))throw new Error('缺少有效的建單識別碼。');
     if(!data||data.createdByUid!==actorUid||data.status!==BUSINESS_STATUS.ACTIVE)throw new Error('建單身分或初始狀態不正確。');
     const snapshot=JSON.parse(JSON.stringify(data));
+    const reorder=snapshot.returnReorderSource;
+    if(reorder!==undefined&&(!reorder||typeof reorder!=='object'||Array.isArray(reorder)
+        ||Object.keys(reorder).length!==1||typeof reorder.orderId!=='string'||!reorder.orderId
+        ||reorder.orderId!==reorder.orderId.trim()||reorder.orderId.includes('/')||reorder.orderId.length>160
+        ||reorder.orderId===orderId||linkForecast||snapshot.sourceType||snapshot.sourceId))
+        throw new Error('退貨重新下單的來源關聯不正確。');
     if(linkForecast&&(snapshot.sourceType!==DOCUMENT_TYPES.FORECAST||!snapshot.sourceId||snapshot.sourceDocumentSyncStatus!=='completed'))
         throw new Error('Forecast 建單來源與同步狀態不符。');
     if(!linkForecast&&snapshot.sourceDocumentSyncStatus==='completed')throw new Error('來源同步完成必須具有同交易的來源連結。');
@@ -3064,11 +3070,22 @@ async function commitOrderCreation(orderId,data,{actorUid=currentUser?.uid,actor
                 throw new Error('待確認的訂單已由其他流程變更，請先檢查訂單清單。');
             if(linkForecast&&(live.sourceType!==snapshot.sourceType||live.sourceId!==snapshot.sourceId))
                 throw new Error('建單識別碼已用於其他來源，請先核對原訂單。');
+            if(JSON.stringify(live.returnReorderSource||null)!==JSON.stringify(reorder||null))
+                throw new Error('建單識別碼已用於其他退貨來源，請先核對原訂單。');
             // Preserve the existing pending-ID contract: resume authoritative saved
             // facts, not a modified/stale form, and never overwrite fulfillment progress.
             savedData=live;return;
         }
         let forecastRef=null;
+        if(reorder){
+            const source=await tx.get(db.collection('orders').doc(reorder.orderId));assertActor();
+            if(!source.exists)throw new Error('原退貨訂單不存在，請重新核對來源。');
+            const original=source.data();
+            if((!['admin','purchaser'].includes(actorRole)&&original.ownerUid!==actorUid)
+                ||original.customerName!==snapshot.customerName)throw new Error('原退貨訂單的負責人或客戶不符。');
+            if(!Array.isArray(original.returnRecords)||!original.returnRecords.some(row=>row?.settlement==='CLOSE'
+                &&Number.isFinite(Number(row.qty))&&Number(row.qty)>0))throw new Error('原訂單尚無實收結案退貨，不能由此重新下單。');
+        }
         if(linkForecast){
             if(!['sales','admin'].includes(actorRole))throw new Error('目前沒有 Forecast 轉單權限。');
             forecastRef=db.collection('forecasts').doc(snapshot.sourceId);
@@ -19333,6 +19350,8 @@ function renderOrderLifecycleModal() {
     lifecycleButton.textContent = cancelled ? '恢復訂單' : deliveryProgressInfo(order).grossDelivered > 0 ? '取消剩餘未送數量' : '取消訂單';
     const canReturn = normalizedOrderItems(order).some(item => returnItemDeliveredQty(order, item.itemId) - returnItemReturnedQty(order, item.itemId) - customerReturnPendingQty(order, item.itemId) > 0);
     document.getElementById('openReturnFormBtn').hidden = !editable || !canReturn;
+    const reorderButton=document.getElementById('reorderAfterReturnBtn');
+    if(reorderButton)reorderButton.hidden=!editable||!savedReturnRecords(order).some(row=>row.settlement==='CLOSE'&&Number(row.qty)>0);
     document.getElementById('orderLifecycleActionHint').textContent = !canCancel && !cancelled ? '已無剩餘未送貨數量；退貨請建立申請，由倉庫頁確認實收。' : '取消僅處理未送貨數量；已送貨部分請申請退貨。';
     const isEditingReturn = !!document.getElementById('returnEditId').value;
     document.getElementById('returnFormPanel').style.display = editable && (orderReturnFormOpen || isEditingReturn) && (info.effectiveDelivered > 0 || isEditingReturn) ? '' : 'none';
@@ -19493,7 +19512,8 @@ function collectOrderDraft() {
         productId:window._orderModalProductId||'',items:newOrderDraftItems,
         shippingInstructions:window.orderShippingInstructions?.()||{},
         sourceLink:window._orderModalSourceLink||null,
-        quoteContext:window._orderModalQuoteContext||null
+        quoteContext:window._orderModalQuoteContext||null,
+        returnReorderSource:window._orderModalReturnReorder||null
     };
 }
 
@@ -19559,6 +19579,7 @@ function restoreSavedOrderDraft(){
     try {
         requestedOrderOwnerUid = draft.ownerUid || '';
         window._orderModalSourceLink = draft.sourceLink || null;
+        window._orderModalReturnReorder = draft.returnReorderSource || null;
         window._orderModalQuoteContext = draft.quoteContext || null;
         populateOrderOwnerSelect();
         document.getElementById('orderDateInput').value=draft.date||'';
@@ -19757,6 +19778,7 @@ window.addCurrentOrderItemToDraft=function(){
 };
 
 window.openOrderModal = function(source = null) {
+    window._orderModalReturnReorder = null;
     const overlay = document.getElementById('orderModalOverlay');
     if (!overlay) return;
     const openingGeneration = ++orderModalOpenGeneration;
@@ -19973,6 +19995,24 @@ function rememberRecentCustomerName(value) {
     populateOrderCustomerSuggestions();
 }
 
+window.reorderAfterReturn = function(orderId) {
+    if(!canManageOrderLifecycleCapability()||!canEditPage('orders.list'))return;
+    const source=ordersCache.find(order=>order.id===orderId);
+    if(!source||!savedReturnRecords(source).some(row=>row.settlement==='CLOSE'&&Number(row.qty)>0)){
+        alert('請先由倉庫確認退貨實收，再從原訂單重新下單。');return;
+    }
+    window.closeDeliveryModal?.();
+    openOrderModal();
+    window._orderModalReturnReorder={orderId};
+    document.getElementById('orderModalTitle').innerText='退貨後重新下單';
+    document.getElementById('orderCustomer').value=source.customerName||'';
+    document.getElementById('orderTransactionType').value=source.transactionType||'';
+    const invoice=document.getElementById('orderInvoiceTitle');
+    invoice.value=source.invoiceTitle||'';invoice.disabled=source.transactionType!=='直';
+    document.getElementById('orderRemarks').value=`退貨後重新下單，原訂單：${source.orderNo||orderId}。請重新確認商品、數量與價格。`;
+    saveOrderDraft();
+};
+
 window.copyOrderAsNew = function(orderId) {
     const source = ordersCache.find(order => order.id === orderId);
     if (!source) {
@@ -20005,6 +20045,7 @@ window.closeOrderModal = function(options = {}) {
     document.getElementById('orderModalOverlay').classList.remove('active');
     if (!options.preserveSource) {
         window._orderModalSourceLink = null;
+        window._orderModalReturnReorder = null;
         window._orderModalQuoteContext = null;
         window._orderModalProductId = '';
     }
@@ -20110,6 +20151,7 @@ window.saveNewOrder = function() {
         isBilled: false,
         billingDate: ''
     };
+    if(window._orderModalReturnReorder)data.returnReorderSource={...window._orderModalReturnReorder};
     if (firstItem.procurementType === 'SALES_SELF_ORDER'
         && firstItem.costPrice !== undefined && firstItem.costPrice !== null
         && String(firstItem.costPrice).trim() !== '') {

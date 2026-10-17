@@ -590,3 +590,9 @@ test('removing a closed return from order caches cannot conceal its immutable ph
  await assert.rejects(x.receive(x.returnRequest({operationId:'return_receipt_hidden_next'})),/憑證數量/);
  assert.deepEqual(await snapshot(x),before);
 });
+test('new wrong-item return defaults to closed free stock and never recreates an original-order hold',async()=>{
+ const x=await returnFixture('default-close'),result=await x.receive(x.returnRequest({settlement:undefined}));
+ assert.equal(result.settlement,'CLOSE');assert.equal(result.reservedQty,6);assert.equal(result.replacementQty,0);
+ const ledger=await x.read('inventoryReservations',x.orderId+'__I');assert.deepEqual(ledger.locations,[{warehouseId:B,reservedQty:6}]);
+ assert.equal((await x.read('inventory',x.key)).onHand,13);assert.equal((await x.read('inventory',x.key)).reserved,8);
+});

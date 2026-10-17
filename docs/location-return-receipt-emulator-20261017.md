@@ -35,3 +35,5 @@
 ## 本機驗證
 
 完整 Node 測試1,512項全部通過；Firestore Emulator 組合58項全部通過（出貨／送達／撤銷／退貨41項、單品雙倉12項、分組預留5項）。包含實物CLOSE／REPLACE、fulfilled重新預留、混合批次分次退貨、五角色、固定ID重送／意圖衝突、競爭額度、刪改先前憑證／快取、原始帳與批次異常、末端movement失敗完整回滾，以及有界讀取／寫入及不讀成本集合。app與Functions共用產物一致性、JavaScript語法及差異格式檢查通過。完整 Rules、真實Auth／Callable及六組Chrome回歸結果以GitHub PR CI為準。
+
+業務方向更新：因主要情境為訂錯貨，新請求未指定settlement時改預設CLOSE；明確REPLACE及既有操作不改。後續免費補送整合暫緩，優先一般重新下單；詳見 `wrong-item-return-reorder-20261017.md`。

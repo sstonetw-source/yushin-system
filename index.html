@@ -1146,6 +1146,7 @@
             <div class="delivery-section-heading"><h4>退貨／取消</h4><div>
                 <button type="button" class="btn-secondary" id="openLifecycleFormBtn" onclick="openOrderLifecycleForm()">取消訂單</button>
                 <button type="button" id="openReturnFormBtn" onclick="openReturnForm()">申請退貨</button>
+                <button type="button" class="btn-secondary" id="reorderAfterReturnBtn" hidden onclick="reorderAfterReturn(currentLifecycleOrderId)">退貨後重新下單</button>
             </div></div>
             <p id="orderLifecycleActionHint" class="form-hint"></p>
             <div id="orderLifecycleSummary" hidden></div>

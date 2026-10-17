@@ -106,3 +106,36 @@ test('Forecast postcommit session change does not mutate new session cache or cl
  const f=forecastFixture();f.state.afterCommit=()=>{f.c.currentUser={uid:'OTHER'};};await assert.rejects(f.convert(),/身分/);
  assert.equal(f.c.ordersCache.length,0);assert.equal(f.stored.size,1);assert.equal(f.writes.length,2);
 });
+
+test('return reorder uses ordinary creation and only reads its closed-return source without moving stock or changing the old order',async()=>{
+ const f=fixture(),original={ownerUid:'U',customerName:'客戶',returnRecords:[{id:'R',qty:2,settlement:'CLOSE'}],isBilled:true};
+ f.docs.set('orders/OLD',original);const data={...f.data,customerName:'客戶',returnReorderSource:{orderId:'OLD'},items:[{productId:'CORRECT',qty:1,unitPrice:250}]};
+ const result=await f.c.commitOrderCreation('NEW',data);assert.equal(result.data.items[0].productId,'CORRECT');
+ assert.deepEqual(f.writes,[['set','orders/NEW']]);assert.deepEqual(f.docs.get('orders/OLD'),original);
+ f.docs.delete('orders/OLD');f.docs.get('orders/NEW').inventoryReservationStatus='completed';
+ const replay=await f.c.commitOrderCreation('NEW',data);assert.equal(replay.data.inventoryReservationStatus,'completed');assert.equal(f.writes.length,1);
+ await assert.rejects(f.c.commitOrderCreation('NEW',{...data,returnReorderSource:{orderId:'OTHER'}}),/其他退貨來源/);
+});
+test('return reorder rejects pending, replacement, missing, foreign or different-customer sources without any write',async()=>{
+ for(const original of [null,{ownerUid:'U',customerName:'客戶',returnRequests:[{status:'PENDING',qty:2}]},
+  {ownerUid:'U',customerName:'客戶',returnRecords:[{qty:2,settlement:'REPLACE'}]},
+  {ownerUid:'OTHER',customerName:'客戶',returnRecords:[{qty:2,settlement:'CLOSE'}]},
+  {ownerUid:'U',customerName:'其他客戶',returnRecords:[{qty:2,settlement:'CLOSE'}]}]){
+  const f=fixture();if(original)f.docs.set('orders/OLD',original);
+  await assert.rejects(f.c.commitOrderCreation('NEW',{...f.data,customerName:'客戶',returnReorderSource:{orderId:'OLD'}}));assert.equal(f.writes.length,0);
+ }
+ const f=fixture();for(const returnReorderSource of [{orderId:'NEW'},{orderId:'A/B'},{orderId:' OLD '},{orderId:'OLD',settlement:'CLOSE'},null])
+  await assert.rejects(f.c.commitOrderCreation('NEW',{...f.data,returnReorderSource}));
+});
+test('return reorder opens a clean order draft with the customer reference and no copied wrong item or price',()=>{
+ const feature=fs.readFileSync('src/features/orders/order-creation.js','utf8');
+ const fields=new Map();const element=id=>{if(!fields.has(id))fields.set(id,{});return fields.get(id);};let opens=0,saves=0;
+ const c=vm.createContext({window:{},ordersCache:[{id:'OLD',orderNo:'NO-1',customerName:'客戶',transactionType:'直',invoiceTitle:'抬頭',
+  productId:'WRONG',unitPrice:888,returnRecords:[{qty:1,settlement:'CLOSE'}]}],canManageOrderLifecycleCapability:()=>true,canEditPage:()=>true,
+  savedReturnRecords:o=>o.returnRecords,openOrderModal:(...args)=>{assert.deepEqual(args,[]);opens++;},
+  document:{getElementById:element},saveOrderDraft:()=>saves++,alert:()=>assert.fail('unexpected alert')});
+ vm.runInContext(feature.slice(feature.indexOf('window.reorderAfterReturn'),feature.indexOf('window.copyOrderAsNew')),c);
+ c.window.reorderAfterReturn('OLD');assert.equal(opens,1);assert.equal(saves,1);assert.equal(element('orderCustomer').value,'客戶');
+ assert.deepEqual(plain(c.window._orderModalReturnReorder),{orderId:'OLD'});assert.match(element('orderRemarks').value,/NO-1/);
+ assert.equal(fields.has('orderItemCode'),false);assert.equal(fields.has('orderUnitPrice'),false);
+});
