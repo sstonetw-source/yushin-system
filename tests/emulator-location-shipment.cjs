@@ -303,3 +303,129 @@ test('removed or reversed acknowledgement cannot be resurrected by retrying its 
  await assert.rejects(x.confirm(),/歷史紀錄/);assert.deepEqual(await snapshot(x),before);
  assert.equal((await x.confirm(x.deliveryRequest(1,'delivery_reversed_new'))).status,'applied');
 });
+
+const {reverseShipmentDelivery}=require('../functions/shipment-delivery-service');
+const {planLocationReturnTrace}=require('../functions/location-return-trace-service');
+async function correctionFixture(name,{role='sales',shipQty=2,confirmedQty=1}={}){
+ const x=await acknowledgementFixture('correction-'+name,{role,shipQty});
+ const adminUid='correction-admin-'+name;await db.collection('users').doc(adminUid).set({role:'admin',active:true});
+ const deliveryRequest=x.deliveryRequest(confirmedQty);
+ if(confirmedQty)await x.confirm(deliveryRequest,adminUid);
+ const reverseRequest=(patch={})=>({orderId:x.orderId,itemId:'I',deliveryRecordId:deliveryRequest.operationId,
+  operationId:'reverse_'+name,syncAttemptId:'sync_ship_12345',date:'2026-10-19',reason:'誤登送達',...patch});
+ const traceRequest=(selections=[{lotId:x.key+'-a-early',qty:1}])=>({orderId:x.orderId,itemId:'I',
+  shipmentId:x.shipmentRequest.operationId,syncAttemptId:'sync_ship_12345',selections});
+ return {...x,adminUid,originalDelivery:deliveryRequest,reverseRequest,traceRequest,
+  reverse:(data=reverseRequest(),actor=x.uid,connection=db)=>reverseShipmentDelivery(connection,actor,data),
+  trace:(data=traceRequest(),actor=x.uid,connection=db)=>planLocationReturnTrace(connection,actor,data)};
+}
+test('actual acknowledgement reversal changes only delivery facts and old acknowledgement ID cannot resurrect them',async()=>{
+ const x=await correctionFixture('actual-reversal'),physical=await physicalSnapshot(x);
+ const result=await x.reverse();assert.equal(result.reversedQty,1);assert.equal(result.confirmedQty,0);
+ assert.equal(result.pendingDeliveryQty,2);assert.equal(result.isDelivered,false);
+ assert.deepEqual(await physicalSnapshot(x),physical);
+ const order=await x.read('orders',x.orderId);assert.deepEqual(order.deliveryRecords,[]);
+ assert.equal(order.items[0].deliveredQty,0);assert.equal(order.items[0].warehouseShippedQty,2);
+ assert.equal(order.items[0].reservedQty,8);
+ const event=order.deliveryHistory.at(-1);assert.equal(event.action,'delete');assert.equal(event.before.qty,1);
+ assert.equal(event.actorUid,x.uid);assert.equal(event.reason,'誤登送達');
+ await assert.rejects(x.confirm(x.originalDelivery,x.adminUid),/歷史紀錄/);
+ const before=await snapshot(x);assert.equal((await x.reverse()).status,'already-applied');assert.deepEqual(await snapshot(x),before);
+});
+test('reversal after all goods arrive reopens acknowledgement only; it neither restocks nor creates a new shippable hold',async()=>{
+ const x=await correctionFixture('full-reversal',{shipQty:4,confirmedQty:4});
+ await x.ship(B,6,'shipment_full_reverse_B');
+ await x.confirm(x.deliveryRequest(6,'delivery_full_reverse_B','shipment_full_reverse_B'),x.adminUid);
+ assert.equal((await x.read('orders',x.orderId)).isDelivered,true);
+ const physical=await physicalSnapshot(x);const result=await x.reverse();
+ assert.equal(result.confirmedQty,6);assert.equal(result.pendingDeliveryQty,4);assert.equal(result.isDelivered,false);
+ assert.deepEqual(await physicalSnapshot(x),physical);await assert.rejects(x.ship(A,1,'shipment_after_full_reverse'));
+ assert.deepEqual(await physicalSnapshot(x),physical);
+});
+test('same reversal returns original result after a new legitimate acknowledgement without overwriting current totals',async()=>{
+ const x=await correctionFixture('replay-correction');await x.reverse();
+ await x.confirm(x.deliveryRequest(1,'delivery_after_correction'),x.adminUid);
+ const before=await snapshot(x),result=await x.reverse();assert.equal(result.status,'already-applied');
+ assert.equal(result.confirmedQty,0);assert.equal((await x.read('orders',x.orderId)).deliveredQty,1);
+ assert.deepEqual(await snapshot(x),before);
+ for(const patch of [{reason:'另一原因'},{date:'2026-10-20'},{deliveryRecordId:'different'},{syncAttemptId:'changed'}])
+  await assert.rejects(x.reverse(x.reverseRequest(patch)),/其他交易/);
+ await assert.rejects(x.reverse(x.reverseRequest(),x.adminUid),/其他交易/);
+ await assert.rejects(x.confirm({...x.deliveryRequest(1,x.reverseRequest().operationId)},x.adminUid),/歷史紀錄/);
+});
+test('simultaneous same or different reversal IDs never remove an acknowledgement twice',async()=>{
+ for(const same of [true,false]){
+  const x=await correctionFixture('concurrent-reverse-'+same),physical=await physicalSnapshot(x);
+  const results=await Promise.allSettled([x.reverse(),x.reverse(x.reverseRequest(same?{}:{operationId:'reverse_other_'+same}))]);
+  assert.equal(results.filter(r=>r.status==='fulfilled').length,same?2:1);
+  const order=await x.read('orders',x.orderId);assert.equal(order.deliveryRecords.length,0);assert.equal(order.deliveredQty,0);
+  assert.equal(order.deliveryHistory.filter(h=>h.source==='shipment_confirmation_reversal').length,1);
+  assert.deepEqual(await physicalSnapshot(x),physical);
+ }
+});
+test('reversal uses business roles while read-only trace lets operational roles inspect original lots',async()=>{
+ for(const role of ['admin','sales','engineer','purchaser','warehouse']){
+  const x=await correctionFixture('correction-role-'+role,{role});
+  const before=await snapshot(x);assert.equal((await x.trace()).status,'read-only');assert.deepEqual(await snapshot(x),before);
+  if(['purchaser','warehouse'].includes(role)){await assert.rejects(x.reverse(),/權限/);assert.deepEqual(await snapshot(x),before);}
+  else assert.equal((await x.reverse()).status,'applied');
+ }
+ const x=await correctionFixture('correction-stranger');
+ await db.collection('users').doc('correction-stranger-user').set({role:'sales',active:true});
+ await assert.rejects(x.reverse(x.reverseRequest(),'correction-stranger-user'),/自己訂單/);
+ await assert.rejects(x.trace(x.traceRequest(),'correction-stranger-user'),/自己訂單/);
+});
+test('explicit return trace of a mixed-lot partial delivery is read-only, bounded and does not leak costs',async()=>{
+ const x=await correctionFixture('mixed-trace',{shipQty:4,confirmedQty:2}),before=await snapshot(x);
+ const request=x.traceRequest([{lotId:x.key+'-a-late',qty:1},{lotId:x.key+'-a-early',qty:1}]);
+ let reads=0;
+ const guarded={projectId:db.projectId,collection:n=>{
+  assert.ok(['users','orders','inventoryMovements','inventoryLots'].includes(n));return db.collection(n);
+ },runTransaction:fn=>db.runTransaction(tx=>fn({get:r=>{reads++;return tx.get(r);}}))};
+ const result=await x.trace(request,x.uid,guarded);assert.equal(result.canCommit,false);assert.equal(result.returnQty,2);
+ assert.equal(reads,5);assert.deepEqual(result.allocations.map(a=>a.lotNo),['a-late','a-early']);
+ assert.equal(JSON.stringify(result).includes('98765'),false);assert.deepEqual(await snapshot(x),before);
+ assert.deepEqual(await x.trace(request),result);assert.deepEqual(await snapshot(x),before);
+ assert.equal((await x.read('inventoryLots',x.key+'-a-early')).remainingQty,0);
+});
+test('return trace rejects unconfirmed quantities, wrong original batch and altered physical lot data',async()=>{
+ const empty=await correctionFixture('unconfirmed-trace',{confirmedQty:0});const emptyBefore=await snapshot(empty);
+ await assert.rejects(empty.trace(),/超過/);assert.deepEqual(await snapshot(empty),emptyBefore);
+ const x=await correctionFixture('trace-limits',{shipQty:4,confirmedQty:1}),before=await snapshot(x);
+ await assert.rejects(x.trace(x.traceRequest([{lotId:x.key+'-a-early',qty:2}])),/超過/);
+ await assert.rejects(x.trace(x.traceRequest([{lotId:x.key+'-b',qty:1}])),/原出貨/);
+ assert.deepEqual(await snapshot(x),before);
+ const cases=[
+  ['missing',y=>db.collection('inventoryLots').doc(y.key+'-a-early').delete()],
+  ['warehouse',y=>db.collection('inventoryLots').doc(y.key+'-a-early').update({warehouseId:B})],
+  ['product',y=>db.collection('inventoryLots').doc(y.key+'-a-early').update({productKey:'OTHER'})],
+  ['batch',y=>db.collection('inventoryLots').doc(y.key+'-a-early').update({lotNo:'another-lot'})],
+  ['negative',y=>db.collection('inventoryLots').doc(y.key+'-a-early').update({remainingQty:-1})],
+  ['over-restoration',y=>db.collection('inventoryLots').doc(y.key+'-a-early').update({remainingQty:2})],
+ ];
+ for(const [name,mutate] of cases){const y=await correctionFixture('trace-'+name);await mutate(y);
+  const state=await snapshot(y);await assert.rejects(y.trace(),undefined,name);assert.deepEqual(await snapshot(y),state,name);}
+});
+test('reversal and trace reject stale, cancelled, returned or falsified evidence with no partial writes',async()=>{
+ const cases=[
+  ['cancel',x=>db.collection('orders').doc(x.orderId).update({status:'cancelled'})],
+  ['sync',x=>db.collection('orders').doc(x.orderId).update({inventoryReservationAttemptId:'new-sync'})],
+  ['returns',x=>db.collection('orders').doc(x.orderId).update({returnRecords:[{qty:1}]})],
+  ['projection',x=>db.collection('orders').doc(x.orderId).update({deliveredQty:2})],
+  ['proof',x=>db.collection('inventoryMovements').doc('location-ship-'+x.shipmentRequest.operationId).update({qty:-99})],
+  ['disabled',x=>db.collection('users').doc(x.uid).update({disabled:true})],
+ ];
+ for(const [name,mutate] of cases){const x=await correctionFixture('correction-reject-'+name);await mutate(x);
+  const before=await snapshot(x);await assert.rejects(x.reverse());await assert.rejects(x.trace());assert.deepEqual(await snapshot(x),before,name);}
+ const x=await correctionFixture('reverse-date'),before=await snapshot(x);
+ await assert.rejects(x.reverse(x.reverseRequest({date:'2026-10-17'})),/日期/);assert.deepEqual(await snapshot(x),before);
+});
+test('failed reversal update rolls back only the attempted correction and permits original-ID retry',async()=>{
+ const x=await correctionFixture('reverse-failure'),collision=db.collection('inventoryMovements').doc('reversal-forced-collision');
+ await collision.set({marker:true});
+ const wrapper={projectId:db.projectId,collection:n=>db.collection(n),runTransaction:fn=>db.runTransaction(tx=>fn({
+  get:r=>tx.get(r),update:(...args)=>{tx.update(...args);tx.create(collision,{marker:false});}
+ }))};
+ const before=await snapshot(x);await assert.rejects(x.reverse(x.reverseRequest(),x.uid,wrapper));
+ assert.deepEqual(await snapshot(x),before);assert.equal((await x.reverse()).status,'applied');
+});

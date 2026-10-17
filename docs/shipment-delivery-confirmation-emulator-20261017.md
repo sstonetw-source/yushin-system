@@ -43,3 +43,5 @@ A 倉寄 2 → 客戶確認 1 → B 倉寄 6 → 確認 B 倉 6 → 確認 A 倉
 ## 本機驗證紀錄
 
 Node 1,502／1,502 通過，0 失敗。Firestore Emulator 合跑出貨／送達20、單品項預留12、分組預留5，最終37／37通過，0失敗。新增送達案例9組涵蓋多個角色、拒絕情境及併發。app與Functions Core建置一致、語法及diff檢查通過；完整Rules、Auth Callable與六組Chrome結果以本批GitHub CI／PR紀錄為準，不等同Preview真人驗收。
+
+後續進度：已另增 Emulator-only 真正送達撤銷及唯讀退貨原批次追溯，詳見 delivery-reversal-return-trace-emulator-20261017.md。原先撤銷 checkpoint 的模擬測試保留作歷史防護回歸；實物退貨與前端尚未開放。

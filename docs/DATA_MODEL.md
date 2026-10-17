@@ -129,3 +129,7 @@ Rules 新增管理員／採購對「不存在 audit ID」的單筆 get；未開�
 ## Emulator-only 送達確認的出貨來源（2026-10-17）
 
 `deliveryRecords[].sourceType=WAREHOUSE_SHIPMENT_CONFIRMATION` 新增 shipmentId／shipmentMovementId，對應原 warehouseShipmentRecords 與真實扣帳 movement；qty為本次確認量，不是再出庫量。原UID／角色、意圖hash與結果同 deliveryRecord 保存，無新憑證集合。訂單與品項 deliveredQty、isDelivered 是確認事件的投影，warehouseShippedQty仍只來自出貨事件。每類事件最多200筆，跨倉／部分確認使用同一核心投影核對，禁止混用舊交付事件。確認只更新orders，不觸碰實貨、預留、批次或成本；部分送達的退貨批次歸屬仍需後續完成，不把整筆原出貨的lotAllocations錯複製到每筆部分確認。
+
+## Emulator-only 送達撤銷識別與批次追溯（2026-10-17）
+
+deliveryHistory 的 shipment_confirmation_reversal 事件以operationId識別本次撤銷、recordId指向原確認，保存before／原因／actorUid／actorRole／intentHash／原結果；確認紀錄移除後仍能阻擋舊ID恢復。只改orders送達投影，warehouseShipmentRecords／實貨／預留／批次不變。退貨追溯不保存新資料，只讀原出貨movement及明確inventoryLots，回傳canCommit=false的lotRestorationPreview；沒有新collection、query、index或正式資料遷移。
