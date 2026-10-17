@@ -86,3 +86,9 @@ Emulator harness 呼叫原正式 PO／incoming 登記、原收貨 Service 及 `k
 **限制：** 目前仍為 demo-yushin 內部逐步執行，需呼叫端重複執行至 completed；不是排程自動觸發，也沒有 Callable、前端、Preview 或正式部署。每個狀態 50 筆上限是正確性閘門，不是大量候選最終方案；遇到已有供應／退貨或錯誤帳目將安全停止，等待稽核，不能偷偷跳過；需後續改善索引排序、分頁與跨批續傳。可恢復 checkpoint 只保證同一目標確定性重送，不宣稱所有品項／訂單合併為一個原子交易。
 
 初始單品項 v2 writer 現在即使兩倉現貨皆不足、locations 為空，也將已驗證並排序的兩個候選實體倉存至同一 ledger 的 `lifecycleWarehouseIds`（僅位置證據、非額外預留）。之後相同來源重試若換成其他候選倉會拒絕；此欄讓 FIFO 協調器判斷零預留缺貨單可安全從第二倉分配，不准憑空加第三倉。舊 ledger 不做自動回填或正式資料遷移。
+
+## FIFO 大量候選分頁與真實日期（2026-10-18）
+
+將 #153 每個狀態超過 50 筆即拒絕的試點改成延續既有 Receiving Service 的 Firestore 游標分頁。每頁最多 50 筆，掃描 active 與 shortage 兩類後，才依共用 `compareReservationPriority` 選擇當前最早者，避免只看第一頁就分錯。單次完整掃描最多 500 份候選文件，超過上限安全停止，不寫入實體庫存或預留，也不將部分掃描當作完整 FIFO。每一步仍可能反覆掃描全部符合條件的 ledger；這是過渡驗證方案，不是已完成高效率索引式 FIFO；大規模資料仍需單獨規劃優先順序索引與候選投影。
+
+初始 v2 來源訂單若有合法 orderDate/date/createdAt 日期，將其日期保存在既有 ledger 的 `orderDate` 供 Core 決定順序（後續重送保留原日期）；缺日期的舊紀錄仍沿用原有排序 fallback，不自動回填或變更正式資料。採購、出貨、退貨的權威判斷與冪等 checkpoint 維持現有 Service。

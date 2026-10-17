@@ -419,3 +419,7 @@ Callable Emulator 啟動修正：在 `firebase.json` 明確配置 `auth:9099`、
 沿用現有 `functions/single-item-location-service.js`；新 `advanceAutomaticFreeStockAllocation` 僅負責在至多 50 筆／狀態的安全候選範圍內依原 Reservation Core 優先順序選擇下一個目標、保存 resumable checkpoint，並呼叫同檔既有 `commitSingleItemFreeStockAllocation`。不建立第二個 stock writer、需求計算或 ledger；每個目標本身仍由既有 Admin SDK Transaction 交易內重讀、守恆並建立不可重用 movement。
 
 job `reservationOperationReceipts` 與 movement 在不同交易，使用 pending 固定操作 ID 協助崩潰後續傳及同 ID 重送。批次有最大量與累計上限、同角色／意圖驗證，但不是跨所有訂單的原子交易。僅 demo-yushin Emulator；正式頁面沒有接線、自動觸發尚未實作、候選 >50 安全拒絕，需後續完成索引／分頁及 Preview 驗收後才可評估開放正式使用。
+
+### v2 FIFO 有界游標分頁（2026-10-18）
+
+原 `advanceAutomaticFreeStockAllocation` 協調器現以既有 productKey/status 等值查詢，採每頁 50 筆、DocumentSnapshot 游標翻頁；讀取 active/shortage 兩個候選集合後，依既有 Reservation Core 優先權比較排序，不新增第二個優先順序函式。掃描超過 500 筆則拒絕，以免不完整選單或無限制 Firestore 成本。對每個批次步驟會重新讀候選，因此效能仍待後續 server-side index/投影優化；正式部署與 Preview 尚未啟用。
