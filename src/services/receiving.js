@@ -158,12 +158,23 @@ async function validateV2ReceiptSource(transaction, {order,supply,reservation,it
     for(const field of ['warehouseShipmentRecords','deliveryRecords','returnRecords','returnHistory']){
         if(!Array.isArray(order[field]??[]))throw new Error('多倉收貨履約紀錄格式不正確。');
     }
-    if(integer(item.deliveredQty??0,'交付量')||integer(item.warehouseShippedQty??0,'出貨量')
-        ||integer(order.deliveredQty??0,'訂單交付量')||integer(item.returnedQty??0,'退貨量')
-        ||order.isDelivered===true||(order.warehouseShipmentRecords??[]).length
-        ||(order.deliveryRecords??[]).length||(order.returnRecords??[]).length
-        ||(order.returnHistory??[]).length)
-        throw new Error('已出貨或退貨後的多倉收貨尚未整合。');
+    if(integer(item.returnedQty??0,'退貨量')||(order.returnRecords??[]).length||(order.returnHistory??[]).length)
+        throw new Error('退貨後的多倉收貨尚未整合。');
+    const warehouseShipmentContext={orderId,itemId,productKey,
+        shipments:order.warehouseShipmentRecords??[],deliveries:order.deliveryRecords??[]};
+    const shipment=globalThis.YushinFulfillment.projectShipmentDelivery({...warehouseShipmentContext,orderedQty:item.qty??item.orderedQty});
+    if(integer(item.warehouseShippedQty??0,'出貨量')!==shipment.shippedQty
+        ||integer(item.deliveredQty??0,'交付量')!==shipment.confirmedQty
+        ||integer(order.deliveredQty??0,'訂單交付量')!==shipment.confirmedQty
+        ||(order.isDelivered??false)!==shipment.isDelivered)
+        throw new Error('多倉收貨的出貨或送達投影不一致。');
+    for(const record of warehouseShipmentContext.shipments){
+        // Read every immutable debit in this transaction so a stale or forged
+        // source cannot reduce the quantity awaiting reservation.
+        if(record.movementId!=='location-ship-'+record.id)throw new Error('來源倉庫出貨憑證不一致。');
+        const proof=await transaction.get(db.collection('inventoryMovements').doc(record.movementId));
+        globalThis.YushinFulfillment.validateShipmentMovement(record,proof.exists?proof.data():null,{orderId,itemId,productKey});
+    }
     const demandId=globalThis.YushinProcurementDemand.demandIdForSource({sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId});
     if(supply.sourceType!=='SALES_ORDER'||supply.sourceId!==orderId||supply.sourceItemId!==itemId
         ||supply.demandId!==demandId||supply.ownerUid!==order.ownerUid||supply.salesCode!==order.salesCode
@@ -197,7 +208,7 @@ async function validateV2ReceiptSource(transaction, {order,supply,reservation,it
         ||demand.status!==normalizedDemand.status||demand.remainingToOrderQty!==normalizedDemand.remainingToOrderQty
         ||demand.remainingToReceiveQty!==normalizedDemand.remainingToReceiveQty
         ||(!cancelled&&demand.cancelled===true)
-        ||(cancelled?(held!==0||shortage!==0||reservation.status!=='released'):held+shortage!==ordered))
+        ||(cancelled?(held!==0||shortage!==0||reservation.status!=='released'):held+shortage!==shipment.unshippedQty))
         throw new Error('多倉收貨數量與來源投影不一致。');
     const rows=globalThis.YushinReservation.reservationLocations(reservation);
     const candidates=new Set([warehouseId,id(item.warehouseId||order.warehouseId),...rows.map(row=>row.warehouseId)]);
@@ -235,6 +246,7 @@ async function validateV2ReceiptSource(transaction, {order,supply,reservation,it
             ||Number(line.qty)!==supply.qty||line.warehouseId!==warehouseId
             ||isPurchaseTerminalStatus(record.status))throw new Error('多倉收貨缺少有效供應商採購單憑證。');
     }else if(!['PURCHASING_MANUAL','SALES_SELF_ORDER'].includes(supply.type))throw new Error('不支援的多倉供應來源。');
+    return warehouseShipmentContext;
 }
 
 async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',operationId='',options={}) {
@@ -489,15 +501,16 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
                 // 此時貨照常入庫，但不可再占回已取消訂單；整批視為自由庫存。
                 items=normalizedOrderItems(order);itemIndex=validateSourceItem(order,items);
                 if(itemIndex>=0){
-                    const item=items[itemIndex];
+                    let item=items[itemIndex];
                     if(!reservationSnap.exists)throw new Error('來源訂單缺少庫存預留紀錄，無法安全入庫。');
                     const savedReservation=reservationSnap.data();
                     if(savedReservation.locationSchemaVersion!==undefined||savedReservation.locations!==undefined)
                         globalThis.YushinReservation.reservationLocations(savedReservation);
                     sourceReservationV2=savedReservation.locationSchemaVersion===2;
-                    if(sourceReservationV2)await validateV2ReceiptSource(tx,{order,supply,reservation:reservationSnap.data(),item,
+                    if(sourceReservationV2)item=items[itemIndex]={...order.items[itemIndex]};
+                    const warehouseShipmentContext=sourceReservationV2?await validateV2ReceiptSource(tx,{order,supply,reservation:reservationSnap.data(),item,
                         inventory:invSnap.exists?invSnap.data():null,warehouseStock:whSnap?.exists?whSnap.data():null,
-                        demand:demandSnap?.exists?demandSnap.data():null,actorUid,actorRole,qty});
+                        demand:demandSnap?.exists?demandSnap.data():null,actorUid,actorRole,qty}):undefined;
                     if(sourceOrderStatus==='normal'){
                         if(!reservationSnap.exists)throw new Error('來源訂單缺少庫存預留紀錄，無法安全入庫。');
                         const reservation=reservationSnap.data();
@@ -511,7 +524,7 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
                             ||Math.abs(Number(item.shortageQty||0)-ledgerShortage)>1e-9||inv.reserved<ledgerReserved||wh.reserved<localReserved)
                             throw new Error('來源訂單與公司／分倉預留數量不一致，請先核對紀錄。');
                         const currentReserved=Math.max(0,Number(reservation.quantity||0));
-                        const receiptPlan=globalThis.YushinReceiving.applyReceiptToOrderItem({...item,reservedQty:currentReserved},qty);
+                        const receiptPlan=globalThis.YushinReceiving.applyReceiptToOrderItem({...item,reservedQty:currentReserved},qty,warehouseShipmentContext);
                         const next=receiptPlan.item;
                         sourceStockPlan=globalThis.YushinReservation.planReservationReceipt({productKey,warehouseId,qty,
                             requestedReserveQty:receiptPlan.reservedDelta,reservation,

@@ -137,10 +137,36 @@
       confirmedQty=qty(confirmedQty+row.qty);
     }
     const delivery=projectOrderDelivery({grossDeliveredQty:confirmedQty});
-    return {shippedQty,confirmedQty:delivery.effectiveDelivered,pendingDeliveryQty:shippedQty-delivery.effectiveDelivered,
+    return {shippedQty,unshippedQty:orderedQty-shippedQty,confirmedQty:delivery.effectiveDelivered,pendingDeliveryQty:shippedQty-delivery.effectiveDelivered,
       isDelivered:orderedQty>0&&delivery.effectiveDelivered===orderedQty,
       shipments:[...source].map(([shipmentId,row])=>({shipmentId,shippedQty:row.shipment.qty,
         confirmedQty:row.confirmedQty,pendingQty:row.shipment.qty-row.confirmedQty}))};
+  }
+
+  // Match an immutable physical debit to its source shipment. The backend
+  // acknowledgement adapter additionally verifies its normalized intent hash.
+  function validateShipmentMovement(shipment,movement,{orderId,itemId,productKey}={}) {
+    const same=(a,b)=>{
+      if(a===b)return true;
+      if(!a||!b||typeof a!=='object'||typeof b!=='object'||Array.isArray(a)!==Array.isArray(b))return false;
+      const keys=Object.keys(a);
+      return keys.length===Object.keys(b).length&&keys.every(k=>Object.prototype.hasOwnProperty.call(b,k)&&same(a[k],b[k]));
+    };
+    const allocations=shipment?.lotAllocations;
+    if(!shipment||shipment.orderId!==orderId||shipment.itemId!==itemId||shipment.productKey!==productKey
+      ||shipment.sourceType!=='WAREHOUSE_CUSTOMER_SHIPMENT'
+      ||shipment.movementId!=='location-ship-'+shipment.id
+      ||!Number.isSafeInteger(shipment.qty)||shipment.qty<=0
+      ||!Array.isArray(allocations)||!allocations.length||allocations.length>200
+      ||allocations.some(a=>!a||typeof a.lotId!=='string'||!a.lotId||!Number.isSafeInteger(a.qty)||a.qty<=0)
+      ||new Set(allocations.map(a=>a.lotId)).size!==allocations.length
+      ||allocations.reduce((sum,a)=>sum+a.qty,0)!==shipment.qty
+      ||!movement||movement.action!=='location_customer_shipment'||movement.type!=='ship'
+      ||movement.sourceId!==orderId||movement.itemId!==itemId||movement.productKey!==productKey
+      ||movement.warehouseId!==shipment.warehouseId||movement.qty!==-shipment.qty
+      ||!same(movement.lotAllocations,allocations))
+      throw Error('來源倉庫出貨與實際扣帳憑證不一致。');
+    return true;
   }
 
   // Physical returns do not erase historical shipments/acknowledgements.
@@ -212,6 +238,7 @@
     dispatchState,
     warehouseShipmentState,
     projectShipmentDelivery,
+    validateShipmentMovement,
     projectShipmentReturns,
     pendingDispatchQty,
     shippableQty,

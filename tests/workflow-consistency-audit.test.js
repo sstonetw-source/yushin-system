@@ -214,3 +214,16 @@ test('same product receipt allocation leaves another warehouse stock and reserva
  assert.equal(f.docs.get('warehouseStocks/W__P').reserved,3);assert.equal(f.docs.get('inventory/P').reserved,7);
  assert.deepEqual([f.docs.get('warehouseStocks/OTHER__P'),f.docs.get('inventoryReservations/OTHER')],before);
 });
+
+test('actual purchasing projection excludes warehouse shipments awaiting acknowledgement',()=>{
+ const c=vm.createContext({YushinWorkflow:workflow,YushinProcurementDemand:demandCore,
+  itemDispatchState:()=>({grossDelivered:0,delivered:0,returned:0})});
+ vm.runInContext(section('function procurementDemandForOrderItem(', 'function purchasingLifecycleSnapshot('),c);
+ const item={itemId:'I',productId:'P',qty:10,reservedQty:4,shortageQty:6,supplyOrderedQty:3,receivedQty:1,warehouseShippedQty:4};
+ const order={id:'O',items:[item],warehouseShipmentRecords:[{id:'S',orderId:'O',itemId:'I',productKey:'P',
+  warehouseId:'A',date:'2026-10-17',qty:4,sourceType:'WAREHOUSE_CUSTOMER_SHIPMENT'}],deliveryRecords:[]};
+ const demand=c.procurementDemandForOrderItem(order,item);
+ assert.equal(demand.requestedQty,3);assert.equal(demand.remainingToOrderQty,0);assert.equal(demand.remainingToReceiveQty,2);
+ order.warehouseShipmentRecords[0].sourceType='UNRECOGNIZED';
+ assert.throws(()=>c.procurementDemandForOrderItem(order,item));
+});

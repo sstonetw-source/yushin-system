@@ -407,3 +407,9 @@ Callable Emulator 啟動修正：在 `firebase.json` 明確配置 `auth:9099`、
 本節更新「已收貨一律拒絕」的生命週期限制。既有 `commitSingleItemLocationLifecycle` 現核對部分／全部收貨及已停止供應：供應狀態使用原 Receiving Core `normalizeSupply`、承諾使用原 Demand Core `reconcileLinkedSupplies`。同交易以 orderId／demandId 各限 51 筆查 receipts，聯集最多接受 50 筆；逐筆核對 v2 receipt 來源、唯一入庫 movement、原 lot 與逐供應累計，不以訂單或供應上的 receivedQty 快取當作入庫證明。
 
 取消仍只釋放 reserved，不更改 onHand／incoming／批號／receipt／PO／供應履約；恢復以真實有效供應承諾減已收貨計算 inTransit，再傳給同一 Reservation／Workflow／Demand Core。已收貨歷史保留，需求 requestedQty 仍涵蓋累計收貨與目前缺口，不把收到的量重算為在途。Functions 的 receiving-core.js 由原 modules/ 建置產生並驗證一致，沒有第二個核心或新的 Service。仍只在 demo-yushin Emulator；途中貨、剩餘打單、退貨與正式 Callable／UI／Preview 尚未接線。
+
+### 部分出貨後續收貨（2026-10-17，Emulator-only）
+
+既有 Fulfillment Core 的 `projectShipmentDelivery` 增加 `unshippedQty`；Workflow 的明確 `warehouseShipmentContext` 由同一投影區分客戶尚未收到的 outstandingQty 與倉庫尚未寄出的 stockOutstandingQty。Receiving.applyReceiptToOrderItem 接受此第三參數，採購需求 helper 也提供來源紀錄，因此途中貨不再產生重複預留／採購缺口。沒有 context 的舊呼叫維持原行為。
+
+原 receiving Service 仍為唯一收貨 writer。v2 先保留原始 order item、同交易驗證出貨／送達快取與全部出貨 movement，再交 Core 計算；避免展示 normalizer 用待送達量覆蓋實際 v2 缺口。共用 `Fulfillment.validateShipmentMovement` 核對扣帳身份、倉別、數量與批次配置；原 shipment acknowledgement adapter 仍額外核對完整 normalized intent hash，未減少驗證。無新 Service／Callable／UI／Rules；僅 demo-yushin Emulator。

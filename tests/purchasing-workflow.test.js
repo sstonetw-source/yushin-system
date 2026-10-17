@@ -562,7 +562,7 @@ test('supply receipt synchronizes received quantity back to the source order ite
     const start=app.indexOf('async function receiveSupplyOrderRecord');
     const end=app.indexOf('function receiptOperationStorageKey',start);
     const source=app.slice(start,end);
-    assert.match(source,/const receiptPlan=globalThis\.YushinReceiving\.applyReceiptToOrderItem\(\{\.\.\.item,reservedQty:currentReserved\},qty\)/);
+    assert.match(source,/const receiptPlan=globalThis\.YushinReceiving\.applyReceiptToOrderItem\(\{\.\.\.item,reservedQty:currentReserved\},qty,warehouseShipmentContext\)/);
     assert.match(source,/const currentReserved=Math\.max\(0,Number\(reservation\.quantity\|\|0\)\)/);
     assert.match(source,/const next=receiptPlan\.item/);
     assert.match(source,/reserveQty=sourceStockPlan\.allocatedQty/);
@@ -575,7 +575,7 @@ test('supply receipt synchronizes received quantity back to the source order ite
 
 
 test('self-order receipt uses receiving core receivedQty without adding it twice',()=>{
-    assert.match(app,/const receiptPlan=globalThis\.YushinReceiving\.applyReceiptToOrderItem\(\{\.\.\.item,reservedQty:currentReserved\},qty\);/);
+    assert.match(app,/const receiptPlan=globalThis\.YushinReceiving\.applyReceiptToOrderItem\(\{\.\.\.item,reservedQty:currentReserved\},qty,warehouseShipmentContext\);/);
     assert.match(app,/const next=receiptPlan\.item/);
     assert.match(app,/if\(!reservationSnap\.exists\)throw new Error\('來源訂單缺少庫存預留紀錄/);
     assert.doesNotMatch(app,/\{\.\.\.next,receivedQty:Number\(item\.receivedQty\|\|0\)\+qty/);

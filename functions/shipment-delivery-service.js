@@ -82,11 +82,8 @@ async function readShipmentProof(tx,db,order,intent,productKey) {
   const movement=await tx.get(ref('inventoryMovements',expectedMovementId));
   if(!movement.exists)fault('來源出貨缺少實際扣帳憑證');
   const proof=movement.data();
-  if(proof.action!=='location_customer_shipment'||proof.type!=='ship'||proof.sourceId!==orderId
-   ||proof.itemId!==itemId||proof.productKey!==productKey||proof.warehouseId!==shipment.warehouseId
-   ||proof.qty!==-shipment.qty||proof.intentHash!==originalIntent.hash
-   ||!require('node:util').isDeepStrictEqual(proof.lotAllocations,shipment.lotAllocations))
-   fault('來源倉庫出貨與實際扣帳憑證不一致');
+  core.validateShipmentMovement(shipment,proof,{orderId,itemId,productKey});
+  if(proof.intentHash!==originalIntent.hash)fault('來源倉庫出貨與實際扣帳憑證不一致');
   return shipment;
 }
 async function commitShipmentDelivery(db,uid,data){

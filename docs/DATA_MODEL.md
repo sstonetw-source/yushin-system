@@ -171,3 +171,9 @@ deliveryHistory 的 shipment_confirmation_reversal 事件以operationId識別本
 不新增欄位或集合。原 receipts（orderId／demandId 聯集最多 50 筆）核對 supplyOrderId、v2 位置標記、來源訂單／品項／產品／倉、PO、method、qty 與 cumulativeReceivedQty；由 receiptId + type=receipt 查唯一 inventoryMovements（limit 2），按 receipt.lotId 讀原 inventoryLots，核對來源、原入庫數量與仍合法的 remainingQty。已出貨消耗的 lot 可為零，不把剩餘量誤當歷史收貨量；不讀受保護 inventoryLotCosts，不改批號／成本／receipt。
 
 逐供應累計憑證與 supply.receivedQty 相等，再由既有 Demand Core 與 orders.items[].receivedQty／採購需求交叉核對。CANCELLED／CLOSED 供應仍保留已收部分的 ordered contribution；已全收的 supply 不因 PO 因其他餘量結案而遺失。取消／恢復只原子更改訂單、預留、reserved、生命週期 movement／receipt 及需求投影。新增 bounded receipt／lot／入庫 movement 讀取，未新增索引定義／Rules／正式資料遷移。
+
+### 出貨後收貨的計算 context（2026-10-17，Emulator-only）
+
+無新持久欄位。`warehouseShipmentContext` 僅為 Core 呼叫參數，包含 orderId／itemId／productKey 與既有 warehouseShipmentRecords／deliveryRecords，不寫入 items。Fulfillment 回傳 unshippedQty；Workflow 在此明確 context 回傳 stockOutstandingQty／pendingDeliveryQty，outstandingQty 保留待客戶確認語意。舊 Core 呼叫的回傳格式維持相容。
+
+原 receiving transaction 新增逐筆原出貨 movement 讀取（沿用最多 200 筆出貨的 Core 上限），核對 `location-ship-{shipment.id}`、action/type、來源、倉庫、負 qty 與 lotAllocations；不更動出貨／送達／既有批次配置，不讀既有受保護成本。無新查詢、索引、集合或 Rules；採購顯示用同一既有紀錄投影。
