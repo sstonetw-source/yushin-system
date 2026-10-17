@@ -143,3 +143,7 @@ deliveryHistory 的 shipment_confirmation_reversal 事件以operationId識別本
 ## v2 打單準備憑證（2026-10-17；僅 Emulator）
 
 使用現存 `dispatchRecords` Collection，不新增集合與索引：`dispatchRecords/v2-{operationId}` 只保留打單事件 `action=location_dispatch_prepared`、`orderId`／`itemId`／`productKey`、`qty`、`actorUid`／`actorRole`、`ownerUid`／`salesCode`、`syncAttemptId`、`intentHash`、`createdAt`、`result`，權威累計仍為原訂單品項的 `dispatchPreparedQty`。來源訂單品項更新與憑證同一 Admin SDK Transaction；庫存與保留位置及客戶送達均不寫入。固定 ID 重送只回原結果、不消耗新的打單預算。此資料結構未接既有 UI、Cloud Callable、正式 Firestore Rules 或工作清單；不可對正式資料進行混用。
+
+## v2 取消／恢復操作憑證（2026-10-17，Emulator-only）
+
+沿用既有 `inventoryReservations/{orderId}__{itemId}`，取消時寫入空的 `locations=[]`、`quantity=0`、`shortageQty=0`、`status='released'`，以及保留兩個來源候選倉的 `lifecycleWarehouseIds`（防止取消後丟失可恢復位置）；恢復時由最新庫存重新產生 `locations` 與 shortage。沒有建立第二份預留 ledger。原 `orders.items[].reservedQty/shortageQty`、`orders.status/orderStatus`、`inventory.reserved` 與逐倉 `warehouseStocks.reserved`、`inventoryMovements`、`reservationOperationReceipts/single-v2-lifecycle-{operationId}` 同一 Admin SDK Transaction 更新。Receipt 保存 actor UID／role、意圖 hash 與首次提交結果，供重試不重放；不新增集合或索引、不改 Rules。現行前端、正式 Firestore 不支援此 v2 寫入，尚未上線。
