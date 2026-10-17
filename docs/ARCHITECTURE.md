@@ -8,6 +8,15 @@
 
 
 
+
+### 指定收貨倉的共同預留分配（2026-10-17）
+
+已實作：`reservation-core.planReservationReceipt` 共用於正常來源訂單收貨，以及已入庫自由庫存的缺貨再分配。收貨需求仍由 `Receiving.applyReceiptToOrderItem`／Workflow 決定；自由庫存仍沿用採購需求投影，已下訂在途不重複占貨。新契約僅計算實際收貨倉的公司／分倉實貨與預留差額，沿用原始帳驗證及 `reservationStockDeltas`，不選擇或搬動其他倉。
+
+來源收貨模式只增加本次真實入庫量；再分配模式不新增實貨，受公司、該倉可用量及原 receipt／transfer checkpoint 限制。無效原始庫存／自由調撥途中量或帳目不足，在更新訂單、批次、需求及 checkpoint 前拒絕。合法單倉小數的操作數量與浮點庫存差額分開回傳，避免把浮點差誤列成額外分配量。取消來源 KEEP_STOCK 及獨立備庫入庫保留原流程。
+
+純 Core 已驗證 v2 locations 在實際收貨倉增加預留並保留其他位置；StockPermissions／Rules 的多倉欄位阻擋完整保留。**多倉資料庫交易仍未啟用**，不能將此純計算或單倉 Emulator 當成完整多倉驗收。無新增查詢、讀寫、集合、Rules、索引、Listener、正式資料遷移或部署；其餘多倉取消／調撥／保管與 Preview 全流程仍待接線。
+
 ### 撤銷與退貨的共同庫存／預留投影（2026-10-17）
 
 已實作：`reservation-core.planReservationReturn` 為送貨撤銷、客戶退貨及退貨縮量的共同數量契約。正常訂單撤銷送貨會還原實貨與本單預留；補送退貨同步增加／完整扣回預留；CLOSE 結案退貨只增加／扣回自由實貨；已取消訂單不重建預留，既有殘留須完整釋放。差額沿用 `reservationStockDeltas`，原始帳目沿用 `validateReservationBalance`，產品／倉位檢查與正向出貨共用。

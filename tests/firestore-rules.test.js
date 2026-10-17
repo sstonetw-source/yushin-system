@@ -1022,7 +1022,7 @@ async function directReceiptFixture(uid='sales1',role='sales',ownerUid=uid) {
  const client=compatDb(uid),nativeRun=client.runTransaction,plain=value=>JSON.parse(JSON.stringify(value));
  client.runTransaction=callback=>nativeRun(tx=>callback({...tx,set:(ref,data,options)=>options?tx.set(ref,plain(data),options):tx.set(ref,plain(data)),update:(ref,data)=>tx.update(ref,plain(data))}));
  const context=vm.createContext({db:client,currentUser:{uid},currentUserRole:role,permissionRulesReady:true,deliveryActor:()=>uid,localDateString:()=> '2026-10-14',
-  YushinSupply:supplyCore,YushinReceiving:receivingCore,YushinProcurementDemand:demandCore,window:{YushinReceiving:receivingCore},
+  YushinSupply:supplyCore,YushinReceiving:receivingCore,YushinProcurementDemand:demandCore,YushinReservation:require('../modules/reservation-core'),window:{YushinReceiving:receivingCore},
   supplyOrdersCollection:()=>client.collection('supplyOrders'),procurementDemandRef:id=>client.collection('procurementDemands').doc(encodeURIComponent(id)),
   procurementDemandDocument:(d,c,m)=>demandCore.demandDocument({...d,...c},m),
   runRoleTransaction:callback=>stockPermissions.run(client,callback,uid,['sales','engineer'].includes(role),role),
@@ -2709,5 +2709,43 @@ test('actual return accounting refuses insufficient reservation accounts before 
    }),/預留量不足/);
    assert.deepEqual(await read(),before);
   }
+ }
+});
+
+async function singleReceivingLocationFixture(uid,role){
+ const f=await orderInitializationFixture(uid,role,{qty:3,onHand:0,ownerUid:'sales1'}),fulfillment=require('../modules/fulfillment-core');
+ const original=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+ await seed('orders/'+f.id,{...original,inventoryReservationStatus:'completed',items:original.items.map(i=>fulfillment.normalizeItem(i))});
+ await seed('inventory/init-product',{productKey:'init-product',onHand:9,reserved:4,incoming:0});
+ await seed('warehouseStocks/W1__init-product',{productKey:'init-product',warehouseId:'W1',onHand:3,reserved:0,incoming:0});
+ await seed('warehouseStocks/OTHER__init-product',{productKey:'init-product',warehouseId:'OTHER',onHand:6,reserved:4,incoming:0});
+ await seed('inventoryReservations/'+f.id+'__I',{orderId:f.id,itemId:'I',orderItemIndex:0,ownerUid:'sales1',salesCode:'S01',productKey:'init-product',warehouseId:'W1',quantity:0,shortageQty:3,status:'shortage'});
+ await seed('inventoryReservations/REMOTE__I',{orderId:'REMOTE',itemId:'I',ownerUid:'sales1',salesCode:'S01',productKey:'init-product',warehouseId:'OTHER',quantity:4,shortageQty:0,status:'active'});
+ await seed('receipts/location-'+uid,{productKey:'init-product',warehouseId:'W1',autoAllocationQty:3,autoAllocatedQty:0,allocationCompleted:false});
+ Object.assign(f.context,{firestoreReadWithTimeout:p=>p,itemDispatchState:(_o,item)=>fulfillment.dispatchState(item),orderInventorySyncIncomplete:o=>o.inventoryReservationStatus!=='completed'});
+ vm.runInContext(fs.readFileSync('src/services/receiving.js','utf8'),f.context);
+ f.allocate=()=>f.context.allocateFreeReceiptStockToShortages('init-product','W1',3,uid,'','location-'+uid);
+ return f;
+}
+test('actual receipt allocation uses only the receiving warehouse and preserves another warehouse holds on repeat',async()=>{
+ for(const [uid,role] of [['admin','admin'],['buyer1','purchaser'],['wh1','warehouse']]){
+  const f=await singleReceivingLocationFixture(uid,role);
+  const paths=['warehouseStocks/OTHER__init-product','inventoryReservations/REMOTE__I'];
+  const read=()=>Promise.all(paths.map(async path=>(await getDoc(doc(db('admin'),path))).data()));const before=await read();
+  await assertSucceeds(f.allocate());await assertSucceeds(f.allocate());assert.deepEqual(await read(),before);
+  const company=(await getDoc(doc(db('admin'),'inventory/init-product'))).data();assert.equal(company.onHand,9);assert.equal(company.reserved,7);
+  const local=(await getDoc(doc(db('admin'),'warehouseStocks/W1__init-product'))).data();assert.equal(local.onHand,3);assert.equal(local.reserved,3);
+  assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).data().quantity,3);
+  assert.equal((await getDoc(doc(db('admin'),'receipts/location-'+uid))).data().autoAllocatedQty,3);
+ }
+});
+test('actual receiving-location allocation refuses corrupt transit before updating any stock checkpoint or demand',async()=>{
+ for(const [uid,role] of [['admin','admin'],['buyer1','purchaser'],['wh1','warehouse']]){
+  const f=await singleReceivingLocationFixture(uid,role);
+  await seed('inventory/init-product',{productKey:'init-product',onHand:9,reserved:4,incoming:0,transferFreeInTransit:-1});
+  const paths=['orders/'+f.id,'inventory/init-product','warehouseStocks/W1__init-product','inventoryReservations/'+f.id+'__I','receipts/location-'+uid];
+  const read=()=>Promise.all(paths.map(async path=>(await getDoc(doc(db('admin'),path))).data()));const before=await read();
+  await assert.rejects(f.allocate(),/預留數量不正確/);assert.deepEqual(await read(),before);
+  assert.equal((await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).exists(),false);
  }
 });

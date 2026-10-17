@@ -67,3 +67,9 @@
 `planReservationIssue` 沿用本文件的 locations／reservedQty 格式與 `reservationStockDeltas`，純計算指定倉正向出貨後的公司與分倉實貨／預留及總預留；不得拿 B 倉預留滿足 A 倉出貨。原本的單倉正向出貨已由共用 delivery-stock Service 使用此核心；舊格式不升版。多倉連續部分出貨的純測試與數量守恆已新增，實際角色／冪等／原子性 Emulator 僅驗證現行單倉入口。
 
 位置欄位的讀寫阻擋維持；沒有啟用新版 Firestore 寫入。退貨與撤銷要依原事件的實際出貨倉、批次及可還原量處理，仍待接線。不能把正向出貨計算完成描述為收貨、取消、保管、調撥、Rules 或 Preview 已全面完成。
+
+## 2026-10-17 收貨位置分配計算接續
+
+`planReservationReceipt` 以指定收貨倉處理真實入庫或既有自由庫存分配，v2 純模型保留其他倉的既有 locations，僅增加實際收貨倉；公司預留與各倉差額沿用 reservationStockDeltas。單倉來源收貨與自由庫存分配已接共用 Service 計算；實際 Emulator 驗證仍只涵蓋現行單倉格式及其他倉資料不變。
+
+沒有解除位置欄位的交易／Rules 阻擋，不代表真正多倉預留已可寫入；取消來源 KEEP_STOCK 與獨立備庫入庫維持原路徑，完整多倉收貨、取消／恢復、調撥、保管與 Preview 仍未完成。

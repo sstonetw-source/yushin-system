@@ -41,3 +41,5 @@
 - 撤銷、退貨及退貨縮量的原批次更新必須使用 `planLotRestoration`，所有候選先讀後驗證；同 lotId 的分配合計後一次寫入，不可逐列以同一舊餘量覆寫。錯產品／倉庫不得猜測或重標批次。
 
 - 撤銷／退貨的公司與分倉數量一律交 `planReservationReturn`；先驗證原始帳與完整差額，再還原原批次。CLOSE、REPLACE 及取消狀態不可由 Feature／Service 另寫 clamp 公式。
+
+- 來源收貨與自由庫存分配共用 `planReservationReceipt`；需求分別由 Receiving／Workflow 與採購投影提供，不另造需求公式。只變更收貨倉預留，既有 receipt／transfer checkpoint、FIFO 與重試身分保護不能略過。
