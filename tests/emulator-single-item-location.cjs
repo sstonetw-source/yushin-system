@@ -349,14 +349,14 @@ test('v2 existing canonical procurement demand closes and reopens atomically wit
  const cancelled=await x.lifecycle('cancelled');
  assert.equal(cancelled.reservedQty,0);
  const stopped=await demand.read();
- assert.equal(stopped.status,'CANCELLED');assert.equal(stopped.remainingToOrderQty,0);
+ assert.equal(stopped.status,'CANCELLED');assert.equal(stopped.cancelled,true);assert.equal(stopped.remainingToOrderQty,0);
  assert.equal(stopped.requestedQty,3);assert.equal(stopped.orderedQty,0);
  assert.equal((await x.lifecycle('cancelled')).status,'already-applied');
  assert.deepEqual(await demand.read(),stopped);
  const restored=await x.lifecycle('normal');
  assert.equal(restored.reservedQty,7);assert.equal(restored.shortageQty,3);
  const reopened=await demand.read();
- assert.equal(reopened.status,'PENDING');assert.equal(reopened.requestedQty,3);
+ assert.equal(reopened.status,'PENDING');assert.equal(reopened.cancelled,false);assert.equal(reopened.requestedQty,3);
  assert.equal(reopened.remainingToOrderQty,3);assert.equal(reopened.ownerUid,x.uid);
  assert.equal(reopened.sourceItemIndex,0);
  assert.equal((await x.read('inventory',x.productKey)).reserved,7);
