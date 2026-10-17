@@ -391,3 +391,7 @@ Callable Emulator 啟動修正：在 `firebase.json` 明確配置 `auth:9099`、
 ### 部分交付後的 v2 取消／恢復（2026-10-17，僅 Emulator）
 
 本節更新上述「初始取消／恢復」範圍。既有 `commitSingleItemLocationLifecycle` 現使用同一 `Fulfillment.projectShipmentDelivery` 與 `readShipmentProof`，交易內核對逐筆出貨扣帳證明、送達與訂單投影。僅支援**已寄出部分全部送達，剩餘部分未打單、無退貨及供應商承諾／收貨**的單品項雙倉訂單。取消釋放剩餘預留；恢復以原訂購量減已確認送達量呼叫原 `planLocationReservation`，採購需求同交易使用現有 Workflow／Demand Core 重算。歷史出貨、送達、打單累計與實貨／批次不改。仍無 Callable／前端／Preview／正式部署；途中貨、剩餘已打單及已下 PO 的取消未完成。
+
+### v2 取消／恢復的未到貨供應承諾（2026-10-17，僅 Emulator）
+
+本節更新前述「有供應承諾一律拒絕」限制。沿用 `commitSingleItemLocationLifecycle`；同一 Admin SDK Transaction 用既有 supplyOrders 的 orderId 與 demandId 兩種來源各查最多 51 筆，合併後最多接受 50 筆，逐筆驗證所有權、產品、實體倉、來源及零收貨狀態，正式 PO 額外重讀 purchaseOrders 與對應供應明細。承諾量由現有 `ProcurementDemand.reconcileLinkedSupplies` 計算，須等於訂單／採購需求投影；已登記 incoming 須由公司／分倉帳足量涵蓋。取消保留 supplyOrders、purchaseOrders 及 incoming；恢復將尚未到貨供應承諾交給現有 Reservation／Workflow／Demand Core，避免現貨與採購重複涵蓋。供應商同意取消仍使用既有採購 Service，客戶取消沒有供應商取消權。無新 Service／Core／Collection／Rules／索引；尚無 Callable／UI／Preview 或正式部署。

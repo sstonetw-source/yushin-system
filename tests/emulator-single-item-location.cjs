@@ -407,3 +407,158 @@ test('v2 procurement demand supplier commitments, identity and lifecycle project
  assert.equal((await ledger.read('inventory',ledger.productKey)).reserved,0);
  assert.notDeepEqual(await snapshot(ledger),snapshotBefore);
 });
+
+// Execute the existing purchase Services against real Firestore transactions;
+// only presentation/session adapters are supplied by this isolated harness.
+const vm=require('node:vm'),fs=require('node:fs');
+const workflow=require('../modules/workflow-core'),receiving=require('../modules/receiving-core');
+function purchasingHarness(){
+ const demandFor=(order,item)=>demandCore.fromSalesOrder({
+  ...workflow.procurementQuantities({...item,orderedQty:item.qty,grossDeliveredQty:item.deliveredQty??0}),
+  shortageQty:item.shortageQty,sourceType:'SALES_ORDER',sourceId:order.id,sourceItemId:item.itemId});
+ const context=vm.createContext({currentUser:{uid:'emulator-purchaser'},currentUserRole:'purchaser',
+  currentUserName:'Purchaser',canCreatePurchaseOrderCapability:()=>true,canAccessPage:()=>true,
+  db,supplyOrdersCollection:()=>db.collection('supplyOrders'),
+  normalizedOrderItems:o=>o.items.map(i=>({...i})),normalizedOrderStatus:o=>o.orderStatus||'normal',
+  orderInventorySyncIncomplete:o=>o.inventoryReservationStatus!=='completed',
+  remainingProcurementQty:(o,i)=>demandFor({...o,id:o.id||''},i).remainingToOrderQty,
+  procurementDemandForOrderItem:demandFor,YushinProcurementDemand:demandCore,YushinReceiving:receiving,
+  procurementDemandRef:id=>db.collection('procurementDemands').doc(encodeURIComponent(id)),
+  procurementDemandDocument:(d,meta={},dates={})=>demandCore.demandDocument({...d,...meta},dates),
+  poIncomingKey:i=>i.productId||'',inventoryProductKey:i=>i.productId||'',resolveBrandName:x=>x,
+  brandIdForName:()=>'',defaultWarehouse:()=>({id:'V2-A'}),orderWorkIndexFields:()=>({}),
+  normalizeDocumentLinks:x=>x,documentLink:(type,id,rel)=>({type,id,rel}),DOCUMENT_TYPES:{PURCHASE_ORDER:'PURCHASE_ORDER'},
+  inventoryNumbers:s=>require('../modules/inventory-core').normalizeStock(s),
+  warehouseStockDocId:(w,p)=>encodeURIComponent(w)+'__'+encodeURIComponent(p),
+  buildInventorySearchTokens:()=>[],isPurchaseTerminalStatus:s=>['CANCELLED','CLOSED'].includes(String(s||'').toUpperCase()),
+  runRoleTransaction:fn=>db.runTransaction(async tx=>fn(tx))
+ });
+ const editor=fs.readFileSync('src/features/purchasing/purchase-order-editor.js','utf8');
+ vm.runInContext(editor.slice(editor.indexOf('function formalSupplyOrderId('),editor.indexOf('function poPdfFileName('))
+  +fs.readFileSync('src/services/formal-purchase-order.js','utf8')
+  +fs.readFileSync('src/services/supply-order.js','utf8'),context);
+ return context;
+}
+async function purchasedLifecycle(name,{quantity=3,register=true}={}){
+ const x=await readyLifecycle('supplier-'+name,{company:7}),c=purchasingHarness();
+ const po={poNo:'PO-LIFE-'+name,vendorName:'Emulator Vendor',supplierName:'Emulator Vendor',
+  buyerName:'Purchaser',poDate:'2026-10-17',createdAt:'2026-10-17T00:00:00Z',
+  items:[{orderId:x.orderId,itemId:'I1',orderItemIndex:0,productId:x.productKey,
+   qty:quantity,unitPrice:100,warehouseId:'V2-A',fulfillmentType:'WAREHOUSE',
+   ownerUid:x.uid,salesCode:'V2',sourceType:'SALES_ORDER'}]};
+ const purchase=await c.commitFormalPurchaseOrder(po);
+ if(register)await c.registerPurchaseIncoming(po.poNo,purchase.poRecord);
+ const demandId='SALES_ORDER:'+x.orderId+':I1',demandRef=db.collection('procurementDemands').doc(encodeURIComponent(demandId));
+ return {...x,c,po:purchase.poRecord,supplyId:purchase.committedSupplyOrders[0].id,demandRef};
+}
+async function supplierSnapshot(x){
+ const demand=(await x.demandRef.get()).data(),po=await x.read('purchaseOrders',x.po.poNo);
+ const rows=await db.collection('supplyOrders').where('orderId','==',x.orderId).get();
+ return {base:await snapshot(x),demand,po,supplies:rows.docs.map(d=>({id:d.id,...d.data()}))};
+}
+test('real formal PO commitment survives customer cancellation, and restore covers supplier transit only once',async()=>{
+ const x=await purchasedLifecycle('retained'),before=await supplierSnapshot(x);
+ assert.equal(before.demand.orderedQty,3);assert.equal(before.base.documents[1].incoming,3);
+ const stopped=await x.lifecycle('cancelled');assert.equal(stopped.reservedQty,0);
+ let after=await supplierSnapshot(x);
+ assert.deepEqual(after.po,before.po);assert.deepEqual(after.supplies,before.supplies);
+ assert.equal(after.demand.status,'CANCELLED');assert.equal(after.demand.orderedQty,3);
+ assert.equal(after.demand.remainingToOrderQty,0);assert.equal(after.demand.remainingToReceiveQty,3);
+ assert.equal(after.base.documents[0].items[0].supplyOrderedQty,3);
+ assert.equal(after.base.documents[1].incoming,3);assert.equal(after.base.documents[1].onHand,7);
+ assert.equal((await x.lifecycle('cancelled')).status,'already-applied');
+ const restored=await x.lifecycle('normal');assert.equal(restored.reservedQty,7);assert.equal(restored.shortageQty,3);
+ after=await supplierSnapshot(x);assert.equal(after.demand.status,'ORDERED');
+ assert.equal(after.demand.remainingToOrderQty,0);assert.equal(after.demand.remainingToReceiveQty,3);
+ assert.deepEqual(after.po,before.po);assert.deepEqual(after.supplies,before.supplies);
+});
+test('supplier-confirmed cancellation uses existing purchasing Service and customer restore never resurrects stopped supply',async()=>{
+ const x=await purchasedLifecycle('supplier-cancel');await x.lifecycle('cancelled');
+ const result=await x.c.cancelOutstandingSupplyRecord(x.po.poNo,x.supplyId,'供應商同意取消');
+ assert.equal(result.cancelledQty,3);
+ const supply=await x.read('supplyOrders',x.supplyId);assert.equal(supply.status,'CANCELLED');
+ assert.equal((await x.read('orders',x.orderId)).items[0].supplyOrderedQty,0);
+ assert.equal((await x.read('inventory',x.productKey)).incoming,0);
+ const restored=await x.lifecycle('normal');assert.equal(restored.reservedQty,7);assert.equal(restored.shortageQty,3);
+ const demand=(await x.demandRef.get()).data();assert.equal(demand.status,'PENDING');
+ assert.equal(demand.orderedQty,0);assert.equal(demand.remainingToOrderQty,3);assert.equal(demand.remainingToReceiveQty,0);
+ assert.deepEqual(await x.read('supplyOrders',x.supplyId),supply);
+});
+test('partial supplier commitment, interrupted incoming registration and excess free stock do not cause duplicate reservations',async()=>{
+ const x=await purchasedLifecycle('partial',{quantity:2,register:false});
+ assert.equal((await x.read('inventory',x.productKey)).incoming,undefined);
+ await x.lifecycle('cancelled');
+ // Add real free stock in this isolated fixture so restoring must honor the PO ceiling.
+ await db.collection('inventory').doc(x.productKey).update({onHand:12});
+ const result=await x.lifecycle('normal');assert.equal(result.reservedQty,8);assert.equal(result.shortageQty,2);
+ const demand=(await x.demandRef.get()).data();assert.equal(demand.orderedQty,2);
+ assert.equal(demand.remainingToOrderQty,0);assert.equal(demand.remainingToReceiveQty,2);
+ assert.equal((await x.read('inventory',x.productKey)).incoming,undefined);
+});
+test('supplier source, PO links, registered incoming and demand counter corruption reject atomically',async()=>{
+ const cases=[
+  ['missing-supply',x=>db.collection('supplyOrders').doc(x.supplyId).delete()],
+  ['wrong-order',x=>db.collection('supplyOrders').doc(x.supplyId).update({orderId:'other-order'})],
+  ['wrong-demand',x=>db.collection('supplyOrders').doc(x.supplyId).update({demandId:'other-demand'})],
+  ['wrong-owner',x=>db.collection('supplyOrders').doc(x.supplyId).update({ownerUid:'other-owner'})],
+  ['received',x=>db.collection('supplyOrders').doc(x.supplyId).update({receivedQty:1,status:'PARTIAL_RECEIPT'})],
+  ['missing-po',x=>db.collection('purchaseOrders').doc(x.po.poNo).delete()],
+  ['wrong-link',x=>db.collection('purchaseOrders').doc(x.po.poNo).update({supplyOrderIds:[]})],
+  ['stopped-po',x=>db.collection('purchaseOrders').doc(x.po.poNo).update({status:'CANCELLED'})],
+  ['incoming',x=>db.collection('inventory').doc(x.productKey).update({incoming:2})],
+  ['wh-incoming',x=>db.collection('warehouseStocks').doc('V2-A__'+x.productKey).update({incoming:2})],
+  ['demand',x=>x.demandRef.update({orderedQty:2,remainingToReceiveQty:2})],
+ ];
+ for(const [name,mutate] of cases){
+  const x=await purchasedLifecycle('corrupt-'+name);await mutate(x);
+  const before=await supplierSnapshot(x);await assert.rejects(x.lifecycle('cancelled'),undefined,name);
+  assert.deepEqual(await supplierSnapshot(x),before,name);
+ }
+});
+test('supplier cancellation racing customer restoration preserves both obligations, and lifecycle late failure rolls back all projections',async()=>{
+ const x=await purchasedLifecycle('race');await x.lifecycle('cancelled');
+ await Promise.all([x.lifecycle('normal'),x.c.cancelOutstandingSupplyRecord(x.po.poNo,x.supplyId,'供應商同意取消')]);
+ const demand=(await x.demandRef.get()).data(),order=await x.read('orders',x.orderId);
+ assert.equal(order.status,'active');assert.equal(order.items[0].reservedQty,7);
+ assert.equal(order.items[0].supplyOrderedQty,0);assert.equal(order.items[0].shortageQty,3);
+ assert.equal(demand.status,'PENDING');assert.equal(demand.orderedQty,0);assert.equal(demand.remainingToReceiveQty,0);
+ assert.equal((await x.read('inventory',x.productKey)).incoming,0);
+ const y=await purchasedLifecycle('late-failure'),collision=db.collection('inventoryMovements').doc('supplier-life-collision');
+ await collision.set({marker:true});
+ const guarded={projectId:db.projectId,collection:n=>db.collection(n),runTransaction:fn=>db.runTransaction(tx=>fn({
+  get:r=>tx.get(r),update:(...a)=>tx.update(...a),set:(...a)=>tx.set(...a),
+  create:(...a)=>{tx.create(collision,{marker:false});return tx.create(...a);}
+ }))};
+ const before=await supplierSnapshot(y);
+ await assert.rejects(commitSingleItemLocationLifecycle(guarded,y.uid,y.intent('cancelled')));
+ assert.deepEqual(await supplierSnapshot(y),before);
+ assert.equal((await y.lifecycle('cancelled')).status,'applied');
+});
+test('supplier source scans accept fifty records and reject fifty-one without partial writes',async()=>{
+ const x=await purchasedLifecycle('bounded'),supply=await x.read('supplyOrders',x.supplyId),batch=db.batch();
+ const stopped={...supply,type:'PURCHASING_MANUAL',method:'PURCHASING_MANUAL',status:'CANCELLED',
+  qty:1,cancelledQty:1,incomingRegisteredQty:0};
+ for(let i=0;i<49;i++)batch.set(db.collection('supplyOrders').doc(x.orderId+'-stopped-'+i),stopped);
+ await batch.commit();assert.equal((await x.lifecycle('cancelled')).status,'applied');
+ await db.collection('supplyOrders').doc(x.orderId+'-excess').set(stopped);
+ const before=await supplierSnapshot(x);
+ await assert.rejects(x.lifecycle('normal'),/50 筆安全上限/);assert.deepEqual(await supplierSnapshot(x),before);
+});
+test('split supplier POs retain the uncancelled commitment when only one PO line is stopped',async()=>{
+ const x=await purchasedLifecycle('split-pos',{quantity:1});
+ const secondPo={...x.po,poNo:x.po.poNo+'-second',supplyOrderIds:undefined,
+  items:[{...x.po.items[0],qty:2}]};
+ delete secondPo.supplyOrderIds;
+ const second=await x.c.commitFormalPurchaseOrder(secondPo);
+ await x.c.registerPurchaseIncoming(secondPo.poNo,second.poRecord);
+ await x.lifecycle('cancelled');
+ await x.c.cancelOutstandingSupplyRecord(x.po.poNo,x.supplyId,'只取消第一張供應');
+ await db.collection('inventory').doc(x.productKey).update({onHand:12});
+ const liveSecond=await x.read('supplyOrders',second.committedSupplyOrders[0].id);
+ const restored=await x.lifecycle('normal');assert.equal(restored.reservedQty,8);assert.equal(restored.shortageQty,2);
+ assert.equal((await x.read('orders',x.orderId)).items[0].supplyOrderedQty,2);
+ const demand=(await x.demandRef.get()).data();assert.equal(demand.orderedQty,2);
+ assert.equal(demand.remainingToOrderQty,0);assert.equal(demand.remainingToReceiveQty,2);
+ assert.equal((await x.read('inventory',x.productKey)).incoming,2);
+ assert.deepEqual(await x.read('supplyOrders',second.committedSupplyOrders[0].id),liveSecond);
+});

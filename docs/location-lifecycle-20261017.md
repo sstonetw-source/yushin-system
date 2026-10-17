@@ -30,3 +30,13 @@
 新增真 Emulator 案例包含：10 訂購→打單／寄出／送達 2→取消 8→恢復 8→再次打單／分倉出貨／送達至 10；別單占用全部自由庫存後恢復缺口 8，建立並再次取消正確需求；途中貨、剩餘已打單、錯誤投影／缺失或竄改出貨 movement 拒絕；權限、同 ID 併發、後段 create 衝突整批回滾。案例已加入 CI，驗收以實際執行結果為準。
 
 尚未完成：途中貨物或未出貨打單的取消、已下 PO／收貨／退貨整合、多品項、完整初始化與前端、Preview 五角色全流程驗收。無正式部署或資料遷移。
+
+## 未到貨供應承諾接續（2026-10-17，Emulator-only）
+
+本節取代前述「已下 PO 全部不支援」的限制；只擴及從未實際收貨的供應紀錄，原已收貨／退貨及物流限制保留。既有 v2 生命週期 Service 用 orderId 與 demandId 有界查詢真實 supplyOrders（聯集最多 50 筆），核對來源、所有權、產品／倉、正式 PO 的明細連結及數量，再由相同 Demand Core 重新加總承諾；訂單／採購需求與實際供應不符或 incoming 不足時拒絕。
+
+取消客戶需求保留供應與 PO、實貨及採購 incoming；採購需求 CANCELLED 只停新增採購，remainingToReceiveQty 繼續保留。恢復時傳入既有未收貨承諾，不重複預留現貨；供應商同意取消後再恢復，僅依最新有效承諾重新計算，不復活原供應。供應商不同意取消仍需採購自行選擇既有 KEEP_STOCK，未代填或改寫其決策。
+
+Emulator harness 實際呼叫原 `commitFormalPurchaseOrder`、`registerPurchaseIncoming`、`cancelOutstandingSupplyRecord`，用 Admin Firestore Transaction 驗證銜接；harness 僅提供頁面／session adapter，不代表前端登入與權限已完成 E2E。案例包含 10 訂購／預留 7／採購 3 的取消恢復、供應商另取消後再恢復、未完成 incoming 登記、恢復與供應取消併發、來源／PO／在途錯帳拒絕、50／51 筆來源上限及後段 create 衝突原子回滾。測試結果以實際本機及 CI 為準。
+
+尚未完成：供應實際收貨後的 v2 分倉入庫／再配置、途中貨及剩餘打單取消、多品項、完整初始化與前端、Preview 五角色全流程。無正式部署或資料遷移。

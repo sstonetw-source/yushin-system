@@ -155,3 +155,7 @@ deliveryHistory 的 shipment_confirmation_reversal 事件以operationId識別本
 ### v2 部分交付後的取消／恢復（2026-10-17，僅 Emulator）
 
 不新增欄位或集合。權威 `warehouseShipmentRecords`、`deliveryRecords` 及對應 shipment movement 重新驗證，items[].warehouseShippedQty／deliveredQty、orders.deliveredQty／isDelivered 必須一致。原訂購量、累計打單／出貨／送達與履約歷史保持原值；單一 reservation ledger 及 orders.items[].reservedQty／shortageQty、公司／兩倉 reserved、逐倉 movement、原 receipt 與 canonical encoded 採購需求仍同交易提交。恢復以未交付量重新配置，不修改 inventory／warehouseStocks.onHand 或 inventoryLots。取消狀態表示停止剩餘需求，並非抹除已完成交付。UI／查詢投影與完整 Preview 尚未驗收。
+
+### 未到貨供應的 v2 生命週期核對（2026-10-17，Emulator-only）
+
+供應承諾權威沿用 supplyOrders（非 receivingSupplyOrders 查閱投影）；以 orderId／canonical demandId 的單欄條件查詢各 limit(51)，聯集合併 doc.id、最多接受 50 筆，不接受呼叫端自行提供供應清單。與 orders.items[].supplyOrderedQty、零 receivedQty 及 procurementDemands.orderedQty／receivedQty 核對；正式採購逐筆驗證 purchaseOrders.supplyOrderIds 對應 items 的訂單、品項、產品、入庫倉及數量，讀同一 PO 時共用快照。使用現有 supplyContribution／reconcileLinkedSupplies 排除已停止供應的未到貨部分。已登記 incoming 加總只核對不改帳；不把採購在途當實貨。取消／恢復仍僅更改原訂單、預留／movement／receipt 與採購需求投影，保留供應及 PO 原貌。未新增欄位、集合或索引，未遷移正式資料。
