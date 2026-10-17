@@ -574,8 +574,6 @@ async function advanceReleasedV2FreeStock(db,uid,input){
    ||Object.keys(input).some(k=>k!=='movementId'))
   reject('釋放來源請求含未授權欄位','invalid-argument');
  const movementId=ident(input.movementId,'來源庫存異動 ID');
- if(!movementId.startsWith('single-v2-life-')&&!movementId.startsWith('location-return-'))
-  reject('不是支援的 v2 釋放來源');
  const source=await db.runTransaction(async tx=>{
   const actor=await tx.get(db.collection('users').doc(uid));
   if(!actor.exists||actor.data().active===false||actor.data().disabled===true
@@ -583,11 +581,18 @@ async function advanceReleasedV2FreeStock(db,uid,input){
    reject('目前登入角色不能執行自由庫存分配','permission-denied');
   const snap=await tx.get(db.collection('inventoryMovements').doc(movementId));
   if(!snap.exists)reject('找不到已提交的釋放 movement','not-found');
-  const event=snap.data(),amount=event.freeAllocationQty;
-  if(!['CANCELLED_ORDER_RELEASE','CLOSED_CUSTOMER_RETURN'].includes(event.v2FreeStockSource))
+  const event=snap.data();
+  // Receiving already commits one receipt, one physical lot and a movement
+  // atomically. The receipt's v2 projection is itself the durable source;
+  // never force the browser writer to mirror that business fact.
+  const isV2Receipt=event.type==='receipt'&&event.sourceType==='SUPPLY_ORDER'
+   &&typeof event.receiptId==='string'&&event.receiptId.length>0;
+  if(!isV2Receipt&&!['CANCELLED_ORDER_RELEASE','CLOSED_CUSTOMER_RETURN'].includes(event.v2FreeStockSource))
    reject('這筆 movement 不會釋放可分配的 v2 自由實貨');
-  if(!Number.isSafeInteger(amount)||amount<=0
-    ||!event.productKey||!event.warehouseId||!event.sourceId||!event.itemId)
+  let amount=event.freeAllocationQty;
+  if(!event.productKey||!event.warehouseId||!event.sourceId)
+   reject('釋放憑證缺少有效的產品、倉庫或來源');
+  if(!isV2Receipt&&(!Number.isSafeInteger(amount)||amount<=0||!event.itemId))
    reject('釋放憑證缺少有效的庫存數量或來源');
   if(event.v2FreeStockSource==='CANCELLED_ORDER_RELEASE'){
    if(!movementId.startsWith('single-v2-life-')||event.type!=='release'
@@ -611,7 +616,49 @@ async function advanceReleasedV2FreeStock(db,uid,input){
      ||event.returnRecord?.qty!==amount||event.returnRecord?.movementId!==movementId
      ||event.result?.settlement!=='CLOSE'||event.result?.qty!==amount)
     reject('結案退貨釋放憑證不一致');
+  }else if(isV2Receipt){
+   const receiptSnap=await tx.get(db.collection('receipts').doc(event.receiptId));
+   const receipt=receiptSnap.exists?receiptSnap.data():null;
+   amount=receipt?.autoAllocationQty;
+   if(!receipt||receipt.receiptId!==event.receiptId
+     ||receipt.operationId!==event.receiptId||receipt.supplyOrderId!==event.sourceId
+     ||receipt.reservationLocationSchemaVersion!==2
+     ||receipt.fulfillmentType!=='WAREHOUSE'
+     ||receipt.productKey!==event.productKey||receipt.warehouseId!==event.warehouseId
+     ||receipt.qty!==event.qty||!Number.isSafeInteger(amount)||amount<=0||amount>event.qty
+     ||!['normal','cancelled'].includes(receipt.sourceOrderStatus)
+     ||(receipt.sourceOrderStatus==='cancelled'&&amount!==receipt.qty)
+     ||receipt.lotNo!==event.lotNo||receipt.expiryDate!==event.expiryDate
+     ||typeof receipt.lotId!=='string'||!receipt.lotId)
+    reject('v2 到貨釋放與原始 receipt 憑證不一致');
+   // The canonical receipt points to the exact physical lot. This verifies
+   // that a source cannot be created from purchase-in-transit alone.
+   const lotSnap=await tx.get(db.collection('inventoryLots').doc(receipt.lotId));
+   const lot=lotSnap.exists?lotSnap.data():null;
+   if(!lot||lot.sourceType!=='SUPPLY_ORDER'||lot.sourceId!==event.sourceId
+     ||lot.productKey!==event.productKey||lot.warehouseId!==event.warehouseId
+     ||lot.lotNo!==event.lotNo||lot.expiryDate!==event.expiryDate
+     ||lot.receivedQty!==event.qty)
+    reject('v2 自由庫存到貨缺少相符的實貨批次');
+   // Re-read the actual supplier commitment even for normal source orders.
+   // A receipt cannot borrow a lot linked to another item or another PO.
+   const supplySnap=await tx.get(db.collection('supplyOrders').doc(event.sourceId));
+   const supply=supplySnap.exists?supplySnap.data():null;
+   if(!supply||supply.orderId!==receipt.orderId
+     ||supply.itemId!==receipt.itemId
+     ||supply.productKey!==event.productKey||supply.warehouseId!==event.warehouseId
+     ||supply.fulfillmentType!=='WAREHOUSE'
+     ||!Number.isSafeInteger(supply.receivedQty)||supply.receivedQty<event.qty
+     ||!Number.isSafeInteger(supply.qty)||supply.qty<supply.receivedQty)
+    reject('v2 到貨來源供應與實體收貨憑證不一致');
+   if(receipt.sourceOrderStatus==='cancelled'){
+    if(supply.customerCancellationDisposition!=='KEEP_STOCK'
+      ||!supply.customerCancellationResolvedAt||!supply.customerCancellationResolvedBy)
+     reject('取消訂單到貨沒有已確認的 KEEP_STOCK 來源');
+   }
   }else reject('這筆 movement 不會釋放可分配的 v2 自由實貨');
+  if(!Number.isSafeInteger(amount)||amount<=0)
+   reject('釋放數量不是有效實貨');
   if(amount>1000)reject('釋放量超過試點批次 1000 件限制，需分段排程但不得遺失事件');
   return {productKey:event.productKey,warehouseId:event.warehouseId,maxQty:amount};
  });

@@ -427,3 +427,7 @@ job `reservationOperationReceipts` 與 movement 在不同交易，使用 pending
 ### v2 取消與結案退貨的 durable 來源事件（2026-10-18）
 
 現有 lifecycle 和 Location Return Services 不另建 outbox Collection，而是把自由庫存來源資訊寫入**同筆交易的既有 inventoryMovements**。庫存真正變動與事件原子提交；rollback 則來源事件一併回滾。後續 `single-item-location-service.advanceReleasedV2FreeStock` 讀取來源 movement 並核對原交易憑證及**現在**授權物流角色，再導向原來的 `advanceAutomaticFreeStockAllocation`；唯一預留數學和 movement writer 仍為 Reservation Core／原 Service。不同來源固定不同 runId，同事件進度可重送且不重扣帳。此仍是 Emulator 內部可呼叫流程，**尚無自動執行器、正式前端、Callable**。尚未處理到貨 KEEP_STOCK、大批分段、不同執行者 checkpoint 接管。
+
+### 既有收貨三份憑證重用（2026-10-18）
+
+多倉自由庫存來源除取消及 CLOSE 退貨外，現在可讀取原 Receiving Service 已原子建立的 warehouse receipt + movement + physical lot，並以其 `autoAllocationQty` 作為配貨最大量；取消後保留採購需驗證現存供應的 `KEEP_STOCK` 決策。所有實際庫存預留仍只由同一 `commitSingleItemFreeStockAllocation` Service 執行、進度寫原 checkpoint；不在 `src/services/receiving.js` 植入另一個 Admin SDK 或隱藏的側寫。這是 demo-yushin Emulator 的可恢復協調入口，尚非正式收貨 UI 自動執行。

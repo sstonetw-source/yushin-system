@@ -1221,7 +1221,7 @@ test('release-event proof, roles, and restore movements refuse illicit redistrib
  const movementId='single-v2-life-release_security_cancel_123456789-V2-B';
  await db.collection('users').doc('v2-no-release').set({active:true,role:'sales'});
  await assert.rejects(advanceReleasedV2FreeStock(db,'v2-no-release',{movementId}),/角色/);
- await assert.rejects(advanceReleasedV2FreeStock(db,x.uid,{movementId:'missing_source_123'}),/來源/);
+ await assert.rejects(advanceReleasedV2FreeStock(db,x.uid,{movementId:'missing_source_123'}),/來源|找不到/);
  await assert.rejects(advanceReleasedV2FreeStock(db,x.uid,{
   movementId:'single-v2-life-unknown-release-V2-A'}),/找不到/);
  const baseline=await snapshot(x);
@@ -1236,4 +1236,86 @@ test('release-event proof, roles, and restore movements refuse illicit redistrib
  await x.lifecycle('normal','release_security_restore_123456789');
  await assert.rejects(advanceReleasedV2FreeStock(db,x.uid,{
   movementId:'single-v2-life-release_security_restore_123456789-V2-B'}),/釋放|憑證/);
+});
+
+
+test('cancelled KEEP_STOCK receipt publishes exactly the physical free v2 remainder and is safely replayed',async()=>{
+ const x=await receiptLifecycle('release-source-receipt');
+ await x.lifecycle('cancelled');
+ await keepReceiptAsStock(x);
+ const receiptId='v2_receipt_release-source-receipt';
+ await x.receive(2);
+ const original=await x.read('receipts',receiptId);
+ assert.equal(original.reservationLocationSchemaVersion,2);
+ assert.equal(original.sourceOrderStatus,'cancelled');
+ assert.equal(original.autoAllocationQty,2);
+ const movementRows=await db.collection('inventoryMovements').where('receiptId','==',receiptId).get();
+ const sources=movementRows.docs.filter(d=>d.data().type==='receipt');
+ assert.equal(sources.length,1);
+ const movementId=sources[0].id,proof=sources[0].data();
+ assert.equal(proof.v2FreeStockSource,undefined,'existing receiving writer is unchanged');
+ assert.equal(proof.freeAllocationQty,undefined,'derive the amount from the real receipt');
+ const baseline=await receiptSnapshot(x);
+ const first=await advanceReleasedV2FreeStock(db,'emulator-purchaser',{movementId});
+ assert.equal(first.sourceMovementId,movementId);
+ assert.equal(first.status,'completed');assert.equal(first.allocatedQty,0);
+ assert.deepEqual(await receiptSnapshot(x),baseline);
+ const repeated=await advanceReleasedV2FreeStock(db,'emulator-purchaser',{movementId});
+ assert.equal(repeated.status,'completed');assert.equal(repeated.allocatedQty,0);
+ await db.collection('receipts').doc(receiptId).update({autoAllocationQty:1});
+ await assert.rejects(advanceReleasedV2FreeStock(db,'emulator-purchaser',{movementId}),/receipt 憑證/);
+ await db.collection('receipts').doc(receiptId).update({autoAllocationQty:2});
+ await db.collection('users').doc('v2-receipt-sales').set({active:true,role:'sales'});
+ await assert.rejects(advanceReleasedV2FreeStock(db,'v2-receipt-sales',{movementId}),/角色/);
+ assert.deepEqual(await receiptSnapshot(x),baseline);
+});
+test('v2 cancelled purchase receipt stock redistributes to a separate waiting order, not the cancelled source',async()=>{
+ const x=await receiptLifecycle('release-reassign-receipt');
+ await x.lifecycle('cancelled');
+ await keepReceiptAsStock(x);
+ const competitorId=x.orderId+'-waiting',sourceOrder=await x.read('orders',x.orderId);
+ const targetItem={...sourceOrder.items[0],qty:12,orderedQty:12,
+  supplyOrderedQty:0,receivedQty:0,shortageQty:0,reservedQty:0,receiptEvents:[]};
+ await db.collection('orders').doc(competitorId).set({...sourceOrder,status:'active',
+  orderStatus:'normal',inventoryReservationStatus:'pending',
+  orderLifecycleHistory:[],items:[targetItem]});
+ await commitSingleItemTwoWarehouse(db,x.uid,{orderId:competitorId,itemId:'I1',
+  warehouseIds:['V2-A','V2-B'],attemptId:'reserve_receipt_competitor_123456',
+  syncAttemptId:'v2_123456789'});
+ await db.collection('orders').doc(competitorId).update({inventoryReservationStatus:'completed'});
+ const competitor={...x,orderId:competitorId};
+ const demandRef=await seedLifecycleDemand(competitor);
+ const start=await x.read('orders',competitorId);
+ assert.equal(start.items[0].reservedQty,7);assert.equal(start.items[0].shortageQty,5);
+ const receiptId='v2_receipt_release-reassign-receipt';
+ await x.receive(2);
+ const movementRows=await db.collection('inventoryMovements').where('receiptId','==',receiptId).get();
+ const receiptProof=movementRows.docs.find(d=>d.data().type==='receipt');
+ assert.ok(receiptProof);
+ const first=await advanceReleasedV2FreeStock(db,'emulator-purchaser',{movementId:receiptProof.id});
+ assert.equal(first.lastOrderId,competitorId);assert.equal(first.lastAllocatedQty,2);
+ assert.equal(first.status,'completed');assert.equal(first.allocatedQty,2);
+ const target=await x.read('orders',competitorId);
+ assert.equal(target.items[0].reservedQty,9);assert.equal(target.items[0].shortageQty,3);
+ const demand=await demandRef.read();
+ assert.equal(demand.requestedQty,3);
+ const origin=await x.read('orders',x.orderId);
+ assert.equal(origin.status,'cancelled');assert.equal(origin.items[0].reservedQty,0);
+ assert.equal((await x.read('inventory',x.productKey)).onHand,9);
+ assert.equal((await x.read('inventory',x.productKey)).reserved,9);
+ const targetLedgerBefore=await x.read('inventoryReservations',competitorId+'__I1');
+ const replay=await advanceReleasedV2FreeStock(db,'emulator-purchaser',{movementId:receiptProof.id});
+ assert.equal(replay.status,'completed');assert.equal(replay.allocatedQty,2);
+ assert.deepEqual(await x.read('inventoryReservations',competitorId+'__I1'),targetLedgerBefore);
+});
+test('v2 source receiving that reserves its whole receipt must never publish a free-stock source',async()=>{
+ const x=await receiptLifecycle('release-no-free');
+ await x.receive(1);
+ const movementRows=await db.collection('inventoryMovements')
+  .where('receiptId','==','v2_receipt_release-no-free').get();
+ const receiptProof=movementRows.docs.find(d=>d.data().type==='receipt');
+ assert.ok(receiptProof);
+ assert.equal(receiptProof.data().v2FreeStockSource,undefined);
+ await assert.rejects(advanceReleasedV2FreeStock(db,'emulator-purchaser',{
+  movementId:receiptProof.id}),/receipt 憑證/);
 });
