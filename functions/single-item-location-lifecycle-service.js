@@ -55,6 +55,13 @@ async function commitSingleItemLocationLifecycle(db,uid,data){
    ||!['admin','sales','engineer'].includes(actorSnap.data().role))
    fault('此帳號不能取消或恢復訂單','permission-denied');
   const role=actorSnap.data().role;
+  // Re-check current order ownership before an idempotent replay, without
+  // requiring its current status or sync checkpoint to match the original.
+  const orderRef=ref('orders',orderId),orderSnap=await tx.get(orderRef);
+  if(!orderSnap.exists)fault('訂單不存在','not-found');
+  const order=orderSnap.data();
+  if(['sales','engineer'].includes(role)&&order.ownerUid!==uid)
+   fault('不能操作其他業務的訂單','permission-denied');
   const applied=await tx.get(receiptRef);
   if(applied.exists){
    const record=applied.data();
@@ -63,13 +70,8 @@ async function commitSingleItemLocationLifecycle(db,uid,data){
     fault('操作識別碼已用於其他交易','already-exists');
    return {...record.result,status:'already-applied',receiptId:receiptRef.id};
   }
-  const orderRef=ref('orders',orderId),orderSnap=await tx.get(orderRef);
-  if(!orderSnap.exists)fault('訂單不存在','not-found');
-  const order=orderSnap.data();
   if(!order.ownerUid||!order.salesCode||!Array.isArray(order.items)||order.items.length!==1
    ||order.items[0]?.itemId!==itemId)fault('此試點僅允許來源完整的單品項訂單');
-  if(['sales','engineer'].includes(role)&&order.ownerUid!==uid)
-   fault('不能操作其他業務的訂單','permission-denied');
   if(order.inventoryReservationStatus!=='completed'||order.inventoryReservationAttemptId!==syncAttemptId)
    fault('庫存同步尚未完成或同步識別碼已變更');
   // Both persisted status fields must agree; never accept one cancelled

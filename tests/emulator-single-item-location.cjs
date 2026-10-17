@@ -896,3 +896,27 @@ test('competing receipt and physical shipment serialize without re-reserving the
  assert.equal(item.warehouseShippedQty,2);assert.equal(item.deliveredQty,0);assert.equal(item.reservedQty,6);
  assert.equal(item.shortageQty,2);assert.equal(stock.onHand,6);assert.equal(stock.reserved,6);assert.equal(stock.incoming,2);
 });
+
+test('v2 idempotent receipts re-check current order owner after reassignment',async()=>{
+  for(const role of ['sales','engineer']){
+    const initial=await seed('owner-replay-initial-'+role,{role});
+    await commit(initial);
+    await db.collection('orders').doc(initial.orderId).update({ownerUid:'reassigned-owner'});
+    const before=await snapshot(initial);
+    await assert.rejects(commit(initial),/非負責業務/,role);
+    assert.deepEqual(await snapshot(initial),before,role);
+    const lifecycle=await readyLifecycle('owner-replay-life-'+role,{role});
+    await lifecycle.lifecycle('cancelled');
+    await db.collection('orders').doc(lifecycle.orderId).update({ownerUid:'reassigned-owner'});
+    const cancelled=await snapshot(lifecycle);
+    await assert.rejects(lifecycle.lifecycle('cancelled'),/不能操作其他業務/,role);
+    assert.deepEqual(await snapshot(lifecycle),cancelled,role);
+  }
+  // An admin retains repository-wide authority, but cannot replay as another actor.
+  const adminCase=await readyLifecycle('owner-replay-admin',{role:'admin'});
+  await adminCase.lifecycle('cancelled');
+  await db.collection('orders').doc(adminCase.orderId).update({ownerUid:'reassigned-owner'});
+  const before=await snapshot(adminCase);
+  assert.equal((await adminCase.lifecycle('cancelled')).status,'already-applied');
+  assert.deepEqual(await snapshot(adminCase),before);
+});
