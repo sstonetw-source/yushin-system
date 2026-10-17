@@ -93,6 +93,7 @@ async function commitGroupedWarehouseReservation(db,uid,data){
   const {orderId,attemptId,rows,hash}=normalizeIntent(data);
   const ref=(name,key)=>db.collection(name).doc(key);
   const receiptRef=ref('reservationOperationReceipts','grouped-'+attemptId);
+  const now=new Date().toISOString();
   return db.runTransaction(async tx=>{
     const userSnap=await tx.get(ref('users',uid));
     if(!userSnap.exists)fault('permission-denied','使用者不存在');
@@ -191,7 +192,11 @@ async function commitGroupedWarehouseReservation(db,uid,data){
         fault('failed-precondition','已停用倉庫不得增加預留');
       const after={...before,orderId,itemId:row.itemId,orderItemIndex:index,ownerUid:order.ownerUid,
         salesCode:order.salesCode,productKey,warehouseId,quantity:row.quantity,
-        shortageQty:demand-row.quantity,status:row.quantity>0?'active':'shortage'};
+        orderNo:order.orderNo||order.quoteNo||orderId,
+        itemCode:item.itemCode||'',itemName:item.itemName||'',customerName:order.customerName||'',
+        salesName:order.salesName||'',orderDate:order.orderDate||'',
+        shortageQty:demand-row.quantity,status:row.quantity>0?'active':'shortage',
+        updatedAt:now};
       const delta=reservationCore.reservationStockDeltas(before,after);
       if(delta.warehouseDeltas.some(v=>v.warehouseId!==warehouseId)
         ||delta.companyReservedDelta!==row.quantity-previous)
@@ -212,11 +217,11 @@ async function commitGroupedWarehouseReservation(db,uid,data){
         fault('failed-precondition','分倉預留帳小於來源訂單預留');
       nextWarehouse.set(warehouseId,projectAfter(target.before,target.delta,warehouseId));
     }
-    const now=new Date().toISOString();
     const nextItems=order.items.map(item=>({...item}));
     for(const change of changes){
       nextItems[change.index].reservedQty=change.quantity;
       nextItems[change.index].shortageQty=change.shortageQty;
+      nextItems[change.index].inventoryProductKey=productKey;
     }
     // Every read above precedes all writes; transaction retries re-read all
     // authoritative sources. A committed receipt makes response retries safe.
