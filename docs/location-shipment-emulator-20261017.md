@@ -45,3 +45,7 @@
 ## 本機驗證紀錄
 
 Node 應用測試 1,497／1,497 通過，0 失敗。Java 21／Firebase CLI 15 的 Firestore Emulator 合跑本批 11 案例、原單品項預留 12 案例及原分組預留 5 案例，共 28／28 通過，0 失敗。生成一致性與 diff 檢查通過。完整 Rules、Auth Callable 及桌機／手機六組 Chrome 尚待本批 GitHub CI，不能將本機交易案例當成 Preview 操作驗收。
+
+## v2 打單實際交易（2026-10-17，僅 Emulator）
+
+新增 `functions/location-dispatch-service.js`，將過去 Emulator 測試直接覆寫 `dispatchPreparedQty` 的捷徑改為同交易打單事件。由 Admin SDK 重讀 users／orders／inventoryReservations，沿用 `projectShipmentDelivery`、`warehouseShipmentState` 計算待打單與累計寄出，確保 A 倉寄出後、B 倉尚未打單的 6 件不能提前寄送。真正再打單只增加 `dispatchPreparedQty` 並寫入既有 `dispatchRecords/v2-{operationId}`，不讀寫實貨、lot、reserved 及送達記錄。同 operationId／同意圖重送不會增加打單量；來源同步、角色、取消單、退貨、v2 預留／訂單投影不符會拒絕。與 `commitLocationShipment` 相容但仍無 Callable／前端入口；初始預留同步 checkpoint 在 fixture 尚為人工模擬，完整工作清單與退貨補送入口仍待整合。無正式 Firebase 部署、索引、Rules 或資料遷移。

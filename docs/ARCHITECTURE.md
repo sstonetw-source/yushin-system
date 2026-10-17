@@ -375,3 +375,7 @@ Callable Emulator 啟動修正：在 `firebase.json` 明確配置 `auth:9099`、
 
 ### 訂錯貨流程優先（2026-10-17）
 主要退貨採 CLOSE，不自動補送；需要其他商品時，前端「退貨後重新下單」開啟既有乾淨建單入口，透過 commitOrderCreation 同交易核對原單並保存 returnReorderSource 單向關聯，不搬移舊預留／款項。原單累加補送與獨立免費補送開發暫緩。詳見 `wrong-item-return-reorder-20261017.md`。
+
+### v2 打單準備的內部交易（2026-10-17；僅 Emulator）
+
+`functions/location-dispatch-service.js` 新增 `commitLocationDispatchPreparation`，沿用 `Fulfillment.projectShipmentDelivery` 與 `warehouseShipmentState`，只處理單品項 v2 的待打單量、累計打單量及操作憑證；不另造打單核心、不扣庫存、批次或更新送達。真實使用者／角色、來源同步 ID、原單與 v2 預留帳在 Admin SDK Firestore Transaction 中重讀；`dispatchRecords/v2-{operationId}` 固定操作 ID 與訂單更新同交易。既有前端 `prepareOrderDispatch`／Rules 尚未切換，Emulator fixture 原本直接改品項打單量的操作已改成呼叫真正 Service；仍以手動 checkpoint 模擬初始同步完成，不可視為完整 Preview 驗收。僅 `demo-yushin` Emulator，無 Callable、UI、正式部署；涉及 REPLACE 退貨及完整待打單工作清單的適配尚未完成。

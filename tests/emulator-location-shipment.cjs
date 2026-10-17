@@ -3,6 +3,7 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const admin=require('firebase-admin'),{getFirestore}=require('firebase-admin/firestore');
 const {commitSingleItemTwoWarehouse}=require('../functions/single-item-location-service');
 const {commitLocationShipment}=require('../functions/location-shipment-service');
+const {commitLocationDispatchPreparation}=require('../functions/location-dispatch-service');
 let app,db;
 const plan={mode:'CUSTOMER_SHIP',contact:'客戶',phone:'02-12345678',address:'台北市測試地址'};
 const A='SHIP-A',B='SHIP-B';
@@ -27,20 +28,22 @@ async function seed(name,{role='warehouse',prepared=10}={}){
   set('inventoryLots',key+'-'+suffix,{productKey:key,warehouseId,remainingQty:qty,receivedQty:qty,
    lotNo:suffix,expiryDate,unitCost:98765,receivedAt:'2026-10-01T00:00:00Z'});
  await batch.commit();
- // Actual #136 reservation transaction, followed by an explicit test fixture
- // checkpoint for completed sync/dispatch. This is not UI dispatch acceptance.
+ // Initial reservation is real; final sync checkpoint remains an isolated
+ // fixture write until full order-initialization integration is available.
  if(['sales','engineer'].includes(role))await db.collection('users').doc(uid).update({role:'warehouse'});
  await commitSingleItemTwoWarehouse(db,uid,{orderId,itemId:'I',warehouseIds:[A,B],attemptId:'reserve_'+name,
   syncAttemptId:'sync_ship_12345'});
- const fresh=(await db.collection('orders').doc(orderId).get()).data();
- fresh.items[0].dispatchPreparedQty=prepared;
- await db.collection('orders').doc(orderId).update({items:fresh.items,inventoryReservationStatus:'completed'});
+ await db.collection('orders').doc(orderId).update({inventoryReservationStatus:'completed'});
+ if(prepared>0)await commitLocationDispatchPreparation(db,uid,{orderId,itemId:'I',quantity:prepared,
+  operationId:'prepare_'+name,syncAttemptId:'sync_ship_12345'});
  if(['sales','engineer'].includes(role))await db.collection('users').doc(uid).update({role});
  const request=(wh=A,quantity=2,operationId='shipment_'+name)=>({orderId,itemId:'I',warehouseId:wh,quantity,
   operationId,syncAttemptId:'sync_ship_12345',date:'2026-10-17',expectedPlan:plan});
  return {uid,orderId,key,request,
   read:async(n,k)=>(await db.collection(n).doc(k).get()).data(),
-  call:(data=request(),actor=uid)=>commitLocationShipment(db,actor,data)};
+  call:(data=request(),actor=uid)=>commitLocationShipment(db,actor,data),
+  prepare:(quantity,operationId='prepare_more_'+name,actor=uid)=>commitLocationDispatchPreparation(db,actor,{
+    orderId,itemId:'I',quantity,operationId,syncAttemptId:'sync_ship_12345'})};
 }
 async function snapshot(x){
  const refs=[['orders',x.orderId],['inventory',x.key],['warehouseStocks',A+'__'+x.key],
@@ -595,4 +598,72 @@ test('new wrong-item return defaults to closed free stock and never recreates an
  assert.equal(result.settlement,'CLOSE');assert.equal(result.reservedQty,6);assert.equal(result.replacementQty,0);
  const ledger=await x.read('inventoryReservations',x.orderId+'__I');assert.deepEqual(ledger.locations,[{warehouseId:B,reservedQty:6}]);
  assert.equal((await x.read('inventory',x.key)).onHand,13);assert.equal((await x.read('inventory',x.key)).reserved,8);
+});
+
+test('v2 dispatch preparation is a separate idempotent event and allows a later printed shipment',async()=>{
+ const x=await seed('prepare-more',{prepared:4});
+ const first=await x.call(x.request(A,4,'shipment_prepare_A'));
+ assert.equal(first.grossShippedQty,4);
+ await assert.rejects(x.call(x.request(B,1,'shipment_prepare_unprinted')),/打單可出貨/);
+ const physicalBefore=await Promise.all([
+  x.read('inventory',x.key),x.read('warehouseStocks',A+'__'+x.key),x.read('warehouseStocks',B+'__'+x.key),
+  x.read('inventoryReservations',x.orderId+'__I'),
+  x.read('inventoryLots',x.key+'-b')]);
+ const printed=await x.prepare(6,'prepare_second_batch_123456');
+ assert.equal(printed.status,'applied');
+ assert.equal(printed.preparedQty,10);assert.equal(printed.pendingDispatchQty,0);
+ assert.equal(printed.shippableQty,6);
+ const physicalAfter=await Promise.all([
+  x.read('inventory',x.key),x.read('warehouseStocks',A+'__'+x.key),x.read('warehouseStocks',B+'__'+x.key),
+  x.read('inventoryReservations',x.orderId+'__I'),x.read('inventoryLots',x.key+'-b')]);
+ assert.deepEqual(physicalAfter,physicalBefore,'printing must never change physical or held stock');
+ assert.equal((await x.prepare(6,'prepare_second_batch_123456')).status,'already-applied');
+ await assert.rejects(x.prepare(5,'prepare_second_batch_123456'),/操作識別碼/);
+ assert.equal((await x.read('orders',x.orderId)).items[0].dispatchPreparedQty,10);
+ const shipment=await x.call(x.request(B,6,'shipment_prepare_B'));
+ assert.equal(shipment.grossShippedQty,10);
+ assert.equal((await x.read('orders',x.orderId)).deliveredQty,0,'shipping is not customer acknowledgement');
+});
+
+test('v2 dispatch rejects duplicate, concurrent overprinting, forged access and stale projection',async()=>{
+ const x=await seed('prepare-concurrent',{prepared:0});
+ const single={orderId:x.orderId,itemId:'I',quantity:3,
+  operationId:'prepare_concurrent_123456',syncAttemptId:'sync_ship_12345'};
+ const attempts=await Promise.all([commitLocationDispatchPreparation(db,x.uid,single),
+   commitLocationDispatchPreparation(db,x.uid,single)]);
+ assert.deepEqual(attempts.map(v=>v.status).sort(),['already-applied','applied']);
+ assert.equal((await x.read('orders',x.orderId)).items[0].dispatchPreparedQty,3);
+ const races=await Promise.allSettled([
+  x.prepare(6,'prepare_compete_one_12345'),x.prepare(6,'prepare_compete_two_12345')]);
+ assert.equal(races.filter(v=>v.status==='fulfilled').length,1);
+ assert.equal((await x.read('orders',x.orderId)).items[0].dispatchPreparedQty,9);
+ await assert.rejects(x.prepare(2,'prepare_too_many_123456'),/待打單數量不足/);
+ const wrong=await seed('prepare-other',{role:'sales',prepared:0});
+ await assert.rejects(wrong.prepare(1,'prepare_sales_forbidden_1234'),/權限/);
+ const disabled=await seed('prepare-disabled',{prepared:0});
+ await db.collection('users').doc(disabled.uid).update({disabled:true});
+ await assert.rejects(disabled.prepare(1,'prepare_disabled_123456'),/權限/);
+ const stale=await seed('prepare-stale',{prepared:0});
+ await db.collection('orders').doc(stale.orderId).update({inventoryReservationAttemptId:'new_attempt'});
+ await assert.rejects(stale.prepare(1,'prepare_stale_123456'),/同步識別碼/);
+ const tampered=await seed('prepare-corrupt',{prepared:0});
+ const order=await tampered.read('orders',tampered.orderId);
+ order.items[0].reservedQty=9;
+ await db.collection('orders').doc(tampered.orderId).update({items:order.items});
+ await assert.rejects(tampered.prepare(1,'prepare_corrupt_123456'),/預留來源|數量不一致/);
+ const after=await tampered.read('orders',tampered.orderId);
+ assert.equal(after.items[0].dispatchPreparedQty,0);
+});
+
+test('dispatch record replay cannot be hijacked after a later shipment or permission change',async()=>{
+ const x=await seed('prepare-replay',{prepared:0});
+ const first=await x.prepare(4,'prepare_replay_12345678');
+ await x.call(x.request(A,4,'shipment_replay_prepare_A'));
+ assert.equal((await x.prepare(4,'prepare_replay_12345678')).status,'already-applied');
+ await db.collection('users').doc('dispatch-hijacker').set({role:'admin',active:true});
+ await assert.rejects(x.prepare(4,'prepare_replay_12345678','dispatch-hijacker'),/操作識別碼/);
+ await db.collection('users').doc(x.uid).update({active:false});
+ await assert.rejects(x.prepare(4,'prepare_replay_12345678'),/權限/);
+ assert.equal((await x.read('orders',x.orderId)).items[0].dispatchPreparedQty,4);
+ assert.equal(first.qty,4);
 });

@@ -167,3 +167,9 @@ Callable API 不接受使用者提供的角色、庫存總量或指定倉庫；�
 
 ### 訂錯商品的預設處理（2026-10-17）
 退貨實收後結案（CLOSE），可銷售品依實際處置入自由庫存，不自動恢復原訂單補送預留。需買正確商品時走一般新訂單，重新選商品／確認數量價格，僅保留原退貨來源關聯；不繼承已收款／已開票狀態。未實收的退貨申請不能作為新入口來源。例外免費補送不是主要流程，既有明確 REPLACE 與舊資料不自動改寫；退款、折讓或抵用獨立處理。
+
+### v2 打單與寄出的時間點（2026-10-17）
+
+- `commitLocationDispatchPreparation`（Emulator-only）以目前的單品項預留、累計寄出及已打單量呼叫權威 `warehouseShipmentState`，只增加 `dispatchPreparedQty` 並建立相同交易的 `dispatchRecords` 憑證。不能重複打單超過待打單額度，不能以已寄出卻尚未送達的量重印同一次出貨。錯誤來源同步、退貨／REPLACE、倉位預留總和錯誤、非法角色與取消單皆拒絕；不同操作 ID 併發仍由同一訂單 Firestore Transaction 序列化。
+- `commitLocationShipment` 仍是唯一 v2 寄出扣帳者；`commitShipmentDelivery` 只確認送達。現在 Emulator 的 v2 寄送測試使用真正打單 Service 取代原本直接覆寫 `dispatchPreparedQty` 的測試捷徑；首次預留完成 checkpoint 尚未真正接到整體訂單生命週期。
+- 此路徑不表示既有前端打單頁／`dispatchRecords` 查詢及 Rules 已能支援 v2；不得將僅 Emulator 的後端記為上線。
