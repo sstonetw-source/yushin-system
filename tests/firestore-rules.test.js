@@ -2827,8 +2827,12 @@ test('actual cross-warehouse wrapper retains authorized five-role access with on
 });
 test('five operational reservations across two warehouses stay within Rules evaluation and document access limits',async()=>{
  for(const [uid,role] of [['buyer1','purchaser'],['wh1','warehouse']]){
-  const f=await crossWarehouseEvidenceFixture(uid,role,5);await assertSucceeds(f.run([1,2,1,2,1]));
-  const [company,a,b]=await f.snapshot();assert.equal(company.reserved,7);assert.equal(a.reserved,3);assert.equal(b.reserved,4);
+  const f=await crossWarehouseEvidenceFixture(uid,role,5);
+  for(const quantities of [[1,2,1,2,1],[1,1,1,1,1],[2,0,1,1,1],[0,0,0,0,0]]){
+   await assertSucceeds(f.run(quantities));const [company,a,b]=await f.snapshot();
+   assert.equal(company.reserved,quantities.reduce((a,b)=>a+b,0));
+   assert.equal(a.reserved,quantities[0]+quantities[2]+quantities[4]);assert.equal(b.reserved,quantities[1]+quantities[3]);
+  }
  }
 });
 test('operational warehouse-specific proofs permit partial release and a zero-company exchange but reject movement reuse',async()=>{
