@@ -67,7 +67,9 @@ async function commitSingleItemLocationLifecycle(db,uid,data){
    fault('不能操作其他業務的訂單','permission-denied');
   if(order.inventoryReservationStatus!=='completed'||order.inventoryReservationAttemptId!==syncAttemptId)
    fault('庫存同步尚未完成或同步識別碼已變更');
-  const current=order.orderStatus==='cancelled'||order.status==='cancelled'?'cancelled'
+  // Both persisted status fields must agree; never accept one cancelled
+  // projection with the other still claiming an active lifecycle.
+  const current=(order.status==='cancelled'&&order.orderStatus==='cancelled')?'cancelled'
    :(['normal','active',undefined,''].includes(order.orderStatus)
     &&['normal','active'].includes(order.status)?'normal':null);
   if(!current)fault('訂單狀態不一致或已結案');
@@ -86,11 +88,15 @@ async function commitSingleItemLocationLifecycle(db,uid,data){
    ||number(item.dispatchPreparedQty??0,'已打單量')!==0
    ||number(item.receivedQty??0,'已收貨量')!==0
    ||number(item.supplyOrderedQty??0,'供應量')!==0
+   ||order.isDelivered===true
    ||(order.warehouseShipmentRecords??[]).length>0||(order.deliveryRecords??[]).length>0
-   ||(order.returnRecords??[]).length>0)
+   ||(order.returnRecords??[]).length>0||(order.warehouseShipmentHistory??[]).length>0
+   ||(order.deliveryHistory??[]).length>0||(order.returnHistory??[]).length>0)
    fault('已打單、採購、收貨、寄出、送達或退貨的訂單不在初始取消試點範圍');
   if(!Array.isArray(order.warehouseShipmentRecords??[])||!Array.isArray(order.deliveryRecords??[])
-    ||!Array.isArray(order.returnRecords??[])||!Array.isArray(order.orderLifecycleHistory??[]))
+    ||!Array.isArray(order.returnRecords??[])||!Array.isArray(order.orderLifecycleHistory??[])
+    ||!Array.isArray(order.warehouseShipmentHistory??[])||!Array.isArray(order.deliveryHistory??[])
+    ||!Array.isArray(order.returnHistory??[]))
    fault('訂單履約或狀態歷史格式不正確');
   const productId=ident(item.productId,'產品主檔'),productKey=ident(item.inventoryProductKey||productId,'庫存產品');
   const hint=ident(item.warehouseId||order.warehouseId,'來源指定倉');
