@@ -2905,7 +2905,7 @@ test('cross-warehouse proof rejects unrelated product ids instead of treating a 
   const client=db(uid),b=writeBatch(client),e={inventoryId:'p-order',warehouseStockId:'W1__p-order',previousWarehouseStockId:'W1__p-order',
    movementId:'RESERVE-EVIDENCE',reservationIds:['evidence__I0','unrelated-product'],crossWarehouse:true,warehouseReservationIds:['evidence__I0']};
   b.update(doc(client,'inventory/p-order'),{reserved:1000000000});
-  b.update(doc(client,'warehouseStocks/W1__p-order'),{reserved:1000000000});
+  b.update(doc(client,'warehouseStocks/W1__p-order'),{reserved:1});
   b.set(doc(client,'inventoryReservations/evidence__I0'),{orderId:'evidence',itemId:'I0',orderItemIndex:0,productKey:'p-order',warehouseId:'W1',
    ownerUid:'sales1',salesCode:'S01',quantity:1,shortageQty:4,stockEvidence:e});
   b.set(doc(client,'inventoryMovements/RESERVE-EVIDENCE'),{productKey:'p-order',warehouseId:'W1',sourceId:'evidence',type:'reserve',qty:1,reservationStockEvidence:e});
