@@ -888,8 +888,7 @@ service cloud.firestore {
         || (e.get('movementId', '') != '' && id in e.get('reservationIds', [])
           && (e.get('crossWarehouse', false) != true || (id in e.get('warehouseReservationIds', [])
             && (before.get('quantity', 0) == 0 || before.get('warehouseId', '') == data.warehouseId)))
-          && e == getAfter(/databases/$(database)/documents/inventoryMovements/$(e.movementId)).data.get('reservationStockEvidence', {})
-          && operationalReservationMovement(e.movementId, data, before));
+          && operationalReservationMovement(e.movementId, data, before, e));
     }
     // Validate the group once on its immutable movement rather than repeating
     // the five-reservation sums on every reservation in the batch.
@@ -931,10 +930,11 @@ service cloud.firestore {
         && transfer.toStockId == e.warehouseStockId && transfer.inventoryId == e.inventoryId
         && getAfter(stockPath).data.reserved == get(stockPath).data.reserved;
     }
-    function operationalReservationMovement(id, data, before) {
+    function operationalReservationMovement(id, data, before, evidence) {
       let path = /databases/$(database)/documents/inventoryMovements/$(id);
       let movement = getAfter(path).data;
       return id is string && id.size() > 0 && !exists(path)
+        && movement.get('reservationStockEvidence', {}) == evidence
         && movement.productKey == data.productKey
         && movement.get('warehouseId', '') in [data.warehouseId, before.get('warehouseId', data.warehouseId)]
         && (movement.get('sourceId', '') == data.orderId
