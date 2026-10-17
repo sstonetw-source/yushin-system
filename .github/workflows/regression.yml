@@ -81,5 +81,7 @@ jobs:
         env:
           ENABLE_GROUPED_RESERVATION: "true"
         run: npx --yes firebase-tools@15 emulators:exec --only firestore,auth,functions --project demo-yushin "node --test tests/emulator-grouped-reservation-callable.cjs"
+      - name: Verify single-item dual-warehouse read-only planner in Emulator
+        run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --test tests/emulator-single-item-location.cjs"
       - name: Compile and test Firestore rules
         run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --test tests/firestore-rules.test.js"
