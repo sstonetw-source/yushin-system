@@ -360,6 +360,9 @@ async function commitSingleItemLocationLifecycle(db,uid,data){
     sourceType:'order',sourceId:orderId,itemId,productKey,warehouseId:change.warehouseId,
     type:change.reservedDelta>0?'reserve':'release',qty:change.reservedDelta,
     actorUid:uid,actorRole:role,reason:nextStatus==='cancelled'?'order_cancelled':'order_restored',
+    // This same atomic movement is the durable source of free-stock release.
+    ...(nextStatus==='cancelled'&&change.reservedDelta<0
+      ?{v2FreeStockSource:'CANCELLED_ORDER_RELEASE',freeAllocationQty:-change.reservedDelta}:{}),
     reservationOperationId:receiptRef.id,createdAt:now});
   }
   tx.set(reservationRef,{...nextLedger,updatedAt:now});

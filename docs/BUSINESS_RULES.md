@@ -223,3 +223,7 @@ batch checkpoint 儲存在既有 `reservationOperationReceipts`，紀錄固定 r
 ### 多倉 FIFO 分頁與日期（2026-10-18，Emulator-only）
 
 v2 初始 Ledger 優先順序日期必須來自交易內讀取的來源訂單（orderDate/date/createdAt，格式有效才保存），不是由頁面自由輸入。自由庫存協調器以共同 `compareReservationPriority` 對 active/shortage 候選進行完整有界掃描，每頁 50 筆、每次最多 500 筆；超過安全上限不得分配，以免 FIFO 遺漏較舊訂單。沒有可用日期的既有 ledger 沿用目前 Core fallback 排序，屬歷史限制而非已完成訂單日回補。每個分配 transaction 仍須驗證來源與實際庫存，不能使用查詢結果直接寫帳。
+
+### v2 庫存釋放後的可恢復配貨觸發來源（2026-10-18，Emulator-only）
+
+取消訂單釋放已預留實貨，或可再入庫的 CLOSE 退貨讓實貨變成自由庫存時，必須由來源交易內的同一 movement 保存實際已釋放數量。恢復預留及 REPLACE 補送不是自由庫存，不能發布釋放訊號。物流角色可用來源 movement 取得固定 batch ID 並繼續既有 FIFO 協調器；權限、來源交易憑證與當前物理庫存仍需再次檢查，重複操作不可重複扣帳。未建立背景自動執行、原廠／採購到貨接線、超過試點批次規模及正式端到端驗收。

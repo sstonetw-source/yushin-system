@@ -4,7 +4,7 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const admin=require('firebase-admin');
 const {getFirestore}=require('firebase-admin/firestore');
 const demandCore=require('../modules/procurement-demand-core');
-const {planSingleItemTwoWarehouse,commitSingleItemTwoWarehouse,commitSingleItemFreeStockAllocation,advanceAutomaticFreeStockAllocation}=require('../functions/single-item-location-service');
+const {planSingleItemTwoWarehouse,commitSingleItemTwoWarehouse,commitSingleItemFreeStockAllocation,advanceAutomaticFreeStockAllocation,advanceReleasedV2FreeStock}=require('../functions/single-item-location-service');
 const {commitSingleItemLocationLifecycle}=require('../functions/single-item-location-lifecycle-service');
 let app,db;
 test.before(()=>{
@@ -1181,4 +1181,59 @@ test('FIFO pagination scans past 50 reservations and chooses the truly oldest da
  assert.equal((await newer.read('orders',newer.orderId)).items[0].shortageQty,newerShortageBefore);
  const replay=await advanceAutomaticFreeStockAllocation(db,source.uid,input);
  assert.equal(replay.allocatedQty,2);
+});
+
+test('v2 cancelled order emits one durable source per freed warehouse and resumes existing FIFO allocation',async()=>{
+ const source=await readyLifecycle('released-source',{role:'admin'});
+ const target=await autoFreeTarget(source,'released-target',10,'2026-10-01');
+ await seedLifecycleDemand(target);
+ const before=await source.read('inventory',source.productKey);
+ const stop=await source.lifecycle('cancelled','source_life_cancelled_123456789');
+ assert.equal(stop.status,'applied');
+ const wh='V2-B',sourceMoveId='single-v2-life-source_life_cancelled_123456789-'+wh;
+ const proof=await source.read('inventoryMovements',sourceMoveId);
+ assert.equal(proof.v2FreeStockSource,'CANCELLED_ORDER_RELEASE');
+ assert.equal(proof.freeAllocationQty,6);assert.equal(proof.qty,-6);
+ const targetOrderBefore=await target.read('orders',target.orderId);
+ assert.equal(targetOrderBefore.items[0].shortageQty,8);
+ const step=await advanceReleasedV2FreeStock(db,source.uid,{movementId:sourceMoveId});
+ assert.equal(step.lastOrderId,target.orderId);assert.equal(step.lastAllocatedQty,6);
+ assert.equal(step.sourceMovementId,sourceMoveId);assert.equal(step.status,'completed');
+ const order=await target.read('orders',target.orderId);
+ assert.equal(order.items[0].shortageQty,2);
+ assert.equal((await target.read('warehouseStocks',wh+'__'+source.productKey)).reserved,8);
+ assert.equal((await target.read('inventory',source.productKey)).onHand,before.onHand);
+ const stable=await snapshot(target);
+ const replay=await advanceReleasedV2FreeStock(db,source.uid,{movementId:sourceMoveId});
+ assert.equal(replay.status,'completed');assert.equal(replay.allocatedQty,6);
+ assert.deepEqual(await snapshot(target),stable);
+ const aMove=await source.read('inventoryMovements','single-v2-life-source_life_cancelled_123456789-V2-A');
+ assert.equal(aMove.freeAllocationQty,4);
+ const second=await advanceReleasedV2FreeStock(db,source.uid,{
+  movementId:'single-v2-life-source_life_cancelled_123456789-V2-A'});
+ assert.equal(second.lastAllocatedQty,2);
+ assert.equal((await target.read('orders',target.orderId)).items[0].shortageQty,0);
+ assert.equal((await target.read('inventory',source.productKey)).onHand,before.onHand);
+});
+test('release-event proof, roles, and restore movements refuse illicit redistribution',async()=>{
+ const x=await readyLifecycle('released-security',{role:'admin'});
+ await x.lifecycle('cancelled','release_security_cancel_123456789');
+ const movementId='single-v2-life-release_security_cancel_123456789-V2-B';
+ await db.collection('users').doc('v2-no-release').set({active:true,role:'sales'});
+ await assert.rejects(advanceReleasedV2FreeStock(db,'v2-no-release',{movementId}),/角色/);
+ await assert.rejects(advanceReleasedV2FreeStock(db,x.uid,{movementId:'missing_source_123'}),/來源/);
+ await assert.rejects(advanceReleasedV2FreeStock(db,x.uid,{
+  movementId:'single-v2-life-unknown-release-V2-A'}),/找不到/);
+ const baseline=await snapshot(x);
+ const proofRef=db.collection('reservationOperationReceipts').doc('single-v2-lifecycle-release_security_cancel_123456789');
+ const old=await proofRef.get(),proof=old.data();
+ await proofRef.update({result:{...proof.result,warehouseDeltas:[]}});
+ await assert.rejects(advanceReleasedV2FreeStock(db,x.uid,{movementId}),/憑證/);
+ // The deliberately tampered proof is part of snapshot(); restore the fixture
+ // first, then verify that the rejected attempt altered no stock or order.
+ await proofRef.update({result:proof.result});
+ assert.deepEqual(await snapshot(x),baseline);
+ await x.lifecycle('normal','release_security_restore_123456789');
+ await assert.rejects(advanceReleasedV2FreeStock(db,x.uid,{
+  movementId:'single-v2-life-release_security_restore_123456789-V2-B'}),/釋放|憑證/);
 });
