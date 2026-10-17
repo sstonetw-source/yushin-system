@@ -147,3 +147,7 @@ deliveryHistory 的 shipment_confirmation_reversal 事件以operationId識別本
 ## v2 取消／恢復操作憑證（2026-10-17，Emulator-only）
 
 沿用既有 `inventoryReservations/{orderId}__{itemId}`，取消時寫入空的 `locations=[]`、`quantity=0`、`shortageQty=0`、`status='released'`，以及保留兩個來源候選倉的 `lifecycleWarehouseIds`（防止取消後丟失可恢復位置）；恢復時由最新庫存重新產生 `locations` 與 shortage。沒有建立第二份預留 ledger。原 `orders.items[].reservedQty/shortageQty`、`orders.status/orderStatus`、`inventory.reserved` 與逐倉 `warehouseStocks.reserved`、`inventoryMovements`、`reservationOperationReceipts/single-v2-lifecycle-{operationId}` 同一 Admin SDK Transaction 更新。Receipt 保存 actor UID／role、意圖 hash 與首次提交結果，供重試不重放；不新增集合或索引、不改 Rules。現行前端、正式 Firestore 不支援此 v2 寫入，尚未上線。
+
+### v2 取消／恢復的採購需求補充（2026-10-17，僅 Emulator）
+
+現行 `procurementDemands` 的權威鍵為 `encodeURIComponent('SALES_ORDER:'+orderId+':'+itemId)`（例如 `SALES_ORDER%3AO%3AI`），與一般訂單需求讀寫相同；v2 Service 不再讀取原樣未編碼 ID。僅當 `orderedQty=receivedQty=remainingToReceiveQty=0` 且角色、來源、產品、倉庫、狀態及待採購投影有效時，同個 Admin SDK Transaction 更新既有 `status/remainingToOrderQty/remainingToReceiveQty/perOrdered/perReceived/sourceItemIndex/updatedAt`，或在恢復且缺口大於零時新建 `YushinProcurementDemand.demandDocument` 格式文件；原始 `requestedQty` 在取消時保留。跟公司與兩倉 reserved、單一 reservation ledger、訂單狀態與重試 receipt 一起原子提交；不修改或臆測任何 supplier order／receipt 歷史。未新增索引、Rules、集合或正式遷移。
