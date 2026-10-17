@@ -213,3 +213,9 @@ Callable API 不接受使用者提供的角色、庫存總量或指定倉庫；�
 ### v2 自由庫存跨訂單分配（2026-10-18，Emulator-only）
 
 指定有效的另一張單品項 v2 缺貨訂單，使用既有 Reservation Core 的 `planReservationReceipt(addsStock:false)`：只增加指定倉及公司 reserved、減少該訂單 shortageQty，不改實貨或其他倉預留。交易內拒絕取消／進度不符、服務品項、採購或送貨已啟動、供應紀錄存在、需求投影不符及超額分配。採購需求 `procurementDemands` 與預留同交易更新；操作 movement 為冪等憑證，已無缺口或自由實貨時不做無效寫入。此為 Emulator 指定目標交易，**不是完整 FIFO 自動分配或前端已開放**；不能以本試點替代已上線的單倉分配。
+
+### 自由庫存 FIFO 協調與進度（2026-10-18，Emulator-only）
+
+單品項雙倉指定位置釋出後，既有 `advanceAutomaticFreeStockAllocation` 依 Reservation Core 的日期／訂單／品項優先順序選擇下一張有效 v2 缺貨訂單；每呼叫只套用最多一筆既有自由庫存交易，絕不在掃描階段改帳。真正分配仍由 `planReservationReceipt(addsStock:false)` 決定，不把在途當實貨。缺貨 candidate 的 productKey/status 查詢每狀態不超過 50 筆，否則拒絕以免錯誤宣稱全域 FIFO。source order／品項／同步與權限在實際提交再交易內重讀。
+
+batch checkpoint 儲存在既有 `reservationOperationReceipts`，紀錄固定 runId、actor／hash、maxQty、累計 allocatedQty、pending 及 processedSteps；對來源訂單的單筆 movement 固定 operationId，已提交未更新 checkpoint 時可重送並只累加一次。各筆是獨立原子交易、整批可恢復但**非跨訂單原子化**。多倉自動觸發、50 筆以上分頁、已採購混合、完整前端接線與 Preview 尚未完成。
