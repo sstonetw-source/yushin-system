@@ -991,6 +991,10 @@ test('free redistribution is gated by role, live demand, warehouse, supply and s
  await db.collection('warehouses').doc('V2-A').update({active:false});
  await assert.rejects(redistributeFree(target,'V2-A'),/實體倉/);
  await db.collection('warehouses').doc('V2-A').update({active:true});
+ await db.collection('warehouses').doc('V2-C').set({active:true});
+ await db.collection('warehouseStocks').doc('V2-C__'+target.productKey).set({
+  productKey:target.productKey,warehouseId:'V2-C',onHand:1,reserved:0,transferFreeInTransit:0});
+ await assert.rejects(redistributeFree(target,'V2-C'),/候選位置/);
  await db.collection('orders').doc(target.orderId).update({inventoryReservationAttemptId:'stale'});
  await assert.rejects(redistributeFree(target,'V2-A'),/來源訂單/);
  const noWrite=await snapshot(target);
