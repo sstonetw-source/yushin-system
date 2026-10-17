@@ -76,7 +76,9 @@
             const match=writes.find(r=>r.ref.path.startsWith(collection+'/')&&
               (r.data.productKey||reads.get(r.ref.path)?.data.productKey)===after.productKey&&
               (collection==='inventory'||(r.data.warehouseId||reads.get(r.ref.path)?.data.warehouseId)===warehouseId));
-            return match?.ref||db.collection(collection).doc(collection==='inventory'?encodeURIComponent(after.productKey):encodeURIComponent(warehouseId)+'__'+encodeURIComponent(after.productKey));
+            const read=[...reads.values()].find(r=>r.ref.path.startsWith(collection+'/')&&r.data.productKey===after.productKey&&
+              (collection==='inventory'||r.data.warehouseId===warehouseId));
+            return match?.ref||read?.ref||db.collection(collection).doc(collection==='inventory'?encodeURIComponent(after.productKey):encodeURIComponent(warehouseId)+'__'+encodeURIComponent(after.productKey));
           };
           const inv=stockRef('inventory',''),wh=stockRef('warehouseStocks',after.warehouseId||''),oldWh=stockRef('warehouseStocks',before.warehouseId||after.warehouseId||'');
           for(const ref of [inv,wh,oldWh])if(!reads.has(ref.path))await proxy.get(ref);

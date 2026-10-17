@@ -133,15 +133,16 @@ test('browser script order resolves shared projection at transaction time and mi
  assert.equal(f.docs.get('inventory/P').reserved,2);
 });
 
-function operationalFixture(count=2){
- const f=fixture();f.docs.get('orders/O').items=Array.from({length:count},(_,i)=>({itemId:'I'+i,productId:'P',warehouseId:i%2?'B':'A'}));
+function operationalFixture(count=2,{inventoryId='P'}={}){
+ const f=fixture();
+ if(inventoryId!=='P'){f.docs.set('inventory/'+inventoryId,f.docs.get('inventory/P'));f.docs.delete('inventory/P');}f.docs.get('orders/O').items=Array.from({length:count},(_,i)=>({itemId:'I'+i,productId:'P',warehouseId:i%2?'B':'A'}));
  f.docs.set('warehouseStocks/B__P',{productKey:'P',warehouseId:'B',onHand:10,reserved:0});
  let attempt=0;
- f.apply=async(quantities,{role='purchaser',missingMovement='',globalMovement=false}={})=>permissions.run(f.db,async tx=>{
+ f.apply=async(quantities,{role='purchaser',missingMovement='',globalMovement=false,skipCompany=false}={})=>permissions.run(f.db,async tx=>{
   const items=f.docs.get('orders/O').items,old=[];
-  for(const path of ['inventory/P','warehouseStocks/A__P','warehouseStocks/B__P'])await tx.get(f.db.collection(path.split('/')[0]).doc(path.split('/')[1]));
+  for(const path of ['inventory/'+inventoryId,'warehouseStocks/A__P','warehouseStocks/B__P'])await tx.get(f.db.collection(path.split('/')[0]).doc(path.split('/')[1]));
   for(const item of items)old.push((await tx.get(f.db.collection('inventoryReservations').doc('O__'+item.itemId))).data()?.quantity||0);
-  tx.update(f.db.collection('inventory').doc('P'),{reserved:quantities.reduce((a,b)=>a+b,0)});
+  if(!skipCompany)tx.update(f.db.collection('inventory').doc(inventoryId),{reserved:quantities.reduce((a,b)=>a+b,0)});
   for(const warehouseId of ['A','B']){
    const total=items.reduce((sum,item,i)=>sum+(item.warehouseId===warehouseId?quantities[i]:0),0);
    tx.update(f.db.collection('warehouseStocks').doc(warehouseId+'__P'),{reserved:total});
@@ -194,4 +195,12 @@ test('cross-warehouse groups retain the five-reservation bound and reject mixing
  moving.docs.set('inventoryReservations/O__I0',{orderId:'O',itemId:'I0',productKey:'P',warehouseId:'B',quantity:1});
  const before=structuredClone([...moving.docs]);await assert.rejects(moving.apply([1,1,1]),/原調撥流程/);
  assert.deepEqual([...moving.docs],before);assert.equal(moving.writes.length,0);
+});
+test('zero-company exchanges reuse the actual read reference when an unchanged company ledger has a noncanonical id',async()=>{
+ const f=operationalFixture(2,{inventoryId:'company-ledger'});
+ await f.apply([2,3]);const before=f.writes.length;
+ await f.apply([3,2],{skipCompany:true});
+ assert.equal(f.docs.get('inventory/company-ledger').reserved,5);
+ for(const item of ['I0','I1'])assert.equal(f.docs.get('inventoryReservations/O__'+item).stockEvidence.inventoryId,'company-ledger');
+ assert.equal(f.writes.slice(before).some(w=>w.ref.path.startsWith('inventory/')),false);
 });

@@ -2779,25 +2779,26 @@ for(const status of ['cancelled','normal'])test('actual '+status+' refuses impos
  }
 });
 
-async function crossWarehouseEvidenceFixture(uid,role,count=2,{mutate=null}={}){
+async function crossWarehouseEvidenceFixture(uid,role,count=2,{mutate=null,inventoryId=null}={}){
  const id='cross-'+uid,productKey=id,ownerUid=role==='engineer'?'eng1':'sales1',salesCode=role==='engineer'?'E01':'S01';
+ const inventoryDocId=inventoryId||productKey;
  const items=Array.from({length:count},(_,i)=>({itemId:'I'+i,productId:productKey,qty:5,warehouseId:i%2?'B':'A'}));
  await seed('orders/'+id,{ownerUid,salesCode,status:'active',inventoryReservationStatus:'completed',items});
- await seed('inventory/'+productKey,{productKey,onHand:40,reserved:0,incoming:0});
+ await seed('inventory/'+inventoryDocId,{productKey,onHand:40,reserved:0,incoming:0});
  for(const warehouseId of ['A','B'])await seed('warehouseStocks/'+warehouseId+'__'+productKey,{productKey,warehouseId,onHand:20,reserved:0,incoming:0});
  const client=compatDb(uid),native=client.runTransaction;
  if(mutate)client.runTransaction=fn=>native(tx=>fn({...tx,
   set:(ref,data,options)=>{const next=mutate(ref.path,data);if(next===null)return;if(options)tx.set(ref,next,options);else tx.set(ref,next);},
   update:(ref,data)=>{const next=mutate(ref.path,data);if(next!==null)tx.update(ref,next);}}));
  let attempt=0;
- const run=(quantities,{movementAttempt=null}={})=>stockPermissions.run(client,async tx=>{
-  const inv=client.collection('inventory').doc(productKey),stocks={},old=[];
+ const run=(quantities,{movementAttempt=null,skipCompany=false}={})=>stockPermissions.run(client,async tx=>{
+  const inv=client.collection('inventory').doc(inventoryDocId),stocks={},old=[];
   await tx.get(inv);
   for(const warehouseId of ['A','B']){
    stocks[warehouseId]=client.collection('warehouseStocks').doc(warehouseId+'__'+productKey);await tx.get(stocks[warehouseId]);
   }
   for(const item of items)old.push((await tx.get(client.collection('inventoryReservations').doc(id+'__'+item.itemId))).data()?.quantity||0);
-  tx.update(inv,{reserved:quantities.reduce((a,b)=>a+b,0)});
+  if(!skipCompany)tx.update(inv,{reserved:quantities.reduce((a,b)=>a+b,0)});
   for(const warehouseId of ['A','B'])tx.update(stocks[warehouseId],{reserved:items.reduce((sum,item,i)=>sum+(item.warehouseId===warehouseId?quantities[i]:0),0)});
   items.forEach((item,i)=>tx.set(client.collection('inventoryReservations').doc(id+'__'+item.itemId),{
    orderId:id,itemId:item.itemId,productKey,warehouseId:item.warehouseId,quantity:quantities[i],shortageQty:5-quantities[i]},{merge:true}));
@@ -2806,7 +2807,7 @@ async function crossWarehouseEvidenceFixture(uid,role,count=2,{mutate=null}={}){
    productKey,warehouseId,sourceType:'order',sourceId:id,ownerUid,salesCode,type:'reserve',
    qty:items.reduce((sum,item,i)=>sum+(item.warehouseId===warehouseId?quantities[i]-old[i]:0),0)});
  },uid,['sales','engineer'].includes(role),role);
- const paths=['inventory/'+productKey,...['A','B'].map(w=>'warehouseStocks/'+w+'__'+productKey),
+ const paths=['inventory/'+inventoryDocId,...['A','B'].map(w=>'warehouseStocks/'+w+'__'+productKey),
   ...items.map(i=>'inventoryReservations/'+id+'__'+i.itemId)];
  const snapshot=()=>Promise.all(paths.map(async p=>{const s=await getDoc(doc(db('admin'),p));return s.exists()?s.data():null;}));
  return {id,productKey,items,run,snapshot};
@@ -2875,5 +2876,17 @@ test('native grouped proofs cannot conceal a nonrepresentative reservation move 
   await assertFails(b.commit());
   assert.equal((await getDoc(doc(db('admin'),'warehouseStocks/C__P'))).data().reserved,2);
   assert.equal((await getDoc(doc(db('admin'),'warehouseStocks/A__P'))).data().reserved,1);
+ }
+});
+test('zero-company exchanges use the actual noncanonical inventory document without writing unchanged stock',async()=>{
+ for(const [uid,role] of [['buyer1','purchaser'],['wh1','warehouse']]){
+  const inventoryId='actual-ledger-'+uid,f=await crossWarehouseEvidenceFixture(uid,role,2,{inventoryId});
+  await assertSucceeds(f.run([2,3]));
+  const before=(await f.snapshot())[0];
+  await assertSucceeds(f.run([3,2],{skipCompany:true}));
+  const [company,a,b,...reservations]=await f.snapshot();assert.deepEqual(company,before);
+  assert.equal(a.reserved,3);assert.equal(b.reserved,2);
+  for(const r of reservations)assert.equal(r.stockEvidence.inventoryId,inventoryId);
+  assert.equal((await getDoc(doc(db('admin'),'inventory/'+f.productKey))).exists(),false);
  }
 });
