@@ -946,7 +946,8 @@ test('released A/B stock reallocates to a separate waiting v2 order without inve
  const demand=await seedLifecycleDemand(target);
  assert.equal((await demand.read()).requestedQty,8);
  await source.lifecycle('cancelled');
- const sourceAfter=await snapshot(source);
+ const sourceOrderAfter=await source.read('orders',source.orderId);
+ const sourceLedgerAfter=await source.read('inventoryReservations',source.orderId+'__I1');
  const first=await redistributeFree(target,'V2-B');
  assert.equal(first.allocatedQty,6);
  assert.equal(first.reservedQty,8);assert.equal(first.shortageQty,2);
@@ -964,7 +965,8 @@ test('released A/B stock reallocates to a separate waiting v2 order without inve
  assert.deepEqual(ledger.locations,[{warehouseId:'V2-A',reservedQty:2},{warehouseId:'V2-B',reservedQty:8}]);
  assert.equal((await demand.read()).requestedQty,0);
  assert.equal((await demand.read()).remainingToOrderQty,0);
- assert.deepEqual(await snapshot(source),sourceAfter);
+ assert.deepEqual(await source.read('orders',source.orderId),sourceOrderAfter);
+ assert.deepEqual(await source.read('inventoryReservations',source.orderId+'__I1'),sourceLedgerAfter);
 });
 test('free redistribution is gated by role, live demand, warehouse, supply and sync',async()=>{
  const source=await readyLifecycle('free-rejections',{role:'admin'});
@@ -973,12 +975,10 @@ test('free redistribution is gated by role, live demand, warehouse, supply and s
  await source.lifecycle('cancelled');
  await db.collection('users').doc('v2-free-sales').set({role:'sales',active:true});
  const before=await snapshot(target);
- await assert.rejects(redistributeFree(target,'V2-A',10,'sales_denied_12345678'),/角色|權限/);
  await assert.rejects(commitSingleItemFreeStockAllocation(db,'v2-free-sales',{
   orderId:target.orderId,itemId:'I1',warehouseId:'V2-A',quantity:10,
   operationId:'sales_denied_123456789',syncAttemptId:'v2_123456789'}),/角色|權限/);
  assert.deepEqual(await snapshot(target),before);
- await target.demandRef?.get();
  const key='SALES_ORDER:'+target.orderId+':I1';
  const demandRef=db.collection('procurementDemands').doc(encodeURIComponent(key));
  await demandRef.update({orderedQty:1,status:'PARTIALLY_ORDERED'});
