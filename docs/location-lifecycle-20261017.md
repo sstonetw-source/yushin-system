@@ -100,3 +100,9 @@ Emulator harness 呼叫原正式 PO／incoming 登記、原收貨 Service 及 `k
 原 `functions/single-item-location-service.js.advanceReleasedV2FreeStock` 是來源證據檢查與續傳協調入口，核對現在登入者 admin/purchaser/warehouse、實際 movement 與原 cancel receipt 或 CLOSE 退貨紀錄。依 movementId 算出固定 runId，交給既有 `advanceAutomaticFreeStockAllocation` 逐單處理，進度仍由原 checkpoint 持久化；相同來源重試不重複增加預留。單事件超過 1000 件暫時拒絕試點續傳，來源實際交易仍有效，需另行分批策略。
 
 **尚未完成：** 此版本為已提交事件的**可明確呼叫續傳入口**，沒有常駐 job runner、排程或自動觸發；尚未接入採購到貨（尤其取消後 KEEP_STOCK）、超大量分批與安全交接不同操作人員，也未正式接 Callable／UI／Preview。原單倉 `allocationPending` 完全不動，避免瀏覽器 v1 Recovery 誤判 v2 訊號。沒有新增 Collection／Rules／Index、正式資料遷移或 Firebase 部署。
+
+## v2 採購收貨自由庫存來源的權威憑證（2026-10-18；Emulator-only）
+
+既有 `Receiving.receiveSupplyOrderRecord` 會在同一個 Firestore Transaction 寫入實體 `inventoryLots`、`receipts/{operationKey}`、`inventoryMovements`、公司／分倉庫存及採購在途；多倉 v2 source receipt 在 receipt 記錄 `reservationLocationSchemaVersion:2`、`autoAllocationQty`、`sourceOrderStatus`，已取消來源另需採購明確確認 `KEEP_STOCK`。新增在現有 `single-item-location-service.advanceReleasedV2FreeStock` 的來源驗證入口直接讀**已存在的** receipt／movement／lot，校驗原來源供應、產品、批號／效期、真實入庫數量與可供分配的額外量；取消來源再驗證供應 `KEEP_STOCK` 的真實決策。**不修改瀏覽器 Receiving writer，也不新增第二套入庫 movement、來源標記或虛擬庫存。**
+
+有效 receiptId 对應的原實體 movementId 作為固定分配批次身份，交給既有 FIFO checkpoint 與唯一 v2 `commitSingleItemFreeStockAllocation`；重試不重複入庫或預留，receipt 沒有剩餘實貨、只有採購在途、證據遭竄改／缺批次時拒絕。權限限制 admin/purchaser/warehouse 並在交易內重驗；仍屬**顯式呼叫**、一輪至多推進一個缺貨訂單，沒有 background runner 或正式 Callable，原單倉實際網站流程不受影響。未做舊單價／批次資料遷移，也沒有 Firebase 正式部署。
