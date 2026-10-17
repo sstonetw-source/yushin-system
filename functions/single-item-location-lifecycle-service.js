@@ -172,7 +172,7 @@ async function commitSingleItemLocationLifecycle(db,uid,data){
     fault('供應收貨數量或狀態異常');
    const terminal=['CANCELLED','CLOSED'].includes(supply.status);
    if((terminal&&(registered!==0||number(supply.closedQty??supply.cancelledQty,'已停止供應')!==qty-received))
-    ||(!terminal&&registered>qty-received))fault('供應停止數量或已登記在途投影不一致');
+    ||(!terminal&&registered>normalizedSupply.remainingQty))fault('供應停止數量或已登記在途投影不一致');
    registeredByWarehouse.set(supply.warehouseId,
     number((registeredByWarehouse.get(supply.warehouseId)||0)+registered,'分倉採購在途合計'));
    if(supply.type==='PURCHASING_PO'){
@@ -252,7 +252,7 @@ async function commitSingleItemLocationLifecycle(db,uid,data){
    ||(previousDemand&&(previousDemand.orderedQty!==orderedSupply||previousDemand.receivedQty!==receivedSupply))
    ||((orderedSupply>0||receivedSupply>0)&&!previousDemand))
    fault('訂單、採購需求與實際供應承諾／收貨不一致');
-  const incomingSupply=orderedSupply-receivedSupply;
+  const incomingSupply=workflowCore.procurementQuantities({supplyOrderedQty:orderedSupply,receivedQty:receivedSupply}).inTransitQty;
   const reservationRef=ref('inventoryReservations',orderId+'__'+itemId),ledgerSnap=await tx.get(reservationRef);
   if(!ledgerSnap.exists)fault('缺少 v2 權威預留');
   const original=ledgerSnap.data();
