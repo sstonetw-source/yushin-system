@@ -4,6 +4,7 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const admin=require('firebase-admin');
 const {getFirestore}=require('firebase-admin/firestore');
 const {planSingleItemTwoWarehouse,commitSingleItemTwoWarehouse}=require('../functions/single-item-location-service');
+const {commitSingleItemLocationLifecycle}=require('../functions/single-item-location-lifecycle-service');
 let app,db;
 test.before(()=>{
  assert.ok(process.env.FIRESTORE_EMULATOR_HOST,'Never use live Firestore');
@@ -213,4 +214,103 @@ test('late movement create collision rolls back stock, ledger, order and receipt
  await db.collection('inventoryMovements').doc(movementId).delete();
  assert.equal((await commit(x)).status,'applied');
  assert.equal((await x.read('inventory',x.productKey)).reserved,10);
+});
+
+async function readyLifecycle(name,opts={}){
+ const x=await seed('lifecycle-'+name,opts);
+ await commit(x);
+ await db.collection('orders').doc(x.orderId).update({inventoryReservationStatus:'completed'});
+ const intent=(nextStatus,operationId='lifecycle_'+name+'_'+nextStatus+'_123456789')=>({
+  orderId:x.orderId,itemId:'I1',warehouseIds:['V2-A','V2-B'],nextStatus,
+  operationId,syncAttemptId:'v2_123456789',date:'2026-10-17',reason:'客戶取消測試'});
+ return {...x,intent,lifecycle:(nextStatus,id,actor=x.uid)=>
+   commitSingleItemLocationLifecycle(db,actor,intent(nextStatus,id))};
+}
+test('v2 initial cancellation atomically releases A and B, then re-reserves with same ledger and no stock creation',async()=>{
+ const x=await readyLifecycle('round-trip');
+ assert.deepEqual((await x.read('inventoryReservations',x.orderId+'__I1')).locations,
+  [{warehouseId:'V2-A',reservedQty:4},{warehouseId:'V2-B',reservedQty:6}]);
+ const before=await x.read('inventory',x.productKey);
+ const cancelled=await x.lifecycle('cancelled');
+ assert.equal(cancelled.status,'applied');assert.equal(cancelled.companyReservedDelta,-10);
+ assert.deepEqual(cancelled.locations,[]);
+ assert.equal((await x.read('inventory',x.productKey)).reserved,0);
+ assert.equal((await x.read('warehouseStocks','V2-A__'+x.productKey)).reserved,0);
+ assert.equal((await x.read('warehouseStocks','V2-B__'+x.productKey)).reserved,0);
+ const released=await x.read('inventoryReservations',x.orderId+'__I1');
+ assert.equal(released.status,'released');assert.equal(released.quantity,0);assert.equal(released.shortageQty,0);
+ assert.deepEqual(released.lifecycleWarehouseIds,['V2-A','V2-B']);
+ assert.equal((await x.read('orders',x.orderId)).status,'cancelled');
+ assert.equal((await x.lifecycle('cancelled')).status,'already-applied');
+ const restored=await x.lifecycle('normal');
+ assert.equal(restored.companyReservedDelta,10);assert.equal(restored.reservedQty,10);
+ assert.deepEqual(restored.locations,[{warehouseId:'V2-A',reservedQty:4},{warehouseId:'V2-B',reservedQty:6}]);
+ assert.equal((await x.read('inventory',x.productKey)).reserved,10);
+ assert.equal((await x.read('inventory',x.productKey)).onHand,before.onHand);
+ assert.equal((await x.read('orders',x.orderId)).status,'active');
+ assert.equal((await x.lifecycle('normal')).status,'already-applied');
+ const receipt=await x.read('reservationOperationReceipts','single-v2-lifecycle-'+x.intent('normal').operationId);
+ assert.equal(receipt.actorUid,x.uid);assert.equal(receipt.result.reservedQty,10);
+});
+test('v2 restore only re-reserves the remaining free physical stock after a competing order',async()=>{
+ const x=await readyLifecycle('competition');
+ await x.lifecycle('cancelled');
+ const otherId=x.orderId+'-other',oldOrder=await x.read('orders',x.orderId);
+ await db.collection('orders').doc(otherId).set({...oldOrder,status:'active',orderStatus:'normal',
+  inventoryReservationStatus:'pending',items:[{...oldOrder.items[0],reservedQty:0,shortageQty:0}]});
+ const competing=await commitSingleItemTwoWarehouse(db,x.uid,{
+  orderId:otherId,itemId:'I1',warehouseIds:['V2-A','V2-B'],
+  attemptId:'another_reservation_competition_1234',syncAttemptId:'v2_123456789'});
+ assert.equal(competing.reservedQty,10);
+ const restored=await x.lifecycle('normal');
+ assert.equal(restored.companyReservedDelta,2);
+ assert.equal(restored.reservedQty,2);assert.equal(restored.shortageQty,8);
+ assert.equal((await x.read('inventory',x.productKey)).reserved,12);
+ assert.equal((await x.read('warehouseStocks','V2-A__'+x.productKey)).reserved,4);
+ assert.equal((await x.read('warehouseStocks','V2-B__'+x.productKey)).reserved,8);
+});
+test('v2 lifecycle rejects unauthorized actor, stale sync, logistics, altered candidate and source projection',async()=>{
+ const outsider=await readyLifecycle('outsider',{owner:'elsewhere'});
+ const baseline=await snapshot(outsider);
+ await assert.rejects(outsider.lifecycle('cancelled'),/其他業務/);
+ assert.deepEqual(await snapshot(outsider),baseline);
+ const noRole=await readyLifecycle('role',{role:'warehouse'});
+ await assert.rejects(noRole.lifecycle('cancelled'),/權限|不能取消/);
+ const changed=await readyLifecycle('stale');
+ await db.collection('orders').doc(changed.orderId).update({inventoryReservationAttemptId:'different'});
+ await assert.rejects(changed.lifecycle('cancelled'),/同步識別碼/);
+ const prepared=await readyLifecycle('prepared');
+ const order=await prepared.read('orders',prepared.orderId);
+ order.items[0].dispatchPreparedQty=1;
+ await db.collection('orders').doc(prepared.orderId).update({items:order.items});
+ const before=await snapshot(prepared);
+ await assert.rejects(prepared.lifecycle('cancelled'),/已打單|試點範圍/);
+ assert.deepEqual(await snapshot(prepared),before);
+ const wrong=await readyLifecycle('candidate');
+ await wrong.lifecycle('cancelled');
+ await assert.rejects(commitSingleItemLocationLifecycle(db,wrong.uid,{
+  ...wrong.intent('normal','wrong_lifecycle_candidates_123'),warehouseIds:['V2-A','V2-C']}),/候選倉/);
+ const mismatch=await readyLifecycle('projection');
+ await db.collection('inventoryReservations').doc(mismatch.orderId+'__I1').update({quantity:9});
+ await assert.rejects(mismatch.lifecycle('cancelled'),/投影|位置|數量/);
+});
+test('v2 lifecycle concurrent cancellations and receipt conflicts are atomic',async()=>{
+ const x=await readyLifecycle('races');
+ const [a,b]=await Promise.allSettled([
+  x.lifecycle('cancelled','cancel_race_one_123456'),
+  x.lifecycle('cancelled','cancel_race_two_123456')]);
+ assert.equal([a,b].filter(v=>v.status==='fulfilled').length,1);
+ assert.equal((await x.read('inventory',x.productKey)).reserved,0);
+ const replay=await x.lifecycle('cancelled',a.status==='fulfilled'?'cancel_race_one_123456':'cancel_race_two_123456');
+ assert.equal(replay.status,'already-applied');
+ await assert.rejects(x.lifecycle('normal',a.status==='fulfilled'?'cancel_race_one_123456':'cancel_race_two_123456'),/操作識別碼/);
+ const y=await readyLifecycle('movement-collision');
+ const collidingId='cancel_collision_1234567';
+ await db.collection('inventoryMovements').doc('single-v2-life-'+collidingId+'-V2-B').set({marker:'collision'});
+ const before=await snapshot(y);
+ await assert.rejects(y.lifecycle('cancelled',collidingId));
+ assert.deepEqual(await snapshot(y),before);
+ assert.equal((await db.collection('reservationOperationReceipts').doc('single-v2-lifecycle-'+collidingId).get()).exists,false);
+ await db.collection('inventoryMovements').doc('single-v2-life-'+collidingId+'-V2-B').delete();
+ assert.equal((await y.lifecycle('cancelled',collidingId)).status,'applied');
 });
