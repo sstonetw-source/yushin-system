@@ -2806,7 +2806,7 @@ async function crossWarehouseEvidenceFixture(uid,role,count=2,{mutate=null,inven
   for(const warehouseId of ['A','B'])tx.set(client.collection('inventoryMovements').doc(id+'-'+movementId+'-'+warehouseId),{
    productKey,warehouseId,sourceType:'order',sourceId:id,ownerUid,salesCode,type:'reserve',
    qty:items.reduce((sum,item,i)=>sum+(item.warehouseId===warehouseId?quantities[i]-old[i]:0),0)});
- },uid,['sales','engineer'].includes(role),role);
+ },uid,['sales','engineer'].includes(role),role).catch(error=>{throw new Error(uid+' cross-warehouse transaction: '+error.message,{cause:error});});
  const paths=['inventory/'+inventoryDocId,...['A','B'].map(w=>'warehouseStocks/'+w+'__'+productKey),
   ...items.map(i=>'inventoryReservations/'+id+'__'+i.itemId)];
  const snapshot=()=>Promise.all(paths.map(async p=>{const s=await getDoc(doc(db('admin'),p));return s.exists()?s.data():null;}));

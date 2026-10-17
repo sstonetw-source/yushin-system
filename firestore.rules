@@ -783,46 +783,36 @@ service cloud.firestore {
 
     // Reserved totals include every reservation of this product changed by the
     // operation, including a move between warehouses. Unchanged siblings add zero.
-    function operationalReservationDeltas(e, index, productKey, warehouseId) {
+    function operationalReservationDelta(e, index, productKey, warehouseId) {
       return index < e.reservationIds.size()
-        ? operationalReservationDeltasAt(e.reservationIds[index], productKey, warehouseId) : [0, 0];
+        ? operationalReservationDeltaAt(e.reservationIds[index], productKey, warehouseId) : 0;
     }
-    function operationalReservationDeltasAt(id, productKey, warehouseId) {
+    function operationalReservationDeltaAt(id, productKey, warehouseId) {
       let path = /databases/$(database)/documents/inventoryReservations/$(id);
       let before = exists(path) ? get(path).data : {};
       let after = getAfter(path).data;
       let oldQty = before.get('quantity', 0);
       let qty = after.get('quantity', 0);
-      return after.productKey == productKey && before.get('productKey', productKey) == productKey
-        ? [qty - oldQty,
-          (after.get('warehouseId', '') == warehouseId ? qty : 0)
-            - (before.get('warehouseId', '') == warehouseId ? oldQty : 0)]
-        : [null, null];
+      // The company proof runs first and validates every product once. Local
+      // sums reuse those same cached snapshots without repeating identity checks.
+      return warehouseId == ''
+        ? (after.productKey == productKey && before.get('productKey', productKey) == productKey ? qty - oldQty : null)
+        : (after.get('warehouseId', '') == warehouseId ? qty : 0)
+          - (before.get('warehouseId', '') == warehouseId ? oldQty : 0);
     }
-    function operationalStockDeltas(e, productKey, warehouseId) {
-      // Read/project each reservation once for both company and local totals.
-      let a = operationalReservationDeltas(e, 0, productKey, warehouseId);
-      let b = operationalReservationDeltas(e, 1, productKey, warehouseId);
-      let c = operationalReservationDeltas(e, 2, productKey, warehouseId);
-      let d = operationalReservationDeltas(e, 3, productKey, warehouseId);
-      let f = operationalReservationDeltas(e, 4, productKey, warehouseId);
-      return [a[0] + b[0] + c[0] + d[0] + f[0], a[1] + b[1] + c[1] + d[1] + f[1]];
+    function operationalStockDelta(e, productKey, warehouseId) {
+      return operationalReservationDelta(e, 0, productKey, warehouseId)
+        + operationalReservationDelta(e, 1, productKey, warehouseId)
+        + operationalReservationDelta(e, 2, productKey, warehouseId)
+        + operationalReservationDelta(e, 3, productKey, warehouseId)
+        + operationalReservationDelta(e, 4, productKey, warehouseId);
     }
-    function operationalReservedStockMatches(path, delta, productKey, warehouseId) {
+    function operationalReservedStockMatches(path, e, productKey, warehouseId) {
       let before = exists(path) ? get(path).data : {};
       let after = getAfter(path).data;
       return after.get('productKey', after.get('productId', '')) == productKey
         && (warehouseId == '' || after.get('warehouseId', '') == warehouseId)
-        && after.get('reserved', 0) - before.get('reserved', 0) == delta;
-    }
-    function operationalReservationStocks(e, data, before) {
-      let delta = operationalStockDeltas(e, data.productKey, data.warehouseId);
-      return operationalReservedStockMatches(/databases/$(database)/documents/inventory/$(e.inventoryId), delta[0], data.productKey, '')
-        && operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId), delta[1], data.productKey, data.warehouseId)
-        && (before.get('quantity', 0) == 0 || before.get('warehouseId', data.warehouseId) == data.warehouseId
-          || (request.resource.data.get('sourceType', '') == 'WAREHOUSE_TRANSFER' && operationalTransferReservationArrival(e, data, before))
-          || operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.previousWarehouseStockId),
-            operationalStockDeltas(e, data.productKey, before.warehouseId)[1], data.productKey, before.warehouseId));
+        && after.get('reserved', 0) - before.get('reserved', 0) == operationalStockDelta(e, productKey, warehouseId);
     }
     function sameWarehouseReservationDelta(e, index, productKey, warehouseId) {
       return index < e.reservationIds.size()
@@ -885,7 +875,11 @@ service cloud.firestore {
         && (!e.get('crossWarehouse', false)
           && (before.get('quantity', 0) == 0 || before.get('warehouseId', data.warehouseId) == data.warehouseId)
           ? sameWarehouseReservationStocks(e, data.productKey, data.warehouseId)
-          : operationalReservationStocks(e, data, before));
+          : operationalReservedStockMatches(/databases/$(database)/documents/inventory/$(e.inventoryId), e, data.productKey, '')
+            && operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId), e, data.productKey, data.warehouseId)
+            && (before.get('quantity', 0) == 0 || before.get('warehouseId', data.warehouseId) == data.warehouseId
+              || (request.resource.data.get('sourceType', '') == 'WAREHOUSE_TRANSFER' && operationalTransferReservationArrival(e, data, before))
+              || operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.previousWarehouseStockId), e, data.productKey, before.warehouseId)));
     }
     function operationalTransferReservationArrival(e, data, before) {
       let movement = request.resource.data;
