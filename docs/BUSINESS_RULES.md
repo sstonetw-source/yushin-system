@@ -149,3 +149,7 @@ Callable API 不接受使用者提供的角色、庫存總量或指定倉庫；�
 ## 單品項雙倉原子提交（2026-10-17，僅 Emulator）
 
 初始 pending 同步以原 syncAttemptId 提交；尚無供應／收貨／物流進度才接受。所有數量由交易內最新來源與 Reservation Core 決定，不接受呼叫者提供角色或庫存。公司／各倉差額守恆，實貨不變，原預留位置不擅自搬移。固定 attemptId 憑證綁定原 UID／角色與意圖；相同操作回覆原結果，不重新寫入，即使原單後續取消也不把成功交易重做。新 attempt 重新規劃並核對來源同步，不能重複預留。此能力無 Callable 或 UI，僅 demo-yushin Emulator；完整履約尚未啟用。
+
+## v2 倉庫寄出與客戶送達分離（2026-10-17，僅 Emulator）
+
+倉庫分批寄出以 warehouseShipmentRecords 保存指定倉與批次，扣實貨及該倉預留；不新增客戶 deliveryRecords、不增加 deliveredQty、不把 isDelivered 設為完成。warehouseShipmentState 沿用 dispatchState 的準備量預算演算法，但消耗量來自 warehouseShippedQty。原客戶交付流程未切換，兩種事件目前禁止混用；後續簽收必須確認已寄出量且不得再次扣庫存。三個倉庫操作角色可以提交，sales／engineer 禁止；同 ID、同身分同意圖重送不重扣。無批次或打單不足、來源／收件快照變更、異常帳、201 批次或退貨／保管／調撥進度均拒絕。

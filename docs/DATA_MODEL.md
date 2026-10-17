@@ -121,3 +121,7 @@ Rules 新增管理員／採購對「不存在 audit ID」的單筆 get；未開�
 ## Emulator-only 單品項雙倉 v2 提交（2026-10-17）
 
 沿用 `inventoryReservations/{orderId}__{itemId}`：locationSchemaVersion=2、locations 為各倉正整數 reservedQty、quantity 為總量，舊 warehouseId 從 v2 預留文件移除。訂單品項只保存 reservedQty／shortageQty 投影，warehouseId 保留為來源提示。公司與分倉 reserved、ledger、品項、movement 及 `reservationOperationReceipts/single-v2-{attemptId}` 一起提交；receipt 保存 UID、角色、來源同步 ID、意圖 hash 與原結果。無新集合或索引，不變更 onHand／批次／供應。僅 demo-yushin Emulator 可執行，未遷移任何正式資料或開放 v2 客戶端寫入。
+
+## Emulator-only v2 倉庫寄出事件（2026-10-17）
+
+新 `orders.warehouseShipmentRecords[]` 是實際寄出權威，包含 operationId、warehouseId、qty、lotAllocations、收件快照、actor／movement；items.warehouseShippedQty 是其加總投影，交易需核對。沿用 inventoryMovements 的固定 location-ship-{operationId} 文件保存扣帳與重送意圖／原結果，不新增集合。公司／指定倉 onHand與reserved、原v2預留、真實批次及寄出事件一起提交。客戶 deliveryRecords／deliveredQty／isDelivered 不變，未提供簽收入口。此資料只允許 demo-yushin Emulator，workCategories及現行前端／需求尚未讀取新事件，不可部署或混寫正式資料。

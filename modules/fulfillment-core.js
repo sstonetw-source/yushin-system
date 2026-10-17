@@ -81,6 +81,17 @@
     return { delivered, grossDelivered, returned, reserved, prepared, preparedOutstanding, shippable, pending };
   }
 
+  // Physical warehouse shipment is a separate event from customer delivery.
+  // Reuse the same cumulative preparation budget, with shipped quantity as
+  // the consumed budget; never change delivery records through this adapter.
+  function warehouseShipmentState(item = {}) {
+    const shippedQty = n(item.warehouseShippedQty);
+    const state = dispatchState({ deliveredQty: shippedQty,
+      reservedQty: item.reservedQty, dispatchPreparedQty: item.dispatchPreparedQty });
+    return { shippedQty, reserved: state.reserved, prepared: state.prepared,
+      preparedOutstanding: state.preparedOutstanding, shippable: state.shippable, pending: state.pending };
+  }
+
   function pendingDispatchQty(item) {
     return dispatchState(item).pending;
   }
@@ -116,6 +127,7 @@
     projectOrderDelivery,
     normalizeItem,
     dispatchState,
+    warehouseShipmentState,
     pendingDispatchQty,
     shippableQty,
     prepareDispatch,
