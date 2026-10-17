@@ -76,3 +76,11 @@ Emulator harness 呼叫原正式 PO／incoming 登記、原收貨 Service 及 `k
 交易重讀有效角色（admin／purchaser／warehouse）、訂單同步、產品／實體倉、來源／數量投影及 canonical demand；有界查詢供應紀錄，任何已記錄的來源供應均拒絕此無採購試點。既有需求在同交易減少至真實剩餘缺口，不建立重複需求；沒有需求且全數分配時不額外建立零量文件。固定 operationId + intentHash 寫不可重用 movement，同 ID 重送不重扣；不同 ID 並發由 Firestore Transaction 衝突重試序列化。未有庫存或已無缺口時回覆零分配、不寫入憑證，允許後續重新嘗試。
 
 實際 Emulator 測試涵蓋：A/B 取消釋放後由另一 v2 訂單分別接收、公司／來源倉差額、既有 demand 同步、冪等重送、角色／供應／取消與錯誤投影拒絕，以及同倉併發、操作 ID 衝突。此為**指定目標訂單的交易能力**，尚未實作 FIFO 自動挑選全產品缺貨清單／完整 checkpoint 續傳，也不開放 Callable、正式瀏覽器與 Preview。無 Firebase 正式部署、資料遷移或新增 Rules／索引。
+
+## FIFO 候選掃描與可恢復進度（2026-10-18；僅 Emulator）
+
+現有 `functions/single-item-location-service.js` 另提供 `advanceAutomaticFreeStockAllocation` 作為薄型協調入口：由指定產品、來源倉、最大分配量和固定 runId 開始，每次呼叫最多**推進一個訂單**。原子預留、採購需求和 movement 仍全部透過既有 `commitSingleItemFreeStockAllocation`，無另一套庫存數學。用 `Reservation.compareReservationPriority` 依日期／訂單／品項決定 FIFO；沿用既有 productKey＋status 查詢，每個狀態最多讀 51 筆，超過 50 筆立即拒絕，不假稱已找到全域最早。零預留 v2 候選可從權威訂單位置提示辨識，不開放無證據第三倉。
+
+在既有 `reservationOperationReceipts/single-v2-free-batch-{runId}` 保存 actor、原請求 hash、最大量、累計已分配量、processedSteps、pending 目標與固定 operationId；與目標庫存異動之間是**可恢復兩階段工作**而非整批原子交易。先 durable 記錄待執行目標，再用固定 operationId 套用原交易，最後在 checkpoint transaction 累計；若已扣帳但進度寫入失敗，下次相同 runId 會從原 movement 重送取得原結果，且只計算一次。雙重繼續與同 ID 並發不得突破最大量。無候選、用盡額度或來源倉無自由庫存才標記 completed；需要新庫存時使用新 runId，不能以舊 completed job 偷做第二批。狀態為 active 的 job 必須持續以原參數重送，角色變更／停用或錯誤來源時拒絕。
+
+**限制：** 目前仍為 demo-yushin 內部逐步執行，需呼叫端重複執行至 completed；不是排程自動觸發，也沒有 Callable、前端、Preview 或正式部署。每個狀態 50 筆上限是正確性閘門，不是大量候選最終方案；遇到已有供應／退貨或錯誤帳目將安全停止，等待稽核，不能偷偷跳過；需後續改善索引排序、分頁與跨批續傳。可恢復 checkpoint 只保證同一目標確定性重送，不宣稱所有品項／訂單合併為一個原子交易。
