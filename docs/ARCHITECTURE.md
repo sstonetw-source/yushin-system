@@ -351,3 +351,5 @@ Service 不再直接呼叫快取函式，改接收可選的同步 `onStockCommit
 ### 2026-10-17 Preview Auth + Callable Emulator 驗收
 
 新增 Firebase Authentication + Functions Callable + Firestore Admin SDK 三套 Emulator 連動測試，明確使用 `demo-yushin` 專案與模擬帳號，驗證持有登入憑證的採購可成功、無憑證拒絕、業務越權拒絕、停用後拒絕、竄改角色拒絕、重送意圖不重複、舊同步 ID 拒絕及交易一致性；CI 環境額外啟用 `ENABLE_GROUPED_RESERVATION=true`，不部署至 Firebase。正式專案 `yu-shing-company` 即使配置同名環境旗標也不得啟用這個試點 Callable。只有 `preview-20135` 在額外設定旗標時才允許（仍須 Preview 實際部署、人工驗收）；這些 Emulator 通過不表示正式切換已完成。
+
+Callable Emulator 啟動修正：在 `firebase.json` 明確配置 `auth:9099`、`firestore:8080`、`functions:5001` 以免 CLI 因 Auth 未初始化而略過模擬登入；Functions 初始化採 `firebase-admin/app` 的 `getApps()/initializeApp()`，避免新版 Admin SDK 不再提供 `admin.apps` 所造成的模組載入失敗。以上僅為 Emulator 設定與程式初始化，不是正式 Firebase 部署。
