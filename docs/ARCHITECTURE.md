@@ -357,3 +357,7 @@ Callable Emulator 啟動修正：在 `firebase.json` 明確配置 `auth:9099`、
 ## 單品項雙倉內部提交（2026-10-17）
 
 `functions/single-item-location-service.js` 由唯讀規劃與 Emulator-only 原子提交共用交易讀取與 Reservation Core。提交更新同一預留 ledger、公司／分倉投影、訂單品項及操作憑證，不建立平行 Core。僅允許 demo-yushin Emulator；無 Callable／UI／Preview／正式入口。後續各履約 Service 尚未接入 v2，不能啟用多倉功能。詳見 `single-item-two-warehouse-readonly-20261017.md`。
+
+## 指定倉分批出貨內部交易（2026-10-17）
+
+新增 `functions/location-shipment-service.js`，只允許 demo-yushin Emulator 的單品項 v2 CUSTOMER_SHIP。沿用 Reservation／Inventory／Fulfillment／WarehouseLogistics 核心；不開 Callable 或 UI。倉庫寄出權威為 warehouseShipmentRecords，獨立於客戶 deliveryRecords，寄完不更新客戶送達。workCategories、既有前端交付服務及簽收確認尚未接入，不能宣稱服務層已全面統一。詳見 `location-shipment-emulator-20261017.md`。
