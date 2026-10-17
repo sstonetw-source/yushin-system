@@ -153,3 +153,7 @@ Callable API 不接受使用者提供的角色、庫存總量或指定倉庫；�
 ## v2 倉庫寄出與客戶送達分離（2026-10-17，僅 Emulator）
 
 倉庫分批寄出以 warehouseShipmentRecords 保存指定倉與批次，扣實貨及該倉預留；不新增客戶 deliveryRecords、不增加 deliveredQty、不把 isDelivered 設為完成。warehouseShipmentState 沿用 dispatchState 的準備量預算演算法，但消耗量來自 warehouseShippedQty。原客戶交付流程未切換，兩種事件目前禁止混用；後續簽收必須確認已寄出量且不得再次扣庫存。三個倉庫操作角色可以提交，sales／engineer 禁止；同 ID、同身分同意圖重送不重扣。無批次或打單不足、來源／收件快照變更、異常帳、201 批次或退貨／保管／調撥進度均拒絕。
+
+## v2 客戶送達確認（2026-10-17，僅 Emulator）
+
+倉庫寄出才扣庫存；客戶送達依 shipmentId 確認，與真實扣帳 movement 核對。單筆出貨的累計確認不得超額，不能借用另一筆出貨；確認日期不得早於寄出日期。確認不再讀寫庫存／預留／批次或建立 movement。admin 可代辦、sales／engineer 限本人訂單、purchaser／warehouse 不可代辦。原 ID／原意圖重送只回傳原結果；不同 ID 仍受交易內最新剩餘額度限制。兩個 Service 共用 projectShipmentDelivery，允許部分送達與後續寄送交錯；全部寄出不代表全部送達。未開放 legacy事件混用、退貨／補送與UI入口。

@@ -361,3 +361,7 @@ Callable Emulator 啟動修正：在 `firebase.json` 明確配置 `auth:9099`、
 ## 指定倉分批出貨內部交易（2026-10-17）
 
 新增 `functions/location-shipment-service.js`，只允許 demo-yushin Emulator 的單品項 v2 CUSTOMER_SHIP。沿用 Reservation／Inventory／Fulfillment／WarehouseLogistics 核心；不開 Callable 或 UI。倉庫寄出權威為 warehouseShipmentRecords，獨立於客戶 deliveryRecords，寄完不更新客戶送達。workCategories、既有前端交付服務及簽收確認尚未接入，不能宣稱服務層已全面統一。詳見 `location-shipment-emulator-20261017.md`。
+
+## 出貨後送達確認（2026-10-17，僅 Emulator）
+
+`shipment-delivery-service` 只確認既有實際寄出事件，不再扣實貨。`Fulfillment.projectShipmentDelivery` 為兩個後端 Service 共用的唯一 v2 出貨／送達投影；支援部分送達後再寄下一批。確認只讀 user／order／來源 movement、只寫 order 的送達事件及投影。未提供前端、Callable或Preview入口，workCategories／需求與舊交付／退貨服務仍待整合。詳見 `shipment-delivery-confirmation-emulator-20261017.md`。
