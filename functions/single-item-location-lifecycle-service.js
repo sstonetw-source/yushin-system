@@ -3,6 +3,8 @@
 // connect legacy pages until procurement-demand and partial-shipment paths are unified.
 const {createHash}=require('node:crypto');
 const core=require('./shared/reservation-core');
+const demandCore=require('./shared/procurement-demand-core');
+const workflowCore=require('./shared/workflow-core');
 function fault(message,code='failed-precondition'){const e=new Error(message);e.code=code;throw e;}
 function ident(value,name){
  if(typeof value!=='string'||!value||value!==value.trim()||value.includes('/')||value.length>160)
@@ -104,10 +106,35 @@ async function commitSingleItemLocationLifecycle(db,uid,data){
   const product=await tx.get(ref('products',productId));
   if(!product.exists||String(product.data().productType||product.data().type||'').toUpperCase()==='SERVICE')
    fault('實體產品主檔不存在或為服務品項');
-  // Procurement projections must be handled by the shared order lifecycle
-  // before enabling this path for orders with supplier commitments/demands.
-  const demand=await tx.get(ref('procurementDemands','SALES_ORDER:'+orderId+':'+itemId));
-  if(demand.exists)fault('此訂單具有採購需求，須同步採購狀態，暫不支援');
+  // The existing browser Procurement Demand adapter URL-encodes the whole
+  // demand ID. A raw SALES_ORDER:... document is NOT the authoritative row.
+  const demandId=demandCore.demandIdForSource({sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId});
+  const demandRef=ref('procurementDemands',encodeURIComponent(demandId));
+  const demandSnap=await tx.get(demandRef),previousDemand=demandSnap.exists?demandSnap.data():null;
+  if(previousDemand){
+   if(previousDemand.demandId!==demandId||previousDemand.sourceType!=='SALES_ORDER'
+    ||previousDemand.sourceId!==orderId||previousDemand.sourceItemId!==itemId
+    ||previousDemand.productId!==productId||previousDemand.productKey!==productKey
+    ||previousDemand.fulfillmentType!=='WAREHOUSE'
+    ||previousDemand.warehouseId!==hint||previousDemand.ownerUid!==order.ownerUid
+    ||previousDemand.salesCode!==order.salesCode
+    ||![undefined,-1,0].includes(previousDemand.sourceItemIndex))
+    fault('採購需求與訂單來源或權限不一致，請先稽核');
+   // Only sync a never-ordered Material Request in this bounded trial.
+   // Committed POs/receipts, inconsistent projections and cancelled demands
+   // on active orders require the broader supplier lifecycle transaction.
+   const requested=number(previousDemand.requestedQty,'採購需求');
+   const orderedDemand=number(previousDemand.orderedQty,'已採購');
+   const receivedDemand=number(previousDemand.receivedQty,'已收貨');
+   const pendingDemand=number(previousDemand.remainingToOrderQty,'待採購');
+   const pendingReceipt=number(previousDemand.remainingToReceiveQty,'待收貨');
+   if(orderedDemand||receivedDemand||pendingReceipt
+    ||previousDemand.status!==(current==='normal'?'PENDING':'CANCELLED')
+    ||(current==='normal'&&previousDemand.cancelled===true)
+    ||(current==='normal'&&pendingDemand!==requested)
+    ||(current==='cancelled'&&pendingDemand!==0))
+    fault('採購需求具有供應承諾、錯誤狀態或異常投影，不能從初始 v2 流程變更');
+  }
   const reservationRef=ref('inventoryReservations',orderId+'__'+itemId),ledgerSnap=await tx.get(reservationRef);
   if(!ledgerSnap.exists)fault('缺少 v2 權威預留');
   const original=ledgerSnap.data();
@@ -163,6 +190,29 @@ async function commitSingleItemLocationLifecycle(db,uid,data){
   delete nextLedger.warehouseId;
   const now=new Date().toISOString(),nextItem={...item,reservedQty:nextLedger.quantity,
    shortageQty:nextLedger.shortageQty};
+  // Use the same Workflow -> Procurement Demand Core chain as the old
+  // order-lifecycle service, never derive requestedQty from page state.
+  const demandProjection=workflowCore.procurementQuantities({
+   orderedQty:ordered,fulfillmentType:'WAREHOUSE',reservedQty:nextItem.reservedQty,
+   shortageQty:nextItem.shortageQty,supplyOrderedQty:0,receivedQty:0,
+   deliveredQty:0,effectiveDeliveredQty:0,returnedQty:0
+  });
+  const baseDemand=nextStatus==='cancelled'
+   ?(previousDemand?demandCore.cancelDemand(previousDemand):null)
+   :demandCore.fromSalesOrder({sourceId:orderId,sourceItemId:itemId,sourceItemIndex:0,
+     fulfillmentType:'WAREHOUSE',shortageQty:demandProjection.requiredSupplyQty,
+     requiredSupplyQty:demandProjection.requiredSupplyQty,
+     inTransitQty:demandProjection.inTransitQty,supplyOrderedQty:0,receivedQty:0});
+  const nextDemand=baseDemand?demandCore.demandDocument({
+   ...(previousDemand||{}),...baseDemand,
+   cancelled:nextStatus==='cancelled',
+   sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId,
+   sourceItemIndex:0,productId,productKey,itemCode:item.itemCode||'',
+   itemName:item.itemName||'',brand:item.brand||'',fulfillmentType:'WAREHOUSE',
+   warehouseId:hint,ownerUid:order.ownerUid,salesCode:order.salesCode,
+   salesName:order.salesName||'',
+   scheduleDate:previousDemand?.scheduleDate||item.requiredByDate||item.scheduleDate||order.requiredByDate||order.expectedDate||''
+  },{createdAt:previousDemand?.createdAt||order.createdAt||now,updatedAt:now}):null;
   const nextStatusData={status:nextStatus==='cancelled'?'cancelled':'active',
    orderStatus:nextStatus,orderStatusDate:intent.date,orderStatusReason:intent.reason};
   const history={action:nextStatus==='normal'?'restore':'status_change',
@@ -182,6 +232,17 @@ async function commitSingleItemLocationLifecycle(db,uid,data){
     reservationOperationId:receiptRef.id,createdAt:now});
   }
   tx.set(reservationRef,{...nextLedger,updatedAt:now});
+  // A cancellation without an existing Material Request must not invent one.
+  // A restoration with shortage creates its demand in the same transaction.
+  if(nextDemand&&(previousDemand||nextDemand.requestedQty>0)){
+   if(previousDemand)tx.update(demandRef,{
+    requestedQty:nextDemand.requestedQty,remainingToOrderQty:nextDemand.remainingToOrderQty,
+    remainingToReceiveQty:nextDemand.remainingToReceiveQty,
+    perOrdered:nextDemand.perOrdered,perReceived:nextDemand.perReceived,
+    cancelled:nextStatus==='cancelled',status:nextDemand.status,sourceItemIndex:0,updatedAt:now
+   });
+   else tx.create(demandRef,nextDemand);
+  }
   tx.update(orderRef,{...nextStatusData,items:[nextItem],
    orderLifecycleHistory:[...(order.orderLifecycleHistory||[]),history],updatedAt:now});
   tx.create(receiptRef,{action:'single_v2_lifecycle',actorUid:uid,actorRole:role,

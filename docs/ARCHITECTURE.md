@@ -383,3 +383,7 @@ Callable Emulator 啟動修正：在 `firebase.json` 明確配置 `auth:9099`、
 ### 單品項 v2 預留取消／恢復（2026-10-17，僅 Emulator）
 
 `functions/single-item-location-lifecycle-service.js` 使用既有 Reservation Core `planLocationReservation` 與 `reservationStockDeltas`，在同一 Firebase Admin SDK Transaction 核對 users／orders／products／inventoryReservations／inventory／兩個 warehouses 與 warehouseStocks／採購需求，完成單筆訂單品項的兩倉預留釋放及重新分配；額外保存原候選倉清單於既有 v2 ledger，避免取消後遺失來源位置。固定 `reservationOperationReceipts/single-v2-lifecycle-{operationId}`、逐倉 inventoryMovements、訂單狀態及公司／分倉帳同交易更新，失敗整筆回滾。嚴格限制**尚未採購、收貨、打單、出貨、送達或退貨**的單品項；有 procurementDemands 文件直接拒絕，避免錯誤跳過需求同步。admin 與本人 sales／engineer 可操作，warehouse／purchaser 不可。沒有新 Core、獨立庫存 ledger、索引或 Rules；沒有 Cloud Callable／前端入口、Preview／正式部署，現行 `setOrderLifecycleStatus` 仍不接 v2。
+
+### v2 初始生命週期與採購需求一致性（2026-10-17，Emulator）
+
+延續單品項初始雙倉取消／恢復 Service：現有採購需求文件實際儲存在 `procurementDemands/${encodeURIComponent('SALES_ORDER:'+orderId+':'+itemId)}`，並非未編碼 ID。`commitSingleItemLocationLifecycle` 已改用與前端 `procurementDemandRef` 相同的**完整 ID 編碼**，交易內重讀該權威文件，避免漏讀並錯放未同步的採購需求。僅允許供應商訂購量與收貨量都為零、狀態與來源完全一致的需求；採購已承諾／到貨、來源錯誤或狀態異常一律拒絕。取消在庫存及訂單同一交易將既有需求標記 `CANCELLED`（保留歷史量），恢復經既有 Workflow → Procurement Demand Core 投影重新計算需求，更新既有文件或依實際缺口建立新文件。`functions/shared/workflow-core.js` 與 `procurement-demand-core.js` **由 modules/ 建置產生**，不是額外權威計算核心，CI 建置一致性檢查同步擴充。仍限 demo-yushin Emulator；有真實 PO、部分出貨或收貨的完整交易，以及前端／Rules／Preview 都未接線。

@@ -3,6 +3,7 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const admin=require('firebase-admin');
 const {getFirestore}=require('firebase-admin/firestore');
+const demandCore=require('../modules/procurement-demand-core');
 const {planSingleItemTwoWarehouse,commitSingleItemTwoWarehouse}=require('../functions/single-item-location-service');
 const {commitSingleItemLocationLifecycle}=require('../functions/single-item-location-lifecycle-service');
 let app,db;
@@ -328,13 +329,73 @@ test('v2 restore rejects inactive source additions and reassigns only actual fre
  await x.lifecycle('cancelled','lifecycle_recancel_inactive_123456');
  assert.equal((await x.read('inventory',x.productKey)).reserved,0);
 });
-test('v2 initial lifecycle refuses purchase demands, inconsistent source status, or released-ledger corruption',async()=>{
- const demand=await readyLifecycle('has-demand');
- await db.collection('procurementDemands').doc('SALES_ORDER:'+demand.orderId+':I1').set({
-  sourceType:'SALES_ORDER',sourceId:demand.orderId,sourceItemId:'I1',status:'PENDING'});
- const before=await snapshot(demand);
- await assert.rejects(demand.lifecycle('cancelled'),/採購需求/);
- assert.deepEqual(await snapshot(demand),before);
+async function seedLifecycleDemand(x,patch={}){
+ const order=await x.read('orders',x.orderId),item=order.items[0];
+ const id=demandCore.demandIdForSource({sourceType:'SALES_ORDER',sourceId:x.orderId,sourceItemId:'I1'});
+ const ref=db.collection('procurementDemands').doc(encodeURIComponent(id));
+ const record=demandCore.demandDocument({
+  sourceType:'SALES_ORDER',sourceId:x.orderId,sourceItemId:'I1',sourceItemIndex:0,
+  productId:x.productKey,productKey:x.productKey,warehouseId:'V2-A',
+  ownerUid:x.uid,salesCode:'V2',fulfillmentType:'WAREHOUSE',requestedQty:item.shortageQty,
+  orderedQty:0,receivedQty:0,status:order.status==='cancelled'?'CANCELLED':'PENDING'
+ },{createdAt:'2026-10-01T00:00:00Z',updatedAt:'2026-10-01T00:00:00Z'});
+ await ref.set({...record,...patch});
+ return {ref,id,read:async()=> (await ref.get()).data()};
+}
+test('v2 existing canonical procurement demand closes and reopens atomically with A/B reservation',async()=>{
+ const x=await readyLifecycle('demand-cycle',{company:7});
+ const demand=await seedLifecycleDemand(x);
+ const before=await demand.read();assert.equal(before.requestedQty,3);
+ const cancelled=await x.lifecycle('cancelled');
+ assert.equal(cancelled.reservedQty,0);
+ const stopped=await demand.read();
+ assert.equal(stopped.status,'CANCELLED');assert.equal(stopped.cancelled,true);assert.equal(stopped.remainingToOrderQty,0);
+ assert.equal(stopped.requestedQty,3);assert.equal(stopped.orderedQty,0);
+ assert.equal((await x.lifecycle('cancelled')).status,'already-applied');
+ assert.deepEqual(await demand.read(),stopped);
+ const restored=await x.lifecycle('normal');
+ assert.equal(restored.reservedQty,7);assert.equal(restored.shortageQty,3);
+ const reopened=await demand.read();
+ assert.equal(reopened.status,'PENDING');assert.equal(reopened.cancelled,false);assert.equal(reopened.requestedQty,3);
+ assert.equal(reopened.remainingToOrderQty,3);assert.equal(reopened.ownerUid,x.uid);
+ assert.equal(reopened.sourceItemIndex,0);
+ assert.equal((await x.read('inventory',x.productKey)).reserved,7);
+ assert.equal((await x.lifecycle('normal')).status,'already-applied');
+ assert.deepEqual(await demand.read(),reopened);
+});
+test('v2 restore creates canonical demand from new physical shortage, and cancellation without demand invents none',async()=>{
+ const x=await readyLifecycle('create-demand',{company:7});
+ const demandId=demandCore.demandIdForSource({sourceType:'SALES_ORDER',sourceId:x.orderId,sourceItemId:'I1'});
+ const encoded=encodeURIComponent(demandId);
+ await x.lifecycle('cancelled');
+ assert.equal((await db.collection('procurementDemands').doc(encoded).get()).exists,false);
+ await x.lifecycle('normal');
+ const demand=await x.read('procurementDemands',encoded);
+ assert.equal(demand.requestedQty,3);assert.equal(demand.remainingToOrderQty,3);
+ assert.equal(demand.status,'PENDING');
+ const release=await x.lifecycle('cancelled','demand_created_cancel_again_12345');
+ assert.equal(release.companyReservedDelta,-7);
+ assert.equal((await x.read('procurementDemands',encoded)).status,'CANCELLED');
+});
+test('v2 procurement demand supplier commitments, identity and lifecycle projection reject without releasing stock',async()=>{
+ const cases=[
+  ['ordered',{orderedQty:1,requestedQty:3,remainingToOrderQty:2,status:'PARTIALLY_ORDERED'}],
+  ['received',{orderedQty:1,receivedQty:1,requestedQty:3,status:'PARTIALLY_RECEIVED'}],
+  ['owner',{ownerUid:'stranger'}],
+  ['product',{productKey:'other'}],
+  ['source',{sourceItemId:'different'}],
+  ['warehouse',{warehouseId:'V2-B'}],
+  ['stale',{remainingToOrderQty:999}],
+  ['cancelled',{status:'CANCELLED'}],
+ ];
+ for(const [name,patch] of cases){
+  const x=await readyLifecycle('demand-reject-'+name,{company:7});
+  const demand=await seedLifecycleDemand(x,patch);
+  const before=await snapshot(x),demandBefore=await demand.read();
+  await assert.rejects(x.lifecycle('cancelled'),undefined,name);
+  assert.deepEqual(await snapshot(x),before,name);
+  assert.deepEqual(await demand.read(),demandBefore,name);
+ }
  const status=await readyLifecycle('bad-status');
  await db.collection('orders').doc(status.orderId).update({orderStatus:'cancelled'});
  await assert.rejects(status.lifecycle('cancelled'),/狀態不一致/);
