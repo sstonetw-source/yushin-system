@@ -423,3 +423,7 @@ job `reservationOperationReceipts` 與 movement 在不同交易，使用 pending
 ### v2 FIFO 有界游標分頁（2026-10-18）
 
 原 `advanceAutomaticFreeStockAllocation` 協調器現以既有 productKey/status 等值查詢，採每頁 50 筆、DocumentSnapshot 游標翻頁；讀取 active/shortage 兩個候選集合後，依既有 Reservation Core 優先權比較排序，不新增第二個優先順序函式。掃描超過 500 筆則拒絕，以免不完整選單或無限制 Firestore 成本。對每個批次步驟會重新讀候選，因此效能仍待後續 server-side index/投影優化；正式部署與 Preview 尚未啟用。
+
+### v2 取消與結案退貨的 durable 來源事件（2026-10-18）
+
+現有 lifecycle 和 Location Return Services 不另建 outbox Collection，而是把自由庫存來源資訊寫入**同筆交易的既有 inventoryMovements**。庫存真正變動與事件原子提交；rollback 則來源事件一併回滾。後續 `single-item-location-service.advanceReleasedV2FreeStock` 讀取來源 movement 並核對原交易憑證及**現在**授權物流角色，再導向原來的 `advanceAutomaticFreeStockAllocation`；唯一預留數學和 movement writer 仍為 Reservation Core／原 Service。不同來源固定不同 runId，同事件進度可重送且不重扣帳。此仍是 Emulator 內部可呼叫流程，**尚無自動執行器、正式前端、Callable**。尚未處理到貨 KEEP_STOCK、大批分段、不同執行者 checkpoint 接管。
