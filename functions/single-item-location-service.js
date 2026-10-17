@@ -584,6 +584,8 @@ async function advanceReleasedV2FreeStock(db,uid,input){
   const snap=await tx.get(db.collection('inventoryMovements').doc(movementId));
   if(!snap.exists)reject('找不到已提交的釋放 movement','not-found');
   const event=snap.data(),amount=event.freeAllocationQty;
+  if(!['CANCELLED_ORDER_RELEASE','CLOSED_CUSTOMER_RETURN'].includes(event.v2FreeStockSource))
+   reject('這筆 movement 不會釋放可分配的 v2 自由實貨');
   if(!Number.isSafeInteger(amount)||amount<=0
     ||!event.productKey||!event.warehouseId||!event.sourceId||!event.itemId)
    reject('釋放憑證缺少有效的庫存數量或來源');
