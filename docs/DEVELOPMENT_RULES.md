@@ -39,3 +39,5 @@
 - 預留同步、取消／恢復使用 `validateReservationBalance` 的原始帳目檢查；不得先正規化或 `Math.max(0, reserved-release)` 掩蓋不足。新增位置配置前須同時驗證來源與目標帳目，callback 重試不可沿用上次結果或通知目標。
 
 - 撤銷、退貨及退貨縮量的原批次更新必須使用 `planLotRestoration`，所有候選先讀後驗證；同 lotId 的分配合計後一次寫入，不可逐列以同一舊餘量覆寫。錯產品／倉庫不得猜測或重標批次。
+
+- 撤銷／退貨的公司與分倉數量一律交 `planReservationReturn`；先驗證原始帳與完整差額，再還原原批次。CLOSE、REPLACE 及取消狀態不可由 Feature／Service 另寫 clamp 公式。

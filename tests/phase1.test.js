@@ -1096,9 +1096,9 @@ test('phase 5 shipment consumes both aggregate and selected warehouse stock tran
     assert.match(s,/warehouseId/);
     assert.match(s,/warehouseStocks/);
     assert.match(s,/YushinReservation\.planReservationIssue/);
-    assert.match(s,/issuePlan\.aggregateStock\.onHand/);
-    assert.match(s,/issuePlan\.warehouseStock\.onHand/);
-    assert.match(s,/issuePlan\.aggregateStock\.reserved/);
+    assert.match(s,/stockPlan\.aggregateStock\.onHand/);
+    assert.match(s,/stockPlan\.warehouseStock\.onHand/);
+    assert.match(s,/stockPlan\.aggregateStock\.reserved/);
     assert.match(s,/'ship'/);
 });
 
