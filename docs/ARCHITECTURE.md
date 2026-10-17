@@ -365,3 +365,7 @@ Callable Emulator 啟動修正：在 `firebase.json` 明確配置 `auth:9099`、
 ## 出貨後送達確認（2026-10-17，僅 Emulator）
 
 `shipment-delivery-service` 只確認既有實際寄出事件，不再扣實貨。`Fulfillment.projectShipmentDelivery` 為兩個後端 Service 共用的唯一 v2 出貨／送達投影；支援部分送達後再寄下一批。確認只讀 user／order／來源 movement、只寫 order 的送達事件及投影。未提供前端、Callable或Preview入口，workCategories／需求與舊交付／退貨服務仍待整合。詳見 `shipment-delivery-confirmation-emulator-20261017.md`。
+
+## 送達撤銷及原批次追溯（2026-10-17，僅 Emulator）
+
+確認、撤銷及追溯共用 shipment-delivery-service 的 actor／order／projection／shipment proof helpers。reverseShipmentDelivery只修正orders送達事件與投影，不動實貨；location-return-trace-service僅依明確lotId／qty核對真實原批次並產生不可提交的預覽。Inventory.planExplicitShipmentReturn補上混合包裹部分送達的明確選批契約，還原計算仍沿既有planLotRestoration。實物退貨入庫、UI、工作清單／需求及Preview仍待完成。詳見 delivery-reversal-return-trace-emulator-20261017.md。

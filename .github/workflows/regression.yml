@@ -83,7 +83,7 @@ jobs:
         run: npx --yes firebase-tools@15 emulators:exec --only firestore,auth,functions --project demo-yushin "node --test tests/emulator-grouped-reservation-callable.cjs"
       - name: Verify single-item dual-warehouse planner and atomic reservation in Emulator
         run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --test tests/emulator-single-item-location.cjs"
-      - name: Verify partial warehouse shipment and customer acknowledgement in Emulator
+      - name: Verify shipment, delivery correction and read-only return trace in Emulator
         run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --test tests/emulator-location-shipment.cjs"
       - name: Compile and test Firestore rules
         run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --test tests/firestore-rules.test.js"

@@ -240,6 +240,42 @@
     return allocations;
   }
 
+  // The actual returned batch is selected explicitly. A partial customer
+  // acknowledgement does not establish which batch in a mixed parcel arrived.
+  function planExplicitShipmentReturn({shipment,confirmedQty,selections=[]}={}){
+    const qty=value=>{
+      if(!Number.isSafeInteger(value)||value<0)throw Error('退貨追溯數量必須為非負整數');
+      return value;
+    };
+    const ident=value=>{
+      if(typeof value!=='string'||!value||value!==value.trim()||value.includes('/')||value.length>160)
+        throw Error('退貨批次識別碼不正確');
+      return value;
+    };
+    if(!shipment||qty(shipment.qty)<=0||qty(confirmedQty)>shipment.qty
+      ||!Array.isArray(shipment.lotAllocations)||!shipment.lotAllocations.length||shipment.lotAllocations.length>200
+      ||!Array.isArray(selections)||!selections.length||selections.length>200)
+      throw Error('退貨追溯來源或明細不正確');
+    const lots=new Map();let sourceQty=0,returnQty=0;
+    for(const row of availableReturnAllocations([shipment],[])){
+      ident(row.lotId);qty(row.qty);
+      if(!row.qty||lots.has(row.lotId))throw Error('原出貨批次重複或數量不正確');
+      lots.set(row.lotId,row);sourceQty=qty(sourceQty+row.qty);
+    }
+    if(sourceQty!==shipment.qty)throw Error('原出貨量與實際批次合計不一致');
+    const seen=new Set(),allocations=[];
+    for(const row of selections){
+      ident(row?.lotId);qty(row.qty);const source=lots.get(row.lotId);
+      if(!row.qty||seen.has(row.lotId)||!source||row.qty>source.qty)
+        throw Error('指定退貨批次不屬於原出貨或超過該批次數量');
+      seen.add(row.lotId);returnQty=qty(returnQty+row.qty);
+      allocations.push({lotId:row.lotId,lotNo:source.lotNo||'',expiryDate:source.expiryDate||'',
+        qty:row.qty,unitCost:0,cost:0});
+    }
+    if(returnQty>confirmedQty)throw Error('退貨追溯總量超過該筆出貨已確認送達量');
+    return {returnQty,allocations};
+  }
+
   return {
     STOCK_POLICIES,
     stockPolicyFor,
@@ -256,7 +292,8 @@
     reverseLotAllocations,
     planLotRestoration,
     allocationsAfterReversal,
-    availableReturnAllocations
+    availableReturnAllocations,
+    planExplicitShipmentReturn
   };
 });
 

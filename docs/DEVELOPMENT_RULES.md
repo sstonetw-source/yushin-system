@@ -53,3 +53,5 @@
 - 指定倉分批寄送使用 `commitLocationShipment`，目前僅 demo-yushin Emulator；不匯出 Callable／接前端。倉庫寄出與客戶送達必須分開，不能為了沿用舊 UI 把新倉庫事件寫成 deliveryRecords。不得另寫 FEFO、預留扣量或打單可用量公式；共用 Core 的部署副本一律建置產生。改動須跑 emulator-location-shipment.cjs 的多倉分批、五角色、併發、原子回滾與重送；Preview 啟用前補全部投影／簽收不重扣及其他履約入口。
 
 - v2送達確認一律使用 `commitShipmentDelivery`／`projectShipmentDelivery`，目前僅demo-yushin Emulator；來源必須連結真實倉庫出貨及扣帳movement。確認不能呼叫現有會再扣庫存的delivery-stock Service，不可將新版與legacy事件混用。權限沿現有商業生命週期：admin或本人sales／engineer。修改須驗證真實預留→分倉寄送→分批送達／再寄下一批，並在執行時檢查送達確認僅讀3份文件、只寫orders；退貨／撤銷與前端／需求投影未整合前不可開放。
+
+- v2送達撤銷必須使用 reverseShipmentDelivery，不能呼叫會補回實貨的舊delivery-stock撤銷。確認／撤銷／批次追溯須共用原身份、投影與shipment proof；操作ID不可跨動作重用。部分送達混合批次的實物退貨，須由操作者明確指定lotId／qty，不可猜FEFO或最後批次。planLocationReturnTrace僅唯讀，不可直接套其預覽進正式寫入；真正退貨入庫仍需另案整合所有帳與重試證據。
