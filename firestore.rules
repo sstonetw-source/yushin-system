@@ -2362,6 +2362,12 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Callable-only idempotency receipt; client SDK cannot create or delete
+    // the server's transaction checkpoint even if it is signed in.
+    match /reservationOperationReceipts/{id} {
+      allow read, write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
