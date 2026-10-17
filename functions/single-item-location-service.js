@@ -563,4 +563,59 @@ async function advanceAutomaticFreeStockAllocation(db,uid,input){
  return {...present(state),lastOrderId:pending.orderId,lastAllocatedQty:applied.allocatedQty};
 }
 
-module.exports={normalizeSingleItemIntent,normalizeCommitIntent,planSingleItemTwoWarehouse,commitSingleItemTwoWarehouse,normalizeFreeStockIntent,commitSingleItemFreeStockAllocation,normalizeAutomaticFreeStockIntent,advanceAutomaticFreeStockAllocation};
+
+// Existing movement acts as a durable source event; this only delegates to
+// the current free-stock allocation coordinator after verifying its proof.
+async function advanceReleasedV2FreeStock(db,uid,input){
+ if(!process.env.FIRESTORE_EMULATOR_HOST||db.projectId!=='demo-yushin')
+  reject('來源庫存釋放續傳僅允許 demo-yushin Emulator');
+ ident(uid,'登入者');
+ if(!input||typeof input!=='object'||Array.isArray(input)
+   ||Object.keys(input).some(k=>k!=='movementId'))
+  reject('釋放來源請求含未授權欄位','invalid-argument');
+ const movementId=ident(input.movementId,'來源庫存異動 ID');
+ if(!movementId.startsWith('single-v2-life-')&&!movementId.startsWith('location-return-'))
+  reject('不是支援的 v2 釋放來源');
+ const source=await db.runTransaction(async tx=>{
+  const actor=await tx.get(db.collection('users').doc(uid));
+  if(!actor.exists||actor.data().active===false||actor.data().disabled===true
+    ||!['admin','purchaser','warehouse'].includes(actor.data().role))
+   reject('目前登入角色不能執行自由庫存分配','permission-denied');
+  const snap=await tx.get(db.collection('inventoryMovements').doc(movementId));
+  if(!snap.exists)reject('找不到已提交的釋放 movement','not-found');
+  const event=snap.data(),amount=event.freeAllocationQty;
+  if(!Number.isSafeInteger(amount)||amount<=0
+    ||!event.productKey||!event.warehouseId||!event.sourceId||!event.itemId)
+   reject('釋放憑證缺少有效的庫存數量或來源');
+  if(event.v2FreeStockSource==='CANCELLED_ORDER_RELEASE'){
+   if(!movementId.startsWith('single-v2-life-')||event.type!=='release'
+     ||event.reason!=='order_cancelled'||event.qty!==-amount
+     ||typeof event.reservationOperationId!=='string'
+     ||!event.reservationOperationId.startsWith('single-v2-lifecycle-'))
+    reject('取消釋放憑證不是原子提交的有效版本');
+   const receipt=await tx.get(db.collection('reservationOperationReceipts').doc(event.reservationOperationId));
+   const proof=receipt.exists?receipt.data():null;
+   if(!proof||proof.action!=='single_v2_lifecycle'||proof.orderId!==event.sourceId
+     ||proof.itemId!==event.itemId||proof.productKey!==event.productKey
+     ||proof.result?.nextStatus!=='cancelled'
+     ||!Array.isArray(proof.result?.warehouseDeltas)
+     ||!proof.result.warehouseDeltas.some(row=>row.warehouseId===event.warehouseId
+       &&row.reservedDelta===-amount))
+    reject('取消釋放缺少相符的原始交易憑證');
+  }else if(event.v2FreeStockSource==='CLOSED_CUSTOMER_RETURN'){
+   if(!movementId.startsWith('location-return-')||event.action!=='location_customer_return'
+     ||event.type!=='return'||event.qty!==amount
+     ||event.returnRecord?.settlement!=='CLOSE'
+     ||event.returnRecord?.qty!==amount||event.returnRecord?.movementId!==movementId
+     ||event.result?.settlement!=='CLOSE'||event.result?.qty!==amount)
+    reject('結案退貨釋放憑證不一致');
+  }else reject('這筆 movement 不會釋放可分配的 v2 自由實貨');
+  if(amount>1000)reject('釋放量超過試點批次 1000 件限制，需分段排程但不得遺失事件');
+  return {productKey:event.productKey,warehouseId:event.warehouseId,maxQty:amount};
+ });
+ const runId='source_v2_'+createHash('sha256').update(movementId).digest('hex').slice(0,40);
+ const result=await advanceAutomaticFreeStockAllocation(db,uid,{...source,runId});
+ return {...result,sourceMovementId:movementId};
+}
+
+module.exports={normalizeSingleItemIntent,normalizeCommitIntent,planSingleItemTwoWarehouse,commitSingleItemTwoWarehouse,normalizeFreeStockIntent,commitSingleItemFreeStockAllocation,normalizeAutomaticFreeStockIntent,advanceAutomaticFreeStockAllocation,advanceReleasedV2FreeStock};
