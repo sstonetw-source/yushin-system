@@ -136,14 +136,23 @@
    };
    return {existingQty:existing,company:stock(aggregateStock),warehouse:stock(warehouseStock)};
  }
+ function validateReservationStockIdentity({productKey,warehouseId,reservation,aggregateStock,warehouseStock}){
+   if(typeof productKey!=='string'||!productKey)throw Error('庫存作業缺少產品識別碼。');
+   locationId(warehouseId);
+   if(!aggregateStock||!warehouseStock)throw Error('庫存作業缺少公司或分倉庫存，請先核對資料。');
+   for(const data of [reservation,aggregateStock,warehouseStock]){
+     if(data.productKey!==undefined&&data.productKey!==productKey)
+       throw Error('產品與預留或庫存不一致，請先核對資料。');
+   }
+   if(warehouseStock.warehouseId!==undefined&&warehouseStock.warehouseId!==warehouseId)
+     throw Error('倉庫與分倉庫存位置不一致。');
+ }
  // One physical issue consumes only the selected location. This is a pure
  // proposal; dispatch eligibility, lots, transaction identity and Rules remain
  // the responsibility of the existing fulfillment transaction.
  function planReservationIssue({productKey,warehouseId,qty,reservation={},aggregateStock,warehouseStock,
    requireReservation=true,itemReservedQty}={}){
-   if(typeof productKey!=='string'||!productKey)throw Error('出貨缺少產品識別碼。');
-   locationId(warehouseId);
-   if(!aggregateStock||!warehouseStock)throw Error('出貨缺少公司或分倉庫存，請先核對資料。');
+   validateReservationStockIdentity({productKey,warehouseId,reservation,aggregateStock,warehouseStock});
    if(typeof requireReservation!=='boolean')throw Error('出貨預留要求格式不正確。');
    const multi=reservation.locationSchemaVersion===2;
    // Reuse canonical format checks, including unknown/mixed location markers.
@@ -152,12 +161,6 @@
    const shortageQty=multi?locationQty(reservation.shortageQty):0;
    const issueQty=multi?locationQty(qty):legacyReservationQty(qty);
    if(issueQty<=0)throw Error('出貨數量必須大於 0。');
-   for(const data of [reservation,aggregateStock,warehouseStock]){
-     if(data.productKey!==undefined&&data.productKey!==productKey)
-       throw Error('出貨產品與預留或庫存不一致，請先核對資料。');
-   }
-   if(warehouseStock.warehouseId!==undefined&&warehouseStock.warehouseId!==warehouseId)
-     throw Error('出貨倉庫與分倉庫存位置不一致。');
    const locations=multi?reservationLocations(reservation)
      :quantity>0?[{warehouseId:locationId(reservation.warehouseId),qty:quantity}]:[];
    const localQty=locations.find(row=>row.warehouseId===warehouseId)?.qty||0;
@@ -188,6 +191,46 @@
      aggregateStock:{onHand:company.onHand-issueQty,reserved:company.reserved+deltas.companyReservedDelta},
      warehouseStock:{onHand:warehouse.onHand-issueQty,
        reserved:warehouse.reserved+(deltas.warehouseDeltas.find(row=>row.warehouseId===warehouseId)?.reservedDelta||0)}};
+ }
+ // Restore real stock without reinterpreting cancellation or closed returns
+ // in a page. Single-location accounting only; the shared delta projection
+ // refuses touching another location through this scalar stock contract.
+ function planReservationReturn({operation,deltaQty,orderStatus='normal',settlement='REPLACE',
+   productKey,warehouseId,reservation={},aggregateStock,warehouseStock,itemReservedQty}={}){
+   if(!['SHIP_REVERSAL','CUSTOMER_RETURN'].includes(operation))throw Error('不支援的庫存還原作業。');
+   if(!['normal','cancelled'].includes(orderStatus)||!['REPLACE','CLOSE'].includes(settlement))
+     throw Error('訂單或退貨結案狀態不正確。');
+   if(!['number','string'].includes(typeof deltaQty)||String(deltaQty).trim()===''
+     ||!Number.isFinite(Number(deltaQty))||Number(deltaQty)===0||Math.abs(Number(deltaQty))>Number.MAX_SAFE_INTEGER)
+     throw Error('庫存還原數量不正確，請先核對資料。');
+   const delta=Number(deltaQty);
+   if(operation==='SHIP_REVERSAL'&&delta<0)throw Error('送貨撤銷還原數量必須大於零。');
+   validateReservationStockIdentity({productKey,warehouseId,reservation,aggregateStock,warehouseStock});
+   const held=reservationStockDeltas({},reservation);
+   if(held.warehouseDeltas.some(row=>row.warehouseId!==warehouseId))
+     throw Error('還原來源倉庫與既有預留位置不一致，不能以單倉作業修改其他位置。');
+   const {existingQty:existing,company,warehouse}=validateReservationBalance({existingQty:reservation.quantity,
+     itemReservedQty,aggregateStock,warehouseStock});
+   let quantity=orderStatus==='cancelled'?0:
+     (operation==='SHIP_REVERSAL'||settlement!=='CLOSE'?existing+delta:existing);
+   quantity=legacyReservationQty(quantity);
+   const next={...reservation,quantity,status:orderStatus==='cancelled'?'released':quantity>0?'active':'fulfilled'};
+   if(reservation.locationSchemaVersion===2){
+     locationQty(quantity);
+     next.locations=quantity>0?[{warehouseId,reservedQty:quantity}]:[];
+   }else if(quantity>0)next.warehouseId=warehouseId;
+   const changes=reservationStockDeltas(reservation,next);
+   const project=(stock,reservedDelta)=>{
+     if(stock.reserved+stock.transferFreeInTransit>stock.onHand)
+       throw Error('預留與自由調撥途中量超過實貨，請先核對庫存。');
+     const onHand=legacyReservationQty(stock.onHand+delta),reserved=legacyReservationQty(stock.reserved+reservedDelta);
+     if(reserved+stock.transferFreeInTransit>onHand)
+       throw Error('還原後公司或分倉可用庫存不足，不可扣用其他訂單預留或調撥途中量。');
+     return {onHand,reserved};
+   };
+   return {reservation:next,reservedDelta:changes.companyReservedDelta,
+     aggregateStock:project(company,changes.companyReservedDelta),
+     warehouseStock:project(warehouse,changes.warehouseDeltas.find(row=>row.warehouseId===warehouseId)?.reservedDelta||0)};
  }
  function planReservationLifecycle({nextStatus,existingQty=0,itemReservedQty=existingQty,
    requestedQty=0,inTransitQty=0,aggregateStock,warehouseStock}={}){
@@ -342,5 +385,5 @@
    const plan=planShortageAllocation(reservations,availableQty);
    return {allocations:plan.allocations.map(row=>({...row,id:row.reservationId})),allocatedQty:plan.allocatedQty,unallocatedQty:plan.remainingQty};
  }
- return {planReservationIssue,validateReservationBalance,physicalWarehouse,planMainTransferHold,planReservationLifecycle,reservationStockDeltas,validateMultiLocationLedger,planLocationReservation,reservationLocations,planMultiWarehouseReservation,planReservation,planShortageAllocation,allocateReceiptToShortages,reservationLocationCanChange,selectSingleWarehouse,compareReservationPriority};
+ return {planReservationReturn,planReservationIssue,validateReservationBalance,physicalWarehouse,planMainTransferHold,planReservationLifecycle,reservationStockDeltas,validateMultiLocationLedger,planLocationReservation,reservationLocations,planMultiWarehouseReservation,planReservation,planShortageAllocation,allocateReceiptToShortages,reservationLocationCanChange,selectSingleWarehouse,compareReservationPriority};
 });

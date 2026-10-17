@@ -1254,9 +1254,10 @@ test('cancelled-order returns go back to free stock instead of restoring reserva
     const end=app.indexOf('\nwindow.quickCompleteDelivery',start);
     const source=app.slice(start,end);
     assert.ok(start>=0&&end>start);
-    assert.match(source,/const returnKeepsReservation=normalizedOrderStatus\(order\)==='normal'/);
-    assert.match(source,/order.customerReturnSettlement==='CLOSE'\?currentReservation/);
-    assert.match(source,/const reservationStatus=returnKeepsReservation\?\(nextReservation>0\?'active':'fulfilled'\):'released'/);
+    assert.match(source,/YushinReservation\.planReservationReturn/);
+    assert.match(source,/orderStatus:normalizedOrderStatus\(order\)/);
+    assert.match(source,/settlement:order\.customerReturnSettlement/);
+    assert.match(source,/stockPlan\.reservation\.status/);
 });
 
 test('multi-item delivery edits cannot make an item delivered quantity lower than its returns', () => {

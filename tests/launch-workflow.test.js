@@ -13,7 +13,7 @@ function deliveryContext(lotQuantities=[1,1]){
  const query={get:async()=>({docs:[{ref:ref('inventoryLots/A')},{ref:ref('inventoryLots/B')}]})};
  query.where=()=>query;
  const db={collection:name=>({doc:id=>ref(name==='inventoryReservations'?'reservation':`${name}/${id||'generated'}`),where:()=>query})};
- const c=vm.createContext({db,window:{},console,Date,Promise,inventoryProductKey:()=> 'P',defaultWarehouse:()=>({id:'W'}),inventoryRefFor:()=>ref('inventory'),warehouseStockDocId:()=> 'stock',inventoryNumbers:x=>x,warehouseMasterCache:[],savedDeliveryRecords:o=>o.deliveryRecords||[],inventoryMovementRecord:()=>({}),inventoryReservationPayload:(_id,_order,quantity)=>({quantity}),YushinInventory:inventory,YushinReservation:require('../modules/reservation-core')});
+ const c=vm.createContext({db,window:{},console,Date,Promise,inventoryProductKey:()=> 'P',defaultWarehouse:()=>({id:'W'}),inventoryRefFor:()=>ref('inventory'),warehouseStockDocId:()=> 'stock',inventoryNumbers:x=>x,warehouseMasterCache:[],savedDeliveryRecords:o=>o.deliveryRecords||[],inventoryMovementRecord:()=>({}),inventoryReservationPayload:(_id,_order,quantity)=>({quantity}),YushinInventory:inventory,YushinReservation:require('../modules/reservation-core'),normalizedOrderStatus:o=>o.status==='cancelled'?'cancelled':'normal'});
  data['warehouseStocks/stock']=data.warehouse;
  vm.runInContext(section('async function applyInventoryDeliveryDeltaInTransaction','\nfunction applyInventoryDeliveryInTransaction'),c);
  return {c,tx,writes,reads,data};
@@ -133,5 +133,22 @@ test('delivery reversal validates every original batch warehouse and product bef
   const before=structuredClone(data);
   await assert.rejects(c.applyInventoryDeliveryDeltaInTransaction(tx,{itemId:'I',warehouseId:'W'},-2,'actor','O',records),/原出貨批次/);
   assert.equal(writes.length,0);assert.deepEqual(data,before);
+ }
+});
+
+test('cancelled-order delivery reversal restores free stock and releases its residual reservation',async()=>{
+ const {c,tx,writes}=deliveryContext([0,0]);
+ await c.applyInventoryDeliveryDeltaInTransaction(tx,{itemId:'I',warehouseId:'W',status:'cancelled'},-2,'actor','O',
+  [{qty:2,lotAllocations:[{lotId:'A',qty:1},{lotId:'B',qty:1}]}]);
+ assert.equal(writes.find(row=>row.path==='inventory').value.onHand,12);
+ assert.equal(writes.find(row=>row.path==='inventory').value.reserved,0);
+ assert.equal(writes.find(row=>row.path==='reservation').value.quantity,0);
+});
+test('delivery reversal rejects insufficient company or warehouse reservation before restoring any batch',async()=>{
+ for(const key of ['inventory','warehouse']){
+  const {c,tx,writes,reads,data}=deliveryContext([0,0]);data[key].reserved=1;
+  await assert.rejects(c.applyInventoryDeliveryDeltaInTransaction(tx,{itemId:'I',warehouseId:'W'},-2,'actor','O',
+   [{qty:2,lotAllocations:[{lotId:'A',qty:1},{lotId:'B',qty:1}]}]),/不足/);
+  assert.equal(writes.length,0);assert.equal(reads.some(path=>path.startsWith('inventoryLots/')),false);
  }
 });

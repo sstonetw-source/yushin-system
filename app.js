@@ -18214,14 +18214,16 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
     if (!whSnap.exists) throw new Error('指定倉庫沒有這個產品的分倉庫存，請先入庫或以庫存調整建立分倉數量。');
 
     const inv = inventoryNumbers(invSnap.exists ? invSnap.data() : {}), wh = inventoryNumbers(whSnap.data());
-    const issuePlan=deltaQty>0?globalThis.YushinReservation.planReservationIssue({
+    const stockPlan=deltaQty>0?globalThis.YushinReservation.planReservationIssue({
         productKey,warehouseId,qty:deltaQty,reservation:reservationSnap.exists?reservationSnap.data():{},
         aggregateStock:invSnap.exists?invSnap.data():undefined,warehouseStock:whSnap.data(),
         requireReservation:order.requireStockReservation===true,itemReservedQty:order.reservedQty
-    }):null;
-    const currentReservation=Math.max(0,Number(reservationSnap.exists?reservationSnap.data().quantity:0));
-    const newReservedRemaining=issuePlan?issuePlan.reservation.quantity:Math.max(0,currentReservation-deltaQty);
-    const reservedDelta=issuePlan?issuePlan.reservedDelta:newReservedRemaining-currentReservation;
+    }):globalThis.YushinReservation.planReservationReturn({operation:'SHIP_REVERSAL',deltaQty:-deltaQty,
+        orderStatus:normalizedOrderStatus(order),productKey,warehouseId,reservation:reservationSnap.exists?reservationSnap.data():{},
+        aggregateStock:invSnap.exists?invSnap.data():undefined,warehouseStock:whSnap.data(),itemReservedQty:order.reservedQty
+    });
+    const newReservedRemaining=stockPlan.reservation.quantity;
+    const reservedDelta=stockPlan.reservedDelta;
     const now = new Date().toISOString();
     let lotAllocations=[],cogs=0;
 
@@ -18257,8 +18259,8 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
         cogs=-reversal.totalCost;
     }
 
-    if (invSnap.exists) transaction.set(invRef,{onHand:issuePlan?issuePlan.aggregateStock.onHand:Math.max(0,inv.onHand-deltaQty),reserved:issuePlan?issuePlan.aggregateStock.reserved:Math.max(0,inv.reserved+reservedDelta),incoming:inv.incoming,updatedAt:now},{merge:true});
-    transaction.set(whRef,{warehouseId,productKey,onHand:issuePlan?issuePlan.warehouseStock.onHand:wh.onHand-deltaQty,reserved:issuePlan?issuePlan.warehouseStock.reserved:Math.max(0,wh.reserved+reservedDelta),incoming:wh.incoming,updatedAt:now},{merge:true});
+    if (invSnap.exists) transaction.set(invRef,{onHand:stockPlan.aggregateStock.onHand,reserved:stockPlan.aggregateStock.reserved,incoming:inv.incoming,updatedAt:now},{merge:true});
+    transaction.set(whRef,{warehouseId,productKey,onHand:stockPlan.warehouseStock.onHand,reserved:stockPlan.warehouseStock.reserved,incoming:wh.incoming,updatedAt:now},{merge:true});
     const movementRef=db.collection('inventoryMovements').doc();
     transaction.set(movementRef,inventoryMovementRecord(deltaQty>0?'ship':'ship_reversal',-deltaQty,sourceId,productKey,actor,{
         warehouseId,itemId:deliveryItemId,fulfillmentType:'WAREHOUSE',reservedDelta,lotAllocations,costPending:true,
@@ -18266,7 +18268,7 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
         ownerUid:order.ownerUid||'',salesCode:order.salesCode||''
     }));
 
-    transaction.set(deliveryReservationRef,{...(issuePlan?.reservation||{}),...inventoryReservationPayload(sourceId,order,newReservedRemaining,issuePlan?issuePlan.reservation.status:(newReservedRemaining>0?'active':'fulfilled')),itemId:deliveryItemId,warehouseId},{merge:true});
+    transaction.set(deliveryReservationRef,{...stockPlan.reservation,...inventoryReservationPayload(sourceId,order,newReservedRemaining,stockPlan.reservation.status),itemId:deliveryItemId,warehouseId},{merge:true});
     return { reservedDelta,newReservedQty:newReservedRemaining,lotAllocations,cogs,movementId:movementRef.id };
 }
 function applyInventoryDeliveryInTransaction(transaction, orderRef, order, deliveryQty, actor, sourceId) {
@@ -18288,9 +18290,11 @@ async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQ
     const reservationSnap = await transaction.get(reservationRef);
     if (!whSnap.exists) throw new Error('找不到原出貨倉庫庫存。');
     const inv=inventoryNumbers(invSnap.exists?invSnap.data():{}), wh=inventoryNumbers(whSnap.data());
-    if (deltaQty < 0 && wh.onHand < Math.abs(deltaQty)) {
-        throw new Error('刪除／縮減退貨後會造成庫存小於 0。');
-    }
+    const stockPlan=globalThis.YushinReservation.planReservationReturn({operation:'CUSTOMER_RETURN',deltaQty,
+        orderStatus:normalizedOrderStatus(order),settlement:order.customerReturnSettlement||'REPLACE',
+        productKey,warehouseId,reservation:reservationSnap.exists?reservationSnap.data():{},
+        aggregateStock:invSnap.exists?invSnap.data():undefined,warehouseStock:whSnap.data(),itemReservedQty:order.reservedQty
+    });
     const now=new Date().toISOString();
     let lotAllocations=[],cogs=0;
     let selectedAllocations;
@@ -18315,18 +18319,10 @@ async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQ
         allocations:selectedAllocations,direction:deltaQty>0?1:-1,
         lots:lotContexts.filter(row=>row.lotSnap.exists).map(row=>({...row.lotSnap.data(),id:row.lotId}))});
     for(const row of restored)transaction.update(db.collection('inventoryLots').doc(row.lotId),{remainingQty:row.remainingQty,updatedAt:now});
-    // 正常訂單退貨後要把商品重新保留給原訂單，供補送使用。
-    // 已取消／作廢訂單只把退貨放回自由庫存，不能重新占住庫存；若遇到殘留預留也一併釋放。
-    const currentReservation=Math.max(0,Number(reservationSnap.exists?reservationSnap.data().quantity:0));
-    const returnKeepsReservation=normalizedOrderStatus(order)==='normal';
-    const nextReservation=returnKeepsReservation?(order.customerReturnSettlement==='CLOSE'?currentReservation:Math.max(0,currentReservation+deltaQty)):0;
-    const reservationDelta=nextReservation-currentReservation;
-    const nextReserved=Math.max(0,inv.reserved+reservationDelta);
-    const nextWarehouseReserved=Math.max(0,wh.reserved+reservationDelta);
-    if (invSnap.exists) transaction.set(invRef,{onHand:Math.max(0,inv.onHand+deltaQty),reserved:nextReserved,incoming:inv.incoming,updatedAt:now},{merge:true});
-    transaction.set(whRef,{warehouseId,productKey,onHand:wh.onHand+deltaQty,reserved:nextWarehouseReserved,incoming:wh.incoming,updatedAt:now},{merge:true});
-    const reservationStatus=returnKeepsReservation?(nextReservation>0?'active':'fulfilled'):'released';
-    transaction.set(reservationRef,{...inventoryReservationPayload(sourceId,order,nextReservation,reservationStatus),itemId:deliveryItemId,warehouseId},{merge:true});
+    const nextReservation=stockPlan.reservation.quantity,reservationDelta=stockPlan.reservedDelta;
+    transaction.set(invRef,{onHand:stockPlan.aggregateStock.onHand,reserved:stockPlan.aggregateStock.reserved,incoming:inv.incoming,updatedAt:now},{merge:true});
+    transaction.set(whRef,{warehouseId,productKey,onHand:stockPlan.warehouseStock.onHand,reserved:stockPlan.warehouseStock.reserved,incoming:wh.incoming,updatedAt:now},{merge:true});
+    transaction.set(reservationRef,{...stockPlan.reservation,...inventoryReservationPayload(sourceId,order,nextReservation,stockPlan.reservation.status),itemId:deliveryItemId,warehouseId},{merge:true});
     transaction.set(db.collection('inventoryMovements').doc(),{
         type:deltaQty>0?'return_in':'return_reversal',qty:deltaQty,productKey,warehouseId,
         fulfillmentType:'WAREHOUSE',sourceType:DOCUMENT_TYPES.ORDER,sourceId,

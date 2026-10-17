@@ -2656,3 +2656,58 @@ test('actual protected reversal and return stop on a foreign batch before queuin
   }
  }
 });
+
+test('actual replacement return and correction keep company warehouse and own reservation aligned',async()=>{
+ const f=await actualShipmentFixture('admin','admin');f.context.DOCUMENT_TYPES={ORDER:'order'};
+ await f.ship(2,'replacement-source');let previous;
+ for(const delta of [1,-1]){
+  await f.context.runRoleTransaction(async tx=>{
+   const ref=f.client.collection('orders').doc(f.id),snap=await tx.get(ref),order=snap.data(),item={...order,...order.items[0]};
+   const result=await f.context.applyInventoryReturnDeltaInTransaction(tx,item,delta,'admin',f.id,delta<0?previous:null);
+   if(delta>0)previous={id:'REPLACE',qty:1,lotAllocations:result.lotAllocations};
+   tx.update(ref,{items:[{...order.items[0],reservedQty:result.newReservedQty}],returnRecords:delta>0?[previous]:[],returnedQty:delta>0?1:0});
+  });
+  const expected=delta>0?4:3;
+  for(const path of ['inventory/init-product','warehouseStocks/W1__init-product']){
+   const stock=(await getDoc(doc(db('admin'),path))).data();assert.equal(stock.onHand,expected);assert.equal(stock.reserved,expected);
+  }
+  assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).data().quantity,expected);
+  assert.equal((await getDoc(doc(db('admin'),'inventoryLots/issue-admin'))).data().remainingQty,expected);
+ }
+});
+test('actual cancellation followed by return or delivery reversal never recreates a stock reservation',async()=>{
+ for(const kind of ['return','reversal']){
+  const f=await actualShipmentFixture('admin','admin');f.context.DOCUMENT_TYPES={ORDER:'order'};
+  await f.ship(2,'cancel-source-'+kind);await loadActualLifecycle(f)('cancelled');
+  await f.context.runRoleTransaction(async tx=>{
+   const ref=f.client.collection('orders').doc(f.id),snap=await tx.get(ref),order=snap.data(),item={...order,...order.items[0]};
+   if(kind==='return'){
+    const result=await f.context.applyInventoryReturnDeltaInTransaction(tx,item,1,'admin',f.id,null);
+    tx.update(ref,{returnRecords:[{id:'CANCEL-R',qty:1,lotAllocations:result.lotAllocations}],returnedQty:1});
+   }else{
+    const result=await f.context.applyInventoryDeliveryDeltaInTransaction(tx,item,-2,'admin',f.id,order.deliveryRecords);
+    tx.update(ref,{items:[{...order.items[0],reservedQty:result.newReservedQty}],deliveryRecords:[],deliveredQty:0,isDelivered:false});
+   }
+  });
+  for(const path of ['inventory/init-product','warehouseStocks/W1__init-product']){
+   const stock=(await getDoc(doc(db('admin'),path))).data();assert.equal(stock.onHand,kind==='return'?4:5);assert.equal(stock.reserved,0);
+  }
+  const held=(await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).data();assert.equal(held.quantity,0);assert.equal(held.status,'released');
+ }
+});
+test('actual return accounting refuses insufficient reservation accounts before any lot restoration for receiver roles',async()=>{
+ for(const [uid,role] of [['admin','admin'],['buyer1','purchaser'],['wh1','warehouse']]){
+  const f=await actualShipmentFixture(uid,role);f.context.DOCUMENT_TYPES={ORDER:'order'};await f.ship(2,'raw-account-'+uid);
+  await seed('inventory/init-product',{productKey:'init-product',onHand:3,reserved:2,incoming:0});
+  const paths=['orders/'+f.id,'inventory/init-product','warehouseStocks/W1__init-product','inventoryLots/issue-'+uid,'inventoryReservations/'+f.id+'__I'];
+  const read=()=>Promise.all(paths.map(async path=>(await getDoc(doc(db('admin'),path))).data()));const before=await read();
+  for(const kind of ['return','reversal']){
+   await assert.rejects(f.context.runRoleTransaction(async tx=>{
+    const snap=await tx.get(f.client.collection('orders').doc(f.id)),order=snap.data(),item={...order,...order.items[0]};
+    if(kind==='return')await f.context.applyInventoryReturnDeltaInTransaction(tx,item,1,uid,f.id,null);
+    else await f.context.applyInventoryDeliveryDeltaInTransaction(tx,item,-1,uid,f.id,order.deliveryRecords);
+   }),/預留量不足/);
+   assert.deepEqual(await read(),before);
+  }
+ }
+});

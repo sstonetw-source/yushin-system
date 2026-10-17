@@ -78,14 +78,14 @@ test('cancelled delivered order opens requested return form only for authorized 
 function returnFixture(cancelled=false){
  const docs=new Map([
   ['inventory/P1',{onHand:1,reserved:cancelled?0:1,incoming:0}],['warehouseStocks/W1-P1',{onHand:1,reserved:cancelled?0:1,incoming:0}],
-  ['inventoryReservations/O1__I1',{quantity:cancelled?0:1}],['inventoryLots/A',{productKey:'P1',warehouseId:'W1',remainingQty:0}],['inventoryLots/B',{productKey:'P1',warehouseId:'W1',remainingQty:1}]
+  ['inventoryReservations/O1__I1',{productKey:'P1',warehouseId:'W1',quantity:cancelled?0:1}],['inventoryLots/A',{productKey:'P1',warehouseId:'W1',remainingQty:0}],['inventoryLots/B',{productKey:'P1',warehouseId:'W1',remainingQty:1}]
  ]);
  let id=0;const db={collection:name=>({doc:key=>({path:name+'/'+(key||'movement-'+(++id))})})};
  const tx={get:async ref=>({exists:docs.has(ref.path),data:()=>({...docs.get(ref.path)})}),update:(ref,data)=>docs.set(ref.path,{...docs.get(ref.path),...data}),set:(ref,data)=>docs.set(ref.path,{...docs.get(ref.path),...data})};
  const prior={id:'R1',qty:1,lotAllocations:[{lotId:'B',qty:1,unitCost:200,cost:200}]};
  const order={itemId:'I1',qty:2,warehouseId:'W1',productId:'P1',status:cancelled?'cancelled':'normal',ownerUid:'sales1',
   deliveryRecords:[{qty:2,lotAllocations:[{lotId:'A',qty:1,unitCost:100},{lotId:'B',qty:1,unitCost:200}]}],returnRecords:[]};
- const c=vm.createContext({db,YushinInventory:inventory,inventoryProductKey:o=>o.productId,defaultWarehouse:()=>({id:'W1'}),inventoryRefFor:()=>db.collection('inventory').doc('P1'),warehouseStockDocId:(w,p)=>w+'-'+p,
+ const c=vm.createContext({db,YushinInventory:inventory,YushinReservation:require('../modules/reservation-core'),inventoryProductKey:o=>o.productId,defaultWarehouse:()=>({id:'W1'}),inventoryRefFor:()=>db.collection('inventory').doc('P1'),warehouseStockDocId:(w,p)=>w+'-'+p,
   inventoryNumbers:inventory.normalizeStock,savedDeliveryRecords:o=>o.deliveryRecords,savedReturnRecords:o=>o.returnRecords,normalizedOrderStatus:o=>o.status,inventoryReservationPayload:()=>({}),DOCUMENT_TYPES:{ORDER:'order'}});
  vm.runInContext(fn('applyInventoryReturnDeltaInTransaction'),c);return {c,tx,docs,prior,order};
 }
@@ -168,6 +168,7 @@ test('customer return combines repeated allocations of one original lot into a s
 test('customer return correction refuses cumulative over-removal from one original lot without any writes',async()=>{
  const {c,tx,docs,order}=returnFixture();
  for(const key of ['inventory/P1','warehouseStocks/W1-P1'])Object.assign(docs.get(key),{onHand:3,reserved:3});
+ docs.get('inventoryReservations/O1__I1').quantity=2;
  const previous={qty:2,lotAllocations:[{lotId:'B',qty:1},{lotId:'B',qty:1}]};
  const before=structuredClone([...docs]);
  await assert.rejects(c.applyInventoryReturnDeltaInTransaction(tx,order,-2,'Receiver','O1',previous),/庫存不足/);
@@ -178,6 +179,25 @@ test('both customer return directions reject original batches belonging to anoth
   const {c,tx,docs,prior,order}=returnFixture();Object.assign(docs.get('inventoryLots/B'),change);
   const before=structuredClone([...docs]);
   await assert.rejects(c.applyInventoryReturnDeltaInTransaction(tx,order,delta,'Receiver','O1',delta<0?prior:null),/原出貨批次/);
+  assert.deepEqual([...docs],before);
+ }
+});
+
+test('return correction refuses erasing more own reserved units than the ledger contains without any writes',async()=>{
+ const {c,tx,docs,order}=returnFixture();
+ for(const key of ['inventory/P1','warehouseStocks/W1-P1'])Object.assign(docs.get(key),{onHand:3,reserved:3});
+ docs.get('inventoryLots/B').remainingQty=3;
+ const before=structuredClone([...docs]),previous={qty:2,lotAllocations:[{lotId:'B',qty:2}]};
+ await assert.rejects(c.applyInventoryReturnDeltaInTransaction(tx,order,-2,'Receiver','O1',previous),/數量不正確/);
+ assert.deepEqual([...docs],before);
+});
+test('return and return correction reject missing or insufficient raw stock accounts before changing any batch',async()=>{
+ for(const delta of [1,-1])for(const mutate of [
+  docs=>docs.delete('inventory/P1'),docs=>docs.get('inventory/P1').reserved=0,
+  docs=>docs.get('warehouseStocks/W1-P1').reserved=0,docs=>docs.get('inventory/P1').onHand=NaN
+ ]){
+  const {c,tx,docs,prior,order}=returnFixture();mutate(docs);const before=structuredClone([...docs]);
+  await assert.rejects(c.applyInventoryReturnDeltaInTransaction(tx,order,delta,'Receiver','O1',delta<0?prior:null),/不足|缺少|數量不正確/);
   assert.deepEqual([...docs],before);
  }
 });
