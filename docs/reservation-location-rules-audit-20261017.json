@@ -1,0 +1,12 @@
+{
+  "score": 4,
+  "summary": "範圍限於 firestore.rules 的 inventoryReservations 位置格式、來源歸屬及既有交易證明。create 與 update 都檢查 validReservationSource，update 另限制原格式及固定來源身分；多位置欄位仍拒絕，未放寬權限。角色取自受保護使用者資料；sales/engineer 另須來源歸屬及交易證明，admin 保留既有管理權限。證明 reservationIds 限 1 至 5 且不可重複；數量與來源索引有型別驗證。純核心多位置取消／恢復不代表 Rules 支援已完成，也不是全系統稽核評分。",
+  "findings": [
+    {
+      "check": "Storage Abuse / Type Safety",
+      "severity": "minor",
+      "issue": "既有 validReservationSource 對 shortageQty 只驗證 number 與非負，未對來源未交付量設定上限，部分說明字串亦無應用層長度上限。位置格式封鎖不能替代完整文件大小與數量語意驗證。",
+      "recommendation": "在獨立相容性變更中明訂 shortageQty 與來源需求的上限及字串長度，先盤點歷史資料，再以五角色 Emulator 驗證 create/update；本批未改此規則。"
+    }
+  ]
+}

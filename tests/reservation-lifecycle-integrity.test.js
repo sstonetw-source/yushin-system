@@ -530,3 +530,21 @@ test('restoration reserves only open replacement returns and respects legacy ite
   assert.equal(f.docs.get('inventoryReservations/O__I').shortageQty,0);
  }
 });
+
+test('cancellation and restoration reject reserved plus travelling free stock exceeding physical stock',()=>{
+ for(const nextStatus of ['normal','cancelled'])for(const key of ['aggregateStock','warehouseStock']){
+  const source={nextStatus,existingQty:3,requestedQty:5,aggregateStock:stock(3),warehouseStock:stock(3)};
+  source[key].transferFreeInTransit=8;
+  assert.throws(()=>plan(source),/調撥途中量超過實貨/);
+  source[key].transferFreeInTransit=7;
+  assert.equal(plan(source).reservedDelta,nextStatus==='cancelled'?-3:0);
+ }
+});
+test('actual lifecycle leaves stock, reservation, demand and order untouched on impossible transit balances',async()=>{
+ for(const role of ['admin','sales','engineer'])for(const nextStatus of ['normal','cancelled']){
+  const f=fixture({role});f.docs.get('warehouseStocks/A__P').transferFreeInTransit=8;
+  const before=structuredClone([...f.docs]);
+  await assert.rejects(f.run(nextStatus),/調撥途中量超過實貨/);
+  assert.deepEqual([...f.docs],before);assert.equal(f.writes.length,0);
+ }
+});

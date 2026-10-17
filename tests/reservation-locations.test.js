@@ -172,3 +172,76 @@ test('browser globals share inventory availability and fail clearly if its depen
  const unloaded=vm.createContext({});vm.runInContext(reservationSource,unloaded);
  assert.throws(()=>unloaded.YushinReservation.planLocationReservation(input()),/Inventory core/);
 });
+
+test('explicit cancellation releases every warehouse despite a nonzero order target and supplier commitment',()=>{
+ const source=apply(input(),plan(input()));source.nextStatus='cancelled';source.inTransitQty=7;
+ const before=structuredClone(source),result=plan(source),after=apply(source,result);
+ assert.deepEqual(source,before);
+ assert.deepEqual(result.reservation,{locationSchemaVersion:2,locations:[],quantity:0,shortageQty:0,status:'released'});
+ assert.deepEqual(result.warehouseDeltas,[{warehouseId:'A',reservedDelta:-4},{warehouseId:'B',reservedDelta:-6}]);
+ assert.equal(result.companyReservedDelta,-10);assert.equal(result.remainingToOrderQty,0);
+ assert.equal(after.aggregateStock.onHand,12);assert.equal(after.stocks.B.onHand,8);
+ assert.equal(plan(after).companyReservedDelta,0);assert.deepEqual(plan(after).warehouseDeltas,[]);
+});
+test('restoration after cancellation respects new competing holds and supplier progress',()=>{
+ const held=apply(input(),plan(input()));held.nextStatus='cancelled';
+ const source=apply(held,plan(held));source.nextStatus='normal';source.inTransitQty=3;
+ source.aggregateStock.reserved=5;source.stocks.A.reserved=4;source.stocks.B.reserved=1;
+ const result=plan(source),after=apply(source,result);
+ assert.deepEqual(result.reservation.locations,[{warehouseId:'B',reservedQty:7}]);
+ assert.equal(result.reservation.shortageQty,3);assert.equal(result.remainingToOrderQty,0);
+ assert.equal(after.aggregateStock.reserved,12);assert.equal(after.stocks.A.reserved,4);
+ assert.equal(plan(after).companyReservedDelta,0);
+});
+test('explicit cancellation retains other orders holds and releases disabled physical locations',()=>{
+ const source=apply(input({requestedQty:8}),plan(input({requestedQty:8})));
+ source.nextStatus='cancelled';source.warehouses[0].active=false;
+ source.stocks.B.reserved+=2;source.aggregateStock.reserved+=2;
+ const after=apply(source,plan(source));
+ assert.equal(after.aggregateStock.reserved,2);assert.equal(after.stocks.A.reserved,0);assert.equal(after.stocks.B.reserved,2);
+ source.nextStatus='normal';source.reservation=after.reservation;source.stocks=after.stocks;source.aggregateStock=after.aggregateStock;
+ const restored=plan(source);assert.deepEqual(restored.reservation.locations,[{warehouseId:'B',reservedQty:6}]);
+ assert.equal(restored.reservation.shortageQty,2);
+});
+test('both lifecycle statuses reject mismatched item projections and mixed source formats',()=>{
+ for(const nextStatus of ['normal','cancelled']){
+  const source=apply(input(),plan(input()));source.nextStatus=nextStatus;
+  assert.throws(()=>plan({...source,itemReservedQty:9}),/不一致/);
+  for(const field of ['allocations','warehouseAllocations']){
+   assert.throws(()=>plan({...source,reservation:{...source.reservation,[field]:[]}}),/不同位置格式/);
+   assert.throws(()=>plan(input({nextStatus,reservation:{quantity:0,[field]:[]}})),/位置格式/);
+  }
+ }
+ assert.throws(()=>plan(input({nextStatus:'archived'})),/狀態/);
+});
+test('raw company and location overcommit cannot be normalized into a successful proposal',()=>{
+ for(const nextStatus of ['normal','cancelled'])for(const target of ['company','A','B']){
+  const source=apply(input({requestedQty:2}),plan(input({requestedQty:2})));source.nextStatus=nextStatus;
+  const data=target==='company'?source.aggregateStock:source.stocks[target];
+  data.transferFreeInTransit=data.onHand-data.reserved+1;
+  assert.throws(()=>plan(source),/稽核/);
+  data.transferFreeInTransit=0;data.reserved=data.onHand+1;
+  assert.throws(()=>plan(source),/稽核/);
+ }
+});
+test('all eligible stock snapshots are validated even when an earlier location covers the full target',()=>{
+ for(const value of [NaN,Infinity,-1,null,'bad',0.5]){
+  const source=input({requestedQty:1});source.stocks.B.transferFreeInTransit=value;
+  assert.throws(()=>plan(source),/數量/);
+ }
+});
+test('multi-location lifecycle conserves other holds and physical stock over cancel, retry and restore sequences',()=>{
+ for(let requested=0;requested<=15;requested++)for(let incoming=0;incoming<=5;incoming++){
+  const source=input({requestedQty:requested,inTransitQty:incoming});
+  source.stocks.B.reserved=1;source.aggregateStock.reserved=1;
+  const held=apply(source,plan(source));held.nextStatus='cancelled';
+  const cancelled=apply(held,plan(held));
+  assert.equal(cancelled.aggregateStock.reserved,1);assert.equal(cancelled.stocks.B.reserved,1);
+  assert.equal(cancelled.aggregateStock.onHand,12);
+  assert.equal(plan(cancelled).companyReservedDelta,0);
+  cancelled.nextStatus='normal';const result=plan(cancelled),restored=apply(cancelled,result);
+  const {productKey,...expected}=held.reservation;assert.deepEqual(result.reservation,expected);
+  assert.equal(restored.aggregateStock.reserved,1+result.reservation.quantity);
+  assert.equal(result.companyReservedDelta,result.warehouseDeltas.reduce((sum,row)=>sum+row.reservedDelta,0));
+ }
+});
