@@ -7,12 +7,13 @@ exports.sendPurchaseOrderEmail=onCall({region:'asia-east1'},()=>{
 
 // Staged, explicitly gated migration of two-warehouse grouped reservations.
 // Default is disabled in deployed Functions until Preview integration is accepted.
-const admin=require('firebase-admin');
-if(!admin.apps.length)admin.initializeApp();
+const {getApps,initializeApp}=require('firebase-admin/app');
+if(!getApps().length)initializeApp();
 const {getFirestore}=require('firebase-admin/firestore');
 const {commitGroupedWarehouseReservation}=require('./grouped-reservation-service');
+const {allowGroupedReservation}=require('./grouped-reservation-gate');
 exports.commitGroupedWarehouseReservation=onCall({region:'asia-east1'},async request=>{
-  if(process.env.ENABLE_GROUPED_RESERVATION!=='true')
+  if(!allowGroupedReservation())
     throw new HttpsError('failed-precondition','跨倉後端交易尚未完成 Preview 驗收');
   if(!request.auth?.uid)throw new HttpsError('unauthenticated','請先登入');
   try{return await commitGroupedWarehouseReservation(getFirestore(),request.auth.uid,request.data);}

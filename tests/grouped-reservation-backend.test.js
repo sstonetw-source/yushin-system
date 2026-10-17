@@ -180,7 +180,9 @@ test('receipt is server-only and no direct client stock write was enabled',()=>{
   const rules=fs.readFileSync('firestore.rules','utf8');
   assert.match(rules,/match \/reservationOperationReceipts\/\{id\} \{\s+allow read, write: if false;/);
   const source=fs.readFileSync('functions/index.js','utf8');
-  assert.match(source,/ENABLE_GROUPED_RESERVATION.*!==.*true/);
+  assert.match(source,/if\(!allowGroupedReservation\(\)\)/);
+  const gate=fs.readFileSync('functions/grouped-reservation-gate.js','utf8');
+  assert.match(gate,/ENABLE_GROUPED_RESERVATION!=='true'/);
   for(const name of ['inventory-core.js','reservation-core.js','fulfillment-core.js'])
     assert.equal(fs.readFileSync('modules/'+name,'utf8'),fs.readFileSync('functions/shared/'+name,'utf8'));
 });
