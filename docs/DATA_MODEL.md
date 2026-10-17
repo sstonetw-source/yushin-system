@@ -136,3 +136,6 @@ deliveryHistory 的 shipment_confirmation_reversal 事件以operationId識別本
 
 ### v2實物退貨事件（2026-10-17，Emulator）
 `orders.returnRecords[]` 新增 sourceType=WAREHOUSE_CUSTOMER_RETURN，包含原 shipmentId、原 warehouseId、明確 lotAllocations、qty、date、reason、condition=RESTOCKABLE、settlement、actor UID／role、intentHash 及固定 movementId。`inventoryMovements/location-return-{operationId}` 保存完整 returnRecord／原 result；returnHistory 保存新增快照。同交易還原 inventory／warehouseStocks.onHand、inventoryLots.remainingQty，REPLACE 才增加原倉 v2 reservation.locations 與公司／原倉 reserved。returnedQty 是累計實物退回；deliveredQty／warehouseShippedQty 保持歷史累計，isDelivered 由 `projectShipmentReturns` 判斷 CLOSE／REPLACE 後有效履約。未改成本集合、Rules／Index 或正式資料。
+
+### 退貨後一般重新下單（2026-10-17）
+新 orders 可含 `returnReorderSource:{orderId}` 單向查核關聯；不設定 quote／forecast 的 sourceType／sourceId 或來源同步完成，也不自動寫原單 backlink。新單金額／品項重新輸入，庫存預留與收款採正常新單初始值，不能複製原單履約／收款欄位。commitOrderCreation 驗證同客戶、可讀所有權及來源存在已實收CLOSE，且 pending ID 重送不可換來源。來源備註可編輯，結構化關聯獨立保存。

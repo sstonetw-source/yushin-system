@@ -372,3 +372,6 @@ Callable Emulator 啟動修正：在 `firebase.json` 明確配置 `auth:9099`、
 
 ### 原倉實物退貨交易（2026-10-17，Emulator）
 `functions/location-return-service.js` 使用共同出貨來源驗證、`projectShipmentReturns`、明確原批次退貨、`planReservationReturn` 與 `planLotRestoration`，在單一交易還原原倉實貨及 CLOSE／REPLACE 預留，保存不可重複入庫的 movement。已支援分次退貨，但後續補送出貨及 UI／需求同步仍未完成；詳見 `location-return-receipt-emulator-20261017.md`，不得視為正式上線。
+
+### 訂錯貨流程優先（2026-10-17）
+主要退貨採 CLOSE，不自動補送；需要其他商品時，前端「退貨後重新下單」開啟既有乾淨建單入口，透過 commitOrderCreation 同交易核對原單並保存 returnReorderSource 單向關聯，不搬移舊預留／款項。原單累加補送與獨立免費補送開發暫緩。詳見 `wrong-item-return-reorder-20261017.md`。

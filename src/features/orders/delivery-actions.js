@@ -388,6 +388,8 @@ function renderOrderLifecycleModal() {
     lifecycleButton.textContent = cancelled ? '恢復訂單' : deliveryProgressInfo(order).grossDelivered > 0 ? '取消剩餘未送數量' : '取消訂單';
     const canReturn = normalizedOrderItems(order).some(item => returnItemDeliveredQty(order, item.itemId) - returnItemReturnedQty(order, item.itemId) - customerReturnPendingQty(order, item.itemId) > 0);
     document.getElementById('openReturnFormBtn').hidden = !editable || !canReturn;
+    const reorderButton=document.getElementById('reorderAfterReturnBtn');
+    if(reorderButton)reorderButton.hidden=!editable||!savedReturnRecords(order).some(row=>row.settlement==='CLOSE'&&Number(row.qty)>0);
     document.getElementById('orderLifecycleActionHint').textContent = !canCancel && !cancelled ? '已無剩餘未送貨數量；退貨請建立申請，由倉庫頁確認實收。' : '取消僅處理未送貨數量；已送貨部分請申請退貨。';
     const isEditingReturn = !!document.getElementById('returnEditId').value;
     document.getElementById('returnFormPanel').style.display = editable && (orderReturnFormOpen || isEditingReturn) && (info.effectiveDelivered > 0 || isEditingReturn) ? '' : 'none';

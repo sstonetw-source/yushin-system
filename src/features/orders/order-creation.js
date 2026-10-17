@@ -48,7 +48,8 @@ function collectOrderDraft() {
         productId:window._orderModalProductId||'',items:newOrderDraftItems,
         shippingInstructions:window.orderShippingInstructions?.()||{},
         sourceLink:window._orderModalSourceLink||null,
-        quoteContext:window._orderModalQuoteContext||null
+        quoteContext:window._orderModalQuoteContext||null,
+        returnReorderSource:window._orderModalReturnReorder||null
     };
 }
 
@@ -114,6 +115,7 @@ function restoreSavedOrderDraft(){
     try {
         requestedOrderOwnerUid = draft.ownerUid || '';
         window._orderModalSourceLink = draft.sourceLink || null;
+        window._orderModalReturnReorder = draft.returnReorderSource || null;
         window._orderModalQuoteContext = draft.quoteContext || null;
         populateOrderOwnerSelect();
         document.getElementById('orderDateInput').value=draft.date||'';
@@ -312,6 +314,7 @@ window.addCurrentOrderItemToDraft=function(){
 };
 
 window.openOrderModal = function(source = null) {
+    window._orderModalReturnReorder = null;
     const overlay = document.getElementById('orderModalOverlay');
     if (!overlay) return;
     const openingGeneration = ++orderModalOpenGeneration;
@@ -528,6 +531,24 @@ function rememberRecentCustomerName(value) {
     populateOrderCustomerSuggestions();
 }
 
+window.reorderAfterReturn = function(orderId) {
+    if(!canManageOrderLifecycleCapability()||!canEditPage('orders.list'))return;
+    const source=ordersCache.find(order=>order.id===orderId);
+    if(!source||!savedReturnRecords(source).some(row=>row.settlement==='CLOSE'&&Number(row.qty)>0)){
+        alert('請先由倉庫確認退貨實收，再從原訂單重新下單。');return;
+    }
+    window.closeDeliveryModal?.();
+    openOrderModal();
+    window._orderModalReturnReorder={orderId};
+    document.getElementById('orderModalTitle').innerText='退貨後重新下單';
+    document.getElementById('orderCustomer').value=source.customerName||'';
+    document.getElementById('orderTransactionType').value=source.transactionType||'';
+    const invoice=document.getElementById('orderInvoiceTitle');
+    invoice.value=source.invoiceTitle||'';invoice.disabled=source.transactionType!=='直';
+    document.getElementById('orderRemarks').value=`退貨後重新下單，原訂單：${source.orderNo||orderId}。請重新確認商品、數量與價格。`;
+    saveOrderDraft();
+};
+
 window.copyOrderAsNew = function(orderId) {
     const source = ordersCache.find(order => order.id === orderId);
     if (!source) {
@@ -560,6 +581,7 @@ window.closeOrderModal = function(options = {}) {
     document.getElementById('orderModalOverlay').classList.remove('active');
     if (!options.preserveSource) {
         window._orderModalSourceLink = null;
+        window._orderModalReturnReorder = null;
         window._orderModalQuoteContext = null;
         window._orderModalProductId = '';
     }
@@ -665,6 +687,7 @@ window.saveNewOrder = function() {
         isBilled: false,
         billingDate: ''
     };
+    if(window._orderModalReturnReorder)data.returnReorderSource={...window._orderModalReturnReorder};
     if (firstItem.procurementType === 'SALES_SELF_ORDER'
         && firstItem.costPrice !== undefined && firstItem.costPrice !== null
         && String(firstItem.costPrice).trim() !== '') {
