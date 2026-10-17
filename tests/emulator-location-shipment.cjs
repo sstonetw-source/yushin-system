@@ -1,7 +1,7 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
 const admin=require('firebase-admin'),{getFirestore}=require('firebase-admin/firestore');
-const {commitSingleItemTwoWarehouse}=require('../functions/single-item-location-service');
+const {commitSingleItemTwoWarehouse,advanceReleasedV2FreeStock}=require('../functions/single-item-location-service');
 const {commitLocationShipment}=require('../functions/location-shipment-service');
 const {commitLocationDispatchPreparation}=require('../functions/location-dispatch-service');
 let app,db;
@@ -758,4 +758,25 @@ test('restoring a partially delivered order recalculates shortage and its canoni
  await x.lifecycle('cancelled','lifecycle_second_cancel_shortage');
  const stopped=(await demandRef.get()).data();assert.equal(stopped.status,'CANCELLED');assert.equal(stopped.requestedQty,8);
  assert.equal(stopped.remainingToOrderQty,0);assert.equal((await x.read('orders',x.orderId)).deliveredQty,2);
+});
+
+test('restockable CLOSE return emits free-stock source for authorized resumable redistribution, REPLACE never does',async()=>{
+ const x=await returnFixture('free-source-close');
+ const returned=await x.receive(x.returnRequest({settlement:'CLOSE'}));
+ const proof=await x.read('inventoryMovements',returned.movementId);
+ assert.equal(proof.v2FreeStockSource,'CLOSED_CUSTOMER_RETURN');
+ assert.equal(proof.freeAllocationQty,1);assert.equal(proof.qty,1);
+ const before=await snapshot(x);
+ const result=await advanceReleasedV2FreeStock(db,x.adminUid,{movementId:returned.movementId});
+ assert.equal(result.status,'completed');assert.equal(result.allocatedQty,0);
+ assert.equal(result.sourceMovementId,returned.movementId);
+ assert.deepEqual(await snapshot(x),before);
+ assert.equal((await advanceReleasedV2FreeStock(db,x.adminUid,{movementId:returned.movementId})).status,'completed');
+ await assert.rejects(advanceReleasedV2FreeStock(db,x.uid,{movementId:returned.movementId}),/角色/);
+ const replacement=await returnFixture('free-source-replace');
+ const replace=await replacement.receive();
+ const move=await replacement.read('inventoryMovements',replace.movementId);
+ assert.equal(move.v2FreeStockSource,undefined);
+ await assert.rejects(advanceReleasedV2FreeStock(db,replacement.adminUid,{movementId:replace.movementId}),
+  /不會釋放/);
 });
