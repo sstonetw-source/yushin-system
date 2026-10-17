@@ -125,3 +125,13 @@ test('legacy partially unreserved delivery deducts its own hold and genuine free
  assert.equal(writes.find(row=>row.path==='warehouseStocks/stock').value.reserved,1);
  assert.equal(writes.find(row=>row.path==='inventory').value.onHand,8);
 });
+
+test('delivery reversal validates every original batch warehouse and product before queuing any restoration',async()=>{
+ for(const change of [{warehouseId:'OTHER'},{productKey:'OTHER'},{remainingQty:NaN},{remainingQty:-1}]){
+  const {c,tx,writes,data}=deliveryContext([0,0]);Object.assign(data['inventoryLots/B'],change);
+  const records=[{qty:2,lotAllocations:[{lotId:'A',qty:1},{lotId:'B',qty:1}]}];
+  const before=structuredClone(data);
+  await assert.rejects(c.applyInventoryDeliveryDeltaInTransaction(tx,{itemId:'I',warehouseId:'W'},-2,'actor','O',records),/原出貨批次/);
+  assert.equal(writes.length,0);assert.deepEqual(data,before);
+ }
+});

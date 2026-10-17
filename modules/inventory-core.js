@@ -155,6 +155,7 @@
         const unitCost=n(row.unitCost);
         allocations.push({
           lotId:row.lotId||'',
+          ...(row.costLotId?{costLotId:row.costLotId}:{}),
           lotNo:row.lotNo||'',
           expiryDate:row.expiryDate||'',
           qty:restored,
@@ -167,6 +168,45 @@
     }
     if(remaining>0)throw new Error('找不到足夠的原始出貨批次，無法安全還原庫存');
     return {allocations,totalCost:allocations.reduce((sum,row)=>sum+row.cost,0)};
+  }
+
+  // Shared by delivery reversal, customer return and return correction.
+  // The transaction re-reads these exact lot IDs; never infer a different
+  // warehouse or silently repair a malformed historical batch.
+  function planLotRestoration({productKey,warehouseId,allocations=[],lots=[],direction=1}={}){
+    if(typeof productKey!=='string'||!productKey||typeof warehouseId!=='string'||!warehouseId)
+      throw new Error('原批次還原缺少產品或倉庫識別碼。');
+    if(direction!==1&&direction!==-1)throw new Error('原批次還原方向不正確。');
+    if(!Array.isArray(allocations)||!allocations.length||!Array.isArray(lots))
+      throw new Error('原批次還原明細不正確。');
+    const quantity=value=>{
+      if(!['number','string'].includes(typeof value)||String(value).trim()===''
+        ||!Number.isFinite(Number(value))||Number(value)<0||Number(value)>Number.MAX_SAFE_INTEGER)
+        throw new Error('原出貨批次數量不正確，請先核對資料。');
+      return Number(value);
+    };
+    const byId=new Map();
+    for(const lot of lots){
+      if(!lot||typeof lot.id!=='string'||!lot.id||byId.has(lot.id))
+        throw new Error('原出貨批次識別碼缺失或重複。');
+      byId.set(lot.id,lot);
+    }
+    const totals=new Map();
+    for(const row of allocations){
+      if(typeof row?.lotId!=='string'||!row.lotId)throw new Error('原出貨批次識別碼缺失。');
+      const qty=quantity(row.qty);
+      if(qty<=0)throw new Error('原批次還原數量必須大於零。');
+      totals.set(row.lotId,quantity((totals.get(row.lotId)||0)+qty));
+    }
+    return [...totals].map(([lotId,qty])=>{
+      const lot=byId.get(lotId);
+      if(!lot)throw new Error(`找不到原出貨批次 ${lotId}，無法安全還原庫存。`);
+      if(lot.productKey!==productKey||lot.warehouseId!==warehouseId)
+        throw new Error(`原出貨批次 ${lotId} 的產品或倉庫不一致，請先核對原出貨倉與退貨倉。`);
+      const before=quantity(lot.remainingQty),remainingQty=before+direction*qty;
+      if(remainingQty<0)throw new Error(`原出貨批次 ${lotId} 庫存不足，無法刪除／縮減退貨。`);
+      return {lotId,remainingQty:quantity(remainingQty),qtyDelta:direction*qty};
+    });
   }
 
   function allocationsAfterReversal(allocations=[],reversed=[]){
@@ -214,6 +254,7 @@
     manualAdjustmentLots,
     operationalLotRows,
     reverseLotAllocations,
+    planLotRestoration,
     allocationsAfterReversal,
     availableReturnAllocations
   };

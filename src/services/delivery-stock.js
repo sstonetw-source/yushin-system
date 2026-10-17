@@ -53,18 +53,15 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
         const sourceRecords=Array.isArray(reversalRecords)&&reversalRecords.length?reversalRecords:savedDeliveryRecords(order);
         const reversal=globalThis.YushinInventory.reverseLotAllocations(sourceRecords,restoreQty);
         lotAllocations=reversal.allocations.map(row=>({...row,qty:-row.qty,cost:-row.cost}));
-        // Several delivery records (or an increased record) can refer to one lot.
-        // Read/update that document once with the total reversal, not last-write-wins.
-        const restoreByLot=new Map();
-        for(const row of reversal.allocations)restoreByLot.set(row.lotId,(restoreByLot.get(row.lotId)||0)+row.qty);
-        const lotContexts=await Promise.all([...restoreByLot].map(async([lotId,qty])=>{
+        const lotIds=[...new Set(reversal.allocations.map(row=>row.lotId))];
+        const lotContexts=await Promise.all(lotIds.map(async lotId=>{
             const lotRef=db.collection('inventoryLots').doc(lotId);
-            return {row:{lotId,qty},lotRef,lotSnap:await transaction.get(lotRef)};
+            return {lotId,lotRef,lotSnap:await transaction.get(lotRef)};
         }));
-        for(const {row,lotRef,lotSnap} of lotContexts){
-            if(!lotSnap.exists)throw new Error(`找不到原出貨批次 ${row.lotNo||row.lotId}，無法安全還原庫存。`);
-            transaction.update(lotRef,{remainingQty:Number(lotSnap.data().remainingQty||0)+row.qty,updatedAt:now});
-        }
+        const restored=globalThis.YushinInventory.planLotRestoration({productKey,warehouseId,
+            allocations:reversal.allocations,lots:lotContexts.filter(row=>row.lotSnap.exists)
+                .map(row=>({...row.lotSnap.data(),id:row.lotId}))});
+        for(const row of restored)transaction.update(db.collection('inventoryLots').doc(row.lotId),{remainingQty:row.remainingQty,updatedAt:now});
         cogs=-reversal.totalCost;
     }
 
@@ -104,33 +101,28 @@ async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQ
     }
     const now=new Date().toISOString();
     let lotAllocations=[],cogs=0;
+    let selectedAllocations;
     if(deltaQty>0){
         // Editing a return increases only the new delta; its original lots are already returned.
         const priorReturns = savedReturnRecords(order).filter(record => !previousReturnRecord || record.id !== previousReturnRecord.id);
         if (previousReturnRecord) priorReturns.push(previousReturnRecord);
         const available=globalThis.YushinInventory.availableReturnAllocations(savedDeliveryRecords(order),priorReturns);
         const plan=globalThis.YushinInventory.reverseLotAllocations([{qty:available.reduce((sum,row)=>sum+Number(row.qty||0),0),lotAllocations:available}],deltaQty);
-        lotAllocations=plan.allocations;cogs=plan.totalCost;
-        const lotContexts=await Promise.all(lotAllocations.map(async row=>{
-            const lotRef=db.collection('inventoryLots').doc(row.lotId);
-            return {row,lotRef,lotSnap:await transaction.get(lotRef)};
-        }));
-        for(const {row,lotRef,lotSnap} of lotContexts){
-            if(!lotSnap.exists)throw new Error(`找不到原出貨批次 ${row.lotNo||row.lotId}，無法辦理退貨。`);
-            transaction.update(lotRef,{remainingQty:Number(lotSnap.data().remainingQty||0)+row.qty,updatedAt:now});
-        }
+        selectedAllocations=plan.allocations;lotAllocations=plan.allocations;cogs=plan.totalCost;
     }else{
         const plan=globalThis.YushinInventory.reverseLotAllocations(previousReturnRecord?[previousReturnRecord]:[],Math.abs(deltaQty));
+        selectedAllocations=plan.allocations;
         lotAllocations=plan.allocations.map(row=>({...row,qty:-row.qty,cost:-row.cost}));cogs=-plan.totalCost;
-        const lotContexts=await Promise.all(plan.allocations.map(async row=>{
-            const lotRef=db.collection('inventoryLots').doc(row.lotId);
-            return {row,lotRef,lotSnap:await transaction.get(lotRef)};
-        }));
-        for(const {row,lotRef,lotSnap} of lotContexts){
-            if(!lotSnap.exists||Number(lotSnap.data().remainingQty||0)<row.qty)throw new Error(`批次 ${row.lotNo||row.lotId} 庫存不足，無法刪除／縮減退貨。`);
-            transaction.update(lotRef,{remainingQty:Number(lotSnap.data().remainingQty||0)-row.qty,updatedAt:now});
-        }
     }
+    const lotIds=[...new Set(selectedAllocations.map(row=>row.lotId))];
+    const lotContexts=await Promise.all(lotIds.map(async lotId=>{
+        const lotRef=db.collection('inventoryLots').doc(lotId);
+        return {lotId,lotRef,lotSnap:await transaction.get(lotRef)};
+    }));
+    const restored=globalThis.YushinInventory.planLotRestoration({productKey,warehouseId,
+        allocations:selectedAllocations,direction:deltaQty>0?1:-1,
+        lots:lotContexts.filter(row=>row.lotSnap.exists).map(row=>({...row.lotSnap.data(),id:row.lotId}))});
+    for(const row of restored)transaction.update(db.collection('inventoryLots').doc(row.lotId),{remainingQty:row.remainingQty,updatedAt:now});
     // 正常訂單退貨後要把商品重新保留給原訂單，供補送使用。
     // 已取消／作廢訂單只把退貨放回自由庫存，不能重新占住庫存；若遇到殘留預留也一併釋放。
     const currentReservation=Math.max(0,Number(reservationSnap.exists?reservationSnap.data().quantity:0));
