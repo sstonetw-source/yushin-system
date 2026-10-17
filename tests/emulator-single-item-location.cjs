@@ -1026,7 +1026,7 @@ async function autoFreeTarget(source,suffix,qty,orderDate=''){
   ...(orderDate?{orderDate}:{}),
   items:[{...existing.items[0],qty,orderedQty:qty,reservedQty:0,shortageQty:0}]});
  await commitSingleItemTwoWarehouse(db,source.uid,{orderId,itemId:'I1',
-  warehouseIds:['V2-A','V2-B'],attemptId:'auto_initial_'+suffix+'_123456789',
+  warehouseIds:['V2-A','V2-B'],attemptId:'auto_initial_'+source.orderId+'_'+suffix+'_123456789',
   syncAttemptId:'v2_123456789'});
  await db.collection('orders').doc(orderId).update({inventoryReservationStatus:'completed'});
  return {...source,orderId,request:{...source.request,orderId}};
