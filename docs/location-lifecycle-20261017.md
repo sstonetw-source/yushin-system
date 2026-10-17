@@ -92,3 +92,11 @@ Emulator harness 呼叫原正式 PO／incoming 登記、原收貨 Service 及 `k
 將 #153 每個狀態超過 50 筆即拒絕的試點改成延續既有 Receiving Service 的 Firestore 游標分頁。每頁最多 50 筆，掃描 active 與 shortage 兩類後，才依共用 `compareReservationPriority` 選擇當前最早者，避免只看第一頁就分錯。單次完整掃描最多 500 份候選文件，超過上限安全停止，不寫入實體庫存或預留，也不將部分掃描當作完整 FIFO。每一步仍可能反覆掃描全部符合條件的 ledger；這是過渡驗證方案，不是已完成高效率索引式 FIFO；大規模資料仍需單獨規劃優先順序索引與候選投影。
 
 初始 v2 來源訂單若有合法 orderDate/date/createdAt 日期，將其日期保存在既有 ledger 的 `orderDate` 供 Core 決定順序（後續重送保留原日期）；缺日期的舊紀錄仍沿用原有排序 fallback，不自動回填或變更正式資料。採購、出貨、退貨的權威判斷與冪等 checkpoint 維持現有 Service。
+
+## v2 真實釋放來源與批次續傳接線（2026-10-18；僅 Emulator）
+
+取消單品項 v2 訂單，在原本同筆原子交易內的每個 `single-v2-life-...` 庫存 movement 標記 `v2FreeStockSource:'CANCELLED_ORDER_RELEASE'` 和實際釋放數量 `freeAllocationQty`。只有 reservedDelta<0 的位置才會標記；恢復增加預留不建立自由訊號。可再上架的實體客戶退貨若採 `settlement:'CLOSE'`，在原先已與實貨、批次、退貨紀錄一起提交的 `location-return-...` movement 標記 `v2FreeStockSource:'CLOSED_CUSTOMER_RETURN'`，REPLACE 不標記。上述皆使用既有唯一交易 movement，**不新建庫存帳、不在來源交易內直接執行跨訂單分配**。
+
+原 `functions/single-item-location-service.js.advanceReleasedV2FreeStock` 是來源證據檢查與續傳協調入口，核對現在登入者 admin/purchaser/warehouse、實際 movement 與原 cancel receipt 或 CLOSE 退貨紀錄。依 movementId 算出固定 runId，交給既有 `advanceAutomaticFreeStockAllocation` 逐單處理，進度仍由原 checkpoint 持久化；相同來源重試不重複增加預留。單事件超過 1000 件暫時拒絕試點續傳，來源實際交易仍有效，需另行分批策略。
+
+**尚未完成：** 此版本為已提交事件的**可明確呼叫續傳入口**，沒有常駐 job runner、排程或自動觸發；尚未接入採購到貨（尤其取消後 KEEP_STOCK）、超大量分批與安全交接不同操作人員，也未正式接 Callable／UI／Preview。原單倉 `allocationPending` 完全不動，避免瀏覽器 v1 Recovery 誤判 v2 訊號。沒有新增 Collection／Rules／Index、正式資料遷移或 Firebase 部署。
