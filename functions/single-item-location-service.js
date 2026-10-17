@@ -119,6 +119,10 @@ async function runSingleItemTwoWarehouse(db,uid,input,operation=null){
   if(previous.itemId&&previous.itemId!==itemId)reject('既有預留品項不符');
   for(const [field,expected] of Object.entries({ownerUid:order.ownerUid,salesCode:order.salesCode}))
    if(previous[field]!==undefined&&previous[field]!==expected)reject('既有預留所有權不符');
+  if(previous.lifecycleWarehouseIds!==undefined
+    &&(!Array.isArray(previous.lifecycleWarehouseIds)
+      ||JSON.stringify([...previous.lifecycleWarehouseIds].sort())!==JSON.stringify(warehouseIds)))
+    reject('初始預留來源的原候選倉不得任意替換');
   const returned=integer(item.returnedQty??0,'退貨量'),delivered=integer(item.deliveredQty??0,'已交付量');
   if(returned>delivered)reject('累計交付與退貨數量不符');
   // Initial-only safe preview: no goods have moved; supply commitments are
@@ -151,7 +155,8 @@ async function runSingleItemTwoWarehouse(db,uid,input,operation=null){
    return {...row,reserved};
   });
   const next={...previous,...plan.reservation,orderId,itemId,productKey,
-   ownerUid:order.ownerUid,salesCode:order.salesCode,orderItemIndex:matches[0].index,updatedAt:now};
+   ownerUid:order.ownerUid,salesCode:order.salesCode,lifecycleWarehouseIds:warehouseIds,
+   orderItemIndex:matches[0].index,updatedAt:now};
   // The legacy warehouseId is a hint on the order, never a v2 quantity authority.
   delete next.warehouseId;
   const nextItems=order.items.map((row,index)=>index===matches[0].index
