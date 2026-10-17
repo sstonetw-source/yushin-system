@@ -116,7 +116,7 @@ async function fiveLineFixture(id){
       f.doc('inventoryReservations/'+f.orderId+'__'+item.itemId)));
     return {company:company.reserved,a:a.reserved,b:b.reserved,
       order:order.items.map(item=>item.reservedQty),
-      reservations:reservations.map(item=>item.quantity)};
+      reservations:reservations.map(item=>item?.quantity??0)};
   };
   return {...f,intent,balances};
 }
