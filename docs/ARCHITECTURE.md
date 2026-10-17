@@ -387,3 +387,7 @@ Callable Emulator 啟動修正：在 `firebase.json` 明確配置 `auth:9099`、
 ### v2 初始生命週期與採購需求一致性（2026-10-17，Emulator）
 
 延續單品項初始雙倉取消／恢復 Service：現有採購需求文件實際儲存在 `procurementDemands/${encodeURIComponent('SALES_ORDER:'+orderId+':'+itemId)}`，並非未編碼 ID。`commitSingleItemLocationLifecycle` 已改用與前端 `procurementDemandRef` 相同的**完整 ID 編碼**，交易內重讀該權威文件，避免漏讀並錯放未同步的採購需求。僅允許供應商訂購量與收貨量都為零、狀態與來源完全一致的需求；採購已承諾／到貨、來源錯誤或狀態異常一律拒絕。取消在庫存及訂單同一交易將既有需求標記 `CANCELLED`（保留歷史量），恢復經既有 Workflow → Procurement Demand Core 投影重新計算需求，更新既有文件或依實際缺口建立新文件。`functions/shared/workflow-core.js` 與 `procurement-demand-core.js` **由 modules/ 建置產生**，不是額外權威計算核心，CI 建置一致性檢查同步擴充。仍限 demo-yushin Emulator；有真實 PO、部分出貨或收貨的完整交易，以及前端／Rules／Preview 都未接線。
+
+### 部分交付後的 v2 取消／恢復（2026-10-17，僅 Emulator）
+
+本節更新上述「初始取消／恢復」範圍。既有 `commitSingleItemLocationLifecycle` 現使用同一 `Fulfillment.projectShipmentDelivery` 與 `readShipmentProof`，交易內核對逐筆出貨扣帳證明、送達與訂單投影。僅支援**已寄出部分全部送達，剩餘部分未打單、無退貨及供應商承諾／收貨**的單品項雙倉訂單。取消釋放剩餘預留；恢復以原訂購量減已確認送達量呼叫原 `planLocationReservation`，採購需求同交易使用現有 Workflow／Demand Core 重算。歷史出貨、送達、打單累計與實貨／批次不改。仍無 Callable／前端／Preview／正式部署；途中貨、剩餘已打單及已下 PO 的取消未完成。

@@ -151,3 +151,7 @@ deliveryHistory 的 shipment_confirmation_reversal 事件以operationId識別本
 ### v2 取消／恢復的採購需求補充（2026-10-17，僅 Emulator）
 
 現行 `procurementDemands` 的權威鍵為 `encodeURIComponent('SALES_ORDER:'+orderId+':'+itemId)`（例如 `SALES_ORDER%3AO%3AI`），與一般訂單需求讀寫相同；v2 Service 不再讀取原樣未編碼 ID。僅當 `orderedQty=receivedQty=remainingToReceiveQty=0` 且角色、來源、產品、倉庫、狀態及待採購投影有效時，同個 Admin SDK Transaction 更新既有 `status/remainingToOrderQty/remainingToReceiveQty/perOrdered/perReceived/sourceItemIndex/updatedAt`，或在恢復且缺口大於零時新建 `YushinProcurementDemand.demandDocument` 格式文件；原始 `requestedQty` 在取消時保留。跟公司與兩倉 reserved、單一 reservation ledger、訂單狀態與重試 receipt 一起原子提交；不修改或臆測任何 supplier order／receipt 歷史。未新增索引、Rules、集合或正式遷移。
+
+### v2 部分交付後的取消／恢復（2026-10-17，僅 Emulator）
+
+不新增欄位或集合。權威 `warehouseShipmentRecords`、`deliveryRecords` 及對應 shipment movement 重新驗證，items[].warehouseShippedQty／deliveredQty、orders.deliveredQty／isDelivered 必須一致。原訂購量、累計打單／出貨／送達與履約歷史保持原值；單一 reservation ledger 及 orders.items[].reservedQty／shortageQty、公司／兩倉 reserved、逐倉 movement、原 receipt 與 canonical encoded 採購需求仍同交易提交。恢復以未交付量重新配置，不修改 inventory／warehouseStocks.onHand 或 inventoryLots。取消狀態表示停止剩餘需求，並非抹除已完成交付。UI／查詢投影與完整 Preview 尚未驗收。

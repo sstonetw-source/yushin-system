@@ -22,3 +22,11 @@
 ## v2 採購需求同交易同步（2026-10-17，Emulator-only 接續）
 
 既有正式 `procurementDemandRef` 採 `encodeURIComponent` 編碼整段 `SALES_ORDER:orderId:itemId`；內部 Service 已修正與相同 ID 對接。具有待採購需求但從未實際下 PO、收貨的 v2 初始取消，現在能同交易將既有 demand 改為 CANCELLED；恢復按當下兩倉可預留量，由 `Workflow.procurementQuantities`、`ProcurementDemand.fromSalesOrder/demandDocument` 統一計算並重新開啟或建立需求。若原 demand 的來源身份、角色、產品、倉庫、狀態或數量投影異常，或有任何 supplier commitment，整批回滾；仍不開放部分出貨、收貨、打單、退貨及正式前端流程。為 Functions 共用的 Workflow／Demand 模組由 `modules/` 複製生成並在 CI 驗證一致性；完整 Preview 尚未驗收。
+
+## 部分交付的剩餘取消／恢復（2026-10-17，Emulator-only 接續）
+
+本節取代前述「全部已有出貨皆不支援」的限制。既有 Service 現支援部分商品已出貨且全數確認送達、未交付部分尚未打單的雙倉單品項訂單。共用出貨／送達核心及既有 shipment proof adapter；不新增核心或交易 Service。取消只釋放剩餘預留，恢復僅重新分配未交付量，採購需求沿用 canonical ID 和 Workflow／Demand Core 同步。出貨、送達、累計打單及原訂購量與實貨／批次不變。
+
+新增真 Emulator 案例包含：10 訂購→打單／寄出／送達 2→取消 8→恢復 8→再次打單／分倉出貨／送達至 10；別單占用全部自由庫存後恢復缺口 8，建立並再次取消正確需求；途中貨、剩餘已打單、錯誤投影／缺失或竄改出貨 movement 拒絕；權限、同 ID 併發、後段 create 衝突整批回滾。案例已加入 CI，驗收以實際執行結果為準。
+
+尚未完成：途中貨物或未出貨打單的取消、已下 PO／收貨／退貨整合、多品項、完整初始化與前端、Preview 五角色全流程驗收。無正式部署或資料遷移。

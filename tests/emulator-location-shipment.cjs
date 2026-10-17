@@ -667,3 +667,95 @@ test('dispatch record replay cannot be hijacked after a later shipment or permis
  assert.equal((await x.read('orders',x.orderId)).items[0].dispatchPreparedQty,4);
  assert.equal(first.qty,4);
 });
+
+const {commitSingleItemLocationLifecycle}=require('../functions/single-item-location-lifecycle-service');
+async function partialLifecycle(name,{confirmed=true,prepared=2}={}){
+ const x=await seed('lifecycle-'+name,{role:'admin',prepared});
+ const shipment=x.request(A,2,'shipment_lifecycle_'+name);
+ await x.call(shipment);
+ if(confirmed)await commitShipmentDelivery(db,x.uid,{orderId:x.orderId,itemId:'I',shipmentId:shipment.operationId,
+  quantity:2,operationId:'delivery_lifecycle_'+name,syncAttemptId:'sync_ship_12345',date:'2026-10-18'});
+ const request=(nextStatus,operationId='lifecycle_'+nextStatus+'_'+name)=>({orderId:x.orderId,itemId:'I',
+  warehouseIds:[A,B],nextStatus,operationId,syncAttemptId:'sync_ship_12345',date:'2026-10-19',reason:'取消未交付部分'});
+ return {...x,lifecycleRequest:request,lifecycle:(status,operationId,actor=x.uid,connection=db)=>
+  commitSingleItemLocationLifecycle(connection,actor,request(status,operationId))};
+}
+test('partial acknowledged shipment cancels only remaining hold, restores only outstanding quantity and can finish normally',async()=>{
+ const x=await partialLifecycle('complete-cycle'),before=await snapshot(x),original=before.docs[0];
+ const cancelled=await x.lifecycle('cancelled');
+ assert.equal(cancelled.reservedQty,0);assert.equal(cancelled.companyReservedDelta,-8);
+ let order=await x.read('orders',x.orderId);
+ for(const field of ['warehouseShipmentRecords','warehouseShipmentHistory','deliveryRecords','deliveryHistory'])
+  assert.deepEqual(order[field],original[field],field);
+ assert.equal(order.items[0].qty,10);assert.equal(order.items[0].warehouseShippedQty,2);
+ assert.equal(order.items[0].deliveredQty,2);assert.equal(order.items[0].dispatchPreparedQty,2);
+ assert.equal(order.deliveredQty,2);assert.equal(order.isDelivered,false);
+ const after=await snapshot(x);
+ for(let i=1;i<before.docs.length;i++){
+  if(i>=5)assert.deepEqual(after.docs[i],before.docs[i]);
+  else assert.equal(after.docs[i].onHand,before.docs[i].onHand);
+ }
+ assert.equal((await x.read('inventory',x.key)).reserved,2); // other order's hold
+ const once=await snapshot(x);assert.equal((await x.lifecycle('cancelled')).status,'already-applied');
+ assert.deepEqual(await snapshot(x),once);
+ const restored=await x.lifecycle('normal');assert.equal(restored.reservedQty,8);assert.equal(restored.shortageQty,0);
+ assert.deepEqual(restored.locations,[{warehouseId:A,reservedQty:2},{warehouseId:B,reservedQty:6}]);
+ await x.prepare(8,'prepare_after_lifecycle_complete');
+ await x.call(x.request(A,2,'shipment_after_lifecycle_A'));
+ await x.call(x.request(B,6,'shipment_after_lifecycle_B'));
+ for(const [wh,quantity] of [[A,2],[B,6]])await commitShipmentDelivery(db,x.uid,{orderId:x.orderId,itemId:'I',
+  shipmentId:'shipment_after_lifecycle_'+(wh===A?'A':'B'),quantity,
+  operationId:'delivery_after_lifecycle_'+wh,syncAttemptId:'sync_ship_12345',date:'2026-10-20'});
+ order=await x.read('orders',x.orderId);assert.equal(order.items[0].warehouseShippedQty,10);
+ assert.equal(order.deliveredQty,10);assert.equal(order.isDelivered,true);
+ await assert.rejects(x.lifecycle('cancelled','lifecycle_reject_completed_123'),/已打單|剩餘|送達/);
+});
+test('partial lifecycle rejects in-flight, unshipped preparation, corrupt projections and missing shipment proof atomically',async()=>{
+ for(const [name,options,mutate] of [
+  ['inflight',{confirmed:false},null],['prepared',{prepared:3},null],
+  ['projection',{},async x=>{const o=await x.read('orders',x.orderId);o.items[0].deliveredQty=1;
+   await db.collection('orders').doc(x.orderId).update({items:o.items});}],
+  ['missing-proof',{},x=>db.collection('inventoryMovements').doc('location-ship-shipment_lifecycle_missing-proof').delete()],
+  ['wrong-proof',{},x=>db.collection('inventoryMovements').doc('location-ship-shipment_lifecycle_wrong-proof').update({qty:-3})],
+ ]){
+  const x=await partialLifecycle(name,options);if(mutate)await mutate(x);
+  const before=await snapshot(x);await assert.rejects(x.lifecycle('cancelled'),undefined,name);
+  assert.deepEqual(await snapshot(x),before,name);
+ }
+});
+test('partial lifecycle roles, concurrent retry and late failure preserve acknowledged facts and atomic balances',async()=>{
+ const x=await partialLifecycle('atomic'),collision=db.collection('inventoryMovements').doc('partial-life-collision');
+ await collision.set({marker:true});
+ const wrapper={projectId:db.projectId,collection:n=>db.collection(n),runTransaction:fn=>db.runTransaction(tx=>fn({
+  get:r=>tx.get(r),update:(...a)=>tx.update(...a),set:(...a)=>tx.set(...a),
+  create:(...a)=>{tx.create(collision,{marker:false});return tx.create(...a);}
+ }))};
+ const before=await snapshot(x);
+ await assert.rejects(x.lifecycle('cancelled',undefined,x.uid,wrapper));assert.deepEqual(await snapshot(x),before);
+ for(const role of ['warehouse','purchaser']){
+  await db.collection('users').doc(x.uid).update({role});
+  await assert.rejects(x.lifecycle('cancelled'),/不能取消/);assert.deepEqual(await snapshot(x),before);
+ }
+ await db.collection('users').doc(x.uid).update({role:'sales'});
+ const results=await Promise.all([x.lifecycle('cancelled'),x.lifecycle('cancelled')]);
+ assert.deepEqual(results.map(r=>r.status).sort(),['already-applied','applied']);
+ await db.collection('users').doc(x.uid).update({role:'engineer'});
+ assert.equal((await x.lifecycle('normal')).reservedQty,8);
+});
+test('restoring a partially delivered order recalculates shortage and its canonical procurement demand from remaining quantity',async()=>{
+ const x=await partialLifecycle('shortage');await x.lifecycle('cancelled');
+ // A real competing reservation takes both the eight released units and the
+ // three units already free, while the original two-unit hold stays intact.
+ const competitor=x.orderId+'-competitor';
+ await db.collection('orders').doc(competitor).set({ownerUid:x.uid,salesCode:'S',status:'active',
+  inventoryReservationStatus:'pending',inventoryReservationAttemptId:'sync_competitor_12345',
+  items:[{itemId:'C',productId:x.key,qty:11,warehouseId:A,reservedQty:0,deliveredQty:0,returnedQty:0}]});
+ await commitSingleItemTwoWarehouse(db,x.uid,{orderId:competitor,itemId:'C',warehouseIds:[A,B],
+  attemptId:'reserve_lifecycle_competitor',syncAttemptId:'sync_competitor_12345'});
+ const restored=await x.lifecycle('normal');assert.equal(restored.reservedQty,0);assert.equal(restored.shortageQty,8);
+ const demandRef=db.collection('procurementDemands').doc(encodeURIComponent('SALES_ORDER:'+x.orderId+':I'));
+ const demand=(await demandRef.get()).data();assert.equal(demand.requestedQty,8);assert.equal(demand.remainingToOrderQty,8);
+ await x.lifecycle('cancelled','lifecycle_second_cancel_shortage');
+ const stopped=(await demandRef.get()).data();assert.equal(stopped.status,'CANCELLED');assert.equal(stopped.requestedQty,8);
+ assert.equal(stopped.remainingToOrderQty,0);assert.equal((await x.read('orders',x.orderId)).deliveredQty,2);
+});

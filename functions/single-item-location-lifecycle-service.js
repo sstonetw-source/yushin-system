@@ -1,10 +1,12 @@
 'use strict';
-// Internal-only, pre-fulfillment v2 lifecycle. Do not export Callable or
-// connect legacy pages until procurement-demand and partial-shipment paths are unified.
+// Internal-only, bounded v2 lifecycle. Do not export Callable or
+// connect legacy pages until supplier commitments and broader fulfillment paths are unified.
 const {createHash}=require('node:crypto');
 const core=require('./shared/reservation-core');
 const demandCore=require('./shared/procurement-demand-core');
 const workflowCore=require('./shared/workflow-core');
+const fulfillmentCore=require('./shared/fulfillment-core');
+const {readShipmentProof}=require('./shipment-delivery-service');
 function fault(message,code='failed-precondition'){const e=new Error(message);e.code=code;throw e;}
 function ident(value,name){
  if(typeof value!=='string'||!value||value!==value.trim()||value.includes('/')||value.length>160)
@@ -84,17 +86,12 @@ async function commitSingleItemLocationLifecycle(db,uid,data){
    fault('品項不是可取消或恢復的實體倉商品');
   const ordered=number(item.qty??item.orderedQty,'訂購量');
   if(!ordered||(item.qty!==undefined&&item.orderedQty!==undefined&&item.qty!==item.orderedQty)
-   ||number(item.deliveredQty??0,'已交付量')!==0
    ||number(item.returnedQty??0,'退貨量')!==0
-   ||number(item.warehouseShippedQty??0,'已寄出量')!==0
-   ||number(item.dispatchPreparedQty??0,'已打單量')!==0
    ||number(item.receivedQty??0,'已收貨量')!==0
    ||number(item.supplyOrderedQty??0,'供應量')!==0
    ||order.isDelivered===true
-   ||(order.warehouseShipmentRecords??[]).length>0||(order.deliveryRecords??[]).length>0
-   ||(order.returnRecords??[]).length>0||(order.warehouseShipmentHistory??[]).length>0
-   ||(order.deliveryHistory??[]).length>0||(order.returnHistory??[]).length>0)
-   fault('已打單、採購、收貨、寄出、送達或退貨的訂單不在初始取消試點範圍');
+   ||(order.returnRecords??[]).length>0||(order.returnHistory??[]).length>0)
+   fault('已採購、收貨、全部送達或退貨的訂單不在此取消試點範圍');
   if(!Array.isArray(order.warehouseShipmentRecords??[])||!Array.isArray(order.deliveryRecords??[])
     ||!Array.isArray(order.returnRecords??[])||!Array.isArray(order.orderLifecycleHistory??[])
     ||!Array.isArray(order.warehouseShipmentHistory??[])||!Array.isArray(order.deliveryHistory??[])
@@ -106,6 +103,24 @@ async function commitSingleItemLocationLifecycle(db,uid,data){
   const product=await tx.get(ref('products',productId));
   if(!product.exists||String(product.data().productType||product.data().type||'').toUpperCase()==='SERVICE')
    fault('實體產品主檔不存在或為服務品項');
+  // Share the shipment authority, including actual debit proofs. Cancellation
+  // only closes the unfulfilled remainder; acknowledged goods stay historical.
+  const fulfillment=fulfillmentCore.projectShipmentDelivery({orderId,itemId,productKey,orderedQty:ordered,
+   shipments:order.warehouseShipmentRecords??[],deliveries:order.deliveryRecords??[]});
+  if(number(item.warehouseShippedQty??0,'已寄出量')!==fulfillment.shippedQty
+   ||number(item.deliveredQty??0,'已交付量')!==fulfillment.confirmedQty
+   ||number(order.deliveredQty??0,'訂單已交付量')!==fulfillment.confirmedQty
+   ||(order.isDelivered??false)!==fulfillment.isDelivered)
+   fault('出貨或送達投影不一致');
+  if(fulfillment.pendingDeliveryQty>0)fault('尚有途中貨物，須先完成送達確認');
+  if(number(item.dispatchPreparedQty??0,'已打單量')!==fulfillment.shippedQty)
+   fault('尚有已打單未出貨數量，不在取消試點範圍');
+  const outstanding=ordered-fulfillment.confirmedQty;
+  if(!outstanding)fault('訂單已無剩餘未交付數量');
+  for(const shipment of order.warehouseShipmentRecords??[]){
+   if(!warehouseIds.includes(shipment.warehouseId))fault('歷史出貨來源不在候選倉');
+   await readShipmentProof(tx,db,order,{orderId,itemId,shipmentId:shipment.id,syncAttemptId},productKey);
+  }
   // The existing browser Procurement Demand adapter URL-encodes the whole
   // demand ID. A raw SALES_ORDER:... document is NOT the authoritative row.
   const demandId=demandCore.demandIdForSource({sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId});
@@ -144,7 +159,7 @@ async function commitSingleItemLocationLifecycle(db,uid,data){
    fault('既有預留來源或位置版本不一致');
   const oldQty=number(original.quantity,'預留量'),oldShortage=number(original.shortageQty,'缺口');
   if(oldQty!==number(item.reservedQty,'品項預留量')||oldShortage!==number(item.shortageQty??0,'品項缺口')
-    ||(current==='normal'&&oldQty+oldShortage!==ordered)
+    ||(current==='normal'&&oldQty+oldShortage!==outstanding)
     ||(current==='cancelled'&&(oldQty!==0||oldShortage!==0||original.status!=='released')))
    fault('訂單與 v2 預留投影不一致');
   const existing=core.reservationLocations(original);
@@ -170,7 +185,7 @@ async function commitSingleItemLocationLifecycle(db,uid,data){
    warehouses.push(master);stocks[warehouseId]=stockSnap.data();refs.set(warehouseId,stockRef);
   }
   const plan=core.planLocationReservation({productKey,warehouses,stocks,
-   aggregateStock:invSnap.data(),reservation:original,requestedQty:ordered,inTransitQty:0,
+   aggregateStock:invSnap.data(),reservation:original,requestedQty:outstanding,inTransitQty:0,
    currentWarehouseId:hint,nextStatus,itemReservedQty:oldQty});
   if(plan.companyReservedDelta!==plan.warehouseDeltas.reduce((sum,row)=>sum+row.reservedDelta,0))
    fault('公司及分倉預留差額不守恆');
@@ -195,7 +210,7 @@ async function commitSingleItemLocationLifecycle(db,uid,data){
   const demandProjection=workflowCore.procurementQuantities({
    orderedQty:ordered,fulfillmentType:'WAREHOUSE',reservedQty:nextItem.reservedQty,
    shortageQty:nextItem.shortageQty,supplyOrderedQty:0,receivedQty:0,
-   deliveredQty:0,effectiveDeliveredQty:0,returnedQty:0
+   deliveredQty:fulfillment.confirmedQty,effectiveDeliveredQty:fulfillment.confirmedQty,returnedQty:0
   });
   const baseDemand=nextStatus==='cancelled'
    ?(previousDemand?demandCore.cancelDemand(previousDemand):null)
