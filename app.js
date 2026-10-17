@@ -17886,7 +17886,7 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
             aggregateStock:invState,warehouseStock:whState});
         const reserve=plan.reservedQty;
         // shortageQty 一律代表尚無實貨預留的量；已下訂待到貨另由 supplyOrderedQty - receivedQty 涵蓋。
-        const shortage = Math.max(0, outstanding - reserve);
+        const shortage = plan.shortageQty;
         if(plan.reservedDelta){
             invState.reserved=Number(invState.reserved||0)+plan.reservedDelta;
             whState.reserved=Number(whState.reserved||0)+plan.reservedDelta;

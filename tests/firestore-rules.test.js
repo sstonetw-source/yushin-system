@@ -2749,3 +2749,31 @@ test('actual receiving-location allocation refuses corrupt transit before updati
   assert.equal((await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).exists(),false);
  }
 });
+
+test('actual lifecycle refuses impossible transit balances atomically and permits corrected retries for admin sales and engineer',async()=>{
+ for(const [uid,role] of [['admin','admin'],['sales1','sales'],['eng1','engineer']])for(const status of ['cancelled','normal']){
+  const f=await orderInitializationFixture(uid,role);await f.run();
+  const order=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+  await seed('orders/'+f.id,{...order,inventoryReservationStatus:'completed'});
+  const run=loadActualLifecycle(f);
+  if(status==='normal')await assertSucceeds(run('cancelled'));
+  const reserved=status==='normal'?0:3;
+  const company={productKey:'init-product',onHand:3,reserved,incoming:0,transferFreeInTransit:0};
+  const warehouse={...company,warehouseId:'W1'};
+  const paths=['orders/'+f.id,'inventory/init-product','warehouseStocks/W1__init-product',
+   'inventoryReservations/'+f.id+'__I','procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')];
+  const snapshots=()=>Promise.all(paths.map(async path=>(await getDoc(doc(db('admin'),path))).data()));
+  for(const target of ['company','warehouse']){
+   await seed(paths[1],{...company,transferFreeInTransit:target==='company'?4:0});
+   await seed(paths[2],{...warehouse,transferFreeInTransit:target==='warehouse'?4:0});
+   const before=await snapshots();
+   await assert.rejects(run(status),/調撥途中量超過實貨/);
+   assert.deepEqual(await snapshots(),before);
+  }
+  await seed(paths[1],company);await seed(paths[2],warehouse);
+  await assertSucceeds(run(status));
+  assert.equal((await getDoc(doc(db('admin'),paths[3]))).data().quantity,status==='normal'?3:0);
+  await assertSucceeds(run(status));
+  assert.equal((await getDoc(doc(db('admin'),paths[1]))).data().reserved,status==='normal'?3:0);
+ }
+});

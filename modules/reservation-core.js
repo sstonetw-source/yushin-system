@@ -277,6 +277,8 @@
    requestedQty=0,inTransitQty=0,aggregateStock,warehouseStock}={}){
    if(!['normal','cancelled'].includes(nextStatus))throw Error('不支援的訂單狀態。');
    const {existingQty:existing,company,warehouse}=validateReservationBalance({existingQty,itemReservedQty,aggregateStock,warehouseStock});
+   for(const stock of [company,warehouse])if(stock.reserved+stock.transferFreeInTransit>stock.onHand+1e-9)
+     throw Error('預留與自由調撥途中量超過實貨，請先核對庫存。');
    if(nextStatus==='cancelled')return {reservedQty:0,shortageQty:0,reservedDelta:existing?-existing:0};
    const requested=legacyReservationQty(requestedQty),incoming=legacyReservationQty(inTransitQty);
    const availableQty=Math.min(inventory.normalizeStock(company).available,inventory.normalizeStock(warehouse).available);
@@ -335,7 +337,7 @@
  // No relocation: existing quantities stay in their warehouse; a disabled
  // physical location may be released, but cannot receive additional holds.
  function planLocationReservation({productKey,warehouses=[],stocks={},aggregateStock,reservation={},
-   requestedQty=0,inTransitQty=0,currentWarehouseId=''}={}){
+   requestedQty=0,inTransitQty=0,currentWarehouseId='',nextStatus='normal',itemReservedQty=reservation.quantity}={}){
    if(typeof productKey!=='string'||!productKey||!aggregateStock)
      throw new Error('多倉預留缺少產品或公司庫存。');
    const checkProduct=data=>{
@@ -350,11 +352,26 @@
      if(stock.warehouseId!==undefined&&stock.warehouseId!==w.id)
        throw new Error('多倉預留分倉位置不一致。');
    }
-   const requested=locationQty(requestedQty),incoming=locationQty(inTransitQty);
+   if(!['normal','cancelled'].includes(nextStatus))throw Error('不支援的訂單狀態。');
+   // Validate the complete source format even when cancellation will empty it.
+   reservationStockDeltas(reservation,reservation);
    const before=reservationLocations(reservation),existingQty=locationQty(reservation.quantity);
-   if(locationQty(aggregateStock.reserved)<existingQty)
-     throw new Error('公司預留量少於本品項預留，請先稽核。');
-   const kept=new Map(),previous=new Map(before.map(row=>[row.warehouseId,row.qty]));
+   if(locationQty(itemReservedQty)!==existingQty)
+     throw Error('訂單與庫存預留數量不一致，請先核對資料。');
+   const requested=nextStatus==='cancelled'?0:locationQty(requestedQty);
+   const incoming=nextStatus==='cancelled'?0:locationQty(inTransitQty);
+   const validateStock=(data,ownQty)=>{
+     const numbers={onHand:locationQty(data.onHand),reserved:locationQty(data.reserved),
+       transferFreeInTransit:locationQty(data.transferFreeInTransit)};
+     if(numbers.reserved<ownQty||numbers.reserved+numbers.transferFreeInTransit>numbers.onHand)
+       throw Error('公司或分倉預留與調撥途中量不一致，請先稽核。');
+   };
+   validateStock(aggregateStock,existingQty);
+   for(const w of warehouses){
+     const ownQty=before.find(row=>row.warehouseId===w.id)?.qty||0;
+     if(stocks[w.id]&&(physicalWarehouse(w)||ownQty>0))validateStock(stocks[w.id],ownQty);
+   }
+   const kept=new Map();
    let remaining=requested;
    for(const row of before){
      const master=warehouses.find(w=>w.id===row.warehouseId),stock=stocks[row.warehouseId];
@@ -375,12 +392,11 @@
    const ledger=validateMultiLocationLedger({requestedQty:requested,
      locations:allocations.map(row=>({warehouseId:row.warehouseId,reservedQty:row.qty}))});
    const quantity=ledger.reservedQty;
-   const warehouseDeltas=[...new Set([...previous.keys(),...kept.keys()])].sort().map(warehouseId=>({
-     warehouseId,reservedDelta:(kept.get(warehouseId)||0)-(previous.get(warehouseId)||0)
-   })).filter(row=>row.reservedDelta!==0);
-   return {reservation:{locationSchemaVersion:2,locations:ledger.locations,quantity,shortageQty:ledger.shortageQty,
-       status:quantity>0?'active':'shortage'},
-     warehouseDeltas,companyReservedDelta:quantity-existingQty,
+   const next={locationSchemaVersion:2,locations:ledger.locations,quantity,shortageQty:ledger.shortageQty,
+     status:nextStatus==='cancelled'?'released':quantity>0?'active':'shortage'};
+   const changes=reservationStockDeltas(reservation,next);
+   return {reservation:next,warehouseDeltas:changes.warehouseDeltas,
+     companyReservedDelta:changes.companyReservedDelta,
      remainingToOrderQty:Math.max(0,requested-quantity-incoming)};
  }
  function planReservation(input={}){
