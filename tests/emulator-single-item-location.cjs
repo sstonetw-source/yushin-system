@@ -1106,7 +1106,7 @@ test('FIFO progress survives committed movement with failed checkpoint update',a
  const final=await advanceAutomaticFreeStockAllocation(db,source.uid,input);
  assert.equal(final.status,'completed');
  assert.equal(final.allocatedQty,6);
- assert.equal(final.processedSteps,2); // one allocation plus the final no-free-stock check
+ assert.equal(final.processedSteps,1); // the exact batch quantity already completed in the first step
 });
 test('automatic FIFO fails closed on excessive candidates, missing role and mismatched batch intent',async()=>{
  const source=await readyLifecycle('auto-safety',{role:'admin'});
