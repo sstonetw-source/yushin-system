@@ -187,3 +187,7 @@ deliveryHistory 的 shipment_confirmation_reversal 事件以operationId識別本
 ### v2 reservation FIFO 日期來源（2026-10-18）
 
 既有 `inventoryReservations/{orderId}__{itemId}` 在初始 v2 單品項預留時，可依實際來源 `orders` 的有效 orderDate、date 或 createdAt 儲存 `orderDate: YYYY-MM-DD`；已存在的有效優先順序日期在相同 Ledger 重送時保留，無日期不偽造。此為排序快照而非第二份權威訂單日期。現有 productKey＋status 索引查詢透過 DocumentSnapshot 游標分頁，不新增 Collection、Index 或 Rules；>500 個候選的自動分配仍需後續索引式高流量策略。
+
+### v2 取消／CLOSE 退貨的自由庫存來源欄位（2026-10-18）
+
+沿用原 `inventoryMovements`：單品項雙倉取消的原 `single-v2-life-...` release movement（signed qty<0），在同一 transaction 記錄 `v2FreeStockSource:'CANCELLED_ORDER_RELEASE'` 與 `freeAllocationQty:-qty`；RESTOCKABLE 且 CLOSE 的原 `location-return-...` receipt movement（qty>0）記錄 `v2FreeStockSource:'CLOSED_CUSTOMER_RETURN'` 與 `freeAllocationQty:qty`。REPLACE 和恢復不標記。不額外維護實體數量；不同來源 movement 的進度透過既有 deterministic runId + `reservationOperationReceipts/single-v2-free-batch-...` 保存。歷史資料不回填；正式庫存未遷移。
