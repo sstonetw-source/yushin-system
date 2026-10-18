@@ -52,7 +52,7 @@
 
 - 指定倉分批寄送使用 `commitLocationShipment`，目前僅 demo-yushin Emulator；不匯出 Callable／接前端。倉庫寄出與客戶送達必須分開，不能為了沿用舊 UI 把新倉庫事件寫成 deliveryRecords。不得另寫 FEFO、預留扣量或打單可用量公式；共用 Core 的部署副本一律建置產生。改動須跑 emulator-location-shipment.cjs 的多倉分批、五角色、併發、原子回滾與重送；Preview 啟用前補全部投影／簽收不重扣及其他履約入口。
 
-- v2送達確認一律使用 `commitShipmentDelivery`／`projectShipmentDelivery`，目前僅demo-yushin Emulator；來源必須連結真實倉庫出貨及扣帳movement。確認不能呼叫現有會再扣庫存的delivery-stock Service，不可將新版與legacy事件混用。權限沿現有商業生命週期：admin或本人sales／engineer。修改須驗證真實預留→分倉寄送→分批送達／再寄下一批，並在執行時檢查送達確認僅讀3份文件、只寫orders；退貨／撤銷與前端／需求投影未整合前不可開放。
+- v2送達確認一律使用 `commitShipmentDelivery`／`projectShipmentDelivery`，目前僅demo-yushin Emulator；來源必須連結真實倉庫出貨及扣帳movement。確認不能呼叫現有會再扣庫存的delivery-stock Service，不可將新版與legacy事件混用。權限沿現有商業生命週期：admin或本人sales／engineer。修改須驗證真實預留→分倉寄送→分批送達／再寄下一批，並在執行時檢查無退貨的正常送達確認執行4次交易讀取（使用者、訂單、出貨 movement 與一次有界退貨憑證查詢）、只寫orders；退貨／撤銷與前端／需求投影未整合前不可開放。
 
 - v2送達撤銷必須使用 reverseShipmentDelivery，不能呼叫會補回實貨的舊delivery-stock撤銷。確認／撤銷／批次追溯須共用原身份、投影與shipment proof；操作ID不可跨動作重用。部分送達混合批次的實物退貨，須由操作者明確指定lotId／qty，不可猜FEFO或最後批次。planLocationReturnTrace僅唯讀，不可直接套其預覽進正式寫入；真正退貨入庫仍需另案整合所有帳與重試證據。
 
@@ -89,3 +89,10 @@
 自動配貨的換人續傳須沿用既有 coordinator 與 `commitSingleItemFreeStockAllocation`；coordinator 呼叫 writer 時必須傳入內部 batchContext，真正庫存交易重讀批次、當前 users 角色及固定 pending 指令，不可只在交接前檢查身份。禁止在接手時重建 runId、改寫舊 movement 操作者或重新執行已提交指令。原步驟與接手補結算共用 `settleAutomaticFreeStockStep`，不分叉進度加總。
 
 實測須包含三種合格物流角色、停用原操作者、不合格接手者、尚未扣帳／已扣帳未更新進度、舊程序延遲執行、不同角色併發、原 movement 篡改、交接稽核失敗回滾及來源 movement 的 bounded recovery。仍不得接正式 Callable／前端；需另行 Preview 全流程驗收。
+
+
+### CLOSE 退貨後的剩餘履約（2026-10-18，Emulator-only）
+
+CLOSE 後剩餘履約須使用原打單／出貨／確認 Service 與 `projectShipmentReturns`，不能只解除 returnRecords 阻擋而略過實際退貨憑證。`normalizeLocationReturnIntent`／`readLocationReturnProofs` 共用於原退貨 writer 及後續履約；不得重寫 intent hash 或複製第二套驗證。Core 修改後重新產生 functions/shared 副本。
+
+日期驗收須覆蓋同一批退貨後的較晚分次送達、反序退貨快取、同日累計上限及禁止用較晚送達回填先前退貨。交易驗收須覆蓋兩倉完整剩餘流程、五角色、超出原訂購量、固定 ID 重送、三入口缺失／竄改／刪除退貨憑證、併發超配與後段寫入失敗回滾。REPLACE、混合補送、退貨後送達撤銷、退貨後收貨／取消恢復及正式接線仍須獨立整合。

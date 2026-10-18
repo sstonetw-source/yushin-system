@@ -5,6 +5,7 @@ const reservationCore=require('./shared/reservation-core');
 const inventoryCore=require('./shared/inventory-core');
 const fulfillmentCore=require('./shared/fulfillment-core');
 const logisticsCore=require('./shared/warehouse-logistics');
+const {readLocationReturnProofs}=require('./location-return-trace-service');
 function fault(message,code='failed-precondition'){const e=new Error(message);e.code=code;throw e;}
 function id(value,label){
  if(typeof value!=='string'||!value||value!==value.trim()||value.includes('/')||value.length>160)
@@ -85,17 +86,19 @@ async function commitLocationShipment(db,uid,data){
    fault('服務或停用商品不可出貨');
   const ordered=quantity(item.qty??item.orderedQty,'訂購量');
   if(item.qty!==undefined&&item.orderedQty!==undefined&&item.qty!==item.orderedQty)fault('訂購量投影不一致');
-  if(!Array.isArray(order.deliveryRecords)||!Array.isArray(order.returnRecords)||order.returnRecords.length
-   ||quantity(item.returnedQty??0,'退貨量'))fault('退貨或補送流程尚未開放');
+  if(!Array.isArray(order.deliveryRecords)||!Array.isArray(order.returnRecords))fault('出貨或退貨紀錄格式不正確');
   const records=order.warehouseShipmentRecords??[];
-  const deliveryProjection=fulfillmentCore.projectShipmentDelivery({orderId,itemId,productKey,orderedQty:ordered,
-   shipments:records,deliveries:order.deliveryRecords});
+  const deliveryProjection=fulfillmentCore.projectShipmentReturns({orderId,itemId,productKey,orderedQty:ordered,
+   shipments:records,deliveries:order.deliveryRecords,returns:order.returnRecords});
+  await readLocationReturnProofs(tx,db,order,intent,productKey,{closedOnly:true});
   const gross=deliveryProjection.shippedQty;
   if(records.some(row=>row.id===operationId)||(order.warehouseShipmentHistory||[]).some(row=>row.recordId===operationId))
    fault('此出貨識別碼已有歷史紀錄，不可重新扣帳');
   if(quantity(item.warehouseShippedQty??gross,'品項累計出貨量')!==gross
    ||quantity(item.deliveredQty??0,'品項送達量')!==deliveryProjection.confirmedQty
    ||quantity(order.deliveredQty??0,'訂單送達量')!==deliveryProjection.confirmedQty
+   ||quantity(item.returnedQty??0,'品項退貨')!==deliveryProjection.returnedQty
+   ||quantity(order.returnedQty??0,'訂單退貨')!==deliveryProjection.returnedQty
    ||(order.isDelivered??false)!==deliveryProjection.isDelivered)
    fault('出貨或客戶送達投影不一致');
   const prepared=quantity(item.dispatchPreparedQty??0,'打單量');
@@ -118,7 +121,7 @@ async function commitLocationShipment(db,uid,data){
    fault('此試點須使用來源一致的 v2 預留');
   if(company.data().productKey!==productKey||stock.data().productKey!==productKey||stock.data().warehouseId!==warehouseId)
    fault('公司或分倉產品不一致');
-  if(quantity(ledger.quantity,'預留總量')+quantity(ledger.shortageQty,'缺口')!==ordered-gross)
+  if(quantity(ledger.quantity,'預留總量')+quantity(ledger.shortageQty,'缺口')!==deliveryProjection.outstandingQty)
    fault('預留與尚待交付數量不一致');
   const stockPlan=reservationCore.planReservationIssue({productKey,warehouseId,qty:intent.quantity,
    reservation:ledger,aggregateStock:company.data(),warehouseStock:stock.data(),itemReservedQty:held,requireReservation:true});
@@ -143,8 +146,8 @@ async function commitLocationShipment(db,uid,data){
    qty:intent.quantity,notes:intent.notes,sourceType:'WAREHOUSE_CUSTOMER_SHIPMENT',deliveryPlan:sourcePlan,
    createdBy:uid,createdByUid:uid,createdAt:now,movementId:movementRef.id,lotAllocations:allocation.allocations,cogs:0};
   const nextRecords=[...records,record];
-  fulfillmentCore.projectShipmentDelivery({orderId,itemId,productKey,orderedQty:ordered,
-   shipments:nextRecords,deliveries:order.deliveryRecords});
+  fulfillmentCore.projectShipmentReturns({orderId,itemId,productKey,orderedQty:ordered,
+   shipments:nextRecords,deliveries:order.deliveryRecords,returns:order.returnRecords});
   const nextLedger={...stockPlan.reservation,updatedAt:now};delete nextLedger.warehouseId;
   tx.update(inventoryRef,{...stockPlan.aggregateStock,updatedAt:now});
   tx.update(stockRef,{...stockPlan.warehouseStock,updatedAt:now});

@@ -61,3 +61,23 @@ test('unspecified new return settlement defaults to CLOSE while explicit histori
  assert.equal(closed.hash,normalizeLocationReturnIntent(request({settlement:'CLOSE'})).hash);
  assert.notEqual(closed.hash,normalizeLocationReturnIntent(request({settlement:'REPLACE'})).hash);
 });
+
+test('return timeline permits later acknowledgement of the same shipment without borrowing future delivery',()=>{
+ const base=source();
+ base.deliveries=[{...base.deliveries[0],qty:2},
+  {...base.deliveries[0],id:'D-later',date:'2026-10-21',qty:2}];
+ const valid=core.projectShipmentReturns({...base,returns:[returned({qty:1,settlement:'CLOSE'})]});
+ assert.equal(valid.confirmedQty,4);assert.equal(valid.returnedQty,1);assert.equal(valid.isDelivered,true);
+ assert.throws(()=>core.projectShipmentReturns({...base,returns:[returned({qty:3})]}),/當時已送達量/);
+});
+test('chronological return allowance is independent of cache order and aggregates same-day returns',()=>{
+ const base=source();
+ base.deliveries=[{...base.deliveries[0],qty:2},
+  {...base.deliveries[0],id:'D-later',date:'2026-10-21',qty:2}];
+ const early=returned({qty:2,settlement:'CLOSE'});
+ const later=returned({id:'R-later',qty:1,date:'2026-10-22',settlement:'CLOSE'});
+ const first=core.projectShipmentReturns({...base,returns:[early,later]});
+ assert.deepEqual(core.projectShipmentReturns({...base,returns:[later,early]}),first);
+ assert.throws(()=>core.projectShipmentReturns({...base,returns:[early,returned({id:'R-same-day',qty:1})]}),/當時已送達量/);
+ assert.throws(()=>core.projectShipmentReturns({...base,returns:[later,returned({qty:3})]}),/當時已送達量/);
+});

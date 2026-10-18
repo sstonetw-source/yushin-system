@@ -3,6 +3,7 @@
 // shipment or a customer delivery. No Callable/UI until all v2 adapters pass.
 const {createHash}=require('node:crypto');
 const fulfillment=require('./shared/fulfillment-core');
+const {readLocationReturnProofs}=require('./location-return-trace-service');
 function fault(message,code='failed-precondition'){const error=new Error(message);error.code=code;throw error;}
 function id(value,label){
  if(typeof value!=='string'||!value||value!==value.trim()||value.includes('/')||value.length>160)
@@ -64,12 +65,12 @@ async function commitLocationDispatchPreparation(db,uid,data){
   const ordered=qty(item.qty??item.orderedQty,'訂購量');
   if(!ordered||(item.qty!==undefined&&item.orderedQty!==undefined&&item.qty!==item.orderedQty))
    fault('訂購數量異常');
-  if(!Array.isArray(order.deliveryRecords)||!Array.isArray(order.returnRecords)
-   ||order.returnRecords.length||qty(item.returnedQty??0,'退貨量')>0)
-   fault('退貨或補送打單尚未開放');
+  if(!Array.isArray(order.deliveryRecords)||!Array.isArray(order.returnRecords))
+   fault('出貨或退貨紀錄格式不正確');
   const productKey=id(item.inventoryProductKey||item.productId,'庫存產品');
-  const progress=fulfillment.projectShipmentDelivery({orderId,itemId,productKey,orderedQty:ordered,
-   shipments:order.warehouseShipmentRecords??[],deliveries:order.deliveryRecords});
+  const progress=fulfillment.projectShipmentReturns({orderId,itemId,productKey,orderedQty:ordered,
+   shipments:order.warehouseShipmentRecords??[],deliveries:order.deliveryRecords,returns:order.returnRecords});
+  await readLocationReturnProofs(tx,db,order,intent,productKey,{closedOnly:true});
   const shipped=qty(item.warehouseShippedQty??0,'出貨投影');
   const delivered=qty(item.deliveredQty??0,'送達投影');
   const prepared=qty(item.dispatchPreparedQty??0,'已打單量');
@@ -77,6 +78,8 @@ async function commitLocationDispatchPreparation(db,uid,data){
   const shortage=qty(item.shortageQty??0,'缺口');
   if(shipped!==progress.shippedQty||delivered!==progress.confirmedQty
    ||qty(order.deliveredQty??0,'訂單送達')!==progress.confirmedQty
+   ||qty(item.returnedQty??0,'品項退貨')!==progress.returnedQty
+   ||qty(order.returnedQty??0,'訂單退貨')!==progress.returnedQty
    ||(order.isDelivered??false)!==progress.isDelivered||prepared>ordered)
    fault('出貨、送達或打單投影不一致');
   const ledgerSnap=await tx.get(ref('inventoryReservations',orderId+'__'+itemId));
@@ -87,7 +90,7 @@ async function commitLocationDispatchPreparation(db,uid,data){
    ||ledger.ownerUid!==order.ownerUid||ledger.salesCode!==order.salesCode
    ||!Array.isArray(ledger.locations)||ledger.locations.length>20
    ||qty(ledger.quantity,'預留總量')!==held||qty(ledger.shortageQty,'預留缺口')!==shortage
-   ||held+shortage+shipped!==ordered)
+   ||held+shortage!==progress.outstandingQty)
    fault('訂單與 v2 預留來源或數量不一致');
   let locationTotal=0;const seen=new Set();
   for(const loc of ledger.locations){
