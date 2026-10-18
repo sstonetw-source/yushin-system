@@ -667,4 +667,48 @@ async function advanceReleasedV2FreeStock(db,uid,input){
  return {...result,sourceMovementId:movementId};
 }
 
-module.exports={normalizeSingleItemIntent,normalizeCommitIntent,planSingleItemTwoWarehouse,commitSingleItemTwoWarehouse,normalizeFreeStockIntent,commitSingleItemFreeStockAllocation,normalizeAutomaticFreeStockIntent,advanceAutomaticFreeStockAllocation,advanceReleasedV2FreeStock};
+
+// Post-commit only. A caller may hand off its committed source movement to
+// this bounded worker; each iteration revalidates source proof and current
+// role, and continues the SAME durable coordinator run ID.
+async function drainReleasedV2FreeStock(db,uid,input){
+ if(!input||typeof input!=='object'||Array.isArray(input)
+  ||Object.keys(input).some(k=>!['movementId','maxSteps'].includes(k)))
+  reject('釋放來源執行請求含未授權欄位','invalid-argument');
+ const movementId=ident(input.movementId,'來源庫存異動 ID');
+ const maxSteps=input.maxSteps===undefined?5:input.maxSteps;
+ if(!Number.isSafeInteger(maxSteps)||maxSteps<1||maxSteps>10)
+  reject('每次執行最多十個步驟','invalid-argument');
+ let result=null,calls=0;
+ while(calls<maxSteps){
+  result=await advanceReleasedV2FreeStock(db,uid,{movementId});
+  calls++;
+  if(result.status==='completed'||result.status==='retry')break;
+  if(result.status!=='active')
+   reject('庫存分配批次回傳非預期狀態，必須原批次核對');
+ }
+ return {...result,stepsAttempted:calls,recoveryPending:result.status!=='completed'};
+}
+// Never throw an allocation failure as a failed cancellation/return. The
+// source mutation is already committed; return an explicit durable list of
+// movements that the authorized operator must resume with the same IDs.
+async function continueCommittedV2FreeStock(db,uid,movementIds,maxSteps=5){
+ if(!Array.isArray(movementIds)||movementIds.length>2
+    ||movementIds.some(id=>typeof id!=='string'||!id))
+  reject('已提交來源憑證不正確','invalid-argument');
+ const results=[];
+ for(const movementId of movementIds){
+  try{
+   const allocation=await drainReleasedV2FreeStock(db,uid,{movementId,maxSteps});
+   results.push({movementId,status:allocation.status,recoveryPending:allocation.recoveryPending,
+    allocatedQty:allocation.allocatedQty,stepsAttempted:allocation.stepsAttempted});
+  }catch(error){
+   results.push({movementId,status:'pending',recoveryPending:true,
+    errorCode:typeof error.code==='string'?error.code:'failed-precondition',
+    errorMessage:error.message});
+  }
+ }
+ return {status:results.some(row=>row.recoveryPending)?'recovery-pending':'completed',sources:results};
+}
+
+module.exports={normalizeSingleItemIntent,normalizeCommitIntent,planSingleItemTwoWarehouse,commitSingleItemTwoWarehouse,normalizeFreeStockIntent,commitSingleItemFreeStockAllocation,normalizeAutomaticFreeStockIntent,advanceAutomaticFreeStockAllocation,advanceReleasedV2FreeStock,drainReleasedV2FreeStock,continueCommittedV2FreeStock};
