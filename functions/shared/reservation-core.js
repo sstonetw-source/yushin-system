@@ -208,13 +208,17 @@
    validateReservationStockIdentity({productKey,warehouseId,reservation,aggregateStock,warehouseStock});
    // V2 customer receipts restore only their source location, retaining holds
    // in every other warehouse. Corrections/cancellation still use a separate
-   // lifecycle contract; never collapse that ledger into a scalar location.
-   if(reservation.locationSchemaVersion===2&&operation==='CUSTOMER_RETURN'&&delta>0&&orderStatus==='normal'){
+   // lifecycle contract; a cancelled CLOSE receipt requires an already empty
+   // released ledger and must never recreate or silently release a hold.
+   if(reservation.locationSchemaVersion===2&&operation==='CUSTOMER_RETURN'&&delta>0){
      reservationStockDeltas(reservation,reservation);
      if(reservation.warehouseId!==undefined)throw Error('多倉預留不可含單倉位置。');
      const amount=locationQty(delta),existing=locationQty(reservation.quantity),shortage=locationQty(reservation.shortageQty);
      if(itemReservedQty!==undefined&&locationQty(itemReservedQty)!==existing)throw Error('訂單與庫存預留數量不一致。');
      const locations=reservationLocations(reservation),local=locations.find(row=>row.warehouseId===warehouseId)?.qty||0;
+     if(orderStatus==='cancelled'&&(settlement!=='CLOSE'||reservation.status!=='released'
+       ||existing!==0||shortage!==0||locations.length!==0))
+       throw Error('取消的多倉退貨只支援已完整釋放的 CLOSE 入庫。');
      const {company,warehouse}=validateReservationBalance({existingQty:local,aggregateStock,warehouseStock});
      if(company.reserved<existing)throw Error('公司預留量不足。');
      for(const stock of [company,warehouse]){
@@ -224,7 +228,7 @@
      const added=settlement==='REPLACE'?amount:0,quantity=locationQty(existing+added);
      const nextLocations=new Map(locations.map(row=>[row.warehouseId,row.qty]));
      if(added)nextLocations.set(warehouseId,locationQty(local+added));
-     const next={...reservation,quantity,status:quantity?'active':shortage?'shortage':'fulfilled',
+     const next={...reservation,quantity,status:orderStatus==='cancelled'?'released':quantity?'active':shortage?'shortage':'fulfilled',
        locations:[...nextLocations].sort(([a],[b])=>a.localeCompare(b)).map(([warehouseId,reservedQty])=>({warehouseId,reservedQty}))};
      const changes=reservationStockDeltas(reservation,next);
      return {reservation:next,reservedDelta:changes.companyReservedDelta,

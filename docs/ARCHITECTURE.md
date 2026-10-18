@@ -470,3 +470,12 @@ CLOSE 後僅剩餘未交付部分可取消／恢復；已出貨須全數確認�
 本節更新先前退貨後不能收貨的限制。沿用 `src/services/receiving.js::receiveSupplyOrderRecord` 唯一收貨 writer，交易內從有界 sourceId＋action 查詢核對所有原退貨入庫憑證（空快取也查），並驗證 item／order returnedQty、出貨、送達及供應來源；只支援 CLOSE，REPLACE／混合補送與退貨更正仍拒絕。退貨意圖正規化及憑證資料驗證抽至原 Fulfillment Core，Functions 原 reader 與原收貨 Service 共用；雜湊順序及歷史操作 ID 不變，平台分別使用 Node SHA-256／Web Crypto。
 
 Workflow 的明確 warehouseShipmentContext 現包含 returns，以原 projectShipmentReturns 區分商業未結清與實體尚未寄出量。Receiving 明確傳 gross／effective，CLOSE 不再被扣第二次；採購需求 helper 同樣帶原退貨事件。無 context 的舊契約保留。原 receipt、批次、成本連結、供應／需求、公司／分倉及來源預留維持同一交易；取消後仍須原採購 KEEP_STOCK 決策，收貨只成自由實貨，恢復至多需求剩餘未寄出量。沒有第二個 writer、後端側寫、Rules／索引變更或正式接線。
+
+
+### 取消訂單後 CLOSE 實物退貨（2026-10-18，Emulator-only）
+
+原 commitLocationReturn 可接收已取消來源的 CLOSE 退貨，仍沿唯一退貨 writer／原批次還原／固定 movement ID；不新增 Callable、前端或正式資料寫入。shipmentDeliveryContext 增加僅由此 writer 明確傳入的 allowCancelledCloseReturn；預設仍拒絕取消來源，因此一般新增送達、送達撤銷及唯讀追溯不會連帶開放。
+
+新交易要求 status／orderStatus 同為 cancelled、來源同步完成、已寄出全送達且無額外打單、只含 CLOSE／無退貨更正歷史。v2 ledger 必須 released、quantity／shortageQty皆0且 locations空，item預留／缺口一致。原 Reservation.planReservationReturn 在此條件下只加公司與原倉實貨，保留 released，不因入庫釋放殘存異常預留或占回取消來源。退貨憑證、原出貨 movement、真實批次、角色／所有權與庫存平衡仍在同一 transaction 核對；不新增讀寫集合或查詢。
+
+後續恢復仍由原 lifecycle Service，以原訂購量減歷史寄出量規劃剩餘需求，CLOSE不新增補送；採購／收貨歷史不改。原自由庫存協調器可用同一退貨 movement 將最多退回量分給其他正常訂單，取消來源不重啟。REPLACE／混合補送、途中或額外已打單的取消、更正／撤銷、完整 Auth／UI／Preview 仍未開放。

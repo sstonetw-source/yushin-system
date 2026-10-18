@@ -137,3 +137,8 @@ Emulator harness 呼叫原正式 PO／incoming 登記、原收貨 Service 及 `k
 驗收新增八組出貨檔案例及一組真實採購／收貨整合：完整取消→恢復→分倉剩餘打單／出貨／送達，競爭庫存造成採購缺口，兩方向錯誤憑證，REPLACE／途中貨／額外打單拒絕，角色，併發，末端失敗回滾與重試，取消後 bounded 配貨，以及既有 PO／供應／receipt／lot 不受影響。測試結果以本批實際 CI 為準；完整 Auth／前端／Preview 尚未啟用，沒有部署或正式資料更動。
 
 未完成：REPLACE／混合補送、取消中新增退貨、途中或額外已打單的取消、退貨後收貨、其他物流模式／多品項、完整初始化與正式接線。
+
+
+### 取消後再新增 CLOSE（2026-10-18，Emulator-only）
+
+已可在原退貨writer收回取消訂單先前已確認交付的可再入庫商品，保持released空ledger及取消狀態。原 lifecycle 恢復時會驗證新增退貨movement與累計投影，CLOSE仍不增加剩餘需求；沒有另一個取消／恢復writer。詳細條件與驗收見 location-return-receipt-emulator-20261017.md 最新節。取消中的REPLACE／混合補送、途中貨及額外已打單取消、更正／撤銷與正式接線仍未開放。
