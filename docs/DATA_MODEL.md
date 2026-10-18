@@ -257,3 +257,10 @@ v2 到貨自由實貨**不新增欄位／Collection**。既有 `receipts/{receip
 Auth uid對應原users/{uid}，角色／active／disabled仍讀原文件；Callable payload契約完全沿原trace／return normalizer，不新增actor／價格／庫存輸入欄位。原location-return-{operationId} movement保存交易內實際登入actorUid／role，trace仍零寫入，原returRecords／history／stock／lot原子交易不改。
 
 臨時Functions測試目錄的checkout.json及.env.local只屬執行設定，結束刪除，不寫入專案資料集合。Emulator Auth帳號與上游order／inventory fixture明確為合成測試資料；無正式帳號、資料遷移、新Rules／Index／Listener。傳輸層驗證失敗不得進入原退貨writer。
+
+
+### 初始化checkpoint由原來源交易產生（2026-10-18，Emulator-only）
+
+無新增collection／欄位／migration。退貨Auth fixture的inventoryReservationStatus、inventoryReservationAttemptId、inventoryReservationError及UpdatedAt現由原writeOrderInventorySyncState寫入，不再由測試直接完成；工作索引沿原orderWorkIndexFields。
+
+v2 operationId以orderId／itemId／本次syncAttemptId建立固定雜湊識別，仍保存原reservationOperationReceipts與逐倉movements；預留／缺口沿原Core。需求使用原來源demandId與正式URL編碼路徑，只有實際缺口／供應歷史才建立需求。中斷重試保留原庫存事實，新的來源attempt不增加已占量；完成來源重送不寫另一份receipt／demand或重設attempt。fixture hooks只模擬中斷與回覆遺失，不是持久資料模型。

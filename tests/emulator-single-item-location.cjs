@@ -1836,3 +1836,67 @@ test('purchased stock can CLOSE return after cancellation then KEEP_STOCK receip
  assert.equal(final.state.base.documents[0].returnedQty,1);assert.deepEqual(final.state.base.documents[0].returnRecords,afterReturn.state.base.documents[0].returnRecords);
  await require('../functions/location-return-service').commitLocationReturn(db,x.uid,intent);assert.deepEqual(await receiptSnapshot(x),final);
 });
+
+const {synchronizeV2OrderFixture}=require('./fixtures/v2-order-initialization.cjs');
+const initialize=x=>synchronizeV2OrderFixture(db,x.uid,{orderId:x.orderId,warehouseIds:['V2-A','V2-B']});
+async function initializedSource(name,options={}){return seed('real-init-'+name,{company:7,a:4,b:3,...options});}
+async function initializationReceipts(x){return (await db.collection('reservationOperationReceipts').where('orderId','==',x.orderId).get()).docs.map(s=>s.data());}
+const initDemandId=x=>encodeURIComponent('SALES_ORDER:'+x.orderId+':I1');
+test('real source synchronization rotates attempt reserves both warehouses persists actual demand then completes its checkpoint',async()=>{
+ const x=await initializedSource('demand'),result=await initialize(x),order=await x.read('orders',x.orderId);
+ assert.equal(order.inventoryReservationStatus,'completed');assert.notEqual(order.inventoryReservationAttemptId,'v2_123456789');
+ assert.equal(order.inventoryReservationError,'');assert.equal(result.summary.reservedQty,7);assert.equal(result.summary.shortageQty,3);
+ assert.equal(order.items[0].reservedQty,7);assert.equal(order.items[0].shortageQty,3);assert.ok(order.workCategories.includes('ordering'));
+ const ledger=await x.read('inventoryReservations',x.orderId+'__I1');assert.equal(ledger.locationSchemaVersion,2);
+ assert.deepEqual(ledger.locations,[{warehouseId:'V2-A',reservedQty:4},{warehouseId:'V2-B',reservedQty:3}]);
+ const demand=await x.read('procurementDemands',initDemandId(x));assert.equal(demand.requestedQty,3);assert.equal(demand.remainingToOrderQty,3);
+ const receipts=await initializationReceipts(x);assert.equal(receipts.length,1);assert.equal(receipts[0].syncAttemptId,order.inventoryReservationAttemptId);
+ assert.equal((await x.read('inventory',x.productKey)).reserved,7);
+});
+test('reservation committed before a source initialization interruption remains blocked until real retry publishes demand',async()=>{
+ const x=await initializedSource('interrupted'),hooks={afterReservation:()=>{throw Error('connection lost before demand');}};
+ await assert.rejects(synchronizeV2OrderFixture(db,x.uid,{orderId:x.orderId,warehouseIds:['V2-A','V2-B'],hooks}),/connection lost/);
+ const failed=await x.read('orders',x.orderId);assert.equal(failed.inventoryReservationStatus,'failed');assert.equal(failed.items[0].reservedQty,7);
+ assert.equal(await x.read('procurementDemands',initDemandId(x)),undefined);
+ await assert.rejects(commitSingleItemLocationLifecycle(db,x.uid,{orderId:x.orderId,itemId:'I1',warehouseIds:['V2-A','V2-B'],
+  nextStatus:'cancelled',operationId:'init_blocked_lifecycle_123',syncAttemptId:failed.inventoryReservationAttemptId,date:'2026-10-18',reason:'未完成不可續做'}),/同步/);
+ const stock=await x.read('inventory',x.productKey);await initialize(x);const done=await x.read('orders',x.orderId);
+ assert.equal(done.inventoryReservationStatus,'completed');assert.notEqual(done.inventoryReservationAttemptId,failed.inventoryReservationAttemptId);
+ assert.deepEqual(await x.read('inventory',x.productKey),stock);assert.equal((await x.read('procurementDemands',initDemandId(x))).requestedQty,3);
+ const movements=(await snapshot(x)).movements.filter(m=>m.type==='reserve');assert.equal(movements.reduce((n,m)=>n+m.qty,0),7);
+});
+test('completed real initialization replays without invoking reservation or changing its attempt demand or balances',async()=>{
+ const x=await initializedSource('replay');await initialize(x);const before=await snapshot(x),demand=await x.read('procurementDemands',initDemandId(x)),receipts=await initializationReceipts(x);
+ await synchronizeV2OrderFixture(db,x.uid,{orderId:x.orderId,warehouseIds:['V2-A','V2-B'],hooks:{beforeReservation:()=>{throw Error('completed source must not reserve again');}}});
+ assert.deepEqual(await snapshot(x),before);assert.deepEqual(await x.read('procurementDemands',initDemandId(x)),demand);assert.deepEqual(await initializationReceipts(x),receipts);
+});
+test('older source initialization callback cannot overwrite a newer real completed attempt or reserve twice',async()=>{
+ const x=await initializedSource('superseded');let release,entered;const pause=new Promise(r=>{release=r;}),started=new Promise(r=>{entered=r;});
+ const older=synchronizeV2OrderFixture(db,x.uid,{orderId:x.orderId,warehouseIds:['V2-A','V2-B'],hooks:{beforeReservation:async()=>{entered();await pause;}}});
+ await started;await initialize(x);const before=await snapshot(x),demand=await x.read('procurementDemands',initDemandId(x));release();
+ assert.equal((await older).order.inventoryReservationStatus,'completed');assert.deepEqual(await snapshot(x),before);assert.deepEqual(await x.read('procurementDemands',initDemandId(x)),demand);
+ assert.equal((await initializationReceipts(x)).length,1);
+});
+test('source initialization checks actual roles ownership and active profile before writing any state',async()=>{
+ for(const role of ['admin','purchaser','sales','engineer','warehouse']){
+  const x=await initializedSource('role-'+role,{role}),before=await snapshot(x);
+  if(role==='warehouse'){await assert.rejects(initialize(x),/無權/);assert.deepEqual(await snapshot(x),before);}
+  else assert.equal((await initialize(x)).order.inventoryReservationStatus,'completed');
+ }
+ for(const [name,options,update] of [['foreign',{owner:'other'},null],['disabled',{}, {active:false}],['missing',{},null]]){
+  const x=await initializedSource(name,options);if(update)await db.collection('users').doc(x.uid).update(update);if(name==='missing')await db.collection('users').doc(x.uid).delete();
+  const before=await snapshot(x);await assert.rejects(initialize(x));assert.deepEqual(await snapshot(x),before,name);
+ }
+});
+test('lost completion response recovers from the actual committed initialization without rewriting it as failed',async()=>{
+ const x=await initializedSource('lost-reply');let reservations=0;
+ const result=await synchronizeV2OrderFixture(db,x.uid,{orderId:x.orderId,warehouseIds:['V2-A','V2-B'],hooks:{completionResponseLost:true,beforeReservation:()=>{reservations++;}}});
+ assert.equal(result.order.inventoryReservationStatus,'completed');assert.equal(reservations,1);assert.equal((await initializationReceipts(x)).length,1);
+ assert.equal((await x.read('orders',x.orderId)).inventoryReservationError,'');assert.equal((await x.read('inventory',x.productKey)).reserved,7);
+});
+test('account change after real reservation cannot finish initialization and original actor can recover without duplicate holds',async()=>{
+ const x=await initializedSource('account-change');
+ await assert.rejects(synchronizeV2OrderFixture(db,x.uid,{orderId:x.orderId,warehouseIds:['V2-A','V2-B'],hooks:{afterReservation:({context})=>{context.currentUser={uid:'another-account'};}}}),/登入身份/);
+ assert.equal((await x.read('orders',x.orderId)).inventoryReservationStatus,'pending');assert.equal((await x.read('inventory',x.productKey)).reserved,7);
+ const stock=await x.read('inventory',x.productKey);await initialize(x);assert.equal((await x.read('orders',x.orderId)).inventoryReservationStatus,'completed');assert.deepEqual(await x.read('inventory',x.productKey),stock);
+});
