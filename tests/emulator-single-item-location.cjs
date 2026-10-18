@@ -4,8 +4,8 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const admin=require('firebase-admin');
 const {getFirestore}=require('firebase-admin/firestore');
 const demandCore=require('../modules/procurement-demand-core');
-const {planSingleItemTwoWarehouse,commitSingleItemTwoWarehouse,commitSingleItemFreeStockAllocation,advanceAutomaticFreeStockAllocation,advanceReleasedV2FreeStock}=require('../functions/single-item-location-service');
-const {commitSingleItemLocationLifecycle}=require('../functions/single-item-location-lifecycle-service');
+const {planSingleItemTwoWarehouse,commitSingleItemTwoWarehouse,commitSingleItemFreeStockAllocation,advanceAutomaticFreeStockAllocation,advanceReleasedV2FreeStock,drainReleasedV2FreeStock}=require('../functions/single-item-location-service');
+const {commitSingleItemLocationLifecycle,commitSingleItemLocationLifecycleAndRecover}=require('../functions/single-item-location-lifecycle-service');
 let app,db;
 test.before(()=>{
  assert.ok(process.env.FIRESTORE_EMULATOR_HOST,'Never use live Firestore');
@@ -1318,4 +1318,69 @@ test('v2 source receiving that reserves its whole receipt must never publish a f
  assert.equal(receiptProof.data().v2FreeStockSource,undefined);
  await assert.rejects(advanceReleasedV2FreeStock(db,'emulator-purchaser',{
   movementId:receiptProof.id}),/receipt 憑證/);
+});
+
+test('v2 cancellation post-commit orchestrator redistributes both warehouses without duplicating source transactions',async()=>{
+ const source=await readyLifecycle('postcommit-both',{role:'admin'});
+ const target=await autoFreeTarget(source,'waiting-post',10,'2026-09-01');
+ await seedLifecycleDemand(target);
+ const original=await source.read('inventory',source.productKey);
+ const cancelIntent=source.intent('cancelled','postcommit_cancel_admin_12345678');
+ const committed=await commitSingleItemLocationLifecycleAndRecover(db,source.uid,cancelIntent);
+ assert.equal(committed.status,'applied');
+ assert.equal(committed.postCommitAllocation.status,'completed');
+ assert.equal(committed.postCommitAllocation.sources.length,2);
+ assert.equal(committed.postCommitAllocation.sources.every(x=>x.recoveryPending===false),true);
+ assert.equal((await target.read('orders',target.orderId)).items[0].shortageQty,0);
+ assert.equal((await source.read('orders',source.orderId)).status,'cancelled');
+ assert.equal((await source.read('inventory',source.productKey)).onHand,original.onHand);
+ assert.equal((await source.read('inventory',source.productKey)).reserved,10);
+ const before=await snapshot(target);
+ const retry=await commitSingleItemLocationLifecycleAndRecover(db,source.uid,cancelIntent);
+ assert.equal(retry.status,'already-applied');
+ assert.equal(retry.postCommitAllocation.status,'completed');
+ assert.deepEqual(await snapshot(target),before);
+});
+test('bounded release worker resumes identical source event across calls without duplicating movements',async()=>{
+ const source=await readyLifecycle('postcommit-bounded',{role:'admin'});
+ const older=await autoFreeTarget(source,'old',4,'2026-09-01');
+ const newer=await autoFreeTarget(source,'new',5,'2026-09-02');
+ await seedLifecycleDemand(older);await seedLifecycleDemand(newer);
+ await source.lifecycle('cancelled','postcommit_bounded_cancel_1234');
+ const movementId='single-v2-life-postcommit_bounded_cancel_1234-V2-B';
+ const step=await drainReleasedV2FreeStock(db,source.uid,{movementId,maxSteps:1});
+ assert.equal(step.status,'active');assert.equal(step.recoveryPending,true);
+ assert.equal(step.stepsAttempted,1);assert.equal(step.allocatedQty,2);
+ const done=await drainReleasedV2FreeStock(db,source.uid,{movementId,maxSteps:3});
+ assert.equal(done.status,'completed');assert.equal(done.recoveryPending,false);
+ assert.equal(done.allocatedQty,6);assert.equal(done.stepsAttempted,1);
+ const both=await Promise.all([drainReleasedV2FreeStock(db,source.uid,{movementId,maxSteps:1}),
+  drainReleasedV2FreeStock(db,source.uid,{movementId,maxSteps:1})]);
+ assert.equal(both.every(x=>x.status==='completed'&&x.allocatedQty===6),true);
+ const rows=await db.collection('inventoryMovements').where('sourceId','==',newer.orderId).get();
+ assert.equal(rows.docs.filter(x=>x.data().action==='single_v2_free_stock_allocation').length,1);
+ await assert.rejects(drainReleasedV2FreeStock(db,source.uid,{movementId,maxSteps:11}),/最多十個步驟/);
+});
+test('post-commit cancellation by a sales actor cannot claim warehouse authority; committed source remains recoverable',async()=>{
+ const source=await readyLifecycle('postcommit-sales',{role:'sales'});
+ const target=await autoFreeTarget(source,'waiting-sales',10,'2026-09-01');
+ await seedLifecycleDemand(target);
+ const cancelIntent=source.intent('cancelled','postcommit_cancel_sales_12345678');
+ const completed=await commitSingleItemLocationLifecycleAndRecover(db,source.uid,cancelIntent);
+ assert.equal(completed.status,'applied');
+ assert.equal(completed.postCommitAllocation.status,'recovery-pending');
+ assert.equal(completed.postCommitAllocation.sources.every(x=>x.recoveryPending),true);
+ assert.equal(completed.postCommitAllocation.sources.every(x=>x.errorCode==='permission-denied'),true);
+ assert.equal((await source.read('orders',source.orderId)).status,'cancelled');
+ const before=(await target.read('orders',target.orderId)).items[0].shortageQty;
+ assert.equal(before,8);
+ const dispatcher='postcommit-resumer-'+source.orderId;
+ await db.collection('users').doc(dispatcher).set({role:'warehouse',active:true});
+ const resumed=await drainReleasedV2FreeStock(db,dispatcher,{
+  movementId:'single-v2-life-'+cancelIntent.operationId+'-V2-B',maxSteps:5});
+ assert.equal(resumed.status,'completed');assert.equal(resumed.allocatedQty,6);
+ assert.equal((await target.read('orders',target.orderId)).items[0].shortageQty,2);
+ const originalReplay=await commitSingleItemLocationLifecycleAndRecover(db,source.uid,cancelIntent);
+ assert.equal(originalReplay.status,'already-applied');
+ assert.equal(originalReplay.postCommitAllocation.status,'recovery-pending');
 });

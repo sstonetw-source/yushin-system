@@ -195,3 +195,7 @@ deliveryHistory 的 shipment_confirmation_reversal 事件以operationId識別本
 ### v2 到貨配貨來源使用現有原子證據（2026-10-18）
 
 v2 到貨自由實貨**不新增欄位／Collection**。既有 `receipts/{receiptId}` 的 `reservationLocationSchemaVersion=2`、`autoAllocationQty`、`sourceOrderStatus`、`lotId`，與原 `inventoryMovements` 中 `sourceType=SUPPLY_ORDER`、`type=receipt`、`receiptId`、實體 `inventoryLots/{lotId}` 的來源及數量一致，組成可稽核的唯一收貨配貨來源。Cancellation KEEP_STOCK 需原 supplyOrders 核定證據。以原 movementId 推導既有 deterministic `reservationOperationReceipts` 分配進度，不新增快取持有權威實貨，無 Firestore Rules／索引更動或正式部署。
+
+### Post-commit 分配續傳輸出契約（2026-10-18）
+
+新 `drainReleasedV2FreeStock` 不新增 Collection／數量權威，而是讀取原 `inventoryMovements/{movementId}`、同一來源雜湊取得既有 `reservationOperationReceipts/single-v2-free-batch-...` checkpoint。執行上限及 `recoveryPending` 為**回應狀態**，非新庫存 cache。新增來源 Service 的 `...AndRecover` 組合回傳 `postCommitAllocation:{status,sources:[{movementId,status,recoveryPending,allocatedQty|errorCode}]}`。交易來源成功後即使配貨卡住，原交易與事件仍保留；可由真實授權角色以來源 movementId 顯式續傳。沒有新 Rules／Index／正式資料遷移。

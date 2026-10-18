@@ -106,3 +106,11 @@ Emulator harness 呼叫原正式 PO／incoming 登記、原收貨 Service 及 `k
 既有 `Receiving.receiveSupplyOrderRecord` 會在同一個 Firestore Transaction 寫入實體 `inventoryLots`、`receipts/{operationKey}`、`inventoryMovements`、公司／分倉庫存及採購在途；多倉 v2 source receipt 在 receipt 記錄 `reservationLocationSchemaVersion:2`、`autoAllocationQty`、`sourceOrderStatus`，已取消來源另需採購明確確認 `KEEP_STOCK`。新增在現有 `single-item-location-service.advanceReleasedV2FreeStock` 的來源驗證入口直接讀**已存在的** receipt／movement／lot，校驗原來源供應、產品、批號／效期、真實入庫數量與可供分配的額外量；取消來源再驗證供應 `KEEP_STOCK` 的真實決策。**不修改瀏覽器 Receiving writer，也不新增第二套入庫 movement、來源標記或虛擬庫存。**
 
 有效 receiptId 对應的原實體 movementId 作為固定分配批次身份，交給既有 FIFO checkpoint 與唯一 v2 `commitSingleItemFreeStockAllocation`；重試不重複入庫或預留，receipt 沒有剩餘實貨、只有採購在途、證據遭竄改／缺批次時拒絕。權限限制 admin/purchaser/warehouse 並在交易內重驗；仍屬**顯式呼叫**、一輪至多推進一個缺貨訂單，沒有 background runner 或正式 Callable，原單倉實際網站流程不受影響。未做舊單價／批次資料遷移，也沒有 Firebase 正式部署。
+
+## 來源交易後自動嘗試與上次進度恢復（2026-10-18，僅 Emulator）
+
+在原 `single-item-location-service.js` 加入 `drainReleasedV2FreeStock(db,uid,{movementId,maxSteps})` 作為**有界執行器**：逐次呼叫既有 `advanceReleasedV2FreeStock`，每次最多 10 個步驟（預設 5），每一步都重新驗證原始來源和現在物流角色，每個目標分配仍走相同原子 Service／固定 checkpoint。批次已完成立即停止，遇到競爭回傳 retry 不盲目重做；超過步數顯示 `recoveryPending`，下一輪使用**同一 movementId** 續傳。
+
+原有 v2 取消及實體退貨 Service 新增**可選的 Emulator-only 組合入口** `commitSingleItemLocationLifecycleAndRecover`、`commitLocationReturnAndRecover`。先呼叫原權威來源 Service 完成原子提交，隨後以原 release／CLOSE 入庫 movement ID 執行 bounded drain；不改動原交易流程、來源身份或存量。客戶業務（sales/engineer）只可提交權限內取消／退貨，沒有物流分配權限時來源仍正確提交，組合回傳 `postCommitAllocation.status='recovery-pending'` 和可交由有權物流角色處理的來源 movementId；不能使用業務身份冒充倉管。對已提交事件重送來源操作 ID，會取得原來源交易結果並續傳原配貨批次，不會再產生第二筆取消、入庫或庫存預留。
+
+**狀態**：新入口是**可被後續 Callable／工作佇列使用的內部組合 API**，尚未綁定正式頁面、排程或 Cloud Functions trigger，因此不表示所有取消／退貨現在已自動跑配貨。不同操作員無法直接接手已建立且進行中的 actor-bound checkpoint，需後續設計具真實身分及單筆 movement 稽核的 lease／安全交接。來源 movement 已成功但配貨失敗的回傳必須區分「交易已提交、後續續傳待處理」，不能告知使用者取消或入庫失敗。沒有正式 Firebase 部署、Rules／Index 更新。
