@@ -10370,6 +10370,7 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex, actorUid 
     }
     const orderRef=db.collection('orders').doc(orderId);
     const syncUid=actorUid;
+    const syncAttemptId=String(order.inventoryReservationAttemptId||'');
     const actor=currentUserName||currentUser?.email||'';
     let result,stockToInvalidate=null;
     let releasedStock=null;
@@ -10386,6 +10387,8 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex, actorUid 
         if(itemIndex<0)throw new Error('訂單品項已變更，請重新讀取後重試同步。');
         item={...order.items[itemIndex],itemId};
         if(order.inventoryReservationStatus==='completed'){result=item;return;}
+        if(syncAttemptId&&(order.inventoryReservationStatus!=='pending'||String(order.inventoryReservationAttemptId||'')!==syncAttemptId))
+            throw new Error('已有較新的庫存同步工作，請更新這筆訂單後確認結果。');
         if(item.transferPendingId)throw new Error('調撥途中不可重新配置訂單庫存。');
         const normalized=normalizedOrderItems(order)[itemIndex];
         const orderedQty=Math.max(0,Number(normalized.qty||0));
@@ -10598,7 +10601,7 @@ function orderItemProcurementDemandDocument(order, item, currentDemand, now) {
     },{createdAt:currentDemand?.createdAt||order.createdAt||now,updatedAt:now});
 }
 
-async function persistOrderProcurementDemands(orderId, order, items = []) {
+async function persistOrderProcurementDemands(orderId, order, items = [], initialization = null) {
     const orderRef=db.collection('orders').doc(orderId);
     // The arguments carry identity only; live quantities and lifecycle always come from Firestore.
     const itemIds=items.map((item,index)=>String(item.itemId||`item-${index+1}`));
@@ -10609,6 +10612,15 @@ async function persistOrderProcurementDemands(orderId, order, items = []) {
             const orderSnap=await tx.get(orderRef);
             if(!orderSnap.exists)throw new Error('訂單已不存在，無法同步採購需求。');
             const liveOrder={id:orderId,...orderSnap.data()};
+            // Only initialization transports supply this fence. Cancellation and
+            // restoration retain their existing live-source demand projection.
+            if(initialization){
+                if(currentUser?.uid!==initialization.actorUid)throw new Error('登入身份已變更，請以原帳號重試同步。');
+                if(!initialization.syncAttemptId||liveOrder.inventoryReservationStatus!=='pending'
+                    ||String(liveOrder.inventoryReservationAttemptId||'')!==initialization.syncAttemptId)
+                    throw new Error('已有較新的庫存同步工作，請更新這筆訂單後確認結果。');
+                if(normalizedOrderStatus(liveOrder)!=='normal')throw new Error('訂單已取消／作廢，停止後續同步。');
+            }
             const currentSnap=await tx.get(ref);
             const current=currentSnap.exists?currentSnap.data():null;
             const item=normalizedOrderItems(liveOrder).find(row=>row.itemId===itemId);
@@ -10639,6 +10651,10 @@ async function reserveInventoryForNewOrder(orderId, order, actorUid = currentUse
     const snapshot=await firestoreReadWithTimeout(orderRef.get(),'讀取待同步訂單');
     if(!snapshot.exists)throw new Error('訂單已不存在，無法同步庫存。');
     const liveOrder={id:orderId,...snapshot.data()};
+    const expectedAttemptId=String(order.inventoryReservationAttemptId||'');
+    if(expectedAttemptId&&liveOrder.inventoryReservationStatus!=='completed'
+        &&(liveOrder.inventoryReservationStatus!=='pending'||String(liveOrder.inventoryReservationAttemptId||'')!==expectedAttemptId))
+        throw new Error('已有較新的庫存同步工作，請更新這筆訂單後確認結果。');
     const items=normalizedOrderItems(liveOrder);
     if(!items.length)throw new Error('訂單缺少正式 items 品項資料，請重新建立訂單。');
     if(items.some(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP')){

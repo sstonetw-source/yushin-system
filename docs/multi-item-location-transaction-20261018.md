@@ -48,4 +48,4 @@
 
 CI 同時執行原單品項初始化、多倉出貨／送達／取消／退貨、真實 Auth Callable、Rules 及八組桌機／手機 Chrome 回歸。結果以本 PR 的實際 CI 為準。
 
-尚未接整單來源初始化協調器與逐品項採購需求 checkpoint；本操作成功後 orders.inventoryReservationStatus 仍為 pending，不可因此進採購／打單／出貨。既有 `synchronizeOrderInventory` 不變，不能把庫存階段原子性誤稱為建立訂單、來源文件、採購需求及整條商業流程全成全敗。多品項打單／出貨／送達／取消／恢復／退貨仍須逐個接入共用契約並驗收，再評估 Preview／正式介面。
+本操作成功後 orders.inventoryReservationStatus 仍為 pending，不可因此進採購／打單／出貨。後續批次已透過 Emulator 傳輸 adapter 接回原 `synchronizeOrderInventory` 與逐品項需求 checkpoint，見 [初始化接線與驗收界線](multi-item-initialization-20261018.md)；正式 UI／Auth 初始化尚未啟用。不能把庫存階段原子性誤稱為建立訂單、來源文件、採購需求及整條商業流程全成全敗。多品項打單／出貨／送達／取消／恢復／退貨仍須逐個接入共用契約並驗收，再評估 Preview／正式介面。

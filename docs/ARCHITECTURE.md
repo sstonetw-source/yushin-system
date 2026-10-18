@@ -524,3 +524,7 @@ Workflow 的明確 warehouseShipmentContext 現包含 returns，以原 projectSh
 ### 2026-10-18 整單雙倉預留引擎
 
 原雙倉 Service 以單一 `runLocationReservation` 同時服務單品項與 `commitOrderTwoWarehouse`。整單 1–5 品項共用交易內公司／分倉餘額、原 Reservation Core 與一次 Transaction；所有品項驗證後才提交，沒有第二組數量規則或逐項獨立提交。仍為 Emulator-only，未接正式 UI／Callable；需求與來源同步 checkpoint 尚待接線。見 [契約及驗收邊界](multi-item-location-transaction-20261018.md)。
+
+### 2026-10-18 整單初始化續傳
+
+整單 Emulator adapter 已接原初始化協調器及原需求 helper；庫存一次交易、需求逐項可恢復，不宣稱跨階段原子。實際前端預留 Service 補上交易內 attempt 防護，需求 helper 可接受初始化 context；原取消／恢復投影不變。正式 v2 UI／Callable 未啟用。見 [完整邊界](multi-item-initialization-20261018.md)。
