@@ -1392,6 +1392,18 @@ test('real order initialization atomically publishes item reservation and demand
   assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,3);
  }
 });
+test('real client initialization refuses an old attempt before stock writes and accepts the current attempt',async()=>{
+ for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['admin','admin']]){
+  const f=await orderInitializationFixture(uid,role,{ownerUid:role==='purchaser'?'sales1':uid});
+  const source=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+  await seed('orders/'+f.id,{...source,inventoryReservationAttemptId:'current-attempt'});
+  await assert.rejects(f.context.reserveSingleOrderItem(f.id,{inventoryReservationAttemptId:'old-attempt'},{itemId:'I'},0),/較新的庫存同步/);
+  assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,0);
+  assert.equal((await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).exists(),false);
+  await assertSucceeds(f.context.reserveSingleOrderItem(f.id,{inventoryReservationAttemptId:'current-attempt'},{itemId:'I'},0));
+  assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,3);
+ }
+});
 const unactivatedLocationPatches=[{locationSchemaVersion:2},{locationSchemaVersion:0},{locations:[]},
  {locations:[{warehouseId:'W1',reservedQty:1},{warehouseId:'W2',reservedQty:1}]},
  {allocations:[]},{warehouseAllocations:[]}];

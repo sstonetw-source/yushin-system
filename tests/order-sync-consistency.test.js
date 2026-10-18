@@ -208,6 +208,50 @@ test('company free stock missing from eligible physical locations stops without 
   assert.equal(JSON.stringify([...f.docs]),before);assert.equal(f.demand('I'),undefined);
  }
 });
+
+test('delayed initial reservation cannot take over a newer pending or failed attempt',async()=>{
+ for(const status of ['pending','failed']){
+  const f=fixture();f.put('orders/O',{...f.order(),inventoryReservationAttemptId:'old-attempt'});
+  const stale=structuredClone(f.order());f.put('orders/O',{...f.order(),inventoryReservationAttemptId:'new-attempt',inventoryReservationStatus:status});
+  const before=JSON.stringify([...f.docs]);
+  await assert.rejects(f.c.reserveInventoryForNewOrder('O',stale),/較新的庫存同步/);
+  await assert.rejects(f.c.reserveSingleOrderItem('O',stale,stale.items[0],0),/較新的庫存同步/);
+  assert.equal(JSON.stringify([...f.docs]),before);assert.equal(f.controls.selfCalls,0);
+ }
+});
+test('reservation transaction retry rechecks initialization attempt before any stock or demand write',async()=>{
+ const f=fixture();f.put('orders/O',{...f.order(),inventoryReservationAttemptId:'old-attempt'});
+ f.controls.beforeCommit=()=>f.put('orders/O',{...f.order(),inventoryReservationAttemptId:'new-attempt'});
+ await assert.rejects(f.sync(),/較新的庫存同步/);
+ assert.equal(f.docs.get('inventory/P').reserved,0);assert.equal(f.demand('I'),undefined);
+ assert.equal(f.docs.has('inventoryReservations/O__I'),false);assert.equal(f.controls.selfCalls,0);
+});
+test('new attempt between legacy item commits stops the old worker without claiming whole-order rollback',async()=>{
+ const f=fixture({onHand:6,items:[{itemId:'I',productId:'P',warehouseId:'W',qty:3},{itemId:'J',productId:'P',warehouseId:'W',qty:3}]});
+ f.put('orders/O',{...f.order(),inventoryReservationAttemptId:'old-attempt'});
+ const original=f.c.reserveSingleOrderItem;
+ f.c.reserveSingleOrderItem=async(...args)=>{
+  const result=await original(...args);
+  if(args[2].itemId==='I')f.put('orders/O',{...f.order(),inventoryReservationAttemptId:'new-attempt'});
+  return result;
+ };
+ await assert.rejects(f.sync(),/較新的庫存同步/);
+ assert.equal(f.docs.get('inventory/P').reserved,3);assert.equal(f.order().items[0].reservedQty,3);
+ assert.equal(f.docs.has('inventoryReservations/O__J'),false);assert.equal(f.demand('J'),undefined);assert.equal(f.controls.selfCalls,0);
+});
+test('initial demand projection fences actor and attempt without changing general lifecycle projection',async()=>{
+ const f=fixture({onHand:0});f.put('orders/O',{...f.order(),inventoryReservationAttemptId:'current-attempt'});
+ const item=f.order().items[0],options={actorUid:'U',syncAttemptId:'current-attempt'};
+ for(const patch of [{actorUid:'other'},{syncAttemptId:'old'}, {syncAttemptId:''}]){
+  const before=JSON.stringify([...f.docs]);await assert.rejects(f.c.persistOrderProcurementDemands('O',f.order(),[item],{...options,...patch}));
+  assert.equal(JSON.stringify([...f.docs]),before);
+ }
+ await f.c.persistOrderProcurementDemands('O',f.order(),[item],options);assert.equal(f.demand('I').remainingToOrderQty,5);
+ f.put('orders/O',{...f.order(),inventoryReservationStatus:'completed'});const before=JSON.stringify([...f.docs]);
+ await assert.rejects(f.c.persistOrderProcurementDemands('O',f.order(),[item],options),/較新的庫存同步/);assert.equal(JSON.stringify([...f.docs]),before);
+ f.put('orders/O',{...f.order(),status:'cancelled'});await f.c.syncOrderProcurementDemandLifecycle('O',f.order(),'cancelled');
+ assert.equal(f.demand('I').status,'CANCELLED');
+});
 test('stock stranded in a disabled warehouse cannot silently become a new purchase shortage',async()=>{
  const f=fixture({onHand:2});addWarehouse(f,'W2',3);f.put('warehouses/W2',{active:false});
  f.put('inventory/P',{productKey:'P',onHand:5,reserved:0});

@@ -3,6 +3,7 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const admin=require('firebase-admin'),{getFirestore}=require('firebase-admin/firestore');
 const {commitOrderTwoWarehouse}=require('../functions/single-item-location-service');
+const {synchronizeV2OrderFixture}=require('./fixtures/v2-order-initialization.cjs');
 let app,db;
 test.before(()=>{
  assert.ok(process.env.FIRESTORE_EMULATOR_HOST,'Never use live Firestore');
@@ -149,4 +150,109 @@ test('joint existing ledger claims cannot conceal duplicate ownership of the ori
   const before=await snapshot(f);await assert.rejects(f.run({attemptId:'joint_new_attempt_'+target}),/整單既有/);
   assert.deepEqual(await snapshot(f),before);
  }
+});
+
+const initialize=(f,hooks={})=>synchronizeV2OrderFixture(db,f.uid,{orderId:f.orderId,warehouseIds:['MULTI-A','MULTI-B'],hooks});
+const demandKey=(f,itemId)=>encodeURIComponent('SALES_ORDER:'+f.orderId+':'+itemId);
+async function demands(f){return Promise.all(f.items.map(i=>f.read('procurementDemands',demandKey(f,i.itemId))));}
+test('actual initialization coordinator publishes all shortages only after one whole-order reservation',async()=>{
+ const f=await seed('init-normal');let calls=0;
+ const result=await initialize(f,{afterReservation:async({result})=>{
+  calls++;assert.equal(result.items.length,3);assert.deepEqual(await demands(f),[undefined,undefined,undefined]);
+  assert.equal((await f.read('orders',f.orderId)).inventoryReservationStatus,'pending');
+ }});
+ assert.equal(calls,1);assert.equal(result.order.inventoryReservationStatus,'completed');
+ assert.deepEqual(result.order.items.map(i=>[i.reservedQty,i.shortageQty]),[[5,0],[2,3],[3,1]]);
+ const saved=await demands(f);assert.equal(saved[0],undefined);assert.deepEqual(saved.slice(1).map(d=>[d.requestedQty,d.remainingToOrderQty]),[[3,3],[1,1]]);
+ const state=await snapshot(f);assert.equal(state.receipts.length,1);assert.equal(state.receipts[0][1].action,'order_location_reservation');
+ assert.equal(state.receipts[0][1].syncAttemptId,result.order.inventoryReservationAttemptId);
+ assert.equal(state.movements.length,5);assert.equal(result.summary.reservedQty,10);assert.equal(result.summary.shortageQty,4);
+});
+test('interruption at every demand boundary keeps whole-order holds and recovers through the real checkpoint',async()=>{
+ for(const boundary of ['reservation','I1','I2','I3']){
+  const f=await seed('init-interrupted-'+boundary);
+  const hooks=boundary==='reservation'?{afterReservation:()=>{throw Error('demand boundary lost');}}:
+   {afterDemand:({item})=>{if(item.itemId===boundary)throw Error('demand boundary lost');}};
+  await assert.rejects(initialize(f,hooks),/demand boundary/);
+  const failed=await f.read('orders',f.orderId),before=await snapshot(f);
+  assert.equal(failed.inventoryReservationStatus,'failed');assert.deepEqual(failed.items.map(i=>i.reservedQty),[5,2,3]);
+  assert.equal(before.receipts.length,1);assert.equal(before.movements.length,5);
+  const done=await initialize(f);assert.equal(done.order.inventoryReservationStatus,'completed');
+  assert.notEqual(done.order.inventoryReservationAttemptId,failed.inventoryReservationAttemptId);
+  const after=await snapshot(f);assert.deepEqual(after.movements,before.movements);
+  for(const [path,data] of before.docs.filter(([p])=>!p.startsWith('orders/')&&!p.startsWith('inventoryReservations/')))
+   assert.deepEqual(after.docs.find(([p])=>p===path)[1],data,path);
+  assert.deepEqual((await demands(f)).slice(1).map(d=>d.remainingToOrderQty),[3,1]);
+  assert.equal(after.receipts.length,2,'new coordinator attempt has its own proof, not new stock holds');
+ }
+});
+test('whole-order initialization completion reply loss and completed replay do not re-reserve or republish demands',async()=>{
+ const f=await seed('init-reply');let calls=0;
+ const done=await initialize(f,{completionResponseLost:true,beforeReservation:()=>{calls++;}});
+ assert.equal(done.order.inventoryReservationStatus,'completed');assert.equal(calls,1);
+ const before=await snapshot(f),published=await demands(f);
+ await initialize(f,{beforeReservation:()=>{throw Error('completed initialization must not run');}});
+ assert.deepEqual(await snapshot(f),before);assert.deepEqual(await demands(f),published);
+});
+test('stale whole-order initialization cannot replace the newer completed attempt or its demands',async()=>{
+ const f=await seed('init-stale');let release,entered;
+ const pause=new Promise(r=>{release=r;}),ready=new Promise(r=>{entered=r;});
+ const older=initialize(f,{beforeReservation:async()=>{entered();await pause;}});
+ await ready;
+ try{
+  await initialize(f);const before=await snapshot(f),published=await demands(f);release();
+  assert.equal((await older).order.inventoryReservationStatus,'completed');
+  assert.deepEqual(await snapshot(f),before);assert.deepEqual(await demands(f),published);
+ }finally{release();}
+});
+test('whole-order initialization retains the existing five-role UI policy and current owner checks',async()=>{
+ for(const role of ['admin','purchaser','warehouse','sales','engineer']){
+  const f=await seed('init-role-'+role,{role}),before=await snapshot(f);
+  if(role==='warehouse'){await assert.rejects(initialize(f),/無權/);assert.deepEqual(await snapshot(f),before);}
+  else assert.equal((await initialize(f)).order.inventoryReservationStatus,'completed');
+ }
+ for(const role of ['sales','engineer']){
+  const f=await seed('init-foreign-'+role,{role,owner:'other-owner'}),before=await snapshot(f);
+  await assert.rejects(initialize(f),/無權/);assert.deepEqual(await snapshot(f),before);
+ }
+});
+test('older worker paused between demand writes cannot republish after a newer whole-order initialization completes',async()=>{
+ const f=await seed('init-stale-demand');let release,entered;
+ const pause=new Promise(r=>{release=r;}),ready=new Promise(r=>{entered=r;});
+ const older=initialize(f,{beforeDemand:async({item})=>{if(item.itemId==='I2'){entered();await pause;}}});
+ await ready;
+ try{
+  await initialize(f);const before=await snapshot(f),published=await demands(f);release();
+  assert.equal((await older).order.inventoryReservationStatus,'completed');
+  assert.deepEqual(await snapshot(f),before);assert.deepEqual(await demands(f),published);
+ }finally{release();}
+});
+test('account changes and current-profile revocation between demands cannot complete multi-line initialization',async()=>{
+ for(const mode of ['account','disabled','role']){
+  const f=await seed('init-revoke-'+mode);
+  await assert.rejects(initialize(f,{afterDemand:async({item,context})=>{
+   if(item.itemId!=='I2')return;
+   if(mode==='account')context.currentUser={uid:'other-account'};
+   else await db.collection('users').doc(f.uid).update(mode==='disabled'?{active:false}:{role:'warehouse'});
+  }}));
+  const order=await f.read('orders',f.orderId);assert.notEqual(order.inventoryReservationStatus,'completed');
+  assert.equal((await demands(f))[2],undefined);assert.equal((await f.read('inventory',f.p)).reserved,7);
+  await db.collection('users').doc(f.uid).update({role:'purchaser',active:true});
+  assert.equal((await initialize(f)).order.inventoryReservationStatus,'completed');
+  assert.equal((await snapshot(f)).movements.length,5);assert.equal((await demands(f))[2].remainingToOrderQty,1);
+ }
+});
+test('invalid final line in actual initialization publishes no earlier reservation or procurement demand',async()=>{
+ const f=await seed('init-invalid');await db.collection('products').doc(f.q).update({productType:'SERVICE'});
+ await assert.rejects(initialize(f));assert.equal((await f.read('orders',f.orderId)).inventoryReservationStatus,'failed');
+ const saved=await snapshot(f);assert.equal(saved.receipts.length,0);assert.equal(saved.movements.length,0);
+ assert.equal((await f.read('inventory',f.p)).reserved,0);assert.equal((await f.read('inventory',f.q)).reserved,0);
+ assert.deepEqual(await demands(f),[undefined,undefined,undefined]);
+ for(const i of f.items)assert.equal(await f.read('inventoryReservations',f.orderId+'__'+i.itemId),undefined);
+});
+test('five-line same-product initialization retains source priority and Core shortage per demand',async()=>{
+ const f=await seed('init-five',{five:true}),result=await initialize(f);
+ assert.equal(result.order.inventoryReservationStatus,'completed');assert.deepEqual(result.order.items.map(i=>i.reservedQty),[3,3,1,0,0]);
+ const saved=await demands(f);assert.deepEqual(saved.map(d=>d?.remainingToOrderQty||0),[0,0,2,3,3]);
+ assert.equal((await snapshot(f)).receipts.length,1);assert.equal((await f.read('inventory',f.p)).reserved,7);
 });

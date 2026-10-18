@@ -158,3 +158,7 @@ CLOSE 後取消／恢復仍拒絕未整合的退貨刪除／更正歷史，不�
 ### 2026-10-18 整單雙倉提交規範
 
 多品項初始預留使用原 Service 的 commitOrderTwoWarehouse，僅 demo-yushin Emulator；不得匯出 Callable 或直接解除前端位置限制。不能用多個獨立 commitSingleItemTwoWarehouse 宣稱全單原子。修改須驗證同產品共用餘額、既有預留合計、後項失敗與末端 create 全回滾、兩張訂單競態、五角色與原單品項回歸。整單 source／需求 checkpoint 及多品項後續履約未接前，不得把這一階段描述為正式整單全流程完成。見 [詳細契約](multi-item-location-transaction-20261018.md)。
+
+### 2026-10-18 初始化工作接手
+
+初始化預留與需求寫入必須在交易重跑時核對當前 attempt／來源；不可只在畫面或 callback 開頭判斷。需求間中斷及舊工作被新工作取代均須驗收；已完成來源重送不得重寫需求。Emulator Admin adapter 驗收不等於真實 Auth／正式 UI 完成。見 [初始化驗收](multi-item-initialization-20261018.md)。
