@@ -1536,7 +1536,7 @@ test('multi-line shipments debit actual A/B lots while preserving untouched sibl
  const order=await x.read('orders',x.orderId);
  assert.equal(order.warehouseShipmentRecords.length,2);
  assert.deepEqual(order.warehouseShipmentRecords.map(rec=>rec.itemIndex),[0,1]);
- assert.equal(order.deliveredQty,0);assert.equal(order.isDelivered,false);
+ assert.equal(order.deliveredQty,original.deliveredQty);assert.equal(order.isDelivered,original.isDelivered);
  assert.deepEqual(order.items[2],original.items[2]);
  assert.equal(order.items[0].unitPrice,456);
  assert.deepEqual(order.items[0].custom,{note:'keep source'});
