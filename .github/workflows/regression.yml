@@ -81,6 +81,8 @@ jobs:
         env:
           ENABLE_GROUPED_RESERVATION: "true"
         run: npx --yes firebase-tools@15 emulators:exec --only firestore,auth,functions --project demo-yushin "node --test tests/emulator-grouped-reservation-callable.cjs"
+      - name: Verify v2 return Auth and Callable integration in isolated demo Emulator
+        run: node tools/run-v2-return-auth-emulator.cjs
       - name: Verify single-item dual-warehouse planner and atomic reservation in Emulator
         run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --test tests/emulator-single-item-location.cjs"
       - name: Verify shipment, delivery correction and physical return receipt in Emulator

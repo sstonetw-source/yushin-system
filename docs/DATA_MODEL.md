@@ -250,3 +250,10 @@ v2 到貨自由實貨**不新增欄位／Collection**。既有 `receipts/{receip
 無持久欄位／collection／migration變更。planExplicitShipmentReturn 與 trace 新增 confirmedQty、previousReturnedQty、remainingReturnQty，以及 remainingLotAllocations[{lotId,lotNo,expiryDate,remainingQty}]。數量皆為本次選定shipment、此次預覽選量尚未提交前的額度；批次上限可能合計大於已確認可退總量，不能相加視為均已送達。新明細不帶實際成本；原 returnQty／allocations／lotRestorationPreview／canCommit false保持。
 
 正常查核交易為4＋N次get呼叫，取消為5＋N（多一份released ledger），N為明確所選批次且≤200。新增一次sourceId＋action退貨movement query，limit201、最多接受200筆，空快取也查；正常最多403份來源／憑證／批次文件，取消最多404份。不讀公司／分倉庫存、成本或供應集合；無寫入、Listener、Index／Rules變更。入庫交易仍以當前權威資料重新驗證。
+
+
+### 退貨 Auth 整合無新持久資料模型（2026-10-18，Emulator-only）
+
+Auth uid對應原users/{uid}，角色／active／disabled仍讀原文件；Callable payload契約完全沿原trace／return normalizer，不新增actor／價格／庫存輸入欄位。原location-return-{operationId} movement保存交易內實際登入actorUid／role，trace仍零寫入，原returRecords／history／stock／lot原子交易不改。
+
+臨時Functions測試目錄的checkout.json及.env.local只屬執行設定，結束刪除，不寫入專案資料集合。Emulator Auth帳號與上游order／inventory fixture明確為合成測試資料；無正式帳號、資料遷移、新Rules／Index／Listener。傳輸層驗證失敗不得進入原退貨writer。

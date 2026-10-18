@@ -124,3 +124,10 @@ CLOSE 後取消／恢復仍拒絕未整合的退貨刪除／更正歷史，不�
 只能擴充原 planLocationReturnTrace，不可另建批次額度核心或預覽writer。必須先用實際 return movements 核對快取，再以選定shipment的 priorReturns 呼叫原 planExplicitShipmentReturn；正常／取消皆只開放CLOSE後續查核。取消來源需一致狀態與空released ledger，並共用實際退貨的取消scope guard。不得開放一般取消送達／撤銷。
 
 驗收需覆蓋正常／取消來源、既有CLOSE逐批扣額度、跨shipment不混用、五角色／陌生所有權／失效帳號、缺漏／變造／隱藏憑證及損壞ledger、201筆query拒絕、無成本／無寫入、預覽過期後入庫拒絕並可刷新。preview始終canCommit false，不得把預覽物件直接寫Firestore；實際入庫仍走原固定ID原子交易。modules修改須同步functions/shared並檢查app來源一致性。
+
+
+### 真實登入退貨測試（2026-10-18，Emulator-only）
+
+退貨Callable adapter不得加到正式functions/index.js；隔離runner只允許固定demo-yushin，臨時Functions入口必須引用實際checkout中的原服務，不可複製或另造退貨writer。保留明確flag、FUNCTIONS_EMULATOR、local Auth／Firestore host與db.projectId限制。測試資料只來自Emulator，禁止deploy或改正式Auth provider。
+
+必須以Firebase Client Auth SDK真實登入取得token，再以Functions SDK呼叫，不能只傳假的request.auth宣稱Auth通過。覆蓋正常／取消CLOSE、五角色、陌生所有權、payload身份偽造、自訂claim不越權、token發出後角色變更／active停用、未登入／無效token／缺profile、同步attempt變更、固定ID衝突與併發重送。明確揭露上游初始化及sync仍為fixture，不能稱為正式UI或完整初始化驗收。CI執行node tools/run-v2-return-auth-emulator.cjs，需Node22與Java21、根目錄Firebase client/Admin依賴及functions依賴。

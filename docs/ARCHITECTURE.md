@@ -486,3 +486,12 @@ Workflow 的明確 warehouseShipmentContext 現包含 returns，以原 projectSh
 原 planLocationReturnTrace 現支援正常或一致 cancelled 來源，以及已有 CLOSE 退貨的剩餘批次。沿用原 shipmentDeliveryContext、readShipmentProof 與有界 readLocationReturnProofs；取消來源再核對完整 released 空 v2 ledger。取消後無途中貨／額外打單／更正或REPLACE歷史的限制抽成 assertCancelledCloseReturnContext，查核與實際原退貨 writer 共用，沒有另建 writer。
 
 原 Inventory.planExplicitShipmentReturn 接收選定shipment的 priorReturns，新增唯讀額度結果；不重算另一份數量。查核仍驗證所選真實批次並回傳 status read-only／canCommit false，不寫庫存、訂單或憑證，也不讀公司／分倉庫存或成本集合。入庫必須在原 commitLocationReturn 的新交易重新授權及核對全部帳目，不能以預覽當提交承諾。其他新增送達／撤銷的取消guard不改，無Callable／UI／Preview或正式部署。
+
+
+### 退貨真實登入與 Callable 整合（2026-10-18，Emulator-only）
+
+新增 functions/v2-return-callable-adapter.js 僅包裝原 planLocationReturnTrace／commitLocationReturn；UID只取Firebase Callable request.auth.uid，角色／active／所有權仍由原Service在交易內重讀users與order，不信任請求欄位或token自訂role。沿原意圖normalizer、固定operationId／hash與唯一writer，不新增庫存邏輯。
+
+正式 functions/index.js不載入／不匯出這兩個Callable。tools/run-v2-return-auth-emulator.cjs 在臨時目錄建立測試Functions入口與設定，引用實際checkout服務和SDK，固定demo-yushin；flag、FUNCTIONS_EMULATOR、demo project、本機Auth／Firestore host與db.projectId均核對。CI以獨立Auth＋Functions＋Firestore Emulator跑真實Email/Password登入、Callable SDK與ID token；無正式Firebase或供應商設定變更。
+
+這是退貨邊界的真實登入整合，不代表完整ERP初始化／UI驗收：上游訂單與庫存為Admin fixture，預留／打單／出貨／送達／取消使用原Service，來源sync完成點仍明確fixture設定。正式Callable／前端／Preview、完整初始化與退貨更正／REPLACE仍待整合。
