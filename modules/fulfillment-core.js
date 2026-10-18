@@ -175,7 +175,10 @@
     const base=projectShipmentDelivery(input),records=input.returns??[];
     if(!Array.isArray(records)||records.length>200)throw Error('退貨紀錄格式不正確或超過安全上限。');
     const seen=new Set(),totals=new Map();let returnedQty=0,closedQty=0;
-    for(const row of records){
+    // A later acknowledgement of the remaining shipment does not invalidate
+    // an earlier return. Validate each return against delivery actually
+    // confirmed by that date, in chronological order (input order is a cache).
+    for(const row of [...records].sort((a,b)=>String(a?.date||'').localeCompare(String(b?.date||'')))){
       const source=(input.shipments||[]).find(s=>s.id===row?.shipmentId);
       const delivered=base.shipments.find(s=>s.shipmentId===row?.shipmentId);
       if(typeof row?.id!=='string'||!row.id||seen.has(row.id)||!source||!delivered
@@ -186,10 +189,12 @@
         ||typeof row.date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(row.date)
         ||!Number.isFinite(Date.parse(row.date+'T00:00:00Z'))
         ||new Date(row.date+'T00:00:00Z').toISOString().slice(0,10)!==row.date
-        ||row.date<source.date||(input.deliveries||[]).some(d=>d.shipmentId===row.shipmentId&&d.date>row.date))
+        ||row.date<source.date)
         throw Error('退貨未對應有效出貨／送達來源或結案方式不正確。');
       seen.add(row.id);const total=(totals.get(row.shipmentId)||0)+row.qty;
-      if(!Number.isSafeInteger(total)||total>delivered.confirmedQty)throw Error('退貨超過該筆已送達量。');
+      const confirmedByDate=(input.deliveries||[]).filter(d=>d.shipmentId===row.shipmentId&&d.date<=row.date)
+        .reduce((sum,d)=>sum+d.qty,0);
+      if(!Number.isSafeInteger(total)||total>confirmedByDate)throw Error('退貨超過該筆當時已送達量。');
       totals.set(row.shipmentId,total);returnedQty+=row.qty;
       if(row.settlement==='CLOSE')closedQty+=row.qty;
     }

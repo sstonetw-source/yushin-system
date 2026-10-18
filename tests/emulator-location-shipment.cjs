@@ -175,8 +175,8 @@ test('late transaction create failure rolls back stock, lots, ledger, order and 
 
 // The next stage confirms customer receipt of an already-debited shipment.
 const {commitShipmentDelivery}=require('../functions/shipment-delivery-service');
-async function acknowledgementFixture(name,{role='sales',shipQty=2}={}){
- const x=await seed('confirm-'+name,{role});
+async function acknowledgementFixture(name,{role='sales',shipQty=2,prepared=10}={}){
+ const x=await seed('confirm-'+name,{role,prepared});
  const shippingUid='shipping-operator-'+name;
  await db.collection('users').doc(shippingUid).set({role:'warehouse',active:true});
  const shipmentRequest=x.request(A,shipQty,'shipment_confirm_'+name);
@@ -209,7 +209,7 @@ test('real reserve -> A shipment -> partial delivery -> B shipment -> final A sh
  assert.equal(order.items[0].warehouseShippedQty,10);assert.equal(order.items[0].reservedQty,0);
  assert.equal((await x.read('inventory',x.key)).onHand,6);assert.equal((await x.read('inventory',x.key)).reserved,2);
 });
-test('customer acknowledgement reads only actor, order and immutable shipment movement; writes only order',async()=>{
+test('customer acknowledgement reads actor, order, shipment movement and bounded return proof query; writes only order',async()=>{
  const x=await acknowledgementFixture('bounded');let reads=0,writes=0;
  const guarded={projectId:db.projectId,collection:name=>{
   assert.ok(['users','orders','inventoryMovements'].includes(name),'unexpected stock/cost read '+name);
@@ -219,7 +219,7 @@ test('customer acknowledgement reads only actor, order and immutable shipment mo
   update:(r,v)=>{assert.ok(r.path.startsWith('orders/'));writes++;return tx.update(r,v);}
  }))};
  const before=await physicalSnapshot(x);assert.equal((await x.confirm(x.deliveryRequest(),x.uid,guarded)).status,'applied');
- assert.equal(reads,3);assert.equal(writes,1);assert.deepEqual(await physicalSnapshot(x),before);
+ assert.equal(reads,4);assert.equal(writes,1);assert.deepEqual(await physicalSnapshot(x),before);
 });
 test('acknowledgement replay preserves original result and rejects modified intent or a different actor',async()=>{
  const x=await acknowledgementFixture('replay');await x.confirm();const first=await snapshot(x);
@@ -309,8 +309,8 @@ test('removed or reversed acknowledgement cannot be resurrected by retrying its 
 
 const {reverseShipmentDelivery}=require('../functions/shipment-delivery-service');
 const {planLocationReturnTrace}=require('../functions/location-return-trace-service');
-async function correctionFixture(name,{role='sales',shipQty=2,confirmedQty=1}={}){
- const x=await acknowledgementFixture('correction-'+name,{role,shipQty});
+async function correctionFixture(name,{role='sales',shipQty=2,confirmedQty=1,prepared=10}={}){
+ const x=await acknowledgementFixture('correction-'+name,{role,shipQty,prepared});
  const adminUid='correction-admin-'+name;await db.collection('users').doc(adminUid).set({role:'admin',active:true});
  const deliveryRequest=x.deliveryRequest(confirmedQty);
  if(confirmedQty)await x.confirm(deliveryRequest,adminUid);
@@ -816,4 +816,162 @@ test('REPLACE return leaves all stock reserved; sales CLOSE return commits but r
  const before=await snapshot(sales);
  assert.equal((await commitLocationReturnAndRecover(db,sales.uid,sales.returnRequest({settlement:'CLOSE'}))).status,'already-applied');
  assert.deepEqual(await snapshot(sales),before);
+});
+
+async function closedRemainingFixture(name,options={}){
+ const x=await returnFixture('closed-next-'+name,{prepared:4,confirmedQty:4,...options});
+ const returned=await x.receive(x.returnRequest({settlement:'CLOSE'}));
+ assert.equal(returned.settlement,'CLOSE');assert.equal(returned.replacementQty,0);
+ return {...x,closedReturn:returned};
+}
+test('CLOSE return permits remaining dispatch shipment and delivery through the same services without replacing the closed unit',async()=>{
+ for(const role of ['admin','purchaser','warehouse']){
+  const x=await closedRemainingFixture('complete-'+role,{role:role==='warehouse'?'engineer':'sales'});
+  const actor='closed-fulfillment-'+role;
+  await db.collection('users').doc(actor).set({role,active:true});
+  const returnRecord=(await x.read('orders',x.orderId)).returnRecords[0];
+  const beforePaper=await physicalSnapshot(x),prepareId='closed_prepare_'+role;
+  const prepared=await x.prepare(6,prepareId,actor);
+  assert.equal(prepared.preparedQty,10);assert.equal(prepared.shippableQty,6);
+  assert.deepEqual(await physicalSnapshot(x),beforePaper);
+  const shipmentId='closed_remaining_ship_'+role;
+  const request={...x.request(B,6,shipmentId),date:'2026-10-20'};
+  const shipped=await x.call(request,actor);
+  assert.equal(shipped.grossShippedQty,10);assert.equal(shipped.reservedQty,0);
+  const beforeDelivery=await physicalSnapshot(x);
+  const delivery={...x.deliveryRequest(6,'closed_remaining_delivered_'+role,shipmentId),date:'2026-10-21'};
+  const done=await x.confirm(delivery);
+  assert.equal(done.confirmedQty,10);assert.equal(done.isDelivered,true);
+  assert.deepEqual(await physicalSnapshot(x),beforeDelivery);
+  const order=await x.read('orders',x.orderId),ledger=await x.read('inventoryReservations',x.orderId+'__I');
+  assert.equal(order.returnedQty,1);assert.equal(order.items[0].returnedQty,1);
+  assert.equal(order.items[0].dispatchPreparedQty,10);assert.equal(order.items[0].warehouseShippedQty,10);
+  assert.deepEqual(order.returnRecords,[returnRecord]);assert.equal(ledger.status,'fulfilled');
+  assert.equal((await x.read('inventory',x.key)).onHand,7);assert.equal((await x.read('inventory',x.key)).reserved,2);
+  assert.equal((await x.read('inventoryLots',x.key+'-a-early')).remainingQty,1);
+  assert.equal((await x.read('warehouseStocks',B+'__'+x.key)).reserved,0);
+  const baseline=await snapshot(x);
+  assert.equal((await x.prepare(6,prepareId,actor)).status,'already-applied');
+  assert.equal((await x.call(request,actor)).status,'already-applied');
+  assert.equal((await x.confirm(delivery)).status,'already-applied');
+  assert.deepEqual(await snapshot(x),baseline);
+  await assert.rejects(x.prepare(1,'closed_excess_prepare_'+role,actor),/待打單/);
+  await assert.rejects(x.call({...x.request(B,1,'closed_excess_ship_'+role),date:'2026-10-22'},actor),/超額交付/);
+  assert.deepEqual(await snapshot(x),baseline);
+ }
+});
+test('CLOSE return after partial acknowledgement allows later delivery of the same shipment and then the second warehouse',async()=>{
+ const x=await closedRemainingFixture('partial-confirm',{confirmedQty:2});
+ const before=await physicalSnapshot(x);
+ const later=await x.confirm({...x.deliveryRequest(2,'closed_first_ship_later_ack'),date:'2026-10-20'});
+ assert.equal(later.confirmedQty,4);assert.equal(later.isDelivered,false);
+ assert.deepEqual(await physicalSnapshot(x),before);
+ await x.prepare(6,'closed_later_prepare_1234',x.shippingUid);
+ const shipmentId='closed_later_ship_B_12345';
+ await x.call({...x.request(B,6,shipmentId),date:'2026-10-21'},x.shippingUid);
+ assert.equal((await x.confirm({...x.deliveryRequest(6,'closed_later_ack_B_1234',shipmentId),date:'2026-10-22'})).isDelivered,true);
+ // Another later CLOSE uses the same original receipt writer and proof reader.
+ const second=await x.receive(x.returnRequest({settlement:'CLOSE',operationId:'closed_later_return_B_123',
+  shipmentId,warehouseId:B,date:'2026-10-23',selections:[{lotId:x.key+'-b',qty:1}]}));
+ assert.equal(second.returnedQty,2);assert.equal(second.replacementQty,0);assert.equal(second.isDelivered,true);
+ assert.equal((await x.read('inventory',x.key)).onHand,8);
+ assert.equal((await x.read('inventory',x.key)).reserved,2);
+});
+test('remaining fulfillment rejects missing altered and concealed physical return proofs at every entry',async()=>{
+ for(const action of ['prepare','ship','deliver'])for(const kind of ['missing','proof','cache','hidden']){
+  const x=await closedRemainingFixture('proof-'+action+'-'+kind,{prepared:action==='ship'?10:4,confirmedQty:2});
+  const order=await x.read('orders',x.orderId);
+  if(kind==='missing')await db.collection('inventoryMovements').doc(x.closedReturn.movementId).delete();
+  if(kind==='proof')await db.collection('inventoryMovements').doc(x.closedReturn.movementId).update({qty:999});
+  if(kind==='cache'){
+   order.returnRecords[0].reason='altered without receipt';
+   await db.collection('orders').doc(x.orderId).update({returnRecords:order.returnRecords});
+  }
+  if(kind==='hidden'){
+   order.items[0].returnedQty=0;
+   await db.collection('orders').doc(x.orderId).update({items:order.items,returnRecords:[],returnedQty:0});
+  }
+  const before=await snapshot(x);
+  const execute=()=>action==='prepare'?x.prepare(1,'closed_proof_prepare_1234',x.shippingUid)
+   :action==='ship'?x.call({...x.request(B,1,'closed_proof_ship_123456'),date:'2026-10-20'},x.shippingUid)
+   :x.confirm({...x.deliveryRequest(1,'closed_proof_delivery_123'),date:'2026-10-20'});
+  await assert.rejects(execute(),/憑證/);assert.deepEqual(await snapshot(x),before);
+ }
+});
+test('REPLACE remains blocked for dispatch shipment and acknowledgement while CLOSE alone is enabled',async()=>{
+ const x=await returnFixture('replace-still-gated',{prepared:4,confirmedQty:2});
+ await x.receive();const before=await snapshot(x);
+ await assert.rejects(x.prepare(1,'replace_gated_prepare_123',x.shippingUid),/退貨或補送/);
+ await assert.rejects(x.call({...x.request(A,1,'replace_gated_ship_123456'),date:'2026-10-20'},x.shippingUid),/退貨或補送/);
+ await assert.rejects(x.confirm({...x.deliveryRequest(1,'replace_gated_delivery_123'),date:'2026-10-20'}),/退貨或補送/);
+ await assert.rejects(x.reverse(),/退貨或補送/);
+ assert.deepEqual(await snapshot(x),before);
+});
+test('concurrent remaining preparation shipment and acknowledgements cannot exceed the original order after CLOSE',async()=>{
+ const x=await closedRemainingFixture('racing-remainder');
+ let results=await Promise.allSettled([x.prepare(6,'closed_race_prepare_A_123',x.shippingUid),
+  x.prepare(6,'closed_race_prepare_B_123',x.shippingUid)]);
+ assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+ const requests=['closed_race_ship_A_123456','closed_race_ship_B_123456']
+  .map(op=>({...x.request(B,6,op),date:'2026-10-20'}));
+ results=await Promise.allSettled(requests.map(r=>x.call(r,x.shippingUid)));
+ assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+ const winner=results.findIndex(r=>r.status==='fulfilled'),shipmentId=requests[winner].operationId;
+ results=await Promise.allSettled(['closed_race_ack_A_123456','closed_race_ack_B_123456']
+  .map(op=>x.confirm({...x.deliveryRequest(6,op,shipmentId),date:'2026-10-21'})));
+ assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+ const order=await x.read('orders',x.orderId);
+ assert.equal(order.items[0].dispatchPreparedQty,10);assert.equal(order.items[0].warehouseShippedQty,10);
+ assert.equal(order.deliveredQty,10);assert.equal(order.returnedQty,1);assert.equal(order.isDelivered,true);
+ assert.equal(order.warehouseShipmentRecords.length,2);assert.equal(order.deliveryRecords.length,2);
+ assert.equal((await x.read('inventory',x.key)).onHand,7);assert.equal((await x.read('inventory',x.key)).reserved,2);
+});
+test('late failures during remaining dispatch and shipment roll back all writes and original IDs safely retry after CLOSE',async()=>{
+ const x=await closedRemainingFixture('remainder-rollback');
+ const prepareId='closed_rollback_prepare_123';
+ const paperFailure={projectId:db.projectId,collection:n=>db.collection(n),runTransaction:fn=>db.runTransaction(tx=>fn({
+  get:r=>tx.get(r),create:(...a)=>tx.create(...a),update:()=>{throw Error('late paperwork failure');}
+ }))};
+ let before=await snapshot(x);
+ await assert.rejects(commitLocationDispatchPreparation(paperFailure,x.shippingUid,{orderId:x.orderId,itemId:'I',quantity:6,
+  operationId:prepareId,syncAttemptId:'sync_ship_12345'}),/late paperwork/);
+ assert.deepEqual(await snapshot(x),before);
+ assert.equal((await db.collection('dispatchRecords').doc('v2-'+prepareId).get()).exists,false);
+ await x.prepare(6,prepareId,x.shippingUid);
+ const request={...x.request(B,6,'closed_rollback_ship_123456'),date:'2026-10-20'};
+ const shipFailure={projectId:db.projectId,collection:n=>db.collection(n),runTransaction:fn=>db.runTransaction(tx=>fn({
+  get:r=>tx.get(r),update:(...a)=>tx.update(...a),set:(...a)=>tx.set(...a),
+  create:()=>{throw Error('late shipment failure');}
+ }))};
+ before=await snapshot(x);
+ await assert.rejects(commitLocationShipment(shipFailure,x.shippingUid,request),/late shipment/);
+ assert.deepEqual(await snapshot(x),before);
+ assert.equal((await x.call(request,x.shippingUid)).grossShippedQty,10);
+});
+test('CLOSE remaining flow preserves five-role authority and rejects inactive or unrelated business users',async()=>{
+ const x=await closedRemainingFixture('roles-remainder',{confirmedQty:2,prepared:10});
+ for(const role of ['sales','engineer']){
+  const actor='closed-forbidden-'+role;await db.collection('users').doc(actor).set({role,active:true});
+  const before=await snapshot(x);
+  await assert.rejects(x.prepare(1,'closed_role_prepare_123456',actor),/權限/);
+  await assert.rejects(x.call({...x.request(B,1,'closed_role_ship_1234567'),date:'2026-10-20'},actor),/權限/);
+  await assert.rejects(x.confirm({...x.deliveryRequest(1,'closed_role_delivery_12345'),date:'2026-10-20'},actor),/自己訂單/);
+  assert.deepEqual(await snapshot(x),before);
+ }
+ for(const role of ['purchaser','warehouse']){
+  const actor='closed-forbidden-ack-'+role;await db.collection('users').doc(actor).set({role,active:true});
+  const before=await snapshot(x);
+  await assert.rejects(x.confirm({...x.deliveryRequest(1,'closed_role_ack_reject_123'),date:'2026-10-20'},actor),/權限/);
+  assert.deepEqual(await snapshot(x),before);
+ }
+ await db.collection('users').doc(x.uid).update({disabled:true});
+ await assert.rejects(x.confirm({...x.deliveryRequest(1,'closed_disabled_ack_12345'),date:'2026-10-20'}),/權限/);
+});
+test('later acknowledgement cannot be used to backdate an additional physical return before those goods arrived',async()=>{
+ const x=await closedRemainingFixture('return-timeline',{confirmedQty:2});
+ await x.confirm({...x.deliveryRequest(2,'closed_timeline_later_ack'),date:'2026-10-21'});
+ const before=await snapshot(x);
+ await assert.rejects(x.receive(x.returnRequest({settlement:'CLOSE',operationId:'closed_timeline_early_return',
+  date:'2026-10-19',selections:[{lotId:x.key+'-a-late',qty:2}]})),/當時已送達量/);
+ assert.deepEqual(await snapshot(x),before);
 });

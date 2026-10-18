@@ -37,3 +37,10 @@
 完整 Node 測試1,512項全部通過；Firestore Emulator 組合58項全部通過（出貨／送達／撤銷／退貨41項、單品雙倉12項、分組預留5項）。包含實物CLOSE／REPLACE、fulfilled重新預留、混合批次分次退貨、五角色、固定ID重送／意圖衝突、競爭額度、刪改先前憑證／快取、原始帳與批次異常、末端movement失敗完整回滾，以及有界讀取／寫入及不讀成本集合。app與Functions共用產物一致性、JavaScript語法及差異格式檢查通過。完整 Rules、真實Auth／Callable及六組Chrome回歸結果以GitHub PR CI為準。
 
 業務方向更新：因主要情境為訂錯貨，新請求未指定settlement時改預設CLOSE；明確REPLACE及既有操作不改。後續免費補送整合暫緩，優先一般重新下單；詳見 `wrong-item-return-reorder-20261017.md`。
+
+
+### CLOSE 退貨後的剩餘履約（2026-10-18，Emulator-only）
+
+本節更新先前 CLOSE 退貨後無法繼續打單／出貨／送達的限制：已在原三個交易 Service 接入共同退貨投影與原實際入庫憑證核對。CLOSE 不增加原單補送需求；部分訂單剩餘商品可以完成第二倉打單／出貨／送達，累計寄出仍不得超過原訂購量。原退貨 writer 及後續交易共用同一 intent normalizer 與有界 proof reader，未新增第二個庫存 writer。
+
+同批先部分送達、退貨，之後確認其餘送達現可依日期量額驗證。純 Core 增加兩組日期回歸，Emulator 增加八組情境（含多角色、三入口錯誤憑證、時間額度、併發、末端回滾與重試）。正常確認新增一次有界退貨 proof query，仍只寫 order 且不動實貨。結果以本批實際 CI 為準；REPLACE／混合補送／退貨後撤銷與收貨／生命週期、完整初始化及前端／Preview 仍未完成，沒有正式部署。

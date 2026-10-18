@@ -4,6 +4,7 @@
 const {createHash}=require('node:crypto');
 const core=require('./shared/fulfillment-core');
 const {normalizeShipmentIntent}=require('./location-shipment-service');
+const {readLocationReturnProofs}=require('./location-return-trace-service');
 function fault(message,code='failed-precondition'){const e=new Error(message);e.code=code;throw e;}
 function id(value){
  if(typeof value!=='string'||!value||value!==value.trim()||value.includes('/')||value.length>160)
@@ -104,7 +105,8 @@ async function commitShipmentDelivery(db,uid,data){
   }
   if((order.deliveryHistory||[]).some(row=>row.recordId===operationId||row.operationId===operationId))
    fault('此送達操作已有歷史紀錄，不能以原識別碼重新確認');
-  const {item,productKey}=shipmentDeliveryContext(order,intent);
+  const {item,productKey}=shipmentDeliveryContext(order,intent,{allowReturns:true});
+  await readLocationReturnProofs(tx,db,order,intent,productKey,{closedOnly:true});
   const shipment=await readShipmentProof(tx,db,order,intent,productKey);
   const expectedMovementId=shipment.movementId;
   const now=new Date().toISOString();
@@ -113,8 +115,8 @@ async function commitShipmentDelivery(db,uid,data){
    shipmentMovementId:expectedMovementId,deliveryPlan:shipment.deliveryPlan,
    createdByUid:uid,createdByRole:actorRole,createdBy:uid,createdAt:now,intentHash:intent.hash};
   const records=[...order.deliveryRecords,record];
-  const next=core.projectShipmentDelivery({orderId,itemId,productKey,orderedQty:item.qty??item.orderedQty,
-   shipments:order.warehouseShipmentRecords,deliveries:records});
+  const next=core.projectShipmentReturns({orderId,itemId,productKey,orderedQty:item.qty??item.orderedQty,
+   shipments:order.warehouseShipmentRecords,deliveries:records,returns:order.returnRecords});
   const result={orderId,itemId,shipmentId,confirmedQty:next.confirmedQty,
    pendingDeliveryQty:next.pendingDeliveryQty,isDelivered:next.isDelivered};
   record.result=result;

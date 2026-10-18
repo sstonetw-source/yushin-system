@@ -449,3 +449,10 @@ job `reservationOperationReceipts` 與 movement 在不同交易，使用 pending
 既有 `advanceAutomaticFreeStockAllocation` 在初次進度交易內，允許當前有效 admin／purchaser／warehouse 自動接手相同批次。仍使用原 runId、pending 操作 ID 及 maxQty，沒有新增配貨核心或庫存 writer。每次庫存提交額外在同一 transaction 重讀批次，核對現任操作者及 pending 指令，阻止已失去處理權的舊執行程序繼續寫入。
 
 接手時若 pending 已有真實 movement，先核對原操作者／意圖／來源／數量，再由既有進度結算 helper 累計一次；保留 movement 原身份。交接紀錄與進度更新同交易。已完成批次可由當前合格物流角色唯讀取得結果，不建立交接或新 movement。仍限 demo-yushin Emulator；沒有新增 Callable／前端／背景觸發或 Firebase 部署。
+
+
+### CLOSE 退貨後的剩餘履約（2026-10-18，Emulator-only）
+
+既有 `commitLocationDispatchPreparation`／`commitLocationShipment`／`commitShipmentDelivery` 支援全部退貨皆為 CLOSE 時，繼續完成原訂單剩餘未交付部分。數量與狀態沿用 `projectShipmentReturns`、`warehouseShipmentState`、原 Reservation／FEFO Core；不重開已結案數量、不新增庫存 writer。REPLACE、混合補送、退貨後送達撤銷仍安全拒絕。
+
+原退貨 intent normalizer 及有界實際入庫憑證核對移至現有 `location-return-trace-service.js` 的唯讀契約，由退貨及後續履約共用；`location-return-service.js` 保留原 export、唯一退貨 writer 與 intent hash。Trace 的送達 adapter 改為呼叫時載入，避免 shipment／delivery／return 的載入循環。此重整不表示重複退貨的唯讀追溯已接線。無新增模組／集合／Rules／Index，仍限 Emulator，沒有正式 Callable 或前端啟用。
