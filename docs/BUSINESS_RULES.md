@@ -231,3 +231,7 @@ v2 初始 Ledger 優先順序日期必須來自交易內讀取的來源訂單（
 ### v2 收貨後剩餘自由實貨的再分配來源（2026-10-18）
 
 收貨原子交易已先入庫，僅 `receipts.autoAllocationQty>0` 且 `reservationLocationSchemaVersion===2`，有一致的原 receipt movement 與 inventoryLot 物理憑證時，才可作為 v2 缺貨再分配來源；同一訂單正常收貨先供來源預留的數量不能再次配給別人。來源訂單已取消時，該供應需有已核定 `KEEP_STOCK` 決策，禁止因客戶取消便虛構收到實貨。批次進度使用 receipt 原 movementId 的固定雜湊，重新呼叫同一來源不重複扣帳。此為 Emulator 內部可呼叫流程，尚非正式網站自動通知／配貨。
+
+### 訂單取消／CLOSE 退貨後段配貨的執行界線（2026-10-18，Emulator-only）
+
+來源訂單取消或真實可再上架的 CLOSE 退貨**先由原交易獨立完成**；後續調撥其他缺貨訂單必須在來源 transaction 完成後、重新驗證目前操作者的 admin/purchaser/warehouse 權限，才可經原自由庫存 Service 推進。業務可合法處理自己訂單的取消或退貨，但不能因此取得倉儲分配權。新增內部組合 API 對後續配貨失敗標記 recovery-pending 並保存來源 movementID，絕不能重複取消或退貨以掩蓋配貨失敗；同一來源 ID 重送只續跑原批次。單次最多 10 步、正常預設 5 步，有未完訂單持續以同 ID 續傳，不建立無界背景工作。正式觸發、身份安全接班與 Preview 驗收仍未完成。
