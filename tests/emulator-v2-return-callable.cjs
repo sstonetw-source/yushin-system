@@ -86,8 +86,10 @@ test('real signed-in client creates an order through the existing Order Creation
   db:{collection:name=>({doc:id=>doc(liveDb,name,id)})},
   runRoleTransaction:callback=>runTransaction(liveDb,async transaction=>callback({
    get:async ref=>{const snapshot=await transaction.get(ref);return {exists:snapshot.exists(),data:()=>snapshot.data()};},
-   set:(ref,value,options)=>transaction.set(ref,value,options),
-   update:(ref,value)=>transaction.update(ref,value)
+   set:(ref,value,options)=>options
+    ?transaction.set(ref,JSON.parse(JSON.stringify(value)),options)
+    :transaction.set(ref,JSON.parse(JSON.stringify(value))),
+   update:(ref,value)=>transaction.update(ref,JSON.parse(JSON.stringify(value)))
   }))
  };
  const context=vm.createContext(transport);
