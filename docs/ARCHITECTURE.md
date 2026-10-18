@@ -528,3 +528,7 @@ Workflow 的明確 warehouseShipmentContext 現包含 returns，以原 projectSh
 ### 2026-10-18 整單初始化續傳
 
 整單 Emulator adapter 已接原初始化協調器及原需求 helper；庫存一次交易、需求逐項可恢復，不宣稱跨階段原子。實際前端預留 Service 補上交易內 attempt 防護，需求 helper 可接受初始化 context；原取消／恢復投影不變。正式 v2 UI／Callable 未啟用。見 [完整邊界](multi-item-initialization-20261018.md)。
+
+### 2026-10-18 多品項分批收貨
+
+既有 receiving Service 的 v2 驗證擴充為最多五個實體商品、初始化完成且無履約進度的多品項來源；仍只有原收貨 writer／Core。交易內核對同產品所有 ledger 的合計持有量，未收貨品項原樣保留。正式瀏覽器／Callable 閘門不變。見 [範圍與驗收](multi-item-receiving-20261018.md)。
