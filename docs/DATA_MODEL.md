@@ -243,3 +243,10 @@ v2 到貨自由實貨**不新增欄位／Collection**。既有 `receipts/{receip
 無新 collection／持久欄位或遷移。取消來源的 inventoryReservations 維持 locationSchemaVersion2、status released、quantity0、shortageQty0、locations[]；退貨只沿既有公司／原倉實貨與原批次餘量加回，原 ledger 結構與 lifecycleWarehouseIds 保留。orders 的 status／orderStatus、出貨／送達、PO／供應／receipts及成本資料不改，只新增原 returnRecords／returnHistory與累計退貨投影。
 
 既有 location-return-{operationId} movement 保存原 actor／意圖hash／完整returnRecord／result；CLOSE仍用原 CLOSED_CUSTOMER_RETURN／freeAllocationQty欄位作為有界配貨來源。無額外get／query／listener：單批次首次仍10次transaction get呼叫、6次寫入，查詢與批次上限沿原契約；同ID重送不重複增加實貨。純Core明確接收orderStatus cancelled，不能把取消誤當normal去新增預留。
+
+
+### 退貨追溯額度回傳契約（2026-10-18，Emulator-only）
+
+無持久欄位／collection／migration變更。planExplicitShipmentReturn 與 trace 新增 confirmedQty、previousReturnedQty、remainingReturnQty，以及 remainingLotAllocations[{lotId,lotNo,expiryDate,remainingQty}]。數量皆為本次選定shipment、此次預覽選量尚未提交前的額度；批次上限可能合計大於已確認可退總量，不能相加視為均已送達。新明細不帶實際成本；原 returnQty／allocations／lotRestorationPreview／canCommit false保持。
+
+正常查核交易為4＋N次get呼叫，取消為5＋N（多一份released ledger），N為明確所選批次且≤200。新增一次sourceId＋action退貨movement query，limit201、最多接受200筆，空快取也查；正常最多403份來源／憑證／批次文件，取消最多404份。不讀公司／分倉庫存、成本或供應集合；無寫入、Listener、Index／Rules變更。入庫交易仍以當前權威資料重新驗證。

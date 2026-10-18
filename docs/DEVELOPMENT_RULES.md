@@ -117,3 +117,10 @@ CLOSE 後取消／恢復仍拒絕未整合的退貨刪除／更正歷史，不�
 只能擴充原 commitLocationReturn 與 Reservation.planReservationReturn，不得另建取消退貨 writer。shipmentDeliveryContext 的 allowCancelledCloseReturn 僅此首次 CLOSE writer 使用，其他入口沿預設禁止取消來源；不要全域移除取消guard。取消ledger必須完整釋放，禁止藉退貨靜默釋放殘存預留或重新占庫。正常／取消兩種ledger目標分別為尚未寄出量／0，恢復仍由原 lifecycle重新規劃。
 
 驗收須包含實際取消→退貨→恢復→剩餘履約、分次與超額拒絕、五角色／陌生操作者／失效帳號、錯誤狀態／ledger／實際movement／批次、退貨與取消／恢復競爭、末端碰撞回滾、固定ID replay、自由實貨有界配給其他訂單，以及真實PO／receipt／KEEP_STOCK後續收貨。原送達／撤銷／trace不得因此對取消來源開放。modules改動需用build-functions-core同步；無正式Auth／UI／Preview或Firebase部署。
+
+
+### 退貨預覽必須與入庫共用剩餘額度（2026-10-18，Emulator-only）
+
+只能擴充原 planLocationReturnTrace，不可另建批次額度核心或預覽writer。必須先用實際 return movements 核對快取，再以選定shipment的 priorReturns 呼叫原 planExplicitShipmentReturn；正常／取消皆只開放CLOSE後續查核。取消來源需一致狀態與空released ledger，並共用實際退貨的取消scope guard。不得開放一般取消送達／撤銷。
+
+驗收需覆蓋正常／取消來源、既有CLOSE逐批扣額度、跨shipment不混用、五角色／陌生所有權／失效帳號、缺漏／變造／隱藏憑證及損壞ledger、201筆query拒絕、無成本／無寫入、預覽過期後入庫拒絕並可刷新。preview始終canCommit false，不得把預覽物件直接寫Firestore；實際入庫仍走原固定ID原子交易。modules修改須同步functions/shared並檢查app來源一致性。

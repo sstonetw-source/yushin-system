@@ -287,7 +287,10 @@
         qty:row.qty,unitCost:0,cost:0});
     }
     if(qty(returnQty+priorQty)>confirmedQty)throw Error('退貨追溯總量超過該筆出貨已確認送達量');
-    return {returnQty,allocations};
+    return {returnQty,allocations,confirmedQty,previousReturnedQty:priorQty,
+      remainingReturnQty:confirmedQty-priorQty,
+      remainingLotAllocations:[...lots.values()].map(row=>({lotId:row.lotId,
+        lotNo:row.lotNo||'',expiryDate:row.expiryDate||'',remainingQty:row.qty}))};
   }
 
   return {

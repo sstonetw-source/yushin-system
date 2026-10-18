@@ -479,3 +479,10 @@ Workflow 的明確 warehouseShipmentContext 現包含 returns，以原 projectSh
 新交易要求 status／orderStatus 同為 cancelled、來源同步完成、已寄出全送達且無額外打單、只含 CLOSE／無退貨更正歷史。v2 ledger 必須 released、quantity／shortageQty皆0且 locations空，item預留／缺口一致。原 Reservation.planReservationReturn 在此條件下只加公司與原倉實貨，保留 released，不因入庫釋放殘存異常預留或占回取消來源。退貨憑證、原出貨 movement、真實批次、角色／所有權與庫存平衡仍在同一 transaction 核對；不新增讀寫集合或查詢。
 
 後續恢復仍由原 lifecycle Service，以原訂購量減歷史寄出量規劃剩餘需求，CLOSE不新增補送；採購／收貨歷史不改。原自由庫存協調器可用同一退貨 movement 將最多退回量分給其他正常訂單，取消來源不重啟。REPLACE／混合補送、途中或額外已打單的取消、更正／撤銷、完整 Auth／UI／Preview 仍未開放。
+
+
+### 取消／既有 CLOSE 後的唯讀批次查核（2026-10-18，Emulator-only）
+
+原 planLocationReturnTrace 現支援正常或一致 cancelled 來源，以及已有 CLOSE 退貨的剩餘批次。沿用原 shipmentDeliveryContext、readShipmentProof 與有界 readLocationReturnProofs；取消來源再核對完整 released 空 v2 ledger。取消後無途中貨／額外打單／更正或REPLACE歷史的限制抽成 assertCancelledCloseReturnContext，查核與實際原退貨 writer 共用，沒有另建 writer。
+
+原 Inventory.planExplicitShipmentReturn 接收選定shipment的 priorReturns，新增唯讀額度結果；不重算另一份數量。查核仍驗證所選真實批次並回傳 status read-only／canCommit false，不寫庫存、訂單或憑證，也不讀公司／分倉庫存或成本集合。入庫必須在原 commitLocationReturn 的新交易重新授權及核對全部帳目，不能以預覽當提交承諾。其他新增送達／撤銷的取消guard不改，無Callable／UI／Preview或正式部署。

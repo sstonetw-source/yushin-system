@@ -49,3 +49,13 @@ test('reversal and return trace cannot run outside the demo Emulator or expose p
  }finally{if(host!==undefined)process.env.FIRESTORE_EMULATOR_HOST=host;}
  assert.doesNotMatch(fs.readFileSync('functions/index.js','utf8'),/reverseShipmentDelivery|planLocationReturnTrace/);
 });
+
+test('return allowance exposes confirmed and previously returned quantities without leaking costs or inferring a delivered lot',()=>{
+ const result=inventory.planExplicitShipmentReturn({shipment:source(),confirmedQty:2,
+  priorReturns:[{qty:1,lotAllocations:[{lotId:'L1',qty:1}]}],selections:[{lotId:'L2',qty:1}]});
+ assert.equal(result.confirmedQty,2);assert.equal(result.previousReturnedQty,1);assert.equal(result.remainingReturnQty,1);
+ assert.deepEqual(result.remainingLotAllocations.map(a=>[a.lotId,a.remainingQty]),[['L1',1],['L2',2]]);
+ assert.equal(JSON.stringify(result).includes('98765'),false);
+ assert.throws(()=>inventory.planExplicitShipmentReturn({shipment:source(),confirmedQty:2,
+  priorReturns:[{qty:1,lotAllocations:[{lotId:'L1',qty:1}]}],selections:[{lotId:'L2',qty:2}]}),/超過/);
+});
