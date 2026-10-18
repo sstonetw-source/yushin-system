@@ -384,4 +384,20 @@ async function commitSingleItemLocationLifecycle(db,uid,data){
   return {...result,status:'applied',receiptId:receiptRef.id};
  });
 }
-module.exports={normalizeLifecycleIntent,commitSingleItemLocationLifecycle};
+
+// Optional internal trial entrypoint. Original cancellation/restore is still
+// the only authoritative transaction. Redistribution happens strictly AFTER
+// commit; business roles cannot impersonate a warehouse operator.
+async function commitSingleItemLocationLifecycleAndRecover(db,uid,input){
+ const intent=normalizeLifecycleIntent(input);
+ const committed=await commitSingleItemLocationLifecycle(db,uid,input);
+ if(intent.nextStatus!=='cancelled')return {...committed,postCommitAllocation:{status:'not-applicable',sources:[]}};
+ const releaseIds=(committed.warehouseDeltas||[])
+  .filter(row=>row.reservedDelta<0)
+  .map(row=>'single-v2-life-'+intent.operationId+'-'+encodeURIComponent(row.warehouseId));
+ const {continueCommittedV2FreeStock}=require('./single-item-location-service');
+ const postCommitAllocation=await continueCommittedV2FreeStock(db,uid,releaseIds);
+ return {...committed,postCommitAllocation};
+}
+
+module.exports={normalizeLifecycleIntent,commitSingleItemLocationLifecycle,commitSingleItemLocationLifecycleAndRecover};
