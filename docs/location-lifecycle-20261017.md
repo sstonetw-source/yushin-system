@@ -128,3 +128,12 @@ Emulator harness 呼叫原正式 PO／incoming 登記、原收貨 Service 及 `k
 本節取代前述「不同操作員無法接手進行中 checkpoint」限制。相同來源 movement 的 `drainReleasedV2FreeStock` 現可由當前有效 admin／purchaser／warehouse 自動續跑；原來源 proof、批次意圖與固定 ID 保留。接手先在同一進度 transaction 核對原 pending movement，已提交量用共同結算 helper 計一次；未提交量仍保留相同指令。交接寫入同集合的不可重覆稽核，原動作執行者與目前接手人分開保存。
 
 實際 writer 額外在庫存 transaction 核對現任批次與指令，舊人恢復連線不會拿過期工作扣帳；雙操作者競爭可能收到需重新讀取的回覆，不能改新批次 ID 重做。已完成批次可由合格物流角色唯讀取得結果。此為 Emulator 內部接手能力，未建立正式操作頁、Callable、背景 runner 或 Preview／正式部署。
+
+
+### CLOSE 退貨後的取消／恢復（2026-10-18，Emulator-only）
+
+本節取代先前所有「退貨後取消／恢復尚未支援」中 CLOSE 的限制。已在原 lifecycle Service 接入既有退貨投影與入庫憑證 reader；既有供應／收貨／倉位／身份驗證及固定操作憑證保持。例：10 件已交付 4、CLOSE 1，取消釋放剩餘 6，恢復至多預留剩餘 6（再受真實在途約束）；不把退貨當 REPLACE，也不改寫原交付與入庫。
+
+驗收新增八組出貨檔案例及一組真實採購／收貨整合：完整取消→恢復→分倉剩餘打單／出貨／送達，競爭庫存造成採購缺口，兩方向錯誤憑證，REPLACE／途中貨／額外打單拒絕，角色，併發，末端失敗回滾與重試，取消後 bounded 配貨，以及既有 PO／供應／receipt／lot 不受影響。測試結果以本批實際 CI 為準；完整 Auth／前端／Preview 尚未啟用，沒有部署或正式資料更動。
+
+未完成：REPLACE／混合補送、取消中新增退貨、途中或額外已打單的取消、退貨後收貨、其他物流模式／多品項、完整初始化與正式接線。

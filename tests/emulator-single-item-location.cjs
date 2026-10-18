@@ -1691,3 +1691,33 @@ test('a new operator disabled after taking ownership cannot commit; another auth
  assert.equal(proof.actorUid,last);
  assert.equal((await ref.get()).data().handoffCount,2);
 });
+
+test('real purchased receipt shipment and CLOSE return preserve supply history through cancellation and restoration',async()=>{
+ const x=await receiptShipmentLifecycle('close-life-integration');
+ await x.receive(1,'close_life_real_receipt_123');
+ await x.prepare(1,'first');await x.ship(1,'first');await x.confirm(1,'first');
+ const order=await x.read('orders',x.orderId),shipment=order.warehouseShipmentRecords[0];
+ const selected=shipment.lotAllocations[0];
+ const received=await require('../functions/location-return-service').commitLocationReturn(db,x.uid,{
+  orderId:x.orderId,itemId:'I1',shipmentId:shipment.id,syncAttemptId:'v2_123456789',
+  operationId:'close_life_real_return_1234',warehouseId:'V2-A',date:'2026-10-18',
+  reason:'客戶結案退貨',condition:'RESTOCKABLE',settlement:'CLOSE',selections:[{lotId:selected.lotId,qty:1}]});
+ assert.equal(received.returnedQty,1);assert.equal(received.replacementQty,0);
+ const before=await receiptSnapshot(x);
+ const cancel={...x.intent('cancelled','close_life_real_cancel_1234'),date:'2026-10-19'};
+ assert.equal((await commitSingleItemLocationLifecycle(db,x.uid,cancel)).companyReservedDelta,-7);
+ const restore={...x.intent('normal','close_life_real_restore_123'),date:'2026-10-20'};
+ const restored=await commitSingleItemLocationLifecycle(db,x.uid,restore);
+ assert.equal(restored.reservedQty,7);assert.equal(restored.shortageQty,2);
+ const after=await receiptSnapshot(x);
+ assert.deepEqual(after.state.po,before.state.po);assert.deepEqual(after.state.supplies,before.state.supplies);
+ for(const name of ['inventoryLots','inventoryLotCosts','receipts'])
+  assert.deepEqual(after.documents[name],before.documents[name],name);
+ const current=after.state.base.documents[0];
+ assert.equal(current.items[0].supplyOrderedQty,3);assert.equal(current.items[0].receivedQty,1);
+ assert.equal(current.deliveredQty,1);assert.equal(current.returnedQty,1);
+ assert.deepEqual(current.returnRecords,before.state.base.documents[0].returnRecords);
+ assert.equal(after.state.base.documents[1].onHand,8);assert.equal(after.state.base.documents[1].incoming,2);
+ assert.equal(after.state.demand.orderedQty,3);assert.equal(after.state.demand.receivedQty,1);
+ assert.equal(after.state.demand.remainingToOrderQty,0);assert.equal(after.state.demand.remainingToReceiveQty,2);
+});

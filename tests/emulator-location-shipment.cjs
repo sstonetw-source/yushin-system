@@ -668,7 +668,7 @@ test('dispatch record replay cannot be hijacked after a later shipment or permis
  assert.equal(first.qty,4);
 });
 
-const {commitSingleItemLocationLifecycle}=require('../functions/single-item-location-lifecycle-service');
+const {commitSingleItemLocationLifecycle,commitSingleItemLocationLifecycleAndRecover}=require('../functions/single-item-location-lifecycle-service');
 async function partialLifecycle(name,{confirmed=true,prepared=2}={}){
  const x=await seed('lifecycle-'+name,{role:'admin',prepared});
  const shipment=x.request(A,2,'shipment_lifecycle_'+name);
@@ -974,4 +974,200 @@ test('later acknowledgement cannot be used to backdate an additional physical re
  await assert.rejects(x.receive(x.returnRequest({settlement:'CLOSE',operationId:'closed_timeline_early_return',
   date:'2026-10-19',selections:[{lotId:x.key+'-a-late',qty:2}]})),/當時已送達量/);
  assert.deepEqual(await snapshot(x),before);
+});
+
+async function closedLifecycleFixture(name,options={}){
+ const x=await closedRemainingFixture('life-'+name,options);
+ const lifecycleRequest=(nextStatus,operationId='closed_lifecycle_'+name+'_'+nextStatus)=>({
+  orderId:x.orderId,itemId:'I',warehouseIds:[A,B],nextStatus,operationId,
+  syncAttemptId:'sync_ship_12345',date:'2026-10-22',reason:'取消或恢復剩餘商品'});
+ return {...x,lifecycleRequest,lifecycle:(nextStatus,operationId,actor=x.uid,connection=db)=>
+  commitSingleItemLocationLifecycle(connection,actor,lifecycleRequest(nextStatus,operationId))};
+}
+async function closedLifecycleSnapshot(x){
+ const documents={};
+ for(const name of ['reservationOperationReceipts','procurementDemands','supplyOrders','dispatchRecords']){
+  const field=name==='procurementDemands'?'sourceId':'orderId';
+  const rows=await db.collection(name).where(field,'==',x.orderId).get();
+  documents[name]=rows.docs.map(d=>({id:d.id,...d.data()}));
+ }
+ return {state:await snapshot(x),documents};
+}
+async function competingClosedOrder(x,suffix,qty=10){
+ const orderId=x.orderId+'-other-'+suffix;
+ await db.collection('orders').doc(orderId).set({ownerUid:x.uid,salesCode:'S',status:'active',
+  inventoryReservationStatus:'pending',inventoryReservationAttemptId:'closed_competitor_sync',
+  items:[{itemId:'C',productId:x.key,qty,warehouseId:A,reservedQty:0,deliveredQty:0,returnedQty:0}]});
+ await commitSingleItemTwoWarehouse(db,x.uid,{orderId,itemId:'C',warehouseIds:[A,B],
+  attemptId:'closed_competitor_'+suffix,syncAttemptId:'closed_competitor_sync'});
+ await db.collection('orders').doc(orderId).update({inventoryReservationStatus:'completed'});
+ return orderId;
+}
+test('CLOSE cancellation releases only six remaining units; restoration completes the original ten without reopening the closed unit',async()=>{
+ const x=await closedLifecycleFixture('roundtrip'),before=await snapshot(x),original=before.docs[0];
+ const cancel=await x.lifecycle('cancelled');
+ assert.equal(cancel.reservedQty,0);assert.equal(cancel.companyReservedDelta,-6);
+ assert.equal((await x.read('inventoryReservations',x.orderId+'__I')).status,'released');
+ assert.equal((await x.read('inventory',x.key)).onHand,13);assert.equal((await x.read('inventory',x.key)).reserved,2);
+ const cancelled=await closedLifecycleSnapshot(x);
+ assert.equal((await x.lifecycle('cancelled')).status,'already-applied');
+ assert.deepEqual(await closedLifecycleSnapshot(x),cancelled);
+ const restored=await x.lifecycle('normal');
+ assert.equal(restored.reservedQty,6);assert.equal(restored.shortageQty,0);
+ assert.deepEqual(restored.locations,[{warehouseId:A,reservedQty:1},{warehouseId:B,reservedQty:5}]);
+ const order=await x.read('orders',x.orderId);
+ for(const field of ['returnRecords','returnHistory','warehouseShipmentRecords','deliveryRecords','deliveryHistory'])
+  assert.deepEqual(order[field],original[field],field);
+ for(let i=5;i<before.docs.length;i++)assert.deepEqual((await snapshot(x)).docs[i],before.docs[i]);
+ assert.equal(order.items[0].qty,10);assert.equal(order.items[0].returnedQty,1);
+ assert.equal(order.items[0].warehouseShippedQty,4);assert.equal(order.deliveredQty,4);
+ await x.prepare(6,'closed_lifecycle_finish_prepare',x.shippingUid);
+ for(const [wh,quantity,tag] of [[A,1,'A'],[B,5,'B']]){
+  const shipmentId='closed_lifecycle_finish_ship_'+tag;
+  await x.call({...x.request(wh,quantity,shipmentId),date:'2026-10-23'},x.shippingUid);
+  await x.confirm({...x.deliveryRequest(quantity,'closed_lifecycle_finish_ack_'+tag,shipmentId),date:'2026-10-24'});
+ }
+ const finished=await x.read('orders',x.orderId);
+ assert.equal(finished.items[0].warehouseShippedQty,10);assert.equal(finished.deliveredQty,10);
+ assert.equal(finished.returnedQty,1);assert.equal(finished.isDelivered,true);
+ assert.equal((await x.read('inventory',x.key)).onHand,7);assert.equal((await x.read('inventory',x.key)).reserved,2);
+ await assert.rejects(x.lifecycle('cancelled','closed_lifecycle_finished_reject'),/全部送達/);
+});
+test('restoring CLOSE remainder after genuine competing reservations creates demand for six, not the returned unit',async()=>{
+ const x=await closedLifecycleFixture('shortage');await x.lifecycle('cancelled');
+ const competitor=await competingClosedOrder(x,'shortage');
+ assert.equal((await x.read('inventoryReservations',competitor+'__C')).quantity,10);
+ const done=await x.lifecycle('normal');assert.equal(done.reservedQty,0);assert.equal(done.shortageQty,6);
+ const demandId=encodeURIComponent('SALES_ORDER:'+x.orderId+':I');
+ const demand=await x.read('procurementDemands',demandId);
+ assert.equal(demand.requestedQty,6);assert.equal(demand.remainingToOrderQty,6);
+ assert.equal(demand.orderedQty,0);assert.equal(demand.status,'PENDING');
+ assert.equal((await x.read('inventory',x.key)).onHand,13);assert.equal((await x.read('inventory',x.key)).reserved,12);
+ const stable=await closedLifecycleSnapshot(x);
+ assert.equal((await x.lifecycle('normal')).status,'already-applied');
+ assert.deepEqual(await closedLifecycleSnapshot(x),stable);
+ await x.lifecycle('cancelled','closed_shortage_cancel_again_123');
+ assert.equal((await x.read('procurementDemands',demandId)).status,'CANCELLED');
+ assert.equal((await x.read('procurementDemands',demandId)).requestedQty,6);
+});
+test('CLOSE cancellation and restoration reject missing altered or concealed return receipts without partial writes',async()=>{
+ for(const target of ['cancelled','normal'])for(const kind of ['missing','proof','cache','hidden','history']){
+  const x=await closedLifecycleFixture('proof-'+target+'-'+kind);
+  if(target==='normal')await x.lifecycle('cancelled');
+  const order=await x.read('orders',x.orderId);
+  if(kind==='missing')await db.collection('inventoryMovements').doc(x.closedReturn.movementId).delete();
+  if(kind==='proof')await db.collection('inventoryMovements').doc(x.closedReturn.movementId).update({qty:999});
+  if(kind==='cache'){
+   order.returnRecords[0].reason='changed without receipt';
+   await db.collection('orders').doc(x.orderId).update({returnRecords:order.returnRecords});
+  }
+  if(kind==='history'){
+   order.returnHistory[0].action='delete';
+   await db.collection('orders').doc(x.orderId).update({returnHistory:order.returnHistory});
+  }
+  if(kind==='hidden'){
+   order.items[0].returnedQty=0;
+   await db.collection('orders').doc(x.orderId).update({items:order.items,returnRecords:[],returnedQty:0});
+  }
+  const before=await closedLifecycleSnapshot(x);
+  await assert.rejects(x.lifecycle(target,'closed_bad_proof_'+target+'_'+kind),/憑證|退貨歷史/);
+  assert.deepEqual(await closedLifecycleSnapshot(x),before);
+ }
+});
+test('CLOSE lifecycle still rejects replacement mixed returns in-flight goods and unshipped paperwork',async()=>{
+ const replacement=await returnFixture('closed-life-replace',{prepared:4,confirmedQty:4});
+ await replacement.receive();
+ const request=x=>({orderId:x.orderId,itemId:'I',warehouseIds:[A,B],nextStatus:'cancelled',
+  operationId:'closed_unsupported_lifecycle_123',syncAttemptId:'sync_ship_12345',date:'2026-10-22'});
+ let before=await snapshot(replacement);
+ await assert.rejects(commitSingleItemLocationLifecycle(db,replacement.uid,request(replacement)),/退貨或補送/);
+ assert.deepEqual(await snapshot(replacement),before);
+ const mixed=await closedLifecycleFixture('mixed');
+ await mixed.receive(mixed.returnRequest({settlement:'REPLACE',operationId:'closed_mixed_replace_12345'}));
+ before=await snapshot(mixed);await assert.rejects(mixed.lifecycle('cancelled'),/退貨或補送/);
+ assert.deepEqual(await snapshot(mixed),before);
+ for(const [name,options,pattern] of [['inflight',{confirmedQty:2},/途中貨物/],
+   ['prepared',{prepared:5},/已打單未出貨/]]){
+  const x=await closedLifecycleFixture(name,options),baseline=await closedLifecycleSnapshot(x);
+  await assert.rejects(x.lifecycle('cancelled'),pattern);
+  assert.deepEqual(await closedLifecycleSnapshot(x),baseline);
+ }
+});
+test('CLOSE lifecycle keeps five-role ownership checks for both cancellation and restoration',async()=>{
+ for(const role of ['admin','sales','engineer','purchaser','warehouse']){
+  const x=await closedLifecycleFixture('roles-'+role);
+  await db.collection('users').doc(x.uid).update({role});
+  if(['admin','sales','engineer'].includes(role)){
+   assert.equal((await x.lifecycle('cancelled')).reservedQty,0);
+   assert.equal((await x.lifecycle('normal')).reservedQty,6);
+  }else{
+   let baseline=await closedLifecycleSnapshot(x);
+   await assert.rejects(x.lifecycle('cancelled'),/不能取消或恢復/);
+   assert.deepEqual(await closedLifecycleSnapshot(x),baseline);
+   await x.lifecycle('cancelled',undefined,x.adminUid);
+   baseline=await closedLifecycleSnapshot(x);
+   await assert.rejects(x.lifecycle('normal'),/不能取消或恢復/);
+   assert.deepEqual(await closedLifecycleSnapshot(x),baseline);
+  }
+ }
+ const x=await closedLifecycleFixture('foreign');
+ for(const role of ['sales','engineer']){
+  const actor='closed-life-foreign-'+role;await db.collection('users').doc(actor).set({role,active:true});
+  await assert.rejects(x.lifecycle('cancelled','closed_foreign_'+role,actor),/其他業務/);
+ }
+ await x.lifecycle('cancelled');const cancelled=await closedLifecycleSnapshot(x);
+ await db.collection('users').doc(x.uid).update({disabled:true});
+ await assert.rejects(x.lifecycle('normal'),/不能取消或恢復/);
+ assert.deepEqual(await closedLifecycleSnapshot(x),cancelled);
+});
+test('concurrent CLOSE lifecycle retries never double release or reserve the original remainder',async()=>{
+ const x=await closedLifecycleFixture('races');
+ const first=await Promise.all([x.lifecycle('cancelled'),x.lifecycle('cancelled')]);
+ assert.deepEqual(first.map(r=>r.status).sort(),['already-applied','applied']);
+ const restores=await Promise.allSettled([x.lifecycle('normal','closed_race_restore_A_123'),
+  x.lifecycle('normal','closed_race_restore_B_123')]);
+ assert.equal(restores.filter(r=>r.status==='fulfilled').length,1);
+ assert.equal((await x.read('inventoryReservations',x.orderId+'__I')).quantity,6);
+ assert.equal((await x.read('inventory',x.key)).reserved,8);
+ const cancellations=await Promise.allSettled([x.lifecycle('cancelled','closed_race_cancel_A_1234'),
+  x.lifecycle('cancelled','closed_race_cancel_B_1234')]);
+ assert.equal(cancellations.filter(r=>r.status==='fulfilled').length,1);
+ assert.equal((await x.read('inventory',x.key)).reserved,2);
+ assert.equal((await x.read('inventory',x.key)).onHand,13);
+ assert.equal((await x.read('orders',x.orderId)).returnedQty,1);
+});
+test('CLOSE lifecycle late receipt failure rolls back cancellation and new restoration demand with safe original-ID retries',async()=>{
+ const x=await closedLifecycleFixture('rollback');
+ const guarded={projectId:db.projectId,collection:n=>db.collection(n),runTransaction:fn=>db.runTransaction(tx=>fn({
+  get:r=>tx.get(r),update:(...a)=>tx.update(...a),set:(...a)=>tx.set(...a),create:(ref,...a)=>{
+   if(ref.path.startsWith('reservationOperationReceipts/single-v2-lifecycle-'))throw Error('late lifecycle receipt failure');
+   return tx.create(ref,...a);
+  }
+ }))};
+ let baseline=await closedLifecycleSnapshot(x);
+ await assert.rejects(x.lifecycle('cancelled',undefined,x.uid,guarded),/late lifecycle receipt/);
+ assert.deepEqual(await closedLifecycleSnapshot(x),baseline);
+ assert.equal((await x.lifecycle('cancelled')).reservedQty,0);
+ await competingClosedOrder(x,'rollback');
+ baseline=await closedLifecycleSnapshot(x);
+ await assert.rejects(x.lifecycle('normal',undefined,x.uid,guarded),/late lifecycle receipt/);
+ assert.deepEqual(await closedLifecycleSnapshot(x),baseline);
+ const done=await x.lifecycle('normal');assert.equal(done.reservedQty,0);assert.equal(done.shortageQty,6);
+ assert.equal((await x.lifecycle('normal')).status,'already-applied');
+});
+test('CLOSE cancellation post-commit recovery reallocates released remainder before restoration replans only unmet demand',async()=>{
+ const x=await closedLifecycleFixture('released-recovery',{role:'admin'});
+ const competitor=await competingClosedOrder(x,'recovery');
+ assert.equal((await x.read('inventoryReservations',competitor+'__C')).quantity,4);
+ const intent=x.lifecycleRequest('cancelled');
+ const cancelled=await commitSingleItemLocationLifecycleAndRecover(db,x.uid,intent);
+ assert.equal(cancelled.companyReservedDelta,-6);assert.equal(cancelled.postCommitAllocation.status,'completed');
+ assert.equal(cancelled.postCommitAllocation.sources.length,1);
+ assert.equal((await x.read('inventoryReservations',competitor+'__C')).quantity,10);
+ const before=await closedLifecycleSnapshot(x);
+ assert.equal((await commitSingleItemLocationLifecycleAndRecover(db,x.uid,intent)).status,'already-applied');
+ assert.deepEqual(await closedLifecycleSnapshot(x),before);
+ const restored=await x.lifecycle('normal');assert.equal(restored.reservedQty,0);assert.equal(restored.shortageQty,6);
+ assert.equal((await x.read('orders',x.orderId)).returnedQty,1);
+ assert.equal((await x.read('inventory',x.key)).onHand,13);
 });

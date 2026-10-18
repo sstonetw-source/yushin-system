@@ -96,3 +96,10 @@
 CLOSE 後剩餘履約須使用原打單／出貨／確認 Service 與 `projectShipmentReturns`，不能只解除 returnRecords 阻擋而略過實際退貨憑證。`normalizeLocationReturnIntent`／`readLocationReturnProofs` 共用於原退貨 writer 及後續履約；不得重寫 intent hash 或複製第二套驗證。Core 修改後重新產生 functions/shared 副本。
 
 日期驗收須覆蓋同一批退貨後的較晚分次送達、反序退貨快取、同日累計上限及禁止用較晚送達回填先前退貨。交易驗收須覆蓋兩倉完整剩餘流程、五角色、超出原訂購量、固定 ID 重送、三入口缺失／竄改／刪除退貨憑證、併發超配與後段寫入失敗回滾。REPLACE、混合補送、退貨後送達撤銷、退貨後收貨／取消恢復及正式接線仍須獨立整合。
+
+
+### CLOSE 退貨後的取消／恢復（2026-10-18，Emulator-only）
+
+CLOSE 後取消／恢復仍拒絕未整合的退貨刪除／更正歷史，不能只因快取目前皆為 CLOSE 便忽略其他歷史動作。CLOSE 後取消／恢復不可移除保護後另算需求：一律沿原 `commitSingleItemLocationLifecycle`、`projectShipmentReturns`、`readLocationReturnProofs`、Reservation 與 Workflow／Demand Core。CLOSE 的有效商業交付應明確傳入 Workflow，不能單純用 returnedQty 再扣一次已結案數量。重送仍查真實使用者與目前所有權；新交易才重新讀取業務來源並提交。
+
+需驗收取消／恢復兩方向的缺失／竄改／隱藏退貨 proof，真實競爭預留引起缺口，取消後配貨再恢復，五角色與外人／停用帳號，併發與末端 receipt 建立失敗（包含新需求全回滾），以及原採購→收貨→出貨→送達→CLOSE→取消／恢復的供應歷史保留。途中貨、未出貨打單、REPLACE／混合補送與全數完成仍拒絕，不可直接開放前端或 Callable。

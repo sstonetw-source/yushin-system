@@ -456,3 +456,10 @@ job `reservationOperationReceipts` 與 movement 在不同交易，使用 pending
 既有 `commitLocationDispatchPreparation`／`commitLocationShipment`／`commitShipmentDelivery` 支援全部退貨皆為 CLOSE 時，繼續完成原訂單剩餘未交付部分。數量與狀態沿用 `projectShipmentReturns`、`warehouseShipmentState`、原 Reservation／FEFO Core；不重開已結案數量、不新增庫存 writer。REPLACE、混合補送、退貨後送達撤銷仍安全拒絕。
 
 原退貨 intent normalizer 及有界實際入庫憑證核對移至現有 `location-return-trace-service.js` 的唯讀契約，由退貨及後續履約共用；`location-return-service.js` 保留原 export、唯一退貨 writer 與 intent hash。Trace 的送達 adapter 改為呼叫時載入，避免 shipment／delivery／return 的載入循環。此重整不表示重複退貨的唯讀追溯已接線。無新增模組／集合／Rules／Index，仍限 Emulator，沒有正式 Callable 或前端啟用。
+
+
+### CLOSE 退貨後的取消／恢復（2026-10-18，Emulator-only）
+
+原 `commitSingleItemLocationLifecycle` 改以既有 `projectShipmentReturns` 投影，並沿用 `readLocationReturnProofs(closedOnly:true)` 核對實際退貨。取消／恢復使用相同 Reservation Core，需求仍走 Workflow → Procurement Demand Core，不新增 writer 或數量核心。新交易在原讀取階段增加一次有界 return movement query，初始空退貨快取可省略欄位但不能略過實際憑證查詢。
+
+CLOSE 後僅剩餘未交付部分可取消／恢復；已出貨須全數確認、累計打單須等於已寄出，仍不處理途中貨或未出貨打單。REPLACE／混合補送與全數完成仍拒絕。組合的取消後配貨入口沿用原 release movements 與 coordinator，不增加自動背景作業。僅 demo-yushin Emulator，沒有 Callable／前端／Firebase 部署。
