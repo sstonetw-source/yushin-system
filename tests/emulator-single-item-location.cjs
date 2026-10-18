@@ -1900,3 +1900,158 @@ test('account change after real reservation cannot finish initialization and ori
  assert.equal((await x.read('orders',x.orderId)).inventoryReservationStatus,'pending');assert.equal((await x.read('inventory',x.productKey)).reserved,7);
  const stock=await x.read('inventory',x.productKey);await initialize(x);assert.equal((await x.read('orders',x.orderId)).inventoryReservationStatus,'completed');assert.deepEqual(await x.read('inventory',x.productKey),stock);
 });
+
+// Multi-line acceptance uses the SAME real PO/incoming/receiving Services as
+// the single-line cases above, after the real whole-order initialization.
+async function multiReceiptLifecycle(name,{five=false}={}){
+ const x=await seed('multi-receipt-'+name,{role:'purchaser',a:1,b:2,company:3}),q=x.productKey+'-Q';
+ const items=five?Array.from({length:5},(_,n)=>({itemId:'I'+(n+1),productId:x.productKey,qty:3,warehouseId:n%2?'V2-B':'V2-A'})):[
+  {itemId:'I1',productId:x.productKey,qty:5,warehouseId:'V2-A',commercialNote:'retain first line'},
+  {itemId:'I2',productId:x.productKey,qty:4,warehouseId:'V2-B',unitPrice:789},
+  {itemId:'I3',productId:q,qty:3,warehouseId:'V2-B',custom:{note:'untouched sibling'}}];
+ await db.collection('orders').doc(x.orderId).update({items,deliveryRecords:[],returnRecords:[],warehouseShipmentRecords:[],returnHistory:[]});
+ const batch=db.batch();batch.set(db.collection('products').doc(q),{productType:'Goods'});
+ batch.set(db.collection('inventory').doc(q),{productKey:q,onHand:1,reserved:0,incoming:0,transferFreeInTransit:0});
+ for(const [warehouseId,onHand] of [['V2-A',1],['V2-B',0]])batch.set(db.collection('warehouseStocks').doc(warehouseId+'__'+q),{productKey:q,warehouseId,onHand,reserved:0,incoming:0,transferFreeInTransit:0});
+ await batch.commit();await initialize(x);
+ const c=purchasingHarness(),order=await x.read('orders',x.orderId);
+ await db.collection('users').doc('emulator-purchaser').set({role:'purchaser',active:true});
+ const po={poNo:'PO-MULTI-RECEIPT-'+name,vendorName:'Multi vendor',supplierName:'Multi vendor',buyerName:'Purchaser',
+  poDate:'2026-10-18',createdAt:'2026-10-18T00:00:00Z',items:order.items.flatMap((item,index)=>item.shortageQty>0?[{
+   orderId:x.orderId,itemId:item.itemId,orderItemIndex:index,productId:item.productId,qty:item.shortageQty,unitPrice:100,
+   warehouseId:item.warehouseId,fulfillmentType:'WAREHOUSE',ownerUid:x.uid,salesCode:'V2',sourceType:'SALES_ORDER'}]:[])};
+ const purchase=await c.commitFormalPurchaseOrder(po);await c.registerPurchaseIncoming(po.poNo,purchase.poRecord);receivingHarness(c);
+ const supplies=purchase.committedSupplyOrders;
+ return {...x,q,c,po:purchase.poRecord,supplies,
+  receive:(itemId,qty,operationId)=>c.receiveSupplyOrderRecord(supplies.find(s=>s.itemId===itemId).id,qty,'LOT-'+itemId,'2027-10-18',operationId)};
+}
+async function multiReceiptSnapshot(x){
+ const docs={};
+ const put=async(name,key)=>{docs[name+'/'+key]=await x.read(name,key);};
+ const order=await x.read('orders',x.orderId);await put('orders',x.orderId);await put('purchaseOrders',x.po.poNo);
+ for(const item of order.items){await put('inventoryReservations',x.orderId+'__'+item.itemId);
+  await put('procurementDemands',encodeURIComponent('SALES_ORDER:'+x.orderId+':'+item.itemId));}
+ for(const s of x.supplies)await put('supplyOrders',s.id);
+ for(const key of [x.productKey,x.q]){
+  await put('inventory',key);for(const wh of ['V2-A','V2-B'])await put('warehouseStocks',wh+'__'+key);
+  for(const name of ['inventoryLots','inventoryLotCosts','receipts','inventoryMovements']){
+   const query=await db.collection(name).where('productKey','==',key).get();
+   for(const doc of query.docs)docs[name+'/'+doc.id]=doc.data();
+  }
+ }
+ return docs;
+}
+test('multi-line real PO and dated partial receipts preserve siblings and reserve only the receiving warehouse',async()=>{
+ const x=await multiReceiptLifecycle('dated'),before=await x.read('orders',x.orderId);
+ assert.deepEqual(before.items.map(i=>i.supplyOrderedQty),[2,4,2]);
+ assert.equal((await x.read('inventory',x.productKey)).onHand,3);assert.equal((await x.read('inventory',x.productKey)).incoming,6);
+ for(const [itemId,qty,date,id] of [['I2',2,'2026-10-18','multi_receipt_dated_1'],['I1',1,'2026-10-19','multi_receipt_dated_2'],['I3',2,'2026-10-20','multi_receipt_dated_3']]){
+  const prior=await x.read('orders',x.orderId);x.c.localDateString=()=>date;
+  await x.receive(itemId,qty,id);const order=await x.read('orders',x.orderId);
+  for(const item of prior.items.filter(i=>i.itemId!==itemId))assert.deepEqual(order.items.find(i=>i.itemId===item.itemId),item);
+  assert.equal(order.items.find(i=>i.itemId===itemId).receiptEvents.at(-1).date,date);
+  assert.equal(order.deliveredQty,prior.deliveredQty);assert.deepEqual(order.warehouseShipmentRecords,[]);
+  const receipt=await x.read('receipts',id);assert.equal(receipt.reservationLocationSchemaVersion,2);assert.equal(receipt.receiptDate,date);
+  const once=await multiReceiptSnapshot(x);x.c.localDateString=()=> '2026-10-21';await x.receive(itemId,qty,id);assert.deepEqual(await multiReceiptSnapshot(x),once);
+ }
+ await x.receive('I2',2,'multi_receipt_dated_4');await x.receive('I1',1,'multi_receipt_dated_5');
+ const order=await x.read('orders',x.orderId);assert.deepEqual(order.items.map(i=>[i.reservedQty,i.shortageQty,i.receivedQty]),[[5,0,2],[4,0,4],[3,0,2]]);
+ for(const [key,total] of [[x.productKey,9],[x.q,3]]){
+  const stock=await x.read('inventory',key);assert.equal(stock.onHand,total);assert.equal(stock.reserved,total);assert.equal(stock.incoming,0);
+  assert.equal((await x.read('warehouseStocks','V2-A__'+key)).reserved+(await x.read('warehouseStocks','V2-B__'+key)).reserved,total);
+ }
+ const ledger=await x.read('inventoryReservations',x.orderId+'__I2');assert.deepEqual(ledger.locations,[{warehouseId:'V2-B',reservedQty:4}]);
+ assert.equal(order.items[0].commercialNote,'retain first line');assert.equal(order.items[1].unitPrice,789);
+ assert.deepEqual(order.items[2].custom,{note:'untouched sibling'});
+});
+test('five same-product lines receive through one existing PO without resetting sibling holds or incoming',async()=>{
+ const x=await multiReceiptLifecycle('five',{five:true});
+ for(const itemId of ['I5','I3','I2','I4'])await x.receive(itemId,3,'multi_five_'+itemId);
+ const order=await x.read('orders',x.orderId);assert.deepEqual(order.items.map(i=>i.reservedQty),[3,3,3,3,3]);
+ assert.deepEqual(order.items.map(i=>i.receivedQty||0),[0,3,3,3,3]);
+ const stock=await x.read('inventory',x.productKey);assert.equal(stock.onHand,15);assert.equal(stock.reserved,15);assert.equal(stock.incoming,0);
+});
+test('multi-line receipts check all five roles and current profile rather than a caller capability',async()=>{
+ for(const role of ['admin','purchaser','warehouse','sales','engineer']){
+  const x=await multiReceiptLifecycle('role-'+role);receivingHarness(x.c,'emulator-purchaser',role);
+  await db.collection('users').doc('emulator-purchaser').update({role});const before=await multiReceiptSnapshot(x);
+  if(['sales','engineer'].includes(role)){await assert.rejects(x.receive('I2',1,'multi_role_'+role));assert.deepEqual(await multiReceiptSnapshot(x),before);}
+  else await x.receive('I2',1,'multi_role_'+role);
+ }
+ const x=await multiReceiptLifecycle('disabled');await db.collection('users').doc('emulator-purchaser').update({active:false});
+ const before=await multiReceiptSnapshot(x);await assert.rejects(x.receive('I2',1,'multi_disabled_receipt'));assert.deepEqual(await multiReceiptSnapshot(x),before);
+});
+test('same receipt replay and competing over-consumption cannot duplicate multi-line receipts lots or reservations',async()=>{
+ const x=await multiReceiptLifecycle('race-same');
+ await Promise.all([x.receive('I2',1,'multi_same_receipt'),x.receive('I2',1,'multi_same_receipt')]);
+ assert.equal((await x.read('inventory',x.productKey)).onHand,4);assert.equal((await x.read('orders',x.orderId)).items[1].receivedQty,1);
+ const before=await multiReceiptSnapshot(x);await assert.rejects(x.receive('I2',2,'multi_same_receipt'),/識別碼衝突/);assert.deepEqual(await multiReceiptSnapshot(x),before);
+ const y=await multiReceiptLifecycle('race-over');const results=await Promise.allSettled([y.receive('I2',3,'multi_race_a'),y.receive('I2',3,'multi_race_b')]);
+ assert.equal(results.filter(r=>r.status==='fulfilled').length,1);assert.equal((await y.read('inventory',y.productKey)).onHand,6);
+ assert.equal((await y.read('orders',y.orderId)).items[1].receivedQty,3);
+});
+test('concurrent different lines sharing one product serialize without losing either receipt or another product',async()=>{
+ const x=await multiReceiptLifecycle('race-lines'),other=await x.read('inventory',x.q);
+ await Promise.all([x.receive('I1',2,'multi_lines_a'),x.receive('I2',4,'multi_lines_b')]);
+ const order=await x.read('orders',x.orderId);assert.deepEqual(order.items.map(i=>i.receivedQty||0),[2,4,0]);
+ const stock=await x.read('inventory',x.productKey);assert.equal(stock.onHand,9);assert.equal(stock.reserved,9);assert.equal(stock.incoming,0);
+ assert.deepEqual(await x.read('inventory',x.q),other);assert.deepEqual(order.items[2].custom,{note:'untouched sibling'});
+});
+test('multi-line joint company and warehouse claims cannot hide under individually sufficient balances',async()=>{
+ for(const scope of ['company','warehouse']){
+  const x=await multiReceiptLifecycle('joint-'+scope);await x.receive('I2',2,'multi_joint_initial_'+scope);
+  await db.collection(scope==='company'?'inventory':'warehouseStocks').doc(scope==='company'?x.productKey:'V2-B__'+x.productKey).update({reserved:scope==='company'?4:3});
+  const before=await multiReceiptSnapshot(x);await assert.rejects(x.receive('I2',1,'multi_joint_reject_'+scope),/庫存帳異常|分倉預留/);
+  assert.deepEqual(await multiReceiptSnapshot(x),before);
+ }
+});
+test('invalid sibling source service direct shipment legacy ledger or prior logistics refuses the entire receipt',async()=>{
+ const cases=[
+  ['service',x=>db.collection('products').doc(x.q).update({productType:'SERVICE'})],
+  ['legacy',x=>db.collection('inventoryReservations').doc(x.orderId+'__I3').update({locationSchemaVersion:1})],
+  ['missing',x=>db.collection('inventoryReservations').doc(x.orderId+'__I3').delete()],
+  ['owner',x=>db.collection('inventoryReservations').doc(x.orderId+'__I3').update({ownerUid:'other'})],
+  ['pending',x=>db.collection('orders').doc(x.orderId).update({inventoryReservationStatus:'pending'})],
+  ['history',x=>db.collection('orders').doc(x.orderId).update({warehouseShipmentRecords:[{id:'not-migrated'}]})],
+  ...['direct','prepared','duplicate','shortage'].map(mode=>[mode,async x=>{
+   const order=await x.read('orders',x.orderId);
+   if(mode==='direct')order.items[2].fulfillmentType='DIRECT_SHIP';
+   if(mode==='prepared')order.items[2].dispatchPreparedQty=1;
+   if(mode==='duplicate')order.items[2].itemId='I1';
+   if(mode==='shortage')order.items[2].shortageQty=99;
+   await db.collection('orders').doc(x.orderId).update({items:order.items});
+  }])
+ ];
+ for(const [name,mutate] of cases){const x=await multiReceiptLifecycle('reject-'+name);await mutate(x);const before=await multiReceiptSnapshot(x);
+  await assert.rejects(x.receive('I2',1,'multi_invalid_'+name));assert.deepEqual(await multiReceiptSnapshot(x),before,name);}
+});
+test('late receipt write failure rolls back multi-line stock lots costs ledger demand and supply atomically',async()=>{
+ const x=await multiReceiptLifecycle('rollback'),before=await multiReceiptSnapshot(x),collision=db.collection('inventoryMovements').doc('multi-receipt-collision');
+ await collision.set({sentinel:true});
+ x.c.runRoleTransaction=fn=>db.runTransaction(async tx=>fn({get:r=>tx.get(r),update:(...a)=>tx.update(...a),
+  set:(ref,...args)=>{if(ref.path.startsWith('receipts/'))tx.create(collision,{sentinel:false});return tx.set(ref,...args);}}));
+ await assert.rejects(x.receive('I2',1,'multi_rollback_receipt'),error=>error.code===6);assert.deepEqual(await multiReceiptSnapshot(x),before);
+ x.c.runRoleTransaction=fn=>db.runTransaction(async tx=>fn(tx));await x.receive('I2',1,'multi_rollback_receipt');
+ assert.equal((await x.read('orders',x.orderId)).items[1].receivedQty,1);
+});
+test('lost multi-line receipt response keeps the fixed operation and recovers without another physical receipt',async()=>{
+ const x=await multiReceiptLifecycle('lost-response');let lost=true;
+ x.c.runRoleTransaction=async fn=>{const result=await db.runTransaction(async tx=>fn(tx));if(lost){lost=false;throw Error('receipt reply lost');}return result;};
+ await assert.rejects(x.receive('I2',2,'multi_lost_reply_receipt'),/reply lost/);const committed=await multiReceiptSnapshot(x);
+ await x.receive('I2',2,'multi_lost_reply_receipt');assert.deepEqual(await multiReceiptSnapshot(x),committed);
+});
+test('concurrent multi-line receipts for different products preserve the complete source order',async()=>{
+ const x=await multiReceiptLifecycle('race-products');await Promise.all([x.receive('I2',2,'multi_products_p'),x.receive('I3',2,'multi_products_q')]);
+ const order=await x.read('orders',x.orderId);assert.deepEqual(order.items.map(i=>i.receivedQty||0),[0,2,2]);
+ assert.equal((await x.read('inventory',x.productKey)).onHand,5);assert.equal((await x.read('inventory',x.q)).onHand,3);
+ assert.equal((await x.read('procurementDemands',encodeURIComponent('SALES_ORDER:'+x.orderId+':I2'))).remainingToReceiveQty,2);
+ assert.equal((await x.read('procurementDemands',encodeURIComponent('SALES_ORDER:'+x.orderId+':I3'))).remainingToReceiveQty,0);
+});
+test('multi-line receipt never opens browser production gates or accepts actor substitution on replay',async()=>{
+ const x=await multiReceiptLifecycle('gates'),before=await multiReceiptSnapshot(x);
+ delete x.c.process;await assert.rejects(x.receive('I2',1,'multi_gated_receipt'),/僅允許 demo-yushin/);assert.deepEqual(await multiReceiptSnapshot(x),before);
+ x.c.process={env:{FIRESTORE_EMULATOR_HOST:''}};await assert.rejects(x.receive('I2',1,'multi_gated_receipt'),/僅允許 demo-yushin/);
+ x.c.process=process;await x.receive('I2',1,'multi_gated_receipt');const once=await multiReceiptSnapshot(x);
+ await db.collection('users').doc('other-multi-receiver').set({role:'admin',active:true});receivingHarness(x.c,'other-multi-receiver','admin');
+ await assert.rejects(x.receive('I2',1,'multi_gated_receipt'),/識別碼衝突/);assert.deepEqual(await multiReceiptSnapshot(x),once);
+});

@@ -15890,15 +15890,68 @@ async function validateV2ReceiptSource(transaction, {order,supply,reservation,it
     };
     const orderId=id(supply.orderId),itemId=id(supply.itemId),productKey=id(supply.productKey),warehouseId=id(supply.warehouseId);
     const status=normalizedOrderStatus(order),cancelled=status==='cancelled';
-    if(!Array.isArray(order.items)||order.items.length!==1||order.items[0].itemId!==itemId
+    if(!Array.isArray(order.items)||!order.items.length||order.items.length>5
+        ||order.items.filter(row=>row?.itemId===itemId).length!==1
         ||!order.ownerUid||!order.salesCode||!['normal','cancelled'].includes(status)
         ||(cancelled?order.status!=='cancelled':!['active','normal'].includes(order.status))
         ||!['normal','active','cancelled','',undefined].includes(order.orderStatus)
         ||order.returnPending===true||item.transferPendingId||item.custodyTransferId
         ||integer(order.logisticsTransfersPending??0,'調撥途中')!==0)
-        throw new Error('多倉收貨只支援來源完整且無調撥的單品項訂單。');
+        throw new Error('多倉收貨只支援來源完整且無調撥的 1–5 品項訂單。');
     for(const field of ['warehouseShipmentRecords','deliveryRecords','returnRecords','returnHistory']){
         if(!Array.isArray(order[field]??[]))throw new Error('多倉收貨履約紀錄格式不正確。');
+    }
+    let jointHolds=null;
+    if(order.items.length>1){
+        // Bounded multi-line receipt phase only. Existing single-line shipment /
+        // CLOSE-return validation below is unchanged; do not reinterpret an
+        // order-level delivery cache as one item's delivery quantity.
+        if(cancelled||order.inventoryReservationStatus!=='completed'||!order.inventoryReservationAttemptId
+            ||['warehouseShipmentRecords','deliveryRecords','returnRecords','returnHistory','warehouseShipmentHistory']
+                .some(field=>!Array.isArray(order[field]??[])||(order[field]??[]).length))
+            throw new Error('多品項收貨目前僅支援已完成初始化且尚無履約紀錄的正常訂單。');
+        const seen=new Set(),products=new Map();
+        jointHolds={company:0,warehouses:new Map()};
+        const candidates=reservation.lifecycleWarehouseIds;
+        if(!Array.isArray(candidates)||candidates.length!==2||new Set(candidates).size!==2)
+            throw new Error('整單原候選倉資料不正確。');
+        candidates.forEach(id);
+        for(const row of order.items){
+            const rowId=id(row?.itemId),productId=id(row.productId),key=id(row.inventoryProductKey||productId);
+            const ordered=integer(row.qty??row.orderedQty,'品項訂購量');
+            if(seen.has(rowId)||!ordered||(row.orderedQty!==undefined&&row.orderedQty!==ordered)
+                ||(row.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
+                ||String(row.productType||row.type||'').toUpperCase()==='SERVICE'
+                ||row.transferPendingId||row.custodyTransferId||!candidates.includes(id(row.warehouseId||order.warehouseId))
+                ||['dispatchPreparedQty','warehouseShippedQty','deliveredQty','returnedQty'].some(field=>integer(row[field]??0,field)!==0))
+                throw new Error('多品項收貨來源必須是唯一實體商品，且尚未打單、出貨或退貨。');
+            seen.add(rowId);
+            if(!products.has(productId))products.set(productId,await transaction.get(db.collection('products').doc(productId)));
+            const product=products.get(productId);
+            if(!product.exists||product.data().active===false||String(product.data().productType||product.data().type||'').toUpperCase()==='SERVICE')
+                throw new Error('服務或停用商品不可進行多品項實貨收貨。');
+            const snap=rowId===itemId?null:await transaction.get(db.collection('inventoryReservations').doc(`${orderId}__${rowId}`));
+            const ledger=rowId===itemId?reservation:(snap.exists?snap.data():{});
+            if(ledger.locationSchemaVersion!==2||ledger.warehouseId!==undefined||ledger.orderId!==orderId||ledger.itemId!==rowId
+                ||ledger.productKey!==key||ledger.ownerUid!==order.ownerUid||ledger.salesCode!==order.salesCode
+                ||!Array.isArray(ledger.lifecycleWarehouseIds)||ledger.lifecycleWarehouseIds.length!==2
+                ||new Set(ledger.lifecycleWarehouseIds).size!==2||ledger.lifecycleWarehouseIds.some(wh=>!candidates.includes(wh))
+                ||integer(ledger.quantity,'品項預留')!==row.reservedQty||integer(ledger.shortageQty,'品項缺口')!==row.shortageQty
+                ||ledger.status!==(ledger.quantity>0?'active':'shortage')
+                ||integer(row.supplyOrderedQty??0,'品項供應量')<integer(row.receivedQty??0,'品項收貨量'))
+                throw new Error('多品項收貨的完整預留來源或供應投影不一致。');
+            const projection=globalThis.YushinFulfillment.projectShipmentReturns({orderId,itemId:rowId,productKey:key,orderedQty:ordered});
+            if(ledger.quantity+ledger.shortageQty!==projection.outstandingQty)
+                throw new Error('多品項收貨預留與來源剩餘需求不一致。');
+            const held=globalThis.YushinReservation.reservationStockDeltas({},ledger);
+            if(held.warehouseDeltas.some(change=>!candidates.includes(change.warehouseId)))
+                throw new Error('多品項預留不在原候選倉。');
+            if(key===productKey){
+                jointHolds.company+=held.companyReservedDelta;
+                for(const change of held.warehouseDeltas)jointHolds.warehouses.set(change.warehouseId,
+                    (jointHolds.warehouses.get(change.warehouseId)||0)+change.reservedDelta);
+            }
+        }
     }
     const returns=order.returnRecords??[];
     if((order.returnHistory??[]).some(event=>event?.action!=='add'||!returns.some(record=>record.id===event.recordId)))
@@ -15983,11 +16036,11 @@ async function validateV2ReceiptSource(transaction, {order,supply,reservation,it
         const stock=wh===warehouseId?warehouseStock:(await transaction.get(db.collection('warehouseStocks').doc(warehouseStockDocId(wh,productKey)))).data();
         const own=rows.find(row=>row.warehouseId===wh)?.qty||0;
         if(!stock||stock.productKey!==productKey||stock.warehouseId!==wh
-            ||integer(stock.reserved,'分倉預留')<own
+            ||integer(stock.reserved,'分倉預留')<(jointHolds?.warehouses.get(wh)??own)
             ||stock.reserved+integer(stock.transferFreeInTransit??0,'分倉途中')>integer(stock.onHand,'分倉實貨'))
             throw new Error('原分倉預留或實貨帳異常，不能部分收貨。');
     }
-    if(!inventory||inventory.productKey!==productKey||integer(inventory.reserved,'公司預留')<held
+    if(!inventory||inventory.productKey!==productKey||integer(inventory.reserved,'公司預留')<(jointHolds?.company??held)
         ||inventory.reserved+integer(inventory.transferFreeInTransit??0,'公司途中')>integer(inventory.onHand,'公司實貨'))
         throw new Error('公司多倉庫存帳異常。');
     if(supply.type==='PURCHASING_PO'){
@@ -16262,7 +16315,11 @@ async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',oper
                     if(savedReservation.locationSchemaVersion!==undefined||savedReservation.locations!==undefined)
                         globalThis.YushinReservation.reservationLocations(savedReservation);
                     sourceReservationV2=savedReservation.locationSchemaVersion===2;
-                    if(sourceReservationV2)item=items[itemIndex]={...order.items[itemIndex]};
+                    if(sourceReservationV2){
+                        // Preserve every untouched v2 line verbatim, not a legacy
+                        // normalized projection of its quantities or metadata.
+                        items=order.items.map(row=>({...row}));item=items[itemIndex];
+                    }
                     const warehouseShipmentContext=sourceReservationV2?await validateV2ReceiptSource(tx,{order,supply,reservation:reservationSnap.data(),item,
                         inventory:invSnap.exists?invSnap.data():null,warehouseStock:whSnap?.exists?whSnap.data():null,
                         demand:demandSnap?.exists?demandSnap.data():null,actorUid,actorRole,qty}):undefined;
