@@ -2792,3 +2792,56 @@ for(const status of ['cancelled','normal'])test('actual '+status+' refuses impos
   assert.equal((await getDoc(doc(db('admin'),paths[1]))).data().reserved,status==='normal'?3:0);
  }
 });
+
+// Actual shared UI service -> stock wrapper -> Client SDK -> current Rules.
+async function dispatchPreparationFixture(uid='buyer1',role='purchaser') {
+ const id='dispatch-ui-'+uid,client=compatDb(uid),native=client.runTransaction;
+ const plain=v=>JSON.parse(JSON.stringify(v));
+ client.runTransaction=cb=>native(tx=>cb({...tx,set:(r,d)=>tx.set(r,plain(d)),update:(r,d)=>tx.update(r,plain(d))}));
+ await seed('orders/'+id,{ownerUid:'sales1',salesCode:'S01',status:'active',inventoryReservationStatus:'completed',items:[
+  {itemId:'I',productId:'p-order',warehouseId:'W1',qty:5,reservedQty:3,dispatchPreparedQty:0},
+  {itemId:'J',productId:'other',warehouseId:'W2',qty:8,reservedQty:2,dispatchPreparedQty:0}]});
+ const c=vm.createContext({db:client,currentUser:{uid},currentUserRole:role,
+  normalizedOrderStatus:o=>o.status==='cancelled'?'cancelled':'normal',normalizedOrderItems:o=>o.items.map(i=>({...i})),
+  itemDispatchState:(_o,i)=>require('../modules/fulfillment-core').dispatchState(i),
+  orderWorkIndexFields:()=>({workCategories:['dispatch','shipping']}),deliveryActor:()=>uid,
+  YushinOrderEntry:{validateTrade:()=>({valid:true})},
+  runRoleTransaction:cb=>stockPermissions.run(client,cb,uid,['sales','engineer'].includes(role),role)});
+ vm.runInContext(fs.readFileSync('src/services/dispatch-preparation.js','utf8'),c);
+ const intent={operationId:'dispatch-ui-'+uid+'-AAAAAAAAAAAA',orderId:id,itemId:'I',actorUid:uid,actorRole:role,quantity:3,expectedPreparedQty:0};
+ return {id,c,intent,run:(i=intent)=>c.prepareOrderDispatch(id,'I',i),
+  order:async()=>(await getDoc(doc(db('admin'),'orders/'+id))).data(),
+  record:async()=>(await getDoc(doc(db('admin'),'dispatchRecords/'+intent.operationId)))};
+}
+test('actual dispatch UI service permits only admin/purchaser across all five current roles',async()=>{
+ for(const [uid,role] of [['admin','admin'],['buyer1','purchaser'],['sales1','sales'],['eng1','engineer'],['wh1','warehouse']]){
+  const f=await dispatchPreparationFixture(uid,role);
+  if(['admin','purchaser'].includes(role)){
+   await f.run();await f.run();const o=await f.order();
+   assert.equal(o.items[0].dispatchPreparedQty,3);assert.equal(o.items[1].dispatchPreparedQty,0);
+   assert.equal(o.items[0].reservedQty,3);assert.equal((await f.record()).data().preparedByUid,uid);
+  }else{await assert.rejects(f.run());assert.equal((await f.order()).items[0].dispatchPreparedQty,0);assert.equal((await f.record()).exists(),false);}
+ }
+});
+test('actual dispatch lost reply/new arrival and concurrent retries reuse one immutable record',async()=>{
+ const f=await dispatchPreparationFixture();await f.run();
+ const o=await f.order();await seed('orders/'+f.id,{...o,items:o.items.map((i,n)=>n?i:{...i,reservedQty:5})});
+ await Promise.all([f.run(),f.run()]);assert.equal((await f.order()).items[0].dispatchPreparedQty,3);
+ await assert.rejects(f.run({...f.intent,quantity:2}),/識別碼/);
+ const fresh={...f.intent,operationId:'dispatch-ui-fresh-AAAAAAAAAAAA',quantity:2,expectedPreparedQty:3};
+ await Promise.all([f.run(fresh),f.run(fresh)]);assert.equal((await f.order()).items[0].dispatchPreparedQty,5);
+});
+test('actual competing dispatch attempts and forbidden receipt creation roll back without partial order changes',async()=>{
+ const f=await dispatchPreparationFixture();
+ const results=await Promise.allSettled([f.run(),f.run({...f.intent,operationId:'dispatch-ui-competing-AAAAAAAAAAAA'})]);
+ assert.equal(results.filter(r=>r.status==='fulfilled').length,1);assert.equal((await f.order()).items[0].dispatchPreparedQty,3);
+ const g=await dispatchPreparationFixture('wh1','purchaser'); // forged frontend role cannot grant permission
+ const before=await g.order();await assert.rejects(g.run());assert.deepEqual(await g.order(),before);assert.equal((await g.record()).exists(),false);
+});
+test('actual dispatch rechecks disabled profiles and refuses the multi-location Emulator contract',async()=>{
+ const f=await dispatchPreparationFixture();await seed('users/buyer1',{role:'purchaser',active:false});
+ await assert.rejects(f.run());assert.equal((await f.record()).exists(),false);
+ await seed('users/buyer1',{role:'purchaser',active:true});
+ await seed('inventoryReservations/'+f.id+'__I',{ownerUid:'sales1',salesCode:'S01',locationSchemaVersion:2,locations:[]});
+ await assert.rejects(f.run(),/尚未啟用的位置資料/);assert.equal((await f.order()).items[0].dispatchPreparedQty,0);
+});

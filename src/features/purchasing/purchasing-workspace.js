@@ -979,7 +979,8 @@ function renderPurchasingDispatchOrders(normalizedItemsByOrder = null, filterCon
         const states = dispatchStatesByOrder?.get(order.id) || null;
         const pending=items.map(item=>{
             const state = states?.get(item) || itemDispatchState(order,item);
-            return orderItemDisplayCategories(order, item, lifecycle, state).includes('dispatch')
+            return (orderItemDisplayCategories(order, item, lifecycle, state).includes('dispatch')
+                || pendingDispatchPreparation(order.id,item.itemId))
                 ? {item,state}
                 : null;
         }).filter(Boolean);
@@ -989,7 +990,7 @@ function renderPurchasingDispatchOrders(normalizedItemsByOrder = null, filterCon
             const canPrepareDispatch = currentUserRole === 'purchaser' || currentUserRole === 'admin';
             const preparing = pendingDispatchOrderIds.has(order.id+'__'+item.itemId);
             const action = canPrepareDispatch
-                ? `<button type="button" class="btn-small" onclick="markOrderItemDispatchPrepared(${inlineJsValue(order.id)},${inlineJsValue(item.itemId)})" ${preparing?'disabled':''}>${preparing?'處理中…':`已打單 × ${state.pending}`}</button>`
+                ? `<button type="button" class="btn-small" onclick="markOrderItemDispatchPrepared(${inlineJsValue(order.id)},${inlineJsValue(item.itemId)})" ${preparing?'disabled':''}>${preparing?'處理中…':(pendingDispatchPreparation(order.id,item.itemId)?'確認打單結果':`已打單 × ${state.pending}`)}</button>`
                 : '<span class="order-progress-badge">唯讀</span>';
             const tr=document.createElement('tr');
             tr.innerHTML=`<td data-th="訂單日期">${escapeHtml(order.orderDate||'')}</td><td data-th="客戶">${escapeHtml(order.customerName||order.customer||'')}</td><td data-th="負責業務">${escapeHtml(order.salesName||'')}</td><td data-th="待打單品項">${escapeHtml(item.itemCode||item.itemName||item.itemId)} × ${state.pending}</td><td data-th="操作">${action}</td>`;

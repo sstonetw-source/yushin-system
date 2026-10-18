@@ -264,3 +264,8 @@ Auth uid對應原users/{uid}，角色／active／disabled仍讀原文件；Calla
 無新增collection／欄位／migration。退貨Auth fixture的inventoryReservationStatus、inventoryReservationAttemptId、inventoryReservationError及UpdatedAt現由原writeOrderInventorySyncState寫入，不再由測試直接完成；工作索引沿原orderWorkIndexFields。
 
 v2 operationId以orderId／itemId／本次syncAttemptId建立固定雜湊識別，仍保存原reservationOperationReceipts與逐倉movements；預留／缺口沿原Core。需求使用原來源demandId與正式URL編碼路徑，只有實際缺口／供應歷史才建立需求。中斷重試保留原庫存事實，新的來源attempt不增加已占量；完成來源重送不寫另一份receipt／demand或重設attempt。fixture hooks只模擬中斷與回覆遺失，不是持久資料模型。
+
+
+### 2026-10-18 實際打單入口續傳整合
+
+dispatchRecords/{dispatch-ui-operationId} 沿用原 Collection；新增 operationId、actorRole、expectedPreparedQty，qty 是凍結確認量。與 orders.items／工作索引同交易提交，重試不得變更或重建憑證。舊憑證保留，不遷移。 詳見 [介面交易對照與驗收邊界](transaction-ui-integration-20261018.md)。已實作、待本批 CI；未部署 Firebase，單品項多位置仍未啟用正式介面。

@@ -10664,33 +10664,71 @@ async function reserveInventoryForNewOrder(orderId, order, actorUid = currentUse
     return {...orderReservationSummary(order),items:order.items};
 }
 
-// Transaction service: UI must not mutate order or dispatch records directly.
-async function prepareOrderDispatch(orderId,itemId) {
+// Transaction service shared by both dispatch UI entrances. A frozen attempt
+// identifies paperwork only; inventory, shipment and customer delivery do not change.
+async function prepareOrderDispatch(orderId,itemId,attempt) {
+    const actorUid=currentUser?.uid,actorRole=currentUserRole;
+    const assertActor=()=>{
+        if(!actorUid||currentUser?.uid!==actorUid||currentUserRole!==actorRole
+            ||!['admin','purchaser'].includes(actorRole))throw new Error('登入帳號或角色已變更，請以原身分確認打單結果。');
+    };
+    assertActor();
+    if(!attempt||!/^dispatch-ui-[a-zA-Z0-9_-]{12,80}$/.test(attempt.operationId||'')
+        ||attempt.orderId!==orderId||attempt.itemId!==itemId||attempt.actorUid!==actorUid||attempt.actorRole!==actorRole
+        ||!Number.isFinite(attempt.quantity)||attempt.quantity<=0
+        ||!Number.isFinite(attempt.expectedPreparedQty)||attempt.expectedPreparedQty<0)
+        throw new Error('打單作業資料不正確，請以原身分重新核對。');
+    const intent={...attempt};
     let saved;
     await runRoleTransaction(async tx=>{
-            const ref=db.collection('orders').doc(orderId);
-            const snap=await tx.get(ref);
-            if(!snap.exists)throw new Error('找不到訂單。');
-            const order=snap.data();
-            if(normalizedOrderStatus(order)!=='normal')throw new Error('已取消訂單不能打單。');
-            const tradeValidation=globalThis.YushinOrderEntry.validateTrade(order);if(!tradeValidation.valid)throw new Error(tradeValidation.message);
-            const items=normalizedOrderItems(order);
-            const index=items.findIndex(item=>item.itemId===itemId);
-            if(index<0)throw new Error('找不到訂單品項。');
-            const item=items[index],state=itemDispatchState(order,item);
-            if(state.pending<=0)throw new Error('此品項目前沒有待打單數量。');
-            const now=new Date().toISOString(),actor=deliveryActor();
-            items[index]={...item,dispatchPreparedQty:state.prepared+state.pending};
-            const dispatchRef=db.collection('dispatchRecords').doc();
-            tx.set(dispatchRef,{
-                orderId,itemId,qty:state.pending,ownerUid:order.ownerUid||'',salesCode:order.salesCode||'',
-                customerName:order.customerName||'',itemCode:item.itemCode||'',itemName:item.itemName||'',
-                preparedByUid:currentUser?.uid||'',preparedBy:actor,createdAt:now
-            });
-            const nextOrder={...order,items,updatedAt:now};
-            tx.update(ref,{items,...orderWorkIndexFields(nextOrder),updatedAt:now});
-            saved=nextOrder;
+        assertActor();
+        const ref=db.collection('orders').doc(orderId);
+        const dispatchRef=db.collection('dispatchRecords').doc(intent.operationId);
+        const snap=await tx.get(ref),prior=await tx.get(dispatchRef);
+        assertActor();
+        if(!snap.exists)throw new Error('找不到訂單。');
+        const order=snap.data();
+        if(prior.exists){
+            const record=prior.data();
+            if(record.orderId!==orderId||record.itemId!==itemId||record.preparedByUid!==actorUid
+                ||record.actorRole!==actorRole||record.qty!==intent.quantity
+                ||record.expectedPreparedQty!==intent.expectedPreparedQty||record.operationId!==intent.operationId)
+                throw new Error('打單操作識別碼已用於其他作業。');
+            saved=order;return;
+        }
+        if(normalizedOrderStatus(order)!=='normal')throw new Error('已取消訂單不能打單。');
+        const tradeValidation=globalThis.YushinOrderEntry.validateTrade(order);
+        if(!tradeValidation.valid)throw new Error(tradeValidation.message);
+        const items=normalizedOrderItems(order),index=items.findIndex(item=>item.itemId===itemId);
+        if(index<0)throw new Error('找不到訂單品項。');
+        const item=items[index];
+        if((item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
+            ||String(item.productType||item.type||'').toUpperCase()==='SERVICE')
+            throw new Error('此品項不屬於實體倉庫打單。');
+        // Do not route the Emulator-only multi-location contract through scalar UI.
+        // The existing stock wrapper rejects ALL unsupported location markers on read.
+        await tx.get(db.collection('inventoryReservations').doc(orderId+'__'+itemId));
+        assertActor();
+        const state=itemDispatchState(order,item);
+        if(state.prepared!==intent.expectedPreparedQty||state.pending<intent.quantity){
+            const error=new Error('待打單資料已變更，請更新訂單後重新確認數量。');
+            error.code='dispatch-stale';throw error;
+        }
+        const now=new Date().toISOString(),actor=deliveryActor();
+        items[index]={...item,dispatchPreparedQty:state.prepared+intent.quantity};
+        tx.set(dispatchRef,{
+            orderId,itemId,qty:intent.quantity,operationId:intent.operationId,
+            expectedPreparedQty:intent.expectedPreparedQty,actorRole,
+            ownerUid:order.ownerUid||'',salesCode:order.salesCode||'',
+            customerName:order.customerName||'',itemCode:item.itemCode||'',itemName:item.itemName||'',
+            preparedByUid:actorUid,preparedBy:actor,createdAt:now
+        });
+        const nextOrder={...order,items,updatedAt:now};
+        assertActor();
+        tx.update(ref,{items,...orderWorkIndexFields(nextOrder),updatedAt:now});
+        saved=nextOrder;
     });
+    assertActor();
     return saved;
 }
 // Shared supplier commitment workflow for initial and manual self-orders.
@@ -11086,31 +11124,67 @@ function dispatchActionHtml(order, normalizedItems = null, dispatchStateByItem =
     return (normalizedItems || normalizedOrderItems(order))
         .filter(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP')
         .map(item=>({item,state:dispatchStateByItem?.get(item) || itemDispatchState(order,item)}))
-        .filter(x=>x.state.pending>0)
-        .map(({item,state})=>`<button type="button" onclick="markOrderItemDispatchPrepared(${inlineJsValue(order.id)},${inlineJsValue(item.itemId)})" ${pendingDispatchOrderIds.has(order.id+'__'+item.itemId)?'disabled':''}>待打單：${escapeHtml(item.itemCode||item.itemName||item.itemId)} × ${state.pending}</button>`)
+        .filter(x=>x.state.pending>0||pendingDispatchPreparation(order.id,x.item.itemId))
+        .map(({item,state})=>`<button type="button" onclick="markOrderItemDispatchPrepared(${inlineJsValue(order.id)},${inlineJsValue(item.itemId)})" ${pendingDispatchOrderIds.has(order.id+'__'+item.itemId)?'disabled':''}>${pendingDispatchPreparation(order.id,item.itemId)?'確認打單結果':'待打單'}：${escapeHtml(item.itemCode||item.itemName||item.itemId)} × ${pendingDispatchPreparation(order.id,item.itemId)?.quantity||state.pending}</button>`)
         .join('');
 }
 
+// Frozen UI intents survive refresh and uncertain replies. Both pages use this
+// same entry; quantities are proposals from itemDispatchState, never a new formula.
+function dispatchPreparationStorageKey(orderId,itemId,uid=currentUser?.uid) {
+    return 'yushin-dispatch-attempt:'+JSON.stringify([uid,orderId,itemId]);
+}
+function pendingDispatchPreparation(orderId,itemId) {
+    try{return JSON.parse(sessionStorage.getItem(dispatchPreparationStorageKey(orderId,itemId))||'null');}
+    catch(_){return null;}
+}
 window.markOrderItemDispatchPrepared = async function(orderId,itemId) {
     if (!(currentUserRole === 'purchaser' || currentUserRole === 'admin')) return;
+    const actorUid=currentUser?.uid,actorRole=currentUserRole;
+    if(!actorUid)return;
+    const isCurrent=()=>currentUser?.uid===actorUid&&currentUserRole===actorRole;
     const key=orderId+'__'+itemId;
     if(pendingDispatchOrderIds.has(key))return;
     pendingDispatchOrderIds.add(key);
-    if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
-    else if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingDispatchOrders();
     try{
-        const saved=await prepareOrderDispatch(orderId,itemId);
+        const storageKey=dispatchPreparationStorageKey(orderId,itemId,actorUid);
+        let attempt=pendingDispatchPreparation(orderId,itemId);
+        if(!attempt){
+            const order=ordersCache.find(o=>o.id===orderId)||purchasingDispatchCache.find(o=>o.id===orderId);
+            const item=order&&normalizedOrderItems(order).find(i=>i.itemId===itemId);
+            if(!item)throw new Error('找不到品項，請更新訂單後重試。');
+            const state=itemDispatchState(order,item);
+            if(state.pending<=0)throw new Error('此品項目前沒有待打單數量。');
+            attempt={operationId:'dispatch-ui-'+db.collection('dispatchRecords').doc().id,
+                orderId,itemId,actorUid,actorRole,quantity:state.pending,expectedPreparedQty:state.prepared};
+            // If persistence is unavailable, do not submit an unresumable operation.
+            sessionStorage.setItem(storageKey,JSON.stringify(attempt));
+        }
+        if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
+        else if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingDispatchOrders();
+        let saved;
+        try{saved=await prepareOrderDispatch(orderId,itemId,attempt);}
+        catch(err){
+            // This code is raised only after reading an absent receipt inside the
+            // transaction. Unknown network/permission outcomes retain the intent.
+            if(err.code==='dispatch-stale'&&isCurrent())sessionStorage.removeItem(storageKey);
+            throw err;
+        }
+        if(!isCurrent())return;
+        sessionStorage.removeItem(storageKey);
         const idx=ordersCache.findIndex(o=>o.id===orderId);
-        const savedOrder={id:orderId,...saved};
+        const savedOrder={...saved,id:orderId};
         if(idx>=0)ordersCache[idx]=savedOrder;
         syncOrderIntoPurchasingCaches(savedOrder, { render:false });
         writeAppDataCache('orders', ordersCache);
-    }catch(err){alert('標記已打單失敗：'+err.message + '\n請確認目前這筆資料及連線／權限，重試前先查詢作業結果；若持續失敗，請聯絡管理員。');}
+    }catch(err){if(isCurrent())alert('打單結果待確認：'+err.message+'\n請更新清單後重試；未確認的作業會沿用原識別碼與數量。');}
     finally{
         pendingDispatchOrderIds.delete(key);
-        if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
-        if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
-        if(currentDeliveryOrderId===orderId)renderDeliveryModal();
+        if(isCurrent()){
+            if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
+            if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
+            if(currentDeliveryOrderId===orderId)renderDeliveryModal();
+        }
     }
 };
 
@@ -13174,7 +13248,8 @@ function renderPurchasingDispatchOrders(normalizedItemsByOrder = null, filterCon
         const states = dispatchStatesByOrder?.get(order.id) || null;
         const pending=items.map(item=>{
             const state = states?.get(item) || itemDispatchState(order,item);
-            return orderItemDisplayCategories(order, item, lifecycle, state).includes('dispatch')
+            return (orderItemDisplayCategories(order, item, lifecycle, state).includes('dispatch')
+                || pendingDispatchPreparation(order.id,item.itemId))
                 ? {item,state}
                 : null;
         }).filter(Boolean);
@@ -13184,7 +13259,7 @@ function renderPurchasingDispatchOrders(normalizedItemsByOrder = null, filterCon
             const canPrepareDispatch = currentUserRole === 'purchaser' || currentUserRole === 'admin';
             const preparing = pendingDispatchOrderIds.has(order.id+'__'+item.itemId);
             const action = canPrepareDispatch
-                ? `<button type="button" class="btn-small" onclick="markOrderItemDispatchPrepared(${inlineJsValue(order.id)},${inlineJsValue(item.itemId)})" ${preparing?'disabled':''}>${preparing?'處理中…':`已打單 × ${state.pending}`}</button>`
+                ? `<button type="button" class="btn-small" onclick="markOrderItemDispatchPrepared(${inlineJsValue(order.id)},${inlineJsValue(item.itemId)})" ${preparing?'disabled':''}>${preparing?'處理中…':(pendingDispatchPreparation(order.id,item.itemId)?'確認打單結果':`已打單 × ${state.pending}`)}</button>`
                 : '<span class="order-progress-badge">唯讀</span>';
             const tr=document.createElement('tr');
             tr.innerHTML=`<td data-th="訂單日期">${escapeHtml(order.orderDate||'')}</td><td data-th="客戶">${escapeHtml(order.customerName||order.customer||'')}</td><td data-th="負責業務">${escapeHtml(order.salesName||'')}</td><td data-th="待打單品項">${escapeHtml(item.itemCode||item.itemName||item.itemId)} × ${state.pending}</td><td data-th="操作">${action}</td>`;
