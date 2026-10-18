@@ -242,3 +242,10 @@ v2 初始 Ledger 優先順序日期必須來自交易內讀取的來源訂單（
 已實作：既有 `advanceAutomaticFreeStockAllocation` 的每次 checkpoint 交易讀取（包含已完成重送及扣帳後結算）均經 `validateAutomaticFreeStockCheckpoint`。累計分配須為 0 至原 maxQty 的整數，步數為 0–1000；完成必須沒有 pending、具已知完成原因，quantity-reached 必須實際達到原額度。pending 必須具有完整且僅限既定欄位、正整數且不超過剩餘額度，操作 ID 必須依原 runId／步數／訂單／品項衍生。達 1000 步不可建立新指令。異常進度先拒絕，不自動改成完成、重設操作 ID 或推估已扣帳量。
 
 沿用原 checkpoint、movement 與唯一自由庫存 writer；交易已提交但 checkpoint 結算失敗時，修復正確進度後仍以原指令重送，原 movement 確保不重複預留。不變更角色、Collection、Rules、Index、前端或 Callable，仍僅 demo-yushin Emulator。新增 Emulator 案例涵蓋完成憑證異常、pending 篡改與額度超限、扣帳後再讀進度異常及原 ID 續傳；實際執行結果以本批 PR CI 為準。完整 Preview、不同操作者安全交接及正式部署仍未完成。
+
+
+### v2 配貨自動換人續傳（2026-10-18）
+
+配貨批次續傳不再永久綁定第一位物流操作者。當前有效 admin／purchaser／warehouse 使用相同批次／來源事件續跑時，自動核對與接手；sales／engineer 沒有因此取得配貨權，原操作者停用也不阻止其他合格人員續作。無須新增日常手動交接步驟。
+
+已完成部分只能按真實原 movement 結算，剩餘額度不重設；原 movement 操作者不得改寫。交接原子記錄前後操作者及必要的補結算量。舊程序在庫存 transaction 內若已非現任操作者，必須拒絕；兩人同時續跑仍受同一批次及固定操作 ID 約束。新操作者於真正扣帳時仍須有效且具原本配貨角色。此能力目前僅 Emulator，正式頁面與 Preview 尚未啟用。

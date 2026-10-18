@@ -205,7 +205,7 @@ function normalizeFreeStockIntent(input){
  if(!intent.quantity)reject('分配量必須大於零','invalid-argument');
  return {...intent,hash:createHash('sha256').update(JSON.stringify(intent)).digest('hex')};
 }
-async function commitSingleItemFreeStockAllocation(db,uid,input){
+async function commitSingleItemFreeStockAllocation(db,uid,input,batchContext=null){
  if(!process.env.FIRESTORE_EMULATOR_HOST||db.projectId!=='demo-yushin')
   reject('跨 v2 訂單自由庫存分配僅允許 demo-yushin Emulator');
  ident(uid,'登入者');
@@ -218,6 +218,21 @@ async function commitSingleItemFreeStockAllocation(db,uid,input){
     ||!['admin','purchaser','warehouse'].includes(actor.data().role))
    reject('目前登入角色不可重新分配庫存','permission-denied');
   const actorRole=actor.data().role;
+  let batchJob=null;
+  if(batchContext){
+   const runId=ident(batchContext.runId,'批次 ID');
+   if(!/^[A-Za-z0-9_-]{12,80}$/.test(runId))reject('批次 ID 不正確','invalid-argument');
+   const batchSnap=await tx.get(ref('reservationOperationReceipts','single-v2-free-batch-'+runId));
+   batchJob=batchSnap.exists?batchSnap.data():null;
+   if(!batchJob||batchJob.action!=='single_v2_free_stock_batch'
+     ||batchJob.actorUid!==uid||batchJob.actorRole!==actorRole
+     ||batchJob.warehouseId!==warehouseId)
+    reject('配貨批次已由其他操作人員接手，請重新讀取');
+   const batchIntent=normalizeAutomaticFreeStockIntent({runId,productKey:batchJob.productKey,
+    warehouseId:batchJob.warehouseId,maxQty:batchJob.maxQty});
+   if(batchJob.intentHash!==batchIntent.hash)reject('配貨批次來源意圖不一致');
+   validateAutomaticFreeStockCheckpoint(batchJob,batchIntent);
+  }
   // Even a replay must check that its source order still exists.
   const orderRef=ref('orders',orderId),orderSnap=await tx.get(orderRef);
   if(!orderSnap.exists)reject('待分配訂單不存在','not-found');
@@ -230,6 +245,13 @@ async function commitSingleItemFreeStockAllocation(db,uid,input){
     reject('分配操作 ID 已用於其他交易','already-exists');
    return {...proof.result,status:'already-applied',movementId:movementRef.id};
   }
+  if(batchJob){
+   const pending=batchJob.pending;
+   if(batchJob.status!=='active'||!pending||pending.operationId!==operationId
+     ||pending.orderId!==orderId||pending.itemId!==itemId
+     ||pending.syncAttemptId!==intent.syncAttemptId||pending.quantity!==intent.quantity)
+    reject('配貨指令已變更，不能執行舊批次工作');
+  }
   const order=orderSnap.data();
   if(order.inventoryReservationStatus!=='completed'
     ||order.inventoryReservationAttemptId!==intent.syncAttemptId
@@ -239,6 +261,7 @@ async function commitSingleItemFreeStockAllocation(db,uid,input){
    reject('來源訂單不是可分配的有效單品項訂單');
   const item=order.items[0];
   const productId=ident(item.productId,'產品'),productKey=ident(item.inventoryProductKey||productId,'庫存產品');
+  if(batchJob&&batchJob.productKey!==productKey)reject('批次與目標訂單產品不一致');
   const hint=ident(item.warehouseId||order.warehouseId,'來源指定倉');
   if(item.itemId!==itemId||(item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
     ||String(item.productType||item.type||'').toUpperCase()==='SERVICE'
@@ -394,10 +417,19 @@ function automaticFreeStockOperationId(runId,step,orderId,itemId){
 // transaction retry, before trusting it as progress or as a stock command.
 function validateAutomaticFreeStockCheckpoint(job,intent){
  const bad=()=>reject('自動分配進度異常，請先核對 checkpoint');
+ const logisticsRoles=['admin','purchaser','warehouse'];
+ if(typeof job.actorUid!=='string'||!job.actorUid||job.actorUid!==job.actorUid.trim()
+   ||job.actorUid.includes('/')||job.actorUid.length>160||!logisticsRoles.includes(job.actorRole))bad();
+ if(job.createdActorUid!==undefined||job.createdActorRole!==undefined){
+  if(typeof job.createdActorUid!=='string'||!job.createdActorUid
+    ||job.createdActorUid!==job.createdActorUid.trim()||job.createdActorUid.includes('/')
+    ||job.createdActorUid.length>160||!logisticsRoles.includes(job.createdActorRole))bad();
+ }
  if(!['active','completed'].includes(job.status)
    ||!Number.isSafeInteger(job.allocatedQty)||job.allocatedQty<0||job.allocatedQty>intent.maxQty
    ||!Number.isSafeInteger(job.processedSteps)||job.processedSteps<0||job.processedSteps>1000
-   ||job.pending===undefined)bad();
+   ||job.pending===undefined
+   ||!Number.isSafeInteger(job.handoffCount??0)||(job.handoffCount??0)<0||(job.handoffCount??0)>1000)bad();
  if(job.status==='completed'){
   if(job.pending!==null
     ||!['quantity-reached','no-free-stock','no-eligible-demand'].includes(job.completionReason)
@@ -417,6 +449,38 @@ function validateAutomaticFreeStockCheckpoint(job,intent){
  }
  return job;
 }
+function settleAutomaticFreeStockStep(job,intent,pending,applied){
+ if(job.status==='completed'||!job.pending)return {};
+ if(job.pending.operationId!==pending.operationId)
+  reject('批次進度已前進，請重新讀取','failed-precondition');
+ const newly=integer(applied.allocatedQty,'已分配數量');
+ if(newly>pending.quantity||job.allocatedQty+newly>intent.maxQty)
+  reject('批次實際分配量超過原定上限');
+ const total=job.allocatedQty+newly,steps=job.processedSteps+1;
+ const completed=total>=intent.maxQty||applied.status==='no-free-stock';
+ return {allocatedQty:total,processedSteps:steps,pending:null,
+  status:completed?'completed':'active',
+  ...(completed?{completionReason:total>=intent.maxQty?'quantity-reached':'no-free-stock'}:{}),
+  updatedAt:new Date().toISOString()};
+}
+// Only reconcile a prior actor's durable command after matching the immutable
+// stock movement. A missing movement leaves the same pending command intact.
+function verifyAutomaticFreeStockMovement(proof,job,intent){
+ const p=job.pending;
+ const command=normalizeFreeStockIntent({orderId:p.orderId,itemId:p.itemId,
+  warehouseId:intent.warehouseId,syncAttemptId:p.syncAttemptId,
+  quantity:p.quantity,operationId:p.operationId});
+ if(proof.action!=='single_v2_free_stock_allocation'||proof.type!=='reserve_from_free_stock'
+   ||proof.actorUid!==job.actorUid||proof.actorRole!==job.actorRole
+   ||proof.intentHash!==command.hash||proof.orderId!==p.orderId||proof.sourceId!==p.orderId
+   ||proof.sourceType!=='order'||proof.itemId!==p.itemId||proof.productKey!==intent.productKey
+   ||proof.warehouseId!==intent.warehouseId||!Number.isSafeInteger(proof.qty)||proof.qty<=0
+   ||proof.qty>p.quantity||proof.reservedDelta!==proof.qty
+   ||proof.result?.allocatedQty!==proof.qty||proof.result?.orderId!==p.orderId
+   ||proof.result?.itemId!==p.itemId||proof.result?.warehouseId!==intent.warehouseId)
+  reject('接手配貨前的原操作扣帳憑證不一致');
+ return {...proof.result,status:'already-applied'};
+}
 async function advanceAutomaticFreeStockAllocation(db,uid,input){
  if(!process.env.FIRESTORE_EMULATOR_HOST||db.projectId!=='demo-yushin')
   reject('自動自由庫存分配僅允許 demo-yushin Emulator');
@@ -432,18 +496,47 @@ async function advanceAutomaticFreeStockAllocation(db,uid,input){
    reject('登入者沒有自由庫存分配權限','permission-denied');
   return user.role;
  };
- const readJob=async tx=>{
+ const readJob=async (tx,allowHandoff=false)=>{
   const role=await authorized(tx);
   const snap=await tx.get(jobRef);
   if(!snap.exists)return {role,job:null};
   const job=snap.data();
-  if(job.action!=='single_v2_free_stock_batch'||job.actorUid!==uid
-    ||job.actorRole!==role||job.intentHash!==intent.hash
+  if(job.action!=='single_v2_free_stock_batch'||job.intentHash!==intent.hash
     ||job.productKey!==productKey||job.warehouseId!==warehouseId
     ||job.maxQty!==intent.maxQty)
    reject('批次 ID 已用於不同交易或不同登入者','already-exists');
   validateAutomaticFreeStockCheckpoint(job,intent);
-  return {role,job};
+  if(job.actorUid===uid&&job.actorRole===role)return {role,job};
+  // A completed batch is read-only for any currently authorized logistics
+  // operator. It never needs a new owner or another stock movement.
+  if(job.status==='completed')return {role,job};
+  if(!allowHandoff)reject('配貨批次已由其他操作人員接手，請重新讀取');
+  const handoffCount=(job.handoffCount??0)+1;
+  if(handoffCount>1000)reject('配貨交接次數已達安全上限');
+  ident(job.actorUid,'原配貨人員');
+  if(!['admin','purchaser','warehouse'].includes(job.actorRole))reject('原配貨角色異常');
+  let settlement={};
+  if(job.pending){
+   const movement=await tx.get(db.collection('inventoryMovements')
+    .doc('single-v2-free-'+job.pending.operationId));
+   if(movement.exists){
+    const applied=verifyAutomaticFreeStockMovement(movement.data(),job,intent);
+    settlement=settleAutomaticFreeStockStep(job,intent,job.pending,applied);
+   }
+  }
+  const now=new Date().toISOString();
+  const patch={...settlement,actorUid:uid,actorRole:role,handoffCount,
+   createdActorUid:job.createdActorUid??job.actorUid,
+   createdActorRole:job.createdActorRole??job.actorRole,updatedAt:now};
+  const auditId='single-v2-free-handoff-'+createHash('sha256').update(runId).digest('hex').slice(0,40)+'-'+handoffCount;
+  tx.create(db.collection('reservationOperationReceipts').doc(auditId),{
+   action:'single_v2_free_stock_handoff',runId,productKey,warehouseId,
+   fromActorUid:job.actorUid,fromActorRole:job.actorRole,actorUid:uid,actorRole:role,
+   handoffCount,intentHash:intent.hash,
+   reconciledOperationId:settlement.pending===null?job.pending.operationId:null,
+   reconciledQty:(settlement.allocatedQty??job.allocatedQty)-job.allocatedQty,createdAt:now});
+  tx.update(jobRef,patch);
+  return {role,job:{...job,...patch}};
  };
  const present=(job,status=job.status)=>({
   status,runId,productKey,warehouseId,
@@ -451,10 +544,11 @@ async function advanceAutomaticFreeStockAllocation(db,uid,input){
   ...(job.pending?{pendingOrderId:job.pending.orderId}:{})
  });
  let state=await db.runTransaction(async tx=>{
-  const {role,job}=await readJob(tx);
+  const {role,job}=await readJob(tx,true);
   if(job)return job;
   const now=new Date().toISOString();
   const created={action:'single_v2_free_stock_batch',actorUid:uid,actorRole:role,
+   createdActorUid:uid,createdActorRole:role,handoffCount:0,
    intentHash:intent.hash,productKey,warehouseId,maxQty:intent.maxQty,
    allocatedQty:0,processedSteps:0,pending:null,status:'active',
    createdAt:now,updatedAt:now};
@@ -568,24 +662,14 @@ async function advanceAutomaticFreeStockAllocation(db,uid,input){
  const pending=state.pending;
  const applied=await commitSingleItemFreeStockAllocation(db,uid,{
   orderId:pending.orderId,itemId:pending.itemId,warehouseId,
-  syncAttemptId:pending.syncAttemptId,quantity:pending.quantity,operationId:pending.operationId});
+  syncAttemptId:pending.syncAttemptId,quantity:pending.quantity,operationId:pending.operationId},{runId});
  // If the movement was committed but checkpoint update failed, this replay
  // returns its ORIGINAL quantity, which is counted exactly once below.
  state=await db.runTransaction(async tx=>{
   const {job}=await readJob(tx);
-  if(job.status==='completed'||!job.pending)return job;
-  if(job.pending.operationId!==pending.operationId)
-   reject('批次進度已前進，請重新讀取','failed-precondition');
-  const newly=integer(applied.allocatedQty,'已分配數量');
-  if(newly>pending.quantity||job.allocatedQty+newly>intent.maxQty)
-   reject('批次實際分配量超過原定上限');
-  const total=job.allocatedQty+newly,steps=job.processedSteps+1;
-  const completed=total>=intent.maxQty||applied.status==='no-free-stock';
-  tx.update(jobRef,{allocatedQty:total,processedSteps:steps,pending:null,
-   status:completed?'completed':'active',
-   ...(completed?{completionReason:total>=intent.maxQty?'quantity-reached':'no-free-stock'}:{}),
-   updatedAt:new Date().toISOString()});
-  return {...job,allocatedQty:total,processedSteps:steps,pending:null,status:completed?'completed':'active'};
+  const patch=settleAutomaticFreeStockStep(job,intent,pending,applied);
+  if(Object.keys(patch).length)tx.update(jobRef,patch);
+  return {...job,...patch};
  });
  return {...present(state),lastOrderId:pending.orderId,lastAllocatedQty:applied.allocatedQty};
 }

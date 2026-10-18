@@ -206,3 +206,12 @@ v2 到貨自由實貨**不新增欄位／Collection**。既有 `receipts/{receip
 已實作：既有 `advanceAutomaticFreeStockAllocation` 的每次 checkpoint 交易讀取（包含已完成重送及扣帳後結算）均經 `validateAutomaticFreeStockCheckpoint`。累計分配須為 0 至原 maxQty 的整數，步數為 0–1000；完成必須沒有 pending、具已知完成原因，quantity-reached 必須實際達到原額度。pending 必須具有完整且僅限既定欄位、正整數且不超過剩餘額度，操作 ID 必須依原 runId／步數／訂單／品項衍生。達 1000 步不可建立新指令。異常進度先拒絕，不自動改成完成、重設操作 ID 或推估已扣帳量。
 
 沿用原 checkpoint、movement 與唯一自由庫存 writer；交易已提交但 checkpoint 結算失敗時，修復正確進度後仍以原指令重送，原 movement 確保不重複預留。不變更角色、Collection、Rules、Index、前端或 Callable，仍僅 demo-yushin Emulator。新增 Emulator 案例涵蓋完成憑證異常、pending 篡改與額度超限、扣帳後再讀進度異常及原 ID 續傳；實際執行結果以本批 PR CI 為準。完整 Preview、不同操作者安全交接及正式部署仍未完成。
+
+
+### v2 配貨自動換人續傳（2026-10-18）
+
+沿用 `reservationOperationReceipts/single-v2-free-batch-{runId}`：`actorUid/actorRole` 為現任執行者；新增 `createdActorUid/createdActorRole` 保留批次建立者，`handoffCount` 記錄交接次數（既有試點文件未帶欄位時為 0，單批最多 1000 次）。原 intentHash／maxQty／runId／累計量／pending 指令保留，禁止換批次繞過已完成額度。
+
+同集合新增 `action=single_v2_free_stock_handoff` 稽核文件，ID 由 runId 雜湊與下一交接序號決定；包含原角色／UID、新角色／UID、runId、產品／倉、intentHash、交接次數及 reconciledOperationId／reconciledQty／createdAt。稽核與批次更新同 transaction，任一失敗全回滾；不修改 users 或原 inventoryMovements。完成批次的其他合格物流角色僅讀結果，不改任務歸屬。
+
+一般自動配貨的原庫存 transaction 增加一次 checkpoint 文件讀取；實際交接依 pending 額外讀取至多一份 movement，並同交易新增一份稽核／更新一份進度。沒有新集合、查詢、Index 或 Listener。正式資料不回填，仍限 Emulator。

@@ -442,3 +442,10 @@ job `reservationOperationReceipts` 與 movement 在不同交易，使用 pending
 已實作：既有 `advanceAutomaticFreeStockAllocation` 的每次 checkpoint 交易讀取（包含已完成重送及扣帳後結算）均經 `validateAutomaticFreeStockCheckpoint`。累計分配須為 0 至原 maxQty 的整數，步數為 0–1000；完成必須沒有 pending、具已知完成原因，quantity-reached 必須實際達到原額度。pending 必須具有完整且僅限既定欄位、正整數且不超過剩餘額度，操作 ID 必須依原 runId／步數／訂單／品項衍生。達 1000 步不可建立新指令。異常進度先拒絕，不自動改成完成、重設操作 ID 或推估已扣帳量。
 
 沿用原 checkpoint、movement 與唯一自由庫存 writer；交易已提交但 checkpoint 結算失敗時，修復正確進度後仍以原指令重送，原 movement 確保不重複預留。不變更角色、Collection、Rules、Index、前端或 Callable，仍僅 demo-yushin Emulator。新增 Emulator 案例涵蓋完成憑證異常、pending 篡改與額度超限、扣帳後再讀進度異常及原 ID 續傳；實際執行結果以本批 PR CI 為準。完整 Preview、不同操作者安全交接及正式部署仍未完成。
+
+
+### v2 配貨自動換人續傳（2026-10-18）
+
+既有 `advanceAutomaticFreeStockAllocation` 在初次進度交易內，允許當前有效 admin／purchaser／warehouse 自動接手相同批次。仍使用原 runId、pending 操作 ID 及 maxQty，沒有新增配貨核心或庫存 writer。每次庫存提交額外在同一 transaction 重讀批次，核對現任操作者及 pending 指令，阻止已失去處理權的舊執行程序繼續寫入。
+
+接手時若 pending 已有真實 movement，先核對原操作者／意圖／來源／數量，再由既有進度結算 helper 累計一次；保留 movement 原身份。交接紀錄與進度更新同交易。已完成批次可由當前合格物流角色唯讀取得結果，不建立交接或新 movement。仍限 demo-yushin Emulator；沒有新增 Callable／前端／背景觸發或 Firebase 部署。
