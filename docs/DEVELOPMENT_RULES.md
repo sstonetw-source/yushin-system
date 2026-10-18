@@ -131,3 +131,10 @@ CLOSE 後取消／恢復仍拒絕未整合的退貨刪除／更正歷史，不�
 退貨Callable adapter不得加到正式functions/index.js；隔離runner只允許固定demo-yushin，臨時Functions入口必須引用實際checkout中的原服務，不可複製或另造退貨writer。保留明確flag、FUNCTIONS_EMULATOR、local Auth／Firestore host與db.projectId限制。測試資料只來自Emulator，禁止deploy或改正式Auth provider。
 
 必須以Firebase Client Auth SDK真實登入取得token，再以Functions SDK呼叫，不能只傳假的request.auth宣稱Auth通過。覆蓋正常／取消CLOSE、五角色、陌生所有權、payload身份偽造、自訂claim不越權、token發出後角色變更／active停用、未登入／無效token／缺profile、同步attempt變更、固定ID衝突與併發重送。明確揭露上游初始化及sync仍為fixture，不能稱為正式UI或完整初始化驗收。CI執行node tools/run-v2-return-auth-emulator.cjs，需Node22與Java21、根目錄Firebase client/Admin依賴及functions依賴。
+
+
+### 初始化同步不得用測試completed替代（2026-10-18，Emulator-only）
+
+退貨Auth整合改用tests/fixtures/v2-order-initialization.cjs，必須載入實際src同步／預留協調／需求／索引函式並呼叫原v2庫存writer；測試不得直接update inventoryReservationStatus completed。只以SDK／傳輸adapter接入原雙倉Service，不另造計算或checkpoint writer，不讓原單倉預留覆寫v2 ledger。
+
+本輪覆蓋七組實際Firestore初始化：雙倉與正式缺口需求完成、預留後需求前中斷與重試、完成重送、舊attempt晚回覆、角色／所有權／active、完成回覆遺失、切換帳號後恢復。退貨真實Auth七組亦全部經由此初始化，結果以本輪CI為準。仍明確保留來源order／inventory種子資料，未驗收完整建立訂單UI／Client Rules或初始自行訂貨，不能宣稱正式上線。

@@ -26,4 +26,6 @@ runner固定--project demo-yushin、--only firestore,auth,functions；不接受�
 
 ## 驗收限制
 
-上游order／inventory為Admin fixture，預留／打單／出貨／確認／取消／恢復沿既有Service建立真實業務事件；來源inventoryReservationStatus completed仍為明確fixture checkpoint。此批只驗收退貨傳輸與登入邊界，不能宣稱完整訂單初始化、真實UI／正式端點或Preview已可使用。正式Callable／前端接線、完整初始化與其他物流模式、退貨更正／撤銷／REPLACE後續仍未完成。
+上游order／inventory仍為Admin fixture；初始化現透過tests/fixtures/v2-order-initialization.cjs載入原src同步、雙倉預留協調、採購需求與索引，完成狀態由原writeOrderInventorySyncState產生，不再直接設completed。品項預留只轉接原v2 Service，沒有第二個writer／Core；初始自行訂貨不在本輪範圍。
+
+新增七組Firestore實際初始化驗收：有缺口需求、預留後需求前中斷、完成重送、舊工作晚回覆、角色／所有權／active、完成回覆遺失、切換帳號與恢復。原七組真實登入退貨現在全數走這個初始化流程，再做原打單／出貨／送達／取消／CLOSE。測試adapter以Admin SDK讀寫，初始化本身尚未接Client Rules／登入傳輸與建立訂單UI；來源建立及初始庫存仍為種子資料，不能宣稱完整ERP初始化或正式Preview／UI已可使用。結果以本輪實際CI為準。

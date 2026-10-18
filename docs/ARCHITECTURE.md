@@ -495,3 +495,12 @@ Workflow 的明確 warehouseShipmentContext 現包含 returns，以原 projectSh
 正式 functions/index.js不載入／不匯出這兩個Callable。tools/run-v2-return-auth-emulator.cjs 在臨時目錄建立測試Functions入口與設定，引用實際checkout服務和SDK，固定demo-yushin；flag、FUNCTIONS_EMULATOR、demo project、本機Auth／Firestore host與db.projectId均核對。CI以獨立Auth＋Functions＋Firestore Emulator跑真實Email/Password登入、Callable SDK與ID token；無正式Firebase或供應商設定變更。
 
 這是退貨邊界的真實登入整合，不代表完整ERP初始化／UI驗收：上游訂單與庫存為Admin fixture，預留／打單／出貨／送達／取消使用原Service，來源sync完成點仍明確fixture設定。正式Callable／前端／Preview、完整初始化與退貨更正／REPLACE仍待整合。
+
+
+### 退貨整合改走實際初始化同步（2026-10-18，Emulator-only）
+
+本節更新退貨Auth整合的手動completed checkpoint限制。tests/fixtures/v2-order-initialization.cjs 在VM載入原src的synchronizeOrderInventory／writeOrderInventorySyncState、reserveInventoryForNewOrder、persistOrderProcurementDemands、採購需求helper、初始自行訂貨判斷與工作索引；品項預留只轉接原commitSingleItemTwoWarehouse，不跑舊單倉writer、不重算庫存／採購數量。
+
+同步工作ID由原流程建立，實際雙倉交易後再用原需求同步，最後由原來源狀態交易完成checkpoint；測試不再直接update completed。Admin SDK adapter在每次transaction重讀真實users／來源並套用原canRetryOrderInventorySync，防止測試adapter繞過當前角色／所有權。原來源重試與失敗恢復邏輯完整執行，仍無新增產品writer或正式入口。
+
+退貨Auth測試已沿此流程初始化後再打單／出貨／送達／取消／退貨。這是實際同步流程的Emulator驗收；來源訂單／初始庫存仍為Admin fixture，初始化本身的瀏覽器Client SDK／Rules／登入呼叫與正式UI仍未串接，不等於完整ERP建立訂單驗收。正式v2阻擋與Firebase設定不改。

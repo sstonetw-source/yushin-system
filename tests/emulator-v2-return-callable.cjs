@@ -1,12 +1,12 @@
 'use strict';
 // Real Auth SDK -> Callable SDK -> original v2 return Services -> Firestore.
-// Upstream order/stock/checkpoint fixtures are explicit Admin setup, not UI acceptance.
+// Source documents are Admin fixtures; inventory synchronization now runs the real src workflow.
 const test=require('node:test'),assert=require('node:assert/strict');
 const admin=require('firebase-admin'),{getFirestore}=require('firebase-admin/firestore'),{getAuth:adminAuth}=require('firebase-admin/auth');
 const {initializeApp,deleteApp}=require('firebase/app');
 const {getAuth,connectAuthEmulator,signInWithEmailAndPassword}=require('firebase/auth');
 const {getFunctions,connectFunctionsEmulator,httpsCallable}=require('firebase/functions');
-const {commitSingleItemTwoWarehouse}=require('../functions/single-item-location-service');
+const {synchronizeV2OrderFixture}=require('./fixtures/v2-order-initialization.cjs');
 const {commitLocationDispatchPreparation}=require('../functions/location-dispatch-service');
 const {commitLocationShipment}=require('../functions/location-shipment-service');
 const {commitShipmentDelivery}=require('../functions/shipment-delivery-service');
@@ -30,7 +30,7 @@ async function identity(tag,role='sales',{profile=true,login=true}={}){
 }
 async function fixture(tag,{role='sales',cancelled=true}={}){
  const actor=await identity(tag,role),operator=await identity(tag+'-operator','admin');
- const orderId='return-order-'+tag,key='return-product-'+tag,syncAttemptId='return_auth_sync_'+tag;
+ const orderId='return-order-'+tag,key='return-product-'+tag;let syncAttemptId='return_auth_sync_'+tag;
  const plan={mode:'CUSTOMER_SHIP',contact:'測試客戶',phone:'02-12345678',address:'台北市測試地址'};
  const batch=db.batch(),set=(n,k,d)=>batch.set(db.collection(n).doc(k),d);
  set('products',key,{productType:'Goods'});set('orders',orderId,{ownerUid:actor.uid,salesCode:'R',status:'active',orderStatus:'normal',
@@ -42,9 +42,9 @@ async function fixture(tag,{role='sales',cancelled=true}={}){
   set('inventoryLots',key+'-'+wh,{productKey:key,warehouseId:wh,receivedQty:onHand,remainingQty:onHand,lotNo:wh,expiryDate:'2028-01-01',unitCost:98765});
  }
  await batch.commit();
- await commitSingleItemTwoWarehouse(db,operator.uid,{orderId,itemId:'I',warehouseIds:['AUTH-A','AUTH-B'],attemptId:'return_auth_reserve_'+tag,syncAttemptId});
- // Full source initialization is a separate migration; do not claim this fixture is UI sync.
- await db.collection('orders').doc(orderId).update({inventoryReservationStatus:'completed'});
+ const initialized=await synchronizeV2OrderFixture(db,operator.uid,{orderId,warehouseIds:['AUTH-A','AUTH-B']});
+ syncAttemptId=initialized.order.inventoryReservationAttemptId;
+ assert.equal(initialized.order.inventoryReservationStatus,'completed');
  await commitLocationDispatchPreparation(db,operator.uid,{orderId,itemId:'I',quantity:4,operationId:'return_auth_prepare_'+tag,syncAttemptId});
  const shipmentId='return_auth_shipment_'+tag;
  await commitLocationShipment(db,operator.uid,{orderId,itemId:'I',warehouseId:'AUTH-A',quantity:4,operationId:shipmentId,syncAttemptId,date:'2026-10-17',expectedPlan:plan});
