@@ -140,4 +140,17 @@ async function commitLocationReturn(db,uid,data){
   return {...result,status:'applied',movementId:movementRef.id};
  });
 }
-module.exports={normalizeLocationReturnIntent,commitLocationReturn};
+
+// Optional Emulator-only post-commit orchestrator. CLOSE receipt is complete
+// before another order is considered; REPLACE is not free stock.
+async function commitLocationReturnAndRecover(db,uid,input){
+ const intent=normalizeLocationReturnIntent(input);
+ const committed=await commitLocationReturn(db,uid,input);
+ if(intent.settlement!=='CLOSE')
+  return {...committed,postCommitAllocation:{status:'not-applicable',sources:[]}};
+ const {continueCommittedV2FreeStock}=require('./single-item-location-service');
+ const postCommitAllocation=await continueCommittedV2FreeStock(db,uid,[committed.movementId]);
+ return {...committed,postCommitAllocation};
+}
+
+module.exports={normalizeLocationReturnIntent,commitLocationReturn,commitLocationReturnAndRecover};
