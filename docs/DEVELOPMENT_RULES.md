@@ -170,3 +170,7 @@ CLOSE 後取消／恢復仍拒絕未整合的退貨刪除／更正歷史，不�
 ### 2026-10-18 整單履約與原憑證
 
 多品項履約必須先驗證全部事件再分組，不能以逐項 filter 隱藏未知來源。逐項數量仍交給原 projectShipmentReturns，整單合計不可溢位。所有實際退貨 proof 都須被核對；空 cache 不代表沒有入庫。歷史 fixture 必須與已啟用 writer／正式 UI 區分。見 [多品項打單驗收](multi-item-dispatch-20261018.md)。
+
+### 2026-10-19 多品項送達實作與測試邊界
+
+新增多品項送達必須沿用 `commitShipmentDelivery`，不能複製送達 Service 或重算數量；`projectOrderShipmentReturns` 是跨品項履約合計唯一權威來源。所有 sibling 出貨需核對 immutable movement，所有退貨證明需走原 reader。測試真實 Emulator 競態、憑證篡改、角色更新、重送與回滾；CI 全通過前不得合併，更不得開啟正式 Callable 或 UI。詳見 [本批契約](multi-item-delivery-20261019.md)。

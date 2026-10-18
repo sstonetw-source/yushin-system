@@ -1618,3 +1618,181 @@ test('multi-line shipment late movement collision rolls back stock and lot; fixe
  assert.equal((await x.ship('I1',A,1,'multi_ship_rollback_op')).status,'applied');
  assert.equal((await x.ship('I1',A,1,'multi_ship_rollback_op')).status,'already-applied');
 });
+
+
+const {commitShipmentDelivery:confirmMultiDelivery}=require('../functions/shipment-delivery-service');
+async function multiDeliveryFixture(name,options={}){
+ const x=await multiShipmentFixture('delivery-'+name,options);
+ const adminUid='delivery-admin-'+name,anotherUid='delivery-foreign-'+name;
+ await db.collection('users').doc(adminUid).set({role:'admin',active:true});
+ await db.collection('users').doc(anotherUid).set({role:'sales',active:true});
+ const ack=(itemId,shipmentId,quantity,operationId,actor=adminUid,connection=db,date='2026-10-19')=>
+  confirmMultiDelivery(connection,actor,{...x.request(itemId,quantity,operationId),
+   shipmentId,date});
+ return {...x,adminUid,anotherUid,ack};
+}
+test('multi-item acknowledgement updates selected line and whole-order total without touching physical stock',async()=>{
+ const x=await multiDeliveryFixture('partial');
+ await x.prepare('I1',2,'multi_ack_prep_1');await x.prepare('I2',2,'multi_ack_prep_2');
+ await x.ship('I1',A,2,'multi_ack_ship_1');await x.ship('I2',B,2,'multi_ack_ship_2');
+ const before=await multiShipmentSnapshot(x);
+ const result=await x.ack('I2','multi_ack_ship_2',1,'multi_ack_confirm_1');
+ assert.equal(result.confirmedQty,1);assert.equal(result.pendingDeliveryQty,1);
+ assert.equal(result.isDelivered,false);assert.equal(result.itemIsDelivered,false);
+ const order=await x.read('orders',x.orderId);
+ assert.equal(order.deliveredQty,1);assert.equal(order.isDelivered,false);
+ assert.deepEqual(order.items.map(row=>row.deliveredQty||0),[0,1,0]);
+ assert.deepEqual(order.items[0],before.order.items[0]);
+ assert.deepEqual(order.items[2],before.order.items[2]);
+ const after=await multiShipmentSnapshot(x);
+ for(const field of Object.keys(before).filter(k=>k!=='order'))assert.deepEqual(after[field],before[field],field);
+ assert.equal(order.deliveryRecords.length,1);assert.equal(order.deliveryHistory.length,1);
+ const second=await x.ack('I1','multi_ack_ship_1',2,'multi_ack_confirm_2');
+ assert.equal(second.confirmedQty,2);assert.equal((await x.read('orders',x.orderId)).deliveredQty,3);
+});
+test('multi-item confirmations can partially acknowledge one shipment without accepting another items shipmentId',async()=>{
+ const x=await multiDeliveryFixture('partial-same');
+ await x.prepare('I1',3,'multi_ack_partial_prepare');await x.ship('I1',A,3,'multi_ack_partial_ship');
+ await x.ack('I1','multi_ack_partial_ship',1,'multi_ack_partial_one');
+ const next=await x.ack('I1','multi_ack_partial_ship',2,'multi_ack_partial_two');
+ assert.equal(next.pendingDeliveryQty,0);assert.equal(next.confirmedQty,3);
+ assert.equal((await x.read('orders',x.orderId)).deliveredQty,3);
+ const before=await multiShipmentSnapshot(x);
+ await assert.rejects(x.ack('I2','multi_ack_partial_ship',1,'multi_ack_wrong_item'));
+ await assert.rejects(x.ack('I1','multi_ack_partial_ship',1,'multi_ack_excess'));
+ assert.deepEqual(await multiShipmentSnapshot(x),before);
+});
+test('multi-item delivery accepts current admin or own sales engineer and rejects warehouse purchaser or unrelated users',async()=>{
+ const x=await multiDeliveryFixture('roles');await x.prepare('I1',2,'multi_ack_role_prep');await x.ship('I1',A,2,'multi_ack_role_ship');
+ await db.collection('users').doc(x.uid).update({role:'sales'});
+ const first=await x.ack('I1','multi_ack_role_ship',1,'multi_ack_role_sales',x.uid);
+ assert.equal(first.confirmedQty,1);
+ await db.collection('users').doc(x.uid).update({role:'engineer'});
+ const second=await x.ack('I1','multi_ack_role_ship',1,'multi_ack_role_engineer',x.uid);
+ assert.equal(second.confirmedQty,2);
+ const before=await multiShipmentSnapshot(x);
+ await db.collection('users').doc(x.uid).update({role:'warehouse'});
+ await assert.rejects(x.ack('I1','multi_ack_role_ship',1,'multi_ack_role_warehouse',x.uid),/權限/);
+ await db.collection('users').doc(x.uid).update({role:'purchaser'});
+ await assert.rejects(x.ack('I1','multi_ack_role_ship',1,'multi_ack_role_purchaser',x.uid),/權限/);
+ await assert.rejects(x.ack('I1','multi_ack_role_ship',1,'multi_ack_role_other',x.anotherUid),/只能確認自己/);
+ await db.collection('users').doc(x.adminUid).update({active:false});
+ await assert.rejects(x.ack('I1','multi_ack_role_ship',1,'multi_ack_role_admin',x.adminUid),/權限/);
+ assert.deepEqual(await multiShipmentSnapshot(x),before);
+});
+test('multi-item same operation replays once and different actor or intent cannot claim its confirmation',async()=>{
+ const x=await multiDeliveryFixture('replay');await x.prepare('I1',2,'multi_ack_replay_prep');await x.ship('I1',A,2,'multi_ack_replay_ship');
+ const same=await Promise.all([x.ack('I1','multi_ack_replay_ship',1,'multi_ack_replay_id'),x.ack('I1','multi_ack_replay_ship',1,'multi_ack_replay_id')]);
+ assert.deepEqual(same.map(v=>v.status).sort(),['already-applied','applied']);
+ const before=await multiShipmentSnapshot(x);
+ assert.equal((await x.ack('I1','multi_ack_replay_ship',1,'multi_ack_replay_id')).status,'already-applied');
+ await assert.rejects(x.ack('I1','multi_ack_replay_ship',2,'multi_ack_replay_id'),/其他交易/);
+ await assert.rejects(x.ack('I1','multi_ack_replay_ship',1,'multi_ack_replay_id',x.anotherUid),/權限|其他交易|只能確認自己/);
+ assert.deepEqual(await multiShipmentSnapshot(x),before);
+});
+test('multi-item competing quantities cannot overconfirm and simultaneous different items retain both records',async()=>{
+ const x=await multiDeliveryFixture('races');
+ await x.prepare('I1',2,'multi_ack_race_p1');await x.prepare('I2',2,'multi_ack_race_p2');
+ await x.ship('I1',A,2,'multi_ack_race_s1');await x.ship('I2',B,2,'multi_ack_race_s2');
+ const race=await Promise.allSettled([
+  x.ack('I1','multi_ack_race_s1',2,'multi_ack_race_a'),
+  x.ack('I1','multi_ack_race_s1',2,'multi_ack_race_b')
+ ]);
+ assert.equal(race.filter(v=>v.status==='fulfilled').length,1);
+ await x.ack('I2','multi_ack_race_s2',1,'multi_ack_race_c');
+ const order=await x.read('orders',x.orderId);
+ assert.deepEqual(order.items.map(row=>row.deliveredQty||0),[2,1,0]);
+ assert.equal(order.deliveredQty,3);assert.equal(order.deliveryRecords.length,2);
+});
+test('multi-item acknowledgement refuses corrupted sibling physical debit and never hides other-line returns',async()=>{
+ for(const mode of ['missing','wrong-debit','hidden-return']){
+  const x=await multiDeliveryFixture('evidence-'+mode);
+  await x.prepare('I1',1,'multi_ack_evidence_p1_'+mode);
+  await x.prepare('I2',1,'multi_ack_evidence_p2_'+mode);
+  await x.ship('I1',A,1,'multi_ack_evidence_s1_'+mode);
+  await x.ship('I2',B,1,'multi_ack_evidence_s2_'+mode);
+  if(mode==='missing')await db.collection('inventoryMovements').doc('location-ship-multi_ack_evidence_s2_'+mode).delete();
+  if(mode==='wrong-debit')await db.collection('inventoryMovements').doc('location-ship-multi_ack_evidence_s2_'+mode).update({qty:0});
+  if(mode==='hidden-return')await db.collection('inventoryMovements').doc('phantom-return-'+mode).set({
+   action:'location_customer_return',sourceId:x.orderId,itemId:'I2',qty:1
+  });
+  const before=await multiShipmentSnapshot(x);
+  await assert.rejects(x.ack('I1','multi_ack_evidence_s1_'+mode,1,'multi_ack_evidence_delivery_'+mode));
+  assert.deepEqual(await multiShipmentSnapshot(x),before,mode);
+ }
+});
+test('multi-item stale totals, unknown events and mixed direct-ship siblings reject without delivery writes',async()=>{
+ const modes=[
+  ['totals',order=>({deliveredQty:10})],
+  ['sibling',order=>({items:order.items.map((row,i)=>i===2?{...row,deliveredQty:2}:row)})],
+  ['mixed',order=>({items:order.items.map((row,i)=>i===2?{...row,fulfillmentType:'DIRECT_SHIP'}:row)})],
+  ['unknown',order=>({deliveryRecords:[{id:'foreign',orderId:'other-order',itemId:'missing',productKey:'unknown',qty:1}]})]
+ ];
+ for(const [name,change] of modes){
+  const x=await multiDeliveryFixture('invalid-'+name);
+  await x.prepare('I1',1,'multi_ack_invalid_p_'+name);await x.ship('I1',A,1,'multi_ack_invalid_s_'+name);
+  const order=await x.read('orders',x.orderId);
+  await db.collection('orders').doc(x.orderId).update(change(order));
+  const before=await multiShipmentSnapshot(x);
+  await assert.rejects(x.ack('I1','multi_ack_invalid_s_'+name,1,'multi_ack_invalid_d_'+name));
+  assert.deepEqual(await multiShipmentSnapshot(x),before,name);
+ }
+});
+test('multi-item failed delivery document update rolls back confirmation and same operation retries safely',async()=>{
+ const x=await multiDeliveryFixture('rollback');
+ await x.prepare('I1',1,'multi_ack_rollback_p');await x.ship('I1',A,1,'multi_ack_rollback_s');
+ const before=await multiShipmentSnapshot(x);
+ const guarded={projectId:db.projectId,collection:n=>db.collection(n),runTransaction:fn=>db.runTransaction(async tx=>fn({
+  get:r=>tx.get(r),update:(ref,data)=>{tx.update(ref,data);tx.create(db.collection('orders').doc(x.orderId),{collision:true});}
+ }))};
+ await assert.rejects(x.ack('I1','multi_ack_rollback_s',1,'multi_ack_rollback_d',x.adminUid,guarded));
+ assert.deepEqual(await multiShipmentSnapshot(x),before);
+ assert.equal((await x.ack('I1','multi_ack_rollback_s',1,'multi_ack_rollback_d')).status,'applied');
+ assert.equal((await x.ack('I1','multi_ack_rollback_s',1,'multi_ack_rollback_d')).status,'already-applied');
+});
+
+test('whole-order delivery becomes complete only after every real line and shipment has been acknowledged',async()=>{
+ const name='full-two-line',uid='full-ack-purchaser',actor='full-ack-admin',
+  orderId='full-ack-order',key='full-ack-product';
+ const batch=db.batch(),set=(coll,id,data)=>batch.set(db.collection(coll).doc(id),data);
+ set('users',uid,{role:'purchaser',active:true});set('users',actor,{role:'admin',active:true});
+ set('products',key,{productType:'Goods',active:true});
+ set('orders',orderId,{ownerUid:uid,salesCode:'FULL',status:'active',
+  inventoryReservationStatus:'pending',items:[
+   {itemId:'I1',productId:key,qty:3,warehouseId:A,deliveryPlan:plan},
+   {itemId:'I2',productId:key,qty:3,warehouseId:B,deliveryPlan:plan}
+  ],deliveryRecords:[],returnRecords:[],warehouseShipmentRecords:[]});
+ set('inventory',key,{productKey:key,onHand:6,reserved:0,incoming:0,transferFreeInTransit:0});
+ for(const wh of [A,B]){
+  set('warehouses',wh,{active:true});
+  set('warehouseStocks',wh+'__'+key,{productKey:key,warehouseId:wh,onHand:3,reserved:0,incoming:0,transferFreeInTransit:0});
+  set('inventoryLots',key+'-'+wh,{productKey:key,warehouseId:wh,remainingQty:3,receivedQty:3,
+   lotNo:'BATCH-'+wh,expiryDate:'2027-12-31',receivedAt:'2026-10-18T00:00:00Z',unitCost:0});
+ }
+ await batch.commit();
+ const initialized=await synchronizeV2OrderFixture(db,uid,{orderId,warehouseIds:[A,B]});
+ const syncAttemptId=initialized.order.inventoryReservationAttemptId;
+ for(const item of [{itemId:'I1',warehouseId:A},{itemId:'I2',warehouseId:B}]){
+  await commitLocationDispatchPreparation(db,uid,{orderId,itemId:item.itemId,quantity:3,
+   operationId:'full_ack_prepare_'+item.itemId,syncAttemptId});
+  await commitLocationShipment(db,uid,{orderId,itemId:item.itemId,warehouseId:item.warehouseId,
+   quantity:3,operationId:'full_ack_ship_'+item.itemId,syncAttemptId,date:'2026-10-19',expectedPlan:plan});
+ }
+ const intent=itemId=>({orderId,itemId,shipmentId:'full_ack_ship_'+itemId,
+  quantity:3,operationId:'full_ack_delivery_'+itemId,syncAttemptId,date:'2026-10-19'});
+ const first=await confirmMultiDelivery(db,actor,intent('I1'));
+ assert.equal(first.itemIsDelivered,true);assert.equal(first.isDelivered,false);
+ const half=(await db.collection('orders').doc(orderId).get()).data();
+ assert.equal(half.deliveredQty,3);assert.equal(half.isDelivered,false);
+ const second=await confirmMultiDelivery(db,actor,intent('I2'));
+ assert.equal(second.itemIsDelivered,true);assert.equal(second.isDelivered,true);
+ const completed=(await db.collection('orders').doc(orderId).get()).data();
+ assert.equal(completed.deliveredQty,6);assert.equal(completed.isDelivered,true);
+ assert.deepEqual(completed.items.map(row=>row.deliveredQty),[3,3]);
+ const beforeLots=await Promise.all([A,B].map(wh=>db.collection('inventoryLots').doc(key+'-'+wh).get()));
+ assert.deepEqual(beforeLots.map(s=>s.data().remainingQty),[0,0]);
+ assert.equal((await confirmMultiDelivery(db,actor,intent('I2'))).status,'already-applied');
+ const after=(await db.collection('orders').doc(orderId).get()).data();
+ assert.deepEqual(after,completed);
+ assert.deepEqual((await Promise.all([A,B].map(wh=>db.collection('inventoryLots').doc(key+'-'+wh).get()))).map(s=>s.data().remainingQty),[0,0]);
+});

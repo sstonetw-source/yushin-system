@@ -72,6 +72,42 @@ function shipmentDeliveryContext(order,intent,{allowReturns=false,allowCancelled
    fault('出貨或客戶送達投影不一致');
   return {item,productKey,projection,returnProjection,cancelled};
 }
+// Multi-line confirmation is isolated from the single-item return/reversal
+// contracts. A delivery is an acknowledgement, never another stock movement.
+function multiShipmentDeliveryContext(order,intent){
+ const {orderId,itemId,syncAttemptId}=intent;
+ if(order.inventoryReservationStatus!=='completed'||order.inventoryReservationAttemptId!==syncAttemptId)
+  fault('庫存同步未完成或來源同步識別碼已變更');
+ if(!['active','normal'].includes(order.status)||![undefined,'','normal','active'].includes(order.orderStatus))
+  fault('已取消或結案訂單不可新增送達');
+ if(!order.ownerUid||!order.salesCode||!Array.isArray(order.items)||order.items.length<2
+  ||order.items.length>5||order.items.filter(row=>row?.itemId===itemId).length!==1
+  ||(order.logisticsTransfersPending??0)!==0)
+  fault('此試點僅支援來源完整的 2–5 品項實體倉訂單');
+ if(!Array.isArray(order.deliveryRecords)||!Array.isArray(order.returnRecords))
+  fault('出貨、送達或退貨紀錄格式不正確');
+ const whole=core.projectOrderShipmentReturns({orderId,items:order.items,
+  shipments:order.warehouseShipmentRecords??[],deliveries:order.deliveryRecords,returns:order.returnRecords});
+ if((order.deliveredQty??0)!==whole.confirmedQty||(order.returnedQty??0)!==whole.returnedQty
+  ||(order.isDelivered??false)!==whole.isDelivered)
+  fault('整張訂單的客戶送達與退貨合計不一致');
+ for(const source of order.items){
+  const part=whole.items.find(row=>row.itemId===source.itemId);
+  if(!part||(source.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
+   ||String(source.productType||source.type||'').toUpperCase()==='SERVICE'
+   ||source.transferPendingId||source.custodyTransferId
+   ||(source.warehouseShippedQty??0)!==part.shippedQty
+   ||(source.deliveredQty??0)!==part.confirmedQty
+   ||(source.returnedQty??0)!==part.returnedQty
+   ||!Number.isSafeInteger(source.dispatchPreparedQty??0)
+   ||(source.dispatchPreparedQty??0)<part.shippedQty
+   ||(source.dispatchPreparedQty??0)>part.orderedQty)
+   fault('整單品項的出貨、送達、打單或退貨來源不一致');
+ }
+ const item=order.items.find(row=>row.itemId===itemId);
+ const projection=whole.items.find(row=>row.itemId===itemId);
+ return {item,productKey:projection.productKey,projection,whole};
+}
 async function readShipmentProof(tx,db,order,intent,productKey) {
  const {orderId,itemId,shipmentId,syncAttemptId}=intent;
  const ref=(n,key)=>db.collection(n).doc(key);
@@ -107,8 +143,20 @@ async function commitShipmentDelivery(db,uid,data){
   }
   if((order.deliveryHistory||[]).some(row=>row.recordId===operationId||row.operationId===operationId))
    fault('此送達操作已有歷史紀錄，不能以原識別碼重新確認');
-  const {item,productKey}=shipmentDeliveryContext(order,intent,{allowReturns:true});
+  const multi=Array.isArray(order.items)&&order.items.length>1;
+  const context=multi?multiShipmentDeliveryContext(order,intent):
+   shipmentDeliveryContext(order,intent,{allowReturns:true});
+  const {item,productKey}=context;
   await readLocationReturnProofs(tx,db,order,intent,productKey,{closedOnly:true});
+  // All physical debits are checked, not merely the selected shipment.
+  // This prevents a sibling's missing/corrupt immutable debit from being
+  // concealed by an otherwise valid order-level delivery projection.
+  if(multi){
+   const shipments=order.warehouseShipmentRecords??[];
+   if(shipments.length>40)fault('多品項歷史出貨憑證超過本試點安全上限');
+   for(const row of shipments)await readShipmentProof(tx,db,order,
+    {...intent,itemId:row.itemId,shipmentId:row.id},row.productKey);
+  }
   const shipment=await readShipmentProof(tx,db,order,intent,productKey);
   const expectedMovementId=shipment.movementId;
   const now=new Date().toISOString();
@@ -117,16 +165,21 @@ async function commitShipmentDelivery(db,uid,data){
    shipmentMovementId:expectedMovementId,deliveryPlan:shipment.deliveryPlan,
    createdByUid:uid,createdByRole:actorRole,createdBy:uid,createdAt:now,intentHash:intent.hash};
   const records=[...order.deliveryRecords,record];
-  const next=core.projectShipmentReturns({orderId,itemId,productKey,orderedQty:item.qty??item.orderedQty,
-   shipments:order.warehouseShipmentRecords,deliveries:records,returns:order.returnRecords});
+  const nextWhole=multi?core.projectOrderShipmentReturns({orderId,items:order.items,
+   shipments:order.warehouseShipmentRecords??[],deliveries:records,returns:order.returnRecords}):null;
+  const next=nextWhole?nextWhole.items.find(row=>row.itemId===itemId):
+   core.projectShipmentReturns({orderId,itemId,productKey,orderedQty:item.qty??item.orderedQty,
+    shipments:order.warehouseShipmentRecords,deliveries:records,returns:order.returnRecords});
   const result={orderId,itemId,shipmentId,confirmedQty:next.confirmedQty,
-   pendingDeliveryQty:next.pendingDeliveryQty,isDelivered:next.isDelivered};
+   pendingDeliveryQty:next.pendingDeliveryQty,isDelivered:(nextWhole??next).isDelivered};
+  if(nextWhole)result.itemIsDelivered=next.isDelivered;
   record.result=result;
   const history={action:'create',source:'shipment_confirmation',recordId:operationId,before:null,after:record,by:uid,at:now};
   // One order document carries both authoritative acknowledgement and caches.
   // No inventory/warehouse/reservation/lot reads or stock-operation writes.
-  tx.update(orderRef,{deliveryRecords:records,items:[{...item,deliveredQty:next.confirmedQty}],
-   deliveredQty:next.confirmedQty,isDelivered:next.isDelivered,
+  tx.update(orderRef,{deliveryRecords:records,items:order.items.map(row=>row.itemId===itemId?
+   {...row,deliveredQty:next.confirmedQty}:row),
+   deliveredQty:(nextWhole??next).confirmedQty,isDelivered:(nextWhole??next).isDelivered,
    deliveryHistory:[...(order.deliveryHistory||[]),history],updatedAt:now});
   return {...result,status:'applied',recordId:operationId};
  });
