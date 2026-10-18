@@ -504,3 +504,9 @@ Workflow 的明確 warehouseShipmentContext 現包含 returns，以原 projectSh
 同步工作ID由原流程建立，實際雙倉交易後再用原需求同步，最後由原來源狀態交易完成checkpoint；測試不再直接update completed。Admin SDK adapter在每次transaction重讀真實users／來源並套用原canRetryOrderInventorySync，防止測試adapter繞過當前角色／所有權。原來源重試與失敗恢復邏輯完整執行，仍無新增產品writer或正式入口。
 
 退貨Auth測試已沿此流程初始化後再打單／出貨／送達／取消／退貨。這是實際同步流程的Emulator驗收；來源訂單／初始庫存仍為Admin fixture，初始化本身的瀏覽器Client SDK／Rules／登入呼叫與正式UI仍未串接，不等於完整ERP建立訂單驗收。正式v2阻擋與Firebase設定不改。
+
+### 真實登入建立訂單接入 v2 初始化之驗收（2026-10-18，Emulator-only）
+
+擴充既有退貨 Auth／Callable 整合測試：以 Firebase Client Auth SDK 真實登入業務帳號，Firestore Client SDK Transaction 經實際 firestore.rules 呼叫原 `src/services/order-creation.js::commitOrderCreation`（VM 僅提供模組化 SDK 相容傳輸 adapter），而非以 Admin fixture 直接建立來源訂單。建單後先核對尚未扣預留，再呼叫上一批原 `synchronizeOrderInventory`／雙倉 v2 writer／正式需求同步與 checkpoint，驗證 10 件需求、兩倉可預留 7 件、採購需求 3 件。也驗證 Rules 拒絕含成本建單、倉管直接建單及同一 pending ID 回放不覆寫已完成原單或再次預留。
+
+界線：產品主檔、實體庫存、倉庫與 Auth 的 users profile 仍是 Admin 測試 seed。建單原 Service 透過 Firestore Client SDK adapter 跑實際 Rules，初始化仍透過上一批 Admin SDK VM adapter；**並非實際瀏覽器頁面／Preview 的全線整合**，正式 Callable、前端執行閘門與 Firebase 部署不變。測試以 PR CI 為準。
