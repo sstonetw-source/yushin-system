@@ -1726,7 +1726,7 @@ test('multi-item stale totals, unknown events and mixed direct-ship siblings rej
   ['totals',order=>({deliveredQty:10})],
   ['sibling',order=>({items:order.items.map((row,i)=>i===2?{...row,deliveredQty:2}:row)})],
   ['mixed',order=>({items:order.items.map((row,i)=>i===2?{...row,fulfillmentType:'DIRECT_SHIP'}:row)})],
-  ['unknown',order=>({deliveryRecords:[{id:'foreign',orderId:order.id,itemId:'missing'}]})]
+  ['unknown',order=>({deliveryRecords:[{id:'foreign',orderId:'other-order',itemId:'missing',productKey:'unknown',qty:1}]})]
  ];
  for(const [name,change] of modes){
   const x=await multiDeliveryFixture('invalid-'+name);
