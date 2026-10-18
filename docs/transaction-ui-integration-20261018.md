@@ -14,7 +14,7 @@
 | 倉庫出貨 | inventory-workspace／出貨清單 → commitInventoryShipment | 既有 delivery-stock delta、Fulfillment；orders、deliveryRecords、inventory／warehouseStocks、lot、movement／cost | 已有一般入口與 Service；一般舊流程仍以 deliveryRecords 承載出貨，不能當成新 v2「出貨／送達分離」已啟用 |
 | 業務送貨／更正 | delivery-actions → completeOrderDelivery／saveOrderDeliveryRecord／correctOrderDeliveryRecord | Fulfillment、delivery-stock／delivery-correction；orders、deliveryRecords、lot／movement | 已接；v2 commitLocationShipment／commitShipmentDelivery 分離事件只在 Emulator，未載入正式 Functions index |
 | 取消／恢復 | lifecycle-workspace／delivery-actions → setOrderLifecycleStatus → adjustInventoryReservationForLifecycle | Reservation lifecycle；orders、預留、公司與分倉、需求同交易 | 一般入口已接；v2 單品項 lifecycle 尚未接正式頁面；多品項跨倉仍需整合驗收 |
-| 客戶退貨實收／訂錯貨重下單 | customer-cancellations → commitCustomerReturnReceipt；order-creation → commitOrderCreation | 既有 CLOSE 實收、批次追溯、獨立一般新訂單；原實收程式仍在 modules/customer-cancellations.js | 該模組仍混合 Feature／交易責任，應後續搬移既有 writer 而非另寫；v2 Auth return adapter 只在隔離 Emulator，沒有正式 Callable |
+| 客戶退貨實收／訂錯貨重下單 | customer-cancellations → customer-return Service 的 commitCustomerReturnReceipt／commitCustomerReturnHoldRelease；order-creation → commitOrderCreation | 既有 CLOSE 實收、批次追溯、獨立一般新訂單；實收與待檢轉庫存的原 writer 已移入 src/services/customer-return.js | 退貨申請／撤回及取消採購處置仍有 Feature 直接交易，後續需沿用既有 writer 整理；v2 Auth return adapter 只在隔離 Emulator，沒有正式 Callable |
 | 服務型訂單 | 需核對商品主檔到建單、採購、履約完整契約 | 不可因單一 productType 或打單排除測試就宣稱不入庫全流程完成 | 本批一般打單明確拒絕 SERVICE；整體不入庫流程仍待獨立驗收 |
 
 ## 本批打單契約
@@ -35,3 +35,12 @@ Service 限 admin／purchaser；真實身分與目前 profile 的最終權限由
 - Firestore Emulator：真實 Client SDK + 現有 StockPermissions wrapper + 現有 Rules，五角色、停用帳號、偽造前端角色、同 ID／不同 ID 競爭、原憑證衝突、v2 拒絕；未用 Admin SDK 代替客戶端授權。
 - Chrome：1280／390 px 的實際兩頁 renderer、click handler、Service／Core，使用記憶體交易傳輸驗證重新載入及跨頁確認；不代表實際 Auth + 瀏覽器 + Firestore 的單一全線 E2E，也不代表 Preview 人工驗收。
 - 完整結果以本批實際 CI 為準。PR #131 仍保留 Draft 作為 Rules 上限分析／反例，不移植未通過的舊寫入；其一般預留／取消需求未被本批打單涵蓋。
+
+
+## 第二批：退貨實收與待檢轉庫存 Service 接線
+
+將原 postCustomerReturnStock、assertActiveReturnWarehouse、commitCustomerReturnReceipt 搬入 src/services/customer-return.js；原待檢轉庫存的 Transaction 搬入同一 Service 的 commitCustomerReturnHoldRelease。兩個原 UI action 保留原按鈕、提示及刷新，不再編排該動作的 stock transaction。建置清單載入唯一 Service；modules/customer-cancellations.js 在 app.js 後載入，原採購改送實體倉庫仍共用同一倉庫檢查。未建立第二份退貨或批次公式。
+
+原正常商品使用 delivery-stock／Inventory Core 的原批次退回與 CLOSE 自由庫存邏輯，直送退貨沿用原採購追溯與批次來源。申請、撤回及取消採購保留／改送仍在原模組，尚未宣稱所有 Features 寫入完成清理。資料模型、Rules、Index、Callable 與 v2 執行閘門不變。
+
+新增真實 Client SDK＋StockPermissions＋Rules 的 Service 驗收：三個收貨角色實收及同 ID 重試；HOLD 不入庫而轉庫存只入一次；停用倉庫整筆拒絕；業務／工程師即使偽造前端 capability 也無法建立實收憑證。Node 驗證唯一 writer、無 DOM Service、hold-release 原子回滾與防重。Chrome 1280／390 px 跑原 receiveCustomerReturn click handler 與實際 Service／Inventory Core，使用記憶體交易傳輸驗證待檢及回覆遺失重送；不等同完整 Auth／瀏覽器／Firestore 單線 E2E 或 Preview。

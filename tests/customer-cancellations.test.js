@@ -1,7 +1,8 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const code=fs.readFileSync('modules/customer-cancellations.js','utf8'),app=fs.readFileSync('app.js','utf8');
 const inventory=require('../modules/inventory-core');
-const start=code.indexOf('async function assertActiveReturnWarehouse('),end=code.indexOf('\nwindow.releaseCustomerReturnHold',start);
+const service=fs.readFileSync('src/services/customer-return.js','utf8');
+const start=service.indexOf('async function assertActiveReturnWarehouse('),end=service.indexOf('async function commitCustomerReturnHoldRelease(',start);
 function fixture(){
  const order={items:[{itemId:'I1',qty:5,fulfillmentType:'WAREHOUSE',warehouseId:'W1'}],ownerUid:'S1',salesCode:'S01',deliveredQty:5,returnRequests:[{id:'Q1',itemId:'I1',qty:3,receivedQty:0,status:'PENDING',reason:'test'}],returnRecords:[],deliveryRecords:[{itemId:'I1',qty:5,lotAllocations:[{lotId:'L1',qty:5}]}]};
  const docs=new Map([['orders/O1',order],['warehouses/W1',{active:true,warehouseType:'PHYSICAL'}]]);let stock=0;const c=vm.createContext({
@@ -12,7 +13,7 @@ function fixture(){
   savedDeliveryRecords:o=>o.deliveryRecords,savedReturnRecords:o=>o.returnRecords,YushinInventory:inventory,
   postCustomerReturnStock:async(_tx,_o,_i,qty)=>{stock+=qty;return {lotAllocations:[{lotId:'L1',qty}],newReservedQty:0};},
   currentUser:{uid:'receiver'},deliveryActor:()=> 'Receiver',localDateString:()=> '2026-10-06',orderWorkIndexFields:()=>({workCategories:['complete']})
- });vm.runInContext(code.slice(start,end),c);return {c,docs,stock:()=>stock};
+ });vm.runInContext(service.slice(start,end),c);return {c,docs,stock:()=>stock};
 }
 test('request quantity includes pending requests, excluding withdrawn and already received quantities',()=>{
  const start=code.indexOf('function customerReturnPendingQty('),end=code.indexOf('\nfunction customerCancellationActions',start),c=vm.createContext({});vm.runInContext(code.slice(start,end),c);
@@ -85,7 +86,7 @@ test('a completed receipt can be retried after the warehouse is disabled without
 
 test('receive action locks before warehouse loading and cannot double submit on repeated taps',async()=>{
  const start=code.indexOf('window.receiveCustomerReturn=async function(');
- const end=code.indexOf('\nasync function assertActiveReturnWarehouse(',start);
+ const end=code.indexOf('\nwindow.releaseCustomerReturnHold=',start);
  assert.ok(start>=0&&end>start);
  let loadResolve,received=0,prompts=0;
  const loaded=new Promise(resolve=>{loadResolve=resolve;});
@@ -151,9 +152,9 @@ function redirectFixture(warehouse){
  });
  const actionStart=code.indexOf('window.keepCancelledPurchaseAsStock=');
  const actionEnd=code.indexOf('window.saveReturnRecord=',actionStart);
- const guardStart=code.indexOf('async function assertActiveReturnWarehouse(');
- const guardEnd=code.indexOf('async function commitCustomerReturnReceipt(',guardStart);
- vm.runInContext(code.slice(guardStart,guardEnd)+code.slice(actionStart,actionEnd),c);
+ const guardStart=service.indexOf('async function assertActiveReturnWarehouse(');
+ const guardEnd=service.indexOf('async function commitCustomerReturnReceipt(',guardStart);
+ vm.runInContext(service.slice(guardStart,guardEnd)+code.slice(actionStart,actionEnd),c);
  return {c,docs,alerts,feedback};
 }
 test('redirect transaction rejects stale warehouse choices without committing incoming stock',async()=>{

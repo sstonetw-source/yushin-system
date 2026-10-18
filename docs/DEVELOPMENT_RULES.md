@@ -149,3 +149,8 @@ CLOSE 後取消／恢復仍拒絕未整合的退貨刪除／更正歷史，不�
 ### 2026-10-18 實際打單入口續傳整合
 
 打單 UI 必須提供已持久保存的固定 intent；兩頁沿用同一 handler／Service。新增 Chrome smoke 與實際 Client Rules／Emulator 行為測試；不得以記憶體瀏覽器傳輸宣稱 Auth／Preview 全線 E2E。 詳見 [介面交易對照與驗收邊界](transaction-ui-integration-20261018.md)。已實作、待本批 CI；未部署 Firebase，單品項多位置仍未啟用正式介面。
+
+
+### 2026-10-18 退貨實收 Service 接線
+
+退貨實收及待檢轉庫存 UI 不得內嵌庫存交易，分別呼叫 commitCustomerReturnReceipt／commitCustomerReturnHoldRelease。Service 可重用既有訂單與批次 helper，但不得新增第二組數量或批次算法。退貨申請／撤回與採購取消處置仍待後續責任整理。 驗收項目與限制見 [介面交易對照](transaction-ui-integration-20261018.md)。未部署 Firebase，完整 Preview 全流程尚待驗收。
