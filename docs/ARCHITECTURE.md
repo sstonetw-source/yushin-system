@@ -544,3 +544,8 @@ Workflow 的明確 warehouseShipmentContext 現包含 returns，以原 projectSh
 ### 2026-10-19 多品項獨立送達確認（待 CI 驗收）
 
 原 `commitShipmentDelivery` 接入整單履約 Core，驗證多品項全部來源出貨 movement 與不可變退貨憑證後，在同一 orders 交易內只更新選中品項送達及整單交付合計，不動庫存、批次、預留。單品項撤銷及退貨追溯仍維持原範圍。此功能仍僅 Emulator，未接正式 UI／Callable。見 [多品項送達驗收邊界](multi-item-delivery-20261019.md)。
+
+
+### 2026-10-19 多品項送達撤銷（已實作、待本批 CI）
+
+原 reverseShipmentDelivery 現與多品項確認共用來源及整單出貨憑證 reader，沿用整單 Core，只更新選定送達及全單投影；不另建 writer。 僅 demo-yushin Emulator；未接正式 UI／Callable、未部署 Firebase，完整 Preview 仍未驗收。詳見 [同一份送達契約與驗收範圍](multi-item-delivery-20261019.md)。

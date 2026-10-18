@@ -1795,4 +1795,167 @@ test('whole-order delivery becomes complete only after every real line and shipm
  const after=(await db.collection('orders').doc(orderId).get()).data();
  assert.deepEqual(after,completed);
  assert.deepEqual((await Promise.all([A,B].map(wh=>db.collection('inventoryLots').doc(key+'-'+wh).get()))).map(s=>s.data().remainingQty),[0,0]);
+ const correction={orderId,itemId:'I2',deliveryRecordId:'full_ack_delivery_I2',
+  operationId:'full_ack_reverse_I2',syncAttemptId,date:'2026-10-20',reason:'誤登送達'};
+ const reversed=await reverseShipmentDelivery(db,actor,correction);
+ assert.equal(reversed.isDelivered,false);assert.equal(reversed.itemIsDelivered,false);
+ const reopened=(await db.collection('orders').doc(orderId).get()).data();
+ assert.equal(reopened.deliveredQty,3);assert.equal(reopened.isDelivered,false);
+ assert.deepEqual(reopened.items[0],completed.items[0]);
+ assert.deepEqual(reopened.items.map(row=>row.deliveredQty),[3,0]);
+ await confirmMultiDelivery(db,actor,{...intent('I2'),operationId:'full_ack_delivery_I2_new',date:'2026-10-20'});
+ const restored=(await db.collection('orders').doc(orderId).get()).data();
+ assert.equal(restored.isDelivered,true);assert.equal(restored.deliveredQty,6);
+ assert.equal((await reverseShipmentDelivery(db,actor,correction)).status,'already-applied');
+ assert.deepEqual((await db.collection('orders').doc(orderId).get()).data(),restored);
+ assert.deepEqual((await Promise.all([A,B].map(wh=>db.collection('inventoryLots').doc(key+'-'+wh).get()))).map(s=>s.data().remainingQty),[0,0]);
+});
+
+async function multiReversalFixture(name,options={}){
+ const x=await multiDeliveryFixture('reverse-'+name,options);
+ for(const [itemId,wh] of [['I1',A],['I2',B]]){
+  await x.prepare(itemId,2,'multi_rev_p_'+name+'_'+itemId);
+  await x.ship(itemId,wh,2,'multi_rev_s_'+name+'_'+itemId);
+  await x.ack(itemId,'multi_rev_s_'+name+'_'+itemId,2,'multi_rev_d_'+name+'_'+itemId);
+ }
+ const reversal=(itemId='I2',patch={})=>({orderId:x.orderId,itemId,
+  deliveryRecordId:'multi_rev_d_'+name+'_'+itemId,operationId:'multi_rev_r_'+name+'_'+itemId,
+  syncAttemptId:x.request(itemId,1,'ignored').syncAttemptId,date:'2026-10-20',reason:'誤登送達',...patch});
+ return {...x,reversal,reverse:(data=reversal(),actor=x.adminUid,connection=db)=>reverseShipmentDelivery(connection,actor,data)};
+}
+test('multi-item reversal preserves every sibling, shipment, reservation, lot and physical movement',async()=>{
+ for(const five of [false,true]){
+  const x=await multiReversalFixture('preserve-'+five,{five}),before=await multiShipmentSnapshot(x);
+  const reads=[],writes=[];
+  const guarded={projectId:db.projectId,collection:n=>db.collection(n),runTransaction:fn=>db.runTransaction(async tx=>fn({
+   get:r=>{reads.push(r.path??'query');return tx.get(r);},
+   update:(r,d)=>{writes.push(r.path);return tx.update(r,d);}
+  }))};
+  const result=await x.reverse(x.reversal(),x.adminUid,guarded);
+  assert.equal(result.reversedQty,2);assert.equal(result.confirmedQty,0);assert.equal(result.pendingDeliveryQty,2);
+  const after=await multiShipmentSnapshot(x);
+  assert.equal(after.order.deliveredQty,2);assert.equal(after.order.isDelivered,false);
+  for(const row of before.order.items)if(row.itemId!=='I2')assert.deepEqual(after.order.items.find(i=>i.itemId===row.itemId),row);
+  assert.equal(after.order.items.find(i=>i.itemId==='I2').deliveredQty,0);
+  assert.deepEqual(after.order.warehouseShipmentRecords,before.order.warehouseShipmentRecords);
+  for(const field of Object.keys(before).filter(k=>k!=='order'))assert.deepEqual(after[field],before[field],field);
+  assert.deepEqual(writes,['orders/'+x.orderId]);
+  assert.ok(reads.every(path=>path==='query'||/^(users|orders|inventoryMovements)\//.test(path)),reads.join(','));
+  const history=after.order.deliveryHistory.at(-1);
+  assert.equal(history.actorUid,x.adminUid);assert.equal(history.actorRole,'admin');
+  assert.equal(history.before.id,x.reversal().deliveryRecordId);assert.equal(history.reason,'誤登送達');
+ }
+});
+test('multi-item reversal replays its original result after a new acknowledgement without erasing new totals',async()=>{
+ const x=await multiReversalFixture('replay');let lost=true;
+ const guarded={projectId:db.projectId,collection:n=>db.collection(n),runTransaction:async fn=>{
+  const result=await db.runTransaction(async tx=>fn(tx));if(lost){lost=false;throw Error('reversal reply lost');}return result;
+ }};
+ await assert.rejects(x.reverse(x.reversal(),x.adminUid,guarded),/reply lost/);
+ const once=await multiShipmentSnapshot(x);
+ assert.equal((await x.reverse()).status,'already-applied');assert.deepEqual(await multiShipmentSnapshot(x),once);
+ await assert.rejects(x.ack('I2','multi_rev_s_replay_I2',2,'multi_rev_d_replay_I2'),/歷史紀錄/);
+ await x.ack('I2','multi_rev_s_replay_I2',2,'multi_rev_d_replay_new');
+ const current=await multiShipmentSnapshot(x),replay=await x.reverse();
+ assert.equal(replay.confirmedQty,0);assert.equal(replay.status,'already-applied');
+ assert.equal(current.order.deliveredQty,4);assert.deepEqual(await multiShipmentSnapshot(x),current);
+ for(const patch of [{reason:'另一原因'},{date:'2026-10-21'},{itemId:'I1'},{deliveryRecordId:'multi_rev_d_replay_I1'}])
+  await assert.rejects(x.reverse(x.reversal('I2',patch)),/其他交易/);
+ await db.collection('users').doc(x.uid).update({role:'admin'});
+ await assert.rejects(x.reverse(x.reversal(),x.uid),/其他交易/);
+ await db.collection('users').doc(x.adminUid).update({role:'sales'});
+ await db.collection('orders').doc(x.orderId).update({ownerUid:x.adminUid});
+ await assert.rejects(x.reverse(),/其他交易/);
+});
+test('multi-item reversal checks live five-role authority, ownership and disabled profiles',async()=>{
+ for(const role of ['admin','sales','engineer','warehouse','purchaser']){
+  const x=await multiReversalFixture('role-'+role);await db.collection('users').doc(x.uid).update({role});
+  const before=await multiShipmentSnapshot(x);
+  if(['warehouse','purchaser'].includes(role)){
+   await assert.rejects(x.reverse(x.reversal(),x.uid),/權限/);assert.deepEqual(await multiShipmentSnapshot(x),before);
+  }else{
+   await x.reverse(x.reversal(),x.uid);const applied=await multiShipmentSnapshot(x);
+   await db.collection('users').doc(x.uid).update({disabled:true});
+   await assert.rejects(x.reverse(x.reversal(),x.uid),/權限/);assert.deepEqual(await multiShipmentSnapshot(x),applied);
+  }
+ }
+ const x=await multiReversalFixture('ownership');const before=await multiShipmentSnapshot(x);
+ await assert.rejects(x.reverse(x.reversal(),x.anotherUid),/自己訂單/);
+ await db.collection('users').doc(x.adminUid).update({active:false});await assert.rejects(x.reverse(),/權限/);
+ assert.deepEqual(await multiShipmentSnapshot(x),before);
+});
+test('multi-item same or competing reversal IDs remove one acknowledgement exactly once',async()=>{
+ for(const same of [true,false]){
+  const x=await multiReversalFixture('race-'+same),before=await multiShipmentSnapshot(x);
+  const results=await Promise.allSettled([x.reverse(),x.reverse(x.reversal('I2',same?{}:{operationId:'multi_rev_other_race'}))]);
+  if(same)assert.deepEqual(results.map(r=>r.value.status).sort(),['already-applied','applied']);
+  else assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+  const after=await multiShipmentSnapshot(x);assert.equal(after.order.deliveredQty,2);
+  assert.equal(after.order.deliveryHistory.filter(r=>r.source==='shipment_confirmation_reversal').length,1);
+  for(const field of Object.keys(before).filter(k=>k!=='order'))assert.deepEqual(after[field],before[field]);
+ }
+});
+test('different-item reversals and simultaneous acknowledgement preserve all concurrent facts',async()=>{
+ const x=await multiReversalFixture('parallel');
+ await Promise.all([x.reverse(x.reversal('I1')),x.reverse(x.reversal('I2'))]);
+ let order=await x.read('orders',x.orderId);assert.equal(order.deliveredQty,0);assert.equal(order.deliveryRecords.length,0);
+ assert.equal(order.deliveryHistory.filter(r=>r.source==='shipment_confirmation_reversal').length,2);
+ await x.ack('I1','multi_rev_s_parallel_I1',1,'multi_rev_parallel_new1');
+ await Promise.all([
+  x.reverse(x.reversal('I1',{deliveryRecordId:'multi_rev_parallel_new1',operationId:'multi_rev_parallel_newreverse'})),
+  x.ack('I2','multi_rev_s_parallel_I2',1,'multi_rev_parallel_new2')
+ ]);
+ order=await x.read('orders',x.orderId);assert.equal(order.deliveredQty,1);
+ assert.deepEqual(order.items.map(i=>i.deliveredQty??0),[0,1,0]);assert.equal(order.deliveryRecords[0].id,'multi_rev_parallel_new2');
+});
+test('multi-item reversal rejects corrupt sibling debits, hidden return receipts and altered target intent atomically',async()=>{
+ for(const mode of ['missing','wrong-debit','hidden-return','target-intent']){
+  const x=await multiReversalFixture('proof-'+mode);
+  const proof=db.collection('inventoryMovements').doc('location-ship-multi_rev_s_proof-'+mode+'_I1');
+  if(mode==='missing')await proof.delete();
+  if(mode==='wrong-debit')await proof.update({qty:0});
+  if(mode==='hidden-return')await db.collection('inventoryMovements').doc('multi-rev-hidden-return').set({
+   action:'location_customer_return',sourceId:x.orderId,itemId:'I1',qty:1
+  });
+  if(mode==='target-intent'){
+   const order=await x.read('orders',x.orderId);order.deliveryRecords.find(d=>d.itemId==='I2').intentHash='tampered';
+   await db.collection('orders').doc(x.orderId).update({deliveryRecords:order.deliveryRecords});
+  }
+  const before=await multiShipmentSnapshot(x);await assert.rejects(x.reverse());assert.deepEqual(await multiShipmentSnapshot(x),before,mode);
+ }
+});
+test('multi-item reversal rejects stale totals, mixed sources, cross-item targets, old dates and cancelled orders',async()=>{
+ const cases=[
+  ['totals',async x=>db.collection('orders').doc(x.orderId).update({deliveredQty:9})],
+  ['sync',async x=>db.collection('orders').doc(x.orderId).update({inventoryReservationAttemptId:'changed'})],
+  ['cancelled',async x=>db.collection('orders').doc(x.orderId).update({status:'cancelled',orderStatus:'cancelled'})],
+  ['mixed',async x=>{const order=await x.read('orders',x.orderId);order.items[2].fulfillmentType='DIRECT_SHIP';
+   await db.collection('orders').doc(x.orderId).update({items:order.items});}]
+ ];
+ for(const [name,mutate] of cases){const x=await multiReversalFixture('reject-'+name);await mutate(x);
+  const before=await multiShipmentSnapshot(x);await assert.rejects(x.reverse());assert.deepEqual(await multiShipmentSnapshot(x),before,name);}
+ const x=await multiReversalFixture('wrong-target'),before=await multiShipmentSnapshot(x);
+ await assert.rejects(x.reverse(x.reversal('I2',{deliveryRecordId:'multi_rev_d_wrong-target_I1'})),/品項/);
+ await assert.rejects(x.reverse(x.reversal('I2',{date:'2026-10-18'})),/日期/);
+ await assert.rejects(x.reverse(x.reversal('I2',{operationId:'multi_rev_d_wrong-target_I1'})),/衝突/);
+ assert.deepEqual(await multiShipmentSnapshot(x),before);
+});
+test('real CLOSE return evidence keeps multi-item acknowledgement correction closed',async()=>{
+ // Real original return writer + seeded independent sibling: reader rejection
+ // coverage only; this does not claim a multi-item return writer exists.
+ const source=await closedRemainingFixture('multi-rev-return'),x=await addDispatchSibling(source);
+ const order=await x.read('orders',x.orderId),before=await multiDispatchSnapshot(x);
+ const target=order.deliveryRecords[0];
+ await assert.rejects(reverseShipmentDelivery(db,x.adminUid,{orderId:x.orderId,itemId:target.itemId,
+  deliveryRecordId:target.id,operationId:'multi_rev_return_reject',syncAttemptId:'sync_ship_12345',date:'2026-10-20',reason:'誤登送達'}),/退貨後/);
+ assert.deepEqual(await multiDispatchSnapshot(x),before);
+});
+test('late reversal commit collision rolls back the whole order and original operation retries safely',async()=>{
+ const x=await multiReversalFixture('rollback'),before=await multiShipmentSnapshot(x);
+ const guarded={projectId:db.projectId,collection:n=>db.collection(n),runTransaction:fn=>db.runTransaction(async tx=>fn({
+  get:r=>tx.get(r),update:(r,d)=>{tx.update(r,d);tx.create(r,{collision:true});}
+ }))};
+ await assert.rejects(x.reverse(x.reversal(),x.adminUid,guarded),e=>e.code===6);
+ assert.deepEqual(await multiShipmentSnapshot(x),before);
+ assert.equal((await x.reverse()).status,'applied');assert.equal((await x.reverse()).status,'already-applied');
 });

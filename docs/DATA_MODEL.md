@@ -278,3 +278,8 @@ dispatchRecords/{dispatch-ui-operationId} 沿用原 Collection；新增 operatio
 ### 2026-10-18 整單 v2 操作憑證（Emulator-only）
 
 沿用 reservationOperationReceipts，新增 order-v2-{attemptId}／action=order_location_reservation，存全單 itemIds、真實 actor／role、syncAttemptId、intentHash 與逐品項結果；各品項各倉 movement 連回同一憑證。預留 ledger、orders.items、公司／分倉模型及舊單品項憑證格式不變，沒有新 Collection／Rules／Index 或正式資料遷移。庫存完成不直接修改初始化 completed。見 [文件邊界](multi-item-location-transaction-20261018.md)。
+
+
+### 2026-10-19 多品項送達撤銷（已實作、待本批 CI）
+
+無新增 collection／欄位／Rules／Index／migration。原 deliveryHistory 的 delete／before／actor／reason／intentHash／result 沿用，只更新選定 item.deliveredQty 及 orders 合計，保留其他品項與庫存事實。首次 get 呼叫為 4＋S（整單出貨 S≤40），重送 2 次；只寫 orders。 僅 demo-yushin Emulator；未接正式 UI／Callable、未部署 Firebase，完整 Preview 仍未驗收。詳見 [同一份送達契約與驗收範圍](multi-item-delivery-20261019.md)。
