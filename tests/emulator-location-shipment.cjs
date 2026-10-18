@@ -1591,7 +1591,7 @@ test('multi-line shipment rejects a corrupt sibling ledger or historical physica
  for(const [name,breakSource] of [
   ['ledger',x=>db.collection('inventoryReservations').doc(x.orderId+'__I3').update({ownerUid:'forged'})],
   ['product',x=>db.collection('products').doc(x.q).update({productType:'SERVICE'})],
-  ['plan',async x=>{const o=await x.read('orders',x.orderId);o.items[2].deliveryPlan={...plan,address:'different'};await db.collection('orders').doc(x.orderId).update({items:o.items});}],
+  ['direct',async x=>{const o=await x.read('orders',x.orderId);o.items[2].fulfillmentType='DIRECT_SHIP';await db.collection('orders').doc(x.orderId).update({items:o.items});}],
   ['movement',async x=>{
    await x.ship('I1',A,1,'multi_ship_corrupt_first');
    await db.collection('inventoryMovements').doc('location-ship-multi_ship_corrupt_first').update({qty:0});
