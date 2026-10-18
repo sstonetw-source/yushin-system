@@ -510,3 +510,8 @@ Workflow 的明確 warehouseShipmentContext 現包含 returns，以原 projectSh
 擴充既有退貨 Auth／Callable 整合測試：以 Firebase Client Auth SDK 真實登入業務帳號，Firestore Client SDK Transaction 經實際 firestore.rules 呼叫原 `src/services/order-creation.js::commitOrderCreation`（VM 僅提供模組化 SDK 相容傳輸 adapter），而非以 Admin fixture 直接建立來源訂單。建單後先核對尚未扣預留，再呼叫上一批原 `synchronizeOrderInventory`／雙倉 v2 writer／正式需求同步與 checkpoint，驗證 10 件需求、兩倉可預留 7 件、採購需求 3 件。也驗證 Rules 拒絕含成本建單、倉管直接建單及同一 pending ID 回放不覆寫已完成原單或再次預留。
 
 界線：產品主檔、實體庫存、倉庫與 Auth 的 users profile 仍是 Admin 測試 seed。建單原 Service 透過 Firestore Client SDK adapter 跑實際 Rules，初始化仍透過上一批 Admin SDK VM adapter；**並非實際瀏覽器頁面／Preview 的全線整合**，正式 Callable、前端執行閘門與 Firebase 部署不變。測試以 PR CI 為準。
+
+
+### 2026-10-18 實際打單入口續傳整合
+
+兩個實際打單頁共用固定操作 ID 與凍結數量，Service 使用既有 Fulfillment Core 與 StockPermissions；讀預留時保留未啟用多位置契約的阻擋。 詳見 [介面交易對照與驗收邊界](transaction-ui-integration-20261018.md)。已實作、待本批 CI；未部署 Firebase，單品項多位置仍未啟用正式介面。

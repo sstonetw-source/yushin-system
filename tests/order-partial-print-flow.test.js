@@ -56,7 +56,7 @@ test('unprinted items cannot enter sales ready list and delivered/cancelled item
 test('printing stays purchaser/admin only, and reuses the existing transactional dispatch record',()=>{
     const slice=app.slice(app.indexOf('window.markOrderItemDispatchPrepared = async function'),app.indexOf('\nfunction canBusinessSelfOrder',app.indexOf('window.markOrderItemDispatchPrepared = async function')));
     assert.match(slice,/currentUserRole === 'purchaser' \|\| currentUserRole === 'admin'/);
-    assert.match(slice,/await prepareOrderDispatch\(orderId,itemId\)/);
+    assert.match(slice,/await prepareOrderDispatch\(orderId,itemId,attempt\)/);
     assert.doesNotMatch(slice,/await runRoleTransaction\(async tx=>/);
     const service=fs.readFileSync(path.join(__dirname,'../src/services/dispatch-preparation.js'),'utf8');
     assert.match(service,/await runRoleTransaction\(async tx=>/);

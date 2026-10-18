@@ -1,49 +1,72 @@
 'use strict';
-const test=require('node:test');
-const assert=require('node:assert/strict');
-const fs=require('node:fs');
-const vm=require('node:vm');
-const path=require('node:path');
-const source=fs.readFileSync(path.join(__dirname,'../src/services/dispatch-preparation.js'),'utf8');
-
-test('dispatch service commits the order and record together, rejects duplicate preparation',async()=>{
-  let order={id:'O1',status:'normal',ownerUid:'U1',salesCode:'S1',customerName:'客戶',
-    items:[{itemId:'I1',itemCode:'P1',itemName:'試劑',qty:3,dispatchPreparedQty:0}]};
-  const records=[],appliedUpdates=[];
-  const refs={
-    orders:{doc:id=>({kind:'orders',id})},
-    dispatchRecords:{doc:()=>({kind:'dispatchRecords',id:'D'+(records.length+1)})}
-  };
-  const sandbox={
-    db:{collection:name=>refs[name]},
-    currentUser:{uid:'PURCHASER'},
-    normalizedOrderStatus:()=> 'normal',
-    normalizedOrderItems:o=>o.items.map(item=>({...item})),
-    itemDispatchState:(o,item)=>({pending:Math.max(0,3-(item.dispatchPreparedQty||0)),prepared:item.dispatchPreparedQty||0}),
-    orderWorkIndexFields:()=>({}),
-    deliveryActor:()=> '採購員',
-    YushinOrderEntry:{validateTrade:()=>({valid:true})},
-    runRoleTransaction:async callback=>{
-      const staging=[];
-      await callback({
-        get:async ref=>({exists:true,data:()=>order}),
-        set:(ref,data)=>staging.push({ref,data}),
-        update:(ref,data)=>staging.push({ref,data})
-      });
-      for(const update of staging){
-        if(update.ref.kind==='orders'){order={...order,...update.data};appliedUpdates.push(update);}
-        else records.push(update.data);
-      }
-    }
-  };
-  vm.createContext(sandbox);
-  vm.runInContext(source,sandbox,{filename:'dispatch-preparation.js'});
-  const saved=await sandbox.prepareOrderDispatch('O1','I1');
-  assert.equal(saved.items[0].dispatchPreparedQty,3);
-  assert.equal(order.items[0].dispatchPreparedQty,3);
-  assert.equal(records.length,1);
-  assert.equal(records[0].qty,3);
-  assert.equal(appliedUpdates.length,1);
-  await assert.rejects(sandbox.prepareOrderDispatch('O1','I1'),/沒有待打單數量/);
-  assert.equal(records.length,1);
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const fulfillment=require('../modules/fulfillment-core');
+const source=fs.readFileSync('src/services/dispatch-preparation.js','utf8');
+function fixture(role='purchaser'){
+ const docs=new Map([['orders/O',{status:'normal',ownerUid:'sales',salesCode:'S',items:[
+  {itemId:'I',productId:'P',warehouseId:'A',qty:5,reservedQty:3,dispatchPreparedQty:0},
+  {itemId:'J',productId:'Q',warehouseId:'B',qty:8,reservedQty:2,dispatchPreparedQty:0}]}]]);
+ let fail=false,lost=false,queue=Promise.resolve();
+ const c=vm.createContext({currentUser:{uid:'buyer'},currentUserRole:role,
+  db:{collection:n=>({doc:id=>({path:n+'/'+id})})},
+  normalizedOrderStatus:o=>o.status,normalizedOrderItems:o=>structuredClone(o.items),
+  itemDispatchState:(o,i)=>o.inventoryReservationStatus==='pending'?{pending:0,prepared:0}:fulfillment.dispatchState(i),
+  deliveryActor:()=>c.currentUser.uid,orderWorkIndexFields:()=>({workCategories:['shipping']}),
+  YushinOrderEntry:{validateTrade:()=>({valid:true})},
+  runRoleTransaction:callback=>{
+   const run=async()=>{
+    const writes=[];await callback({get:async r=>({exists:docs.has(r.path),data:()=>structuredClone(docs.get(r.path))}),
+     set:(r,d)=>writes.push([r.path,d]),update:(r,d)=>writes.push([r.path,{...docs.get(r.path),...d}])});
+    if(fail)throw Error('injected rollback');
+    for(const [k,v] of writes)docs.set(k,structuredClone({...v}));
+    if(lost){lost=false;throw Error('lost response');}
+   };
+   const next=queue.then(run);queue=next.catch(()=>{});return next;
+  }});
+ vm.runInContext(source,c);
+ const intent=(patch={})=>({operationId:'dispatch-ui-AAAAAAAAAAAAAAA',orderId:'O',itemId:'I',actorUid:'buyer',actorRole:role,quantity:3,expectedPreparedQty:0,...patch});
+ return {c,docs,intent,run:a=>c.prepareOrderDispatch('O','I',a||intent()),
+  order:()=>docs.get('orders/O'),records:()=>[...docs.keys()].filter(k=>k.startsWith('dispatchRecords/')),
+  fail:()=>fail=true,lose:()=>lost=true};
+}
+test('dispatch freezes one item quantity across a multi-item/two-warehouse order and only writes paperwork',async()=>{
+ const f=fixture(),other=structuredClone(f.order().items[1]);await f.run();
+ assert.equal(f.order().items[0].dispatchPreparedQty,3);assert.deepEqual(f.order().items[1],other);
+ assert.equal(f.records().length,1);assert.equal(f.docs.size,2);assert.equal(f.order().items[0].reservedQty,3);
+ await f.run();assert.equal(f.records().length,1);
+});
+test('lost response then additional stock retries the same receipt without preparing the new arrival',async()=>{
+ const f=fixture();f.lose();await assert.rejects(f.run(),/lost response/);
+ f.order().items[0].reservedQty=5;await f.run();assert.equal(f.order().items[0].dispatchPreparedQty,3);
+ await f.run(f.intent({operationId:'dispatch-ui-BBBBBBBBBBBBBBB',quantity:2,expectedPreparedQty:3}));
+ assert.equal(f.order().items[0].dispatchPreparedQty,5);assert.equal(f.records().length,2);
+});
+test('concurrent same operation reuses one receipt; competing operations must refresh their prepared baseline',async()=>{
+ const f=fixture();await Promise.all([f.run(),f.run()]);assert.equal(f.records().length,1);
+ const g=fixture(),results=await Promise.allSettled([g.run(),g.run(g.intent({operationId:'dispatch-ui-BBBBBBBBBBBBBBB'}))]);
+ assert.equal(results.filter(r=>r.status==='fulfilled').length,1);assert.equal(g.records().length,1);
+});
+test('operation ID rejects changed quantity or a different actor',async()=>{
+ const f=fixture();await f.run();await assert.rejects(f.run(f.intent({quantity:2})),/識別碼/);
+ f.c.currentUser={uid:'another'};await assert.rejects(f.run(f.intent({actorUid:'another'})),/識別碼/);
+});
+for(const role of ['sales','engineer','warehouse'])test(role+' cannot call the dispatch service directly',async()=>{
+ const f=fixture(role);await assert.rejects(f.run(),/角色/);assert.equal(f.records().length,0);
+});
+test('admin and purchaser are accepted without granting warehouse dispatch preparation',async()=>{
+ for(const role of ['admin','purchaser']){const f=fixture(role);await f.run();assert.equal(f.records().length,1);}
+});
+test('transaction failure rolls back both paperwork and order, preserving a retryable operation',async()=>{
+ const f=fixture(),before=structuredClone([...f.docs]);f.fail();await assert.rejects(f.run(),/rollback/);assert.deepEqual([...f.docs],before);
+});
+test('stale quantities, pending sync, cancelled, service/direct all reject without writes',async()=>{
+ for(const patch of [o=>o.items[0].reservedQty=2,o=>o.inventoryReservationStatus='pending',o=>o.status='cancelled',
+  o=>o.items[0].fulfillmentType='DIRECT_SHIP',o=>o.items[0].productType='SERVICE']){
+  const f=fixture();patch(f.order());await assert.rejects(f.run());assert.equal(f.records().length,0);
+ }
+});
+test('session change while reading stops transaction and retains no receipt',async()=>{
+ const f=fixture(),original=f.c.db.collection;
+ f.c.db.collection=n=>{const r=original(n);if(n==='inventoryReservations')f.c.currentUserRole='sales';return r;};
+ await assert.rejects(f.run(),/角色/);assert.equal(f.records().length,0);
 });

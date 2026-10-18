@@ -144,3 +144,8 @@ CLOSE 後取消／恢復仍拒絕未整合的退貨刪除／更正歷史，不�
 新增測試於既有 `tests/emulator-v2-return-callable.cjs`，隨 `node tools/run-v2-return-auth-emulator.cjs` 在隔離 demo-yushin Auth＋Functions＋Firestore Emulator 執行。測試需以 Client SDK 登入業務本人、透過真實 Firestore Rules 執行原 `commitOrderCreation`，再由原初始化協調器與 v2 writer 建立預留與採購缺口，不可將直接 Admin seed 訂單當作「已驗收建單」。驗證含成本／無權倉管建單拒絕、同 ID 重送不得覆蓋來源或重扣帳。VM 只供 Firestore 模組化 SDK 介面相容，不得複製商業計算或新建單 writer。
 
 此測試僅驗收單品項雙倉 Auth Client 建單入口到後續 Emulator 初始化的**部分鏈路**；正式網頁、真實瀏覽器登入／Role adapter、Preview、全面多品項／直送／服務型流程與正式部署仍須各自驗收。
+
+
+### 2026-10-18 實際打單入口續傳整合
+
+打單 UI 必須提供已持久保存的固定 intent；兩頁沿用同一 handler／Service。新增 Chrome smoke 與實際 Client Rules／Emulator 行為測試；不得以記憶體瀏覽器傳輸宣稱 Auth／Preview 全線 E2E。 詳見 [介面交易對照與驗收邊界](transaction-ui-integration-20261018.md)。已實作、待本批 CI；未部署 Firebase，單品項多位置仍未啟用正式介面。
