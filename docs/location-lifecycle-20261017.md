@@ -114,3 +114,10 @@ Emulator harness 呼叫原正式 PO／incoming 登記、原收貨 Service 及 `k
 原有 v2 取消及實體退貨 Service 新增**可選的 Emulator-only 組合入口** `commitSingleItemLocationLifecycleAndRecover`、`commitLocationReturnAndRecover`。先呼叫原權威來源 Service 完成原子提交，隨後以原 release／CLOSE 入庫 movement ID 執行 bounded drain；不改動原交易流程、來源身份或存量。客戶業務（sales/engineer）只可提交權限內取消／退貨，沒有物流分配權限時來源仍正確提交，組合回傳 `postCommitAllocation.status='recovery-pending'` 和可交由有權物流角色處理的來源 movementId；不能使用業務身份冒充倉管。對已提交事件重送來源操作 ID，會取得原來源交易結果並續傳原配貨批次，不會再產生第二筆取消、入庫或庫存預留。
 
 **狀態**：新入口是**可被後續 Callable／工作佇列使用的內部組合 API**，尚未綁定正式頁面、排程或 Cloud Functions trigger，因此不表示所有取消／退貨現在已自動跑配貨。不同操作員無法直接接手已建立且進行中的 actor-bound checkpoint，需後續設計具真實身分及單筆 movement 稽核的 lease／安全交接。來源 movement 已成功但配貨失敗的回傳必須區分「交易已提交、後續續傳待處理」，不能告知使用者取消或入庫失敗。沒有正式 Firebase 部署、Rules／Index 更新。
+
+
+### v2 自由庫存配貨進度完整性（2026-10-18）
+
+已實作：既有 `advanceAutomaticFreeStockAllocation` 的每次 checkpoint 交易讀取（包含已完成重送及扣帳後結算）均經 `validateAutomaticFreeStockCheckpoint`。累計分配須為 0 至原 maxQty 的整數，步數為 0–1000；完成必須沒有 pending、具已知完成原因，quantity-reached 必須實際達到原額度。pending 必須具有完整且僅限既定欄位、正整數且不超過剩餘額度，操作 ID 必須依原 runId／步數／訂單／品項衍生。達 1000 步不可建立新指令。異常進度先拒絕，不自動改成完成、重設操作 ID 或推估已扣帳量。
+
+沿用原 checkpoint、movement 與唯一自由庫存 writer；交易已提交但 checkpoint 結算失敗時，修復正確進度後仍以原指令重送，原 movement 確保不重複預留。不變更角色、Collection、Rules、Index、前端或 Callable，仍僅 demo-yushin Emulator。新增 Emulator 案例涵蓋完成憑證異常、pending 篡改與額度超限、扣帳後再讀進度異常及原 ID 續傳；實際執行結果以本批 PR CI 為準。完整 Preview、不同操作者安全交接及正式部署仍未完成。

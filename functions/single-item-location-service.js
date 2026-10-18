@@ -386,6 +386,37 @@ function normalizeAutomaticFreeStockIntent(input){
  const intent={productKey,warehouseId,maxQty,runId};
  return {...intent,hash:createHash('sha256').update(JSON.stringify(intent)).digest('hex')};
 }
+function automaticFreeStockOperationId(runId,step,orderId,itemId){
+ return 'auto_v2_'+createHash('sha256')
+  .update(runId+'|'+step+'|'+orderId+'|'+itemId).digest('hex').slice(0,42);
+}
+// Check every persisted checkpoint, including completed replays and each
+// transaction retry, before trusting it as progress or as a stock command.
+function validateAutomaticFreeStockCheckpoint(job,intent){
+ const bad=()=>reject('自動分配進度異常，請先核對 checkpoint');
+ if(!['active','completed'].includes(job.status)
+   ||!Number.isSafeInteger(job.allocatedQty)||job.allocatedQty<0||job.allocatedQty>intent.maxQty
+   ||!Number.isSafeInteger(job.processedSteps)||job.processedSteps<0||job.processedSteps>1000
+   ||job.pending===undefined)bad();
+ if(job.status==='completed'){
+  if(job.pending!==null
+    ||!['quantity-reached','no-free-stock','no-eligible-demand'].includes(job.completionReason)
+    ||(job.completionReason==='quantity-reached'&&job.allocatedQty!==intent.maxQty))bad();
+ }
+ if(job.pending!==null){
+  const p=job.pending;
+  if(!p||typeof p!=='object'||Array.isArray(p)
+    ||Object.keys(p).sort().join(',')!=='itemId,operationId,orderId,quantity,syncAttemptId'
+    ||!Number.isSafeInteger(p.quantity)||p.quantity<=0
+    ||p.quantity>intent.maxQty-job.allocatedQty||job.processedSteps>=1000)bad();
+  for(const field of ['orderId','itemId','syncAttemptId']){
+   if(typeof p[field]!=='string'||!p[field]||p[field]!==p[field].trim()
+     ||p[field].includes('/')||p[field].length>(field==='syncAttemptId'?96:160))bad();
+  }
+  if(p.operationId!==automaticFreeStockOperationId(intent.runId,job.processedSteps,p.orderId,p.itemId))bad();
+ }
+ return job;
+}
 async function advanceAutomaticFreeStockAllocation(db,uid,input){
  if(!process.env.FIRESTORE_EMULATOR_HOST||db.projectId!=='demo-yushin')
   reject('自動自由庫存分配僅允許 demo-yushin Emulator');
@@ -411,6 +442,7 @@ async function advanceAutomaticFreeStockAllocation(db,uid,input){
     ||job.productKey!==productKey||job.warehouseId!==warehouseId
     ||job.maxQty!==intent.maxQty)
    reject('批次 ID 已用於不同交易或不同登入者','already-exists');
+  validateAutomaticFreeStockCheckpoint(job,intent);
   return {role,job};
  };
  const present=(job,status=job.status)=>({
@@ -430,10 +462,6 @@ async function advanceAutomaticFreeStockAllocation(db,uid,input){
   return created;
  });
  if(state.status==='completed')return present(state);
- if(state.status!=='active'||!Number.isSafeInteger(state.allocatedQty)
-   ||!Number.isSafeInteger(state.processedSteps)||state.allocatedQty<0
-   ||state.allocatedQty>intent.maxQty||state.processedSteps<0||state.processedSteps>1000)
-  reject('自動分配進度異常，請先核對 checkpoint');
  if(state.allocatedQty===intent.maxQty){
   state=await db.runTransaction(async tx=>{
    const {job}=await readJob(tx);
@@ -526,9 +554,8 @@ async function advanceAutomaticFreeStockAllocation(db,uid,input){
       ||!order.inventoryReservationAttemptId)
      reject('FIFO 候選已改變，請使用相同批次 ID 重試');
     const quantity=Math.min(intent.maxQty-job.allocatedQty,row.shortageQty);
-    const operationId='auto_v2_'+createHash('sha256')
-     .update(runId+'|'+job.processedSteps+'|'+row.orderId+'|'+row.itemId)
-     .digest('hex').slice(0,42);
+    if(job.processedSteps>=1000)reject('自動分配已達步數上限，請先核對 checkpoint');
+    const operationId=automaticFreeStockOperationId(runId,job.processedSteps,row.orderId,row.itemId);
     const pending={orderId:row.orderId,itemId:row.itemId,
      syncAttemptId:order.inventoryReservationAttemptId,quantity,operationId};
     tx.update(jobRef,{pending,updatedAt:new Date().toISOString()});
@@ -711,4 +738,4 @@ async function continueCommittedV2FreeStock(db,uid,movementIds,maxSteps=5){
  return {status:results.some(row=>row.recoveryPending)?'recovery-pending':'completed',sources:results};
 }
 
-module.exports={normalizeSingleItemIntent,normalizeCommitIntent,planSingleItemTwoWarehouse,commitSingleItemTwoWarehouse,normalizeFreeStockIntent,commitSingleItemFreeStockAllocation,normalizeAutomaticFreeStockIntent,advanceAutomaticFreeStockAllocation,advanceReleasedV2FreeStock,drainReleasedV2FreeStock,continueCommittedV2FreeStock};
+module.exports={normalizeSingleItemIntent,normalizeCommitIntent,planSingleItemTwoWarehouse,commitSingleItemTwoWarehouse,normalizeFreeStockIntent,commitSingleItemFreeStockAllocation,normalizeAutomaticFreeStockIntent,validateAutomaticFreeStockCheckpoint,advanceAutomaticFreeStockAllocation,advanceReleasedV2FreeStock,drainReleasedV2FreeStock,continueCommittedV2FreeStock};

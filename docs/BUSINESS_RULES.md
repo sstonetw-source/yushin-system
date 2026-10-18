@@ -235,3 +235,10 @@ v2 初始 Ledger 優先順序日期必須來自交易內讀取的來源訂單（
 ### 訂單取消／CLOSE 退貨後段配貨的執行界線（2026-10-18，Emulator-only）
 
 來源訂單取消或真實可再上架的 CLOSE 退貨**先由原交易獨立完成**；後續調撥其他缺貨訂單必須在來源 transaction 完成後、重新驗證目前操作者的 admin/purchaser/warehouse 權限，才可經原自由庫存 Service 推進。業務可合法處理自己訂單的取消或退貨，但不能因此取得倉儲分配權。新增內部組合 API 對後續配貨失敗標記 recovery-pending 並保存來源 movementID，絕不能重複取消或退貨以掩蓋配貨失敗；同一來源 ID 重送只續跑原批次。單次最多 10 步、正常預設 5 步，有未完訂單持續以同 ID 續傳，不建立無界背景工作。正式觸發、身份安全接班與 Preview 驗收仍未完成。
+
+
+### v2 自由庫存配貨進度完整性（2026-10-18）
+
+已實作：既有 `advanceAutomaticFreeStockAllocation` 的每次 checkpoint 交易讀取（包含已完成重送及扣帳後結算）均經 `validateAutomaticFreeStockCheckpoint`。累計分配須為 0 至原 maxQty 的整數，步數為 0–1000；完成必須沒有 pending、具已知完成原因，quantity-reached 必須實際達到原額度。pending 必須具有完整且僅限既定欄位、正整數且不超過剩餘額度，操作 ID 必須依原 runId／步數／訂單／品項衍生。達 1000 步不可建立新指令。異常進度先拒絕，不自動改成完成、重設操作 ID 或推估已扣帳量。
+
+沿用原 checkpoint、movement 與唯一自由庫存 writer；交易已提交但 checkpoint 結算失敗時，修復正確進度後仍以原指令重送，原 movement 確保不重複預留。不變更角色、Collection、Rules、Index、前端或 Callable，仍僅 demo-yushin Emulator。新增 Emulator 案例涵蓋完成憑證異常、pending 篡改與額度超限、扣帳後再讀進度異常及原 ID 續傳；實際執行結果以本批 PR CI 為準。完整 Preview、不同操作者安全交接及正式部署仍未完成。
