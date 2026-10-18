@@ -1,6 +1,6 @@
 'use strict';
 // Read-only batch/provenance preflight; this is NOT a stock return commit.
-const inventory=require('./shared/inventory-core');
+const inventory=require('./shared/inventory-core'),reservation=require('./shared/reservation-core');
 const {createHash}=require('node:crypto');
 function fault(message,code='failed-precondition'){const e=new Error(message);e.code=code;throw e;}
 const fulfillment=require('./shared/fulfillment-core');
@@ -19,6 +19,16 @@ async function readLocationReturnProofs(tx,db,order,intent,productKey,{closedOnl
    hashIntent:value=>createHash('sha256').update(JSON.stringify(value)).digest('hex')});
 }
 
+// Shared scope guard for cancelled CLOSE preview and the actual receipt.
+function assertCancelledCloseReturnContext(order,{item,projection,returnProjection,cancelled}){
+ if(!cancelled)return;
+ if(!Array.isArray(order.returnHistory??[]))fault('退貨歷史格式不正確');
+ if(returnProjection.replacementQty!==0||projection.pendingDeliveryQty!==0
+  ||!Number.isSafeInteger(item.dispatchPreparedQty??0)||(item.dispatchPreparedQty??0)!==projection.shippedQty
+  ||(order.returnHistory??[]).some(event=>event?.action!=='add'
+    ||!order.returnRecords.some(record=>record.id===event.recordId)))
+  fault('取消訂單僅支援無途中貨、無額外打單及無更正歷史的 CLOSE 退貨');
+}
 async function planLocationReturnTrace(db,uid,data){
  if(!process.env.FIRESTORE_EMULATOR_HOST||db.projectId!=='demo-yushin')
   fault('退貨批次追溯目前僅允許 demo-yushin Emulator');
@@ -26,10 +36,24 @@ async function planLocationReturnTrace(db,uid,data){
  const {readShipmentActorOrder,shipmentDeliveryContext,readShipmentProof}=require('./shipment-delivery-service');
  return db.runTransaction(async tx=>{
   const {order}=await readShipmentActorOrder(tx,db,uid,intent.orderId,['admin','sales','engineer','purchaser','warehouse']);
-  const {productKey,projection}=shipmentDeliveryContext(order,intent);
+  const context=shipmentDeliveryContext(order,intent,{allowReturns:true,allowCancelledCloseReturn:true});
+  const {item,productKey,projection,cancelled}=context;
+  assertCancelledCloseReturnContext(order,context);
+  await readLocationReturnProofs(tx,db,order,intent,productKey,{closedOnly:true});
+  if(cancelled){
+   const ledgerSnap=await tx.get(db.collection('inventoryReservations').doc(intent.orderId+'__'+intent.itemId));
+   const ledger=ledgerSnap.exists?ledgerSnap.data():null;
+   if(!ledger||ledger.locationSchemaVersion!==2||ledger.warehouseId!==undefined
+    ||ledger.orderId!==intent.orderId||ledger.itemId!==intent.itemId||ledger.productKey!==productKey
+    ||ledger.ownerUid!==order.ownerUid||ledger.salesCode!==order.salesCode||ledger.status!=='released'
+    ||ledger.quantity!==0||ledger.shortageQty!==0||item.reservedQty!==0||item.shortageQty!==0
+    ||reservation.reservationLocations(ledger).length!==0)
+    fault('取消來源缺少完整釋放的 v2 預留憑證');
+  }
   const shipment=await readShipmentProof(tx,db,order,intent,productKey);
   const confirmedQty=projection.shipments.find(row=>row.shipmentId===intent.shipmentId)?.confirmedQty??0;
-  const plan=inventory.planExplicitShipmentReturn({shipment,confirmedQty,selections:intent.selections});
+  const plan=inventory.planExplicitShipmentReturn({shipment,confirmedQty,selections:intent.selections,
+   priorReturns:order.returnRecords.filter(row=>row.shipmentId===shipment.id)});
   const lots=[];
   for(const row of plan.allocations){
    const snap=await tx.get(db.collection('inventoryLots').doc(row.lotId));
@@ -48,7 +72,9 @@ async function planLocationReturnTrace(db,uid,data){
    fault('批次預計還原量超過原入庫量');
   return {status:'read-only',canCommit:false,orderId:intent.orderId,itemId:intent.itemId,shipmentId:intent.shipmentId,
    productKey,warehouseId:shipment.warehouseId,returnQty:plan.returnQty,
+   confirmedQty:plan.confirmedQty,previousReturnedQty:plan.previousReturnedQty,
+   remainingReturnQty:plan.remainingReturnQty,remainingLotAllocations:plan.remainingLotAllocations,
    allocations:plan.allocations,lotRestorationPreview:restoration};
  });
 }
-module.exports={normalizeReturnTraceIntent,normalizeLocationReturnIntent,readLocationReturnProofs,planLocationReturnTrace};
+module.exports={normalizeReturnTraceIntent,normalizeLocationReturnIntent,readLocationReturnProofs,assertCancelledCloseReturnContext,planLocationReturnTrace};

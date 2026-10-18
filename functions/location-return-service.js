@@ -2,7 +2,7 @@
 // Internal Emulator-only receipt of restockable goods into their source warehouse.
 const inventory=require('./shared/inventory-core'),reservation=require('./shared/reservation-core');
 const fulfillment=require('./shared/fulfillment-core');
-const {normalizeLocationReturnIntent,readLocationReturnProofs}=require('./location-return-trace-service');
+const {normalizeLocationReturnIntent,readLocationReturnProofs,assertCancelledCloseReturnContext}=require('./location-return-trace-service');
 const {readShipmentActorOrder,shipmentDeliveryContext,readShipmentProof}=require('./shipment-delivery-service');
 function fault(message,code='failed-precondition'){const e=new Error(message);e.code=code;throw e;}
 function qty(value){if(!Number.isSafeInteger(value)||value<0)fault('退貨帳目數量不正確');return value;}
@@ -24,11 +24,7 @@ async function commitLocationReturn(db,uid,data){
   const {item,productKey,projection,returnProjection,cancelled}=shipmentDeliveryContext(order,intent,{
    allowReturns:true,allowCancelledCloseReturn:intent.settlement==='CLOSE'});
   if(order.returnHistory!==undefined&&!Array.isArray(order.returnHistory))fault('退貨歷史格式不正確');
-  if(cancelled&&(returnProjection.replacementQty!==0||projection.pendingDeliveryQty!==0
-   ||qty(item.dispatchPreparedQty??0)!==projection.shippedQty
-   ||(order.returnHistory??[]).some(event=>event?.action!=='add'
-     ||!order.returnRecords.some(record=>record.id===event.recordId))))
-   fault('取消訂單僅支援無途中貨、無額外打單及無更正歷史的 CLOSE 退貨');
+  assertCancelledCloseReturnContext(order,{item,projection,returnProjection,cancelled});
   if(order.returnRecords.some(r=>r.id===operationId)||(order.returnHistory||[]).some(r=>r.recordId===operationId))
    fault('此退貨操作已有歷史紀錄，不能重複入庫');
   const shipment=await readShipmentProof(tx,db,order,intent,productKey);

@@ -67,3 +67,8 @@
 取消來源ledger須released、預留與缺口皆0、位置空。原 Reservation Core只增加實貨與原批次餘量，不占回來源、不動原PO／供應／receipt／成本連結，也不更改取消狀態。10件寄出送達4後取消、退1、恢復，仍只需剩餘6；原自由庫存協調器可沿同一movement配給其他正常訂單。原意圖hash／operationId與角色重讀不變。
 
 新增八組出貨檔整合、一次真實PO→receipt→shipment→ack→cancel→CLOSE→KEEP_STOCK收貨→restore整合及一組純Core：涵蓋剩餘履約、分次、五角色、錯誤／隱藏憑證、邊界入口仍封鎖、併發、末端回滾／重試、get／write界限及有界配貨。結果以本批實際CI為準。唯讀trace、一般新增送達／送達撤銷仍拒絕取消來源；REPLACE／混合補送、退貨更正／撤銷、多品項、完整Auth／UI／Preview與正式部署仍待完成。
+
+
+### 取消後退貨可先唯讀查核（2026-10-18，Emulator-only）
+
+本節更新前述取消來源不能trace的限制。原 planLocationReturnTrace 已接同一取消CLOSE guard、完整released空ledger及實際退貨proof驗證，並用原planExplicitShipmentReturn扣除先前每批退貨。五個角色可唯讀取得原shipment的已確認／已退／剩餘總量與各批上限；不因此取得實際入庫權限。查核無寫入、canCommit false，原commitLocationReturn仍須在新交易重讀完整庫存／批次及當前額度；一般新增送達與送達撤銷仍不開放取消來源。詳見delivery-reversal-return-trace-emulator-20261017.md最新節。

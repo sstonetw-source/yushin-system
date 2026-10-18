@@ -50,3 +50,14 @@
 前端接線、workCategories／需求投影、真正 UI 打單、Preview 完整走單、多品項、部分更正送達、取消／恢復、實物退貨／補送／跨倉退回、收貨／保管／調撥仍未完成。現行 v2 客戶端寫入阻擋與正式資料完整保留。
 
 後續進展：原倉可再入庫品已新增獨立的實物退貨交易，見 `location-return-receipt-emulator-20261017.md`；本文件的 trace 仍為唯讀，不能提交預覽。後續補送出貨／送達閉環仍未完成。
+
+
+## 2026-10-18 更新：取消與既有 CLOSE 後的剩餘批次查核
+
+本節取代先前trace只支援無退貨且正常訂單的限制。原 planLocationReturnTrace 現支援一致cancelled且已完整釋放的單品項雙倉來源；正常或取消來源若已有CLOSE，須先以同交易有界return movement query核對全部真實憑證，再傳選定shipment的priorReturns給原Inventory Core。取消scope與實際退貨writer共用，並唯讀核對ledger身份、released／quantity0／shortage0／locations空及item投影。
+
+回傳新增confirmedQty、previousReturnedQty、remainingReturnQty與remainingLotAllocations，均為本次選量尚未提交前的額度。各批剩餘原出貨上限不代表均已送達，總退貨仍受remainingReturnQty約束；只驗證明確所選批次的目前實物資料。查核不寫入、不建立收貨憑證／預留，不讀成本／公司庫存／分倉庫存；canCommit仍false。預覽後他人先退貨，原writer必須重讀並拒絕超額，不能以舊預覽保證提交。
+
+get呼叫正常4＋N、取消5＋N（N≤200）；return proof query limit201最多接受200筆，空快取亦核對，最多文件正常403／取消404，無新索引或Rules。新增六組Emulator與一組純Core測試：正常與取消CLOSE後逐批額度、跨shipment不混用、五角色、錯誤／隱藏憑證、取消ledger、途中／額外打單／REPLACE拒絕、201筆上限、零寫入／零成本及過期預覽後實際提交。結果以本批實際CI為準。
+
+仍無正式Callable／前端／Preview或部署；REPLACE／混合補送後追溯、多品項、跨倉／品質隔離、更正／撤銷退貨及成本結算仍未整合。
