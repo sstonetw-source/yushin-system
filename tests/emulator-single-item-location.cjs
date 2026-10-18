@@ -1395,7 +1395,8 @@ test('completed FIFO checkpoints reject corrupt totals and pending work instead 
  const ref=db.collection('reservationOperationReceipts').doc('single-v2-free-batch-'+input.runId);
  const original=(await ref.get()).data(),before=await snapshot(source);
  for(const patch of [{allocatedQty:7},{allocatedQty:-1},{processedSteps:1001},
-   {pending:{}},{completionReason:'invented'},{allocatedQty:5}]){
+   {pending:{}},{completionReason:'invented'},{allocatedQty:5},
+   {actorUid:''},{actorRole:'sales'},{handoffCount:-1},{createdActorUid:null}]){
   await ref.set({...original,...patch});
   await assert.rejects(advanceAutomaticFreeStockAllocation(db,source.uid,input),/checkpoint/);
   assert.deepEqual(await snapshot(source),before);
@@ -1468,4 +1469,225 @@ test('FIFO validates a checkpoint again inside finalization after a committed st
  const resumed=await advanceAutomaticFreeStockAllocation(db,source.uid,input);
  assert.equal(resumed.status,'completed');assert.equal(resumed.allocatedQty,6);
  assert.deepEqual(await snapshot(target),afterStock);
+});
+
+async function pauseAutomaticAllocation(source,input,afterStock=false){
+ let calls=0;
+ const wrapper={projectId:db.projectId,collection:n=>db.collection(n),
+  runTransaction:fn=>{
+   if(!afterStock&&++calls===3)throw Error('paused before stock transaction');
+   return db.runTransaction(tx=>fn({get:r=>tx.get(r),create:(...a)=>tx.create(...a),
+    set:(...a)=>tx.set(...a),update:(ref,patch)=>{
+     if(afterStock&&ref.path==='reservationOperationReceipts/single-v2-free-batch-'+input.runId
+       &&patch.processedSteps===1)throw Error('paused after stock transaction');
+     return tx.update(ref,patch);
+    }}));
+  }};
+ await assert.rejects(advanceAutomaticFreeStockAllocation(wrapper,source.uid,input),/paused/);
+ return db.collection('reservationOperationReceipts').doc('single-v2-free-batch-'+input.runId);
+}
+async function allocationActor(id,role='warehouse',extra={}){
+ const uid='handoff-'+id;
+ await db.collection('users').doc(uid).set({active:true,role,...extra});
+ return uid;
+}
+async function handoffAudits(runId){
+ const rows=await db.collection('reservationOperationReceipts').where('runId','==',runId).get();
+ return rows.docs.map(d=>d.data()).filter(r=>r.action==='single_v2_free_stock_handoff');
+}
+test('currently authorized logistics roles automatically resume another actor without resetting the source budget',async()=>{
+ for(const role of ['admin','purchaser','warehouse']){
+  const source=await readyLifecycle('handoff-roles-'+role,{role:'admin'});
+  const older=await autoFreeTarget(source,'older',4,'2026-09-01');
+  const newer=await autoFreeTarget(source,'newer',5,'2026-09-02');
+  await source.lifecycle('cancelled');
+  const input=autoFreeRequest(source,'batch_handoff_roles_'+role+'_123');
+  const first=await advanceAutomaticFreeStockAllocation(db,source.uid,input);
+  assert.equal(first.allocatedQty,2);assert.equal(first.status,'active');
+  await db.collection('users').doc(source.uid).update({disabled:true});
+  const next=await allocationActor('roles-'+role,role);
+  const done=await advanceAutomaticFreeStockAllocation(db,next,input);
+  assert.equal(done.allocatedQty,6);assert.equal(done.processedSteps,2);assert.equal(done.status,'completed');
+  const job=await source.read('reservationOperationReceipts','single-v2-free-batch-'+input.runId);
+  assert.equal(job.createdActorUid,source.uid);assert.equal(job.actorUid,next);assert.equal(job.actorRole,role);
+  assert.equal(job.handoffCount,1);assert.equal(job.maxQty,6);
+  const audits=await handoffAudits(input.runId);
+  assert.equal(audits.length,1);assert.equal(audits[0].fromActorUid,source.uid);
+  assert.equal(audits[0].actorUid,next);assert.equal(audits[0].reconciledQty,0);
+  for(const [target,actor] of [[older,source.uid],[newer,next]]){
+   const moves=await db.collection('inventoryMovements').where('sourceId','==',target.orderId).get();
+   const assigned=moves.docs.map(d=>d.data()).filter(r=>r.action==='single_v2_free_stock_allocation');
+   assert.equal(assigned.length,1);assert.equal(assigned[0].actorUid,actor);
+  }
+  assert.equal((await source.read('inventory',source.productKey)).onHand,12);
+  assert.equal((await source.read('inventory',source.productKey)).reserved,8);
+ }
+});
+test('handoff of an uncommitted pending command retains its operation ID and executes once as the new actor',async()=>{
+ const source=await readyLifecycle('handoff-uncommitted',{role:'admin'});
+ const target=await autoFreeTarget(source,'target',10);
+ await source.lifecycle('cancelled');
+ const input=autoFreeRequest(source,'batch_handoff_uncommitted_123');
+ const ref=await pauseAutomaticAllocation(source,input),original=(await ref.get()).data();
+ assert.equal(original.allocatedQty,0);assert.ok(original.pending);
+ const next=await allocationActor('uncommitted');
+ const done=await advanceAutomaticFreeStockAllocation(db,next,input);
+ assert.equal(done.allocatedQty,6);assert.equal(done.status,'completed');
+ const move=await source.read('inventoryMovements','single-v2-free-'+original.pending.operationId);
+ assert.equal(move.actorUid,next);assert.equal(move.qty,6);
+ assert.equal((await ref.get()).data().processedSteps,1);
+ const baseline=await snapshot(target),job=(await ref.get()).data();
+ const observer=await allocationActor('completed-observer','purchaser');
+ assert.equal((await advanceAutomaticFreeStockAllocation(db,observer,input)).allocatedQty,6);
+ assert.deepEqual((await ref.get()).data(),job);
+ assert.deepEqual(await snapshot(target),baseline);
+ assert.equal((await handoffAudits(input.runId)).length,1);
+});
+test('handoff reconciles the prior actor committed movement before continuing and preserves original audit identity',async()=>{
+ const source=await readyLifecycle('handoff-committed',{role:'admin'});
+ const target=await autoFreeTarget(source,'target',10);
+ await source.lifecycle('cancelled');
+ const input=autoFreeRequest(source,'batch_handoff_committed_12345');
+ const ref=await pauseAutomaticAllocation(source,input,true),original=(await ref.get()).data();
+ const before=await snapshot(target);
+ const next=await allocationActor('committed');
+ const done=await advanceAutomaticFreeStockAllocation(db,next,input);
+ assert.equal(done.status,'completed');assert.equal(done.allocatedQty,6);assert.equal(done.processedSteps,1);
+ assert.deepEqual(await snapshot(target),before);
+ const move=await source.read('inventoryMovements','single-v2-free-'+original.pending.operationId);
+ assert.equal(move.actorUid,source.uid);
+ const audits=await handoffAudits(input.runId);
+ assert.equal(audits.length,1);assert.equal(audits[0].reconciledQty,6);
+ assert.equal(audits[0].reconciledOperationId,original.pending.operationId);
+ assert.equal((await ref.get()).data().actorUid,next);
+});
+test('a stale worker paused before stock commit cannot execute after another actor takes over',async()=>{
+ const source=await readyLifecycle('handoff-stale-worker',{role:'admin'});
+ const target=await autoFreeTarget(source,'target',10);
+ await source.lifecycle('cancelled');
+ const input=autoFreeRequest(source,'batch_handoff_stale_worker_123');
+ let release,paused,calls=0;
+ const gate=new Promise(r=>{release=r;}),ready=new Promise(r=>{paused=r;});
+ const wrapper={projectId:db.projectId,collection:n=>db.collection(n),
+  runTransaction:async fn=>{
+   if(++calls===3){paused();await gate;}
+   return db.runTransaction(fn);
+  }};
+ const old=advanceAutomaticFreeStockAllocation(wrapper,source.uid,input)
+  .then(value=>({value}),error=>({error}));
+ await ready;
+ const next=await allocationActor('stale-worker');
+ let done;
+ try{done=await advanceAutomaticFreeStockAllocation(db,next,input);}finally{release();}
+ const stale=await old;
+ assert.match(stale.error?.message||'',/其他操作人員接手/);
+ assert.equal(done.allocatedQty,6);assert.equal(done.status,'completed');
+ assert.equal((await target.read('inventory',target.productKey)).reserved,8);
+ const rows=await db.collection('inventoryMovements').where('sourceId','==',target.orderId).get();
+ const actual=rows.docs.map(d=>d.data()).filter(x=>x.action==='single_v2_free_stock_allocation');
+ assert.equal(actual.length,1);assert.equal(actual[0].actorUid,next);
+});
+test('handoff refuses unauthorized actors and corrupt original movement without modifying ownership or progress',async()=>{
+ const source=await readyLifecycle('handoff-denials',{role:'admin'});
+ const target=await autoFreeTarget(source,'target',10);
+ await source.lifecycle('cancelled');
+ const input=autoFreeRequest(source,'batch_handoff_denials_1234567');
+ const ref=await pauseAutomaticAllocation(source,input,true),job=(await ref.get()).data();
+ const before=await snapshot(target);
+ for(const [role,extra] of [['sales',{}],['engineer',{}],['warehouse',{disabled:true}],['admin',{active:false}]]){
+  const actor=await allocationActor('deny-'+role+Object.keys(extra).join(''),role,extra);
+  await assert.rejects(advanceAutomaticFreeStockAllocation(db,actor,input),/權限/);
+  assert.deepEqual((await ref.get()).data(),job);assert.deepEqual(await snapshot(target),before);
+ }
+ const next=await allocationActor('corrupt-proof');
+ const movementRef=db.collection('inventoryMovements').doc('single-v2-free-'+job.pending.operationId);
+ const proof=(await movementRef.get()).data();
+ for(const patch of [{actorUid:next},{actorRole:'warehouse'},{qty:5},{intentHash:'wrong'},
+   {productKey:'another-product'},{reservedDelta:0},{result:{...proof.result,allocatedQty:5}}]){
+  await movementRef.set({...proof,...patch});
+  await assert.rejects(advanceAutomaticFreeStockAllocation(db,next,input),/憑證不一致/);
+  assert.deepEqual((await ref.get()).data(),job);
+  assert.equal((await handoffAudits(input.runId)).length,0);
+ }
+ await movementRef.set(proof);
+ assert.equal((await advanceAutomaticFreeStockAllocation(db,next,input)).allocatedQty,6);
+ assert.deepEqual(await snapshot(target),before);
+});
+test('two different operators racing to resume one pending batch cannot double allocate',async()=>{
+ const source=await readyLifecycle('handoff-racing-operators',{role:'admin'});
+ const target=await autoFreeTarget(source,'target',10);
+ await source.lifecycle('cancelled');
+ const input=autoFreeRequest(source,'batch_handoff_racing_12345678');
+ const ref=await pauseAutomaticAllocation(source,input);
+ const a=await allocationActor('race-A'),b=await allocationActor('race-B','purchaser');
+ const results=await Promise.allSettled([advanceAutomaticFreeStockAllocation(db,a,input),
+  advanceAutomaticFreeStockAllocation(db,b,input)]);
+ assert.ok(results.some(r=>r.status==='fulfilled'&&r.value.status==='completed'));
+ for(const r of results)if(r.status==='rejected')assert.match(r.reason.message,/其他操作人員接手/);
+ const job=(await ref.get()).data();
+ assert.equal(job.status,'completed');assert.equal(job.allocatedQty,6);assert.equal(job.processedSteps,1);
+ assert.ok(job.handoffCount>=1&&job.handoffCount<=2);
+ assert.equal((await target.read('inventory',target.productKey)).reserved,8);
+ const rows=await db.collection('inventoryMovements').where('sourceId','==',target.orderId).get();
+ assert.equal(rows.docs.filter(d=>d.data().action==='single_v2_free_stock_allocation').length,1);
+});
+test('source movement bounded recovery automatically hands unfinished FIFO work to another warehouse operator',async()=>{
+ const source=await readyLifecycle('handoff-real-source',{role:'admin'});
+ await autoFreeTarget(source,'older',4,'2026-09-01');
+ await autoFreeTarget(source,'newer',5,'2026-09-02');
+ await source.lifecycle('cancelled','handoff_source_cancelled_1234');
+ const movementId='single-v2-life-handoff_source_cancelled_1234-V2-B';
+ const first=await drainReleasedV2FreeStock(db,source.uid,{movementId,maxSteps:1});
+ assert.equal(first.status,'active');assert.equal(first.allocatedQty,2);
+ const next=await allocationActor('real-source');
+ const done=await drainReleasedV2FreeStock(db,next,{movementId,maxSteps:2});
+ assert.equal(done.status,'completed');assert.equal(done.allocatedQty,6);assert.equal(done.recoveryPending,false);
+ const audits=await handoffAudits(done.runId);
+ assert.equal(audits.length,1);assert.equal(audits[0].actorUid,next);
+});
+
+test('handoff audit write failure rolls back ownership and reconciliation together',async()=>{
+ const source=await readyLifecycle('handoff-audit-rollback',{role:'admin'});
+ const target=await autoFreeTarget(source,'target',10);
+ await source.lifecycle('cancelled');
+ const input=autoFreeRequest(source,'batch_handoff_audit_rollback_123');
+ const ref=await pauseAutomaticAllocation(source,input,true),job=(await ref.get()).data();
+ const before=await snapshot(target);
+ const next=await allocationActor('audit-rollback');
+ const wrapper={projectId:db.projectId,collection:n=>db.collection(n),
+  runTransaction:fn=>db.runTransaction(tx=>fn({get:r=>tx.get(r),set:(...a)=>tx.set(...a),
+   update:(...a)=>tx.update(...a),create:(ref,...a)=>{
+    if(ref.id.startsWith('single-v2-free-handoff-'))throw Error('handoff audit unavailable');
+    return tx.create(ref,...a);
+   }}))};
+ await assert.rejects(advanceAutomaticFreeStockAllocation(wrapper,next,input),/audit unavailable/);
+ assert.deepEqual((await ref.get()).data(),job);assert.deepEqual(await snapshot(target),before);
+ assert.equal((await handoffAudits(input.runId)).length,0);
+ assert.equal((await advanceAutomaticFreeStockAllocation(db,next,input)).allocatedQty,6);
+ assert.deepEqual(await snapshot(target),before);
+});
+test('a new operator disabled after taking ownership cannot commit; another authorized operator resumes the same command',async()=>{
+ const source=await readyLifecycle('handoff-disabled-during-work',{role:'admin'});
+ const target=await autoFreeTarget(source,'target',10);
+ await source.lifecycle('cancelled');
+ const input=autoFreeRequest(source,'batch_handoff_disabled_during_123');
+ const ref=await pauseAutomaticAllocation(source,input),original=(await ref.get()).data();
+ const next=await allocationActor('disabled-during-work');
+ let release,paused,calls=0;
+ const gate=new Promise(r=>{release=r;}),ready=new Promise(r=>{paused=r;});
+ const wrapper={projectId:db.projectId,collection:n=>db.collection(n),
+  runTransaction:async fn=>{if(++calls===2){paused();await gate;}return db.runTransaction(fn);}};
+ const pending=advanceAutomaticFreeStockAllocation(wrapper,next,input)
+  .then(value=>({value}),error=>({error}));
+ await ready;
+ try{await db.collection('users').doc(next).update({disabled:true});}finally{release();}
+ assert.match((await pending).error?.message||'',/不可重新分配/);
+ assert.equal((await ref.get()).data().pending.operationId,original.pending.operationId);
+ assert.equal((await target.read('inventory',target.productKey)).reserved,2);
+ const last=await allocationActor('after-disabled','purchaser');
+ const done=await advanceAutomaticFreeStockAllocation(db,last,input);
+ assert.equal(done.allocatedQty,6);assert.equal(done.status,'completed');
+ const proof=await target.read('inventoryMovements','single-v2-free-'+original.pending.operationId);
+ assert.equal(proof.actorUid,last);
+ assert.equal((await ref.get()).data().handoffCount,2);
 });

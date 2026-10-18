@@ -121,3 +121,10 @@ Emulator harness 呼叫原正式 PO／incoming 登記、原收貨 Service 及 `k
 已實作：既有 `advanceAutomaticFreeStockAllocation` 的每次 checkpoint 交易讀取（包含已完成重送及扣帳後結算）均經 `validateAutomaticFreeStockCheckpoint`。累計分配須為 0 至原 maxQty 的整數，步數為 0–1000；完成必須沒有 pending、具已知完成原因，quantity-reached 必須實際達到原額度。pending 必須具有完整且僅限既定欄位、正整數且不超過剩餘額度，操作 ID 必須依原 runId／步數／訂單／品項衍生。達 1000 步不可建立新指令。異常進度先拒絕，不自動改成完成、重設操作 ID 或推估已扣帳量。
 
 沿用原 checkpoint、movement 與唯一自由庫存 writer；交易已提交但 checkpoint 結算失敗時，修復正確進度後仍以原指令重送，原 movement 確保不重複預留。不變更角色、Collection、Rules、Index、前端或 Callable，仍僅 demo-yushin Emulator。新增 Emulator 案例涵蓋完成憑證異常、pending 篡改與額度超限、扣帳後再讀進度異常及原 ID 續傳；實際執行結果以本批 PR CI 為準。完整 Preview、不同操作者安全交接及正式部署仍未完成。
+
+
+### v2 配貨自動換人續傳（2026-10-18）
+
+本節取代前述「不同操作員無法接手進行中 checkpoint」限制。相同來源 movement 的 `drainReleasedV2FreeStock` 現可由當前有效 admin／purchaser／warehouse 自動續跑；原來源 proof、批次意圖與固定 ID 保留。接手先在同一進度 transaction 核對原 pending movement，已提交量用共同結算 helper 計一次；未提交量仍保留相同指令。交接寫入同集合的不可重覆稽核，原動作執行者與目前接手人分開保存。
+
+實際 writer 額外在庫存 transaction 核對現任批次與指令，舊人恢復連線不會拿過期工作扣帳；雙操作者競爭可能收到需重新讀取的回覆，不能改新批次 ID 重做。已完成批次可由合格物流角色唯讀取得結果。此為 Emulator 內部接手能力，未建立正式操作頁、Callable、背景 runner 或 Preview／正式部署。
