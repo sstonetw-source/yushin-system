@@ -58,3 +58,12 @@
 原 Functions reader 及收貨 adapter 共用 Fulfillment Core 的 canonical intent 與完整 proof validator。Node 與 Web Crypto SHA-256 經固定歷史 hash 回歸；查詢每次首次 v2 收貨增加一次有界 return proof query（limit201、最多200），空快取亦查。無新 collection、Rules、Index 或另一個 writer。
 
 新增七組 Emulator 回歸：分次收貨後完成剩餘雙倉履約、部分送達仍待確認、取消 KEEP_STOCK 收貨後恢復、恢復後收貨、缺漏／變造／隱藏憑證與 REPLACE 拒絕、退貨／取消競爭、末端碰撞回滾及固定 ID 重試。另覆蓋收貨 Core、實際採購需求 helper 與歷史雜湊相容。結果以本批實際 CI 為準。仍待取消中新增退貨、REPLACE／混合補送、退貨更正／撤銷、多品項、完整 Auth／UI／Preview；沒有正式部署。
+
+
+### 取消後 CLOSE 退貨（2026-10-18，Emulator-only）
+
+本節取代「取消中新增退貨尚未整合」中 CLOSE 的限制。已在原 commitLocationReturn 開放一致的 cancelled 狀態，仍需來源同步完成、原出貨全確認、無額外打單與退貨更正／REPLACE歷史。只收原倉、原出貨真實批次的可再入庫實物；數量與完整退貨憑證依原共同Core與reader驗證。
+
+取消來源ledger須released、預留與缺口皆0、位置空。原 Reservation Core只增加實貨與原批次餘量，不占回來源、不動原PO／供應／receipt／成本連結，也不更改取消狀態。10件寄出送達4後取消、退1、恢復，仍只需剩餘6；原自由庫存協調器可沿同一movement配給其他正常訂單。原意圖hash／operationId與角色重讀不變。
+
+新增八組出貨檔整合、一次真實PO→receipt→shipment→ack→cancel→CLOSE→KEEP_STOCK收貨→restore整合及一組純Core：涵蓋剩餘履約、分次、五角色、錯誤／隱藏憑證、邊界入口仍封鎖、併發、末端回滾／重試、get／write界限及有界配貨。結果以本批實際CI為準。唯讀trace、一般新增送達／送達撤銷仍拒絕取消來源；REPLACE／混合補送、退貨更正／撤銷、多品項、完整Auth／UI／Preview與正式部署仍待完成。

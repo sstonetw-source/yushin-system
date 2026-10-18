@@ -236,3 +236,10 @@ v2 到貨自由實貨**不新增欄位／Collection**。既有 `receipts/{receip
 無新 collection／持久欄位。warehouseShipmentContext 增加 `returns`，只供 Core 計算、不寫入 items；Workflow stockOutstandingQty 使用 projectShipmentReturns.outstandingQty，CLOSE 等於原訂購量減歷史寄出量。receivedQty／supplyOrderedQty 仍是累計供應事實；returnedQty 與 returnRecords／returnHistory 不因新 receipt 刪除或縮量。
 
 首次 v2 收貨交易新增一次 sourceId＋action 等值 return movement query，limit201、最多接受200筆；即使空 returnRecords 也驗證。每筆比對完整 returnRecord、原 canonical intent hash 與固定 movement ID；無額外庫存／成本查詢或寫入。原庫存／批次／成本／receipt／需求與供應寫入契約不變。既有同 ID receipt replay 不重新入庫；正常首次收貨仍重讀實際角色。無 migration、Index／Rules／Listener 變更；正式查詢索引仍須 Preview 驗證。
+
+
+### 取消來源 CLOSE 退貨資料契約（2026-10-18，Emulator-only）
+
+無新 collection／持久欄位或遷移。取消來源的 inventoryReservations 維持 locationSchemaVersion2、status released、quantity0、shortageQty0、locations[]；退貨只沿既有公司／原倉實貨與原批次餘量加回，原 ledger 結構與 lifecycleWarehouseIds 保留。orders 的 status／orderStatus、出貨／送達、PO／供應／receipts及成本資料不改，只新增原 returnRecords／returnHistory與累計退貨投影。
+
+既有 location-return-{operationId} movement 保存原 actor／意圖hash／完整returnRecord／result；CLOSE仍用原 CLOSED_CUSTOMER_RETURN／freeAllocationQty欄位作為有界配貨來源。無額外get／query／listener：單批次首次仍10次transaction get呼叫、6次寫入，查詢與批次上限沿原契約；同ID重送不重複增加實貨。純Core明確接收orderStatus cancelled，不能把取消誤當normal去新增預留。

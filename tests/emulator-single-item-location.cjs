@@ -1814,3 +1814,25 @@ test('late post-CLOSE receipt failure rolls back stock lots cost source and dema
  const after=await receiptSnapshot(x);await x.receive(2,'closed_rollback_final_receipt');assert.deepEqual(await receiptSnapshot(x),after);
  assert.equal(after.state.base.documents[1].onHand,10);assert.equal(after.state.base.documents[1].reserved,9);
 });
+
+test('purchased stock can CLOSE return after cancellation then KEEP_STOCK receipt and restore without reviving closed demand',async()=>{
+ const x=await receiptShipmentLifecycle('cancel-return-po');await x.receive(1,'cancel_return_po_initial_receipt');
+ await x.prepare(1,'first');await x.ship(1,'first');await x.confirm(1,'first');await x.lifecycle('cancelled');
+ const before=await receiptSnapshot(x),o=await x.read('orders',x.orderId),shipment=o.warehouseShipmentRecords[0];
+ const intent={orderId:x.orderId,itemId:'I1',shipmentId:shipment.id,syncAttemptId:'v2_123456789',
+  operationId:'cancel_return_po_customer_return',warehouseId:'V2-A',date:'2026-10-18',reason:'取消後結案退貨',
+  condition:'RESTOCKABLE',settlement:'CLOSE',selections:[{lotId:shipment.lotAllocations[0].lotId,qty:1}]};
+ const returned=await require('../functions/location-return-service').commitLocationReturn(db,x.uid,intent);assert.equal(returned.reservedQty,0);
+ const afterReturn=await receiptSnapshot(x);assert.deepEqual(afterReturn.state.po,before.state.po);assert.deepEqual(afterReturn.state.supplies,before.state.supplies);
+ assert.deepEqual(afterReturn.state.demand,before.state.demand);assert.deepEqual(afterReturn.documents.receipts,before.documents.receipts);
+ assert.deepEqual(afterReturn.documents.inventoryLotCosts,before.documents.inventoryLotCosts);
+ const blocked=await receiptSnapshot(x);await assert.rejects(x.receive(2,'cancel_return_po_remaining_receipt'),/採購確認/);assert.deepEqual(await receiptSnapshot(x),blocked);
+ await keepReceiptAsStock(x);await x.receive(2,'cancel_return_po_remaining_receipt');
+ const stocked=await receiptSnapshot(x);assert.equal(stocked.state.base.documents[0].status,'cancelled');assert.equal(stocked.state.base.documents[1].reserved,0);
+ assert.equal(stocked.state.base.documents[1].onHand,10);assert.equal(stocked.state.base.documents[1].incoming,0);
+ const restored=await x.lifecycle('normal');assert.equal(restored.reservedQty,9);assert.equal(restored.shortageQty,0);
+ const final=await receiptSnapshot(x);assert.equal(final.state.demand.requestedQty,3);assert.equal(final.state.demand.receivedQty,3);
+ assert.equal(final.state.demand.remainingToOrderQty,0);assert.equal(final.state.demand.remainingToReceiveQty,0);
+ assert.equal(final.state.base.documents[0].returnedQty,1);assert.deepEqual(final.state.base.documents[0].returnRecords,afterReturn.state.base.documents[0].returnRecords);
+ await require('../functions/location-return-service').commitLocationReturn(db,x.uid,intent);assert.deepEqual(await receiptSnapshot(x),final);
+});

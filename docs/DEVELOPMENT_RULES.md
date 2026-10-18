@@ -110,3 +110,10 @@ CLOSE 後取消／恢復仍拒絕未整合的退貨刪除／更正歷史，不�
 只擴充原 receiveSupplyOrderRecord，不可另建收貨 writer。新交易必須核對實際 return movements（包含空快取），共用 Fulfillment.normalizeLocationReturnIntent／validateLocationReturnProofs；Node 與 Web Crypto 只負責 SHA-256 adapter，不得各自正規化意圖或變更歷史 hash。原 Functions readLocationReturnProofs 仍為共同有界讀取 adapter。
 
 使用含 returns 的 warehouseShipmentContext，gross／effective 要明確表達 CLOSE 商業結清；不得把 returnedQty 歸零或以待客戶確認量當實體缺口。測試須包含原真實採購→收貨→出貨→送達→CLOSE→後續收貨→剩餘履約、取消 KEEP_STOCK／恢復、錯誤憑證拒絕、固定 ID 重送與衝突、競爭交易與末端失敗整筆回滾。modules 修改須產生 functions/shared，src 修改須產生 app.js。仍限 demo-yushin Emulator，沒有 Callable／UI／正式 Firebase 部署。
+
+
+### 取消來源 CLOSE 退貨驗收（2026-10-18，Emulator-only）
+
+只能擴充原 commitLocationReturn 與 Reservation.planReservationReturn，不得另建取消退貨 writer。shipmentDeliveryContext 的 allowCancelledCloseReturn 僅此首次 CLOSE writer 使用，其他入口沿預設禁止取消來源；不要全域移除取消guard。取消ledger必須完整釋放，禁止藉退貨靜默釋放殘存預留或重新占庫。正常／取消兩種ledger目標分別為尚未寄出量／0，恢復仍由原 lifecycle重新規劃。
+
+驗收須包含實際取消→退貨→恢復→剩餘履約、分次與超額拒絕、五角色／陌生操作者／失效帳號、錯誤狀態／ledger／實際movement／批次、退貨與取消／恢復競爭、末端碰撞回滾、固定ID replay、自由實貨有界配給其他訂單，以及真實PO／receipt／KEEP_STOCK後續收貨。原送達／撤銷／trace不得因此對取消來源開放。modules改動需用build-functions-core同步；無正式Auth／UI／Preview或Firebase部署。

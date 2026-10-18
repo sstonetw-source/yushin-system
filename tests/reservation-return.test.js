@@ -86,3 +86,15 @@ test('restoration conserves own and unrelated holds across lifecycle settlement 
   assert.equal(result.warehouseStock.onHand-input.warehouseStock.onHand,deltaQty);
  }
 });
+
+test('cancelled v2 CLOSE receipt requires a fully released empty ledger and creates only free physical stock',()=>{
+ const input={...base(),orderStatus:'cancelled',settlement:'CLOSE',itemReservedQty:0,
+  reservation:{productKey:'P',locationSchemaVersion:2,quantity:0,shortageQty:0,status:'released',locations:[],lifecycleWarehouseIds:['W','OTHER']}};
+ const before=structuredClone(input),result=plan(input);
+ assert.deepEqual(input,before);assert.deepEqual(result.reservation,input.reservation);assert.equal(result.reservedDelta,0);
+ assert.deepEqual(result.aggregateStock,{onHand:12,reserved:7});assert.deepEqual(result.warehouseStock,{onHand:9,reserved:4});
+ for(const patch of [{settlement:'REPLACE'},{itemReservedQty:1},
+  {reservation:{...input.reservation,status:'fulfilled'}},{reservation:{...input.reservation,shortageQty:1}},
+  {reservation:{...input.reservation,quantity:1,locations:[{warehouseId:'OTHER',reservedQty:1}]}},
+  {warehouseStock:{onHand:4,reserved:4,transferFreeInTransit:1}}])assert.throws(()=>plan({...input,...patch}));
+});

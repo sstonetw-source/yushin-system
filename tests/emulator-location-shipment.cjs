@@ -977,7 +977,9 @@ test('later acknowledgement cannot be used to backdate an additional physical re
 });
 
 async function closedLifecycleFixture(name,options={}){
- const x=await closedRemainingFixture('life-'+name,options);
+ return withReturnLifecycle(await closedRemainingFixture('life-'+name,options),name);
+}
+function withReturnLifecycle(x,name){
  const lifecycleRequest=(nextStatus,operationId='closed_lifecycle_'+name+'_'+nextStatus)=>({
   orderId:x.orderId,itemId:'I',warehouseIds:[A,B],nextStatus,operationId,
   syncAttemptId:'sync_ship_12345',date:'2026-10-22',reason:'取消或恢復剩餘商品'});
@@ -1170,4 +1172,121 @@ test('CLOSE cancellation post-commit recovery reallocates released remainder bef
  const restored=await x.lifecycle('normal');assert.equal(restored.reservedQty,0);assert.equal(restored.shortageQty,6);
  assert.equal((await x.read('orders',x.orderId)).returnedQty,1);
  assert.equal((await x.read('inventory',x.key)).onHand,13);
+});
+
+async function cancelledReturnFixture(name,options={}){
+ const x=withReturnLifecycle(await returnFixture('cancel-return-'+name,{prepared:4,confirmedQty:4,...options}),'cancel-return-'+name);
+ await x.lifecycle('cancelled',undefined,x.adminUid);
+ return {...x,closeRequest:patch=>x.returnRequest({settlement:'CLOSE',date:'2026-10-23',...patch})};
+}
+test('cancelled CLOSE receipt restores original lots as free stock and restoration ships only original remainder',async()=>{
+ const x=await cancelledReturnFixture('roundtrip'),before=await closedLifecycleSnapshot(x),ledger=before.state.docs[4];
+ const result=await x.receive(x.closeRequest());assert.equal(result.reservedQty,0);assert.equal(result.replacementQty,0);
+ const after=await closedLifecycleSnapshot(x),order=after.state.docs[0];
+ assert.equal(order.status,'cancelled');assert.equal(order.orderStatus,'cancelled');assert.equal(order.returnedQty,1);assert.equal(order.deliveredQty,4);
+ assert.deepEqual(after.state.docs[4],{...ledger,updatedAt:after.state.docs[4].updatedAt});
+ assert.equal(after.state.docs[1].onHand,before.state.docs[1].onHand+1);assert.equal(after.state.docs[1].reserved,2);
+ assert.deepEqual(after.state.docs[3],before.state.docs[3]);assert.deepEqual(order.deliveryRecords,before.state.docs[0].deliveryRecords);
+ assert.deepEqual(order.warehouseShipmentRecords,before.state.docs[0].warehouseShipmentRecords);
+ assert.deepEqual(after.documents.procurementDemands,before.documents.procurementDemands);
+ await x.receive(x.closeRequest());assert.deepEqual(await closedLifecycleSnapshot(x),after);
+ await assert.rejects(x.receive(x.closeRequest({reason:'另一意圖'})),/其他交易/);
+ const restored=await x.lifecycle('normal');assert.equal(restored.reservedQty,6);assert.equal(restored.shortageQty,0);
+ const hold=await x.read('inventoryReservations',x.orderId+'__I');await x.prepare(6,'cancel_close_remaining_prepare',x.adminUid);
+ for(const row of hold.locations){const tag='cancel_close_remaining_'+row.warehouseId;
+  await x.ship(row.warehouseId,row.reservedQty,tag);
+  await x.confirm(x.deliveryRequest(row.reservedQty,'delivery_'+tag,tag),x.adminUid);}
+ const completed=await x.read('orders',x.orderId);assert.equal(completed.deliveredQty,10);assert.equal(completed.returnedQty,1);assert.equal(completed.isDelivered,true);
+ assert.equal((await x.read('inventory',x.key)).onHand,7);assert.equal((await x.read('inventory',x.key)).reserved,2);
+ const final=await snapshot(x);await x.receive(x.closeRequest());assert.deepEqual(await snapshot(x),final);
+});
+test('cancelled CLOSE can follow a previous CLOSE and repeated returns share original delivered and lot allowance',async()=>{
+ const x=await closedLifecycleFixture('cancel-return-prior');await x.lifecycle('cancelled');
+ await x.receive(x.returnRequest({settlement:'CLOSE',operationId:'cancel_return_prior_second',date:'2026-10-23'}));
+ const order=await x.read('orders',x.orderId);assert.equal(order.returnedQty,2);assert.equal(order.returnRecords.length,2);
+ assert.equal((await x.read('inventoryReservations',x.orderId+'__I')).status,'released');
+ const before=await snapshot(x);
+ await assert.rejects(x.receive(x.returnRequest({settlement:'CLOSE',operationId:'cancel_return_prior_excess',date:'2026-10-23'})),/批次|超過/);
+ assert.deepEqual(await snapshot(x),before);assert.equal((await x.lifecycle('normal')).reservedQty,6);
+});
+test('cancelled CLOSE preserves five-role ownership and current active actor checks including replay',async()=>{
+ for(const role of ['admin','sales','engineer','purchaser','warehouse']){
+  const x=await cancelledReturnFixture('roles-'+role,{role}),before=await snapshot(x);
+  if(['admin','sales','engineer'].includes(role)){
+   assert.equal((await x.receive(x.closeRequest())).reservedQty,0);
+   await db.collection('users').doc(x.uid).update({disabled:true});const committed=await snapshot(x);
+   await assert.rejects(x.receive(x.closeRequest()),/權限/);assert.deepEqual(await snapshot(x),committed);
+  }else{await assert.rejects(x.receive(x.closeRequest()),/權限/);assert.deepEqual(await snapshot(x),before);}
+ }
+ const x=await cancelledReturnFixture('foreign');
+ for(const role of ['sales','engineer']){const uid='cancel-return-foreign-'+role;await db.collection('users').doc(uid).set({role,active:true});
+  const before=await snapshot(x);await assert.rejects(x.receive(x.closeRequest(),uid),/自己訂單/);assert.deepEqual(await snapshot(x),before);}
+});
+test('cancelled CLOSE refuses residual holds wrong lifecycle and forged shipment or earlier return evidence atomically',async()=>{
+ const cases=[
+  ['status',x=>db.collection('orders').doc(x.orderId).update({orderStatus:'normal'})],
+  ['ledger-status',x=>db.collection('inventoryReservations').doc(x.orderId+'__I').update({status:'fulfilled'})],
+  ['shortage',x=>db.collection('inventoryReservations').doc(x.orderId+'__I').update({shortageQty:1})],
+  ['hold',x=>db.collection('inventoryReservations').doc(x.orderId+'__I').update({quantity:1,locations:[{warehouseId:B,reservedQty:1}]})],
+  ['item',async x=>{const o=await x.read('orders',x.orderId);o.items[0].reservedQty=1;await db.collection('orders').doc(x.orderId).update({items:o.items});}],
+  ['paperwork',async x=>{const o=await x.read('orders',x.orderId);o.items[0].dispatchPreparedQty=5;await db.collection('orders').doc(x.orderId).update({items:o.items});}],
+  ['sync',x=>db.collection('orders').doc(x.orderId).update({inventoryReservationAttemptId:'different'})],
+  ['shipment',x=>db.collection('inventoryMovements').doc('location-ship-'+x.shipmentRequest.operationId).delete()],
+  ['lot',x=>db.collection('inventoryLots').doc(x.key+'-a-early').delete()],
+ ];
+ for(const [name,mutate] of cases){const x=await cancelledReturnFixture('bad-'+name);await mutate(x);const before=await snapshot(x);
+  await assert.rejects(x.receive(x.closeRequest()));assert.deepEqual(await snapshot(x),before,name);}
+ for(const kind of ['missing','hash','hidden','history']){
+  const x=await closedLifecycleFixture('cancel-return-'+kind);await x.lifecycle('cancelled');const o=await x.read('orders',x.orderId),r=o.returnRecords[0];
+  if(kind==='missing')await db.collection('inventoryMovements').doc(r.movementId).delete();
+  if(kind==='hash')await db.collection('inventoryMovements').doc(r.movementId).update({intentHash:'altered'});
+  if(kind==='hidden'){o.items[0].returnedQty=0;await db.collection('orders').doc(x.orderId).update({items:o.items,returnRecords:[],returnHistory:[],returnedQty:0});}
+  if(kind==='history')await db.collection('orders').doc(x.orderId).update({returnHistory:[{action:'remove',recordId:r.id}]});
+  const before=await snapshot(x);await assert.rejects(x.receive(x.returnRequest({settlement:'CLOSE',operationId:'cancel_return_bad_'+kind,date:'2026-10-23'})));
+  assert.deepEqual(await snapshot(x),before,kind);
+ }
+ const x=await cancelledReturnFixture('replace'),before=await snapshot(x);await assert.rejects(x.receive(x.returnRequest()),/取消|結案/);assert.deepEqual(await snapshot(x),before);
+});
+test('cancelled return does not open acknowledgement reversal trace or replacement and rejects in-flight cancellation caches',async()=>{
+ const x=await cancelledReturnFixture('boundaries'),before=await snapshot(x);
+ await assert.rejects(x.confirm(x.deliveryRequest(1,'cancel_return_new_ack')),/取消|結案/);
+ await assert.rejects(x.reverse(),/取消|結案/);await assert.rejects(x.trace(),/取消|結案/);assert.deepEqual(await snapshot(x),before);
+ const pending=await returnFixture('cancel-return-inflight',{prepared:4,confirmedQty:2});
+ // A corrupt external status cache must not pretend the real cancellation service completed.
+ const o=await pending.read('orders',pending.orderId);o.items[0].reservedQty=0;o.items[0].shortageQty=0;
+ await db.collection('orders').doc(pending.orderId).update({status:'cancelled',orderStatus:'cancelled',items:o.items});
+ await db.collection('inventoryReservations').doc(pending.orderId+'__I').update({quantity:0,shortageQty:0,locations:[],status:'released'});
+ const state=await snapshot(pending);await assert.rejects(pending.receive(pending.returnRequest({settlement:'CLOSE'})),/途中/);assert.deepEqual(await snapshot(pending),state);
+});
+test('CLOSE return racing cancellation restoration or competing receipts serializes without duplicate stock or reservation',async()=>{
+ const x=withReturnLifecycle(await returnFixture('cancel-return-race',{prepared:4,confirmedQty:4}),'cancel-return-race');
+ const request=x.returnRequest({settlement:'CLOSE'});
+ await Promise.all([x.lifecycle('cancelled'),x.receive(request)]);
+ let stock=await x.read('inventory',x.key);assert.equal(stock.onHand,13);assert.equal(stock.reserved,2);
+ const next=x.returnRequest({settlement:'CLOSE',operationId:'cancel_return_restore_race',date:'2026-10-23'});
+ await Promise.all([x.lifecycle('normal'),x.receive(next)]);stock=await x.read('inventory',x.key);assert.equal(stock.onHand,14);assert.equal(stock.reserved,8);
+ const y=await cancelledReturnFixture('double-race'),make=operationId=>y.closeRequest({operationId,selections:[{lotId:y.key+'-a-early',qty:2}]});
+ const results=await Promise.allSettled([y.receive(make('cancel_return_race_one')),y.receive(make('cancel_return_race_two'))]);
+ assert.equal(results.filter(r=>r.status==='fulfilled').length,1);assert.equal((await y.read('inventory',y.key)).onHand,14);
+ assert.equal((await y.read('inventoryReservations',y.orderId+'__I')).quantity,0);
+});
+test('cancelled CLOSE late collision rolls back all physical and history writes and retains bounded same-ID retry',async()=>{
+ const x=await cancelledReturnFixture('rollback'),collision=db.collection('inventoryMovements').doc('cancel-return-collision');await collision.set({marker:true});
+ const wrapper={projectId:db.projectId,collection:n=>db.collection(n),runTransaction:fn=>db.runTransaction(tx=>fn({
+  get:r=>tx.get(r),update:(...a)=>tx.update(...a),set:(...a)=>tx.set(...a),create:(...a)=>{tx.create(...a);tx.create(collision,{marker:false});}}))};
+ const before=await closedLifecycleSnapshot(x);await assert.rejects(x.receive(x.closeRequest(),x.uid,wrapper));assert.deepEqual(await closedLifecycleSnapshot(x),before);
+ let reads=0,writes=0;
+ const guarded={projectId:db.projectId,collection:n=>{assert.ok(['users','orders','inventoryMovements','inventory','warehouseStocks','inventoryReservations','warehouses','inventoryLots'].includes(n));return db.collection(n);},
+  runTransaction:fn=>db.runTransaction(tx=>fn({get:r=>{reads++;return tx.get(r);},update:(...a)=>{writes++;return tx.update(...a);},set:(...a)=>{writes++;return tx.set(...a);},create:(...a)=>{writes++;return tx.create(...a);}}))};
+ assert.equal((await x.receive(x.closeRequest(),x.uid,guarded)).status,'applied');assert.equal(reads,10);assert.equal(writes,6);
+ const after=await snapshot(x);await x.receive(x.closeRequest());assert.deepEqual(await snapshot(x),after);
+});
+test('cancelled CLOSE movement redistributes at most its returned unit to another order and never reactivates its source',async()=>{
+ const x=await cancelledReturnFixture('recovery',{role:'admin'});await competingClosedOrder(x,'consume-free',9);
+ const target=await competingClosedOrder(x,'waiting');assert.equal((await x.read('inventoryReservations',target+'__C')).shortageQty,10);
+ const returned=await commitLocationReturnAndRecover(db,x.uid,x.closeRequest());assert.equal(returned.postCommitAllocation.status,'completed');
+ assert.equal(returned.postCommitAllocation.sources[0].allocatedQty,1);
+ assert.equal((await x.read('inventoryReservations',target+'__C')).quantity,1);
+ assert.equal((await x.read('inventoryReservations',x.orderId+'__I')).status,'released');assert.equal((await x.read('orders',x.orderId)).status,'cancelled');
+ const after=await snapshot(x);await commitLocationReturnAndRecover(db,x.uid,x.closeRequest());assert.deepEqual(await snapshot(x),after);
 });

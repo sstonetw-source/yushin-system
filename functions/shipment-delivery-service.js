@@ -42,11 +42,13 @@ async function readShipmentActorOrder(tx,db,uid,orderId,roles=['admin','sales','
   if(order.deliveryHistory!==undefined&&!Array.isArray(order.deliveryHistory))fault('送達歷史格式不正確');
   return {actorRole,orderRef,order};
 }
-function shipmentDeliveryContext(order,intent,{allowReturns=false}={}) {
+function shipmentDeliveryContext(order,intent,{allowReturns=false,allowCancelledCloseReturn=false}={}) {
  const {orderId,itemId,syncAttemptId}=intent;
   if(order.inventoryReservationStatus!=='completed'||order.inventoryReservationAttemptId!==syncAttemptId)
    fault('庫存同步未完成或來源同步識別碼已變更');
-  if(!['active','normal'].includes(order.status)||![undefined,'','normal','active'].includes(order.orderStatus))
+  const cancelled=order.status==='cancelled'&&order.orderStatus==='cancelled';
+  if(!(allowReturns&&allowCancelledCloseReturn&&cancelled)
+   &&(!['active','normal'].includes(order.status)||![undefined,'','normal','active'].includes(order.orderStatus)))
    fault('已取消或結案訂單不可新增送達');
   if(!order.ownerUid||!order.salesCode||!Array.isArray(order.items)||order.items.length!==1)
    fault('此試點僅限所有權明確的單品項訂單');
@@ -68,7 +70,7 @@ function shipmentDeliveryContext(order,intent,{allowReturns=false}={}) {
    ||(allowReturns&&((item.returnedQty??0)!==returnProjection.returnedQty
     ||(order.returnedQty??0)!==returnProjection.returnedQty)))
    fault('出貨或客戶送達投影不一致');
-  return {item,productKey,projection,returnProjection};
+  return {item,productKey,projection,returnProjection,cancelled};
 }
 async function readShipmentProof(tx,db,order,intent,productKey) {
  const {orderId,itemId,shipmentId,syncAttemptId}=intent;

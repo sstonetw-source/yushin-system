@@ -21,13 +21,19 @@ async function commitLocationReturn(db,uid,data){
     fault('退貨操作識別碼已用於其他交易','already-exists');
    return {...prior.result,status:'already-applied',movementId:movementRef.id};
   }
-  const {item,productKey,projection,returnProjection}=shipmentDeliveryContext(order,intent,{allowReturns:true});
+  const {item,productKey,projection,returnProjection,cancelled}=shipmentDeliveryContext(order,intent,{
+   allowReturns:true,allowCancelledCloseReturn:intent.settlement==='CLOSE'});
   if(order.returnHistory!==undefined&&!Array.isArray(order.returnHistory))fault('退貨歷史格式不正確');
+  if(cancelled&&(returnProjection.replacementQty!==0||projection.pendingDeliveryQty!==0
+   ||qty(item.dispatchPreparedQty??0)!==projection.shippedQty
+   ||(order.returnHistory??[]).some(event=>event?.action!=='add'
+     ||!order.returnRecords.some(record=>record.id===event.recordId))))
+   fault('取消訂單僅支援無途中貨、無額外打單及無更正歷史的 CLOSE 退貨');
   if(order.returnRecords.some(r=>r.id===operationId)||(order.returnHistory||[]).some(r=>r.recordId===operationId))
    fault('此退貨操作已有歷史紀錄，不能重複入庫');
   const shipment=await readShipmentProof(tx,db,order,intent,productKey);
   if(warehouseId!==shipment.warehouseId)fault('此試點只能收回原出貨倉，不可跨倉退回');
-  await readLocationReturnProofs(tx,db,order,intent,productKey);
+  await readLocationReturnProofs(tx,db,order,intent,productKey,{closedOnly:cancelled});
   const confirmedQty=projection.shipments.find(r=>r.shipmentId===intent.shipmentId)?.confirmedQty??0;
   const plan=inventory.planExplicitShipmentReturn({shipment,confirmedQty,selections:intent.selections,
    priorReturns:order.returnRecords.filter(r=>r.shipmentId===shipment.id)});
@@ -44,13 +50,13 @@ async function commitLocationReturn(db,uid,data){
   if(ledger.locationSchemaVersion!==2||ledger.warehouseId!==undefined
    ||ledger.orderId!==orderId||ledger.itemId!==itemId||ledger.productKey!==productKey
    ||ledger.ownerUid!==order.ownerUid||ledger.salesCode!==order.salesCode
-   ||ledger.status!==(qty(ledger.quantity)?'active':qty(ledger.shortageQty)?'shortage':'fulfilled')
-   ||qty(ledger.quantity)+qty(ledger.shortageQty)!==returnProjection.outstandingQty
+   ||ledger.status!==(cancelled?'released':qty(ledger.quantity)?'active':qty(ledger.shortageQty)?'shortage':'fulfilled')
+   ||qty(ledger.quantity)+qty(ledger.shortageQty)!==(cancelled?0:returnProjection.outstandingQty)
    ||qty(item.shortageQty)!==ledger.shortageQty
    ||inv.data().productKey!==productKey||stock.data().productKey!==productKey||stock.data().warehouseId!==warehouseId)
    fault('退貨預留來源、投影或公司／分倉帳目不一致');
   const stockPlan=reservation.planReservationReturn({operation:'CUSTOMER_RETURN',deltaQty:plan.returnQty,
-   settlement:intent.settlement,orderStatus:'normal',productKey,warehouseId,reservation:ledger,
+   settlement:intent.settlement,orderStatus:cancelled?'cancelled':'normal',productKey,warehouseId,reservation:ledger,
    aggregateStock:inv.data(),warehouseStock:stock.data(),itemReservedQty:item.reservedQty});
   const candidates=await tx.get(db.collection('inventoryLots').where('productKey','==',productKey)
    .where('warehouseId','==',warehouseId).limit(201));
@@ -74,7 +80,7 @@ async function commitLocationReturn(db,uid,data){
   const records=[...order.returnRecords,record];
   const next=fulfillment.projectShipmentReturns({orderId,itemId,productKey,orderedQty:item.qty??item.orderedQty,
    shipments:order.warehouseShipmentRecords,deliveries:order.deliveryRecords,returns:records});
-  if(stockPlan.reservation.quantity+stockPlan.reservation.shortageQty!==next.outstandingQty)
+  if(stockPlan.reservation.quantity+stockPlan.reservation.shortageQty!==(cancelled?0:next.outstandingQty))
    fault('退貨後預留與補送需求不一致');
   const result={orderId,itemId,shipmentId:shipment.id,warehouseId,qty:plan.returnQty,settlement:intent.settlement,
    returnedQty:next.returnedQty,closedQty:next.closedQty,replacementQty:next.replacementQty,
