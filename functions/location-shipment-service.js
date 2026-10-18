@@ -167,7 +167,7 @@ async function commitLocationShipment(db,uid,data){
      if(!amount||seen.has(wh)||!source.lifecycleWarehouseIds.includes(wh))
       fault('來源分倉預留異常');
      seen.add(wh);subtotal=quantity(subtotal+amount,'分倉預留合計');
-     const key=siblingKey+'__'+wh;
+     const key=JSON.stringify([siblingKey,wh]);
      warehouseClaims.set(key,quantity((warehouseClaims.get(key)||0)+amount,'分倉預留合計'));
     }
     if(subtotal!==held)fault('來源預留合計不一致');
@@ -181,7 +181,7 @@ async function commitLocationShipment(db,uid,data){
      fault('整單商品預留超過公司現有總帳');
    }
    for(const [key,amount] of warehouseClaims){
-    const index=key.lastIndexOf('__'),productKey=key.slice(0,index),wh=key.slice(index+2);
+    const [productKey,wh]=JSON.parse(key);
     const snapshot=await tx.get(ref('warehouseStocks',encodeURIComponent(wh)+'__'+encodeURIComponent(productKey)));
     if(!snapshot.exists||snapshot.data().productKey!==productKey||snapshot.data().warehouseId!==wh
      ||quantity(snapshot.data().reserved,'分倉預留')<amount)
