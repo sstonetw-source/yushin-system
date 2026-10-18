@@ -1750,3 +1750,49 @@ test('multi-item failed delivery document update rolls back confirmation and sam
  assert.equal((await x.ack('I1','multi_ack_rollback_s',1,'multi_ack_rollback_d')).status,'applied');
  assert.equal((await x.ack('I1','multi_ack_rollback_s',1,'multi_ack_rollback_d')).status,'already-applied');
 });
+
+test('whole-order delivery becomes complete only after every real line and shipment has been acknowledged',async()=>{
+ const name='full-two-line',uid='full-ack-purchaser',actor='full-ack-admin',
+  orderId='full-ack-order',key='full-ack-product';
+ const batch=db.batch(),set=(coll,id,data)=>batch.set(db.collection(coll).doc(id),data);
+ set('users',uid,{role:'purchaser',active:true});set('users',actor,{role:'admin',active:true});
+ set('products',key,{productType:'Goods',active:true});
+ set('orders',orderId,{ownerUid:uid,salesCode:'FULL',status:'active',
+  inventoryReservationStatus:'pending',items:[
+   {itemId:'I1',productId:key,qty:3,warehouseId:A,deliveryPlan:plan},
+   {itemId:'I2',productId:key,qty:3,warehouseId:B,deliveryPlan:plan}
+  ],deliveryRecords:[],returnRecords:[],warehouseShipmentRecords:[]});
+ set('inventory',key,{productKey:key,onHand:6,reserved:0,incoming:0,transferFreeInTransit:0});
+ for(const wh of [A,B]){
+  set('warehouses',wh,{active:true});
+  set('warehouseStocks',wh+'__'+key,{productKey:key,warehouseId:wh,onHand:3,reserved:0,incoming:0,transferFreeInTransit:0});
+  set('inventoryLots',key+'-'+wh,{productKey:key,warehouseId:wh,remainingQty:3,receivedQty:3,
+   lotNo:'BATCH-'+wh,expiryDate:'2027-12-31',receivedAt:'2026-10-18T00:00:00Z',unitCost:0});
+ }
+ await batch.commit();
+ const initialized=await synchronizeV2OrderFixture(db,uid,{orderId,warehouseIds:[A,B]});
+ const syncAttemptId=initialized.order.inventoryReservationAttemptId;
+ for(const item of [{itemId:'I1',warehouseId:A},{itemId:'I2',warehouseId:B}]){
+  await commitLocationDispatchPreparation(db,uid,{orderId,itemId:item.itemId,quantity:3,
+   operationId:'full_ack_prepare_'+item.itemId,syncAttemptId});
+  await commitLocationShipment(db,uid,{orderId,itemId:item.itemId,warehouseId:item.warehouseId,
+   quantity:3,operationId:'full_ack_ship_'+item.itemId,syncAttemptId,date:'2026-10-19',expectedPlan:plan});
+ }
+ const intent=itemId=>({orderId,itemId,shipmentId:'full_ack_ship_'+itemId,
+  quantity:3,operationId:'full_ack_delivery_'+itemId,syncAttemptId,date:'2026-10-19'});
+ const first=await confirmMultiDelivery(db,actor,intent('I1'));
+ assert.equal(first.itemIsDelivered,true);assert.equal(first.isDelivered,false);
+ const half=(await db.collection('orders').doc(orderId).get()).data();
+ assert.equal(half.deliveredQty,3);assert.equal(half.isDelivered,false);
+ const second=await confirmMultiDelivery(db,actor,intent('I2'));
+ assert.equal(second.itemIsDelivered,true);assert.equal(second.isDelivered,true);
+ const completed=(await db.collection('orders').doc(orderId).get()).data();
+ assert.equal(completed.deliveredQty,6);assert.equal(completed.isDelivered,true);
+ assert.deepEqual(completed.items.map(row=>row.deliveredQty),[3,3]);
+ const beforeLots=await Promise.all([A,B].map(wh=>db.collection('inventoryLots').doc(key+'-'+wh).get()));
+ assert.deepEqual(beforeLots.map(s=>s.data().remainingQty),[0,0]);
+ assert.equal((await confirmMultiDelivery(db,actor,intent('I2'))).status,'already-applied');
+ const after=(await db.collection('orders').doc(orderId).get()).data();
+ assert.deepEqual(after,completed);
+ assert.deepEqual((await Promise.all([A,B].map(wh=>db.collection('inventoryLots').doc(key+'-'+wh).get()))).map(s=>s.data().remainingQty),[0,0]);
+});
