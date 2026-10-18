@@ -227,3 +227,17 @@ test('actual purchasing projection excludes warehouse shipments awaiting acknowl
  order.warehouseShipmentRecords[0].sourceType='UNRECOGNIZED';
  assert.throws(()=>c.procurementDemandForOrderItem(order,item));
 });
+
+test('actual purchasing projection keeps CLOSE returns closed after receipt and pending acknowledgement',()=>{
+ const c=vm.createContext({YushinWorkflow:workflow,YushinProcurementDemand:demandCore,
+  itemDispatchState:()=>({grossDelivered:2,delivered:2,returned:1})});
+ vm.runInContext(section('function procurementDemandForOrderItem(', 'function purchasingLifecycleSnapshot('),c);
+ const item={itemId:'I',productId:'P',qty:10,reservedQty:4,shortageQty:2,supplyOrderedQty:3,receivedQty:1,warehouseShippedQty:4,returnedQty:1};
+ const order={id:'O',items:[item],warehouseShipmentRecords:[{id:'S',orderId:'O',itemId:'I',productKey:'P',warehouseId:'A',date:'2026-10-17',qty:4,sourceType:'WAREHOUSE_CUSTOMER_SHIPMENT'}],
+  deliveryRecords:[{id:'D',shipmentId:'S',orderId:'O',itemId:'I',productKey:'P',warehouseId:'A',date:'2026-10-17',qty:2,sourceType:'WAREHOUSE_SHIPMENT_CONFIRMATION'}],
+  returnRecords:[{id:'R',shipmentId:'S',orderId:'O',itemId:'I',productKey:'P',warehouseId:'A',date:'2026-10-17',qty:1,sourceType:'WAREHOUSE_CUSTOMER_RETURN',condition:'RESTOCKABLE',settlement:'CLOSE'}]};
+ const demand=c.procurementDemandForOrderItem(order,item);
+ assert.equal(demand.requestedQty,3);assert.equal(demand.remainingToOrderQty,0);assert.equal(demand.remainingToReceiveQty,2);
+ item.receivedQty=2;item.reservedQty=5;item.shortageQty=1;
+ const next=c.procurementDemandForOrderItem(order,item);assert.equal(next.requestedQty,3);assert.equal(next.remainingToOrderQty,0);assert.equal(next.remainingToReceiveQty,1);
+});

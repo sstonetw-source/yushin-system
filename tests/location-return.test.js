@@ -81,3 +81,14 @@ test('chronological return allowance is independent of cache order and aggregate
  assert.throws(()=>core.projectShipmentReturns({...base,returns:[early,returned({id:'R-same-day',qty:1})]}),/當時已送達量/);
  assert.throws(()=>core.projectShipmentReturns({...base,returns:[later,returned({qty:3})]}),/當時已送達量/);
 });
+
+test('shared return intent keeps the historical SHA-256 serialization in browser and server',async()=>{
+ const {createHash,webcrypto}=require('node:crypto');
+ const intent=core.normalizeLocationReturnIntent(request());
+ // Golden hash computed from main before extracting the pure normalizer.
+ const original={hash:'6fb12a52804365d440c1155419081f5dd9c913e6371568b8b7a9b621e125093d'};
+ assert.equal(createHash('sha256').update(JSON.stringify(intent)).digest('hex'),original.hash);
+ const digest=await webcrypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(intent)));
+ assert.equal(Buffer.from(digest).toString('hex'),original.hash);
+ assert.equal(normalizeLocationReturnIntent(request()).hash,original.hash);
+});

@@ -229,3 +229,10 @@ v2 到貨自由實貨**不新增欄位／Collection**。既有 `receipts/{receip
 沒有新增欄位、集合或來源憑證格式。`orders.returnRecords`／兩層 returnedQty 必須與共同投影及原 `location_customer_return` movements 一致，取消與恢復都驗證；缺失、竄改或清除退貨快取不得繞過。原 lifecycle operation ID／intent hash／receipt、ledger 與 release/reserve movement 格式保持不變，固定 ID 重送仍只回原結果。
 
 每次首次 lifecycle 交易新增一次 sourceId + action 的既有 return movement 查詢（limit 201，最多接受 200）；舊初始 v2 無 returnRecords 欄位時以空快取唯讀檢查，不回填正式資料。既有供應／採購單／實收 proof 同交易檢查保留；取消／恢復只寫原狀態、預留、需求、操作歷史與憑證，不改實貨、批次或既有交付／退貨／採購／收貨事實。無新 Index／Rules／Listener 或遷移。
+
+
+### CLOSE 後收貨契約（2026-10-18，Emulator-only）
+
+無新 collection／持久欄位。warehouseShipmentContext 增加 `returns`，只供 Core 計算、不寫入 items；Workflow stockOutstandingQty 使用 projectShipmentReturns.outstandingQty，CLOSE 等於原訂購量減歷史寄出量。receivedQty／supplyOrderedQty 仍是累計供應事實；returnedQty 與 returnRecords／returnHistory 不因新 receipt 刪除或縮量。
+
+首次 v2 收貨交易新增一次 sourceId＋action 等值 return movement query，limit201、最多接受200筆；即使空 returnRecords 也驗證。每筆比對完整 returnRecord、原 canonical intent hash 與固定 movement ID；無額外庫存／成本查詢或寫入。原庫存／批次／成本／receipt／需求與供應寫入契約不變。既有同 ID receipt replay 不重新入庫；正常首次收貨仍重讀實際角色。無 migration、Index／Rules／Listener 變更；正式查詢索引仍須 Preview 驗證。

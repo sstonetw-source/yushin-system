@@ -60,7 +60,8 @@
       ? require('./workflow-core.js') : root?.YushinWorkflow;
     if(!workflow?.projectItem)throw new Error('Workflow core 未載入，無法更新收貨預留。');
     const projection=workflow.projectItem({
-      ...item,grossDeliveredQty:item.deliveredQty??0,effectiveDeliveredQty:undefined,warehouseShipmentContext
+      ...item,grossDeliveredQty:item.deliveredQty??0,
+      effectiveDeliveredQty:warehouseShipmentContext===undefined?undefined:item.deliveredQty??0,warehouseShipmentContext
     });
     const orderedQty=projection.orderedQty;
     const outstandingQty=projection.stockOutstandingQty??projection.outstandingQty;
