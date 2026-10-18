@@ -13,6 +13,6 @@
 
 ## 驗收與未開放範圍
 
-本批新增八組真正的 Firestore Emulator 測試：分倉分品項累計、部分送達、五角色（實際只允許原三個業務角色）、固定 ID／競態、不同品項同時確認、不可變扣帳損壞與隱藏退貨、無效兄弟投影、送達提交失敗回滾。既有 Node、Rules、Auth/Callable 及 Chrome 回歸由 PR CI 確認。
+本批新增九組真正的 Firestore Emulator 測試：分倉分品項累計、部分送達、五角色（實際只允許原三個業務角色）、固定 ID／競態、不同品項同時確認、不可變扣帳損壞與隱藏退貨、無效兄弟投影、送達提交失敗回滾。既有 Node、Rules、Auth/Callable 及 Chrome 回歸由 PR CI 確認。
 
 仍未完成：多品項送達撤銷、多品項退貨 receipt writer、多品項履約後收貨／取消與恢復、完整 Auth Browser/Preview E2E；因此**正式系統 v2 仍維持停用**，沒有對外部署。
