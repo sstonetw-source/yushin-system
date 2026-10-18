@@ -536,3 +536,7 @@ Workflow 的明確 warehouseShipmentContext 現包含 returns，以原 projectSh
 ### 2026-10-18 整單履約 Core 與打單
 
 原 Fulfillment Core 以 projectOrderShipmentReturns 驗證完整事件並分組呼叫既有逐品項投影；原 v2 打單 Service 使用其整單與逐項結果，核對全單 ledger、出貨扣帳與退貨入庫憑證後，只改選定品項及一份打單記錄。仍 Emulator-only，多品項出貨／送達 writer 尚未擴充。見 [契約及驗收](multi-item-dispatch-20261018.md)。
+
+### 2026-10-18 多品項雙倉實際出貨（待 PR CI）
+
+原 `commitLocationShipment` 現沿用整單履約投影驗證 1–5 品項的來源及所有歷史出貨／退貨憑證，再以原預留 Core 和批次分配原子扣除選定品項的實貨與 ledger，保留其他品項資料，不建立第二套交易邏輯。此階段只支援 demo Emulator；未接多品項送達／正式 Callable 或 UI。見 [出貨試點契約](multi-item-shipment-20261018.md)。
