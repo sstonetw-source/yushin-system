@@ -1,5 +1,5 @@
 'use strict';
-// Internal v2 single-item planner and Emulator-only atomic writer. Do NOT expose
+// Internal v2 location planner and Emulator-only atomic writer. Do NOT expose
 // a Callable until all fulfillment writers support the same location ledger.
 const {createHash}=require('node:crypto');
 const core=require('./shared/reservation-core');
@@ -33,22 +33,44 @@ function normalizeCommitIntent(data){
  const hash=createHash('sha256').update(JSON.stringify({...intent,syncAttemptId})).digest('hex');
  return {...intent,attemptId,syncAttemptId,hash};
 }
+function normalizeOrderCommitIntent(data){
+ const fields=['orderId','itemIds','warehouseIds','attemptId','syncAttemptId'];
+ if(!data||typeof data!=='object'||Array.isArray(data)||Object.keys(data).some(k=>!fields.includes(k))
+   ||!Array.isArray(data.itemIds)||data.itemIds.length<1||data.itemIds.length>5)
+  reject('整單雙倉一次須包含 1 至 5 個品項','invalid-argument');
+ const itemIds=data.itemIds.map(value=>ident(value,'品項')).sort();
+ if(new Set(itemIds).size!==itemIds.length)reject('訂單品項重複','invalid-argument');
+ const single=normalizeCommitIntent({orderId:data.orderId,itemId:itemIds[0],warehouseIds:data.warehouseIds,
+  attemptId:data.attemptId,syncAttemptId:data.syncAttemptId});
+ const intent={orderId:single.orderId,itemIds,warehouseIds:single.warehouseIds,syncAttemptId:single.syncAttemptId};
+ return {...intent,attemptId:single.attemptId,hash:createHash('sha256').update(JSON.stringify(intent)).digest('hex')};
+}
+async function commitOrderTwoWarehouse(db,uid,data){
+ if(!process.env.FIRESTORE_EMULATOR_HOST||db.projectId!=='demo-yushin')
+  reject('整單雙倉 v2 提交目前僅允許 demo-yushin Emulator');
+ const operation=normalizeOrderCommitIntent(data);
+ return runLocationReservation(db,uid,{orderId:operation.orderId,itemIds:operation.itemIds,
+  warehouseIds:operation.warehouseIds},operation);
+}
 async function commitSingleItemTwoWarehouse(db,uid,data){
  // Even a direct accidental import cannot write v2 into Preview/production yet.
  if(!process.env.FIRESTORE_EMULATOR_HOST||db.projectId!=='demo-yushin')
    reject('雙倉 v2 提交目前僅允許 demo-yushin Emulator');
  const operation=normalizeCommitIntent(data);
  const {orderId,itemId,warehouseIds}=operation;
- return runSingleItemTwoWarehouse(db,uid,{orderId,itemId,warehouseIds},operation);
+ return runLocationReservation(db,uid,{orderId,itemId,warehouseIds},operation);
 }
 async function planSingleItemTwoWarehouse(db,uid,input){
- return runSingleItemTwoWarehouse(db,uid,input);
+ return runLocationReservation(db,uid,normalizeSingleItemIntent(input));
 }
-async function runSingleItemTwoWarehouse(db,uid,input,operation=null){
+async function runLocationReservation(db,uid,input,operation=null){
  ident(uid,'登入者');
- const {orderId,itemId,warehouseIds}=normalizeSingleItemIntent(input);
+ const wholeOrder=Array.isArray(input?.itemIds);
+ const {orderId,warehouseIds}=wholeOrder?input:normalizeSingleItemIntent(input);
+ const requestedItemIds=wholeOrder?input.itemIds:[input.itemId];
  const ref=(name,id)=>db.collection(name).doc(id);
- const receiptRef=operation?ref('reservationOperationReceipts','single-v2-'+operation.attemptId):null;
+ const action=wholeOrder?'order_location_reservation':'single_item_location_reservation';
+ const receiptRef=operation?ref('reservationOperationReceipts',(wholeOrder?'order-v2-':'single-v2-')+operation.attemptId):null;
  return db.runTransaction(async tx=>{
   const profile=await tx.get(ref('users',uid));
   if(!profile.exists||profile.data().active===false||profile.data().disabled===true)
@@ -68,7 +90,8 @@ async function runSingleItemTwoWarehouse(db,uid,input,operation=null){
    if(applied.exists){
     const receipt=applied.data();
     if(receipt.actorUid!==uid||receipt.actorRole!==role||receipt.intentHash!==operation.hash
-      ||receipt.orderId!==orderId||receipt.itemId!==itemId||receipt.action!=='single_item_location_reservation')
+      ||receipt.orderId!==orderId||receipt.action!==action
+      ||(wholeOrder?JSON.stringify(receipt.itemIds)!==JSON.stringify(requestedItemIds):receipt.itemId!==requestedItemIds[0]))
       reject('操作識別碼已用於其他交易','already-exists');
     return {...receipt.result,status:'already-applied',receiptId:receiptRef.id};
    }
@@ -80,80 +103,142 @@ async function runSingleItemTwoWarehouse(db,uid,input,operation=null){
       [order.status,order.orderStatus].some(v=>String(v||'').toLowerCase()===x)))
     reject('已取消或結案訂單不可建立預留');
   if(!Array.isArray(order.items))reject('訂單缺少品項');
-  const matches=order.items.map((v,index)=>({v,index,id:String(v.itemId||'item-'+(index+1))})).filter(x=>x.id===itemId);
-  if(matches.length!==1)reject('來源品項不是唯一');
-  const item=matches[0].v;
-  if((item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'||String(item.productType||item.type||'').toUpperCase()==='SERVICE'
-    ||item.transferPendingId||item.custodyTransferId||integer(item.dispatchPreparedQty??0,'備貨量')>0)
-    reject('非實體倉或已開始物流的品項不可預留');
-  if(operation&&(integer(item.supplyOrderedQty??0,'供應量')||integer(item.receivedQty??0,'已收貨')))
-    reject('已開始供應或收貨的品項不可用初始雙倉提交');
-  const requested=integer(item.qty??item.orderedQty,'訂購量');
-  const productId=ident(item.productId,'產品主檔');
-  const productKey=ident(item.inventoryProductKey||productId,'庫存產品');
-  const hint=ident(item.warehouseId||order.warehouseId,'來源倉');
-  if(!warehouseIds.includes(hint))reject('候選倉庫須包含來源指定倉');
-  const productSnap=await tx.get(ref('products',productId));
-  if(!productSnap.exists||String(productSnap.data().productType||productSnap.data().type||'').toUpperCase()==='SERVICE')
-    reject('服務商品不可實體預留');
-  const companySnap=await tx.get(ref('inventory',encodeURIComponent(productKey)));
-  if(!companySnap.exists||companySnap.data().productKey!==productKey)reject('公司庫存資料不完整');
-  const company={...checkStock(companySnap.data(),'公司'),productKey};
-  const warehouses=[],stocks={};
-  for(const warehouseId of warehouseIds){
-    const wh=await tx.get(ref('warehouses',warehouseId));
-    const raw=await tx.get(ref('warehouseStocks',encodeURIComponent(warehouseId)+'__'+encodeURIComponent(productKey)));
-    if(!wh.exists||!raw.exists)reject('來源分倉資料不存在');
-    const master={...wh.data(),id:warehouseId};
-    if(master.active===false||master.systemCustody||master.warehouseType==='CUSTODY'
-      ||warehouseId.startsWith('custody-')||raw.data().productKey!==productKey||raw.data().warehouseId!==warehouseId)
-      reject('候選位置不是啟用中實體倉');
-    warehouses.push(master);
-    stocks[warehouseId]={...checkStock(raw.data(),warehouseId),productKey,warehouseId};
+  if(wholeOrder){
+   const sourceIds=order.items.map(row=>row?.itemId);
+   if(sourceIds.length!==requestedItemIds.length||new Set(sourceIds).size!==sourceIds.length
+     ||sourceIds.some(value=>!requestedItemIds.includes(value)))
+    reject('整單雙倉必須包含來源全部且唯一的品項');
+   if(['deliveryRecords','returnRecords','warehouseShipmentRecords'].some(key=>
+       order[key]!==undefined&&(!Array.isArray(order[key])||order[key].length))
+     ||integer(order.logisticsTransfersPending??0,'調撥途中')>0)
+    reject('整單初始預留不可含既有物流或退貨紀錄');
   }
-  const reservationRef=ref('inventoryReservations',orderId+'__'+itemId);
-  const reservation=await tx.get(reservationRef);
-  const previous=reservation.exists?reservation.data():{};
-  if(previous.productKey&&previous.productKey!==productKey)reject('既有預留產品不符');
-  if(previous.orderId&&previous.orderId!==orderId)reject('既有預留訂單不符');
-  if(previous.itemId&&previous.itemId!==itemId)reject('既有預留品項不符');
-  for(const [field,expected] of Object.entries({ownerUid:order.ownerUid,salesCode:order.salesCode}))
-   if(previous[field]!==undefined&&previous[field]!==expected)reject('既有預留所有權不符');
-  if(previous.lifecycleWarehouseIds!==undefined
-    &&(!Array.isArray(previous.lifecycleWarehouseIds)
-      ||JSON.stringify([...previous.lifecycleWarehouseIds].sort())!==JSON.stringify(warehouseIds)))
-    reject('初始預留來源的原候選倉不得任意替換');
-  const returned=integer(item.returnedQty??0,'退貨量'),delivered=integer(item.deliveredQty??0,'已交付量');
-  if(returned>delivered)reject('累計交付與退貨數量不符');
-  // Initial-only safe preview: no goods have moved; supply commitments are
-  // excluded from actual available stock by the shared Reservation Core.
-  if(delivered||returned||item.transferPendingId||item.custodyTransferId)reject('非初始預留不得使用本試點');
-  const outstanding=requested;
-  const inTransit=Math.max(0,integer(item.supplyOrderedQty??0,'供應量')-integer(item.receivedQty??0,'已收貨'));
-  const plan=core.planLocationReservation({productKey,requestedQty:outstanding,
-    itemReservedQty:item.reservedQty??0,inTransitQty:inTransit,
-    reservation:previous,aggregateStock:company,warehouses,stocks,currentWarehouseId:hint});
-  if(plan.companyReservedDelta!==plan.warehouseDeltas.reduce((s,r)=>s+r.reservedDelta,0))
-    reject('預留差額不守恆');
-  const result={orderId,itemId,productKey,requestedQty:outstanding,
-    locations:plan.reservation.locations,reservedQty:plan.reservation.quantity,
-    shortageQty:plan.reservation.shortageQty,remainingToOrderQty:plan.remainingToOrderQty,
-    companyReservedDelta:plan.companyReservedDelta,
-    warehouseDeltas:plan.warehouseDeltas};
+  // Read each authoritative stock document once. Later lines see the proposed
+  // balance after earlier source-order lines, never independent old snapshots.
+  // Nothing is queued for Firestore until every line has validated successfully.
+  const companyStates=new Map(),warehouseStates=new Map(),masters=new Map(),products=new Map(),plans=[];
+  const previousCompanyHolds=new Map(),previousWarehouseHolds=new Map();
+  const itemIds=wholeOrder?order.items.map(row=>row.itemId):requestedItemIds;
+  for(const itemId of itemIds){
+   const matches=order.items.map((v,index)=>({v,index,id:String(v.itemId||'item-'+(index+1))})).filter(x=>x.id===itemId);
+   if(matches.length!==1)reject('來源品項不是唯一');
+   const item=matches[0].v;
+   if((item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'||String(item.productType||item.type||'').toUpperCase()==='SERVICE'
+     ||item.transferPendingId||item.custodyTransferId||integer(item.dispatchPreparedQty??0,'備貨量')>0)
+     reject('非實體倉或已開始物流的品項不可預留');
+   if(operation&&(integer(item.supplyOrderedQty??0,'供應量')||integer(item.receivedQty??0,'已收貨')))
+     reject('已開始供應或收貨的品項不可用初始雙倉提交');
+   const requested=integer(item.qty??item.orderedQty,'訂購量');
+   if(wholeOrder&&(!requested||(item.qty!==undefined&&item.orderedQty!==undefined&&item.qty!==item.orderedQty)))
+    reject('整單雙倉訂購數量必須為一致的正整數');
+   const productId=ident(item.productId,'產品主檔');
+   const productKey=ident(item.inventoryProductKey||productId,'庫存產品');
+   const hint=ident(item.warehouseId||order.warehouseId,'來源倉');
+   if(!warehouseIds.includes(hint))reject('候選倉庫須包含來源指定倉');
+   if(!products.has(productId))products.set(productId,await tx.get(ref('products',productId)));
+   const productSnap=products.get(productId);
+   if(!productSnap.exists||String(productSnap.data().productType||productSnap.data().type||'').toUpperCase()==='SERVICE')
+     reject('服務商品不可實體預留');
+   if(!companyStates.has(productKey)){
+    const stockRef=ref('inventory',encodeURIComponent(productKey)),companySnap=await tx.get(stockRef);
+    if(!companySnap.exists||companySnap.data().productKey!==productKey)reject('公司庫存資料不完整');
+    const stock={...checkStock(companySnap.data(),'公司'),productKey};
+    companyStates.set(productKey,{ref:stockRef,initialReserved:stock.reserved,current:stock});
+   }
+   const companyState=companyStates.get(productKey),company=companyState.current;
+   const warehouses=[],stocks={};
+   for(const warehouseId of warehouseIds){
+     if(!masters.has(warehouseId))masters.set(warehouseId,await tx.get(ref('warehouses',warehouseId)));
+     const wh=masters.get(warehouseId);
+     const stockRef=ref('warehouseStocks',encodeURIComponent(warehouseId)+'__'+encodeURIComponent(productKey));
+     if(!warehouseStates.has(stockRef.path)){
+      const raw=await tx.get(stockRef);
+      if(!raw.exists)reject('來源分倉資料不存在');
+      if(raw.data().productKey!==productKey||raw.data().warehouseId!==warehouseId)reject('候選位置不是啟用中實體倉');
+      const stock={...checkStock(raw.data(),warehouseId),productKey,warehouseId};
+      warehouseStates.set(stockRef.path,{ref:stockRef,initialReserved:stock.reserved,current:stock});
+     }
+     const stock=warehouseStates.get(stockRef.path).current;
+     if(!wh.exists)reject('來源分倉資料不存在');
+     const master={...wh.data(),id:warehouseId};
+     if(master.active===false||master.systemCustody||master.warehouseType==='CUSTODY'
+       ||warehouseId.startsWith('custody-'))
+       reject('候選位置不是啟用中實體倉');
+     warehouses.push(master);
+     stocks[warehouseId]=stock;
+   }
+   const reservationRef=ref('inventoryReservations',orderId+'__'+itemId);
+   const reservation=await tx.get(reservationRef);
+   const previous=reservation.exists?reservation.data():{};
+   if(wholeOrder&&reservation.exists&&(previous.locationSchemaVersion!==2
+     ||integer(previous.quantity,'既有預留')+integer(previous.shortageQty,'既有缺口')!==requested))
+    reject('整單初始化只接受需求一致的 v2 預留，不執行歷史格式遷移');
+   if(wholeOrder&&reservation.exists&&Object.entries({orderId,itemId,productKey,
+     ownerUid:order.ownerUid,salesCode:order.salesCode}).some(([field,expected])=>previous[field]!==expected))
+    reject('整單既有預留來源或所有權不完整');
+   if(previous.productKey&&previous.productKey!==productKey)reject('既有預留產品不符');
+   if(previous.orderId&&previous.orderId!==orderId)reject('既有預留訂單不符');
+   if(previous.itemId&&previous.itemId!==itemId)reject('既有預留品項不符');
+   for(const [field,expected] of Object.entries({ownerUid:order.ownerUid,salesCode:order.salesCode}))
+    if(previous[field]!==undefined&&previous[field]!==expected)reject('既有預留所有權不符');
+   if(previous.lifecycleWarehouseIds!==undefined
+     &&(!Array.isArray(previous.lifecycleWarehouseIds)
+       ||JSON.stringify([...previous.lifecycleWarehouseIds].sort())!==JSON.stringify(warehouseIds)))
+     reject('初始預留來源的原候選倉不得任意替換');
+   const returned=integer(item.returnedQty??0,'退貨量'),delivered=integer(item.deliveredQty??0,'已交付量');
+   if(returned>delivered)reject('累計交付與退貨數量不符');
+   // Initial-only safe preview: no goods have moved; supply commitments are
+   // excluded from actual available stock by the shared Reservation Core.
+   if(delivered||returned||item.transferPendingId||item.custodyTransferId)reject('非初始預留不得使用本試點');
+   const outstanding=requested;
+   const inTransit=Math.max(0,integer(item.supplyOrderedQty??0,'供應量')-integer(item.receivedQty??0,'已收貨'));
+   const plan=core.planLocationReservation({productKey,requestedQty:outstanding,
+     itemReservedQty:item.reservedQty??0,inTransitQty:inTransit,
+     reservation:previous,aggregateStock:company,warehouses,stocks,currentWarehouseId:hint});
+   if(plan.companyReservedDelta!==plan.warehouseDeltas.reduce((s,r)=>s+r.reservedDelta,0))
+     reject('預留差額不守恆');
+   if(wholeOrder&&reservation.exists){
+    // Validate the combined prior claims against the ORIGINAL accounts. Looking
+    // at each line alone can conceal two ledgers claiming the same held units.
+    const held=core.reservationStockDeltas({},previous);
+    previousCompanyHolds.set(productKey,integer((previousCompanyHolds.get(productKey)||0)+held.companyReservedDelta,'整單既有預留合計'));
+    for(const row of held.warehouseDeltas){
+     const path=ref('warehouseStocks',encodeURIComponent(row.warehouseId)+'__'+encodeURIComponent(productKey)).path;
+     previousWarehouseHolds.set(path,integer((previousWarehouseHolds.get(path)||0)+row.reservedDelta,'整單既有分倉預留合計'));
+    }
+   }
+   const itemResult={orderId,itemId,productKey,requestedQty:outstanding,
+     locations:plan.reservation.locations,reservedQty:plan.reservation.quantity,
+     shortageQty:plan.reservation.shortageQty,remainingToOrderQty:plan.remainingToOrderQty,
+     companyReservedDelta:plan.companyReservedDelta,
+     warehouseDeltas:plan.warehouseDeltas};
+   const nextCompany=company.reserved+plan.companyReservedDelta;
+   integer(nextCompany,'公司預留');
+   if(nextCompany+company.transferFreeInTransit>company.onHand)reject('公司庫存不足');
+   // Validate every target before queuing any writes; callback retries re-read
+   // the order, role, receipts, and all stock balances above.
+   const changes=plan.warehouseDeltas.map(row=>{
+    const stock=stocks[row.warehouseId];
+    if(!stock)reject('預留差額含非候選倉');
+    const reserved=integer(stock.reserved+row.reservedDelta,'分倉預留');
+    if(reserved+stock.transferFreeInTransit>stock.onHand)reject('分倉庫存不足');
+    return {...row,reserved};
+   });
+   companyState.current={...company,reserved:nextCompany};
+   for(const row of changes){
+    const state=warehouseStates.get(ref('warehouseStocks',encodeURIComponent(row.warehouseId)+'__'+encodeURIComponent(productKey)).path);
+    state.current={...state.current,reserved:row.reserved};
+   }
+   plans.push({itemId,itemIndex:matches[0].index,productKey,previous,plan,changes,result:itemResult});
+  }
+  for(const [productKey,held] of previousCompanyHolds)
+   if(companyStates.get(productKey).initialReserved<held)reject('公司原預留不足以支持整單既有預留合計');
+  for(const [path,held] of previousWarehouseHolds)
+   if(!warehouseStates.has(path)||warehouseStates.get(path).initialReserved<held)
+    reject('分倉原預留不足以支持整單既有預留合計');
+  const result=wholeOrder?{orderId,items:plans.map(row=>row.result)}:plans[0].result;
   if(!operation)return result;
   const now=new Date().toISOString();
-  const nextCompany=company.reserved+plan.companyReservedDelta;
-  integer(nextCompany,'公司預留');
-  if(nextCompany+company.transferFreeInTransit>company.onHand)reject('公司庫存不足');
-  // Validate every target before queuing any writes; callback retries re-read
-  // the order, role, receipts, and all stock balances above.
-  const changes=plan.warehouseDeltas.map(row=>{
-   const stock=stocks[row.warehouseId];
-   if(!stock)reject('預留差額含非候選倉');
-   const reserved=integer(stock.reserved+row.reservedDelta,'分倉預留');
-   if(reserved+stock.transferFreeInTransit>stock.onHand)reject('分倉庫存不足');
-   return {...row,reserved};
-  });
   // Stable priority comes from the persisted source order, never the caller.
   // Older v2 ledgers without a valid source date keep their legacy fallback.
   const sourceDate=String(order.orderDate||order.date||order.createdAt||'').slice(0,10);
@@ -161,26 +246,31 @@ async function runSingleItemTwoWarehouse(db,uid,input,operation=null){
     &&Number.isFinite(Date.parse(sourceDate+'T00:00:00Z'))
     &&new Date(sourceDate+'T00:00:00Z').toISOString().slice(0,10)===sourceDate
     ?sourceDate:'';
-  const next={...previous,...plan.reservation,orderId,itemId,productKey,
-   ownerUid:order.ownerUid,salesCode:order.salesCode,lifecycleWarehouseIds:warehouseIds,
-   ...(priorityDate?{orderDate:previous.orderDate||priorityDate}:{}),
-   orderItemIndex:matches[0].index,updatedAt:now};
-  // The legacy warehouseId is a hint on the order, never a v2 quantity authority.
-  delete next.warehouseId;
-  const nextItems=order.items.map((row,index)=>index===matches[0].index
-   ?{...row,reservedQty:next.quantity,shortageQty:next.shortageQty,inventoryProductKey:productKey}:row);
-  if(plan.companyReservedDelta)tx.update(ref('inventory',encodeURIComponent(productKey)),{reserved:nextCompany,updatedAt:now});
-  for(const row of changes){
-   tx.update(ref('warehouseStocks',encodeURIComponent(row.warehouseId)+'__'+encodeURIComponent(productKey)),
-     {reserved:row.reserved,updatedAt:now});
-   tx.create(ref('inventoryMovements','single-v2-'+operation.attemptId+'-'+encodeURIComponent(row.warehouseId)),
-    {sourceType:'order',sourceId:orderId,itemId,productKey,warehouseId:row.warehouseId,
-     type:row.reservedDelta>0?'reserve':'release',qty:row.reservedDelta,
-     actorUid:uid,actorRole:role,reservationOperationId:receiptRef.id,createdAt:now});
+  const nextItems=[...order.items];
+  for(const states of [companyStates,warehouseStates]){
+   for(const state of states.values())if(state.current.reserved!==state.initialReserved)
+    tx.update(state.ref,{reserved:state.current.reserved,updatedAt:now});
   }
-  tx.set(reservationRef,next);
+  for(const context of plans){
+   const {itemId,itemIndex,productKey,previous,plan,changes}=context;
+   const next={...previous,...plan.reservation,orderId,itemId,productKey,
+    ownerUid:order.ownerUid,salesCode:order.salesCode,lifecycleWarehouseIds:warehouseIds,
+    ...(priorityDate?{orderDate:previous.orderDate||priorityDate}:{}),
+    orderItemIndex:itemIndex,updatedAt:now};
+   // The legacy warehouseId is a hint on the order, never a v2 quantity authority.
+   delete next.warehouseId;
+   nextItems[itemIndex]={...nextItems[itemIndex],reservedQty:next.quantity,shortageQty:next.shortageQty,inventoryProductKey:productKey};
+   for(const row of changes){
+    const movementPrefix=wholeOrder?'order-v2-'+operation.attemptId+'-'+itemIndex:'single-v2-'+operation.attemptId;
+    tx.create(ref('inventoryMovements',movementPrefix+'-'+encodeURIComponent(row.warehouseId)),
+     {sourceType:'order',sourceId:orderId,itemId,productKey,warehouseId:row.warehouseId,
+      type:row.reservedDelta>0?'reserve':'release',qty:row.reservedDelta,
+      actorUid:uid,actorRole:role,reservationOperationId:receiptRef.id,createdAt:now});
+   }
+   tx.set(ref('inventoryReservations',orderId+'__'+itemId),next);
+  }
   tx.update(orderRef,{items:nextItems,updatedAt:now});
-  tx.create(receiptRef,{action:'single_item_location_reservation',orderId,itemId,productKey,
+  tx.create(receiptRef,{action,orderId,...(wholeOrder?{itemIds:requestedItemIds}:{itemId:plans[0].itemId,productKey:plans[0].productKey}),
    actorUid:uid,actorRole:role,intentHash:operation.hash,syncAttemptId:operation.syncAttemptId,
    result,createdAt:now,status:'applied'});
   return {...result,status:'applied',receiptId:receiptRef.id};
@@ -822,4 +912,4 @@ async function continueCommittedV2FreeStock(db,uid,movementIds,maxSteps=5){
  return {status:results.some(row=>row.recoveryPending)?'recovery-pending':'completed',sources:results};
 }
 
-module.exports={normalizeSingleItemIntent,normalizeCommitIntent,planSingleItemTwoWarehouse,commitSingleItemTwoWarehouse,normalizeFreeStockIntent,commitSingleItemFreeStockAllocation,normalizeAutomaticFreeStockIntent,validateAutomaticFreeStockCheckpoint,advanceAutomaticFreeStockAllocation,advanceReleasedV2FreeStock,drainReleasedV2FreeStock,continueCommittedV2FreeStock};
+module.exports={normalizeSingleItemIntent,normalizeCommitIntent,normalizeOrderCommitIntent,planSingleItemTwoWarehouse,commitSingleItemTwoWarehouse,commitOrderTwoWarehouse,normalizeFreeStockIntent,commitSingleItemFreeStockAllocation,normalizeAutomaticFreeStockIntent,validateAutomaticFreeStockCheckpoint,advanceAutomaticFreeStockAllocation,advanceReleasedV2FreeStock,drainReleasedV2FreeStock,continueCommittedV2FreeStock};

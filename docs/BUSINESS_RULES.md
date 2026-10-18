@@ -312,3 +312,7 @@ CLOSE 僅結清先前交付的退貨量，不增加原單補送需求；原單�
 ### 2026-10-18 退貨實收 Service 接線
 
 退貨申請不增實貨；實收 SALEABLE 才回原批次庫存，INSPECTION／DAMAGED 先 HOLD；確認可售後由同一 Service 轉庫存一次。CLOSE 不補送，重新購買仍是一般新訂單。這些既有規則未改，僅整合其 Service 責任與驗收。 驗收項目與限制見 [介面交易對照](transaction-ui-integration-20261018.md)。未部署 Firebase，完整 Preview 全流程尚待驗收。
+
+### 2026-10-18 整單預留優先順序與原子性
+
+整單雙倉試點依交易內來源 items 順序配置，不能用 payload 排序搶先預留；同產品各品項共用實貨額度。原 ledger 合計不可超過公司／分倉原預留。全選 1–5 個初始實體倉品項才可提交；混合服務／直送或有採購／履約進度時整單拒絕，不默默忽略。僅庫存預留階段原子，需求同步完成前仍為 pending。見 [詳細契約](multi-item-location-transaction-20261018.md)；正式介面未啟用。

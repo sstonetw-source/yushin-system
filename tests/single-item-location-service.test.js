@@ -55,3 +55,29 @@ test('internal v2 writer refuses non-emulator and non-demo projects before datab
   await assert.rejects(commitSingleItemTwoWarehouse({projectId:'demo-yushin'},'actor',{}),/僅允許/);
  }finally{if(host!==undefined)process.env.FIRESTORE_EMULATOR_HOST=host;}
 });
+test('whole-order intent is bounded, canonical and never accepts caller quantities or roles',()=>{
+ const {normalizeOrderCommitIntent}=require('../functions/single-item-location-service');
+ const data={orderId:'O',itemIds:['I2','I1'],warehouseIds:['B','A'],attemptId:'whole_order_123456',syncAttemptId:'sync_123456789'};
+ const first=normalizeOrderCommitIntent(data);
+ assert.deepEqual(first.itemIds,['I1','I2']);
+ assert.equal(first.hash,normalizeOrderCommitIntent({...data,itemIds:['I1','I2'],warehouseIds:['A','B']}).hash);
+ for(const bad of [{...data,itemIds:[]},{...data,itemIds:['I1','I1']},{...data,itemIds:['I1','I2','I3','I4','I5','I6']},
+  {...data,itemIds:['I/1']},{...data,quantity:100},{...data,actorUid:'admin'},{...data,actorRole:'admin'}])
+  assert.throws(()=>normalizeOrderCommitIntent(bad));
+ assert.notEqual(first.hash,normalizeOrderCommitIntent({...data,itemIds:['I1']}).hash);
+ assert.notEqual(first.hash,normalizeOrderCommitIntent({...data,syncAttemptId:'another_sync'}).hash);
+});
+test('whole-order writer shares the existing engine and stays unavailable in live environments',async()=>{
+ const {commitOrderTwoWarehouse}=require('../functions/single-item-location-service');
+ for(const projectId of ['preview-20135','yu-shing-company'])
+  await assert.rejects(commitOrderTwoWarehouse({projectId},'actor',{}),/僅允許/);
+ const host=process.env.FIRESTORE_EMULATOR_HOST;
+ try{delete process.env.FIRESTORE_EMULATOR_HOST;await assert.rejects(commitOrderTwoWarehouse({projectId:'demo-yushin'},'actor',{}),/僅允許/);}
+ finally{if(host!==undefined)process.env.FIRESTORE_EMULATOR_HOST=host;}
+ const entry=fs.readFileSync('functions/index.js','utf8');
+ assert.doesNotMatch(entry,/commitOrderTwoWarehouse/);
+});
+test('single-item read-only API cannot bypass validation through the internal whole-order shape',async()=>{
+ const {planSingleItemTwoWarehouse}=require('../functions/single-item-location-service');
+ await assert.rejects(planSingleItemTwoWarehouse({},'actor',{orderId:'O',itemIds:['I1'],warehouseIds:['A','B']}),/請求內容/);
+});
