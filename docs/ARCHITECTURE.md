@@ -431,3 +431,7 @@ job `reservationOperationReceipts` 與 movement 在不同交易，使用 pending
 ### 既有收貨三份憑證重用（2026-10-18）
 
 多倉自由庫存來源除取消及 CLOSE 退貨外，現在可讀取原 Receiving Service 已原子建立的 warehouse receipt + movement + physical lot，並以其 `autoAllocationQty` 作為配貨最大量；取消後保留採購需驗證現存供應的 `KEEP_STOCK` 決策。所有實際庫存預留仍只由同一 `commitSingleItemFreeStockAllocation` Service 執行、進度寫原 checkpoint；不在 `src/services/receiving.js` 植入另一個 Admin SDK 或隱藏的側寫。這是 demo-yushin Emulator 的可恢復協調入口，尚非正式收貨 UI 自動執行。
+
+### v2 post-commit 有界運行與可選組合入口（2026-10-18）
+
+沿用唯一 `single-item-location-service.advanceReleasedV2FreeStock` 的來源核對及 checkpoint，新增 `drainReleasedV2FreeStock` 只用最多 10 次有限呼叫逐單推進，不引入第二個 Core／stock writer 或另一份 batch state。原 `commitSingleItemLocationLifecycle` 與 `commitLocationReturn` 仍各自是來源的唯一原子 transaction；同檔新的 `...AndRecover` **先提交來源、再在交易外**呼叫既有 drain。後段失敗回傳明確的 postCommitAllocation pending 和來源 movementId，不能假裝回滾來源；sales/engineer 角色不提升為物流權限。Emulator 新測試覆蓋 admin 同次分配、上限中斷續傳、兩角色 handoff 的未開工來源、來源 replay／REPLACE 不可調撥。沒有新增 Callable、background trigger 或正式 UI 接線。
