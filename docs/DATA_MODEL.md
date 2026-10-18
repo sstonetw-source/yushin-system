@@ -274,3 +274,7 @@ dispatchRecords/{dispatch-ui-operationId} 沿用原 Collection；新增 operatio
 ### 2026-10-18 退貨實收 Service 接線
 
 第二批沒有新增持久欄位或 Collection；customerReturnReceipts、orders.returnRequests／returnRecords、原批次及庫存的既有提交邊界不變。HOLD→STOCK 和回庫存仍在同一交易；依原 receipt disposition 重送為只讀。 驗收項目與限制見 [介面交易對照](transaction-ui-integration-20261018.md)。未部署 Firebase，完整 Preview 全流程尚待驗收。
+
+### 2026-10-18 整單 v2 操作憑證（Emulator-only）
+
+沿用 reservationOperationReceipts，新增 order-v2-{attemptId}／action=order_location_reservation，存全單 itemIds、真實 actor／role、syncAttemptId、intentHash 與逐品項結果；各品項各倉 movement 連回同一憑證。預留 ledger、orders.items、公司／分倉模型及舊單品項憑證格式不變，沒有新 Collection／Rules／Index 或正式資料遷移。庫存完成不直接修改初始化 completed。見 [文件邊界](multi-item-location-transaction-20261018.md)。

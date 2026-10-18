@@ -154,3 +154,7 @@ CLOSE 後取消／恢復仍拒絕未整合的退貨刪除／更正歷史，不�
 ### 2026-10-18 退貨實收 Service 接線
 
 退貨實收及待檢轉庫存 UI 不得內嵌庫存交易，分別呼叫 commitCustomerReturnReceipt／commitCustomerReturnHoldRelease。Service 可重用既有訂單與批次 helper，但不得新增第二組數量或批次算法。退貨申請／撤回與採購取消處置仍待後續責任整理。 驗收項目與限制見 [介面交易對照](transaction-ui-integration-20261018.md)。未部署 Firebase，完整 Preview 全流程尚待驗收。
+
+### 2026-10-18 整單雙倉提交規範
+
+多品項初始預留使用原 Service 的 commitOrderTwoWarehouse，僅 demo-yushin Emulator；不得匯出 Callable 或直接解除前端位置限制。不能用多個獨立 commitSingleItemTwoWarehouse 宣稱全單原子。修改須驗證同產品共用餘額、既有預留合計、後項失敗與末端 create 全回滾、兩張訂單競態、五角色與原單品項回歸。整單 source／需求 checkpoint 及多品項後續履約未接前，不得把這一階段描述為正式整單全流程完成。見 [詳細契約](multi-item-location-transaction-20261018.md)。

@@ -520,3 +520,7 @@ Workflow 的明確 warehouseShipmentContext 現包含 returns，以原 projectSh
 ### 2026-10-18 退貨實收 Service 接線
 
 既有退貨實收與待檢轉庫存的交易編排已移到 src/services/customer-return.js，兩個原操作頁入口只呼叫 Service。實體退回與直送退回仍沿用原有 writer／Core；不新增相同功能的核心。 驗收項目與限制見 [介面交易對照](transaction-ui-integration-20261018.md)。未部署 Firebase，完整 Preview 全流程尚待驗收。
+
+### 2026-10-18 整單雙倉預留引擎
+
+原雙倉 Service 以單一 `runLocationReservation` 同時服務單品項與 `commitOrderTwoWarehouse`。整單 1–5 品項共用交易內公司／分倉餘額、原 Reservation Core 與一次 Transaction；所有品項驗證後才提交，沒有第二組數量規則或逐項獨立提交。仍為 Emulator-only，未接正式 UI／Callable；需求與來源同步 checkpoint 尚待接線。見 [契約及驗收邊界](multi-item-location-transaction-20261018.md)。
