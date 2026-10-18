@@ -540,3 +540,7 @@ Workflow 的明確 warehouseShipmentContext 現包含 returns，以原 projectSh
 ### 2026-10-18 多品項雙倉實際出貨（待 PR CI）
 
 原 `commitLocationShipment` 現沿用整單履約投影驗證 1–5 品項的來源及所有歷史出貨／退貨憑證，再以原預留 Core 和批次分配原子扣除選定品項的實貨與 ledger，保留其他品項資料，不建立第二套交易邏輯。此階段只支援 demo Emulator；未接多品項送達／正式 Callable 或 UI。見 [出貨試點契約](multi-item-shipment-20261018.md)。
+
+### 2026-10-19 多品項獨立送達確認（待 CI 驗收）
+
+原 `commitShipmentDelivery` 接入整單履約 Core，驗證多品項全部來源出貨 movement 與不可變退貨憑證後，在同一 orders 交易內只更新選中品項送達及整單交付合計，不動庫存、批次、預留。單品項撤銷及退貨追溯仍維持原範圍。此功能仍僅 Emulator，未接正式 UI／Callable。見 [多品項送達驗收邊界](multi-item-delivery-20261019.md)。
