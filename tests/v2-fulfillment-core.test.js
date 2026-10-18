@@ -120,3 +120,61 @@ test('CLOSE returns do not reopen replacement demand',()=>{
   assert.equal(f.projectOrderDelivery({grossDeliveredQty:5,returnedQty:8,
     returnRecords:[{qty:8,settlement:'CLOSE'}]}).effectiveDelivered,5);
 });
+
+function orderEvents(){
+ const orderId='O',items=[{itemId:'I1',productId:'P',qty:5},{itemId:'I2',productId:'P',qty:2}];
+ const shipment=(id,itemId,qty)=>({id,itemId,qty,orderId,productKey:'P',warehouseId:id==='S1'?'A':'B',date:'2026-10-16',sourceType:'WAREHOUSE_CUSTOMER_SHIPMENT'});
+ const shipments=[shipment('S1','I1',3),shipment('S2','I2',2)];
+ const deliveries=shipments.map((s,n)=>({...s,id:'D'+n,shipmentId:s.id,qty:n?1:2,date:'2026-10-17',sourceType:'WAREHOUSE_SHIPMENT_CONFIRMATION'}));
+ const returns=[{...shipments[0],id:'R1',shipmentId:'S1',qty:1,date:'2026-10-18',sourceType:'WAREHOUSE_CUSTOMER_RETURN',condition:'RESTOCKABLE',settlement:'CLOSE'}];
+ return {orderId,items,shipments,deliveries,returns};
+}
+test('whole-order projection partitions same-product lines through the original per-item quantity authority',()=>{
+ const input=orderEvents(),before=structuredClone(input),result=f.projectOrderShipmentReturns(input);
+ assert.equal(result.orderedQty,7);assert.equal(result.shippedQty,5);assert.equal(result.confirmedQty,3);assert.equal(result.pendingDeliveryQty,2);
+ assert.equal(result.returnedQty,1);assert.equal(result.closedQty,1);assert.equal(result.replacementQty,0);assert.equal(result.outstandingQty,2);
+ assert.equal(result.effectiveDeliveredQty,3);assert.equal(result.isDelivered,false);
+ for(const item of result.items){
+  const expected=f.projectShipmentReturns({orderId:input.orderId,...item,
+   shipments:input.shipments.filter(r=>r.itemId===item.itemId),deliveries:input.deliveries.filter(r=>r.itemId===item.itemId),returns:input.returns.filter(r=>r.itemId===item.itemId)});
+  for(const [key,value] of Object.entries(expected))assert.deepEqual(item[key],value);
+ }
+ assert.deepEqual(input,before);
+});
+test('an order is delivered only after every line is acknowledged, regardless of fully shipped totals',()=>{
+ const input=orderEvents();input.items[0].qty=3;input.deliveries[0].qty=3;
+ assert.equal(f.projectOrderShipmentReturns(input).isDelivered,false);
+ input.deliveries[1].qty=2;const done=f.projectOrderShipmentReturns(input);assert.equal(done.isDelivered,true);assert.equal(done.confirmedQty,5);
+ input.returns[0].settlement='REPLACE';const replace=f.projectOrderShipmentReturns(input);assert.equal(replace.isDelivered,false);
+ assert.equal(replace.replacementQty,1);assert.equal(replace.outstandingQty,1);assert.equal(replace.effectiveDeliveredQty,4);
+});
+test('whole-order projection rejects unknown or duplicated events before filtering can hide them',()=>{
+ for(const mutate of [x=>{x.shipments[0].itemId='unknown';},x=>{x.deliveries[0].productKey='other';},
+  x=>{x.returns[0].orderId='other';},x=>{x.shipments[1].id=x.shipments[0].id;},
+  x=>{x.deliveries[1].id=x.deliveries[0].id;},x=>{x.returns.push({...x.returns[0],itemId:'I2'});}]){
+  const input=orderEvents();mutate(input);assert.throws(()=>f.projectOrderShipmentReturns(input));
+ }
+});
+test('whole-order deliveries and returns cannot borrow another line shipment even for the same product',()=>{
+ for(const kind of ['deliveries','returns']){
+  const input=orderEvents();input[kind][0].shipmentId='S2';assert.throws(()=>f.projectOrderShipmentReturns(input));
+ }
+ const input=orderEvents();input.deliveries[0].qty=4;assert.throws(()=>f.projectOrderShipmentReturns(input),/超過/);
+});
+test('whole-order projection preserves all original chronological return validation',()=>{
+ const input=orderEvents();input.returns[0].date='2026-10-16';assert.throws(()=>f.projectOrderShipmentReturns(input),/超過/);
+ input.returns[0].date='2026-02-30';assert.throws(()=>f.projectOrderShipmentReturns(input));
+});
+test('whole-order projection enforces stable source IDs positive integer quantities and bounded event sets',()=>{
+ for(const mutate of [x=>{x.items=[];},x=>{x.items.push(x.items[0]);},x=>{x.items[0].qty=0;},
+  x=>{x.items[0].qty=1.5;},x=>{x.items[0].orderedQty=99;},x=>{x.items[0].itemId='bad/id';},
+  x=>{x.items[0].productId='';},x=>{x.shipments=null;},x=>{x.returns=Array(201).fill(x.returns[0]);}]){
+  const input=orderEvents();mutate(input);assert.throws(()=>f.projectOrderShipmentReturns(input));
+ }
+ const items=Array.from({length:5},(_,i)=>({itemId:'I'+i,productId:'P',qty:1}));
+ assert.equal(f.projectOrderShipmentReturns({orderId:'O',items}).orderedQty,5);
+ assert.throws(()=>f.projectOrderShipmentReturns({orderId:'O',items:[...items,{itemId:'I6',productId:'P',qty:1}]}));
+});
+test('whole-order aggregate cannot overflow otherwise valid per-item integer quantities',()=>{
+ assert.throws(()=>f.projectOrderShipmentReturns({orderId:'O',items:[{itemId:'I1',productId:'P',qty:Number.MAX_SAFE_INTEGER},{itemId:'I2',productId:'Q',qty:1}]}),/安全數量/);
+});

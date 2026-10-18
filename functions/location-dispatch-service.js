@@ -55,9 +55,10 @@ async function commitLocationDispatchPreparation(db,uid,data){
    fault('庫存尚未同步完成或同步識別碼已變更');
   if(!['active','normal'].includes(order.status)||![undefined,'','normal','active'].includes(order.orderStatus))
    fault('取消或結案訂單不能打單');
-  if(!order.ownerUid||!order.salesCode||!Array.isArray(order.items)||order.items.length!==1)
-   fault('此試點僅支援來源完整的單品項訂單');
-  const item=order.items[0];
+  if(!order.ownerUid||!order.salesCode||!Array.isArray(order.items)||!order.items.length||order.items.length>5
+   ||order.items.filter(row=>row?.itemId===itemId).length!==1)
+   fault('此試點僅支援來源完整且品項唯一的 1–5 品項訂單');
+  const item=order.items.find(row=>row.itemId===itemId),multi=order.items.length>1;
   if(item.itemId!==itemId||(item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
    ||String(item.productType||item.type||'').toUpperCase()==='SERVICE'
    ||item.transferPendingId||item.custodyTransferId||qty(order.logisticsTransfersPending??0,'調撥途中')>0)
@@ -68,7 +69,9 @@ async function commitLocationDispatchPreparation(db,uid,data){
   if(!Array.isArray(order.deliveryRecords)||!Array.isArray(order.returnRecords))
    fault('出貨或退貨紀錄格式不正確');
   const productKey=id(item.inventoryProductKey||item.productId,'庫存產品');
-  const progress=fulfillment.projectShipmentReturns({orderId,itemId,productKey,orderedQty:ordered,
+  const whole=multi?fulfillment.projectOrderShipmentReturns({orderId,items:order.items,
+   shipments:order.warehouseShipmentRecords??[],deliveries:order.deliveryRecords,returns:order.returnRecords}):null;
+  const progress=whole?whole.items.find(row=>row.itemId===itemId):fulfillment.projectShipmentReturns({orderId,itemId,productKey,orderedQty:ordered,
    shipments:order.warehouseShipmentRecords??[],deliveries:order.deliveryRecords,returns:order.returnRecords});
   await readLocationReturnProofs(tx,db,order,intent,productKey,{closedOnly:true});
   const shipped=qty(item.warehouseShippedQty??0,'出貨投影');
@@ -77,30 +80,62 @@ async function commitLocationDispatchPreparation(db,uid,data){
   const held=qty(item.reservedQty,'品項預留');
   const shortage=qty(item.shortageQty??0,'缺口');
   if(shipped!==progress.shippedQty||delivered!==progress.confirmedQty
-   ||qty(order.deliveredQty??0,'訂單送達')!==progress.confirmedQty
+   ||qty(order.deliveredQty??0,'訂單送達')!==(whole??progress).confirmedQty
    ||qty(item.returnedQty??0,'品項退貨')!==progress.returnedQty
-   ||qty(order.returnedQty??0,'訂單退貨')!==progress.returnedQty
-   ||(order.isDelivered??false)!==progress.isDelivered||prepared>ordered)
+   ||qty(order.returnedQty??0,'訂單退貨')!==(whole??progress).returnedQty
+   ||(order.isDelivered??false)!==(whole??progress).isDelivered||prepared>ordered)
    fault('出貨、送達或打單投影不一致');
-  const ledgerSnap=await tx.get(ref('inventoryReservations',orderId+'__'+itemId));
-  if(!ledgerSnap.exists)fault('缺少 v2 預留來源');
-  const ledger=ledgerSnap.data();
-  if(ledger.locationSchemaVersion!==2||ledger.warehouseId!==undefined
-   ||ledger.orderId!==orderId||ledger.itemId!==itemId||ledger.productKey!==productKey
-   ||ledger.ownerUid!==order.ownerUid||ledger.salesCode!==order.salesCode
-   ||!Array.isArray(ledger.locations)||ledger.locations.length>20
-   ||qty(ledger.quantity,'預留總量')!==held||qty(ledger.shortageQty,'預留缺口')!==shortage
-   ||held+shortage!==progress.outstandingQty)
-   fault('訂單與 v2 預留來源或數量不一致');
-  let locationTotal=0;const seen=new Set();
-  for(const loc of ledger.locations){
-   const wh=id(loc?.warehouseId,'預留倉');
-   if(seen.has(wh)||wh.startsWith('custody-')||qty(loc.reservedQty,'分倉預留')===0)
-    fault('v2 倉位預留格式不正確');
-   seen.add(wh);locationTotal=qty(locationTotal+loc.reservedQty,'預留總和');
+  if(multi){
+   const products=new Map();
+   for(const row of order.items){
+    const part=whole.items.find(p=>p.itemId===row.itemId);
+    if((row.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'||String(row.productType||row.type||'').toUpperCase()==='SERVICE'
+     ||row.transferPendingId||row.custodyTransferId||qty(row.warehouseShippedQty??0,'品項出貨')!==part.shippedQty
+     ||qty(row.deliveredQty??0,'品項送達')!==part.confirmedQty||qty(row.returnedQty??0,'品項退貨')!==part.returnedQty
+     ||qty(row.dispatchPreparedQty??0,'品項打單')<part.shippedQty
+     ||qty(row.dispatchPreparedQty??0,'品項打單')>part.orderedQty)
+     fault('整單含未支援的品項或履約投影不一致');
+    const productId=id(row.productId,'產品');
+    if(!products.has(productId))products.set(productId,await tx.get(ref('products',productId)));
+    const product=products.get(productId);
+    if(!product.exists||product.data().active===false||String(product.data().productType||product.data().type||'').toUpperCase()==='SERVICE')
+     fault('整單含服務或停用產品，不能打單');
+   }
+   for(const record of order.warehouseShipmentRecords??[]){
+    if(record.movementId!=='location-ship-'+record.id)fault('整單出貨缺少原扣帳憑證');
+    const proof=await tx.get(ref('inventoryMovements',record.movementId));
+    fulfillment.validateShipmentMovement(record,proof.exists?proof.data():null,
+     {orderId,itemId:record.itemId,productKey:record.productKey});
+   }
   }
-  if(locationTotal!==held||ledger.status!==(held?'active':shortage?'shortage':'fulfilled'))
-   fault('v2 預留與倉位合計不一致');
+  for(const part of whole?.items??[{...progress,itemId,productKey}]){
+   const {itemId,productKey}=part,row=order.items.find(source=>source.itemId===itemId);
+   const held=qty(row.reservedQty,'品項預留'),shortage=qty(row.shortageQty??0,'品項缺口'),progress=part;
+   const ledgerSnap=await tx.get(ref('inventoryReservations',orderId+'__'+itemId));
+   if(!ledgerSnap.exists)fault('缺少 v2 預留來源');
+   const ledger=ledgerSnap.data();
+   if(ledger.locationSchemaVersion!==2||ledger.warehouseId!==undefined
+    ||ledger.orderId!==orderId||ledger.itemId!==itemId||ledger.productKey!==productKey
+    ||ledger.ownerUid!==order.ownerUid||ledger.salesCode!==order.salesCode
+    ||!Array.isArray(ledger.locations)||ledger.locations.length>20
+    ||qty(ledger.quantity,'預留總量')!==held||qty(ledger.shortageQty,'預留缺口')!==shortage
+    ||held+shortage!==progress.outstandingQty)
+    fault('訂單與 v2 預留來源或數量不一致');
+   let locationTotal=0;const seen=new Set();
+   for(const loc of ledger.locations){
+    const wh=id(loc?.warehouseId,'預留倉');
+    if(seen.has(wh)||wh.startsWith('custody-')||qty(loc.reservedQty,'分倉預留')===0)
+     fault('v2 倉位預留格式不正確');
+    seen.add(wh);locationTotal=qty(locationTotal+loc.reservedQty,'預留總和');
+   }
+   if(locationTotal!==held||ledger.status!==(held?'active':shortage?'shortage':'fulfilled'))
+    fault('v2 預留與倉位合計不一致');
+   if(multi&&(!Array.isArray(ledger.lifecycleWarehouseIds)||ledger.lifecycleWarehouseIds.length!==2
+    ||new Set(ledger.lifecycleWarehouseIds).size!==2||ledger.lifecycleWarehouseIds.some(wh=>id(wh,'原候選倉').startsWith('custody-'))
+    ||ledger.locations.some(loc=>!ledger.lifecycleWarehouseIds.includes(loc.warehouseId))
+    ||!ledger.lifecycleWarehouseIds.includes(row.warehouseId||order.warehouseId)))
+    fault('整單品項預留不在原雙倉來源');
+  }
   const state=fulfillment.warehouseShipmentState({warehouseShippedQty:shipped,
    reservedQty:held,dispatchPreparedQty:prepared});
   if(quantity>state.pending||prepared+quantity>ordered)
@@ -115,7 +150,7 @@ async function commitLocationDispatchPreparation(db,uid,data){
    syncAttemptId,intentHash:intent.hash,createdAt:now,result};
   // This operation does NOT write inventory, lots, reservation, shipment or delivery.
   tx.create(recordRef,record);
-  tx.update(orderRef,{items:[{...item,dispatchPreparedQty:updatedPrepared}],updatedAt:now});
+  tx.update(orderRef,{items:order.items.map(row=>row.itemId===itemId?{...row,dispatchPreparedQty:updatedPrepared}:row),updatedAt:now});
   return {...result,status:'applied',recordId:recordRef.id};
  });
 }
