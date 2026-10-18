@@ -138,3 +138,9 @@ CLOSE 後取消／恢復仍拒絕未整合的退貨刪除／更正歷史，不�
 退貨Auth整合改用tests/fixtures/v2-order-initialization.cjs，必須載入實際src同步／預留協調／需求／索引函式並呼叫原v2庫存writer；測試不得直接update inventoryReservationStatus completed。只以SDK／傳輸adapter接入原雙倉Service，不另造計算或checkpoint writer，不讓原單倉預留覆寫v2 ledger。
 
 本輪覆蓋七組實際Firestore初始化：雙倉與正式缺口需求完成、預留後需求前中斷與重試、完成重送、舊attempt晚回覆、角色／所有權／active、完成回覆遺失、切換帳號後恢復。退貨真實Auth七組亦全部經由此初始化，結果以本輪CI為準。仍明確保留來源order／inventory種子資料，未驗收完整建立訂單UI／Client Rules或初始自行訂貨，不能宣稱正式上線。
+
+### v2 真實登入建單的整合測試閘門（2026-10-18）
+
+新增測試於既有 `tests/emulator-v2-return-callable.cjs`，隨 `node tools/run-v2-return-auth-emulator.cjs` 在隔離 demo-yushin Auth＋Functions＋Firestore Emulator 執行。測試需以 Client SDK 登入業務本人、透過真實 Firestore Rules 執行原 `commitOrderCreation`，再由原初始化協調器與 v2 writer 建立預留與採購缺口，不可將直接 Admin seed 訂單當作「已驗收建單」。驗證含成本／無權倉管建單拒絕、同 ID 重送不得覆蓋來源或重扣帳。VM 只供 Firestore 模組化 SDK 介面相容，不得複製商業計算或新建單 writer。
+
+此測試僅驗收單品項雙倉 Auth Client 建單入口到後續 Emulator 初始化的**部分鏈路**；正式網頁、真實瀏覽器登入／Role adapter、Preview、全面多品項／直送／服務型流程與正式部署仍須各自驗收。

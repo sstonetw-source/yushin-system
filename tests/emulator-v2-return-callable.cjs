@@ -2,10 +2,13 @@
 // Real Auth SDK -> Callable SDK -> original v2 return Services -> Firestore.
 // Source documents are Admin fixtures; inventory synchronization now runs the real src workflow.
 const test=require('node:test'),assert=require('node:assert/strict');
+const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const admin=require('firebase-admin'),{getFirestore}=require('firebase-admin/firestore'),{getAuth:adminAuth}=require('firebase-admin/auth');
 const {initializeApp,deleteApp}=require('firebase/app');
 const {getAuth,connectAuthEmulator,signInWithEmailAndPassword}=require('firebase/auth');
 const {getFunctions,connectFunctionsEmulator,httpsCallable}=require('firebase/functions');
+const {getFirestore:clientFirestore,connectFirestoreEmulator,doc,runTransaction,setDoc}=require('firebase/firestore');
+const procurementDemandCore=require('../modules/procurement-demand-core');
 const {synchronizeV2OrderFixture}=require('./fixtures/v2-order-initialization.cjs');
 const {commitLocationDispatchPreparation}=require('../functions/location-dispatch-service');
 const {commitLocationShipment}=require('../functions/location-shipment-service');
@@ -25,7 +28,7 @@ async function identity(tag,role='sales',{profile=true,login=true}={}){
  if(login){await accounts.createUser({uid,email,password:'EmulatorOnly!123456'});await signInWithEmailAndPassword(auth,email,'EmulatorOnly!123456');}
  if(profile)await db.collection('users').doc(uid).set({role,active:true});
  const functions=getFunctions(app,'asia-east1');connectFunctionsEmulator(functions,'127.0.0.1',5001);
- return {uid,auth,preview:input=>httpsCallable(functions,'previewV2CustomerReturn',{timeout:30000})(input).then(r=>r.data),
+ return {uid,auth,app,preview:input=>httpsCallable(functions,'previewV2CustomerReturn',{timeout:30000})(input).then(r=>r.data),
   receive:input=>httpsCallable(functions,'receiveV2CustomerReturn',{timeout:30000})(input).then(r=>r.data)};
 }
 async function fixture(tag,{role='sales',cancelled=true}={}){
@@ -64,6 +67,65 @@ async function snapshot(x){
  const movements=await db.collection('inventoryMovements').where('sourceId','==',x.orderId).get();
  return {documents,movements:movements.docs.map(s=>({id:s.id,...s.data()}))};
 }
+
+test('real signed-in client creates an order through the existing Order Creation Service and Rules before genuine v2 synchronization',async()=>{
+ const actor=await identity('client-create','sales'),unauthorized=await identity('client-create-warehouse','warehouse');
+ await db.collection('users').doc(actor.uid).update({salesCode:'R'});
+ const orderId='return-client-created',key='return-client-product';
+ const setup=db.batch(),put=(collection,id,value)=>setup.set(db.collection(collection).doc(id),value);
+ put('products',key,{productType:'Goods'});
+ put('inventory',key,{productKey:key,onHand:7,reserved:0,transferFreeInTransit:0});
+ for(const [id,quantity] of [['CLIENT-A',3],['CLIENT-B',4]]){
+  put('warehouses',id,{active:true});
+  put('warehouseStocks',id+'__'+key,{warehouseId:id,productKey:key,onHand:quantity,reserved:0,transferFreeInTransit:0});
+ }
+ await setup.commit();
+ const liveDb=clientFirestore(actor.app);connectFirestoreEmulator(liveDb,'127.0.0.1',8080);
+ const transport={
+  currentUser:{uid:actor.uid},currentUserRole:'sales',BUSINESS_STATUS:{ACTIVE:'active'},
+  db:{collection:name=>({doc:id=>doc(liveDb,name,id)})},
+  runRoleTransaction:callback=>runTransaction(liveDb,async transaction=>callback({
+   get:async ref=>{const snapshot=await transaction.get(ref);return {exists:snapshot.exists(),data:()=>snapshot.data()};},
+   set:(ref,value,options)=>options
+    ?transaction.set(ref,JSON.parse(JSON.stringify(value)),options)
+    :transaction.set(ref,JSON.parse(JSON.stringify(value))),
+   update:(ref,value)=>transaction.update(ref,JSON.parse(JSON.stringify(value)))
+  }))
+ };
+ const context=vm.createContext(transport);
+ vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/services/order-creation.js'),'utf8'),context);
+ const order={status:'active',orderStatus:'normal',createdByUid:actor.uid,createdByRole:'sales',
+  ownerUid:actor.uid,salesCode:'R',customerName:'真實登入建單測試',productId:key,productMasterMatched:true,
+  inventoryReservationStatus:'pending',inventoryReservationAttemptId:'auth_client_initial',
+  deliveryRecords:[],returnRecords:[],deliveredQty:0,isDelivered:false,
+  items:[{itemId:'I',productId:key,qty:10,warehouseId:'CLIENT-A',reservedQty:0,
+   deliveredQty:0,returnedQty:0,fulfillmentType:'WAREHOUSE'}]};
+ const create=(id,data)=>context.commitOrderCreation(id,data,{actorUid:actor.uid,actorRole:'sales'});
+ await assert.rejects(create(orderId+'-cost',{...order,items:[{...order.items[0],unitCost:100}]}),error=>error.code==='permission-denied');
+ assert.equal((await db.collection('orders').doc(orderId+'-cost').get()).exists,false);
+ const warehouseDb=clientFirestore(unauthorized.app);connectFirestoreEmulator(warehouseDb,'127.0.0.1',8080);
+ await assert.rejects(setDoc(doc(warehouseDb,'orders',orderId+'-warehouse'),{...order,createdByUid:unauthorized.uid}),
+  error=>error.code==='permission-denied');
+ assert.equal((await db.collection('orders').doc(orderId+'-warehouse').get()).exists,false);
+ const created=await create(orderId,order);assert.equal(created.id,orderId);
+ const before=(await db.collection('orders').doc(orderId).get()).data();
+ assert.equal(before.createdByUid,actor.uid);
+ assert.equal(before.inventoryReservationStatus,'pending');
+ assert.equal((await db.collection('inventory').doc(key).get()).data().reserved,0);
+ const initialized=await synchronizeV2OrderFixture(db,actor.uid,{orderId,warehouseIds:['CLIENT-A','CLIENT-B']});
+ assert.equal(initialized.order.inventoryReservationStatus,'completed');
+ const after=(await db.collection('orders').doc(orderId).get()).data();
+ assert.equal(after.items[0].reservedQty,7);assert.equal(after.items[0].shortageQty,3);
+ assert.equal((await db.collection('inventory').doc(key).get()).data().reserved,7);
+ const demandId=procurementDemandCore.demandIdForSource({sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:'I'});
+ const demand=(await db.collection('procurementDemands').doc(encodeURIComponent(demandId)).get()).data();
+ assert.equal(demand.requestedQty,3);
+ const replay=await create(orderId,{...order,customerName:'不應覆蓋原訂單'});
+ assert.equal(replay.data.customerName,order.customerName);
+ assert.equal((await db.collection('orders').doc(orderId).get()).data().customerName,order.customerName);
+ assert.equal((await db.collection('inventory').doc(key).get()).data().reserved,7);
+});
+
 const code=expected=>error=>error.code==='functions/'+expected;
 test('real signed-in owner previews and CLOSE receives normal and cancelled orders with immutable retry and remaining restoration',async()=>{
  for(const cancelled of [false,true]){
