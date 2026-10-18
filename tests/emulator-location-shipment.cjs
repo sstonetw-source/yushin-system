@@ -1,7 +1,7 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
 const admin=require('firebase-admin'),{getFirestore}=require('firebase-admin/firestore');
-const {commitSingleItemTwoWarehouse,advanceReleasedV2FreeStock}=require('../functions/single-item-location-service');
+const {commitSingleItemTwoWarehouse,advanceReleasedV2FreeStock,drainReleasedV2FreeStock}=require('../functions/single-item-location-service');
 const {commitLocationShipment}=require('../functions/location-shipment-service');
 const {commitLocationDispatchPreparation}=require('../functions/location-dispatch-service');
 let app,db;
@@ -433,7 +433,7 @@ test('failed reversal update rolls back only the attempted correction and permit
  assert.deepEqual(await snapshot(x),before);assert.equal((await x.reverse()).status,'applied');
 });
 
-const {commitLocationReturn}=require('../functions/location-return-service');
+const {commitLocationReturn,commitLocationReturnAndRecover}=require('../functions/location-return-service');
 async function returnFixture(name,options={}){
  const x=await correctionFixture('receipt-'+name,{shipQty:4,confirmedQty:2,...options});
  const request=(patch={})=>({...x.traceRequest([{lotId:x.key+'-a-early',qty:1}]),
@@ -779,4 +779,41 @@ test('restockable CLOSE return emits free-stock source for authorized resumable 
  assert.equal(move.v2FreeStockSource,undefined);
  await assert.rejects(advanceReleasedV2FreeStock(db,replacement.adminUid,{movementId:replace.movementId}),
   /不會釋放/);
+});
+
+test('CLOSE physical return can resume free-stock allocation post-commit without changing return quantities',async()=>{
+ const x=await returnFixture('postcommit-close',{role:'admin'});
+ const requested=x.returnRequest({settlement:'CLOSE'});
+ const first=await commitLocationReturnAndRecover(db,x.uid,requested);
+ assert.equal(first.status,'applied');
+ assert.equal(first.postCommitAllocation.status,'completed');
+ assert.equal(first.postCommitAllocation.sources.length,1);
+ assert.equal(first.postCommitAllocation.sources[0].allocatedQty,0);
+ const before=await snapshot(x);
+ const replay=await commitLocationReturnAndRecover(db,x.uid,requested);
+ assert.equal(replay.status,'already-applied');
+ assert.equal(replay.postCommitAllocation.status,'completed');
+ assert.deepEqual(await snapshot(x),before);
+ const movement=await x.read('inventoryMovements',first.movementId);
+ assert.equal(movement.v2FreeStockSource,'CLOSED_CUSTOMER_RETURN');
+});
+test('REPLACE return leaves all stock reserved; sales CLOSE return commits but requires warehouse recovery',async()=>{
+ const replaced=await returnFixture('postcommit-replace',{role:'admin'});
+ const rep=await commitLocationReturnAndRecover(db,replaced.uid,replaced.returnRequest());
+ assert.equal(rep.status,'applied');
+ assert.equal(rep.postCommitAllocation.status,'not-applicable');
+ assert.deepEqual(rep.postCommitAllocation.sources,[]);
+ const move=await replaced.read('inventoryMovements',rep.movementId);
+ assert.equal(move.v2FreeStockSource,undefined);
+ const sales=await returnFixture('postcommit-sales-close',{role:'sales'});
+ const done=await commitLocationReturnAndRecover(db,sales.uid,sales.returnRequest({settlement:'CLOSE'}));
+ assert.equal(done.status,'applied');
+ assert.equal(done.postCommitAllocation.status,'recovery-pending');
+ assert.equal(done.postCommitAllocation.sources[0].errorCode,'permission-denied');
+ assert.equal((await sales.read('orders',sales.orderId)).returnRecords.length,1);
+ const resumer=await drainReleasedV2FreeStock(db,sales.adminUid,{movementId:done.movementId,maxSteps:5});
+ assert.equal(resumer.status,'completed');assert.equal(resumer.allocatedQty,0);
+ const before=await snapshot(sales);
+ assert.equal((await commitLocationReturnAndRecover(db,sales.uid,sales.returnRequest({settlement:'CLOSE'}))).status,'already-applied');
+ assert.deepEqual(await snapshot(sales),before);
 });
