@@ -532,3 +532,7 @@ Workflow 的明確 warehouseShipmentContext 現包含 returns，以原 projectSh
 ### 2026-10-18 多品項分批收貨
 
 既有 receiving Service 的 v2 驗證擴充為最多五個實體商品、初始化完成且無履約進度的多品項來源；仍只有原收貨 writer／Core。交易內核對同產品所有 ledger 的合計持有量，未收貨品項原樣保留。正式瀏覽器／Callable 閘門不變。見 [範圍與驗收](multi-item-receiving-20261018.md)。
+
+### 2026-10-18 整單履約 Core 與打單
+
+原 Fulfillment Core 以 projectOrderShipmentReturns 驗證完整事件並分組呼叫既有逐品項投影；原 v2 打單 Service 使用其整單與逐項結果，核對全單 ledger、出貨扣帳與退貨入庫憑證後，只改選定品項及一份打單記錄。仍 Emulator-only，多品項出貨／送達 writer 尚未擴充。見 [契約及驗收](multi-item-dispatch-20261018.md)。

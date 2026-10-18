@@ -280,6 +280,48 @@
       isDelivered:input.orderedQty>0&&effectiveDeliveredQty===input.orderedQty};
   }
 
+  // Bounded order adapter around the original per-item authority. Partition
+  // only after validating the whole event set, so unknown/duplicate events
+  // cannot disappear through a page's item filter.
+  function projectOrderShipmentReturns({orderId,items,shipments=[],deliveries=[],returns=[]}={}) {
+    const ident=value=>{
+      if(typeof value!=='string'||!value||value!==value.trim()||value.includes('/')||value.length>160)
+        throw Error('整單履約識別資料不正確。');
+      return value;
+    };
+    ident(orderId);
+    if(!Array.isArray(items)||!items.length||items.length>5)throw Error('整單履約僅支援 1–5 個品項。');
+    const sources=new Map();
+    for(const item of items){
+      const itemId=ident(item?.itemId),productKey=ident(item.inventoryProductKey||item.productId);
+      const orderedQty=item.qty??item.orderedQty;
+      if(sources.has(itemId)||!Number.isSafeInteger(orderedQty)||orderedQty<=0
+        ||(item.qty!==undefined&&item.orderedQty!==undefined&&item.qty!==item.orderedQty))
+        throw Error('整單履約品項重複或訂購量不正確。');
+      sources.set(itemId,{itemId,productKey,orderedQty});
+    }
+    for(const records of [shipments,deliveries,returns]){
+      if(!Array.isArray(records)||records.length>200)throw Error('整單履約事件格式不正確或超過安全上限。');
+      const seen=new Set();
+      for(const row of records){
+        const eventId=ident(row?.id),source=sources.get(row.itemId);
+        if(seen.has(eventId)||!source||row.orderId!==orderId||row.productKey!==source.productKey)
+          throw Error('整單履約事件來源不一致或重複。');
+        seen.add(eventId);
+      }
+    }
+    const projected=[...sources.values()].map(source=>({...source,...projectShipmentReturns({orderId,...source,
+      shipments:shipments.filter(row=>row.itemId===source.itemId),
+      deliveries:deliveries.filter(row=>row.itemId===source.itemId),returns:returns.filter(row=>row.itemId===source.itemId)})}));
+    const result={orderId,items:projected,isDelivered:projected.every(item=>item.isDelivered)};
+    for(const field of ['orderedQty','shippedQty','unshippedQty','confirmedQty','pendingDeliveryQty',
+      'returnedQty','closedQty','replacementQty','effectiveDeliveredQty','outstandingQty']){
+      result[field]=projected.reduce((sum,item)=>sum+item[field],0);
+      if(!Number.isSafeInteger(result[field])||result[field]<0)throw Error('整單履約合計超過安全數量。');
+    }
+    return result;
+  }
+
   function pendingDispatchQty(item) {
     return dispatchState(item).pending;
   }
@@ -322,6 +364,7 @@
     normalizeLocationReturnIntent,
     validateLocationReturnProofs,
     projectShipmentReturns,
+    projectOrderShipmentReturns,
     pendingDispatchQty,
     shippableQty,
     prepareDispatch,
