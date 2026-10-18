@@ -222,3 +222,10 @@ v2 到貨自由實貨**不新增欄位／Collection**。既有 `receipts/{receip
 不增加欄位或集合。原 `orders.returnRecords`／`returnedQty` 與 `inventoryMovements.action=location_customer_return` 必須一致；既有退貨寫入與後續打單／出貨／送達共用 `readLocationReturnProofs`。相同來源訂單 query 上限 201，超過 200 或紀錄數／原 normalized intent hash／來源／批次／完整 returnRecord 不一致時整筆拒絕。空快取也查詢，不能把移除實際退貨紀錄視為從未退貨。
 
 正常無退貨送達由原三份文件讀取，增加一次有界退貨憑證 query，總計 4 次 transaction.get 呼叫；有退貨時，該 query 實際讀取對應 movement（最多 200 份）。正常打單與出貨同樣增加一次此 query；不讀成本、批次或庫存來確認送達，送達仍只寫 orders，不二次扣帳。原退貨 writer 沒有增加查詢。沿用既有複合條件查詢，不新增 Index／Listener，未遷移或部署正式資料。
+
+
+### CLOSE 退貨後的取消／恢復（2026-10-18，Emulator-only）
+
+沒有新增欄位、集合或來源憑證格式。`orders.returnRecords`／兩層 returnedQty 必須與共同投影及原 `location_customer_return` movements 一致，取消與恢復都驗證；缺失、竄改或清除退貨快取不得繞過。原 lifecycle operation ID／intent hash／receipt、ledger 與 release/reserve movement 格式保持不變，固定 ID 重送仍只回原結果。
+
+每次首次 lifecycle 交易新增一次 sourceId + action 的既有 return movement 查詢（limit 201，最多接受 200）；舊初始 v2 無 returnRecords 欄位時以空快取唯讀檢查，不回填正式資料。既有供應／採購單／實收 proof 同交易檢查保留；取消／恢復只寫原狀態、預留、需求、操作歷史與憑證，不改實貨、批次或既有交付／退貨／採購／收貨事實。無新 Index／Rules／Listener 或遷移。

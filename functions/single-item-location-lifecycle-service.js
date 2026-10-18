@@ -8,6 +8,7 @@ const workflowCore=require('./shared/workflow-core');
 const receivingCore=require('./shared/receiving-core');
 const fulfillmentCore=require('./shared/fulfillment-core');
 const {readShipmentProof}=require('./shipment-delivery-service');
+const {readLocationReturnProofs}=require('./location-return-trace-service');
 function fault(message,code='failed-precondition'){const e=new Error(message);e.code=code;throw e;}
 function ident(value,name){
  if(typeof value!=='string'||!value||value!==value.trim()||value.includes('/')||value.length>160)
@@ -89,10 +90,8 @@ async function commitSingleItemLocationLifecycle(db,uid,data){
    fault('品項不是可取消或恢復的實體倉商品');
   const ordered=number(item.qty??item.orderedQty,'訂購量');
   if(!ordered||(item.qty!==undefined&&item.orderedQty!==undefined&&item.qty!==item.orderedQty)
-   ||number(item.returnedQty??0,'退貨量')!==0
-   ||order.isDelivered===true
-   ||(order.returnRecords??[]).length>0||(order.returnHistory??[]).length>0)
-   fault('全部送達或退貨的訂單不在此取消試點範圍');
+   ||order.isDelivered===true)
+   fault('全部送達或訂購量異常的訂單不在此取消試點範圍');
   if(!Array.isArray(order.warehouseShipmentRecords??[])||!Array.isArray(order.deliveryRecords??[])
     ||!Array.isArray(order.returnRecords??[])||!Array.isArray(order.orderLifecycleHistory??[])
     ||!Array.isArray(order.warehouseShipmentHistory??[])||!Array.isArray(order.deliveryHistory??[])
@@ -106,17 +105,26 @@ async function commitSingleItemLocationLifecycle(db,uid,data){
    fault('實體產品主檔不存在或為服務品項');
   // Share the shipment authority, including actual debit proofs. Cancellation
   // only closes the unfulfilled remainder; acknowledged goods stay historical.
-  const fulfillment=fulfillmentCore.projectShipmentDelivery({orderId,itemId,productKey,orderedQty:ordered,
-   shipments:order.warehouseShipmentRecords??[],deliveries:order.deliveryRecords??[]});
+  const returnRecords=order.returnRecords??[];
+  const fulfillment=fulfillmentCore.projectShipmentReturns({orderId,itemId,productKey,orderedQty:ordered,
+   shipments:order.warehouseShipmentRecords??[],deliveries:order.deliveryRecords??[],returns:returnRecords});
+  // Initial v2 orders may omit an empty cache. Still query physical receipts
+  // so deleting or zeroing an existing CLOSE return cannot hide its history.
+  await readLocationReturnProofs(tx,db,{...order,returnRecords},intent,productKey,{closedOnly:true});
+  if((order.returnHistory??[]).some(event=>event?.action!=='add'
+    ||!returnRecords.some(record=>record.id===event.recordId)))
+   fault('退貨歷史含尚未整合的更正或缺少原入庫來源');
   if(number(item.warehouseShippedQty??0,'已寄出量')!==fulfillment.shippedQty
    ||number(item.deliveredQty??0,'已交付量')!==fulfillment.confirmedQty
    ||number(order.deliveredQty??0,'訂單已交付量')!==fulfillment.confirmedQty
+   ||number(item.returnedQty??0,'品項退貨量')!==fulfillment.returnedQty
+   ||number(order.returnedQty??0,'訂單退貨量')!==fulfillment.returnedQty
    ||(order.isDelivered??false)!==fulfillment.isDelivered)
    fault('出貨或送達投影不一致');
   if(fulfillment.pendingDeliveryQty>0)fault('尚有途中貨物，須先完成送達確認');
   if(number(item.dispatchPreparedQty??0,'已打單量')!==fulfillment.shippedQty)
    fault('尚有已打單未出貨數量，不在取消試點範圍');
-  const outstanding=ordered-fulfillment.confirmedQty;
+  const outstanding=fulfillment.outstandingQty;
   if(!outstanding)fault('訂單已無剩餘未交付數量');
   for(const shipment of order.warehouseShipmentRecords??[]){
    if(!warehouseIds.includes(shipment.warehouseId))fault('歷史出貨來源不在候選倉');
@@ -326,7 +334,8 @@ async function commitSingleItemLocationLifecycle(db,uid,data){
   const demandProjection=workflowCore.procurementQuantities({
    orderedQty:ordered,fulfillmentType:'WAREHOUSE',reservedQty:nextItem.reservedQty,
    shortageQty:nextItem.shortageQty,supplyOrderedQty:orderedSupply,receivedQty:receivedSupply,
-   deliveredQty:fulfillment.confirmedQty,effectiveDeliveredQty:fulfillment.confirmedQty,returnedQty:0
+   deliveredQty:fulfillment.confirmedQty,effectiveDeliveredQty:fulfillment.effectiveDeliveredQty,
+   returnedQty:fulfillment.returnedQty
   });
   const baseDemand=nextStatus==='cancelled'
    ?(previousDemand?demandCore.cancelDemand(previousDemand):null)
