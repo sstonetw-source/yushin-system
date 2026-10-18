@@ -103,3 +103,10 @@ CLOSE 後剩餘履約須使用原打單／出貨／確認 Service 與 `projectSh
 CLOSE 後取消／恢復仍拒絕未整合的退貨刪除／更正歷史，不能只因快取目前皆為 CLOSE 便忽略其他歷史動作。CLOSE 後取消／恢復不可移除保護後另算需求：一律沿原 `commitSingleItemLocationLifecycle`、`projectShipmentReturns`、`readLocationReturnProofs`、Reservation 與 Workflow／Demand Core。CLOSE 的有效商業交付應明確傳入 Workflow，不能單純用 returnedQty 再扣一次已結案數量。重送仍查真實使用者與目前所有權；新交易才重新讀取業務來源並提交。
 
 需驗收取消／恢復兩方向的缺失／竄改／隱藏退貨 proof，真實競爭預留引起缺口，取消後配貨再恢復，五角色與外人／停用帳號，併發與末端 receipt 建立失敗（包含新需求全回滾），以及原採購→收貨→出貨→送達→CLOSE→取消／恢復的供應歷史保留。途中貨、未出貨打單、REPLACE／混合補送與全數完成仍拒絕，不可直接開放前端或 Callable。
+
+
+### CLOSE 後收貨實作規則（2026-10-18，Emulator-only）
+
+只擴充原 receiveSupplyOrderRecord，不可另建收貨 writer。新交易必須核對實際 return movements（包含空快取），共用 Fulfillment.normalizeLocationReturnIntent／validateLocationReturnProofs；Node 與 Web Crypto 只負責 SHA-256 adapter，不得各自正規化意圖或變更歷史 hash。原 Functions readLocationReturnProofs 仍為共同有界讀取 adapter。
+
+使用含 returns 的 warehouseShipmentContext，gross／effective 要明確表達 CLOSE 商業結清；不得把 returnedQty 歸零或以待客戶確認量當實體缺口。測試須包含原真實採購→收貨→出貨→送達→CLOSE→後續收貨→剩餘履約、取消 KEEP_STOCK／恢復、錯誤憑證拒絕、固定 ID 重送與衝突、競爭交易與末端失敗整筆回滾。modules 修改須產生 functions/shared，src 修改須產生 app.js。仍限 demo-yushin Emulator，沒有 Callable／UI／正式 Firebase 部署。

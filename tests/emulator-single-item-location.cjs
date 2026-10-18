@@ -565,7 +565,7 @@ test('split supplier POs retain the uncancelled commitment when only one PO line
 
 function receivingHarness(c,uid='emulator-purchaser',role='purchaser'){
  c.currentUser={uid};c.currentUserRole=role;c.permissionRulesReady=true;
- c.process=process;c.window=c;c.YushinSupply=require('../modules/supply-core');
+ c.process=process;c.window=c;c.crypto=require('node:crypto').webcrypto;c.TextEncoder=TextEncoder;c.YushinSupply=require('../modules/supply-core');
  c.YushinFulfillment=require('../modules/fulfillment-core');c.YushinReservation=require('../modules/reservation-core');
  c.canConfirmSupplyReceipt=()=>['admin','purchaser','warehouse'].includes(c.currentUserRole);
  c.deliveryActor=()=>c.currentUser.uid;c.localDateString=()=> '2026-10-17';
@@ -1720,4 +1720,97 @@ test('real purchased receipt shipment and CLOSE return preserve supply history t
  assert.equal(after.state.base.documents[1].onHand,8);assert.equal(after.state.base.documents[1].incoming,2);
  assert.equal(after.state.demand.orderedQty,3);assert.equal(after.state.demand.receivedQty,1);
  assert.equal(after.state.demand.remainingToOrderQty,0);assert.equal(after.state.demand.remainingToReceiveQty,2);
+});
+
+async function closedReceiptLifecycle(name,{settlement='CLOSE',shipped=1,confirmed=shipped}={}){
+ const x=await receiptShipmentLifecycle('closed-receipt-'+name);
+ await x.receive(1,'closed_initial_receipt_'+name);await x.prepare(shipped,'first');await x.ship(shipped,'first');await x.confirm(confirmed,'first');
+ const order=await x.read('orders',x.orderId),shipment=order.warehouseShipmentRecords[0];
+ const result=await require('../functions/location-return-service').commitLocationReturn(db,x.uid,{
+  orderId:x.orderId,itemId:'I1',shipmentId:shipment.id,syncAttemptId:'v2_123456789',
+  operationId:'closed_customer_return_'+name,warehouseId:'V2-A',date:'2026-10-17',
+  reason:'訂錯貨結案',condition:'RESTOCKABLE',settlement,selections:[{lotId:shipment.lotAllocations[0].lotId,qty:1}]});
+ return {...x,returnMovementId:result.movementId};
+}
+test('CLOSE return permits remaining partial PO receipts with fixed-ID replay and completes original remaining shipments',async()=>{
+ const x=await closedReceiptLifecycle('complete'),before=await receiptSnapshot(x);
+ await x.receive(1,'closed_next_receipt_complete');
+ const once=await receiptSnapshot(x);await x.receive(1,'closed_next_receipt_complete');assert.deepEqual(await receiptSnapshot(x),once);
+ await assert.rejects(x.receive(2,'closed_next_receipt_complete'),/識別碼衝突/);
+ await x.receive(1,'closed_final_receipt_complete');
+ let order=await x.read('orders',x.orderId),stock=await x.read('inventory',x.productKey);
+ assert.equal(order.items[0].reservedQty,9);assert.equal(order.items[0].shortageQty,0);assert.equal(order.items[0].receivedQty,3);
+ assert.equal(stock.onHand,10);assert.equal(stock.reserved,9);assert.equal(stock.incoming,0);
+ assert.deepEqual(order.returnRecords,before.state.base.documents[0].returnRecords);
+ assert.deepEqual(order.returnHistory,before.state.base.documents[0].returnHistory);
+ await x.prepare(9,'last');await x.ship(6,'a');await x.ship(3,'b','V2-B');await x.confirm(6,'a');await x.confirm(3,'b');
+ order=await x.read('orders',x.orderId);stock=await x.read('inventory',x.productKey);
+ assert.equal(order.isDelivered,true);assert.equal(order.deliveredQty,10);assert.equal(order.returnedQty,1);
+ assert.equal(order.items[0].warehouseShippedQty,10);assert.equal(stock.onHand,1);assert.equal(stock.reserved,0);
+ const demand=(await x.demandRef.get()).data();assert.equal(demand.receivedQty,3);assert.equal(demand.requestedQty,3);
+ assert.equal(demand.remainingToOrderQty,0);assert.equal(demand.remainingToReceiveQty,0);
+});
+test('CLOSE receipt while other shipped goods await acknowledgement never reserves those units again',async()=>{
+ const x=await closedReceiptLifecycle('pending',{shipped:2,confirmed:1});await x.receive(2,'closed_pending_receipt_final');
+ const order=await x.read('orders',x.orderId),stock=await x.read('inventory',x.productKey);
+ assert.equal(order.items[0].reservedQty,8);assert.equal(order.items[0].shortageQty,0);assert.equal(order.items[0].warehouseShippedQty,2);
+ assert.equal(order.deliveredQty,1);assert.equal(order.returnedQty,1);assert.equal(stock.reserved,8);assert.equal(stock.incoming,0);
+});
+test('CLOSE then cancelled KEEP_STOCK receipt remains free stock and restores only remaining demand',async()=>{
+ const x=await closedReceiptLifecycle('cancelled');await x.lifecycle('cancelled');
+ const blocked=await receiptSnapshot(x);await assert.rejects(x.receive(),/採購確認/);assert.deepEqual(await receiptSnapshot(x),blocked);
+ await keepReceiptAsStock(x);const before=await receiptSnapshot(x);await x.receive(2,'closed_cancelled_receipt_final');
+ let order=await x.read('orders',x.orderId),stock=await x.read('inventory',x.productKey);
+ assert.equal(order.status,'cancelled');assert.equal(order.items[0].reservedQty,0);assert.equal(order.items[0].receivedQty,3);
+ assert.equal(stock.onHand,10);assert.equal(stock.reserved,0);assert.equal(stock.incoming,0);
+ assert.deepEqual(order.returnRecords,before.state.base.documents[0].returnRecords);
+ const restore=await x.lifecycle('normal');assert.equal(restore.reservedQty,9);assert.equal(restore.shortageQty,0);
+ assert.equal((await x.demandRef.get()).data().remainingToOrderQty,0);
+});
+test('receipt after CLOSE cancellation and restoration uses current location ledger without reopening closed demand',async()=>{
+ const x=await closedReceiptLifecycle('restored');await x.lifecycle('cancelled');await x.lifecycle('normal');
+ await x.receive(2,'closed_restored_receipt_final');
+ const order=await x.read('orders',x.orderId),stock=await x.read('inventory',x.productKey);
+ assert.equal(order.items[0].reservedQty,9);assert.equal(order.items[0].shortageQty,0);
+ assert.equal(stock.reserved,9);assert.equal(stock.incoming,0);assert.equal(order.returnedQty,1);
+ assert.equal((await x.demandRef.get()).data().requestedQty,3);
+});
+test('post-return receipts reject altered, missing or hidden return evidence and projections with no partial writes',async()=>{
+ const cases=[
+  ['missing',x=>db.collection('inventoryMovements').doc(x.returnMovementId).delete()],
+  ['quantity',x=>db.collection('inventoryMovements').doc(x.returnMovementId).update({qty:2})],
+  ['warehouse',x=>db.collection('inventoryMovements').doc(x.returnMovementId).update({warehouseId:'V2-B'})],
+  ['hash',x=>db.collection('inventoryMovements').doc(x.returnMovementId).update({intentHash:'forged'})],
+  ['record',x=>db.collection('inventoryMovements').doc(x.returnMovementId).update({'returnRecord.reason':'altered'})],
+  ['hidden',async x=>{const o=await x.read('orders',x.orderId);o.items[0].returnedQty=0;
+   await db.collection('orders').doc(x.orderId).update({items:o.items,returnRecords:[],returnHistory:[],returnedQty:0});}],
+  ['cache',x=>db.collection('orders').doc(x.orderId).update({returnedQty:0})],
+  ['item',async x=>{const o=await x.read('orders',x.orderId);o.items[0].returnedQty=0;await db.collection('orders').doc(x.orderId).update({items:o.items});}],
+  ['history',x=>db.collection('orders').doc(x.orderId).update({returnHistory:[{action:'remove',recordId:'unknown'}]})],
+ ];
+ for(const [name,mutate] of cases){const x=await closedReceiptLifecycle('reject-'+name);await mutate(x);
+  const before=await receiptSnapshot(x);await assert.rejects(x.receive(1,'closed_rejected_receipt_'+name));assert.deepEqual(await receiptSnapshot(x),before,name);}
+ const replace=await closedReceiptLifecycle('replace',{settlement:'REPLACE'}),before=await receiptSnapshot(replace);
+ await assert.rejects(replace.receive(1,'closed_replace_receipt_rejected'),/CLOSE/);assert.deepEqual(await receiptSnapshot(replace),before);
+});
+test('CLOSE receipt races with physical return or cancellation serialize without duplicate reservation',async()=>{
+ const x=await receiptShipmentLifecycle('closed-race');await x.receive(1,'closed_race_initial_receipt');await x.prepare(1,'first');await x.ship(1,'first');await x.confirm(1,'first');
+ const order=await x.read('orders',x.orderId),shipment=order.warehouseShipmentRecords[0];
+ await Promise.all([x.receive(1,'closed_race_next_receipt'),require('../functions/location-return-service').commitLocationReturn(db,x.uid,{
+  orderId:x.orderId,itemId:'I1',shipmentId:shipment.id,syncAttemptId:'v2_123456789',operationId:'closed_race_customer_return',
+  warehouseId:'V2-A',date:'2026-10-17',reason:'結案',condition:'RESTOCKABLE',settlement:'CLOSE',selections:[{lotId:shipment.lotAllocations[0].lotId,qty:1}]})]);
+ let stock=await x.read('inventory',x.productKey);assert.equal(stock.onHand,9);assert.equal(stock.reserved,8);assert.equal(stock.incoming,1);
+ const results=await Promise.allSettled([x.receive(1,'closed_race_final_receipt'),x.lifecycle('cancelled')]);
+ assert.equal(results[1].status,'fulfilled');stock=await x.read('inventory',x.productKey);
+ const current=await x.read('orders',x.orderId);assert.equal(current.status,'cancelled');assert.equal(stock.reserved,0);
+ assert.equal(stock.onHand,current.items[0].receivedQty+7);assert.equal(stock.incoming,3-current.items[0].receivedQty);
+});
+test('late post-CLOSE receipt failure rolls back stock lots cost source and demand; retry posts once',async()=>{
+ const x=await closedReceiptLifecycle('rollback'),collision=db.collection('inventoryMovements').doc('closed-receipt-collision');await collision.set({marker:true});
+ x.c.runRoleTransaction=fn=>db.runTransaction(async tx=>fn({get:r=>tx.get(r),update:(...a)=>tx.update(...a),
+  set:(ref,...args)=>{if(ref.parent.id==='receipts')tx.create(collision,{marker:false});return tx.set(ref,...args);}}));
+ const before=await receiptSnapshot(x);await assert.rejects(x.receive(2,'closed_rollback_final_receipt'));assert.deepEqual(await receiptSnapshot(x),before);
+ x.c.runRoleTransaction=fn=>db.runTransaction(async tx=>fn(tx));await x.receive(2,'closed_rollback_final_receipt');
+ const after=await receiptSnapshot(x);await x.receive(2,'closed_rollback_final_receipt');assert.deepEqual(await receiptSnapshot(x),after);
+ assert.equal(after.state.base.documents[1].onHand,10);assert.equal(after.state.base.documents[1].reserved,9);
 });

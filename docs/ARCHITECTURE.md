@@ -463,3 +463,10 @@ job `reservationOperationReceipts` 與 movement 在不同交易，使用 pending
 原 `commitSingleItemLocationLifecycle` 改以既有 `projectShipmentReturns` 投影，並沿用 `readLocationReturnProofs(closedOnly:true)` 核對實際退貨。取消／恢復使用相同 Reservation Core，需求仍走 Workflow → Procurement Demand Core，不新增 writer 或數量核心。新交易在原讀取階段增加一次有界 return movement query，初始空退貨快取可省略欄位但不能略過實際憑證查詢。
 
 CLOSE 後僅剩餘未交付部分可取消／恢復；已出貨須全數確認、累計打單須等於已寄出，仍不處理途中貨或未出貨打單。REPLACE／混合補送與全數完成仍拒絕。組合的取消後配貨入口沿用原 release movements 與 coordinator，不增加自動背景作業。僅 demo-yushin Emulator，沒有 Callable／前端／Firebase 部署。
+
+
+### CLOSE 退貨後的後續收貨（2026-10-18，Emulator-only）
+
+本節更新先前退貨後不能收貨的限制。沿用 `src/services/receiving.js::receiveSupplyOrderRecord` 唯一收貨 writer，交易內從有界 sourceId＋action 查詢核對所有原退貨入庫憑證（空快取也查），並驗證 item／order returnedQty、出貨、送達及供應來源；只支援 CLOSE，REPLACE／混合補送與退貨更正仍拒絕。退貨意圖正規化及憑證資料驗證抽至原 Fulfillment Core，Functions 原 reader 與原收貨 Service 共用；雜湊順序及歷史操作 ID 不變，平台分別使用 Node SHA-256／Web Crypto。
+
+Workflow 的明確 warehouseShipmentContext 現包含 returns，以原 projectShipmentReturns 區分商業未結清與實體尚未寄出量。Receiving 明確傳 gross／effective，CLOSE 不再被扣第二次；採購需求 helper 同樣帶原退貨事件。無 context 的舊契約保留。原 receipt、批次、成本連結、供應／需求、公司／分倉及來源預留維持同一交易；取消後仍須原採購 KEEP_STOCK 決策，收貨只成自由實貨，恢復至多需求剩餘未寄出量。沒有第二個 writer、後端側寫、Rules／索引變更或正式接線。

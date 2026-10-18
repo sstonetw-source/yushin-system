@@ -146,12 +146,6 @@
   // Match an immutable physical debit to its source shipment. The backend
   // acknowledgement adapter additionally verifies its normalized intent hash.
   function validateShipmentMovement(shipment,movement,{orderId,itemId,productKey}={}) {
-    const same=(a,b)=>{
-      if(a===b)return true;
-      if(!a||!b||typeof a!=='object'||typeof b!=='object'||Array.isArray(a)!==Array.isArray(b))return false;
-      const keys=Object.keys(a);
-      return keys.length===Object.keys(b).length&&keys.every(k=>Object.prototype.hasOwnProperty.call(b,k)&&same(a[k],b[k]));
-    };
     const allocations=shipment?.lotAllocations;
     if(!shipment||shipment.orderId!==orderId||shipment.itemId!==itemId||shipment.productKey!==productKey
       ||shipment.sourceType!=='WAREHOUSE_CUSTOMER_SHIPMENT'
@@ -164,11 +158,91 @@
       ||!movement||movement.action!=='location_customer_shipment'||movement.type!=='ship'
       ||movement.sourceId!==orderId||movement.itemId!==itemId||movement.productKey!==productKey
       ||movement.warehouseId!==shipment.warehouseId||movement.qty!==-shipment.qty
-      ||!same(movement.lotAllocations,allocations))
+      ||!sameRecord(movement.lotAllocations,allocations))
       throw Error('來源倉庫出貨與實際扣帳憑證不一致。');
     return true;
   }
 
+  // Immutable events contain plain Firestore data; key order is immaterial.
+  function sameRecord(a,b){
+    if(a===b)return true;
+    if(!a||!b||typeof a!=='object'||typeof b!=='object'||Array.isArray(a)!==Array.isArray(b))return false;
+    const keys=Object.keys(a);
+    return keys.length===Object.keys(b).length&&keys.every(k=>Object.prototype.hasOwnProperty.call(b,k)&&sameRecord(a[k],b[k]));
+  }
+
+  function returnFault(message,code='failed-precondition'){const e=new Error(message);e.code=code;throw e;}
+  function returnId(value){
+   if(typeof value!=='string'||!value||value!==value.trim()||value.includes('/')||value.length>160)
+    returnFault('退貨追溯識別碼不正確','invalid-argument');
+   return value;
+  }
+  function normalizeReturnTraceIntent(data){
+   if(!data||typeof data!=='object'||Array.isArray(data)
+    ||Object.keys(data).some(k=>!['orderId','itemId','shipmentId','syncAttemptId','selections'].includes(k)))
+    returnFault('退貨追溯請求含未授權欄位','invalid-argument');
+   const intent={};for(const key of ['orderId','itemId','shipmentId','syncAttemptId'])intent[key]=returnId(data[key]);
+   if(intent.syncAttemptId.length>96||!Array.isArray(data.selections)||!data.selections.length||data.selections.length>200)
+    returnFault('退貨批次選擇不正確','invalid-argument');
+   intent.selections=data.selections.map(row=>{
+    if(!row||typeof row!=='object'||Array.isArray(row)||Object.keys(row).some(k=>!['lotId','qty'].includes(k))
+     ||!Number.isSafeInteger(row.qty)||row.qty<=0)returnFault('退貨批次數量不正確','invalid-argument');
+    return {lotId:returnId(row.lotId),qty:row.qty};
+   });
+   if(new Set(intent.selections.map(row=>row.lotId)).size!==intent.selections.length)
+    returnFault('退貨批次重複','invalid-argument');
+   return intent;
+  }
+  function normalizeLocationReturnIntent(data){
+   const keys=['orderId','itemId','shipmentId','syncAttemptId','selections','operationId','warehouseId','date','reason','condition','settlement'];
+   if(!data||typeof data!=='object'||Array.isArray(data)||Object.keys(data).some(k=>!keys.includes(k)))
+    returnFault('退貨入庫請求含未授權欄位','invalid-argument');
+   const intent=normalizeReturnTraceIntent(Object.fromEntries(['orderId','itemId','shipmentId','syncAttemptId','selections'].map(k=>[k,data[k]])));
+   const settlement=data.settlement===undefined?'CLOSE':data.settlement;
+   if(typeof data.operationId!=='string'||!/^[a-zA-Z0-9_-]{12,96}$/.test(data.operationId)
+    ||typeof data.warehouseId!=='string'||!data.warehouseId||data.warehouseId!==data.warehouseId.trim()
+    ||data.warehouseId.includes('/')||data.warehouseId.length>160)
+    returnFault('退貨入庫操作或收貨倉識別碼不正確','invalid-argument');
+   if(typeof data.date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(data.date)
+    ||!Number.isFinite(Date.parse(data.date+'T00:00:00Z'))
+    ||new Date(data.date+'T00:00:00Z').toISOString().slice(0,10)!==data.date)
+    returnFault('退貨入庫日期不正確','invalid-argument');
+   if(typeof data.reason!=='string'||!data.reason.trim()||data.reason.length>1000
+    ||data.condition!=='RESTOCKABLE'||!['CLOSE','REPLACE'].includes(settlement))
+    returnFault('退貨原因、品質或補送／結案決策不正確','invalid-argument');
+   // Lot order has no business meaning. Stable ordering makes retries deterministic.
+   intent.selections.sort((a,b)=>a.lotId.localeCompare(b.lotId));
+   Object.assign(intent,{operationId:data.operationId,warehouseId:data.warehouseId,date:data.date,
+    reason:data.reason.trim(),condition:data.condition,settlement});
+   return intent;
+  }
+
+  // Database reads and SHA-256 implementations remain platform adapters.
+  // This validator is shared by the original receiving and return Services.
+  async function validateLocationReturnProofs(order,intent,productKey,receipts,{closedOnly=false,hashIntent}={}){
+   const {orderId,itemId}=intent;
+   if(!Array.isArray(order.returnRecords))returnFault('退貨紀錄格式不正確');
+   if(closedOnly&&order.returnRecords.some(r=>r?.settlement!=='CLOSE'))
+    returnFault('退貨或補送流程尚未開放：此入口僅支援 CLOSE 結案退貨');
+   if(receipts.length>200||receipts.length!==order.returnRecords.length)returnFault('退貨紀錄與實際入庫憑證數量不一致');
+   const byMovement=new Map(receipts.map(s=>[s.id,s.data]));
+   for(const row of order.returnRecords){
+    if(!Array.isArray(row.lotAllocations))returnFault('先前退貨缺少批次明細');
+    const priorIntent=normalizeLocationReturnIntent({orderId,itemId,shipmentId:row.shipmentId,
+     syncAttemptId:intent.syncAttemptId,selections:row.lotAllocations.map(a=>({lotId:a.lotId,qty:a.qty})),
+     operationId:row.id,warehouseId:row.warehouseId,date:row.date,reason:row.reason,
+     condition:row.condition,settlement:row.settlement});
+    const hash=await hashIntent(priorIntent);
+    const proof=byMovement.get('location-return-'+row.id);
+    if(row.movementId!=='location-return-'+row.id||row.intentHash!==hash||!proof
+     ||proof.action!=='location_customer_return'||proof.type!=='return'
+     ||proof.qty!==row.qty||proof.sourceId!==orderId||proof.itemId!==itemId
+     ||proof.productKey!==productKey||proof.warehouseId!==row.warehouseId
+     ||proof.intentHash!==hash||!sameRecord(proof.returnRecord,row))
+     returnFault('先前退貨缺少一致的實際入庫憑證');
+   }
+   return true;
+  }
   // Physical returns do not erase historical shipments/acknowledgements.
   // CLOSE fulfils that quantity commercially; REPLACE reopens demand.
   function projectShipmentReturns(input={}) {
@@ -244,6 +318,9 @@
     warehouseShipmentState,
     projectShipmentDelivery,
     validateShipmentMovement,
+    normalizeReturnTraceIntent,
+    normalizeLocationReturnIntent,
+    validateLocationReturnProofs,
     projectShipmentReturns,
     pendingDispatchQty,
     shippableQty,

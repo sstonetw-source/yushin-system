@@ -49,3 +49,12 @@
 ## 2026-10-18 更新：CLOSE 後取消／恢復剩餘需求
 
 原 lifecycle Service 已共用本退貨入庫憑證 reader，CLOSE 後可在已寄出全確認、無額外打單的條件下取消／恢復剩餘需求；不重開結案退貨、不改批次實貨與原歷史。兩方向都核對實際 movements。REPLACE／混合補送、取消中新增退貨與退貨後收貨仍未整合；詳見 location-lifecycle-20261017.md 最新節。此能力僅 Emulator，無正式部署。
+
+
+### CLOSE 後原 PO 繼續收貨（2026-10-18，Emulator-only）
+
+本節取代先前 CLOSE 退貨後收貨尚未支援的限制。原 Receiving Service 現可在交易內驗證實際退貨 movements 及累計出貨／送達／退貨，沿用同一原子收貨 writer；取消中收貨仍要求採購 KEEP_STOCK，絕不占回取消訂單。正常／恢復訂單只預留尚未寄出的剩餘需求，CLOSE 不新增補送量；途中未確認商品不重覆占量。
+
+原 Functions reader 及收貨 adapter 共用 Fulfillment Core 的 canonical intent 與完整 proof validator。Node 與 Web Crypto SHA-256 經固定歷史 hash 回歸；查詢每次首次 v2 收貨增加一次有界 return proof query（limit201、最多200），空快取亦查。無新 collection、Rules、Index 或另一個 writer。
+
+新增七組 Emulator 回歸：分次收貨後完成剩餘雙倉履約、部分送達仍待確認、取消 KEEP_STOCK 收貨後恢復、恢復後收貨、缺漏／變造／隱藏憑證與 REPLACE 拒絕、退貨／取消競爭、末端碰撞回滾及固定 ID 重試。另覆蓋收貨 Core、實際採購需求 helper 與歷史雜湊相容。結果以本批實際 CI 為準。仍待取消中新增退貨、REPLACE／混合補送、退貨更正／撤銷、多品項、完整 Auth／UI／Preview；沒有正式部署。

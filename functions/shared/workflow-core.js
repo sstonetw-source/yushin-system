@@ -56,15 +56,15 @@
     const outstandingQty=Math.max(0,orderedQty-effectiveDeliveredQty);
 
     const shipmentContext=input.warehouseShipmentContext;
-    const shipment=shipmentContext===undefined?null:fulfillment.projectShipmentDelivery({
+    const shipment=shipmentContext===undefined?null:fulfillment.projectShipmentReturns({
       ...shipmentContext,orderedQty:input.orderedQty??input.qty
     });
-    if(shipment&&(fulfillmentType!=='WAREHOUSE'||returnedQty!==0
-      ||grossDeliveredQty!==shipment.confirmedQty||effectiveDeliveredQty!==shipment.confirmedQty
+    if(shipment&&(fulfillmentType!=='WAREHOUSE'||shipment.replacementQty!==0||returnedQty!==shipment.returnedQty
+      ||grossDeliveredQty!==shipment.confirmedQty||effectiveDeliveredQty!==shipment.effectiveDeliveredQty
       ||(input.warehouseShippedQty!==undefined&&input.warehouseShippedQty!==shipment.shippedQty)))
       throw Error('倉庫出貨與履約投影不一致，或退貨流程尚未整合。');
     // Customer acknowledgement and remaining physical shipment are separate.
-    const stockOutstandingQty=shipment?shipment.unshippedQty:outstandingQty;
+    const stockOutstandingQty=shipment?shipment.outstandingQty:outstandingQty;
     let reservedQty=0;
     let shortageQty=0;
     if(hasNumber(input.reservedQty)){

@@ -235,7 +235,7 @@ function procurementDemandForOrderItem(order, item, dispatchOverride = null) {
         fulfillmentType,
         ...(Array.isArray(order.warehouseShipmentRecords)&&order.warehouseShipmentRecords.length?{
             warehouseShipmentContext:{orderId:order.id,itemId:item.itemId,productKey:item.inventoryProductKey||item.productId,
-                shipments:order.warehouseShipmentRecords,deliveries:order.deliveryRecords??[]},
+                shipments:order.warehouseShipmentRecords,deliveries:order.deliveryRecords??[],returns:order.returnRecords??[]},
             warehouseShippedQty:item.warehouseShippedQty
         }:{}),
         reservedQty:item.reservedQty,

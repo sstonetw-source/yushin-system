@@ -149,3 +149,21 @@ test('partial receipt reserves only unshipped demand while goods await customer 
  assert.equal(receipt.item.deliveredQty,0);assert.equal(receipt.item.warehouseShippedQty,4);
  assert.equal(Object.hasOwn(receipt.item,'warehouseShipmentContext'),false);
 });
+
+test('CLOSE return receipt preserves closed delivery and reserves only remaining physical demand',()=>{
+ const context={orderId:'O',itemId:'I',productKey:'P',shipments:[{id:'S',orderId:'O',itemId:'I',productKey:'P',
+  warehouseId:'A',date:'2026-10-17',qty:4,sourceType:'WAREHOUSE_CUSTOMER_SHIPMENT'}],
+  deliveries:[{id:'D',shipmentId:'S',orderId:'O',itemId:'I',productKey:'P',warehouseId:'A',date:'2026-10-17',qty:2,sourceType:'WAREHOUSE_SHIPMENT_CONFIRMATION'}],
+  returns:[{id:'R',shipmentId:'S',orderId:'O',itemId:'I',productKey:'P',warehouseId:'A',date:'2026-10-17',qty:1,
+   sourceType:'WAREHOUSE_CUSTOMER_RETURN',condition:'RESTOCKABLE',settlement:'CLOSE'}]};
+ const item={qty:10,receivedQty:1,reservedQty:4,deliveredQty:2,returnedQty:1,warehouseShippedQty:4};
+ const receipt=receiving.applyReceiptToOrderItem(item,3,context);
+ assert.equal(receipt.reservedDelta,2);assert.equal(receipt.item.reservedQty,6);assert.equal(receipt.item.shortageQty,0);
+ assert.equal(receipt.item.deliveredQty,2);assert.equal(receipt.item.returnedQty,1);
+ const workflow=require('../modules/workflow-core');
+ const projection=workflow.projectItem({...item,grossDeliveredQty:2,effectiveDeliveredQty:2,warehouseShipmentContext:context});
+ assert.equal(projection.outstandingQty,8);assert.equal(projection.stockOutstandingQty,6);
+ assert.equal(projection.pendingDeliveryQty,2);
+ context.returns[0].settlement='REPLACE';
+ assert.throws(()=>receiving.applyReceiptToOrderItem(item,1,context));
+});
