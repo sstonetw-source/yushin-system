@@ -608,7 +608,7 @@ test('purchasing state transitions refresh the derived order work index',()=>{
 test('order lifecycle, delivery and return mutations refresh work category index',()=>{
     assert.match(app,/Object\.assign\(updates,orderWorkIndexFields\(\{\.\.\.order,\.\.\.updates\}\)\);/);
     const deliverySync=(app.match(/orderWorkIndexFields\(\{\.\.\.order,\.\.\.updates\}\)[\s\S]{0,160}deliveryHistory/g)||[]).length;
-    const returns=fs.readFileSync('modules/customer-cancellations.js','utf8');
+    const returns=fs.readFileSync('src/services/customer-return.js','utf8');
     assert.ok(deliverySync>=3,'all delivery mutation paths should refresh the work index');
     assert.match(returns,/Object.assign\(patch,orderWorkIndexFields\(\{\.\.\.order,\.\.\.patch\}\)\)/);
 });
@@ -1013,7 +1013,7 @@ test('delivery writes keep isDelivered based on net delivered quantity', () => {
     const save=app.slice(saveStart,saveEnd);
     assert.match(save,/isDelivered: effectiveTotalDelivered >= total/);
 
-    const returns=fs.readFileSync('modules/customer-cancellations.js','utf8');
+    const returns=fs.readFileSync('src/services/customer-return.js','utf8');
     assert.match(returns,/returnRecords:records,returnedQty:/);
     assert.match(returns,/orderWorkIndexFields/);
 });
@@ -1305,7 +1305,7 @@ test('delivery and return writes synchronize live reservedQty back to order item
     assert.match(delivery,/newReservedQty/);
     assert.match(delivery,/updates\.items=syncedItems/);
 
-    const returns=fs.readFileSync('modules/customer-cancellations.js','utf8');
+    const returns=fs.readFileSync('src/services/customer-return.js','utf8');
     assert.match(returns,/result.newReservedQty/);
     assert.match(returns,/patch.items=order.items.map/);
 });

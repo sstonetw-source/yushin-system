@@ -2845,3 +2845,55 @@ test('actual dispatch rechecks disabled profiles and refuses the multi-location 
  await seed('inventoryReservations/'+f.id+'__I',{ownerUid:'sales1',salesCode:'S01',locationSchemaVersion:2,locations:[]});
  await assert.rejects(f.run(),/尚未啟用的位置資料/);assert.equal((await f.order()).items[0].dispatchPreparedQty,0);
 });
+
+async function actualCustomerReturnFixture(uid='buyer1',role='purchaser') {
+ const f=await actualShipmentFixture(uid,role);await f.ship(2,'source-return-'+uid);
+ const order=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+ await seed('orders/'+f.id,{...order,returnRequests:[{id:'REQUEST',itemId:'I',qty:2,receivedQty:0,status:'PENDING',settlement:'CLOSE',reason:'訂錯貨'}],returnPending:true});
+ Object.assign(f.context,{localDateString:()=> '2026-10-18',DOCUMENT_TYPES:{ORDER:'order'}});
+ const actions=fs.readFileSync('src/features/orders/delivery-actions.js','utf8');
+ vm.runInContext(actions.slice(actions.indexOf('function returnItemDeliveredQty('),actions.indexOf('function populateReturnItemOptions(')),f.context);
+ vm.runInContext(fs.readFileSync('src/services/customer-return.js','utf8'),f.context);
+ f.receive=(receiptId,qty=1,quality='SALEABLE')=>f.context.commitCustomerReturnReceipt({orderId:f.id,requestId:'REQUEST',receiptId,qty,quality,warehouseId:'W1'});
+ return f;
+}
+test('actual customer return Service receives CLOSE into original stock once for admin purchaser and warehouse',async()=>{
+ for(const [uid,role] of [['admin','admin'],['buyer1','purchaser'],['wh1','warehouse']]){
+  const f=await actualCustomerReturnFixture(uid,role);await f.receive('RETURN-'+uid);await f.receive('RETURN-'+uid);
+  const stock=(await getDoc(doc(db('admin'),'inventory/init-product'))).data(),local=(await getDoc(doc(db('admin'),'warehouseStocks/W1__init-product'))).data();
+  assert.equal(stock.onHand,4);assert.equal(local.onHand,4);assert.equal(stock.reserved,3);assert.equal(local.reserved,3);
+  const order=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();assert.equal(order.returnedQty,1);assert.equal(order.returnRecords.length,1);assert.equal(order.returnRecords[0].settlement,'CLOSE');
+  assert.equal(order.returnRequests[0].receivedQty,1);assert.equal(order.returnPending,true);
+  await assert.rejects(f.receive('RETURN-'+uid,2),/識別碼/);
+ }
+});
+test('actual held return settles without stock then shared release Service credits it exactly once',async()=>{
+ const f=await actualCustomerReturnFixture();await f.receive('HELD',1,'INSPECTION');
+ assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().onHand,3);
+ await f.context.commitCustomerReturnHoldRelease('HELD');await f.context.commitCustomerReturnHoldRelease('HELD');
+ assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().onHand,4);
+ assert.equal((await getDoc(doc(db('admin'),'customerReturnReceipts/HELD'))).data().disposition,'STOCK');
+ assert.equal((await getDoc(doc(db('admin'),'orders/'+f.id))).data().returnRecords.length,1);
+});
+test('actual customer return refuses source warehouse changes before posting stock or receipt',async()=>{
+ const f=await actualCustomerReturnFixture(),order=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+ await seed('warehouses/W1',{active:false});await assert.rejects(f.receive('REJECTED'),/倉庫/);
+ assert.deepEqual((await getDoc(doc(db('admin'),'orders/'+f.id))).data(),order);
+ assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().onHand,3);
+ assert.equal((await getDoc(doc(db('admin'),'customerReturnReceipts/REJECTED'))).exists(),false);
+});
+test('actual return Service cannot grant sales or engineer receipt permission through a forged UI capability',async()=>{
+ const f=await actualCustomerReturnFixture('admin','admin');
+ for(const [uid,role] of [['sales1','sales'],['eng1','engineer']]){
+  const saved=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+  await seed('orders/'+f.id,{...saved,ownerUid:uid,salesCode:role==='sales'?'S01':'E01'});
+  const client=compatDb(uid),native=client.runTransaction,plain=v=>JSON.parse(JSON.stringify(v));
+  client.runTransaction=fn=>native(tx=>fn({...tx,set:(r,d)=>tx.set(r,plain(d)),update:(r,d)=>tx.update(r,plain(d))}));
+  Object.assign(f.context,{db:client,currentUser:{uid},canReceiveInventoryCapability:()=>true,
+   runRoleTransaction:fn=>stockPermissions.run(client,fn,uid,true,role)});
+  const before=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+  await assert.rejects(f.context.commitCustomerReturnReceipt({orderId:f.id,requestId:'REQUEST',receiptId:'forged-'+uid,qty:1,quality:'INSPECTION',warehouseId:'W1'}));
+  assert.deepEqual((await getDoc(doc(db('admin'),'orders/'+f.id))).data(),before);
+  assert.equal((await getDoc(doc(db('admin'),'customerReturnReceipts/forged-'+uid))).exists(),false);
+ }
+});

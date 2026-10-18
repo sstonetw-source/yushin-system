@@ -515,3 +515,8 @@ Workflow 的明確 warehouseShipmentContext 現包含 returns，以原 projectSh
 ### 2026-10-18 實際打單入口續傳整合
 
 兩個實際打單頁共用固定操作 ID 與凍結數量，Service 使用既有 Fulfillment Core 與 StockPermissions；讀預留時保留未啟用多位置契約的阻擋。 詳見 [介面交易對照與驗收邊界](transaction-ui-integration-20261018.md)。已實作、待本批 CI；未部署 Firebase，單品項多位置仍未啟用正式介面。
+
+
+### 2026-10-18 退貨實收 Service 接線
+
+既有退貨實收與待檢轉庫存的交易編排已移到 src/services/customer-return.js，兩個原操作頁入口只呼叫 Service。實體退回與直送退回仍沿用原有 writer／Core；不新增相同功能的核心。 驗收項目與限制見 [介面交易對照](transaction-ui-integration-20261018.md)。未部署 Firebase，完整 Preview 全流程尚待驗收。

@@ -68,6 +68,8 @@ jobs:
         run: node tests/inventory-lot-browser-smoke.js
       - name: Check shared dispatch preparation and cross-page retries in desktop and mobile Chrome
         run: node tests/dispatch-preparation-browser-smoke.js
+      - name: Check customer return receiving Service in desktop and mobile Chrome
+        run: node tests/customer-return-browser-smoke.js
       - name: Install Firestore rules test dependencies
         run: npm install --no-save @firebase/rules-unit-testing firebase firebase-admin@14.2.0
       - name: Set up Java 21 for Firestore emulator

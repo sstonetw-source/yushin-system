@@ -269,3 +269,8 @@ v2 operationId以orderId／itemId／本次syncAttemptId建立固定雜湊識別�
 ### 2026-10-18 實際打單入口續傳整合
 
 dispatchRecords/{dispatch-ui-operationId} 沿用原 Collection；新增 operationId、actorRole、expectedPreparedQty，qty 是凍結確認量。與 orders.items／工作索引同交易提交，重試不得變更或重建憑證。舊憑證保留，不遷移。 詳見 [介面交易對照與驗收邊界](transaction-ui-integration-20261018.md)。已實作、待本批 CI；未部署 Firebase，單品項多位置仍未啟用正式介面。
+
+
+### 2026-10-18 退貨實收 Service 接線
+
+第二批沒有新增持久欄位或 Collection；customerReturnReceipts、orders.returnRequests／returnRecords、原批次及庫存的既有提交邊界不變。HOLD→STOCK 和回庫存仍在同一交易；依原 receipt disposition 重送為只讀。 驗收項目與限制見 [介面交易對照](transaction-ui-integration-20261018.md)。未部署 Firebase，完整 Preview 全流程尚待驗收。
