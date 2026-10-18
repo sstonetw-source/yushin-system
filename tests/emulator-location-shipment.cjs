@@ -1495,3 +1495,126 @@ test('multi-item dispatch rejects an empty return cache when another item has a 
  const before=await multiDispatchSnapshot(x);await assert.rejects(x.prepareLine(1,'multi_print_hidden_return',x.adminUid),/憑證數量/);
  assert.deepEqual(await multiDispatchSnapshot(x),before);
 });
+
+
+// The source is the real 1–5 line reservation/dispatch fixture above. Only
+// physical lots and the originally agreed customer-shipping plan are added.
+async function multiShipmentFixture(name,{five=false}={}){
+ const x=await multiDispatchFixture('ship-'+name,{five});
+ const order=await x.read('orders',x.orderId);
+ await db.collection('orders').doc(x.orderId).update({
+  items:order.items.map(item=>({...item,deliveryPlan:plan})),shippingInstructions:plan
+ });
+ const batch=db.batch();
+ for(const [productKey,perWarehouse] of [[x.key,3],...(five?[]:[[x.q,1]])]){
+  for(const wh of [A,B]){
+   const lotId=productKey+'-lot-'+wh;
+   batch.set(db.collection('inventoryLots').doc(lotId),{
+    productKey,warehouseId:wh,remainingQty:perWarehouse,receivedQty:perWarehouse,
+    lotNo:lotId,expiryDate:'2027-12-31',receivedAt:'2026-10-01T00:00:00Z',unitCost:0
+   });
+  }
+ }
+ await batch.commit();
+ return {...x,ship:(itemId,wh,quantity,operationId,actor=x.uid,connection=db)=>
+  commitLocationShipment(connection,actor,{...x.request(itemId,quantity,operationId),warehouseId:wh,
+   date:'2026-10-18',expectedPlan:plan})};
+}
+async function multiShipmentSnapshot(x){
+ const result=await multiDispatchSnapshot(x),lots={};
+ for(const key of [x.key,x.q].filter(Boolean))for(const wh of [A,B])
+  lots[key+'/'+wh]=await x.read('inventoryLots',key+'-lot-'+wh);
+ return {...result,lots};
+}
+test('multi-line shipments debit actual A/B lots while preserving untouched sibling items and all delivery counters',async()=>{
+ const x=await multiShipmentFixture('happy');
+ await x.prepare('I1',2,'multi_ship_prepare_one');await x.prepare('I2',2,'multi_ship_prepare_two');
+ const original=await x.read('orders',x.orderId);
+ const first=await x.ship('I1',A,2,'multi_ship_issue_one');
+ const second=await x.ship('I2',B,2,'multi_ship_issue_two');
+ assert.equal(first.grossShippedQty,2);assert.equal(second.grossShippedQty,2);
+ const order=await x.read('orders',x.orderId);
+ assert.equal(order.warehouseShipmentRecords.length,2);
+ assert.deepEqual(order.warehouseShipmentRecords.map(rec=>rec.itemIndex),[0,1]);
+ assert.equal(order.deliveredQty,0);assert.equal(order.isDelivered,false);
+ assert.deepEqual(order.items[2],original.items[2]);
+ assert.equal(order.items[0].unitPrice,456);
+ assert.deepEqual(order.items[0].custom,{note:'keep source'});
+ assert.deepEqual(order.items.map(row=>row.warehouseShippedQty||0),[2,2,0]);
+ assert.equal((await x.read('inventory',x.key)).onHand,2);
+ assert.equal((await x.read('inventoryLots',x.key+'-lot-'+A)).remainingQty,1);
+ assert.equal((await x.read('inventoryLots',x.key+'-lot-'+B)).remainingQty,1);
+ assert.equal((await x.ship('I1',A,2,'multi_ship_issue_one')).status,'already-applied');
+ assert.equal((await x.read('orders',x.orderId)).warehouseShipmentRecords.length,2);
+});
+test('five-line same-product shipment cannot borrow a sibling paper amount or another warehouse hold',async()=>{
+ const x=await multiShipmentFixture('five',{five:true});
+ await x.prepare('I1',3,'multi_ship_five_prepare_one');
+ const before=await multiShipmentSnapshot(x);
+ await assert.rejects(x.ship('I2',B,1,'multi_ship_five_wrong'),/打單可出貨/);
+ assert.deepEqual(await multiShipmentSnapshot(x),before);
+ await x.ship('I1',A,3,'multi_ship_five_allowed');
+ const order=await x.read('orders',x.orderId);
+ assert.equal(order.items[0].warehouseShippedQty,3);
+ assert.deepEqual(order.items.slice(1),before.order.items.slice(1));
+});
+test('multi-line physical shipments enforce current operator role and original operation identity',async()=>{
+ const x=await multiShipmentFixture('actor');await x.prepare('I1',1,'multi_ship_actor_prep');
+ for(const role of ['sales','engineer']){
+  await db.collection('users').doc(x.uid).update({role});
+  const before=await multiShipmentSnapshot(x);
+  await assert.rejects(x.ship('I1',A,1,'multi_ship_actor_'+role),/權限/);
+  assert.deepEqual(await multiShipmentSnapshot(x),before);
+ }
+ await db.collection('users').doc(x.uid).update({role:'admin'});
+ await x.ship('I1',A,1,'multi_ship_actor_ok');
+ const saved=await multiShipmentSnapshot(x);
+ await db.collection('users').doc(x.uid).update({role:'warehouse'});
+ await assert.rejects(x.ship('I1',A,1,'multi_ship_actor_ok'),/其他交易/);
+ assert.deepEqual(await multiShipmentSnapshot(x),saved);
+ await db.collection('users').doc(x.uid).update({active:false});
+ await assert.rejects(x.ship('I1',A,1,'multi_ship_actor_ok'),/權限/);
+});
+test('multi-line shipment replay, over-shipment and concurrent sibling issues preserve physical stock once',async()=>{
+ const x=await multiShipmentFixture('races');await x.prepare('I1',2,'multi_ship_race_p1');
+ await x.prepare('I2',2,'multi_ship_race_p2');
+ const same=await Promise.all([x.ship('I1',A,1,'multi_ship_race_same'),x.ship('I1',A,1,'multi_ship_race_same')]);
+ assert.deepEqual(same.map(v=>v.status).sort(),['already-applied','applied']);
+ const both=await Promise.all([x.ship('I1',A,1,'multi_ship_race_diff'),x.ship('I2',B,2,'multi_ship_race_sibling')]);
+ assert.equal(both.length,2);
+ const baseline=await multiShipmentSnapshot(x);
+ await assert.rejects(x.ship('I2',B,1,'multi_ship_race_extra'),/打單可出貨|已超額/);
+ assert.deepEqual(await multiShipmentSnapshot(x),baseline);
+ assert.equal((await x.read('inventory',x.key)).onHand,2);
+});
+test('multi-line shipment rejects a corrupt sibling ledger or historical physical debit without any new stock writes',async()=>{
+ for(const [name,breakSource] of [
+  ['ledger',x=>db.collection('inventoryReservations').doc(x.orderId+'__I3').update({ownerUid:'forged'})],
+  ['product',x=>db.collection('products').doc(x.q).update({productType:'SERVICE'})],
+  ['plan',async x=>{const o=await x.read('orders',x.orderId);o.items[2].deliveryPlan={...plan,address:'different'};await db.collection('orders').doc(x.orderId).update({items:o.items});}],
+  ['movement',async x=>{
+   await x.ship('I1',A,1,'multi_ship_corrupt_first');
+   await db.collection('inventoryMovements').doc('location-ship-multi_ship_corrupt_first').update({qty:0});
+  }]
+ ]){
+  const x=await multiShipmentFixture('reject-'+name);
+  await x.prepare('I1',2,'multi_ship_reject_prepare_'+name);
+  await breakSource(x);
+  const before=await multiShipmentSnapshot(x);
+  await assert.rejects(x.ship('I1',A,1,'multi_ship_reject_attempt_'+name));
+  assert.deepEqual(await multiShipmentSnapshot(x),before,name);
+ }
+});
+test('multi-line shipment late movement collision rolls back stock and lot; fixed ID retries safely',async()=>{
+ const x=await multiShipmentFixture('rollback');await x.prepare('I1',1,'multi_ship_rollback_prepare');
+ const before=await multiShipmentSnapshot(x),collision=db.collection('inventoryMovements').doc('multi-ship-collision');
+ await collision.set({sentinel:true});
+ const guarded={projectId:db.projectId,collection:n=>db.collection(n),runTransaction:fn=>db.runTransaction(async tx=>fn({
+  get:r=>tx.get(r),set:(...args)=>tx.set(...args),update:(...args)=>tx.update(...args),
+  create:(ref,record)=>{tx.create(collision,{sentinel:false});return tx.create(ref,record);}
+ }))};
+ await assert.rejects(x.ship('I1',A,1,'multi_ship_rollback_op',x.uid,guarded),e=>e.code===6);
+ assert.deepEqual(await multiShipmentSnapshot(x),before);
+ assert.equal((await x.ship('I1',A,1,'multi_ship_rollback_op')).status,'applied');
+ assert.equal((await x.ship('I1',A,1,'multi_ship_rollback_op')).status,'already-applied');
+});
