@@ -1384,3 +1384,88 @@ test('post-commit cancellation by a sales actor cannot claim warehouse authority
  assert.equal(originalReplay.status,'already-applied');
  assert.equal(originalReplay.postCommitAllocation.status,'recovery-pending');
 });
+
+
+test('completed FIFO checkpoints reject corrupt totals and pending work instead of reporting success',async()=>{
+ const source=await readyLifecycle('auto-completed-integrity',{role:'admin'});
+ await autoFreeTarget(source,'target',10);
+ await source.lifecycle('cancelled');
+ const input=autoFreeRequest(source,'batch_completed_integrity_123');
+ assert.equal((await advanceAutomaticFreeStockAllocation(db,source.uid,input)).status,'completed');
+ const ref=db.collection('reservationOperationReceipts').doc('single-v2-free-batch-'+input.runId);
+ const original=(await ref.get()).data(),before=await snapshot(source);
+ for(const patch of [{allocatedQty:7},{allocatedQty:-1},{processedSteps:1001},
+   {pending:{}},{completionReason:'invented'},{allocatedQty:5}]){
+  await ref.set({...original,...patch});
+  await assert.rejects(advanceAutomaticFreeStockAllocation(db,source.uid,input),/checkpoint/);
+  assert.deepEqual(await snapshot(source),before);
+  assert.deepEqual((await ref.get()).data(),{...original,...patch});
+ }
+ await ref.set(original);
+ assert.equal((await advanceAutomaticFreeStockAllocation(db,source.uid,input)).allocatedQty,6);
+});
+
+test('pending FIFO checkpoints cannot change the retry identity or exceed the remaining source budget',async()=>{
+ const source=await readyLifecycle('auto-pending-integrity',{role:'admin'});
+ const target=await autoFreeTarget(source,'target',10);
+ await source.lifecycle('cancelled');
+ const input=autoFreeRequest(source,'batch_pending_integrity_12345');
+ const ref=db.collection('reservationOperationReceipts').doc('single-v2-free-batch-'+input.runId);
+ // Interrupt immediately after the pending command is durable, before stock.
+ const wrapper={projectId:db.projectId,collection:n=>db.collection(n),
+  runTransaction:fn=>db.runTransaction(tx=>fn({
+   get:x=>tx.get(x),create:(...args)=>{
+    if(args[0].path.startsWith('inventoryMovements/single-v2-free-'))
+     throw Error('pause before allocation commit');
+    return tx.create(...args);
+   },set:(...args)=>tx.set(...args),update:(...args)=>tx.update(...args)
+  }))};
+ await assert.rejects(advanceAutomaticFreeStockAllocation(wrapper,source.uid,input),/pause before/);
+ const original=(await ref.get()).data(),before=await snapshot(target);
+ assert.equal(original.pending.orderId,target.orderId);
+ for(const patch of [{quantity:7},{quantity:0},{quantity:1.5},{orderId:'another-order'},
+   {operationId:'another_operation_123456'},{syncAttemptId:''},{unexpected:true}]){
+  await ref.set({...original,pending:{...original.pending,...patch}});
+  await assert.rejects(advanceAutomaticFreeStockAllocation(db,source.uid,input),/checkpoint/);
+  assert.deepEqual(await snapshot(target),before);
+ }
+ await ref.set({...original,processedSteps:1});
+ await assert.rejects(advanceAutomaticFreeStockAllocation(db,source.uid,input),/checkpoint/);
+ assert.deepEqual(await snapshot(target),before);
+ await ref.set(original);
+ const resumed=await advanceAutomaticFreeStockAllocation(db,source.uid,input);
+ assert.equal(resumed.status,'completed');assert.equal(resumed.allocatedQty,6);
+ assert.equal((await target.read('inventory',target.productKey)).reserved,8);
+});
+
+test('FIFO validates a checkpoint again inside finalization after a committed stock movement',async()=>{
+ const source=await readyLifecycle('auto-finalization-integrity',{role:'admin'});
+ const target=await autoFreeTarget(source,'target',10);
+ await source.lifecycle('cancelled');
+ const input=autoFreeRequest(source,'batch_finalize_integrity_1234');
+ const path='reservationOperationReceipts/single-v2-free-batch-'+input.runId;
+ let stockCommitted=false,injected=false;
+ const wrapper={projectId:db.projectId,collection:n=>db.collection(n),
+  runTransaction:async fn=>{
+   const result=await db.runTransaction(tx=>fn({
+    get:async ref=>{
+     const snap=await tx.get(ref);
+     if(stockCommitted&&ref.path===path){
+      injected=true;
+      return {exists:true,data:()=>({...snap.data(),allocatedQty:-1})};
+     }
+     return snap;
+    },create:(...args)=>tx.create(...args),set:(...args)=>tx.set(...args),
+    update:(...args)=>tx.update(...args)
+   }));
+   if(result?.status==='applied'&&result?.movementId)stockCommitted=true;
+   return result;
+  }};
+ await assert.rejects(advanceAutomaticFreeStockAllocation(wrapper,source.uid,input),/checkpoint/);
+ assert.equal(injected,true);
+ const afterStock=await snapshot(target);
+ assert.equal(afterStock.documents[1].reserved,8);
+ const resumed=await advanceAutomaticFreeStockAllocation(db,source.uid,input);
+ assert.equal(resumed.status,'completed');assert.equal(resumed.allocatedQty,6);
+ assert.deepEqual(await snapshot(target),afterStock);
+});

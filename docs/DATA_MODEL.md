@@ -199,3 +199,10 @@ v2 到貨自由實貨**不新增欄位／Collection**。既有 `receipts/{receip
 ### Post-commit 分配續傳輸出契約（2026-10-18）
 
 新 `drainReleasedV2FreeStock` 不新增 Collection／數量權威，而是讀取原 `inventoryMovements/{movementId}`、同一來源雜湊取得既有 `reservationOperationReceipts/single-v2-free-batch-...` checkpoint。執行上限及 `recoveryPending` 為**回應狀態**，非新庫存 cache。新增來源 Service 的 `...AndRecover` 組合回傳 `postCommitAllocation:{status,sources:[{movementId,status,recoveryPending,allocatedQty|errorCode}]}`。交易來源成功後即使配貨卡住，原交易與事件仍保留；可由真實授權角色以來源 movementId 顯式續傳。沒有新 Rules／Index／正式資料遷移。
+
+
+### v2 自由庫存配貨進度完整性（2026-10-18）
+
+已實作：既有 `advanceAutomaticFreeStockAllocation` 的每次 checkpoint 交易讀取（包含已完成重送及扣帳後結算）均經 `validateAutomaticFreeStockCheckpoint`。累計分配須為 0 至原 maxQty 的整數，步數為 0–1000；完成必須沒有 pending、具已知完成原因，quantity-reached 必須實際達到原額度。pending 必須具有完整且僅限既定欄位、正整數且不超過剩餘額度，操作 ID 必須依原 runId／步數／訂單／品項衍生。達 1000 步不可建立新指令。異常進度先拒絕，不自動改成完成、重設操作 ID 或推估已扣帳量。
+
+沿用原 checkpoint、movement 與唯一自由庫存 writer；交易已提交但 checkpoint 結算失敗時，修復正確進度後仍以原指令重送，原 movement 確保不重複預留。不變更角色、Collection、Rules、Index、前端或 Callable，仍僅 demo-yushin Emulator。新增 Emulator 案例涵蓋完成憑證異常、pending 篡改與額度超限、扣帳後再讀進度異常及原 ID 續傳；實際執行結果以本批 PR CI 為準。完整 Preview、不同操作者安全交接及正式部署仍未完成。

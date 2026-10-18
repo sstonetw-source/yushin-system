@@ -435,3 +435,10 @@ job `reservationOperationReceipts` 與 movement 在不同交易，使用 pending
 ### v2 post-commit 有界運行與可選組合入口（2026-10-18）
 
 沿用唯一 `single-item-location-service.advanceReleasedV2FreeStock` 的來源核對及 checkpoint，新增 `drainReleasedV2FreeStock` 只用最多 10 次有限呼叫逐單推進，不引入第二個 Core／stock writer 或另一份 batch state。原 `commitSingleItemLocationLifecycle` 與 `commitLocationReturn` 仍各自是來源的唯一原子 transaction；同檔新的 `...AndRecover` **先提交來源、再在交易外**呼叫既有 drain。後段失敗回傳明確的 postCommitAllocation pending 和來源 movementId，不能假裝回滾來源；sales/engineer 角色不提升為物流權限。Emulator 新測試覆蓋 admin 同次分配、上限中斷續傳、兩角色 handoff 的未開工來源、來源 replay／REPLACE 不可調撥。沒有新增 Callable、background trigger 或正式 UI 接線。
+
+
+### v2 自由庫存配貨進度完整性（2026-10-18）
+
+已實作：既有 `advanceAutomaticFreeStockAllocation` 的每次 checkpoint 交易讀取（包含已完成重送及扣帳後結算）均經 `validateAutomaticFreeStockCheckpoint`。累計分配須為 0 至原 maxQty 的整數，步數為 0–1000；完成必須沒有 pending、具已知完成原因，quantity-reached 必須實際達到原額度。pending 必須具有完整且僅限既定欄位、正整數且不超過剩餘額度，操作 ID 必須依原 runId／步數／訂單／品項衍生。達 1000 步不可建立新指令。異常進度先拒絕，不自動改成完成、重設操作 ID 或推估已扣帳量。
+
+沿用原 checkpoint、movement 與唯一自由庫存 writer；交易已提交但 checkpoint 結算失敗時，修復正確進度後仍以原指令重送，原 movement 確保不重複預留。不變更角色、Collection、Rules、Index、前端或 Callable，仍僅 demo-yushin Emulator。新增 Emulator 案例涵蓋完成憑證異常、pending 篡改與額度超限、扣帳後再讀進度異常及原 ID 續傳；實際執行結果以本批 PR CI 為準。完整 Preview、不同操作者安全交接及正式部署仍未完成。

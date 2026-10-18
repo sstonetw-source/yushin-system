@@ -75,3 +75,10 @@
 - v2 收貨後生命週期沿用 `commitSingleItemLocationLifecycle`，禁止新增另一套取消／恢復核心。供應狀態依原 Receiving.normalizeSupply；Functions 的 receiving-core.js 必須由 modules/ build 同步。供應承諾與收貨均須同交易核對來源、receipt／唯一入庫 movement／原 lot，最多 50 筆 receipt；累計與身份不符、批次重用、缺失或竄改憑證須在任何寫入前拒絕。恢復傳給 Reservation Core 的 incoming 僅為有效 ordered 減 received，Workflow／Demand Core 保留累計收貨歷史；不可將取消狀態當作沖銷入庫。測試須用原採購／收貨 Service 串接部分或全收、取消中收貨、供應餘量取消、已出貨批次的收貨證明、併發與後段失敗回滾。
 
 - 部分出貨後收貨必須沿用 receiving Service 與 Workflow／Receiving／Fulfillment Core；明確提供 warehouseShipmentContext，不得把 shipped 填成 delivered。v2 交易驗證須使用原始 order item，不能用 presentation normalizer 重算的 shortage 覆蓋 ledger。實際出貨扣帳的純驗證共用 validateShipmentMovement；原 readShipmentProof 的 intent hash 核對須保留。新增測試涵蓋 pending／partial／full acknowledgement 後收貨、原展示 normalizer、完整跨倉收貨打單出貨送達、固定 ID 重試、憑證竄改拒絕及收貨／出貨併發。退貨、前端 v2 寫入或途中取消未整合前不能解除阻擋。
+
+
+### v2 自由庫存配貨進度完整性（2026-10-18）
+
+已實作：既有 `advanceAutomaticFreeStockAllocation` 的每次 checkpoint 交易讀取（包含已完成重送及扣帳後結算）均經 `validateAutomaticFreeStockCheckpoint`。累計分配須為 0 至原 maxQty 的整數，步數為 0–1000；完成必須沒有 pending、具已知完成原因，quantity-reached 必須實際達到原額度。pending 必須具有完整且僅限既定欄位、正整數且不超過剩餘額度，操作 ID 必須依原 runId／步數／訂單／品項衍生。達 1000 步不可建立新指令。異常進度先拒絕，不自動改成完成、重設操作 ID 或推估已扣帳量。
+
+沿用原 checkpoint、movement 與唯一自由庫存 writer；交易已提交但 checkpoint 結算失敗時，修復正確進度後仍以原指令重送，原 movement 確保不重複預留。不變更角色、Collection、Rules、Index、前端或 Callable，仍僅 demo-yushin Emulator。新增 Emulator 案例涵蓋完成憑證異常、pending 篡改與額度超限、扣帳後再讀進度異常及原 ID 續傳；實際執行結果以本批 PR CI 為準。完整 Preview、不同操作者安全交接及正式部署仍未完成。
