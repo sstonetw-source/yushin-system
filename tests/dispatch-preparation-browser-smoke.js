@@ -116,7 +116,7 @@ const scripts=[read('modules/fulfillment-core.js'),read('modules/order-entry-cor
     const beginActionButton=()=>({}),endActionButton=()=>{},inventoryProductKey=i=>i.productId;
     const renderInventoryShipping=()=>{},localDateString=()=> '2026-10-19',lifecycleRecordId=()=> 'shipment_browser_123456';
     let feedback=[];const showActionFeedback=message=>feedback.push(message);
-    globalThis.prompt=()=> '2';globalThis.confirm=()=>true;
+    globalThis.prompt=(message,def)=>message.includes('日期')?def:'2';globalThis.confirm=()=>true;
    `});
    await page.addScriptTag({content:read('modules/warehouse-logistics.js')});
    await page.addScriptTag({content:read('src/services/warehouse-shipment.js')});
