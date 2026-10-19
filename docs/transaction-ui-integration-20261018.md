@@ -57,3 +57,5 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 新增六項 Node 行為測試、五項真實 Client SDK＋StockPermissions＋Rules 測試，涵蓋額度、原 ID 意圖／帳號、30 次上限、部分實收撤回、帳號／角色變更、回覆遺失及末端回滾；Client Rules 驗證五角色／偽造 capability、同 ID／超額競爭、停用與外人、部分實收撤回以及 KEEP_STOCK 原子來源／接收鏡像／在途。既有 1280／390 px Chrome suite 擴充原三個 click handler → 真實 Service，驗證未知回覆重試與 incoming 不重複。Chrome 為記憶體傳輸，不是完整 Auth Browser／Firestore 單線 E2E。
 
 本地 Node 1566/1566、建置同步／語法／diff 通過；新增 Client Rules 與 Chrome 以本批完整 CI 為準。本批接線為原一般介面，v2 多倉正式 Callable／UI 閘門不變，沒有 Firebase 部署或正式資料寫入。v2 正式傳輸、Preview 及完整真實登入端對端驗收仍待後續整合。
+
+本批 Client Rules 實測也確認既有一般申請的限制：同 ID 並行 proposal 可能有一方先被 Rules 拒絕（包含既有 expression 上限），而非由 Client SDK 自動重跑。測試保留並辨識該拒絕，確認至少一方提交成功、整單只有一筆申請，再以原 ID 讀回原結果而不寫第二次。這不代表 Rules 上限已解決；UI 沿用原 pending 鎖及未知回覆保留 ID，不盲目換新 ID。
