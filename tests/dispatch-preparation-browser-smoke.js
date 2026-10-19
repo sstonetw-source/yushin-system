@@ -124,7 +124,8 @@ const scripts=[read('modules/fulfillment-core.js'),read('modules/order-entry-cor
    await page.evaluate(async()=>{orderWorkQueueCache=[await shipmentRead()];});
   };
   await initialize();await page.locator('#ship').click();
-  await page.waitForFunction(()=>feedback.some(x=>x.includes('response lost')));
+  const shippingFeedback=await page.evaluate(()=>feedback.slice());
+  assert.ok(shippingFeedback.some(x=>x.includes('response lost')),JSON.stringify({shippingFeedback,errors}));
   const frozen=await page.evaluate(()=>pendingV2WarehouseShipment('O','I'));
   assert.equal(frozen.quantity,2);assert.equal(stockWrites,1);
   await initialize();assert.equal(await page.evaluate(()=>YushinInventoryWorkspace.shippingRows(orderWorkQueueCache,warehouseMasterCache,'B',
