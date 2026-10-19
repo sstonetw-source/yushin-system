@@ -58,7 +58,7 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
        functions:()=>({app,useEmulator:(host,port)=>{if(host!=='127.0.0.1'||port!==5001)throw Error('remote endpoint');},
         httpsCallable:name=>name==='confirmV2ShipmentDelivery'?deliveryConfirm:name==='reverseV2ShipmentDelivery'?deliveryReverse:()=>{throw Error('unexpected endpoint');}})};
       const db={collection:()=>({doc:()=>({get:async()=>{const row=await deliveryRead();return {exists:true,data:()=>row};}})})};
-      const canManageOrderLifecycleCapability=()=>true,canEditPage=()=>true;
+      const canManageOrderLifecycleCapability=()=>['admin','sales','engineer'].includes(currentUserRole),canEditPage=()=>true;
       const normalizedOrderItems=o=>o.items,normalizedOrderStatus=()=> 'normal';
       const savedDeliveryRecords=o=>o.deliveryRecords, savedReturnRecords=o=>o.returnRecords;
       const deliveryProgressInfo=o=>({state:o.isDelivered?'complete':'none',remaining:2-o.deliveredQty,total:2,delivered:o.deliveredQty});
@@ -89,10 +89,16 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
   await page.waitForFunction(()=>!pendingV2DeliveryConfirmation('O'));
   assert.equal(calls,2);assert.equal(applied,1);assert.equal(order.deliveryRecords.length,1);
   confirmedId=order.deliveryRecords[0].id;
+  await page.evaluate(()=>{currentUserRole='purchaser';renderDeliveryModal();});
+  assert.equal(await page.locator('#deliveryRecordsBody button').count(),0);
+  await page.evaluate(()=>{currentUserRole='sales';renderDeliveryModal();});
   await page.locator('#deliveryRecordsBody button').filter({hasText:'撤銷送達確認'}).click();
   await page.waitForFunction(()=>alerts.length===1);
   assert.match((await page.evaluate(()=>alerts))[0],/simulated lost reversal reply/);
   assert.equal(reversed,1);assert.equal(await page.evaluate(()=>promptCalls),1);
+  await page.evaluate(()=>{currentUserRole='engineer';renderDeliveryModal();});
+  assert.equal(await page.locator('#deliveryRecordsBody button').count(),0);
+  assert.match(await page.locator('#deliveryFormHint').textContent(),/原帳號與角色/);
   await setup();
   assert.equal(await page.locator('#deliveryRecordsBody button').filter({hasText:'確認撤銷結果'}).count(),1);
   assert.equal(await page.locator('#deliveryRecordsBody button').filter({hasText:'撤銷送達確認'}).count(),0);
