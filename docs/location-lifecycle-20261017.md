@@ -142,3 +142,20 @@ Emulator harness 呼叫原正式 PO／incoming 登記、原收貨 Service 及 `k
 ### 取消後再新增 CLOSE（2026-10-18，Emulator-only）
 
 已可在原退貨writer收回取消訂單先前已確認交付的可再入庫商品，保持released空ledger及取消狀態。原 lifecycle 恢復時會驗證新增退貨movement與累計投影，CLOSE仍不增加剩餘需求；沒有另一個取消／恢復writer。詳細條件與驗收見 location-return-receipt-emulator-20261017.md 最新節。取消中的REPLACE／混合補送、途中貨及額外已打單取消、更正／撤銷與正式接線仍未開放。
+
+
+## 2026-10-19 整張多品項取消／恢復（基準 main eb0573e9，已實作、待本批 CI）
+
+原 `single-item-location-lifecycle-service` 的唯一交易引擎擴充為內部 `runLocationLifecycle`；舊單品項入口／hash／憑證／結果不變，新 `commitOrderLocationLifecycle` 接收完整且唯一 1–5 個 itemIds，與單品項共用原 supply／receipt／PO／stock 查核及 Core。不是迴圈提交多次單品項交易。來源訂單順序決定恢復時的配置優先；同商品後項看到前項提案後的餘額，全部讀取和驗證完成後才寫入。
+
+整單透過原 projectOrderShipmentReturns 核對所有事件／各品項與整單交付合計，再核對全部不可變出貨 movement（上限40）。取消只釋放尚未寄出的原預留、取消既有需求及整單狀態；歷史出貨／送達、採購供應／在途、實收／批次／成本、原單商品數量保留。全部已送達／已無剩餘未出貨需求拒絕；途中貨、打單未出完、SERVICE／DIRECT_SHIP、保管／調撥與多品項退貨仍拒絕。單品項 CLOSE 既有契約維持。
+
+整單 50 筆供應與 50 筆收貨上限仍有界。orderId query 每集合只讀一次，並逐品項 demandId query 雙向鎖定，先拒絕未知來源再分組驗證，不能以 filter 隱藏錯 demand／order linkage。逐供應實收總額仍需對應真實 receipt／movement／原批次，原 PO line 來源、需求與供應數量／狀態及即時角色／本人所有權均驗證。每個產品的公司與各倉 stock／warehouse master 讀一次；原預留與在途合計須被原始總帳覆蓋，各 stock 最後至多寫一次。恢復共用 planLocationReservation 與 Workflow→Demand，不自行推算需要量或把在途當實貨。
+
+共用 Reservation Core 修正零剩餘、零預留的正常位置 ledger 為 fulfilled（取消仍 released），讓已出完的 sibling 恢復後不被當成缺貨。沒有另建狀態公式，原單品項／整單繼續使用同一 Core。
+
+沿 reservationOperationReceipts/single-v2-lifecycle-{operationId}，整單 action=order_v2_lifecycle、itemIds、真實 actor/role、intentHash 與 result.items；每項結果含 productKey／nextStatus／預留與分倉差額。逐項 reserve/release movement 的原 single-v2-life- 前綴增加 itemId 段避免同產品同倉碰撞，仍引用同一份原子憑證。固定 ID 重送先驗證目前身分與所有權，只回原結果，不覆蓋後來的恢復。無新 collection／Rules／Index／Listener 或正式資料遷移。
+
+整單取消釋出的原 movement 沿既有 CANCELLED_ORDER_RELEASE。原 advanceReleasedV2FreeStock reader 以同一憑證選定 item，核對 productKey／actor／role／唯一 item result、精確 movement ID 及原分倉差額；交給原 FIFO checkpoint／唯一分配 writer。新增薄協調入口 commitOrderLocationLifecycleAndRecover 僅在交易提交後執行原 continueCommittedV2FreeStock；不是跨訂單分配與取消一起原子，仍無背景 runner，原先對多品項目標與已履約目標的 FIFO 限制未放寬。
+
+驗收：新增九項真實 Emulator，包括純整單初始化取消/恢復、正式 PO/部分收貨/多品項已送達後取消及恢復後收貨、已全部出完 sibling、五列同產品與競爭訂單、五角色/停用/所有權/intent/role 綁定、同ID與不同ID競態及回覆遺失、末品項/供應/receipt/出貨proof/隱藏退貨/途中與額外打單拒絕、每stock只讀寫一次與真實ALREADY_EXISTS末端回滾、整單釋放來源的原 FIFO 配貨與重送。另新增正常化與 Core 零剩餘狀態的 Node 測試。本地1559/1559通過；完整 Emulator/Auth/Rules/Chrome以本批 CI 為準。新增整單交易仍為 Admin SDK adapter，正式 UI/Callable/環境閘門未啟用，真實Auth Browser/Preview E2E尚未驗收，未部署Firebase。

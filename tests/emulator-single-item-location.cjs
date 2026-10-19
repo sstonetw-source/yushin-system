@@ -1903,7 +1903,7 @@ test('account change after real reservation cannot finish initialization and ori
 
 // Multi-line acceptance uses the SAME real PO/incoming/receiving Services as
 // the single-line cases above, after the real whole-order initialization.
-async function multiReceiptLifecycle(name,{five=false}={}){
+async function multiReceiptLifecycle(name,{five=false,purchase:withPurchase=true}={}){
  const x=await seed('multi-receipt-'+name,{role:'purchaser',a:1,b:2,company:3}),q=x.productKey+'-Q';
  const items=five?Array.from({length:5},(_,n)=>({itemId:'I'+(n+1),productId:x.productKey,qty:3,warehouseId:n%2?'V2-B':'V2-A'})):[
   {itemId:'I1',productId:x.productKey,qty:5,warehouseId:'V2-A',commercialNote:'retain first line'},
@@ -1914,6 +1914,7 @@ async function multiReceiptLifecycle(name,{five=false}={}){
  batch.set(db.collection('inventory').doc(q),{productKey:q,onHand:1,reserved:0,incoming:0,transferFreeInTransit:0});
  for(const [warehouseId,onHand] of [['V2-A',1],['V2-B',0]])batch.set(db.collection('warehouseStocks').doc(warehouseId+'__'+q),{productKey:q,warehouseId,onHand,reserved:0,incoming:0,transferFreeInTransit:0});
  await batch.commit();await initialize(x);
+ if(!withPurchase)return {...x,q,po:{poNo:'absent'},supplies:[]};
  const c=purchasingHarness(),order=await x.read('orders',x.orderId);
  await db.collection('users').doc('emulator-purchaser').set({role:'purchaser',active:true});
  const po={poNo:'PO-MULTI-RECEIPT-'+name,vendorName:'Multi vendor',supplierName:'Multi vendor',buyerName:'Purchaser',
@@ -2203,4 +2204,139 @@ test('post-shipment identical receipt races and competing excess quantities cann
  const order=await x.read('orders',x.orderId);assert.equal(order.items[1].receivedQty,3);
  assert.equal(order.items[0].warehouseShippedQty,1);assert.equal(order.deliveredQty,0);
  const stock=await x.read('inventory',x.productKey);assert.equal(stock.onHand,5);assert.equal(stock.reserved,5);assert.equal(stock.incoming,3);
+});
+
+const {commitOrderLocationLifecycle,commitOrderLocationLifecycleAndRecover}=require('../functions/single-item-location-lifecycle-service');
+async function wholeLifecycleFixture(name,{five=false,purchase=true}={}){
+ const x=purchase?await multiReceiptShipmentLifecycle('life-'+name,{five}):await multiReceiptLifecycle('life-'+name,{five,purchase:false});
+ await db.collection('users').doc(x.uid).update({role:'sales'});
+ const order=await x.read('orders',x.orderId),syncAttemptId=order.inventoryReservationAttemptId;
+ const intent=(nextStatus='cancelled',tag=nextStatus,patch={})=>({orderId:x.orderId,itemIds:order.items.map(i=>i.itemId).reverse(),
+  warehouseIds:['V2-B','V2-A'],nextStatus,operationId:'whole_life_'+name+'_'+tag,syncAttemptId,date:'2026-10-21',reason:'客戶取消未出貨部分',...patch});
+ return {...x,intent,life:(status='cancelled',tag=status,actor=x.uid,connection=db)=>commitOrderLocationLifecycle(connection,actor,intent(status,tag))};
+}
+async function wholeLifecycleSnapshot(x){
+ const state=await multiReceiptSnapshot(x);
+ state.operationReceipts=(await db.collection('reservationOperationReceipts').where('orderId','==',x.orderId).get()).docs.map(s=>[s.id,s.data()]).sort((a,b)=>a[0].localeCompare(b[0]));
+ return state;
+}
+test('whole-order initial cancellation and restoration update every ledger and demand atomically without changing physical goods',async()=>{
+ const x=await wholeLifecycleFixture('initial',{purchase:false}),initial=await x.read('orders',x.orderId);
+ const stocks=await Promise.all([x.productKey,x.q].map(key=>x.read('inventory',key)));
+ const cancelled=await x.life();assert.equal(cancelled.items.length,3);assert.equal(cancelled.items.reduce((s,i)=>s+i.companyReservedDelta,0),-4);
+ for(const item of initial.items){const ledger=await x.read('inventoryReservations',x.orderId+'__'+item.itemId);
+  assert.equal(ledger.status,'released');assert.equal(ledger.quantity,0);assert.equal(ledger.shortageQty,0);assert.deepEqual(ledger.locations,[]);
+  const demand=await x.read('procurementDemands',encodeURIComponent('SALES_ORDER:'+x.orderId+':'+item.itemId));assert.equal(demand.cancelled,true);}
+ const restored=await x.life('normal');assert.equal(restored.items.reduce((s,i)=>s+i.companyReservedDelta,0),4);
+ const order=await x.read('orders',x.orderId);assert.equal(order.status,'active');
+ assert.deepEqual(order.items.map(i=>[i.reservedQty,i.shortageQty]),initial.items.map(i=>[i.reservedQty,i.shortageQty]));
+ for(const [n,key] of [x.productKey,x.q].entries()){const stock=await x.read('inventory',key);assert.equal(stock.onHand,stocks[n].onHand);assert.equal(stock.reserved,stocks[n].reserved);}
+ const before=await wholeLifecycleSnapshot(x);assert.equal((await x.life()).status,'already-applied');assert.deepEqual(await wholeLifecycleSnapshot(x),before);
+});
+test('real multi-item PO partial receipts and acknowledged shipments survive whole-order cancel restore with incoming commitments untouched',async()=>{
+ const x=await wholeLifecycleFixture('purchased');await x.receive('I1',1,'wl_receipt_i1');await x.receive('I2',2,'wl_receipt_i2');
+ await x.prepare('I1',1,'one');await x.ship('I1','V2-A',1,'one');await x.confirm('I1',1,'one');
+ await x.prepare('I2',1,'two');await x.ship('I2','V2-B',1,'two');await x.confirm('I2',1,'two');
+ const before=await wholeLifecycleSnapshot(x),orderBefore=await x.read('orders',x.orderId);
+ await x.life();const cancelled=await x.read('orders',x.orderId);assert.equal(cancelled.deliveredQty,2);
+ assert.deepEqual(cancelled.warehouseShipmentRecords,orderBefore.warehouseShipmentRecords);assert.deepEqual(cancelled.deliveryRecords,orderBefore.deliveryRecords);
+ const restored=await x.life('normal');assert.deepEqual(restored.items.map(i=>i.reservedQty),[3,1,1]);
+ const after=await wholeLifecycleSnapshot(x);
+ for(const [key,value] of Object.entries(before))if(/^(supplyOrders|receipts|inventoryLots|inventoryLotCosts|purchaseOrders)\//.test(key))assert.deepEqual(after[key],value,key);
+ for(const key of [x.productKey,x.q])for(const collection of ['inventory','warehouseStocks']){
+  const paths=collection==='inventory'?[key]:['V2-A__'+key,'V2-B__'+key];
+  for(const path of paths){const a=before[collection+'/'+path],b=after[collection+'/'+path];assert.equal(b.onHand,a.onHand);assert.equal(b.incoming,a.incoming);assert.equal(b.reserved,a.reserved);}
+ }
+ assert.equal((await x.read('orders',x.orderId)).deliveredQty,2);
+ await x.receive('I1',1,'wl_receipt_after_restore');assert.equal((await x.read('orders',x.orderId)).items[0].shortageQty,0);
+});
+test('a fully acknowledged sibling remains physically fulfilled across cancellation and restoration of remaining items',async()=>{
+ const x=await wholeLifecycleFixture('fulfilled');await x.receive('I1',2,'wl_full_i1');await x.prepare('I1',5,'all');
+ await x.ship('I1','V2-A',3,'a');await x.ship('I1','V2-B',2,'b');await x.confirm('I1',3,'a');await x.confirm('I1',2,'b');
+ const original=(await x.read('orders',x.orderId)).items[0];await x.life();await x.life('normal');
+ const order=await x.read('orders',x.orderId);assert.deepEqual(order.items[0],original);assert.equal(order.deliveredQty,5);assert.equal(order.isDelivered,false);
+ assert.equal((await x.read('inventoryReservations',x.orderId+'__I1')).status,'fulfilled');
+ await x.receive('I2',1,'wl_after_fulfilled_restore');assert.deepEqual((await x.read('orders',x.orderId)).items[0],original);
+});
+async function competingWholeLifecycleOrder(x,quantity=2){
+ const orderId=x.orderId+'-competitor';await db.collection('orders').doc(orderId).set({ownerUid:x.uid,salesCode:'V2',status:'active',
+  inventoryReservationStatus:'pending',items:[{itemId:'OTHER',productId:x.productKey,qty:quantity,warehouseId:'V2-A'}],deliveryRecords:[],returnRecords:[],warehouseShipmentRecords:[]});
+ await synchronizeV2OrderFixture(db,x.uid,{orderId,warehouseIds:['V2-A','V2-B']});return orderId;
+}
+test('five same-product restorations share the remaining stock after a competing order takes released goods',async()=>{
+ const x=await wholeLifecycleFixture('five',{five:true,purchase:false});await x.life();
+ const other=await competingWholeLifecycleOrder(x);assert.equal((await x.read('inventoryReservations',other+'__OTHER')).quantity,2);
+ const restored=await x.life('normal');assert.deepEqual(restored.items.map(i=>i.reservedQty),[1,0,0,0,0]);
+ assert.deepEqual(restored.items.map(i=>i.shortageQty),[2,3,3,3,3]);assert.equal((await x.read('inventory',x.productKey)).reserved,3);
+ const order=await x.read('orders',x.orderId);assert.equal(order.items[0].warehouseId,'V2-A');
+});
+test('whole-order lifecycle enforces current five-role authority ownership and replay actor role intent binding',async()=>{
+ for(const role of ['admin','sales','engineer','warehouse','purchaser']){
+  const x=await wholeLifecycleFixture('role-'+role,{purchase:false});await db.collection('users').doc(x.uid).update({role});
+  const before=await wholeLifecycleSnapshot(x);
+  if(['warehouse','purchaser'].includes(role)){await assert.rejects(x.life(),/不能取消/);assert.deepEqual(await wholeLifecycleSnapshot(x),before);}
+  else{await x.life();const applied=await wholeLifecycleSnapshot(x);await db.collection('users').doc(x.uid).update({active:false});
+   await assert.rejects(x.life(),/不能取消/);assert.deepEqual(await wholeLifecycleSnapshot(x),applied);}
+ }
+ const x=await wholeLifecycleFixture('identity',{purchase:false});await x.life();const applied=await wholeLifecycleSnapshot(x);
+ for(const patch of [{reason:'不同原因'},{itemIds:['I1','I2']},{date:'2026-10-22'},{nextStatus:'normal'}])
+  await assert.rejects(commitOrderLocationLifecycle(db,x.uid,x.intent('cancelled','cancelled',patch)),/其他交易/);
+ await db.collection('users').doc('wl-other-admin').set({role:'admin',active:true});await assert.rejects(x.life('cancelled','cancelled','wl-other-admin'),/其他交易/);
+ await db.collection('users').doc(x.uid).update({role:'engineer'});await assert.rejects(x.life(),/其他交易/);
+ await db.collection('users').doc(x.uid).update({role:'sales'});await db.collection('orders').doc(x.orderId).update({ownerUid:'another-owner'});
+ await assert.rejects(x.life(),/其他業務/);const after=await wholeLifecycleSnapshot(x);delete after['orders/'+x.orderId];delete applied['orders/'+x.orderId];assert.deepEqual(after,applied);
+});
+test('whole-order duplicate and competing cancellation ids commit exactly once and a lost reply never reverts a later restore',async()=>{
+ const x=await wholeLifecycleFixture('race',{purchase:false});
+ const same=await Promise.all([x.life(),x.life()]);assert.deepEqual(same.map(r=>r.status).sort(),['already-applied','applied']);
+ await x.life('normal');const results=await Promise.allSettled([x.life('cancelled','againA'),x.life('cancelled','againB')]);
+ assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+ const y=await wholeLifecycleFixture('lost',{purchase:false});let lost=true;
+ const guarded={projectId:db.projectId,collection:n=>db.collection(n),runTransaction:async fn=>{const result=await db.runTransaction(async tx=>fn(tx));if(lost){lost=false;throw Error('whole lifecycle reply lost');}return result;}};
+ await assert.rejects(y.life('cancelled','cancelled',y.uid,guarded),/reply lost/);const once=await wholeLifecycleSnapshot(y);
+ assert.equal((await y.life()).status,'already-applied');assert.deepEqual(await wholeLifecycleSnapshot(y),once);
+ await y.life('normal');const restored=await wholeLifecycleSnapshot(y);await y.life();assert.deepEqual(await wholeLifecycleSnapshot(y),restored);
+});
+test('whole-order lifecycle refuses corrupted sibling ledgers supply receipt proofs pending freight and unsupported returns atomically',async()=>{
+ const cases=[
+  ['ledger',x=>db.collection('inventoryReservations').doc(x.orderId+'__I3').update({quantity:0})],
+  ['in-transit',x=>db.collection('inventory').doc(x.productKey).update({incoming:3})],
+  ['service',x=>db.collection('products').doc(x.q).update({productType:'SERVICE'})],
+  ['supply',x=>db.collection('supplyOrders').doc(x.supplies.find(s=>s.itemId==='I3').id).update({demandId:'wrong'})],
+  ['missing-receipt',async x=>{await x.receive('I3',1,'wl_corrupt_receipt');await db.collection('receipts').doc('wl_corrupt_receipt').delete();}],
+  ['pending',x=>db.collection('orders').doc(x.orderId).update({inventoryReservationStatus:'pending'})],
+  ['returns',x=>db.collection('orders').doc(x.orderId).update({returnRecords:[{id:'unsupported'}]})],
+  ['shipment',async x=>{await x.prepare('I1',1,'first');await x.ship('I1','V2-A',1,'first');}],
+  ['paper',x=>x.prepare('I1',1,'paper')],
+  ['debit',async x=>{await x.prepare('I1',1,'first');await x.ship('I1','V2-A',1,'first');await x.confirm('I1',1,'first');
+   await db.collection('inventoryMovements').doc('location-ship-'+x.request('I1','ship_first').operationId).update({qty:0});}],
+  ['hidden-return',x=>db.collection('inventoryMovements').doc('wl-hidden-return').set({sourceId:x.orderId,action:'location_customer_return',qty:1,itemId:'I3'})]
+ ];
+ for(const [name,mutate] of cases){const x=await wholeLifecycleFixture('bad-'+name);await mutate(x);const before=await wholeLifecycleSnapshot(x);
+  await assert.rejects(x.life());assert.deepEqual(await wholeLifecycleSnapshot(x),before,name);}
+});
+test('whole-order lifecycle reads each product balance once and a true late receipt collision rolls back every earlier line',async()=>{
+ const x=await wholeLifecycleFixture('rollback',{purchase:false}),before=await wholeLifecycleSnapshot(x);
+ const collision=db.collection('inventoryMovements').doc('whole-lifecycle-collision');await collision.set({sentinel:true});
+ const reads=[],writes=[];
+ const guarded={projectId:db.projectId,collection:n=>db.collection(n),runTransaction:fn=>db.runTransaction(async tx=>fn({
+  get:r=>{if(r.path)reads.push(r.path);return tx.get(r);},update:(r,d)=>{writes.push(r.path);return tx.update(r,d);},
+  set:(...a)=>tx.set(...a),create:(r,d)=>{if(r.parent.id==='reservationOperationReceipts')tx.create(collision,{sentinel:false});return tx.create(r,d);}
+ }))};
+ await assert.rejects(x.life('cancelled','cancelled',x.uid,guarded),e=>e.code===6);assert.deepEqual(await wholeLifecycleSnapshot(x),before);
+ assert.deepEqual((await collision.get()).data(),{sentinel:true});
+ for(const path of ['inventory/'+x.productKey,'warehouseStocks/V2-A__'+x.productKey,'warehouseStocks/V2-B__'+x.productKey]){
+  assert.equal(reads.filter(p=>p===path).length,1,path);assert.equal(writes.filter(p=>p===path).length,1,path);
+ }
+ await x.life();assert.equal((await x.life()).status,'already-applied');
+});
+test('whole-order cancellation releases reuse the original durable free-stock recovery with per-line proof and fixed replay',async()=>{
+ const x=await wholeLifecycleFixture('recovery',{purchase:false});
+ const other=await competingWholeLifecycleOrder(x);assert.equal((await x.read('inventoryReservations',other+'__OTHER')).quantity,0);
+ const adminUid='wl-recovery-admin';await db.collection('users').doc(adminUid).set({role:'admin',active:true});
+ const result=await commitOrderLocationLifecycleAndRecover(db,adminUid,x.intent());assert.equal(result.status,'applied');
+ assert.equal((await x.read('inventoryReservations',other+'__OTHER')).quantity,2);
+ const before=await wholeLifecycleSnapshot(x);await commitOrderLocationLifecycleAndRecover(db,adminUid,x.intent());assert.deepEqual(await wholeLifecycleSnapshot(x),before);
+ const movement=(await db.collection('inventoryMovements').where('sourceId','==',x.orderId).where('type','==','release').get()).docs[0];
+ await movement.ref.update({itemId:'UNKNOWN'});await assert.rejects(advanceReleasedV2FreeStock(db,adminUid,{movementId:movement.id}),/原始交易憑證/);
 });

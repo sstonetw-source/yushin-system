@@ -554,3 +554,8 @@ Workflow 的明確 warehouseShipmentContext 現包含 returns，以原 projectSh
 ### 2026-10-19 多品項履約後收貨（已實作、待本批 CI）
 
 原 validateV2ReceiptSource 以既有整單履約 Core 驗證全來源及全出貨 debit，再提供選定 item 的 shipment context 給原 Receiving／Workflow。receiveSupplyOrderRecord 仍是唯一 writer；兄弟原資料與交付事實保留。 限 demo-yushin Emulator，未接正式 UI／Callable 或部署；詳見 [原收貨契約增補](multi-item-receiving-20261018.md)。
+
+
+### 2026-10-19 多品項整單取消／恢復（已實作、待本批 CI）
+
+單項／整單 lifecycle 共用原私有交易引擎，讀完全部品項、供應、實收與出貨證據後一次寫入；同產品共用提案餘額，各stock最後只寫一次。整單取消釋放沿原FIFO恢復入口及checkpoint。 仍限 demo-yushin Emulator，正式 UI／Callable 未開啟，無部署。詳見 [同一份 lifecycle 契約增補](location-lifecycle-20261017.md)。

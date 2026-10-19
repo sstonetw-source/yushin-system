@@ -288,3 +288,8 @@ dispatchRecords/{dispatch-ui-operationId} 沿用原 Collection；新增 operatio
 ### 2026-10-19 多品項履約後收貨（已實作、待本批 CI）
 
 沒有新增持久欄位、collection、Rules、Index或migration。收貨不改 warehouseShipmentRecords／deliveryRecords／deliveryHistory 或整單交付總量，只更新既有收貨及庫存事實。整單最多40筆出貨憑證，每份在交易內讀一次；沿用空退貨的原有界憑證query。 限 demo-yushin Emulator，未接正式 UI／Callable 或部署；詳見 [原收貨契約增補](multi-item-receiving-20261018.md)。
+
+
+### 2026-10-19 多品項整單取消／恢復（已實作、待本批 CI）
+
+沿既有reservationOperationReceipts，整單action=order_v2_lifecycle新增itemIds/result.items（逐項productKey/差額）；movement原前綴增加itemId避免同倉碰撞，原actor/hash/receipt鏈保留。無新collection/Rules/Index/Listener/migration；stock文件只讀一次、最後至多寫一次，供應與receipt各以orderId一次＋逐項demandId有界query雙向查核。 仍限 demo-yushin Emulator，正式 UI／Callable 未開啟，無部署。詳見 [同一份 lifecycle 契約增補](location-lifecycle-20261017.md)。

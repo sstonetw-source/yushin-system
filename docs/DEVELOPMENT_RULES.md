@@ -184,3 +184,8 @@ CLOSE 後取消／恢復仍拒絕未整合的退貨刪除／更正歷史，不�
 ### 2026-10-19 多品項履約後收貨（已實作、待本批 CI）
 
 履約後多品項收貨必須先用 projectOrderShipmentReturns 核對完整事件，再篩選單品項傳入原 Receiving／Workflow；核對全部 sibling 出貨 movement，不得只信快取或選中品項。所有既有預留、供應、需求及角色驗證保留。 限 demo-yushin Emulator，未接正式 UI／Callable 或部署；詳見 [原收貨契約增補](multi-item-receiving-20261018.md)。
+
+
+### 2026-10-19 多品項整單取消／恢復（已實作、待本批 CI）
+
+整單取消／恢復不可循環提交單項交易，必須走原 lifecycle 引擎與完整 itemIds/單份操作憑證，所有來源雙向供應/receipt proof 都需驗證。共享Core決定數量與零剩餘fulfilled狀態；CI全部通過才合併。 仍限 demo-yushin Emulator，正式 UI／Callable 未開啟，無部署。詳見 [同一份 lifecycle 契約增補](location-lifecycle-20261017.md)。
