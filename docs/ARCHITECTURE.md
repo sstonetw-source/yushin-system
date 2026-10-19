@@ -626,3 +626,8 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 新增五項 Node 測試與四項 Auth SDK→原 UI handler／Service→Functions SDK→原 writer→Firestore 整合：多品項含同商品及另一商品、admin／purchaser 的不明回覆／重新載入原 ID、五角色、即時降權／claim 偽造、未登入／payload UID／停用、同 ID／競爭 ID／打單基準與同步版本。既有八組 Chrome 中，打單 suite 加測1280／390px 原兩頁 renderer 與 click handler，在尚未確認送達的實體出貨後使用正確 Core 額度並跨頁重試；其 Callable 為 scripted local transport，真實 Auth／Backend 由獨立整合測試驗證，不宣稱完整 Browser Auth／Preview E2E。
 
 本地 Node1571/1571、建置同步／語法／diff 通過；完整新增 Auth、Chrome 與既有全部 Emulator／Rules 以本批 CI 為準。v2 初始化、收貨、出貨、送達、取消／恢復與退貨的正式傳輸／UI／Preview 全線仍待逐步接線。
+
+
+### 本機隔離 v2 倉庫出貨介面與傳輸（2026-10-19）
+
+現有 `modules/inventory-workspace.js` 及 `modules/warehouse-logistics.js` 的原按鈕仍呼叫 `src/services/warehouse-shipment.js:commitInventoryShipment`；明確開啟本機 v2 試點時才進入同 Service 的 Auth/Callable adapter，送交原 `functions/location-shipment-service.js`。唯一實貨交易 Core、批次扣帳及後端權限均未另建。每品項以 sessionStorage 固定原意圖及 ID，回覆遺失可跨重新載入重送，不接受不明結果降級為舊 Writer。批次仍逐項 checkpoint，並非整批原子；客戶送達仍要獨立事件。真實登入 SDK/Callable/Firestore 的自動整合與桌機/手機腳本 UI 不能取代完整 Browser Auth／Preview E2E；尚未正式匯出 Callable、啟用 v2 或部署 Firebase。
