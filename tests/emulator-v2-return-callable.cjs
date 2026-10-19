@@ -7,7 +7,7 @@ const admin=require('firebase-admin'),{getFirestore}=require('firebase-admin/fir
 const {initializeApp,deleteApp}=require('firebase/app');
 const {getAuth,connectAuthEmulator,signInWithEmailAndPassword}=require('firebase/auth');
 const {getFunctions,connectFunctionsEmulator,httpsCallable}=require('firebase/functions');
-const {getFirestore:clientFirestore,connectFirestoreEmulator,doc,runTransaction,setDoc}=require('firebase/firestore');
+const {getFirestore:clientFirestore,connectFirestoreEmulator,doc,collection,getDoc,runTransaction,setDoc}=require('firebase/firestore');
 const procurementDemandCore=require('../modules/procurement-demand-core');
 const {synchronizeV2OrderFixture}=require('./fixtures/v2-order-initialization.cjs');
 const {commitLocationDispatchPreparation}=require('../functions/location-dispatch-service');
@@ -28,18 +28,27 @@ async function identity(tag,role='sales',{profile=true,login=true}={}){
  if(login){await accounts.createUser({uid,email,password:'EmulatorOnly!123456'});await signInWithEmailAndPassword(auth,email,'EmulatorOnly!123456');}
  if(profile)await db.collection('users').doc(uid).set({role,active:true});
  const functions=getFunctions(app,'asia-east1');connectFunctionsEmulator(functions,'127.0.0.1',5001);
- return {uid,auth,app,preview:input=>httpsCallable(functions,'previewV2CustomerReturn',{timeout:30000})(input).then(r=>r.data),
+ return {uid,auth,app,functions,dispatch:input=>httpsCallable(functions,'prepareV2OrderDispatch',{timeout:30000})(input).then(r=>r.data),preview:input=>httpsCallable(functions,'previewV2CustomerReturn',{timeout:30000})(input).then(r=>r.data),
   receive:input=>httpsCallable(functions,'receiveV2CustomerReturn',{timeout:30000})(input).then(r=>r.data)};
 }
-async function fixture(tag,{role='sales',cancelled=true}={}){
+async function fixture(tag,{role='sales',cancelled=true,multi=false}={}){
  const actor=await identity(tag,role),operator=await identity(tag+'-operator','admin');
  const orderId='return-order-'+tag,key='return-product-'+tag;let syncAttemptId='return_auth_sync_'+tag;
  const plan={mode:'CUSTOMER_SHIP',contact:'測試客戶',phone:'02-12345678',address:'台北市測試地址'};
  const batch=db.batch(),set=(n,k,d)=>batch.set(db.collection(n).doc(k),d);
- set('products',key,{productType:'Goods'});set('orders',orderId,{ownerUid:actor.uid,salesCode:'R',status:'active',orderStatus:'normal',
+ set('products',key,{productType:'Goods'});if(!multi)set('orders',orderId,{ownerUid:actor.uid,salesCode:'R',status:'active',orderStatus:'normal',
   inventoryReservationStatus:'pending',inventoryReservationAttemptId:syncAttemptId,deliveryRecords:[],returnRecords:[],deliveryHistory:[],deliveredQty:0,isDelivered:false,
   items:[{itemId:'I',productId:key,qty:10,warehouseId:'AUTH-A',reservedQty:0,returnedQty:0,deliveredQty:0,dispatchPreparedQty:0,deliveryPlan:plan,fulfillmentType:'WAREHOUSE'}]});
  set('inventory',key,{productKey:key,onHand:16,reserved:2,transferFreeInTransit:1});
+ if(multi){
+  const source={ownerUid:actor.uid,salesCode:'R',status:'active',orderStatus:'normal',inventoryReservationStatus:'pending',
+   inventoryReservationAttemptId:syncAttemptId,deliveryRecords:[],returnRecords:[],deliveryHistory:[],deliveredQty:0,isDelivered:false,
+   items:[{itemId:'I',productId:key,qty:10,warehouseId:'AUTH-A',deliveryPlan:plan},
+    {itemId:'I2',productId:key,qty:2,warehouseId:'AUTH-B',deliveryPlan:plan},{itemId:'I3',productId:key+'-Q',qty:3,warehouseId:'AUTH-B',deliveryPlan:plan}]};
+  set('orders',orderId,source);set('products',key+'-Q',{productType:'Goods'});set('inventory',key+'-Q',{productKey:key+'-Q',onHand:6,reserved:0,transferFreeInTransit:0});
+  for(const wh of ['AUTH-A','AUTH-B']){set('warehouseStocks',wh+'__'+key+'-Q',{warehouseId:wh,productKey:key+'-Q',onHand:3,reserved:0,transferFreeInTransit:0});
+   set('inventoryLots',key+'-Q-'+wh,{productKey:key+'-Q',warehouseId:wh,receivedQty:3,remainingQty:3,lotNo:wh,expiryDate:'2028-01-01'});}
+ }
  for(const [wh,onHand,reserved,transit] of [['AUTH-A',6,2,0],['AUTH-B',10,0,1]]){
   set('warehouses',wh,{active:true});set('warehouseStocks',wh+'__'+key,{warehouseId:wh,productKey:key,onHand,reserved,transferFreeInTransit:transit});
   set('inventoryLots',key+'-'+wh,{productKey:key,warehouseId:wh,receivedQty:onHand,remainingQty:onHand,lotNo:wh,expiryDate:'2028-01-01',unitCost:98765});
@@ -127,6 +136,67 @@ test('real signed-in client creates an order through the existing Order Creation
 });
 
 const code=expected=>error=>error.code==='functions/'+expected;
+async function dispatchUI(x,actor=x.actor,role='purchaser',{storage=new Map(),lose=false}={}){
+ if(!actor.clientDb){actor.clientDb=clientFirestore(actor.app);connectFirestoreEmulator(actor.clientDb,'127.0.0.1',8080);}
+ const live=actor.clientDb,alerts=[],calls=[],current=(await getDoc(doc(live,'orders',x.orderId))).data();
+ const c=vm.createContext({currentUser:{uid:actor.uid},currentUserRole:role,YUSHIN_V2_DISPATCH_EMULATOR:true,location:{hostname:'localhost'},
+  YushinFulfillment:require('../modules/fulfillment-core'),ordersCache:[{...current,id:x.orderId}],purchasingDispatchCache:[],currentDeliveryOrderId:null,
+  brandIdentityForRecord:i=>({brand:i.brand||'',brandId:i.brandId||''}),normalizeHistoryItemCode:s=>s,parseMoney:Number,
+  orderInventorySyncIncomplete:o=>o.inventoryReservationStatus!=='completed',
+  sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},
+  document:{getElementById:()=>null},renderOrdersList(){},renderPurchasingDispatchOrders(){},renderPurchasingView(){},renderDeliveryModal(){},
+  syncOrderIntoPurchasingCaches(){},writeAppDataCache(){},alert:m=>alerts.push(m),runRoleTransaction:()=>{throw Error('v2 cannot use the legacy transaction');},
+  db:{collection:n=>({doc:id=>{const ref=id?doc(live,n,id):doc(collection(live,n));return {id:ref.id,get:async()=>{const s=await getDoc(ref);return {exists:s.exists(),data:()=>s.data()};}};}})},
+  firebase:{auth:()=>actor.auth,functions:()=>({app:actor.app,useEmulator:(host,port)=>connectFunctionsEmulator(actor.functions,host,port),
+   httpsCallable:name=>async data=>{calls.push({name,data});const reply=await httpsCallable(actor.functions,name)(data);if(lose){lose=false;throw Error('UI Callable reply lost');}return reply;}})}});
+ c.window=c;const workspace=fs.readFileSync('src/features/orders/order-workspace.js','utf8');
+ const section=(a,b)=>workspace.slice(workspace.indexOf(a),workspace.indexOf(b,workspace.indexOf(a)));
+ vm.runInContext(section('function normalizedOrderItems(','function ensureOrderItemCompatibility('),c);
+ vm.runInContext(section('const pendingDispatchOrderIds =','function orderLifecycleActionButtons('),c);
+ vm.runInContext(fs.readFileSync('src/services/dispatch-preparation.js','utf8'),c);
+ vm.runInContext(section('function dispatchPreparationStorageKey(','\n\nasync function refreshAffectedOrderCaches'),c);
+ return {c,storage,alerts,calls,run:()=>c.markOrderItemDispatchPrepared(x.orderId,'I')};
+}
+test('real Auth original dispatch UI calls the v2 Service for multi-item orders and reuses a frozen operation after lost reply and reload',async()=>{
+ for(const role of ['admin','purchaser']){
+  const x=await fixture('dispatch-ui-'+role,{role,cancelled:false,multi:true}),before=await snapshot(x),order=await x.data('orders',x.orderId);
+  const ui=await dispatchUI(x,x.actor,role,{lose:true});await ui.run();assert.equal(ui.alerts.length,1);const frozen=ui.c.pendingDispatchPreparation(x.orderId,'I');
+  assert.equal(frozen.quantity,6);assert.equal(frozen.expectedPreparedQty,4);assert.equal(frozen.syncAttemptId,x.intent.syncAttemptId);assert.equal((await x.data('orders',x.orderId)).items[0].dispatchPreparedQty,10);
+  const proof=await x.data('dispatchRecords','v2-'+frozen.operationId);assert.equal(proof.actorUid,x.actor.uid);assert.equal(proof.actorRole,role);
+  const reload=await dispatchUI(x,x.actor,role,{storage:ui.storage});await reload.run();assert.equal(reload.alerts.length,0);assert.equal(ui.storage.size,0);
+  assert.equal(reload.calls[0].data.operationId,frozen.operationId);assert.equal(reload.calls[0].data.quantity,6);assert.equal(reload.calls[0].data.actorUid,undefined);
+  const after=await snapshot(x);for(const n of [1,2,3,4,5,6])assert.deepEqual(after.documents[n],before.documents[n]);assert.deepEqual(after.movements,before.movements);
+  const updated=await x.data('orders',x.orderId);assert.deepEqual(updated.items.slice(1),order.items.slice(1));assert.deepEqual(updated.deliveryRecords,order.deliveryRecords);
+ }
+});
+test('real dispatch Callable rechecks five current roles and the existing UI keeps warehouse and business buttons unavailable',async()=>{
+ for(const role of ['admin','purchaser','warehouse','sales','engineer']){
+  const x=await fixture('dispatch-role-'+role,{role,cancelled:false}),ui=await dispatchUI(x,x.actor,role);await ui.run();
+  if(['warehouse','sales','engineer'].includes(role))assert.equal(ui.calls.length,0);
+  const request={orderId:x.orderId,itemId:'I',quantity:1,expectedPreparedQty:['admin','purchaser'].includes(role)?10:4,operationId:'dispatch_auth_role_'+role,syncAttemptId:x.intent.syncAttemptId};
+  if(role==='warehouse')assert.equal((await x.actor.dispatch(request)).status,'applied');
+  else if(['sales','engineer'].includes(role))await assert.rejects(x.actor.dispatch(request),code('permission-denied'));
+  else{await db.collection('users').doc(x.actor.uid).update({role:'sales'});await accounts.setCustomUserClaims(x.actor.uid,{role:'admin'});await x.actor.auth.currentUser.getIdToken(true);
+   await assert.rejects(x.actor.dispatch(request),code('permission-denied'));}
+ }
+});
+test('real dispatch Callable freezes the prepared baseline and safely serializes identical and competing operation IDs',async()=>{
+ const x=await fixture('dispatch-race',{role:'purchaser',cancelled:false,multi:true}),before=await snapshot(x);
+ const input={orderId:x.orderId,itemId:'I',quantity:1,expectedPreparedQty:4,operationId:'dispatch_auth_race_same',syncAttemptId:x.intent.syncAttemptId};
+ const same=await Promise.all([x.actor.dispatch(input),x.actor.dispatch(input)]);assert.deepEqual(same.map(r=>r.status).sort(),['already-applied','applied']);
+ await assert.rejects(x.actor.dispatch({...input,expectedPreparedQty:5}),code('already-exists'));
+ const stale={...input,operationId:'dispatch_auth_race_stale'};await assert.rejects(x.actor.dispatch(stale),e=>code('failed-precondition')(e)&&e.details?.reason==='dispatch-stale');
+ const race=await Promise.allSettled(['a','b'].map(tag=>x.actor.dispatch({...input,operationId:'dispatch_auth_race_'+tag,expectedPreparedQty:5})));assert.equal(race.filter(r=>r.status==='fulfilled').length,1);
+ const after=await snapshot(x);assert.equal(after.documents[0].items[0].dispatchPreparedQty,6);for(const n of [1,2,3,4,5,6])assert.deepEqual(after.documents[n],before.documents[n]);assert.deepEqual(after.movements,before.movements);
+});
+test('real dispatch refuses missing Auth spoofed identities disabled profiles and stale inventory synchronization',async()=>{
+ const x=await fixture('dispatch-guard',{role:'purchaser',cancelled:false}),anonymous=await identity('dispatch-unsigned','purchaser',{login:false,profile:false});
+ const input={orderId:x.orderId,itemId:'I',quantity:1,expectedPreparedQty:4,operationId:'dispatch_auth_guard_request',syncAttemptId:x.intent.syncAttemptId},before=await snapshot(x);
+ await assert.rejects(anonymous.dispatch(input),code('unauthenticated'));
+ for(const patch of [{actorUid:x.operator.uid},{actorRole:'admin'}])await assert.rejects(x.actor.dispatch({...input,...patch}),code('invalid-argument'));
+ await assert.rejects(x.actor.dispatch({...input,syncAttemptId:'superseded'}),code('failed-precondition'));
+ await db.collection('users').doc(x.actor.uid).update({disabled:true});await assert.rejects(x.actor.dispatch(input),code('permission-denied'));assert.deepEqual(await snapshot(x),before);
+});
 test('real signed-in owner previews and CLOSE receives normal and cancelled orders with immutable retry and remaining restoration',async()=>{
  for(const cancelled of [false,true]){
   const x=await fixture('flow-'+cancelled,{cancelled}),before=await snapshot(x),preview=await x.actor.preview(x.trace);

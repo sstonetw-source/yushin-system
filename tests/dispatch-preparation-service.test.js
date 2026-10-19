@@ -70,3 +70,33 @@ test('session change while reading stops transaction and retains no receipt',asy
  f.c.db.collection=n=>{const r=original(n);if(n==='inventoryReservations')f.c.currentUserRole='sales';return r;};
  await assert.rejects(f.run(),/角色/);assert.equal(f.records().length,0);
 });
+function emulatorFixture(){
+ const f=fixture(),calls=[],auth={app:{options:{projectId:'demo-yushin'}},currentUser:{uid:'buyer'},emulatorConfig:{host:'127.0.0.1',port:9099}};
+ const functions={app:auth.app,useEmulator:(...args)=>calls.push({endpoint:args}),httpsCallable:name=>async data=>{
+  calls.push({name,data});if(f.c.replyError)throw f.c.replyError;
+  return {data:{status:'applied',orderId:'O',itemId:'I',qty:data.quantity,recordId:'v2-'+data.operationId}};}};
+ f.c.YUSHIN_V2_DISPATCH_EMULATOR=true;f.c.location={hostname:'localhost'};f.c.firebase={auth:()=>auth,functions:()=>functions};
+ f.c.runRoleTransaction=()=>{throw Error('legacy fallback forbidden');};
+ f.c.db.collection=n=>({doc:id=>({get:async()=>{f.c.afterRead?.();return {exists:true,data:()=>({...f.order(),latest:true})};}})});
+ return {...f,calls,auth,functions,run:()=>f.c.prepareOrderDispatch('O','I',f.intent({syncAttemptId:'original-sync'}))};
+}
+test('v2 dispatch transmits only frozen intent through local Functions and refreshes the actual source without a legacy write',async()=>{
+ const f=emulatorFixture(),before=structuredClone([...f.docs]);const result=await f.run();assert.equal(result.latest,true);assert.deepEqual([...f.docs],before);
+ assert.deepEqual(Array.from(f.calls[0].endpoint),['127.0.0.1',5001]);assert.equal(f.calls[1].name,'prepareV2OrderDispatch');
+ assert.equal(f.calls[1].data.expectedPreparedQty,0);assert.equal(f.calls[1].data.syncAttemptId,'original-sync');assert.equal(f.calls[1].data.actorUid,undefined);
+});
+test('v2 dispatch refuses remote projects hosts or Auth and actual account mismatch before sending a request',async()=>{
+ for(const change of [f=>f.c.location.hostname='example.com',f=>f.auth.app.options.projectId='production',f=>f.auth.emulatorConfig=null,
+  f=>f.auth.emulatorConfig.port=9098,f=>f.auth.currentUser={uid:'other'}]){
+  const f=emulatorFixture();change(f);await assert.rejects(f.run());assert.equal(f.calls.length,0);assert.equal(f.records().length,0);
+ }
+});
+test('only the server confirmed stale baseline clears as dispatch-stale; network uncertainty remains retryable',async()=>{
+ const f=emulatorFixture();f.c.replyError={code:'functions/failed-precondition',details:{reason:'dispatch-stale'},message:'stale'};
+ await assert.rejects(f.run(),e=>e.code==='dispatch-stale');f.c.replyError={code:'functions/unavailable',message:'unknown'};
+ await assert.rejects(f.run(),e=>e.code==='functions/unavailable');assert.equal(f.records().length,0);
+});
+test('v2 source refresh rejects a session change and an old v2 intent cannot fall back when its mode is disabled',async()=>{
+ const f=emulatorFixture();f.c.afterRead=()=>f.c.currentUserRole='sales';await assert.rejects(f.run(),/角色/);
+ const g=emulatorFixture();g.c.YUSHIN_V2_DISPATCH_EMULATOR=false;await assert.rejects(g.run(),/不可改用一般交易/);assert.equal(g.calls.length,0);
+});
