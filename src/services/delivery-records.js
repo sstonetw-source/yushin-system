@@ -45,7 +45,7 @@ async function confirmV2ShipmentDeliveryEmulator(orderId,{date,qty,notes='',item
    throw Error('尚有未確認的送達結果，請以原品項、來源出貨、數量與日期重試。');
  }else{
   if(!/^[a-zA-Z0-9_-]{12,96}$/.test(recordId||''))throw Error('送達操作識別碼不正確。');
-  const snapshot=await db.collection('orders').doc(orderId).get();check();
+  const snapshot=await db.collection('orders').doc(orderId).get({source:'server'});check();
   if(!snapshot.exists)throw Error('找不到原始訂單。');
   const order=snapshot.data(),rows=order.items||[];
   const resolvedItemId=itemId||(rows.length===1?rows[0].itemId:'');
@@ -70,7 +70,7 @@ async function confirmV2ShipmentDeliveryEmulator(orderId,{date,qty,notes='',item
  if(!['applied','already-applied'].includes(data?.status)||data.recordId!==frozen.operationId
     ||data.orderId!==orderId||data.itemId!==frozen.itemId||data.shipmentId!==frozen.shipmentId)
   throw Error('送達回覆無法核對，必須保留原識別碼重試。');
- const refreshed=await db.collection('orders').doc(orderId).get();check();
+ const refreshed=await db.collection('orders').doc(orderId).get({source:'server'});check();
  if(!refreshed.exists)throw Error('送達回覆成功但訂單回讀失敗，請核對原操作。');
  sessionStorage.removeItem(key);
  return refreshed.data();
@@ -103,7 +103,7 @@ async function reverseV2ShipmentDeliveryEmulator(orderId,deliveryRecordId,{date,
    throw Error('尚有未確認的送達撤銷，請使用原紀錄、日期與原因重試。');
  }else{
   if(!/^[a-zA-Z0-9_-]{12,96}$/.test(operationId||''))throw Error('撤銷操作識別碼不正確。');
-  const snapshot=await db.collection('orders').doc(orderId).get();check();
+  const snapshot=await db.collection('orders').doc(orderId).get({source:'server'});check();
   if(!snapshot.exists)throw Error('找不到原始訂單。');
   const order=snapshot.data(),record=(order.deliveryRecords||[]).find(row=>row.id===deliveryRecordId);
   if(order.inventoryReservationStatus!=='completed'||!order.inventoryReservationAttemptId
@@ -121,7 +121,7 @@ async function reverseV2ShipmentDeliveryEmulator(orderId,deliveryRecordId,{date,
  if(!['applied','already-applied'].includes(result?.status)||result.operationId!==frozen.operationId
   ||result.orderId!==orderId||result.itemId!==frozen.itemId||result.deliveryRecordId!==deliveryRecordId)
   throw Error('撤銷回覆無法核對，請保留原識別碼重試。');
- const refreshed=await db.collection('orders').doc(orderId).get();check();
+ const refreshed=await db.collection('orders').doc(orderId).get({source:'server'});check();
  if(!refreshed.exists)throw Error('撤銷已回覆成功但訂單回讀失敗，請核對原操作。');
  sessionStorage.removeItem(key);
  return refreshed.data();
