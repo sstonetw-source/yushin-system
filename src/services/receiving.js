@@ -163,12 +163,10 @@ async function validateV2ReceiptSource(transaction, {order,supply,reservation,it
     if(order.items.length>1){
         // Validate the whole event set before selecting the receiving line.
         // A sibling acknowledgement is never this line's outstanding demand.
-        if(cancelled||order.inventoryReservationStatus!=='completed'||!order.inventoryReservationAttemptId
-            ||['returnRecords','returnHistory']
-                .some(field=>!Array.isArray(order[field]??[])||(order[field]??[]).length))
-            throw new Error('多品項收貨僅支援已完成初始化且尚無退貨的正常訂單。');
+        if(cancelled||order.inventoryReservationStatus!=='completed'||!order.inventoryReservationAttemptId)
+            throw new Error('多品項收貨僅支援已完成初始化的正常訂單。');
         wholeShipment=globalThis.YushinFulfillment.projectOrderShipmentReturns({orderId,items:order.items,
-            shipments:order.warehouseShipmentRecords??[],deliveries:order.deliveryRecords??[],returns:[]});
+            shipments:order.warehouseShipmentRecords??[],deliveries:order.deliveryRecords??[],returns:order.returnRecords??[]});
         if((order.warehouseShipmentRecords??[]).length>40)
             throw new Error('多品項歷史出貨憑證超過本試點安全上限。');
         const seen=new Set(),products=new Map();
@@ -223,14 +221,15 @@ async function validateV2ReceiptSource(transaction, {order,supply,reservation,it
         throw new Error('退貨歷史含尚未整合的更正或缺少原入庫來源。');
     const warehouseShipmentContext={orderId,itemId,productKey,
         shipments:wholeShipment?(order.warehouseShipmentRecords??[]).filter(row=>row.itemId===itemId):order.warehouseShipmentRecords??[],
-        deliveries:wholeShipment?(order.deliveryRecords??[]).filter(row=>row.itemId===itemId):order.deliveryRecords??[],returns};
+        deliveries:wholeShipment?(order.deliveryRecords??[]).filter(row=>row.itemId===itemId):order.deliveryRecords??[],
+        returns:wholeShipment?returns.filter(row=>row.itemId===itemId):returns};
     const shipment=wholeShipment?wholeShipment.items.find(part=>part.itemId===itemId):
         globalThis.YushinFulfillment.projectShipmentReturns({...warehouseShipmentContext,orderedQty:item.qty??item.orderedQty});
     // Empty caches must also match the actual bounded return query. Otherwise
     // removing a cached event could hide a physical receipt from this transaction.
     const proofs=await transaction.get(db.collection('inventoryMovements').where('sourceId','==',orderId)
         .where('action','==','location_customer_return').limit(201));
-    await globalThis.YushinFulfillment.validateLocationReturnProofs({...order,returnRecords:returns},
+    await globalThis.YushinFulfillment.validateOrderLocationReturnProofs({...order,returnRecords:returns},
         {orderId,itemId,syncAttemptId:order.inventoryReservationAttemptId},productKey,
         proofs.docs.map(s=>({id:s.id,data:s.data()})),{closedOnly:true,hashIntent:async intent=>{
             const digest=await globalThis.crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(intent)));

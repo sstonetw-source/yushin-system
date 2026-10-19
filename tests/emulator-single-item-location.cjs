@@ -2220,6 +2220,69 @@ async function wholeLifecycleSnapshot(x){
  state.operationReceipts=(await db.collection('reservationOperationReceipts').where('orderId','==',x.orderId).get()).docs.map(s=>[s.id,s.data()]).sort((a,b)=>a[0].localeCompare(b[0]));
  return state;
 }
+async function multiClosedFollowupFixture(name){
+ const x=await wholeLifecycleFixture('closed-'+name);
+ for(const itemId of ['I1','I3']){
+  await x.prepare(itemId,1,itemId);await x.ship(itemId,'V2-A',1,itemId);await x.confirm(itemId,1,itemId);
+  const order=await x.read('orders',x.orderId),shipment=order.warehouseShipmentRecords.find(s=>s.itemId===itemId);
+  await require('../functions/location-return-service').commitLocationReturn(db,x.uid,{
+   ...x.request(itemId,'return_'+itemId),shipmentId:shipment.id,warehouseId:'V2-A',date:'2026-10-20',
+   reason:'客戶結案退貨',condition:'RESTOCKABLE',settlement:'CLOSE',
+   selections:[{lotId:shipment.lotAllocations[0].lotId,qty:1}]});
+ }
+ return x;
+}
+test('multi-item CLOSE receipts preserve sibling return facts and complete twelve historical deliveries without reopening closed quantities',async()=>{
+ const x=await multiClosedFollowupFixture('complete'),before=await x.read('orders',x.orderId);
+ await x.receive('I1',1,'mc_complete_partial');const once=await wholeLifecycleSnapshot(x);
+ await x.receive('I1',1,'mc_complete_partial');assert.deepEqual(await wholeLifecycleSnapshot(x),once);
+ await assert.rejects(x.receive('I1',2,'mc_complete_partial'),/識別碼衝突/);
+ assert.deepEqual((await x.read('orders',x.orderId)).items.slice(1),before.items.slice(1));
+ await x.receive('I1',1,'mc_complete_last');await x.receive('I2',4,'mc_complete_i2');await x.receive('I3',2,'mc_complete_i3');
+ for(const [itemId,wh,qty,tag] of [['I1','V2-A',2,'a'],['I1','V2-B',2,'b'],['I2','V2-B',4,'c'],['I3','V2-B',2,'d']]){
+  await x.prepare(itemId,qty,tag);await x.ship(itemId,wh,qty,tag);await x.confirm(itemId,qty,tag);
+ }
+ const order=await x.read('orders',x.orderId);assert.equal(order.deliveredQty,12);assert.equal(order.returnedQty,2);assert.equal(order.isDelivered,true);
+ assert.deepEqual(order.returnRecords,before.returnRecords);assert.deepEqual(order.returnHistory,before.returnHistory);
+ for(const key of [x.productKey,x.q]){const stock=await x.read('inventory',key);assert.equal(stock.onHand,1);assert.equal(stock.reserved,0);assert.equal(stock.incoming,0);}
+});
+test('whole-order cancel restore after two-product CLOSE preserves physical proofs and permits remaining receipts',async()=>{
+ const x=await multiClosedFollowupFixture('restore'),before=await wholeLifecycleSnapshot(x),original=await x.read('orders',x.orderId);
+ await x.life();const cancelled=await x.read('orders',x.orderId);
+ assert.ok(cancelled.items.every(i=>i.reservedQty===0&&i.shortageQty===0));
+ const applied=await wholeLifecycleSnapshot(x);assert.equal((await x.life()).status,'already-applied');assert.deepEqual(await wholeLifecycleSnapshot(x),applied);
+ await x.life('normal');const restored=await x.read('orders',x.orderId);
+ for(const field of ['warehouseShipmentRecords','deliveryRecords','returnRecords','returnHistory','deliveredQty','returnedQty','isDelivered'])assert.deepEqual(restored[field],original[field],field);
+ const after=await wholeLifecycleSnapshot(x);
+ for(const [key,value] of Object.entries(before))if(/^(supplyOrders|receipts|inventoryLots|inventoryLotCosts|purchaseOrders)\//.test(key))assert.deepEqual(after[key],value,key);
+ for(const item of restored.items){const ledger=await x.read('inventoryReservations',x.orderId+'__'+item.itemId);
+  assert.equal(ledger.quantity+ledger.shortageQty,item.qty-item.warehouseShippedQty);}
+ await x.receive('I1',2,'mc_restore_i1');await x.receive('I3',2,'mc_restore_i3');
+ assert.deepEqual((await x.read('orders',x.orderId)).returnRecords,original.returnRecords);
+});
+test('receiving and lifecycle reject missing forged hidden sibling CLOSE proofs or edited histories before any write',async()=>{
+ const cases=[
+  ['missing',async(x,r)=>db.collection('inventoryMovements').doc(r.movementId).delete()],
+  ['hash',async(x,r)=>db.collection('inventoryMovements').doc(r.movementId).update({intentHash:'forged'})],
+  ['record',async(x,r)=>db.collection('inventoryMovements').doc(r.movementId).update({'returnRecord.reason':'forged'})],
+  ['unknown',async(x,r)=>db.collection('inventoryMovements').doc(r.movementId).update({itemId:'UNKNOWN'})],
+  ['hidden',async(x,r)=>{const o=await x.read('orders',x.orderId);await db.collection('orders').doc(x.orderId).update({returnRecords:o.returnRecords.filter(s=>s.id!==r.id)});}],
+  ['history',async x=>{const o=await x.read('orders',x.orderId);await db.collection('orders').doc(x.orderId).update({returnHistory:[...o.returnHistory,{action:'edit',recordId:o.returnRecords[0].id}]});}]
+ ];
+ for(const [name,mutate] of cases){const x=await multiClosedFollowupFixture('bad-'+name),o=await x.read('orders',x.orderId);
+  await mutate(x,o.returnRecords.find(r=>r.itemId==='I3'));const before=await wholeLifecycleSnapshot(x);
+  await assert.rejects(x.receive('I1',1,'mc_bad_'+name));assert.deepEqual(await wholeLifecycleSnapshot(x),before,name+' receipt');
+  await assert.rejects(x.life());assert.deepEqual(await wholeLifecycleSnapshot(x),before,name+' lifecycle');}
+});
+test('multi-item CLOSE followup remains closed to replacement returns and cancelled receipts',async()=>{
+ const x=await wholeLifecycleFixture('replace-followup');await x.prepare('I1',1,'first');await x.ship('I1','V2-A',1,'first');await x.confirm('I1',1,'first');
+ const shipment=(await x.read('orders',x.orderId)).warehouseShipmentRecords[0];
+ await assert.rejects(require('../functions/location-return-service').commitLocationReturn(db,x.uid,{
+  ...x.request('I1','replace'),shipmentId:shipment.id,warehouseId:'V2-A',date:'2026-10-20',reason:'補送',condition:'RESTOCKABLE',settlement:'REPLACE',
+  selections:[{lotId:shipment.lotAllocations[0].lotId,qty:1}]}));
+ const y=await multiClosedFollowupFixture('cancelled');await y.life();const before=await wholeLifecycleSnapshot(y);
+ await assert.rejects(y.receive('I1',1,'mc_cancelled_receipt'));assert.deepEqual(await wholeLifecycleSnapshot(y),before);
+});
 test('whole-order initial cancellation and restoration update every ledger and demand atomically without changing physical goods',async()=>{
  const x=await wholeLifecycleFixture('initial',{purchase:false}),initial=await x.read('orders',x.orderId);
  const stocks=await Promise.all([x.productKey,x.q].map(key=>x.read('inventory',key)));
