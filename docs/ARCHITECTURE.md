@@ -631,3 +631,7 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 ### 本機隔離 v2 倉庫出貨介面與傳輸（2026-10-19）
 
 現有 `modules/inventory-workspace.js` 及 `modules/warehouse-logistics.js` 的原按鈕仍呼叫 `src/services/warehouse-shipment.js:commitInventoryShipment`；明確開啟本機 v2 試點時才進入同 Service 的 Auth/Callable adapter，送交原 `functions/location-shipment-service.js`。唯一實貨交易 Core、批次扣帳及後端權限均未另建。每品項以 sessionStorage 固定原意圖及 ID，回覆遺失可跨重新載入重送，不接受不明結果降級為舊 Writer。批次仍逐項 checkpoint，並非整批原子；客戶送達仍要獨立事件。真實登入 SDK/Callable/Firestore 的自動整合與桌機/手機腳本 UI 不能取代完整 Browser Auth／Preview E2E；尚未正式匯出 Callable、啟用 v2 或部署 Firebase。
+
+### v2 客戶送達原介面接線（2026-10-19，隔離本機 Emulator）
+
+沿用 `src/features/orders/delivery-actions.js` 原逐品項送貨表單及唯一 `src/services/delivery-records.js:saveOrderDeliveryRecord`，明確 `YUSHIN_V2_DELIVERY_EMULATOR=true` 時顯示原 `warehouseShipmentRecords` 來源選單，由 `YushinFulfillment.projectOrderShipmentReturns` 唯一計算該筆出貨尚待送達量。Service 在本機 demo-yushin Auth／Functions 環境以同一 Auth UID 呼叫隔離的 `confirmV2ShipmentDelivery` → 原 `commitShipmentDelivery`；正式 `functions/index.js` 不匯出此 Callable。作業意圖按 UID／訂單 ID 在 sessionStorage 固定來源品項、出貨 ID、數量、日期、備註、syncAttemptId 與操作 ID；未知結果不能用新 ID 或舊 Writer 重送，確認後重讀 orders 才清除。v2 快速完成／一鍵取消／一般編輯與刪除途徑失效，避免未經 v2 確認誤回補實貨。多倉選取及真實 Preview Browser Auth E2E 仍未驗收，且未部署 Firebase。
