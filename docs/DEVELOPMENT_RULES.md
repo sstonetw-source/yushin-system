@@ -256,3 +256,6 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 新增五項 Node 測試與四項 Auth SDK→原 UI handler／Service→Functions SDK→原 writer→Firestore 整合：多品項含同商品及另一商品、admin／purchaser 的不明回覆／重新載入原 ID、五角色、即時降權／claim 偽造、未登入／payload UID／停用、同 ID／競爭 ID／打單基準與同步版本。既有八組 Chrome 中，打單 suite 加測1280／390px 原兩頁 renderer 與 click handler，在尚未確認送達的實體出貨後使用正確 Core 額度並跨頁重試；其 Callable 為 scripted local transport，真實 Auth／Backend 由獨立整合測試驗證，不宣稱完整 Browser Auth／Preview E2E。
 
 本地 Node1571/1571、建置同步／語法／diff 通過；完整新增 Auth、Chrome 與既有全部 Emulator／Rules 以本批 CI 為準。v2 初始化、收貨、出貨、送達、取消／恢復與退貨的正式傳輸／UI／Preview 全線仍待逐步接線。
+
+
+- v2 實體倉分批出貨登入傳輸 `shipV2WarehouseItem` 只存在隔離 `v2-return-callable-adapter`／測試用 Functions source，必須由 Firebase Auth 真實 uid 進入原 `commitLocationShipment`，在資料庫交易重讀 users 當前角色與全部來源，不能接受前端 actorRole 欄位替代授權。原 `functions/index.js` 仍不得匯出；正式 UI、Preview 與部署皆未啟用。修改須先驗真實 Auth／Callable／Firestore Emulator 的出貨與送達不混淆、五角色、偽造 claims、相同 ID 重送與錯意圖拒絕；後續接原倉庫頁時需再補瀏覽器持久 intent／未知回覆恢復／跨頁操作，而非直接把舊 deliveryRecords writer 當作新 shipment。
