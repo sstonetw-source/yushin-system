@@ -99,6 +99,7 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
   await page.evaluate(()=>{currentUserRole='engineer';renderDeliveryModal();});
   assert.equal(await page.locator('#deliveryRecordsBody button').count(),0);
   assert.match(await page.locator('#deliveryFormHint').textContent(),/原帳號與角色/);
+  assert.equal(await page.locator('#deliveryRecordsBody td').filter({hasText:'原帳號與角色'}).isVisible(),true);
   await setup();
   assert.equal(await page.locator('#deliveryRecordsBody button').filter({hasText:'確認撤銷結果'}).count(),1);
   assert.equal(await page.locator('#deliveryRecordsBody button').filter({hasText:'撤銷送達確認'}).count(),0);
