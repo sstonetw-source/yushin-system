@@ -154,6 +154,50 @@ function renderDeliveryModal() {
         const select=document.getElementById('deliveryItemId');if(select)select.style.display='none';
     }
 
+    // The existing delivery form selects a real immutable shipment only in
+    // the isolated v2 demo. Never infer arrival from an inventory debit.
+    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true){
+        let host=document.getElementById('deliveryShipmentSelection');
+        if(!host){
+            host=document.createElement('label');host.id='deliveryShipmentSelection';
+            host.textContent='客戶實際收到的出貨批次';
+            const field=document.createElement('select');field.id='deliveryShipmentId';field.style.marginBottom='8px';
+            host.appendChild(field);deliveryForm.insertBefore(host,deliveryForm.firstChild);
+        }
+        const field=document.getElementById('deliveryShipmentId');
+        const frozen=pendingV2DeliveryConfirmation(order.id);
+        const rawItems=order.items||[],selectedItemId=frozen?.itemId
+            ||document.getElementById('deliveryItemId')?.value
+            ||(rawItems.length===1?rawItems[0].itemId:'');
+        const old=field.value;
+        try{
+            const projected=globalThis.YushinFulfillment.projectOrderShipmentReturns({
+                orderId:order.id,items:rawItems,shipments:order.warehouseShipmentRecords||[],
+                deliveries:order.deliveryRecords||[],returns:order.returnRecords||[]});
+            const part=projected.items.find(row=>row.itemId===selectedItemId);
+            const options=(part?.shipments||[]).filter(row=>row.pendingQty>0||row.shipmentId===frozen?.shipmentId);
+            field.innerHTML='<option value="">請選擇原倉庫出貨</option>'+options.map(row=>{
+                const origin=(order.warehouseShipmentRecords||[]).find(s=>s.id===row.shipmentId);
+                return `<option value="${escapeAttr(row.shipmentId)}">${escapeHtml(origin?.date||'')}／${escapeHtml(origin?.warehouseId||'')}／待確認 ${row.pendingQty}</option>`;
+            }).join('');
+            field.value=frozen?.shipmentId||options.some(row=>row.shipmentId===old)?(frozen?.shipmentId||old):'';
+            field.disabled=!!frozen;
+        }catch(error){
+            field.innerHTML='<option value="">無法核對來源出貨：'+escapeHtml(error.message)+'</option>';
+            field.disabled=true;
+        }
+        const itemSelect=document.getElementById('deliveryItemId');
+        if(itemSelect&&rawItems.length>1){
+            if(frozen)itemSelect.value=frozen.itemId;
+            itemSelect.disabled=!!frozen;
+            itemSelect.onchange=()=>renderDeliveryModal();
+        }
+        if(frozen){
+            document.getElementById('deliveryDate').value=frozen.date;
+            document.getElementById('deliveryQty').value=frozen.quantity;
+            document.getElementById('deliveryNotes').value=frozen.notes;
+        }
+    }else document.getElementById('deliveryShipmentSelection')?.remove();
     const tbody = document.getElementById('deliveryRecordsBody');
     const partialButton = document.getElementById('openPartialDeliveryBtn');
     if (partialButton) partialButton.style.display = editable && !locked && progress.remaining > 0 ? '' : 'none';
@@ -174,6 +218,10 @@ function renderDeliveryModal() {
     document.getElementById('deliveryFormHint').innerText = progress.isLegacyEstimated
         ? '請先取消舊資料推估，再登錄正確的分批送貨紀錄。'
         : `目前最多還可登錄 ${progress.remaining} 個。`;
+    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true)
+        document.getElementById('deliveryFormHint').innerText=pendingV2DeliveryConfirmation(order.id)
+            ? '前次送達結果未確認：使用原出貨批次及原操作識別碼重試。'
+            : '只確認客戶實際收到的數量；不會再次扣除倉庫實貨。';
 }
 
 window.editDeliveryRecord = function(recordId) {
