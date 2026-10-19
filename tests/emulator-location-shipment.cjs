@@ -1995,6 +1995,101 @@ async function multiReturnFixture(name,options={}){
   receiveReturn:(data=request(),actor=x.adminUid,connection=db)=>commitLocationReturn(connection,actor,data),
   traceReturn:(data=traceRequest(),actor=x.adminUid,connection=db)=>planLocationReturnTrace(connection,actor,data)};
 }
+async function cancelledMultiReturnFixture(name,options={}){
+ const x=await multiReturnFixture('cancel-'+name,options),order=await x.read('orders',x.orderId);
+ const lifecycle=(nextStatus='cancelled',tag=nextStatus,connection=db)=>
+  require('../functions/single-item-location-lifecycle-service').commitOrderLocationLifecycle(connection,x.adminUid,{
+   orderId:x.orderId,itemIds:order.items.map(i=>i.itemId),warehouseIds:[A,B],nextStatus,
+   operationId:'cancel_multi_return_'+name+'_'+tag,syncAttemptId:order.inventoryReservationAttemptId,
+   date:nextStatus==='cancelled'?'2026-10-19':'2026-10-21',reason:'取消剩餘未出貨'});
+ await lifecycle();return {...x,lifecycle};
+}
+async function cancelledMultiReturnSnapshot(x){
+ const state=await multiShipmentSnapshot(x);
+ for(const item of state.order.items)state['demand/'+item.itemId]=await x.read('procurementDemands',encodeURIComponent('SALES_ORDER:'+x.orderId+':'+item.itemId));
+ state.lifecycle=(await db.collection('reservationOperationReceipts').where('orderId','==',x.orderId).get()).docs.map(s=>[s.id,s.data()]).sort((a,b)=>a[0].localeCompare(b[0]));
+ return state;
+}
+test('cancelled multi-item CLOSE returns restore original lots as free stock and keep all sibling ledgers released until restoration',async()=>{
+ const x=await cancelledMultiReturnFixture('normal'),before=await cancelledMultiReturnSnapshot(x);
+ await x.receiveReturn();await x.receiveReturn(x.returnRequest('I2',1,'second'));const after=await cancelledMultiReturnSnapshot(x);
+ assert.equal(after.order.status,'cancelled');assert.equal(after.order.orderStatus,'cancelled');assert.equal(after.order.returnedQty,2);assert.equal(after.order.deliveredQty,4);
+ assert.deepEqual(after.order.items[2],before.order.items[2]);assert.deepEqual(after.order.warehouseShipmentRecords,before.order.warehouseShipmentRecords);
+ assert.deepEqual(after.order.deliveryRecords,before.order.deliveryRecords);assert.deepEqual(after.order.deliveryHistory,before.order.deliveryHistory);
+ assert.equal(after['inventory/'+x.key].onHand,before['inventory/'+x.key].onHand+2);assert.equal(after['inventory/'+x.key].reserved,0);
+ for(const item of before.order.items){const ledger=after['ledger/'+item.itemId];assert.equal(ledger.status,'released');assert.equal(ledger.quantity,0);assert.equal(ledger.shortageQty,0);assert.deepEqual(ledger.locations,[]);
+  assert.deepEqual(ledger,{...before['ledger/'+item.itemId],updatedAt:ledger.updatedAt});assert.deepEqual(after['demand/'+item.itemId],before['demand/'+item.itemId]);}
+ const once=await cancelledMultiReturnSnapshot(x);await x.receiveReturn();assert.deepEqual(await cancelledMultiReturnSnapshot(x),once);
+ await x.lifecycle('normal');const restored=await x.read('orders',x.orderId);
+ for(const item of restored.items){const ledger=await x.read('inventoryReservations',x.orderId+'__'+item.itemId);assert.equal(ledger.quantity+ledger.shortageQty,(item.qty??item.orderedQty)-(item.warehouseShippedQty??0));}
+ assert.deepEqual(restored.returnRecords,after.order.returnRecords);assert.equal((await x.read('inventory',x.key)).reserved,4);
+});
+test('five same-product cancelled CLOSE returns preserve released siblings and never reopen replacement demand',async()=>{
+ const x=await cancelledMultiReturnFixture('five',{five:true});await x.receiveReturn();await x.receiveReturn(x.returnRequest('I2',2,'second'));
+ const cancelled=await x.read('orders',x.orderId);assert.equal(cancelled.items.length,5);assert.equal(cancelled.returnedQty,3);assert.ok(cancelled.items.every(i=>i.reservedQty===0&&i.shortageQty===0));
+ const result=await x.lifecycle('normal');assert.equal(result.items.reduce((s,i)=>s+i.reservedQty,0),5);assert.equal(result.items.reduce((s,i)=>s+i.shortageQty,0),6);
+});
+test('cancelled multi-item return trace validates all released sources read-only and a stale preview cannot over-return',async()=>{
+ const x=await cancelledMultiReturnFixture('trace'),before=await cancelledMultiReturnSnapshot(x),reads=[];
+ const guarded={projectId:db.projectId,collection:n=>db.collection(n),runTransaction:fn=>db.runTransaction(async tx=>fn({get:r=>{reads.push(r.path??'query');return tx.get(r);}}))};
+ const preview=await x.traceReturn(x.traceRequest('I2'),x.adminUid,guarded);assert.equal(preview.canCommit,false);assert.equal(preview.remainingReturnQty,2);
+ assert.ok(reads.every(p=>p==='query'||/^(users|orders|inventoryMovements|inventoryReservations|inventoryLots)\//.test(p)));
+ assert.equal(reads.filter(p=>p==='inventoryReservations/'+x.orderId+'__I2').length,1);
+ assert.deepEqual(await cancelledMultiReturnSnapshot(x),before);await x.receiveReturn(x.returnRequest('I2',2,'all'));const once=await cancelledMultiReturnSnapshot(x);
+ await assert.rejects(x.receiveReturn(x.returnRequest('I2',1,'stale')),/超過/);await assert.rejects(x.traceReturn(x.traceRequest('I2')),/超過/);assert.deepEqual(await cancelledMultiReturnSnapshot(x),once);
+});
+test('cancelled multi-item CLOSE retains five trace roles three receipt roles and current ownership actor role and intent binding',async()=>{
+ for(const role of ['admin','sales','engineer','purchaser','warehouse']){
+  const x=await cancelledMultiReturnFixture('role-'+role);await db.collection('users').doc(x.uid).update({role});const before=await cancelledMultiReturnSnapshot(x);
+  assert.equal((await x.traceReturn(x.traceRequest(),x.uid)).canCommit,false);
+  if(['purchaser','warehouse'].includes(role)){await assert.rejects(x.receiveReturn(x.returnRequest(),x.uid),/權限/);assert.deepEqual(await cancelledMultiReturnSnapshot(x),before);}
+  else{await x.receiveReturn(x.returnRequest(),x.uid);const once=await cancelledMultiReturnSnapshot(x);await db.collection('users').doc(x.uid).update({disabled:true});
+   await assert.rejects(x.receiveReturn(x.returnRequest(),x.uid),/權限/);await assert.rejects(x.traceReturn(x.traceRequest(),x.uid),/權限/);assert.deepEqual(await cancelledMultiReturnSnapshot(x),once);}
+ }
+ const x=await cancelledMultiReturnFixture('binding');await x.receiveReturn();const once=await cancelledMultiReturnSnapshot(x);
+ await assert.rejects(x.receiveReturn(x.returnRequest(),x.anotherUid),/自己訂單/);
+ await assert.rejects(x.receiveReturn(x.returnRequest('I1',1,'one',{reason:'不同意圖'})),/其他交易/);
+ await db.collection('users').doc(x.uid).update({role:'admin'});await assert.rejects(x.receiveReturn(x.returnRequest(),x.uid),/其他交易/);assert.deepEqual(await cancelledMultiReturnSnapshot(x),once);
+});
+test('cancelled multi-item CLOSE trace and receipt reject sibling debit ledger history freight and hidden proof corruption atomically',async()=>{
+ const cases=[
+  ['debit',x=>db.collection('inventoryMovements').doc('location-ship-'+x.returnRequest('I2').shipmentId).update({qty:0})],
+  ['ledger',x=>db.collection('inventoryReservations').doc(x.orderId+'__I3').update({status:'fulfilled'})],
+  ['pending',async x=>{const o=await x.read('orders',x.orderId);o.items[1].deliveredQty=1;o.deliveryRecords.find(r=>r.itemId==='I2').qty=1;await db.collection('orders').doc(x.orderId).update({items:o.items,deliveryRecords:o.deliveryRecords,deliveredQty:3});}],
+  ['paper',async x=>{const o=await x.read('orders',x.orderId);o.items[2].dispatchPreparedQty=1;await db.collection('orders').doc(x.orderId).update({items:o.items});}],
+  ['history',x=>db.collection('orders').doc(x.orderId).update({returnHistory:[{action:'edit',recordId:'missing'}]})],
+  ['hidden',x=>db.collection('inventoryMovements').doc('cancel-multi-hidden').set({sourceId:x.orderId,action:'location_customer_return',itemId:'I3'})],
+  ['status',x=>db.collection('orders').doc(x.orderId).update({orderStatus:'normal'})],
+  ['proof',async x=>{const r=await x.receiveReturn(x.returnRequest('I2',1,'prior'));await db.collection('inventoryMovements').doc(r.movementId).update({intentHash:'forged'});}]
+ ];
+ for(const [name,mutate] of cases){const x=await cancelledMultiReturnFixture('bad-'+name);await mutate(x);const before=await cancelledMultiReturnSnapshot(x);
+  await assert.rejects(x.traceReturn());await assert.rejects(x.receiveReturn());assert.deepEqual(await cancelledMultiReturnSnapshot(x),before,name);}
+ const x=await cancelledMultiReturnFixture('replace');const before=await cancelledMultiReturnSnapshot(x);
+ await assert.rejects(x.receiveReturn(x.returnRequest('I1',1,'replace',{settlement:'REPLACE'})));assert.deepEqual(await cancelledMultiReturnSnapshot(x),before);
+});
+test('cancelled multi-item CLOSE races serialize duplicate IDs excess allowance sibling returns and simultaneous restoration',async()=>{
+ const x=await cancelledMultiReturnFixture('race-same');const same=await Promise.all([x.receiveReturn(),x.receiveReturn()]);assert.deepEqual(same.map(r=>r.status).sort(),['already-applied','applied']);
+ const y=await cancelledMultiReturnFixture('race-excess');const excess=await Promise.allSettled([y.receiveReturn(y.returnRequest('I1',2,'a')),y.receiveReturn(y.returnRequest('I1',2,'b'))]);assert.equal(excess.filter(r=>r.status==='fulfilled').length,1);
+ const z=await cancelledMultiReturnFixture('race-lines'),original=await z.read('inventory',z.key);
+ await Promise.all([z.receiveReturn(),z.receiveReturn(z.returnRequest('I2',1,'second'))]);assert.equal((await z.read('inventory',z.key)).onHand,original.onHand+2);
+ const w=await cancelledMultiReturnFixture('race-restore');await Promise.all([w.receiveReturn(),w.lifecycle('normal')]);const order=await w.read('orders',w.orderId);
+ assert.equal(order.status,'active');assert.equal(order.returnedQty,1);assert.equal((await w.read('inventory',w.key)).onHand,3);
+ for(const item of order.items){const ledger=await w.read('inventoryReservations',w.orderId+'__'+item.itemId);assert.equal(ledger.quantity+ledger.shortageQty,(item.qty??item.orderedQty)-(item.warehouseShippedQty??0));}
+});
+test('cancelled multi-item CLOSE late movement collision rolls back all facts and lost reply replays after restoration',async()=>{
+ const x=await cancelledMultiReturnFixture('rollback'),before=await cancelledMultiReturnSnapshot(x),collision=db.collection('inventoryMovements').doc('cancel-multi-collision');await collision.set({sentinel:true});
+ const guarded={projectId:db.projectId,collection:n=>db.collection(n),runTransaction:fn=>db.runTransaction(async tx=>fn({get:r=>tx.get(r),update:(...a)=>tx.update(...a),set:(...a)=>tx.set(...a),create:(r,d)=>{tx.create(collision,{sentinel:false});return tx.create(r,d);}}))};
+ await assert.rejects(x.receiveReturn(x.returnRequest(),x.adminUid,guarded),e=>e.code===6);assert.deepEqual(await cancelledMultiReturnSnapshot(x),before);assert.deepEqual((await collision.get()).data(),{sentinel:true});
+ let lost=true;const lostConnection={projectId:db.projectId,collection:n=>db.collection(n),runTransaction:async fn=>{const r=await db.runTransaction(async tx=>fn(tx));if(lost){lost=false;throw Error('cancelled multi return reply lost');}return r;}};
+ await assert.rejects(x.receiveReturn(x.returnRequest(),x.adminUid,lostConnection),/reply lost/);await x.lifecycle('normal');const restored=await cancelledMultiReturnSnapshot(x);
+ assert.equal((await x.receiveReturn()).status,'already-applied');assert.deepEqual(await cancelledMultiReturnSnapshot(x),restored);
+});
+test('cancelled multi-item CLOSE uses original post-commit recovery while receipt and trace keep the production gate closed',async()=>{
+ const x=await cancelledMultiReturnFixture('recovery');const result=await commitLocationReturnAndRecover(db,x.adminUid,x.returnRequest());assert.equal(result.status,'applied');assert.equal(result.postCommitAllocation.sources.length,1);
+ const once=await cancelledMultiReturnSnapshot(x);await commitLocationReturnAndRecover(db,x.adminUid,x.returnRequest());assert.deepEqual((await x.read('orders',x.orderId)).returnRecords,once.order.returnRecords);
+ const real={projectId:'production-yushin'};const before=await cancelledMultiReturnSnapshot(x);
+ await assert.rejects(x.receiveReturn(x.returnRequest('I2',1,'blocked'),x.adminUid,real),/僅允許 demo-yushin/);await assert.rejects(x.traceReturn(x.traceRequest('I2'),x.adminUid,real),/僅允許 demo-yushin/);assert.deepEqual(await cancelledMultiReturnSnapshot(x),before);
+});
 test('multi-item CLOSE restores original lots and only selected counters while whole-order returned totals include every item',async()=>{
  const x=await multiReturnFixture('normal'),before=await multiShipmentSnapshot(x);
  const first=await x.receiveReturn(x.returnRequest('I2',1,'second'));

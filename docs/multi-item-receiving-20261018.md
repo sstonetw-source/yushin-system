@@ -81,3 +81,16 @@ receiveSupplyOrderRecord 沿原取消分支及 planReservationReceipt(requestedR
 新增八項真實 Emulator 案例：逐供應採購核准、分批及完整收貨恢復、兩產品 CLOSE 保留歷史、五列同商品競爭、來源／空 ledger／決策／退貨憑證異常零寫入、五角色與重送綁定、同 ID／超額／恢復競態、ALREADY_EXISTS 末端回滾與回覆遺失、原 receipt 自由庫存來源及正式環境閘門。皆沿既有初始化、採購決策、PO、收貨、出貨、退貨與整單 lifecycle。沒有新資料庫查詢、Collection、持久欄位、Rules、Index 或 Listener。
 
 本地 Node 1560/1560 通過；完整新增 Emulator、Auth、Rules 與八組 Chrome 以本批 CI 為準。僅 demo-yushin Emulator、2–5 個實體倉品項、兩個原候選倉；未啟用正式 UI／Callable、未部署 Firebase 或修改正式資料。多品項取消後再新增退貨、混合服務／直送、補送／更正及 Preview 真實登入全線 E2E 仍待後續整合。
+
+
+## 2026-10-19 取消後多品項 CLOSE 退貨
+
+本節取代前述取消後再新增多品項退貨仍拒絕的限制。僅 demo-yushin Emulator、2–5 個實體倉品項、原兩候選倉、completed 初始化。原 shipmentDeliveryContext 只有同時明確啟用 return／cancelled-CLOSE 選項才接受兩個狀態欄位均 cancelled 的整單；原送達確認與撤銷仍拒絕取消訂單。
+
+原 trace 與唯一 commitLocationReturn writer 共用整單 context／取消 guard／來源 reader：每個品項都須無途中貨、無額外打單、無 REPLACE，退貨歷史僅有可對應原入庫的 add；每份原 v2 ledger 必須 released、quantity／shortage 為零、位置為空，並維持相同候選倉及所有權／商品來源。全單出貨 debit 與全單退貨 movement／canonical hash 查核不變，不能忽略兄弟品項。trace 仍只讀來源證據與原批次，不讀庫存或成本；多品項取消的選定 ledger 已由原整單 reader 查核，不重讀一次。
+
+原庫存／批次／Fulfillment Core 處理實收及原批次還原，CLOSE 只增加自由實貨，取消狀態、released 預留、採購／需求／送達事實保留，不重開已交付需求。整單 returnedQty／isDelivered 沿原整單 Core 投影，只改選定品項；原固定 movement ID、actor／role、intent hash、原子提交、重送與提交後自由庫存續傳沿用。退貨後可接原 KEEP_STOCK 收貨及整單恢復，並依當下實貨配置原未出貨需求。
+
+新增十項真實 Emulator 案例：正常及五列取消後退貨／恢復、唯讀 trace 與過期預覽、五角色及重送／所有權、兄弟出貨／ledger／途中／打單／歷史／隱藏憑證損壞、同 ID／超額／跨品項／恢復競態、ALREADY_EXISTS 末端回滾與回覆遺失、原自由庫存續傳及正式閘門，另含真實 PO→出貨→取消→兩產品退貨→KEEP_STOCK 收貨→恢復與取消前後各一筆 CLOSE。既有 Node context 契約更新為需同時明確啟用兩個退貨選項。
+
+本地 Node 1560/1560 通過；完整 Emulator／Auth／Rules 與八組 Chrome 以本批 CI 為準。無新 writer、資料庫查詢、Collection、持久欄位、Rules、Index、Listener、Firebase 部署或正式資料寫入。正式介面／Callable 接線與 Preview 真實登入全線 E2E、混合服務／直送及退貨更正仍待後續整合。

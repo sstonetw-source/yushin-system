@@ -2331,6 +2331,39 @@ test('cancelled multi-item receipt exposes the original bounded free-stock recov
  const before=await wholeLifecycleSnapshot(x);await advanceReleasedV2FreeStock(db,'emulator-purchaser',{movementId:movement.id});assert.deepEqual(await wholeLifecycleSnapshot(x),before);
  delete x.c.process;await assert.rejects(x.receive('I1',1,'mk_production_gate'),/僅允許 demo-yushin/);assert.deepEqual(await wholeLifecycleSnapshot(x),before);
 });
+test('real multi-item PO shipment cancellation then two-product CLOSE permits KEEP_STOCK receipts and restores only original unshipped demand',async()=>{
+ const x=await wholeLifecycleFixture('cancel-new-close');
+ for(const itemId of ['I1','I3']){await x.prepare(itemId,1,itemId);await x.ship(itemId,'V2-A',1,itemId);await x.confirm(itemId,1,itemId);}
+ await x.life();const cancelled=await wholeLifecycleSnapshot(x);await assert.rejects(x.confirm('I1',1,'I1','blocked_cancelled'),/取消|結案/);
+ for(const itemId of ['I1','I3']){
+  const shipment=(await x.read('orders',x.orderId)).warehouseShipmentRecords.find(s=>s.itemId===itemId);
+  const request={...x.request(itemId,'cancel_close_'+itemId),shipmentId:shipment.id,warehouseId:'V2-A',date:'2026-10-22',
+   reason:'取消後收回訂錯商品',condition:'RESTOCKABLE',settlement:'CLOSE',selections:[{lotId:shipment.lotAllocations[0].lotId,qty:1}]};
+  const trace=Object.fromEntries(['orderId','itemId','shipmentId','syncAttemptId','selections'].map(k=>[k,request[k]]));
+  assert.equal((await require('../functions/location-return-trace-service').planLocationReturnTrace(db,x.uid,trace)).canCommit,false);
+  await require('../functions/location-return-service').commitLocationReturn(db,x.uid,request);
+ }
+ const returned=await x.read('orders',x.orderId);assert.equal(returned.status,'cancelled');assert.equal(returned.returnedQty,2);assert.equal(returned.deliveredQty,2);
+ for(const item of returned.items){const ledger=await x.read('inventoryReservations',x.orderId+'__'+item.itemId);assert.equal(ledger.status,'released');assert.equal(ledger.quantity,0);assert.equal(ledger.shortageQty,0);
+  assert.deepEqual(await x.read('procurementDemands',encodeURIComponent('SALES_ORDER:'+x.orderId+':'+item.itemId)),cancelled['procurementDemands/'+encodeURIComponent('SALES_ORDER:'+x.orderId+':'+item.itemId)]);}
+ for(const supply of x.supplies)await keepReceiptAsStock({...x,supplyId:supply.id});x.c.localDateString=()=> '2026-10-22';
+ await x.receive('I1',2,'cancel_new_close_receipt_i1');await x.receive('I2',4,'cancel_new_close_receipt_i2');await x.receive('I3',2,'cancel_new_close_receipt_i3');
+ await commitOrderLocationLifecycle(db,x.uid,x.intent('normal','after_close',{date:'2026-10-23'}));
+ const restored=await x.read('orders',x.orderId);assert.deepEqual(restored.items.map(i=>[i.reservedQty,i.shortageQty]),[[4,0],[4,0],[2,0]]);
+ assert.deepEqual(restored.returnRecords,returned.returnRecords);assert.deepEqual(restored.deliveryRecords,returned.deliveryRecords);
+ for(const [key,held] of [[x.productKey,8],[x.q,2]]){const stock=await x.read('inventory',key);assert.equal(stock.reserved,held);assert.equal(stock.onHand,held+1);assert.equal(stock.incoming,0);}
+});
+test('an existing multi-item CLOSE before cancellation and another source-lot CLOSE after cancellation share original delivered allowance',async()=>{
+ const x=await wholeLifecycleFixture('prior-then-cancel-close');await x.prepare('I1',2,'first');
+ await x.ship('I1','V2-A',1,'a');await x.ship('I1','V2-B',1,'b');await x.confirm('I1',1,'a');await x.confirm('I1',1,'b');
+ const receive=async(warehouseId,tag)=>{const o=await x.read('orders',x.orderId),s=o.warehouseShipmentRecords.find(r=>r.warehouseId===warehouseId);
+  return require('../functions/location-return-service').commitLocationReturn(db,x.uid,{...x.request('I1','close_'+tag),shipmentId:s.id,warehouseId,
+   date:tag==='a'?'2026-10-20':'2026-10-22',reason:'訂錯商品結案',condition:'RESTOCKABLE',settlement:'CLOSE',selections:[{lotId:s.lotAllocations[0].lotId,qty:1}]});};
+ await receive('V2-A','a');await x.life();await receive('V2-B','b');const returned=await x.read('orders',x.orderId);assert.equal(returned.returnedQty,2);assert.equal(returned.deliveredQty,2);
+ const before=await wholeLifecycleSnapshot(x);await assert.rejects(receive('V2-B','excess'),/超過/);assert.deepEqual(await wholeLifecycleSnapshot(x),before);
+ await commitOrderLocationLifecycle(db,x.uid,x.intent('normal','after_second_close',{date:'2026-10-23'}));const restored=await x.read('orders',x.orderId);assert.equal(restored.items[0].reservedQty+restored.items[0].shortageQty,3);
+ assert.deepEqual(restored.returnRecords,returned.returnRecords);
+});
 test('multi-item CLOSE receipts preserve sibling return facts and complete twelve historical deliveries without reopening closed quantities',async()=>{
  const x=await multiClosedFollowupFixture('complete'),before=await x.read('orders',x.orderId);
  await x.receive('I1',1,'mc_complete_partial');const once=await wholeLifecycleSnapshot(x);

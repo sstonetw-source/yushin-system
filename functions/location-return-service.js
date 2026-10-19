@@ -26,7 +26,7 @@ async function commitLocationReturn(db,uid,data){
   const {item,productKey,projection,returnProjection,cancelled,whole}=context;
   if(whole&&intent.settlement!=='CLOSE')fault('多品項退貨目前僅支援 CLOSE 結案，訂錯貨請另開新單');
   if(order.returnHistory!==undefined&&!Array.isArray(order.returnHistory))fault('退貨歷史格式不正確');
-  assertCancelledCloseReturnContext(order,{item,projection,returnProjection,cancelled});
+  assertCancelledCloseReturnContext(order,context);
   if(order.returnRecords.some(r=>r.id===operationId)||(order.returnHistory||[]).some(r=>r.recordId===operationId))
    fault('此退貨操作已有歷史紀錄，不能重複入庫');
   const shipment=await readShipmentProof(tx,db,order,intent,productKey);

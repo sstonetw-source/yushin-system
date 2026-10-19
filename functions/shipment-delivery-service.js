@@ -44,8 +44,8 @@ async function readShipmentActorOrder(tx,db,uid,orderId,roles=['admin','sales','
 }
 function shipmentDeliveryContext(order,intent,{allowReturns=false,allowCancelledCloseReturn=false,allowMultiReturn=false}={}) {
  if(allowMultiReturn&&Array.isArray(order.items)&&order.items.length>1){
-  const context=multiShipmentDeliveryContext(order,intent);
-  return {...context,returnProjection:context.projection,cancelled:false};
+  const context=multiShipmentDeliveryContext(order,intent,{allowCancelledCloseReturn:allowReturns&&allowCancelledCloseReturn});
+  return {...context,returnProjection:context.projection};
  }
  const {orderId,itemId,syncAttemptId}=intent;
   if(order.inventoryReservationStatus!=='completed'||order.inventoryReservationAttemptId!==syncAttemptId)
@@ -77,12 +77,14 @@ function shipmentDeliveryContext(order,intent,{allowReturns=false,allowCancelled
   return {item,productKey,projection,returnProjection,cancelled};
 }
 // Shared whole-order projection for acknowledgement/correction and explicitly
-// opted-in CLOSE return readers. Cancelled multi-line returns remain closed.
-function multiShipmentDeliveryContext(order,intent){
+// opted-in CLOSE return readers. Cancellation never permits new delivery.
+function multiShipmentDeliveryContext(order,intent,{allowCancelledCloseReturn=false}={}){
  const {orderId,itemId,syncAttemptId}=intent;
  if(order.inventoryReservationStatus!=='completed'||order.inventoryReservationAttemptId!==syncAttemptId)
   fault('庫存同步未完成或來源同步識別碼已變更');
- if(!['active','normal'].includes(order.status)||![undefined,'','normal','active'].includes(order.orderStatus))
+ const cancelled=order.status==='cancelled'&&order.orderStatus==='cancelled';
+ if(!(allowCancelledCloseReturn&&cancelled)
+  &&(!['active','normal'].includes(order.status)||![undefined,'','normal','active'].includes(order.orderStatus)))
   fault('已取消或結案訂單不可新增送達');
  if(!order.ownerUid||!order.salesCode||!Array.isArray(order.items)||order.items.length<2
   ||order.items.length>5||order.items.filter(row=>row?.itemId===itemId).length!==1
@@ -110,7 +112,7 @@ function multiShipmentDeliveryContext(order,intent){
  }
  const item=order.items.find(row=>row.itemId===itemId);
  const projection=whole.items.find(row=>row.itemId===itemId);
- return {item,productKey:projection.productKey,projection,whole};
+ return {item,productKey:projection.productKey,projection,whole,cancelled};
 }
 async function readShipmentProof(tx,db,order,intent,productKey) {
  const {orderId,itemId,shipmentId,syncAttemptId}=intent;

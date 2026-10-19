@@ -20,14 +20,18 @@ async function readLocationReturnProofs(tx,db,order,intent,productKey,{closedOnl
 }
 
 // Shared scope guard for cancelled CLOSE preview and the actual receipt.
-function assertCancelledCloseReturnContext(order,{item,projection,returnProjection,cancelled}){
+function assertCancelledCloseReturnContext(order,{item,returnProjection,cancelled,whole}){
  if(!cancelled)return;
  if(!Array.isArray(order.returnHistory??[]))fault('退貨歷史格式不正確');
- if(returnProjection.replacementQty!==0||projection.pendingDeliveryQty!==0
-  ||!Number.isSafeInteger(item.dispatchPreparedQty??0)||(item.dispatchPreparedQty??0)!==projection.shippedQty
-  ||(order.returnHistory??[]).some(event=>event?.action!=='add'
+ if((order.returnHistory??[]).some(event=>event?.action!=='add'
     ||!order.returnRecords.some(record=>record.id===event.recordId)))
   fault('取消訂單僅支援無途中貨、無額外打單及無更正歷史的 CLOSE 退貨');
+ for(const source of whole?order.items:[item]){
+  const part=whole?whole.items.find(row=>row.itemId===source.itemId):returnProjection;
+  if(part.replacementQty!==0||part.pendingDeliveryQty!==0
+   ||!Number.isSafeInteger(source.dispatchPreparedQty??0)||(source.dispatchPreparedQty??0)!==part.shippedQty)
+   fault('取消訂單僅支援無途中貨、無額外打單及無更正歷史的 CLOSE 退貨');
+ }
 }
 // One sibling-ledger/provenance reader for multi-line preview and receipt.
 // Preview deliberately makes no stock promise; the receipt re-reads balances.
@@ -47,8 +51,8 @@ async function readMultiReturnSource(tx,db,order,intent,context,{ledger=null,inv
    ||!Number.isSafeInteger(source.quantity)||source.quantity<0
    ||!Number.isSafeInteger(source.shortageQty)||source.shortageQty<0
    ||source.quantity!==item.reservedQty||source.shortageQty!==item.shortageQty
-   ||source.quantity+source.shortageQty!==part.outstandingQty
-   ||source.status!==(source.quantity?'active':source.shortageQty?'shortage':'fulfilled')
+   ||source.quantity+source.shortageQty!==(context.cancelled?0:part.outstandingQty)
+   ||source.status!==(context.cancelled?'released':source.quantity?'active':source.shortageQty?'shortage':'fulfilled')
    ||!Array.isArray(source.lifecycleWarehouseIds)||source.lifecycleWarehouseIds.length!==2
    ||new Set(source.lifecycleWarehouseIds).size!==2
    ||source.lifecycleWarehouseIds.some(id=>typeof id!=='string'||!id||id!==id.trim()||id.length>160||id.includes('/')||id.startsWith('custody-')))
@@ -56,6 +60,8 @@ async function readMultiReturnSource(tx,db,order,intent,context,{ledger=null,inv
   const ids=[...source.lifecycleWarehouseIds].sort();
   if(candidates&&JSON.stringify(ids)!==JSON.stringify(candidates))fault('整單退貨的原候選倉不一致');
   candidates=ids;
+  if(context.cancelled&&reservation.reservationLocations(source).length!==0)
+   fault('取消整單來源必須完整釋放所有位置預留');
   const held=reservation.reservationStockDeltas({},source);
   if(held.warehouseDeltas.some(row=>!ids.includes(row.warehouseId))
    ||!ids.includes(item.warehouseId||order.warehouseId))fault('整單退貨預留不在原候選實體倉');
@@ -91,7 +97,7 @@ async function planLocationReturnTrace(db,uid,data){
   assertCancelledCloseReturnContext(order,context);
   await readLocationReturnProofs(tx,db,order,intent,productKey,{closedOnly:true});
   await readMultiReturnSource(tx,db,order,intent,context);
-  if(cancelled){
+  if(cancelled&&!context.whole){
    const ledgerSnap=await tx.get(db.collection('inventoryReservations').doc(intent.orderId+'__'+intent.itemId));
    const ledger=ledgerSnap.exists?ledgerSnap.data():null;
    if(!ledger||ledger.locationSchemaVersion!==2||ledger.warehouseId!==undefined
