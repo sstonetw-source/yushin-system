@@ -1,6 +1,6 @@
 'use strict';
 // Internal-only v2 dispatch preparation. Preparation creates paperwork, not a
-// shipment or a customer delivery. No Callable/UI until all v2 adapters pass.
+// shipment or a customer delivery. The isolated Auth/UI adapter stays demo-only.
 const {createHash}=require('node:crypto');
 const fulfillment=require('./shared/fulfillment-core');
 const {readLocationReturnProofs}=require('./location-return-trace-service');
@@ -15,12 +15,13 @@ function qty(value,label){
  return value;
 }
 function normalizeLocationDispatchIntent(data){
- const keys=['orderId','itemId','quantity','operationId','syncAttemptId'];
+ const keys=['orderId','itemId','quantity','operationId','syncAttemptId','expectedPreparedQty'];
  if(!data||typeof data!=='object'||Array.isArray(data)||Object.keys(data).some(k=>!keys.includes(k)))
   fault('打單請求含未授權欄位','invalid-argument');
  const intent={orderId:id(data.orderId,'訂單'),itemId:id(data.itemId,'品項'),
   operationId:id(data.operationId,'操作識別碼'),syncAttemptId:id(data.syncAttemptId,'同步識別碼'),
   quantity:qty(data.quantity,'打單量')};
+ if(data.expectedPreparedQty!==undefined)intent.expectedPreparedQty=qty(data.expectedPreparedQty,'原打單基準');
  if(!intent.quantity||!/^[a-zA-Z0-9_-]{12,96}$/.test(intent.operationId)
   ||intent.syncAttemptId.length>96)
   fault('打單數量或操作識別碼不正確','invalid-argument');
@@ -77,6 +78,10 @@ async function commitLocationDispatchPreparation(db,uid,data){
   const shipped=qty(item.warehouseShippedQty??0,'出貨投影');
   const delivered=qty(item.deliveredQty??0,'送達投影');
   const prepared=qty(item.dispatchPreparedQty??0,'已打單量');
+  if(intent.expectedPreparedQty!==undefined&&prepared!==intent.expectedPreparedQty){
+   const error=new Error('待打單資料已變更，請更新訂單後重新確認數量');
+   error.code='failed-precondition';error.reason='dispatch-stale';throw error;
+  }
   const held=qty(item.reservedQty,'品項預留');
   const shortage=qty(item.shortageQty??0,'缺口');
   if(shipped!==progress.shippedQty||delivered!==progress.confirmedQty

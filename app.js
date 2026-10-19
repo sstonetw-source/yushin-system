@@ -10682,6 +10682,40 @@ async function reserveInventoryForNewOrder(orderId, order, actorUid = currentUse
 
 // Transaction service shared by both dispatch UI entrances. A frozen attempt
 // identifies paperwork only; inventory, shipment and customer delivery do not change.
+async function prepareV2OrderDispatchEmulator(orderId,itemId,intent,assertActor) {
+    const local=host=>['localhost','127.0.0.1'].includes(host);
+    if(globalThis.YUSHIN_V2_DISPATCH_EMULATOR!==true||!local(globalThis.location?.hostname)
+        ||typeof firebase==='undefined'||!firebase.auth||!firebase.functions)
+        throw new Error('v2 打單傳輸僅限明確啟用的本機 Emulator。');
+    const auth=firebase.auth(),functions=firebase.functions('asia-east1');
+    if(auth.app?.options?.projectId!=='demo-yushin'||functions.app?.options?.projectId!=='demo-yushin'
+        ||!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099)
+        throw new Error('v2 打單須使用 demo-yushin 的本機登入與 Functions Emulator。');
+    const assertSession=()=>{assertActor();if(auth.currentUser?.uid!==intent.actorUid)
+        throw new Error('實際登入帳號已變更，請以原身分確認打單結果。');};
+    assertSession();
+    if(typeof intent.syncAttemptId!=='string'||!intent.syncAttemptId||intent.syncAttemptId.length>96)
+        throw new Error('缺少原 v2 同步識別碼，請保留原作業並重新核對。');
+    functions.useEmulator('127.0.0.1',5001);
+    let reply;
+    try{reply=await functions.httpsCallable('prepareV2OrderDispatch')({orderId,itemId,
+        quantity:intent.quantity,operationId:intent.operationId,syncAttemptId:intent.syncAttemptId,
+        expectedPreparedQty:intent.expectedPreparedQty});}
+    catch(error){
+        if(error.code==='functions/failed-precondition'&&error.details?.reason==='dispatch-stale'){
+            const stale=new Error(error.message);stale.code='dispatch-stale';throw stale;
+        }
+        throw error;
+    }
+    assertSession();const result=reply?.data;
+    if(!['applied','already-applied'].includes(result?.status)||result.orderId!==orderId||result.itemId!==itemId
+        ||result.qty!==intent.quantity||result.recordId!=='v2-'+intent.operationId)
+        throw new Error('v2 打單回覆不明確，請保留原識別碼重試。');
+    // Refresh actual source data; never synthesize an order from result counters.
+    const source=await db.collection('orders').doc(orderId).get();assertSession();
+    if(!source.exists)throw new Error('打單可能已提交，但找不到最新訂單，請以原識別碼重試。');
+    return source.data();
+}
 async function prepareOrderDispatch(orderId,itemId,attempt) {
     const actorUid=currentUser?.uid,actorRole=currentUserRole;
     const assertActor=()=>{
@@ -10695,6 +10729,9 @@ async function prepareOrderDispatch(orderId,itemId,attempt) {
         ||!Number.isFinite(attempt.expectedPreparedQty)||attempt.expectedPreparedQty<0)
         throw new Error('打單作業資料不正確，請以原身分重新核對。');
     const intent={...attempt};
+    if(globalThis.YUSHIN_V2_DISPATCH_EMULATOR===true)
+        return prepareV2OrderDispatchEmulator(orderId,itemId,intent,assertActor);
+    if(intent.syncAttemptId!==undefined)throw new Error('原 v2 打單作業不可改用一般交易重送。');
     let saved;
     await runRoleTransaction(async tx=>{
         assertActor();
@@ -11064,6 +11101,12 @@ const pendingDispatchOrderIds = new Set();
 
 function itemDispatchState(order, item) {
     if(orderInventorySyncIncomplete(order))return {ordered:Number(item.orderedQty||item.qty||0),reserved:0,prepared:0,delivered:0,grossDelivered:0,returned:0,shippable:0,pending:0};
+    if(globalThis.YUSHIN_V2_DISPATCH_EMULATOR===true){
+        // The Emulator bridge consumes physical shipments, not acknowledgements.
+        const source=order.items?.find(row=>row.itemId===item.itemId)||item;
+        return {...globalThis.YushinFulfillment.warehouseShipmentState(source),
+            delivered:source.deliveredQty??0,grossDelivered:source.deliveredQty??0,returned:source.returnedQty??0};
+    }
     // deliveryRecords / returnRecords 仍由頁面層整理；所有物流數量公式交給 fulfillment-core。
     // 這樣訂單頁、採購頁與實際送貨動作不會各自維護一套「待打單／可出貨」算法。
     const hasSnapshot = item?.__fulfillmentSnapshot === true;
@@ -11173,6 +11216,7 @@ window.markOrderItemDispatchPrepared = async function(orderId,itemId) {
             if(state.pending<=0)throw new Error('此品項目前沒有待打單數量。');
             attempt={operationId:'dispatch-ui-'+db.collection('dispatchRecords').doc().id,
                 orderId,itemId,actorUid,actorRole,quantity:state.pending,expectedPreparedQty:state.prepared};
+            if(globalThis.YUSHIN_V2_DISPATCH_EMULATOR===true)attempt.syncAttemptId=order.inventoryReservationAttemptId;
             // If persistence is unavailable, do not submit an unresumable operation.
             sessionStorage.setItem(storageKey,JSON.stringify(attempt));
         }

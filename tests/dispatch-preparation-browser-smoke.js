@@ -8,10 +8,10 @@ function section(s,a,b){const start=s.indexOf(a),end=s.indexOf(b,start);assert.o
 const scripts=[read('modules/fulfillment-core.js'),read('modules/order-entry-core.js'),
  `let currentUser={uid:'buyer'},currentUserRole='purchaser',ordersCache=[],purchasingDispatchCache=[],currentDeliveryOrderId=null;
  const pendingDispatchOrderIds=new Set();let sequence=0;
- const db={collection:n=>({doc:id=>({id:id||'AAAAAAAAAAAA'+Date.now()+'-'+(++sequence),path:n+'/'+id})})};
+ const db={collection:n=>({doc:id=>({id:id||'AAAAAAAAAAAA'+Date.now()+'-'+(++sequence),path:n+'/'+id,get:async()=>{const data=await nativeRead(n+'/'+id);return {exists:!!data,data:()=>data};}})})};
  const normalizedOrderStatus=o=>o.status==='cancelled'?'cancelled':'normal',normalizedOrderItems=o=>structuredClone(o.items);
  const orderInventorySyncIncomplete=o=>['pending','failed'].includes(o.inventoryReservationStatus);
- const itemDispatchState=(o,i)=>orderInventorySyncIncomplete(o)?{pending:0,prepared:0}:YushinFulfillment.dispatchState(i);
+ const savedDeliveryRecords=o=>o.deliveryRecords||[],savedReturnRecords=o=>o.returnRecords||[];
  const deliveryActor=()=>currentUser.uid,orderWorkIndexFields=()=>({});
  const escapeHtml=x=>String(x||''),inlineJsValue=x=>JSON.stringify(x).replaceAll('"','&quot;');
  const defaultWarehouse=()=>({id:'A'}),purchaseFilterContext=()=>({}),purchaseLineMatchesFilters=()=>true;
@@ -25,6 +25,7 @@ const scripts=[read('modules/fulfillment-core.js'),read('modules/order-entry-cor
  set:(r,data)=>writes.push([r.path,data]),update:(r,data)=>writes.push([r.path,data])});await nativeCommit(writes);}
  async function reloadOrder(){ordersCache=[await nativeRead('orders/O')];purchasingDispatchCache=ordersCache;renderOrdersList();renderPurchasingView();}
  `,
+ section(workspace,'function itemDispatchState(','function orderLifecycleActionButtons('),
  read('src/services/dispatch-preparation.js'),
  section(workspace,'function dispatchActionHtml(','\n\nasync function refreshAffectedOrderCaches'),
  section(purchasing,'function renderPurchasingDispatchOrders(','\nfunction pendingPurchaseLines(')];
@@ -54,5 +55,32 @@ const scripts=[read('modules/fulfillment-core.js'),read('modules/order-entry-cor
   for(const role of ['sales','engineer','warehouse']){await page.evaluate(r=>{currentUserRole=r;renderOrdersList();renderPurchasingView();},role);assert.equal(await page.locator('#orderActions button').count(),0);assert.equal(await page.locator('#purchaseDispatchBody button').count(),0);}
   await page.evaluate(()=>{currentUserRole='admin';renderOrdersList();renderPurchasingView();});assert.equal(await page.locator('#purchaseDispatchBody button').count(),1);
   assert.deepEqual(errors,[]);console.log(`Dispatch ${width}px: real renderers -> shared Service/Core, lost reply, reload, cross-page retry, new arrival and five-role visibility passed.`);await page.close();
- }}finally{await browser.close();}
+ }
+ for(const width of [1280,390]){
+  const docs=new Map([['orders/O',{id:'O',status:'active',transactionType:'借',inventoryReservationStatus:'completed',inventoryReservationAttemptId:'chrome-v2-sync',orderDate:'2026-10-19',customerName:'多倉測試',items:[
+   {itemId:'I',productId:'P',warehouseId:'A',itemCode:'A1',qty:5,reservedQty:2,dispatchPreparedQty:1,warehouseShippedQty:1,deliveredQty:0},
+   {itemId:'J',productId:'Q',warehouseId:'B',itemCode:'B2',qty:2,reservedQty:2,dispatchPreparedQty:0}]}]]),calls=[];let lost=true;
+  const page=await browser.newPage({viewport:{width,height:950}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.exposeFunction('nativeRead',p=>docs.get(p)||null);await page.exposeFunction('nativeCommit',()=>{throw Error('legacy v2 write forbidden');});
+  await page.exposeFunction('nativeV2Callable',payload=>{
+   calls.push(payload);assert.equal(payload.quantity,2);assert.equal(payload.expectedPreparedQty,1);assert.equal(payload.syncAttemptId,'chrome-v2-sync');assert.equal(payload.actorUid,undefined);
+   const key='dispatchRecords/v2-'+payload.operationId,exists=docs.has(key);
+   if(!exists){docs.set(key,{...payload});docs.get('orders/O').items[0].dispatchPreparedQty=3;}
+   if(lost){lost=false;throw Error('模擬 v2 Callable 回覆遺失');}
+   return {data:{orderId:'O',itemId:'I',qty:2,preparedQty:3,status:exists?'already-applied':'applied',recordId:'v2-'+payload.operationId}};
+  });
+  await page.route('http://127.0.0.1:4173/',route=>route.fulfill({contentType:'text/html',body:'<html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="order-system" class="active"><div id="orderActions"></div></div><div id="purchasing-system"><table><tbody id="purchaseDispatchBody"></tbody></table><div id="purchaseDispatchStatus"></div><button id="purchaseDispatchMoreBtn"></button></div></html>'}));
+  async function loadV2(){await page.goto('http://127.0.0.1:4173/');for(const content of scripts)await page.addScriptTag({content});await page.evaluate(()=>{
+   globalThis.YUSHIN_V2_DISPATCH_EMULATOR=true;const app={options:{projectId:'demo-yushin'}};
+   globalThis.firebase={auth:()=>({app,currentUser:{uid:'buyer'},emulatorConfig:{host:'127.0.0.1',port:9099}}),functions:()=>({app,useEmulator:(host,port)=>{if(host!=='127.0.0.1'||port!==5001)throw Error('remote endpoint forbidden');},httpsCallable:name=>{if(name!=='prepareV2OrderDispatch')throw Error('wrong endpoint');return nativeV2Callable;}})};
+  });await page.evaluate(()=>reloadOrder());}
+  await loadV2();assert.match(await page.locator('#orderActions button').first().textContent(),/× 2/);await page.locator('#orderActions button').first().click();await page.waitForFunction(()=>alerts.length===1);
+  const id=calls[0].operationId;docs.get('orders/O').items[0].reservedQty=4;await loadV2();assert.match(await page.locator('#orderActions button').first().textContent(),/確認打單結果/);
+  await page.evaluate(()=>{document.getElementById('order-system').classList.remove('active');document.getElementById('purchasing-system').classList.add('active');});
+  await page.locator('#purchaseDispatchBody button').first().click();await page.waitForFunction(()=>!pendingDispatchPreparation('O','I'));
+  assert.equal(calls.length,2);assert.equal(calls[1].operationId,id);assert.equal(docs.get('orders/O').items[0].dispatchPreparedQty,3);assert.equal([...docs.keys()].filter(k=>k.startsWith('dispatchRecords/')).length,1);
+  assert.equal(await page.evaluate(()=>itemDispatchState(ordersCache[0],ordersCache[0].items[0]).pending),2);assert.deepEqual(errors,[]);
+  console.log(`V2 dispatch ${width}px: original two-page UI, physical shipment Core, frozen sync/baseline and cross-page uncertain reply retry passed (scripted local transport).`);await page.close();
+ }
+ }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

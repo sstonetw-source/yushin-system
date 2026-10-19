@@ -195,6 +195,12 @@ const pendingDispatchOrderIds = new Set();
 
 function itemDispatchState(order, item) {
     if(orderInventorySyncIncomplete(order))return {ordered:Number(item.orderedQty||item.qty||0),reserved:0,prepared:0,delivered:0,grossDelivered:0,returned:0,shippable:0,pending:0};
+    if(globalThis.YUSHIN_V2_DISPATCH_EMULATOR===true){
+        // The Emulator bridge consumes physical shipments, not acknowledgements.
+        const source=order.items?.find(row=>row.itemId===item.itemId)||item;
+        return {...globalThis.YushinFulfillment.warehouseShipmentState(source),
+            delivered:source.deliveredQty??0,grossDelivered:source.deliveredQty??0,returned:source.returnedQty??0};
+    }
     // deliveryRecords / returnRecords 仍由頁面層整理；所有物流數量公式交給 fulfillment-core。
     // 這樣訂單頁、採購頁與實際送貨動作不會各自維護一套「待打單／可出貨」算法。
     const hasSnapshot = item?.__fulfillmentSnapshot === true;
@@ -304,6 +310,7 @@ window.markOrderItemDispatchPrepared = async function(orderId,itemId) {
             if(state.pending<=0)throw new Error('此品項目前沒有待打單數量。');
             attempt={operationId:'dispatch-ui-'+db.collection('dispatchRecords').doc().id,
                 orderId,itemId,actorUid,actorRole,quantity:state.pending,expectedPreparedQty:state.prepared};
+            if(globalThis.YUSHIN_V2_DISPATCH_EMULATOR===true)attempt.syncAttemptId=order.inventoryReservationAttemptId;
             // If persistence is unavailable, do not submit an unresumable operation.
             sessionStorage.setItem(storageKey,JSON.stringify(attempt));
         }
