@@ -266,3 +266,5 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 - v2 客戶送達確認與倉庫出貨是獨立事件，送達只能沿 `saveOrderDeliveryRecord` → `confirmV2ShipmentDelivery` → 唯一 `commitShipmentDelivery`，不得再次執行 `delivery-stock.js` 之出貨／還原扣帳；隔離本機 demo-yushin gate 之外沿用一般系統。v2 必須由 Core 驗證來源出貨的 pendingQty，在 Firebase 交易內重讀所有權、送達來源扣帳憑證與權威進度；前端 sessionStorage 固定同一不可變 operationId／來源 shipmentId／數量，未知回覆保留意圖並可刷新確認。v2 未接撤銷前禁用舊版取消、更正及一鍵完成途徑；正式 index 不得匯出 v2 Callable；啟用 Preview、正式 Rules／Functions／資料遷移都須另外驗收。
 
 - v2 送達撤銷的登入傳輸僅隔離 `reverseV2ShipmentDelivery` → 原 `reverseShipmentDelivery`，不得改用 legacy delivery-stock 還原實貨。正式 index 不匯出、原 UI 仍關閉；後續接線需固定撤銷 intent／操作 ID 與提交後回讀，未知回覆不可重建 ID 或退回一般更正路徑。測試用真 Auth SDK 驗證五角色、當前權限、來源 proof、重送與競爭；已有實物退貨仍拒絕。詳見 [原介面驗收邊界](transaction-ui-integration-20261018.md)。
+
+- 2026-10-20 本機 v2 原送達紀錄的逐筆撤銷已接原 deleteDeliveryRecord → reverseV2ShipmentDeliveryEmulator → 唯一 reverseShipmentDelivery；取代上一條「原 UI 仍關閉」的本機限制。確認與撤銷共用環境／身分 gate，分開保存固定 intent；未知回覆或提交後回讀失敗不可換 ID／降級 legacy。原紀錄已消失仍需顯示同 ID 核對入口；角色變更／損壞暫存須關閉操作並顯示提示，不能靜默清掉。正式／Preview 未啟用，已有實物退貨仍拒絕。詳見原介面驗收文件。

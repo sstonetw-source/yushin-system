@@ -635,3 +635,7 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 ### v2 客戶送達原介面接線（2026-10-19，隔離本機 Emulator）
 
 沿用 `src/features/orders/delivery-actions.js` 原逐品項送貨表單及唯一 `src/services/delivery-records.js:saveOrderDeliveryRecord`，明確 `YUSHIN_V2_DELIVERY_EMULATOR=true` 時顯示原 `warehouseShipmentRecords` 來源選單，由 `YushinFulfillment.projectOrderShipmentReturns` 唯一計算該筆出貨尚待送達量。Service 在本機 demo-yushin Auth／Functions 環境以同一 Auth UID 呼叫隔離的 `confirmV2ShipmentDelivery` → 原 `commitShipmentDelivery`；正式 `functions/index.js` 不匯出此 Callable。作業意圖按 UID／訂單 ID 在 sessionStorage 固定來源品項、出貨 ID、數量、日期、備註、syncAttemptId 與操作 ID；未知結果不能用新 ID 或舊 Writer 重送，確認後重讀 orders 才清除。v2 快速完成／一鍵取消／一般編輯與刪除途徑失效，避免未經 v2 確認誤回補實貨。多倉選取及真實 Preview Browser Auth E2E 仍未驗收，且未部署 Firebase。
+
+### v2 原介面送達撤銷（2026-10-20，隔離本機 Emulator）
+
+原 delivery-actions 的紀錄按鈕 → delivery-records 的 reverseV2ShipmentDeliveryEmulator → 隔離 reverseV2ShipmentDelivery → 原 reverseShipmentDelivery。前端確認／撤銷共用 v2DeliveryEmulatorTransport，獨立固定 pending intent；UI 不含庫存交易或數量重算。正式 index／Preview 未開啟，真實 Browser Auth 全線仍待驗收；詳見 transaction-ui-integration-20261018.md。

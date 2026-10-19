@@ -105,3 +105,13 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 新增四項真實 Auth SDK → Callable → 原撤銷 Service → Firestore Emulator 整合，涵蓋單／多品項、五角色、外人、匿名、偽造 payload／claims、即時降權／停權、同 ID 重送與錯意圖、同／不同 ID 並行、失效同步、日期與來源錯誤、兄弟出貨憑證篡改、實物退貨後拒絕，以及撤銷後再次簽收。逐次核對實貨、預留、兩倉、批次及 movement 不變；已提交重送仍檢查當前權限。原後端 transaction 回滾測試保留；本批不將網路回覆丟失等同新增末端寫入失敗注入。
 
 驗收結果以本批完整 CI 為準。僅 localhost demo-yushin Auth／Functions／Firestore Emulator；正式 functions/index.js 不匯出，沒有 Rules、Index、Collection、欄位、Listener 或正式部署變更。**原 UI 撤銷仍關閉**，這批未新增前端 sessionStorage intent、原按鈕或 Chrome 撤銷驗收。後續需接原紀錄逐筆撤銷、未知回覆後刷新／續傳，再做真實 Browser／Preview 全流程。退貨後送達撤銷仍由原 Service 拒絕。
+
+## 2026-10-20 原送達紀錄逐筆撤銷（本機 Emulator 試點）
+
+本節取代上一節「原 UI 撤銷仍關閉」的本機試點限制；正式／Preview 閘門不變。原 renderDeliveryModal／deleteDeliveryRecord 在 YUSHIN_V2_DELIVERY_EMULATOR=true 時顯示逐筆「撤銷送達確認」，經原 delivery-records Service 的 reverseV2ShipmentDeliveryEmulator → 原隔離 reverseV2ShipmentDelivery → 唯一 reverseShipmentDelivery。畫面只收原因，日期及來源在首次提交前固定；沒有新數量公式、實貨 writer 或第二個畫面。一般 legacy 更正與一鍵取消保持原路徑／v2 阻擋。
+
+前端按 UID／訂單以獨立 sessionStorage key 固定原 record ID／item ID／syncAttemptId／operationId／日期／原因及原角色。未知回覆、回應無法核對、成功後回讀失敗與身分切換均保留原意圖；不接受改來源／原因／日期。同分頁刷新後，即使原送達紀錄已由後端撤掉，原紀錄表仍顯示「確認撤銷結果」以同 ID 重送；已套用後先核對回覆並讀最新 orders 才清除。確認與撤銷互相阻擋尚未確認的另一動作，避免在未知結果後建立不同意圖。損壞或角色不符的暫存不拋出未處理 render 例外，而是顯示原因並關閉寫入操作。
+
+環境及當前身分檢查由送達確認／撤銷共用 v2DeliveryEmulatorTransport；只允許明確旗標、localhost／127.0.0.1、實際 demo-yushin Auth／Functions app、Auth Emulator 9099 與固定本機 Functions 5001。payload 不含 UID／role，真正作業權限及退貨後拒絕仍由原後端交易決定。沒有新 Firestore Query／Collection／欄位／Index／Rules／Listener；每新操作只沿既有讀原單、Callable、提交後回讀原單。
+
+已實作四項 Node 行為測試、原 handler → 真 Auth SDK／Callable／Firestore 的回覆遺失與刷新續傳整合，既有 1280／390 px Chrome suite 擴充原紀錄按鈕、原因提示、已撤掉紀錄的確認列與同 ID 重送；Chrome 仍是 scripted transport，不能替代完整 Browser Auth／Preview。Node1581/1581；新增 Auth／Chrome 及完整回歸結果以本批 CI 為準。未部署 Firebase／修改正式資料，跨分頁／裝置續傳、已有實物退貨的撤銷及 Preview 全線仍未驗收。

@@ -560,3 +560,46 @@ test('real Auth reversal serializes identical and competing IDs and keeps alread
   assert.deepEqual(await snapshot(x),after);
  }
 });
+
+test('original delivery reversal click resumes frozen intent through real Auth after lost reply without restoring physical stock',async()=>{
+ const tag='reverse-original-ui',x=await fixture(tag,{role:'sales',cancelled:false,multi:true});
+ const input=reversalInput(x,tag),before=await snapshot(x),storage=new Map();
+ const live=clientFirestore(x.actor.app);connectFirestoreEmulator(live,'127.0.0.1',8080);
+ let calls=0,lost=true,prompts=0;
+ const open=async()=>{
+  const alerts=[],payloads=[];
+  const c=vm.createContext({YUSHIN_V2_DELIVERY_EMULATOR:true,location:{hostname:'127.0.0.1'},
+   currentUser:{uid:x.actor.uid},currentUserRole:'sales',currentDeliveryOrderId:x.orderId,
+   ordersCache:[{id:x.orderId,...(await snapshot(x)).documents[0]}],pendingDeliveryOrderIds:new Set(),
+   canManageOrderLifecycleCapability:()=>true,canEditPage:()=>true,
+   localDateString:()=>input.date,deliveryRecordId:()=>input.operationId,
+   prompt:()=>{prompts++;return input.reason;},alert:message=>alerts.push(message),
+   resetDeliveryForm:()=>{},renderDeliveryModal:()=>{},renderOrderLifecycleModal:()=>{},renderOrdersList:()=>{},
+   sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},
+   db:{collection:n=>({doc:id=>({get:async()=>{const s=await getDoc(doc(live,n,id));return {exists:s.exists(),data:()=>s.data()};}})})},
+   firebase:{auth:()=>x.actor.auth,functions:()=>({app:x.actor.app,useEmulator:()=>{},
+    httpsCallable:name=>async payload=>{calls++;assert.equal(name,'reverseV2ShipmentDelivery');payloads.push(structuredClone(payload));
+     assert.equal(payload.actorUid,undefined);assert.equal(payload.actorRole,undefined);
+     const response=await httpsCallable(x.actor.functions,name)(payload);
+     if(lost){lost=false;throw Error('original UI reversal reply lost');}return response;}})},
+   runRoleTransaction:()=>{throw Error('legacy physical stock reversal forbidden');}});
+  c.window=c;
+  vm.runInContext(fs.readFileSync('src/services/delivery-records.js','utf8'),c);
+  const ui=fs.readFileSync('src/features/orders/delivery-actions.js','utf8');
+  vm.runInContext(ui.slice(ui.indexOf('async function reverseV2DeliveryRecord('),ui.indexOf('window.clearLegacyDelivery =')),c);
+  return {c,alerts,payloads};
+ };
+ const first=await open();
+ await first.c.deleteDeliveryRecord(input.deliveryRecordId);
+ assert.equal(first.alerts.length,1);assert.match(first.alerts[0],/original UI reversal reply lost/);
+ assert.equal(first.c.pendingV2DeliveryReversal(x.orderId).operationId,input.operationId);
+ assert.equal(first.c.ordersCache[0].deliveredQty,before.documents[0].deliveredQty);
+ const after=await snapshot(x);assertOnlyDeliveryReversed(before,after,input.deliveryRecordId,input.operationId);
+ const resumed=await open();assert.equal(resumed.c.ordersCache[0].deliveryRecords.length,0);
+ await resumed.c.deleteDeliveryRecord(input.deliveryRecordId);
+ assert.deepEqual(resumed.alerts,[]);assert.equal(prompts,1);assert.equal(calls,2);assert.equal(storage.size,0);
+ assert.deepEqual(resumed.payloads[0],first.payloads[0]);
+ assert.equal(resumed.c.pendingDeliveryOrderIds.size,0);
+ assert.equal(resumed.c.ordersCache[0].deliveredQty,0);
+ assert.deepEqual(await snapshot(x),after);
+});
