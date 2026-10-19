@@ -1,5 +1,6 @@
 // Warehouse shipment transaction service; single and batch UI share this entry.
 async function commitInventoryShipment({orderId,itemId,qty,date,notes='',operationId,expectedWarehouseId='',expectedPlan=null}){
+  if(globalThis.YUSHIN_V2_SHIPMENT_EMULATOR===true)return commitV2WarehouseShipmentEmulator({orderId,itemId,qty,date,notes,operationId,expectedWarehouseId,expectedPlan});
   if(!canReceiveInventoryCapability()||!canAccessPage('inventory'))throw new Error('無倉庫出貨權限。');
   if(typeof operationId!=='string'||!operationId.trim()||!Number.isFinite(qty)||qty<=0)throw new Error('出貨數量或操作識別碼不正確。');
   if(typeof date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(Date.parse(date+'T00:00:00Z'))||new Date(date+'T00:00:00Z').toISOString().slice(0,10)!==date)throw new Error('請填寫有效的出貨日期。');
