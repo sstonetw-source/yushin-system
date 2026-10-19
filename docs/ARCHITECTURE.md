@@ -549,3 +549,8 @@ Workflow 的明確 warehouseShipmentContext 現包含 returns，以原 projectSh
 ### 2026-10-19 多品項送達撤銷（已實作、待本批 CI）
 
 原 reverseShipmentDelivery 現與多品項確認共用來源及整單出貨憑證 reader，沿用整單 Core，只更新選定送達及全單投影；不另建 writer。 僅 demo-yushin Emulator；未接正式 UI／Callable、未部署 Firebase，完整 Preview 仍未驗收。詳見 [同一份送達契約與驗收範圍](multi-item-delivery-20261019.md)。
+
+
+### 2026-10-19 多品項履約後收貨（已實作、待本批 CI）
+
+原 validateV2ReceiptSource 以既有整單履約 Core 驗證全來源及全出貨 debit，再提供選定 item 的 shipment context 給原 Receiving／Workflow。receiveSupplyOrderRecord 仍是唯一 writer；兄弟原資料與交付事實保留。 限 demo-yushin Emulator，未接正式 UI／Callable 或部署；詳見 [原收貨契約增補](multi-item-receiving-20261018.md)。

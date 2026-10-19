@@ -2013,10 +2013,10 @@ test('invalid sibling source service direct shipment legacy ledger or prior logi
   ['owner',x=>db.collection('inventoryReservations').doc(x.orderId+'__I3').update({ownerUid:'other'})],
   ['pending',x=>db.collection('orders').doc(x.orderId).update({inventoryReservationStatus:'pending'})],
   ['history',x=>db.collection('orders').doc(x.orderId).update({warehouseShipmentRecords:[{id:'not-migrated'}]})],
-  ...['direct','prepared','duplicate','shortage'].map(mode=>[mode,async x=>{
+  ...['direct','overprepared','duplicate','shortage'].map(mode=>[mode,async x=>{
    const order=await x.read('orders',x.orderId);
    if(mode==='direct')order.items[2].fulfillmentType='DIRECT_SHIP';
-   if(mode==='prepared')order.items[2].dispatchPreparedQty=1;
+   if(mode==='overprepared')order.items[2].dispatchPreparedQty=4;
    if(mode==='duplicate')order.items[2].itemId='I1';
    if(mode==='shortage')order.items[2].shortageQty=99;
    await db.collection('orders').doc(x.orderId).update({items:order.items});
@@ -2054,4 +2054,153 @@ test('multi-line receipt never opens browser production gates or accepts actor s
  x.c.process=process;await x.receive('I2',1,'multi_gated_receipt');const once=await multiReceiptSnapshot(x);
  await db.collection('users').doc('other-multi-receiver').set({role:'admin',active:true});receivingHarness(x.c,'other-multi-receiver','admin');
  await assert.rejects(x.receive('I2',1,'multi_gated_receipt'),/識別碼衝突/);assert.deepEqual(await multiReceiptSnapshot(x),once);
+});
+
+// Real whole-order initialization -> PO/incoming -> original receiving Service
+// -> existing dispatch/shipment/acknowledgement writers, no synthetic events.
+async function multiReceiptShipmentLifecycle(name,{five=false}={}){
+ const x=await multiReceiptLifecycle('after-ship-'+name,{five});
+ const plan={mode:'CUSTOMER_SHIP',contact:'客戶',phone:'02-12345678',address:'台北市測試地址'};
+ const order=await x.read('orders',x.orderId),syncAttemptId=order.inventoryReservationAttemptId;
+ await db.collection('orders').doc(x.orderId).update({items:order.items.map(i=>({...i,deliveryPlan:plan})),
+  deliveryHistory:[],deliveredQty:0,isDelivered:false});
+ const batch=db.batch();
+ for(const [key,wh,qty] of [[x.productKey,'V2-A',1],[x.productKey,'V2-B',2],...(five?[]:[[x.q,'V2-A',1]])])
+  batch.set(db.collection('inventoryLots').doc(key+'-baseline-'+wh),{productKey:key,productId:key,warehouseId:wh,
+   receivedQty:qty,remainingQty:qty,lotNo:'BASE',expiryDate:'2028-10-17',receivedAt:'2026-10-01T00:00:00Z'});
+ await batch.commit();await db.collection('users').doc(x.uid).update({role:'sales'});
+ const request=(itemId,tag)=>({orderId:x.orderId,itemId,syncAttemptId,operationId:'mr_'+name+'_'+tag});
+ const prepare=(itemId,qty,tag)=>require('../functions/location-dispatch-service').commitLocationDispatchPreparation(db,'emulator-purchaser',{
+  ...request(itemId,'prepare_'+tag),quantity:qty});
+ const ship=(itemId,wh,qty,tag)=>require('../functions/location-shipment-service').commitLocationShipment(db,'emulator-purchaser',{
+  ...request(itemId,'ship_'+tag),warehouseId:wh,quantity:qty,date:'2026-10-19',expectedPlan:plan});
+ const confirm=(itemId,qty,tag,ackTag=tag)=>require('../functions/shipment-delivery-service').commitShipmentDelivery(db,x.uid,{
+  ...request(itemId,'ack_'+ackTag),shipmentId:request(itemId,'ship_'+tag).operationId,quantity:qty,date:'2026-10-19'});
+ const reverse=(itemId,ackTag,tag)=>require('../functions/shipment-delivery-service').reverseShipmentDelivery(db,x.uid,{
+  ...request(itemId,'reverse_'+tag),deliveryRecordId:request(itemId,'ack_'+ackTag).operationId,date:'2026-10-20',reason:'誤登送達'});
+ x.c.localDateString=()=> '2026-10-20';
+ return {...x,prepare,ship,confirm,reverse,request};
+}
+test('multi-line receipt after prepared pending partly acknowledged or acknowledged shipment reserves only unshipped demand',async()=>{
+ for(const confirmed of [-1,0,1,3]){
+  const x=await multiReceiptShipmentLifecycle('ack'+confirmed);await x.prepare('I1',3,'initial');
+  if(confirmed>=0){await x.ship('I1','V2-A',1,'a');await x.ship('I1','V2-B',2,'b');}
+  if(confirmed>0)await x.confirm('I1',1,'a');if(confirmed===3)await x.confirm('I1',2,'b');
+  const before=await x.read('orders',x.orderId),beforeStock=await x.read('inventory',x.productKey);
+  await x.receive('I1',1,'mr_after_ack_'+confirmed);await x.receive('I2',1,'mr_sibling_ack_'+confirmed);
+  const after=await x.read('orders',x.orderId),item=after.items[0],shipped=confirmed>=0?3:0;
+  assert.equal(item.reservedQty,4-shipped);assert.equal(item.shortageQty,1);
+  assert.equal(item.warehouseShippedQty??0,shipped);assert.equal(item.deliveredQty??0,Math.max(0,confirmed));
+  assert.equal(after.deliveredQty,before.deliveredQty);assert.deepEqual(after.warehouseShipmentRecords,before.warehouseShipmentRecords);
+  assert.deepEqual(after.deliveryRecords,before.deliveryRecords);assert.deepEqual(after.items[2],before.items[2]);
+  const stock=await x.read('inventory',x.productKey);assert.equal(stock.onHand,beforeStock.onHand+2);
+  assert.equal(stock.reserved,beforeStock.reserved+2);assert.equal(stock.incoming,beforeStock.incoming-2);
+  const once=await multiReceiptSnapshot(x);await x.receive('I1',1,'mr_after_ack_'+confirmed);
+  assert.deepEqual(await multiReceiptSnapshot(x),once);
+ }
+});
+test('full multi-item PO receipt dispatch shipment and acknowledgement cycle preserves fulfilled siblings and closes exactly twelve goods',async()=>{
+ const x=await multiReceiptShipmentLifecycle('full');await x.prepare('I1',3,'first');
+ await x.ship('I1','V2-A',1,'firstA');await x.ship('I1','V2-B',2,'firstB');await x.confirm('I1',1,'firstA');
+ await x.receive('I1',1,'mr_full_i1_partial');await x.receive('I1',1,'mr_full_i1_last');
+ await x.prepare('I1',2,'last');await x.ship('I1','V2-A',2,'lastA');await x.confirm('I1',2,'firstB');await x.confirm('I1',2,'lastA');
+ assert.equal((await x.read('inventoryReservations',x.orderId+'__I1')).status,'fulfilled');
+ const fulfilled=(await x.read('orders',x.orderId)).items[0];
+ await x.receive('I2',2,'mr_full_i2_partial');await x.prepare('I2',2,'second');await x.ship('I2','V2-B',2,'second');
+ await x.receive('I3',2,'mr_full_i3');await x.receive('I2',2,'mr_full_i2_last');
+ assert.deepEqual((await x.read('orders',x.orderId)).items[0],fulfilled);
+ await x.prepare('I2',2,'secondlast');await x.ship('I2','V2-B',2,'secondlast');
+ await x.prepare('I3',3,'third');await x.ship('I3','V2-A',1,'thirdA');await x.ship('I3','V2-B',2,'thirdB');
+ for(const [itemId,qty,tag] of [['I2',2,'second'],['I2',2,'secondlast'],['I3',1,'thirdA'],['I3',2,'thirdB']])await x.confirm(itemId,qty,tag);
+ const order=await x.read('orders',x.orderId);assert.equal(order.isDelivered,true);assert.equal(order.deliveredQty,12);
+ assert.deepEqual(order.items.map(i=>[i.warehouseShippedQty,i.deliveredQty,i.reservedQty,i.shortageQty]),[[5,5,0,0],[4,4,0,0],[3,3,0,0]]);
+ for(const key of [x.productKey,x.q]){
+  const stock=await x.read('inventory',key);assert.equal(stock.onHand,0);assert.equal(stock.reserved,0);assert.equal(stock.incoming,0);
+  const lots=await db.collection('inventoryLots').where('productKey','==',key).get();assert.ok(lots.docs.every(s=>s.data().remainingQty===0));
+ }
+ for(const item of order.items){const demand=await x.read('procurementDemands',encodeURIComponent('SALES_ORDER:'+x.orderId+':'+item.itemId));
+  assert.equal(demand.remainingToReceiveQty,0);assert.equal(demand.remainingToOrderQty,0);}
+});
+test('five same-product lines may receive after the first is physically fulfilled without stealing its dispatched units',async()=>{
+ const x=await multiReceiptShipmentLifecycle('five',{five:true});await x.prepare('I1',3,'first');
+ await x.ship('I1','V2-A',1,'a');await x.ship('I1','V2-B',2,'b');await x.confirm('I1',1,'a');
+ const original=(await x.read('orders',x.orderId)).items[0];
+ await Promise.all([x.receive('I2',2,'mr_five_two'),x.receive('I3',2,'mr_five_three')]);
+ await x.receive('I4',3,'mr_five_four');await x.receive('I5',3,'mr_five_five');
+ const order=await x.read('orders',x.orderId);assert.deepEqual(order.items[0],original);
+ assert.deepEqual(order.items.map(i=>i.reservedQty),[0,2,2,3,3]);
+ const stock=await x.read('inventory',x.productKey);assert.equal(stock.onHand,10);assert.equal(stock.reserved,10);assert.equal(stock.incoming,2);
+});
+test('multi-line receipt after an actual acknowledgement reversal retains correction history and physical outstanding authority',async()=>{
+ const x=await multiReceiptShipmentLifecycle('reverse');await x.prepare('I1',1,'first');await x.ship('I1','V2-A',1,'first');
+ await x.confirm('I1',1,'first');await x.reverse('I1','first','fix');const before=await x.read('orders',x.orderId);
+ await x.receive('I1',1,'mr_reversed_receive');const order=await x.read('orders',x.orderId);
+ assert.equal(order.items[0].reservedQty,3);assert.equal(order.items[0].shortageQty,1);assert.equal(order.deliveredQty,0);
+ assert.deepEqual(order.deliveryHistory,before.deliveryHistory);assert.deepEqual(order.warehouseShipmentRecords,before.warehouseShipmentRecords);
+});
+test('multi-item receiving and sibling shipment or acknowledgement serialize without losing either authoritative event',async()=>{
+ const x=await multiReceiptShipmentLifecycle('concurrent');await x.prepare('I1',1,'first');await x.ship('I1','V2-A',1,'first');
+ await Promise.all([x.receive('I1',1,'mr_parallel_i1'),x.confirm('I1',1,'first')]);
+ await x.receive('I2',1,'mr_parallel_i2_seed');await x.prepare('I2',1,'second');
+ await Promise.all([x.receive('I1',1,'mr_parallel_i1_last'),x.ship('I2','V2-B',1,'second')]);
+ const order=await x.read('orders',x.orderId);assert.equal(order.deliveredQty,1);
+ assert.deepEqual(order.items.map(i=>[i.receivedQty??0,i.warehouseShippedQty??0,i.reservedQty,i.shortageQty]),[[2,1,4,0],[1,1,0,3],[0,0,1,2]]);
+ const stock=await x.read('inventory',x.productKey);assert.equal(stock.onHand,4);assert.equal(stock.reserved,4);assert.equal(stock.incoming,3);
+});
+test('post-shipment multi-line receipt validates every original physical debit, including nonselected different-product siblings',async()=>{
+ for(const mode of ['missing','quantity','allocation','hidden-return','unknown-event','sibling-total','returns','cancelled','pending','totals']){
+  const x=await multiReceiptShipmentLifecycle('evidence-'+mode);
+  await x.prepare('I3',1,'sibling');await x.ship('I3','V2-A',1,'sibling');await x.confirm('I3',1,'sibling');
+  const move=db.collection('inventoryMovements').doc('location-ship-'+x.request('I3','ship_sibling').operationId);
+  if(mode==='missing')await move.delete();if(mode==='quantity')await move.update({qty:0});
+  if(mode==='allocation')await move.update({lotAllocations:[]});
+  if(mode==='hidden-return')await db.collection('inventoryMovements').doc('mr-hidden-return').set({sourceId:x.orderId,action:'location_customer_return',qty:1,itemId:'I3'});
+  if(mode==='unknown-event'||mode==='sibling-total'){
+   const order=await x.read('orders',x.orderId);
+   if(mode==='unknown-event')order.deliveryRecords[0].itemId='unknown';else order.items[2].deliveredQty=0;
+   await db.collection('orders').doc(x.orderId).update({items:order.items,deliveryRecords:order.deliveryRecords});
+  }
+  if(mode==='returns')await db.collection('orders').doc(x.orderId).update({returnRecords:[{id:'unsupported-return'}]});
+  if(mode==='cancelled')await db.collection('orders').doc(x.orderId).update({status:'cancelled',orderStatus:'cancelled'});
+  if(mode==='pending')await db.collection('orders').doc(x.orderId).update({inventoryReservationStatus:'pending'});
+  if(mode==='totals')await db.collection('orders').doc(x.orderId).update({deliveredQty:0});
+  const before=await multiReceiptSnapshot(x);await assert.rejects(x.receive('I2',1,'mr_evidence_'+mode));
+  assert.deepEqual(await multiReceiptSnapshot(x),before,mode);
+ }
+});
+test('post-shipment receipt keeps five-role live checks and fixed-id response-loss recovery',async()=>{
+ for(const role of ['admin','purchaser','warehouse','sales','engineer']){
+  const x=await multiReceiptShipmentLifecycle('live-'+role);await x.prepare('I1',1,'first');await x.ship('I1','V2-A',1,'first');
+  receivingHarness(x.c,'emulator-purchaser',role);await db.collection('users').doc('emulator-purchaser').update({role});
+  const before=await multiReceiptSnapshot(x);
+  if(['sales','engineer'].includes(role)){
+   await assert.rejects(x.receive('I2',1,'mr_roles_'+role));assert.deepEqual(await multiReceiptSnapshot(x),before);
+  }else{await x.receive('I2',1,'mr_roles_'+role);await db.collection('users').doc('emulator-purchaser').update({active:false});
+   const applied=await multiReceiptSnapshot(x);await assert.rejects(x.receive('I2',1,'mr_roles_new_'+role));assert.deepEqual(await multiReceiptSnapshot(x),applied);}
+ }
+ const x=await multiReceiptShipmentLifecycle('lost');await x.prepare('I1',1,'first');await x.ship('I1','V2-A',1,'first');let lost=true;
+ x.c.runRoleTransaction=async fn=>{const r=await db.runTransaction(async tx=>fn(tx));if(lost){lost=false;throw Error('post-shipment receipt reply lost');}return r;};
+ await assert.rejects(x.receive('I2',1,'mr_lost_after_ship'),/reply lost/);const once=await multiReceiptSnapshot(x);
+ await x.receive('I2',1,'mr_lost_after_ship');assert.deepEqual(await multiReceiptSnapshot(x),once);
+});
+test('post-shipment receipt still rolls back stock lot cost supply demand and order on true late ALREADY_EXISTS collision',async()=>{
+ const x=await multiReceiptShipmentLifecycle('rollback');await x.prepare('I1',1,'first');await x.ship('I1','V2-A',1,'first');
+ const collision=db.collection('inventoryMovements').doc('mr-post-shipment-collision');await collision.set({sentinel:true});
+ const before=await multiReceiptSnapshot(x);
+ x.c.runRoleTransaction=fn=>db.runTransaction(async tx=>fn({get:r=>tx.get(r),update:(...a)=>tx.update(...a),
+  set:(ref,...args)=>{if(ref.path.startsWith('receipts/'))tx.create(collision,{sentinel:false});return tx.set(ref,...args);}}));
+ await assert.rejects(x.receive('I2',1,'mr_rollback_receipt'),e=>e.code===6);assert.deepEqual(await multiReceiptSnapshot(x),before);
+ assert.deepEqual((await collision.get()).data(),{sentinel:true});x.c.runRoleTransaction=fn=>db.runTransaction(async tx=>fn(tx));
+ await x.receive('I2',1,'mr_rollback_receipt');const applied=await multiReceiptSnapshot(x);
+ await x.receive('I2',1,'mr_rollback_receipt');assert.deepEqual(await multiReceiptSnapshot(x),applied);
+});
+test('post-shipment identical receipt races and competing excess quantities cannot duplicate incoming or inventory',async()=>{
+ const x=await multiReceiptShipmentLifecycle('receipt-races');await x.prepare('I1',1,'first');await x.ship('I1','V2-A',1,'first');
+ await Promise.all([x.receive('I2',1,'mr_receipt_race_same'),x.receive('I2',1,'mr_receipt_race_same')]);
+ assert.equal((await x.read('orders',x.orderId)).items[1].receivedQty,1);
+ const race=await Promise.allSettled([x.receive('I2',2,'mr_receipt_race_a'),x.receive('I2',2,'mr_receipt_race_b')]);
+ assert.equal(race.filter(r=>r.status==='fulfilled').length,1);
+ const order=await x.read('orders',x.orderId);assert.equal(order.items[1].receivedQty,3);
+ assert.equal(order.items[0].warehouseShippedQty,1);assert.equal(order.deliveredQty,0);
+ const stock=await x.read('inventory',x.productKey);assert.equal(stock.onHand,5);assert.equal(stock.reserved,5);assert.equal(stock.incoming,3);
 });

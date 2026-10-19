@@ -159,15 +159,18 @@ async function validateV2ReceiptSource(transaction, {order,supply,reservation,it
     for(const field of ['warehouseShipmentRecords','deliveryRecords','returnRecords','returnHistory']){
         if(!Array.isArray(order[field]??[]))throw new Error('多倉收貨履約紀錄格式不正確。');
     }
-    let jointHolds=null;
+    let jointHolds=null,wholeShipment=null;
     if(order.items.length>1){
-        // Bounded multi-line receipt phase only. Existing single-line shipment /
-        // CLOSE-return validation below is unchanged; do not reinterpret an
-        // order-level delivery cache as one item's delivery quantity.
+        // Validate the whole event set before selecting the receiving line.
+        // A sibling acknowledgement is never this line's outstanding demand.
         if(cancelled||order.inventoryReservationStatus!=='completed'||!order.inventoryReservationAttemptId
-            ||['warehouseShipmentRecords','deliveryRecords','returnRecords','returnHistory','warehouseShipmentHistory']
+            ||['returnRecords','returnHistory']
                 .some(field=>!Array.isArray(order[field]??[])||(order[field]??[]).length))
-            throw new Error('多品項收貨目前僅支援已完成初始化且尚無履約紀錄的正常訂單。');
+            throw new Error('多品項收貨僅支援已完成初始化且尚無退貨的正常訂單。');
+        wholeShipment=globalThis.YushinFulfillment.projectOrderShipmentReturns({orderId,items:order.items,
+            shipments:order.warehouseShipmentRecords??[],deliveries:order.deliveryRecords??[],returns:[]});
+        if((order.warehouseShipmentRecords??[]).length>40)
+            throw new Error('多品項歷史出貨憑證超過本試點安全上限。');
         const seen=new Set(),products=new Map();
         jointHolds={company:0,warehouses:new Map()};
         const candidates=reservation.lifecycleWarehouseIds;
@@ -180,9 +183,8 @@ async function validateV2ReceiptSource(transaction, {order,supply,reservation,it
             if(seen.has(rowId)||!ordered||(row.orderedQty!==undefined&&row.orderedQty!==ordered)
                 ||(row.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
                 ||String(row.productType||row.type||'').toUpperCase()==='SERVICE'
-                ||row.transferPendingId||row.custodyTransferId||!candidates.includes(id(row.warehouseId||order.warehouseId))
-                ||['dispatchPreparedQty','warehouseShippedQty','deliveredQty','returnedQty'].some(field=>integer(row[field]??0,field)!==0))
-                throw new Error('多品項收貨來源必須是唯一實體商品，且尚未打單、出貨或退貨。');
+                ||row.transferPendingId||row.custodyTransferId||!candidates.includes(id(row.warehouseId||order.warehouseId)))
+                throw new Error('多品項收貨來源必須是唯一實體商品且無調撥途中。');
             seen.add(rowId);
             if(!products.has(productId))products.set(productId,await transaction.get(db.collection('products').doc(productId)));
             const product=products.get(productId);
@@ -195,11 +197,16 @@ async function validateV2ReceiptSource(transaction, {order,supply,reservation,it
                 ||!Array.isArray(ledger.lifecycleWarehouseIds)||ledger.lifecycleWarehouseIds.length!==2
                 ||new Set(ledger.lifecycleWarehouseIds).size!==2||ledger.lifecycleWarehouseIds.some(wh=>!candidates.includes(wh))
                 ||integer(ledger.quantity,'品項預留')!==row.reservedQty||integer(ledger.shortageQty,'品項缺口')!==row.shortageQty
-                ||ledger.status!==(ledger.quantity>0?'active':'shortage')
+                ||ledger.status!==(ledger.quantity>0?'active':ledger.shortageQty>0?'shortage':'fulfilled')
                 ||integer(row.supplyOrderedQty??0,'品項供應量')<integer(row.receivedQty??0,'品項收貨量'))
                 throw new Error('多品項收貨的完整預留來源或供應投影不一致。');
-            const projection=globalThis.YushinFulfillment.projectShipmentReturns({orderId,itemId:rowId,productKey:key,orderedQty:ordered});
-            if(ledger.quantity+ledger.shortageQty!==projection.outstandingQty)
+            const projection=wholeShipment.items.find(part=>part.itemId===rowId);
+            if(integer(row.warehouseShippedQty??0,'品項出貨')!==projection.shippedQty
+                ||integer(row.deliveredQty??0,'品項交付')!==projection.confirmedQty
+                ||integer(row.returnedQty??0,'品項退貨')!==projection.returnedQty
+                ||integer(row.dispatchPreparedQty??0,'品項打單')<projection.shippedQty
+                ||integer(row.dispatchPreparedQty??0,'品項打單')>ordered
+                ||ledger.quantity+ledger.shortageQty!==projection.outstandingQty)
                 throw new Error('多品項收貨預留與來源剩餘需求不一致。');
             const held=globalThis.YushinReservation.reservationStockDeltas({},ledger);
             if(held.warehouseDeltas.some(change=>!candidates.includes(change.warehouseId)))
@@ -215,8 +222,10 @@ async function validateV2ReceiptSource(transaction, {order,supply,reservation,it
     if((order.returnHistory??[]).some(event=>event?.action!=='add'||!returns.some(record=>record.id===event.recordId)))
         throw new Error('退貨歷史含尚未整合的更正或缺少原入庫來源。');
     const warehouseShipmentContext={orderId,itemId,productKey,
-        shipments:order.warehouseShipmentRecords??[],deliveries:order.deliveryRecords??[],returns};
-    const shipment=globalThis.YushinFulfillment.projectShipmentReturns({...warehouseShipmentContext,orderedQty:item.qty??item.orderedQty});
+        shipments:wholeShipment?(order.warehouseShipmentRecords??[]).filter(row=>row.itemId===itemId):order.warehouseShipmentRecords??[],
+        deliveries:wholeShipment?(order.deliveryRecords??[]).filter(row=>row.itemId===itemId):order.deliveryRecords??[],returns};
+    const shipment=wholeShipment?wholeShipment.items.find(part=>part.itemId===itemId):
+        globalThis.YushinFulfillment.projectShipmentReturns({...warehouseShipmentContext,orderedQty:item.qty??item.orderedQty});
     // Empty caches must also match the actual bounded return query. Otherwise
     // removing a cached event could hide a physical receipt from this transaction.
     const proofs=await transaction.get(db.collection('inventoryMovements').where('sourceId','==',orderId)
@@ -229,17 +238,18 @@ async function validateV2ReceiptSource(transaction, {order,supply,reservation,it
         }});
     if(integer(item.warehouseShippedQty??0,'出貨量')!==shipment.shippedQty
         ||integer(item.deliveredQty??0,'交付量')!==shipment.confirmedQty
-        ||integer(order.deliveredQty??0,'訂單交付量')!==shipment.confirmedQty
+        ||integer(order.deliveredQty??0,'訂單交付量')!==(wholeShipment??shipment).confirmedQty
         ||integer(item.returnedQty??0,'退貨量')!==shipment.returnedQty
-        ||integer(order.returnedQty??0,'訂單退貨量')!==shipment.returnedQty
-        ||(order.isDelivered??false)!==shipment.isDelivered)
+        ||integer(order.returnedQty??0,'訂單退貨量')!==(wholeShipment??shipment).returnedQty
+        ||(order.isDelivered??false)!==(wholeShipment??shipment).isDelivered)
         throw new Error('多倉收貨的出貨、送達或退貨投影不一致。');
-    for(const record of warehouseShipmentContext.shipments){
+    for(const record of wholeShipment?(order.warehouseShipmentRecords??[]):warehouseShipmentContext.shipments){
         // Read every immutable debit in this transaction so a stale or forged
         // source cannot reduce the quantity awaiting reservation.
         if(record.movementId!=='location-ship-'+record.id)throw new Error('來源倉庫出貨憑證不一致。');
         const proof=await transaction.get(db.collection('inventoryMovements').doc(record.movementId));
-        globalThis.YushinFulfillment.validateShipmentMovement(record,proof.exists?proof.data():null,{orderId,itemId,productKey});
+        globalThis.YushinFulfillment.validateShipmentMovement(record,proof.exists?proof.data():null,
+            wholeShipment?{orderId,itemId:record.itemId,productKey:record.productKey}:{orderId,itemId,productKey});
     }
     const demandId=globalThis.YushinProcurementDemand.demandIdForSource({sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId});
     if(supply.sourceType!=='SALES_ORDER'||supply.sourceId!==orderId||supply.sourceItemId!==itemId

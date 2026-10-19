@@ -179,3 +179,8 @@ CLOSE 後取消／恢復仍拒絕未整合的退貨刪除／更正歷史，不�
 ### 2026-10-19 多品項送達撤銷（已實作、待本批 CI）
 
 多品項撤銷必須沿用 reverseShipmentDelivery／projectOrderShipmentReturns，驗證全單出貨 proof 及隱藏退貨，不可逐項 filter 掩蓋其他品項。固定 ID 重送只回原結果。 僅 demo-yushin Emulator；未接正式 UI／Callable、未部署 Firebase，完整 Preview 仍未驗收。詳見 [同一份送達契約與驗收範圍](multi-item-delivery-20261019.md)。
+
+
+### 2026-10-19 多品項履約後收貨（已實作、待本批 CI）
+
+履約後多品項收貨必須先用 projectOrderShipmentReturns 核對完整事件，再篩選單品項傳入原 Receiving／Workflow；核對全部 sibling 出貨 movement，不得只信快取或選中品項。所有既有預留、供應、需求及角色驗證保留。 限 demo-yushin Emulator，未接正式 UI／Callable 或部署；詳見 [原收貨契約增補](multi-item-receiving-20261018.md)。
