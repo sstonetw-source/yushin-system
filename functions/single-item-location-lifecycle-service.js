@@ -519,7 +519,15 @@ async function commitOrderLocationLifecycleAndRecover(db,uid,input){
  const releaseIds=committed.items.flatMap(item=>item.warehouseDeltas.filter(row=>row.reservedDelta<0)
   .map(row=>'single-v2-life-'+intent.operationId+'-'+encodeURIComponent(item.itemId)+'-'+encodeURIComponent(row.warehouseId)));
  const {continueCommittedV2FreeStock}=require('./single-item-location-service');
- return {...committed,postCommitAllocation:await continueCommittedV2FreeStock(db,uid,releaseIds)};
+ const sources=[];
+ // Keep the original two-source recovery contract. A whole-order receipt can
+ // contain up to ten releases; each durable source still resumes independently.
+ for(let index=0;index<releaseIds.length;index+=2){
+  const recovered=await continueCommittedV2FreeStock(db,uid,releaseIds.slice(index,index+2));
+  sources.push(...recovered.sources);
+ }
+ return {...committed,postCommitAllocation:{
+  status:sources.some(row=>row.recoveryPending)?'recovery-pending':'completed',sources}};
 }
 
 module.exports={normalizeLifecycleIntent,normalizeOrderLifecycleIntent,commitSingleItemLocationLifecycle,commitOrderLocationLifecycle,commitSingleItemLocationLifecycleAndRecover,commitOrderLocationLifecycleAndRecover};
