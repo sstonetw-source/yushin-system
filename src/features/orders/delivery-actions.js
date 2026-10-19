@@ -5,6 +5,9 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
     if (pendingDeliveryOrderIds.has(orderId)) return;
     const cachedOrder = ordersCache.find(item => item.id === orderId);
     if (!cachedOrder || !canManageOrderLifecycleCapability() || !canEditPage('orders.list')) return;
+    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true){
+        openDeliveryModal(orderId);openPartialDeliveryForm();return;
+    }
     if(orderInventorySyncIncomplete(cachedOrder)){showActionFeedback('訂單庫存尚未同步完成，請先完成同步。','warning');return;}
     const cachedProgress = deliveryProgressInfo(cachedOrder);
     if (normalizedOrderStatus(cachedOrder) !== 'normal') { alert('已取消的訂單不能送貨。'); return; }
@@ -63,6 +66,7 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
 };
 
 window.quickCancelAllDelivery = async function(orderIdOverride) {
+    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true){alert('v2 送達須逐筆撤銷，不可回補已寄出的庫存。');return;}
     const orderId = orderIdOverride || currentDeliveryOrderId;
     if (pendingDeliveryOrderIds.has(orderId)) return;
     const cachedOrder = ordersCache.find(item => item.id === orderId);
@@ -150,6 +154,50 @@ function renderDeliveryModal() {
         const select=document.getElementById('deliveryItemId');if(select)select.style.display='none';
     }
 
+    // The existing delivery form selects a real immutable shipment only in
+    // the isolated v2 demo. Never infer arrival from an inventory debit.
+    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true){
+        let host=document.getElementById('deliveryShipmentSelection');
+        if(!host){
+            host=document.createElement('label');host.id='deliveryShipmentSelection';
+            host.textContent='客戶實際收到的出貨批次';
+            const field=document.createElement('select');field.id='deliveryShipmentId';field.style.marginBottom='8px';
+            host.appendChild(field);deliveryForm.insertBefore(host,deliveryForm.firstChild);
+        }
+        const field=document.getElementById('deliveryShipmentId');
+        const frozen=pendingV2DeliveryConfirmation(order.id);
+        const rawItems=order.items||[],selectedItemId=frozen?.itemId
+            ||document.getElementById('deliveryItemId')?.value
+            ||(rawItems.length===1?rawItems[0].itemId:'');
+        const old=field.value;
+        try{
+            const projected=globalThis.YushinFulfillment.projectOrderShipmentReturns({
+                orderId:order.id,items:rawItems,shipments:order.warehouseShipmentRecords||[],
+                deliveries:order.deliveryRecords||[],returns:order.returnRecords||[]});
+            const part=projected.items.find(row=>row.itemId===selectedItemId);
+            const options=(part?.shipments||[]).filter(row=>row.pendingQty>0||row.shipmentId===frozen?.shipmentId);
+            field.innerHTML='<option value="">請選擇原倉庫出貨</option>'+options.map(row=>{
+                const origin=(order.warehouseShipmentRecords||[]).find(s=>s.id===row.shipmentId);
+                return `<option value="${escapeAttr(row.shipmentId)}">${escapeHtml(origin?.date||'')}／${escapeHtml(origin?.warehouseId||'')}／待確認 ${row.pendingQty}</option>`;
+            }).join('');
+            field.value=frozen?.shipmentId||(options.some(row=>row.shipmentId===old)?old:'');
+            field.disabled=!!frozen;
+        }catch(error){
+            field.innerHTML='<option value="">無法核對來源出貨：'+escapeHtml(error.message)+'</option>';
+            field.disabled=true;
+        }
+        const itemSelect=document.getElementById('deliveryItemId');
+        if(itemSelect&&rawItems.length>1){
+            if(frozen)itemSelect.value=frozen.itemId;
+            itemSelect.disabled=!!frozen;
+            itemSelect.onchange=()=>renderDeliveryModal();
+        }
+        if(frozen){
+            document.getElementById('deliveryDate').value=frozen.date;
+            document.getElementById('deliveryQty').value=frozen.quantity;
+            document.getElementById('deliveryNotes').value=frozen.notes;
+        }
+    }else document.getElementById('deliveryShipmentSelection')?.remove();
     const tbody = document.getElementById('deliveryRecordsBody');
     const partialButton = document.getElementById('openPartialDeliveryBtn');
     if (partialButton) partialButton.style.display = editable && !locked && progress.remaining > 0 ? '' : 'none';
@@ -159,7 +207,7 @@ function renderDeliveryModal() {
             <td>${escapeHtml(record.date || '')}</td><td>${escapeHtml(String(record.qty || ''))}</td>
             <td>${record.itemId ? escapeHtml(deliveryItemNameById.get(record.itemId)||record.itemId)+'<br>' : ''}${escapeHtml(record.notes || '')}</td>
             <td>${escapeHtml(record.createdBy || '')}<br><span style="font-size:10px;color:#666;">${escapeHtml(formatOrderStatusTime(record.createdAt))}</span></td>
-            <td>${editable ? `<details class="order-record-actions"><summary>操作</summary><button type="button" class="btn-small btn-secondary" onclick="editDeliveryRecord(${inlineJsValue(record.id)})">編輯</button> <button type="button" class="btn-danger" onclick="deleteDeliveryRecord(${inlineJsValue(record.id)})">更正誤登</button></details>` : '僅可查看'}</td>
+            <td>${editable && globalThis.YUSHIN_V2_DELIVERY_EMULATOR!==true ? `<details class="order-record-actions"><summary>操作</summary><button type="button" class="btn-small btn-secondary" onclick="editDeliveryRecord(${inlineJsValue(record.id)})">編輯</button> <button type="button" class="btn-danger" onclick="deleteDeliveryRecord(${inlineJsValue(record.id)})">更正誤登</button></details>` : '僅可查看'}</td>
         </tr>`).join('');
     } else if (progress.isLegacyEstimated) {
         tbody.innerHTML = `<tr><td>${escapeHtml(order.orderDate || '')}<br><span class="delivery-estimated">歷史推估</span></td><td>${progress.total}</td><td>舊版已送貨資料</td><td>－</td><td>${editable ? '<button type="button" class="btn-secondary" onclick="clearLegacyDelivery()">取消此推估</button>' : '僅可查看'}</td></tr>`;
@@ -170,9 +218,14 @@ function renderDeliveryModal() {
     document.getElementById('deliveryFormHint').innerText = progress.isLegacyEstimated
         ? '請先取消舊資料推估，再登錄正確的分批送貨紀錄。'
         : `目前最多還可登錄 ${progress.remaining} 個。`;
+    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true)
+        document.getElementById('deliveryFormHint').innerText=pendingV2DeliveryConfirmation(order.id)
+            ? '前次送達結果未確認：使用原出貨批次及原操作識別碼重試。'
+            : '只確認客戶實際收到的數量；不會再次扣除倉庫實貨。';
 }
 
 window.editDeliveryRecord = function(recordId) {
+    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true){alert('v2 送達紀錄不可直接編輯；請走送達更正流程。');return;}
     const order = ordersCache.find(item => item.id === currentDeliveryOrderId);
     const record = savedDeliveryRecords(order).find(item => item.id === recordId);
     if (!record) return;
@@ -215,16 +268,23 @@ window.saveDeliveryRecord = async function() {
         return;
     }
     if (pendingDeliveryOrderIds.has(orderId)) return;
-    const itemId=document.getElementById('deliveryItemId')?.value||'';
-    const fingerprint=JSON.stringify([orderId,itemId,date,qty,notes]);
+    const itemId=globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true
+        ? (ordersCache.find(row=>row.id===orderId)?.items?.length===1
+            ? ordersCache.find(row=>row.id===orderId).items[0].itemId
+            : document.getElementById('deliveryItemId')?.value||'')
+        : document.getElementById('deliveryItemId')?.value||'';
+    const shipmentChoice=document.getElementById('deliveryShipmentId')?.value||'';
+    const fingerprint=JSON.stringify([orderId,itemId,shipmentChoice,date,qty,notes]);
     if(!editId&&deliveryCreateAttempt?.fingerprint!==fingerprint)
         deliveryCreateAttempt={fingerprint,recordId:deliveryRecordId()};
-    const recordId=editId||deliveryCreateAttempt.recordId;
+    const frozen=globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true?pendingV2DeliveryConfirmation(orderId):null;
+    const recordId=frozen?.operationId||editId||deliveryCreateAttempt.recordId;
+    const shipmentId=frozen?.shipmentId||document.getElementById('deliveryShipmentId')?.value||'';
     const saveButton = document.querySelector('[onclick="saveDeliveryRecord()"]');
     pendingDeliveryOrderIds.add(orderId);
     if (saveButton) { saveButton.disabled = true; saveButton.textContent = '儲存中…'; }
     try {
-        const savedOrder=await saveOrderDeliveryRecord(orderId,{date,qty,notes,editId,itemId,recordId});
+        const savedOrder=await saveOrderDeliveryRecord(orderId,{date,qty,notes,editId,itemId,recordId,shipmentId});
         const index = ordersCache.findIndex(item => item.id === orderId);
         if (index >= 0) ordersCache[index] = { id: orderId, ...savedOrder };
         resetDeliveryForm();
@@ -240,6 +300,7 @@ window.saveDeliveryRecord = async function() {
 };
 
 window.deleteDeliveryRecord = async function(recordId) {
+    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true){alert('v2 撤銷送達需獨立確認，不會回補出貨庫存；此介面尚未開放。');return;}
     if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) { alert('此操作僅限訂單負責業務或管理員。'); return; }
     const correctionReason = prompt('僅限更正誤登的送貨紀錄，會同步回補原出貨庫存並保留異動軌跡。實際已送出的貨請申請退貨。\n\n請輸入誤登更正原因：');
     if (!correctionReason || !correctionReason.trim()) return;
@@ -264,6 +325,7 @@ window.deleteDeliveryRecord = async function(recordId) {
 };
 
 window.clearLegacyDelivery = async function() {
+    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true)return alert('v2 送達不可使用歷史推估清除功能。');
     if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) { alert('此操作僅限訂單負責業務或管理員。'); return; }
     if (!confirm('確定取消這筆舊資料的「已送貨」推估嗎？取消後請重新登錄正確送貨日期與數量。')) return;
     const order = ordersCache.find(item => item.id === currentDeliveryOrderId);

@@ -88,3 +88,12 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 首次提出操作前讀取原始訂單 syncAttemptId，按登入 UID、orderId、itemId 將操作 ID、來源倉、出貨量、日期、備註、交付方案及身分寫入同分頁 sessionStorage。無法持久保存不送出；網路回覆遺失不換 ID、不走一般 legacy writer。回傳只接受帶原 movement ID 的 applied/already-applied，並且再次讀取實際訂單，才清掉原操作。刷新後即使剩餘可出貨為零，原清單仍可顯示未確認出貨並使用原資料重試。批次操作逐品項保留既有 checkpoint，先前不明結果以原 ID、原日期及原收件資訊核對；不把多品項批次誤認為單一原子交易。
 
 **邊界**：實際出貨與客戶送達仍是不同事件；v2 僅支援直接寄客戶且以目前來源倉提示操作，尚未實作完整多候選倉的介面選倉／可用量預覽；倉位不足由交易拒絕。前端尚無正式或 Preview 啟用旗標及正式 Functions 匯出。Chrome 使用腳本傳輸驗證原按鈕桌機／手機重試；真實 Auth SDK→原前端 Service→Callable→Firestore 由隔離整合測試覆蓋，不是完整真瀏覽器 Auth／Preview E2E。沒有 Firebase 正式部署、資料遷移或正式資料修改。
+
+
+## 2026-10-19 原客戶送達介面 v2 身分及共同 Service 試點
+
+原 `delivery-actions.js` 表單新增只供本機 `YUSHIN_V2_DELIVERY_EMULATOR` 使用的「原實體倉出貨批次」選單，沿既有 `saveOrderDeliveryRecord` 進唯一前端 Delivery Service。只根據共用 `projectOrderShipmentReturns` 列出出貨後仍待客戶確認的數量；不用商品預留、打單額度或業務送貨舊數量公式決定送達。每次操作只對準一筆出貨並固定 orderId／itemId／shipmentId、qty、日期、備註、actor UID／role、同步識別碼及 operationId。網路未知回覆跨本分頁刷新仍使用原資料，原回覆核對後回讀 orders 才解除。多品項必須指定品項；同一訂單同時只保存一個待核對送達操作。
+
+使用既有 Auth SDK＋隔離 `v2-return-callable-adapter` 新增 `confirmV2ShipmentDelivery`，後端仍直接呼叫原 `commitShipmentDelivery`，執行時重讀 users／orders／physical shipment movement、即時角色／所有權／當前送達額度；成功只更新訂單送達事件與投影，**不再扣庫存**。原「一鍵完成」、「一鍵取消已送貨」、逐筆編輯或刪除在本試點明確拒絕舊路徑，防止物理寄出後被重新扣帳或回補；送達撤銷需後續獨立 v2 入口。原一般路徑不變，沒新增第二套寫入者、Core、Collection、Index 或 Rules。
+
+本批驗證真實 Auth SDK → 原 UI Service → Callable → 原送達 Service → Firestore Emulator，包含來源出貨、同一 ID 回覆遺失後續傳、沒有新 movement／lot／庫存異動，以及匿名／偽造角色／中途降權／失效同步拒絕。原有 UI 來源選單仍需完整真實 Browser Auth（Chrome／Safari）及 Preview 五角色、退貨後已送達撤銷、跨裝置不確定狀態等另外驗收。試點未改正式 Callable index、沒啟用正式 Firebase／正式資料。
