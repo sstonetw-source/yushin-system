@@ -28,7 +28,8 @@ async function identity(tag,role='sales',{profile=true,login=true}={}){
  if(login){await accounts.createUser({uid,email,password:'EmulatorOnly!123456'});await signInWithEmailAndPassword(auth,email,'EmulatorOnly!123456');}
  if(profile)await db.collection('users').doc(uid).set({role,active:true});
  const functions=getFunctions(app,'asia-east1');connectFunctionsEmulator(functions,'127.0.0.1',5001);
- return {uid,auth,app,functions,dispatch:input=>httpsCallable(functions,'prepareV2OrderDispatch',{timeout:30000})(input).then(r=>r.data),preview:input=>httpsCallable(functions,'previewV2CustomerReturn',{timeout:30000})(input).then(r=>r.data),
+ return {uid,auth,app,functions,dispatch:input=>httpsCallable(functions,'prepareV2OrderDispatch',{timeout:30000})(input).then(r=>r.data),
+  ship:input=>httpsCallable(functions,'shipV2WarehouseItem',{timeout:30000})(input).then(r=>r.data),preview:input=>httpsCallable(functions,'previewV2CustomerReturn',{timeout:30000})(input).then(r=>r.data),
   receive:input=>httpsCallable(functions,'receiveV2CustomerReturn',{timeout:30000})(input).then(r=>r.data)};
 }
 async function fixture(tag,{role='sales',cancelled=true,multi=false}={}){
@@ -256,5 +257,74 @@ test('simultaneous authenticated retries post exactly one physical return and al
 test('authenticated calls still reject a superseded inventory sync checkpoint before preview or stock changes',async()=>{
  const x=await fixture('stale');await db.collection('orders').doc(x.orderId).update({inventoryReservationAttemptId:'superseding_return_auth_sync'});const before=await snapshot(x);
  await assert.rejects(x.actor.preview(x.trace),code('failed-precondition'));await assert.rejects(x.actor.receive(x.intent),code('failed-precondition'));
+ assert.deepEqual(await snapshot(x),before);
+});
+
+
+// This transport extends the existing real Auth/Callable fixture; the shipment
+// writer, source ledgers, batch allocation, and whole-order projection are unchanged.
+async function followupShipment(x,tag,quantity=2){
+ const syncAttemptId=x.intent.syncAttemptId;
+ await commitLocationDispatchPreparation(db,x.operator.uid,{orderId:x.orderId,itemId:'I',quantity,
+  operationId:'auth_ship_prepare_'+tag,syncAttemptId});
+ const order=await x.data('orders',x.orderId);
+ return {orderId:x.orderId,itemId:'I',warehouseId:'AUTH-B',quantity,
+  date:'2026-10-19',operationId:'auth_ship_commit_'+tag,syncAttemptId,
+  expectedPlan:order.items[0].deliveryPlan};
+}
+test('real Auth shipment Callable commits a second-warehouse physical shipment once without delivering it',async()=>{
+ const x=await fixture('ship-physical-multi',{role:'purchaser',cancelled:false,multi:true});
+ const request=await followupShipment(x,'physical_multi');
+ const before=await snapshot(x),order=before.documents[0];
+ const result=await x.actor.ship(request);
+ assert.equal(result.status,'applied');assert.equal(result.qty,2);
+ assert.equal(result.movementId,'location-ship-'+request.operationId);
+ const after=await snapshot(x),updated=after.documents[0];
+ assert.equal(updated.items[0].warehouseShippedQty,order.items[0].warehouseShippedQty+2);
+ assert.equal(updated.items[0].dispatchPreparedQty,order.items[0].dispatchPreparedQty);
+ assert.equal(updated.deliveredQty,order.deliveredQty);
+ assert.deepEqual(updated.deliveryRecords,order.deliveryRecords);
+ assert.deepEqual(updated.items.slice(1),order.items.slice(1));
+ assert.equal(after.documents[1].onHand,before.documents[1].onHand-2);
+ assert.equal(after.documents[4].onHand,before.documents[4].onHand-2);
+ assert.equal(after.documents[6].remainingQty,before.documents[6].remainingQty-2);
+ const movement=after.movements.find(m=>m.id===result.movementId);
+ assert.equal(movement.actorUid,x.actor.uid);assert.equal(movement.qty,-2);
+ assert.equal((await x.actor.ship(request)).status,'already-applied');
+ assert.deepEqual(await snapshot(x),after);
+ await assert.rejects(x.actor.ship({...request,quantity:1}),code('already-exists'));
+ assert.deepEqual(await snapshot(x),after);
+});
+test('signed-in shipment Callable enforces current warehouse roles independently of payload or token claims',async()=>{
+ for(const role of ['admin','purchaser','warehouse','sales','engineer']){
+  const tag='role_'+role,x=await fixture('ship-'+tag,{role,cancelled:false});
+  const request=await followupShipment(x,tag,1),before=await snapshot(x);
+  if(['admin','purchaser','warehouse'].includes(role)){
+   const result=await x.actor.ship(request);assert.equal(result.status,'applied');
+   assert.equal(result.qty,1);assert.equal((await x.actor.ship(request)).status,'already-applied');
+  }else{
+   await assert.rejects(x.actor.ship(request),code('permission-denied'));
+   assert.deepEqual(await snapshot(x),before);
+  }
+ }
+ const x=await fixture('ship-role-downgrade',{role:'purchaser',cancelled:false});
+ const request=await followupShipment(x,'role_downgrade',1),before=await snapshot(x);
+ await db.collection('users').doc(x.actor.uid).update({role:'sales'});
+ await accounts.setCustomUserClaims(x.actor.uid,{role:'admin'});
+ await x.actor.auth.currentUser.getIdToken(true);
+ await assert.rejects(x.actor.ship(request),code('permission-denied'));
+ assert.deepEqual(await snapshot(x),before);
+});
+test('signed-in shipment rejects forged identity stale synchronization and invalid request before stock writes',async()=>{
+ const x=await fixture('ship-transport-guards',{role:'purchaser',cancelled:false});
+ const request=await followupShipment(x,'transport_guards',1),before=await snapshot(x);
+ const anonymous=await identity('ship-unsigned','purchaser',{login:false,profile:false});
+ await assert.rejects(anonymous.ship(request),code('unauthenticated'));
+ for(const patch of [{actorUid:x.operator.uid},{actorRole:'admin'},{warehouseId:'AUTH-C'}])
+  await assert.rejects(x.actor.ship({...request,...patch}),
+   error=>['functions/invalid-argument','functions/failed-precondition'].includes(error.code));
+ await assert.rejects(x.actor.ship({...request,syncAttemptId:'superseded'}),code('failed-precondition'));
+ await db.collection('users').doc(x.actor.uid).update({active:false});
+ await assert.rejects(x.actor.ship(request),code('permission-denied'));
  assert.deepEqual(await snapshot(x),before);
 });

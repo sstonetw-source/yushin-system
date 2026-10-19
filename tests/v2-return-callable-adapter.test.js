@@ -25,7 +25,7 @@ test('disabled gate missing authentication and wrong database never call a retur
  assert.equal(reads,1);
 });
 test('production Functions entry never exports the isolated return Callables or their fixture',()=>{
- assert.doesNotMatch(fs.readFileSync('functions/index.js','utf8'),/v2-return-callable|previewV2CustomerReturn|receiveV2CustomerReturn|prepareV2OrderDispatch|v2-return-auth-functions/);
+ assert.doesNotMatch(fs.readFileSync('functions/index.js','utf8'),/v2-return-callable|previewV2CustomerReturn|receiveV2CustomerReturn|prepareV2OrderDispatch|shipV2WarehouseItem|v2-return-auth-functions/);
 });
 test('dispatch baseline is optional for old receipts and is bound to the canonical intent when supplied',()=>{
  const {normalizeLocationDispatchIntent}=require('../functions/location-dispatch-service');
@@ -34,4 +34,27 @@ test('dispatch baseline is optional for old receipts and is bound to the canonic
  assert.equal(old.hash,require('node:crypto').createHash('sha256').update(JSON.stringify(input)).digest('hex'));
  assert.notEqual(normalizeLocationDispatchIntent({...input,expectedPreparedQty:0}).hash,old.hash);
  for(const expectedPreparedQty of [-1,0.5,'0',null])assert.throws(()=>normalizeLocationDispatchIntent({...input,expectedPreparedQty}));
+});
+
+
+test('shipment Callable is isolated and shares the existing Auth and Emulator gate',async()=>{
+ class HttpsError extends Error{constructor(code,message){super(message);this.code=code;}}
+ let calls=0;
+ const handlers=createV2ReturnCallables({onCall:(_settings,handler)=>handler,HttpsError,
+  getDatabase:()=>{calls++;return {projectId:'demo-yushin'};},env:env()});
+ assert.equal(typeof handlers.shipV2WarehouseItem,'function');
+ await assert.rejects(handlers.shipV2WarehouseItem({data:{actorUid:'forged'}}),
+  error=>error.code==='unauthenticated');
+ assert.equal(calls,0);
+ const bad=createV2ReturnCallables({onCall:(_settings,handler)=>handler,HttpsError,
+  getDatabase:()=>{calls++;return {projectId:'production'};},env:env()});
+ await assert.rejects(bad.shipV2WarehouseItem({auth:{uid:'signed-in'},data:{}}),
+  error=>error.code==='failed-precondition');
+ assert.equal(calls,1);
+ const off=createV2ReturnCallables({onCall:(_settings,handler)=>handler,HttpsError,
+  getDatabase:()=>{calls++;return {projectId:'demo-yushin'};},
+  env:{...env(),ENABLE_V2_RETURN_AUTH_EMULATOR:'false'}});
+ await assert.rejects(off.shipV2WarehouseItem({auth:{uid:'signed-in'},data:{}}),
+  error=>error.code==='failed-precondition');
+ assert.equal(calls,1);
 });
