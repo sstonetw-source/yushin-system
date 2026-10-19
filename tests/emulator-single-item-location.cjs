@@ -2256,7 +2256,7 @@ test('whole-order cancel restore after two-product CLOSE preserves physical proo
  const after=await wholeLifecycleSnapshot(x);
  for(const [key,value] of Object.entries(before))if(/^(supplyOrders|receipts|inventoryLots|inventoryLotCosts|purchaseOrders)\//.test(key))assert.deepEqual(after[key],value,key);
  for(const item of restored.items){const ledger=await x.read('inventoryReservations',x.orderId+'__'+item.itemId);
-  assert.equal(ledger.quantity+ledger.shortageQty,(item.qty??item.orderedQty)-item.warehouseShippedQty);}
+  assert.equal(ledger.quantity+ledger.shortageQty,item.qty-item.warehouseShippedQty);}
  await x.receive('I1',2,'mc_restore_i1');await x.receive('I3',2,'mc_restore_i3');
  assert.deepEqual((await x.read('orders',x.orderId)).returnRecords,original.returnRecords);
 });
