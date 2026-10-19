@@ -262,3 +262,5 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 
 
 - 原倉庫單筆與批次出貨的 v2 本機試點沿用 `commitInventoryShipment` 與原 `shipV2WarehouseItem` Callable；只能在 localhost/127.0.0.1 的 demo-yushin Auth/Functions/Firestore Emulator 啟用。首次提交前必須儲存凍結的 UID／角色／操作 ID／倉庫／數量／日期／交付方案及同步 ID；未知回覆、角色切換或刷新不可產生另一份實體出貨。完成必須核對 immutable movement ID，回讀 orders 後才解除原 pending。原單與批次兩個入口不得改走另一套扣帳 Service，也不得將 v2 warehouseShipmentRecords 當成客戶 deliveryRecords。原舊式介面、正式 index/Rules 不應因測試閘門而改動；多候選倉選取、客戶送達、真實 Preview 瀏覽器驗收仍為獨立未完門檻。
+
+- v2 客戶送達確認與倉庫出貨是獨立事件，送達只能沿 `saveOrderDeliveryRecord` → `confirmV2ShipmentDelivery` → 唯一 `commitShipmentDelivery`，不得再次執行 `delivery-stock.js` 之出貨／還原扣帳；隔離本機 demo-yushin gate 之外沿用一般系統。v2 必須由 Core 驗證來源出貨的 pendingQty，在 Firebase 交易內重讀所有權、送達來源扣帳憑證與權威進度；前端 sessionStorage 固定同一不可變 operationId／來源 shipmentId／數量，未知回覆保留意圖並可刷新確認。v2 未接撤銷前禁用舊版取消、更正及一鍵完成途徑；正式 index 不得匯出 v2 Callable；啟用 Preview、正式 Rules／Functions／資料遷移都須另外驗收。
