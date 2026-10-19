@@ -29,7 +29,8 @@ async function identity(tag,role='sales',{profile=true,login=true}={}){
  if(profile)await db.collection('users').doc(uid).set({role,active:true});
  const functions=getFunctions(app,'asia-east1');connectFunctionsEmulator(functions,'127.0.0.1',5001);
  return {uid,auth,app,functions,dispatch:input=>httpsCallable(functions,'prepareV2OrderDispatch',{timeout:30000})(input).then(r=>r.data),
-  ship:input=>httpsCallable(functions,'shipV2WarehouseItem',{timeout:30000})(input).then(r=>r.data),preview:input=>httpsCallable(functions,'previewV2CustomerReturn',{timeout:30000})(input).then(r=>r.data),
+  ship:input=>httpsCallable(functions,'shipV2WarehouseItem',{timeout:30000})(input).then(r=>r.data),
+  confirm:input=>httpsCallable(functions,'confirmV2ShipmentDelivery',{timeout:30000})(input).then(r=>r.data),preview:input=>httpsCallable(functions,'previewV2CustomerReturn',{timeout:30000})(input).then(r=>r.data),
   receive:input=>httpsCallable(functions,'receiveV2CustomerReturn',{timeout:30000})(input).then(r=>r.data)};
 }
 async function fixture(tag,{role='sales',cancelled=true,multi=false}={}){
@@ -366,4 +367,68 @@ test('original warehouse shipment Service uses real Auth Callable with frozen re
  await open().commitInventoryShipment(payload);
  assert.equal(calls,2);assert.equal(storage.size,0);
  assert.deepEqual(await snapshot(x),after);
+});
+
+
+test('real Auth original delivery Service confirms an existing shipment and resumes the same operation after lost reply',async()=>{
+ const x=await fixture('delivery-ui-auth',{role:'sales',cancelled:false,multi:true});
+ const shipment=await followupShipment(x,'delivery_ui_auth',2);
+ const out=await commitLocationShipment(db,x.operator.uid,shipment);
+ assert.equal(out.status,'applied');
+ const before=await snapshot(x),original=before.documents[0],storage=new Map();
+ const live=clientFirestore(x.actor.app);connectFirestoreEmulator(live,'127.0.0.1',8080);
+ let lost=true,calls=0;
+ const open=()=>{
+  const context=vm.createContext({YUSHIN_V2_DELIVERY_EMULATOR:true,location:{hostname:'127.0.0.1'},
+   currentUser:{uid:x.actor.uid},currentUserRole:'sales',
+   canManageOrderLifecycleCapability:()=>true,canEditPage:()=>true,
+   YushinFulfillment:require('../modules/fulfillment-core'),
+   sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},
+   db:{collection:n=>({doc:id=>({get:async()=>{const s=await getDoc(doc(live,n,id));return {exists:s.exists(),data:()=>s.data()};}})})},
+   firebase:{auth:()=>({app:x.actor.app,currentUser:{uid:x.actor.uid},emulatorConfig:{host:'127.0.0.1',port:9099}}),
+    functions:()=>({app:x.actor.app,useEmulator:()=>{},
+     httpsCallable:name=>async payload=>{calls++;assert.equal(name,'confirmV2ShipmentDelivery');
+      assert.equal(payload.actorUid,undefined);assert.equal(payload.actorRole,undefined);
+      const response=await httpsCallable(x.actor.functions,name)(payload);
+      if(lost){lost=false;throw Error('delivery response lost');}
+      return response;}})},
+   runRoleTransaction:()=>{throw Error('legacy delivery stock writer must not run');}});
+  vm.runInContext(fs.readFileSync('src/services/delivery-records.js','utf8'),context);
+  return context;
+ };
+ const request={date:'2026-10-19',qty:1,notes:'簽收一份',itemId:'I',
+  shipmentId:shipment.operationId,recordId:'delivery_auth_ui_123456'};
+ const first=open();
+ await assert.rejects(first.saveOrderDeliveryRecord(x.orderId,request),/delivery response lost/);
+ const after=await snapshot(x);
+ assert.equal(after.documents[0].deliveredQty,original.deliveredQty+1);
+ assert.equal(after.documents[0].items[0].deliveredQty,original.items[0].deliveredQty+1);
+ assert.deepEqual(after.documents.slice(1),before.documents.slice(1));
+ assert.deepEqual(after.movements,before.movements);
+ const frozen=first.pendingV2DeliveryConfirmation(x.orderId);
+ assert.equal(frozen.shipmentId,shipment.operationId);assert.equal(frozen.syncAttemptId,shipment.syncAttemptId);
+ await assert.rejects(first.saveOrderDeliveryRecord(x.orderId,{...request,qty:2}),/未確認/);
+ await assert.rejects(first.saveOrderDeliveryRecord(x.orderId,{...request,shipmentId:'another_shipment'}),/未確認/);
+ const resumed=open();
+ await resumed.saveOrderDeliveryRecord(x.orderId,{...request,recordId:'ignored_new_ui_record'});
+ assert.equal(calls,2);assert.equal(storage.size,0);
+ assert.deepEqual(await snapshot(x),after);
+});
+test('authenticated delivery Callable refuses anonymous users and a forged role without stock or acknowledgement changes',async()=>{
+ const x=await fixture('delivery-auth-guard',{role:'sales',cancelled:false,multi:true});
+ const shipment=await followupShipment(x,'delivery_auth_guard',1);
+ await commitLocationShipment(db,x.operator.uid,shipment);
+ const input={orderId:x.orderId,itemId:'I',shipmentId:shipment.operationId,
+  quantity:1,date:'2026-10-19',notes:'signed',operationId:'delivery_auth_guard_123456',
+  syncAttemptId:shipment.syncAttemptId};
+ const before=await snapshot(x);
+ const anonymous=await identity('delivery-unsigned','sales',{login:false,profile:false});
+ await assert.rejects(anonymous.confirm(input),code('unauthenticated'));
+ await assert.rejects(x.actor.confirm({...input,actorRole:'admin'}),code('invalid-argument'));
+ await assert.rejects(x.actor.confirm({...input,syncAttemptId:'stale'}),code('failed-precondition'));
+ await db.collection('users').doc(x.actor.uid).update({role:'warehouse'});
+ await accounts.setCustomUserClaims(x.actor.uid,{role:'admin'});
+ await x.actor.auth.currentUser.getIdToken(true);
+ await assert.rejects(x.actor.confirm(input),code('permission-denied'));
+ assert.deepEqual(await snapshot(x),before);
 });
