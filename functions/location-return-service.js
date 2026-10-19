@@ -2,7 +2,7 @@
 // Internal Emulator-only receipt of restockable goods into their source warehouse.
 const inventory=require('./shared/inventory-core'),reservation=require('./shared/reservation-core');
 const fulfillment=require('./shared/fulfillment-core');
-const {normalizeLocationReturnIntent,readLocationReturnProofs,assertCancelledCloseReturnContext}=require('./location-return-trace-service');
+const {normalizeLocationReturnIntent,readLocationReturnProofs,assertCancelledCloseReturnContext,readMultiReturnSource}=require('./location-return-trace-service');
 const {readShipmentActorOrder,shipmentDeliveryContext,readShipmentProof}=require('./shipment-delivery-service');
 function fault(message,code='failed-precondition'){const e=new Error(message);e.code=code;throw e;}
 function qty(value){if(!Number.isSafeInteger(value)||value<0)fault('退貨帳目數量不正確');return value;}
@@ -21,15 +21,17 @@ async function commitLocationReturn(db,uid,data){
     fault('退貨操作識別碼已用於其他交易','already-exists');
    return {...prior.result,status:'already-applied',movementId:movementRef.id};
   }
-  const {item,productKey,projection,returnProjection,cancelled}=shipmentDeliveryContext(order,intent,{
-   allowReturns:true,allowCancelledCloseReturn:intent.settlement==='CLOSE'});
+  const context=shipmentDeliveryContext(order,intent,{
+   allowReturns:true,allowCancelledCloseReturn:intent.settlement==='CLOSE',allowMultiReturn:true});
+  const {item,productKey,projection,returnProjection,cancelled,whole}=context;
+  if(whole&&intent.settlement!=='CLOSE')fault('多品項退貨目前僅支援 CLOSE 結案，訂錯貨請另開新單');
   if(order.returnHistory!==undefined&&!Array.isArray(order.returnHistory))fault('退貨歷史格式不正確');
   assertCancelledCloseReturnContext(order,{item,projection,returnProjection,cancelled});
   if(order.returnRecords.some(r=>r.id===operationId)||(order.returnHistory||[]).some(r=>r.recordId===operationId))
    fault('此退貨操作已有歷史紀錄，不能重複入庫');
   const shipment=await readShipmentProof(tx,db,order,intent,productKey);
   if(warehouseId!==shipment.warehouseId)fault('此試點只能收回原出貨倉，不可跨倉退回');
-  await readLocationReturnProofs(tx,db,order,intent,productKey,{closedOnly:cancelled});
+  await readLocationReturnProofs(tx,db,order,intent,productKey,{closedOnly:cancelled||!!whole});
   const confirmedQty=projection.shipments.find(r=>r.shipmentId===intent.shipmentId)?.confirmedQty??0;
   const plan=inventory.planExplicitShipmentReturn({shipment,confirmedQty,selections:intent.selections,
    priorReturns:order.returnRecords.filter(r=>r.shipmentId===shipment.id)});
@@ -51,6 +53,7 @@ async function commitLocationReturn(db,uid,data){
    ||qty(item.shortageQty)!==ledger.shortageQty
    ||inv.data().productKey!==productKey||stock.data().productKey!==productKey||stock.data().warehouseId!==warehouseId)
    fault('退貨預留來源、投影或公司／分倉帳目不一致');
+  await readMultiReturnSource(tx,db,order,intent,context,{ledger,inventory:inv.data(),warehouseStock:stock.data()});
   const stockPlan=reservation.planReservationReturn({operation:'CUSTOMER_RETURN',deltaQty:plan.returnQty,
    settlement:intent.settlement,orderStatus:cancelled?'cancelled':'normal',productKey,warehouseId,reservation:ledger,
    aggregateStock:inv.data(),warehouseStock:stock.data(),itemReservedQty:item.reservedQty});
@@ -74,19 +77,24 @@ async function commitLocationReturn(db,uid,data){
    settlement:intent.settlement,condition:intent.condition,lotAllocations:plan.allocations,
    movementId:movementRef.id,createdByUid:uid,createdByRole:actorRole,createdAt:now,intentHash:intent.hash};
   const records=[...order.returnRecords,record];
-  const next=fulfillment.projectShipmentReturns({orderId,itemId,productKey,orderedQty:item.qty??item.orderedQty,
-   shipments:order.warehouseShipmentRecords,deliveries:order.deliveryRecords,returns:records});
+  const nextWhole=whole?fulfillment.projectOrderShipmentReturns({orderId,items:order.items,
+   shipments:order.warehouseShipmentRecords??[],deliveries:order.deliveryRecords,returns:records}):null;
+  const next=nextWhole?nextWhole.items.find(row=>row.itemId===itemId):
+   fulfillment.projectShipmentReturns({orderId,itemId,productKey,orderedQty:item.qty??item.orderedQty,
+    shipments:order.warehouseShipmentRecords,deliveries:order.deliveryRecords,returns:records});
   if(stockPlan.reservation.quantity+stockPlan.reservation.shortageQty!==(cancelled?0:next.outstandingQty))
    fault('退貨後預留與補送需求不一致');
   const result={orderId,itemId,shipmentId:shipment.id,warehouseId,qty:plan.returnQty,settlement:intent.settlement,
    returnedQty:next.returnedQty,closedQty:next.closedQty,replacementQty:next.replacementQty,
-   effectiveDeliveredQty:next.effectiveDeliveredQty,isDelivered:next.isDelivered,reservedQty:stockPlan.reservation.quantity};
+   effectiveDeliveredQty:next.effectiveDeliveredQty,isDelivered:(nextWhole??next).isDelivered,reservedQty:stockPlan.reservation.quantity};
+  if(nextWhole)result.itemIsDelivered=next.isDelivered;
   tx.update(invRef,{...stockPlan.aggregateStock,updatedAt:now});
   tx.update(stockRef,{...stockPlan.warehouseStock,updatedAt:now});
   tx.set(ledgerRef,{...stockPlan.reservation,updatedAt:now});
   for(const row of restoration)tx.update(ref('inventoryLots',row.lotId),{remainingQty:row.remainingQty,updatedAt:now});
-  tx.update(orderRef,{items:[{...item,reservedQty:result.reservedQty,returnedQty:next.returnedQty}],
-   returnedQty:next.returnedQty,isDelivered:next.isDelivered,returnRecords:records,
+  tx.update(orderRef,{items:order.items.map(row=>row.itemId===itemId?
+   {...row,reservedQty:result.reservedQty,returnedQty:next.returnedQty}:row),
+   returnedQty:(nextWhole??next).returnedQty,isDelivered:(nextWhole??next).isDelivered,returnRecords:records,
    returnHistory:[...(order.returnHistory||[]),{action:'add',recordId:operationId,before:null,after:record,by:uid,at:now}],updatedAt:now});
   tx.create(movementRef,{action:'location_customer_return',type:'return',qty:plan.returnQty,
    sourceType:'order',sourceId:orderId,itemId,productKey,warehouseId,actorUid:uid,actorRole,

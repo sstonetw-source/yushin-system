@@ -72,3 +72,19 @@
 ### 取消後退貨可先唯讀查核（2026-10-18，Emulator-only）
 
 本節更新前述取消來源不能trace的限制。原 planLocationReturnTrace 已接同一取消CLOSE guard、完整released空ledger及實際退貨proof驗證，並用原planExplicitShipmentReturn扣除先前每批退貨。五個角色可唯讀取得原shipment的已確認／已退／剩餘總量與各批上限；不因此取得實際入庫權限。查核無寫入、canCommit false，原commitLocationReturn仍須在新交易重讀完整庫存／批次及當前額度；一般新增送達與送達撤銷仍不開放取消來源。詳見delivery-reversal-return-trace-emulator-20261017.md最新節。
+
+## 2026-10-19 多品項 CLOSE 原倉退貨（基準 main 218826f8；已實作、待本批 CI）
+
+原 commitLocationReturn 與 planLocationReturnTrace 現以明確 allowMultiReturn 接入原整單履約投影；不增加另一份退貨 writer 或數量公式。正常、completed 初始化的 2–5 個實體倉品項可各自退回一筆明確出貨，仍限 CLOSE／RESTOCKABLE／原出貨倉及使用者選定原批次。多品項 REPLACE、取消中退貨、更正撤銷、跨倉／隔離與服務或直送混單仍拒絕；單品項既有 CLOSE／REPLACE／取消退貨契約不變。
+
+每次先核對整單 shipments／deliveries／returns 與各品項及全單快取，原有界 reader 查全部實際退貨 movements（包含空快取／其他品項）。trace 與 commit 共用 readMultiReturnSource：全部原出貨 immutable debit＋canonical intent proof（最多40），所有 2–5 筆 v2 ledger、owner／product／原兩候選倉及剩餘需求；commit 另外用交易內公司／兩倉原帳驗證同商品所有 sibling 的預留合計。查核只選定品項前，未知或錯來源不能被 filter 隱藏。
+
+實收沿原 ExplicitShipmentReturn／ReservationReturn／LotRestoration Core，增加選中商品公司及原倉實貨、還原原 lot，CLOSE 不新增預留或補送需求；原供應、採購、收貨、成本與所有出貨／送達事實保留。orders.items 僅更新選中品項 returnedQty／原預留投影，其他品項原樣保留；全單 returnedQty／isDelivered 仍由 projectOrderShipmentReturns 計算。原 result 語意維持，整單另回 itemIsDelivered 以區分品項與全單完成；該欄位同原 result 保存於 movement，未另建集合／ledger欄位。
+
+正常全單已送達後 CLOSE 仍維持結案，不抹除累計送達；部分訂單退貨後可沿原打單／出貨／確認 Service 完成剩餘原訂數量，已退商品不再補送。訂錯貨需要正確商品時使用一般新訂單；本批沒有新增自動建單或正式 v2 退貨到新單的 UI／關聯接線。
+
+固定操作 ID／actor／即時角色／intent hash 與原子提交不變。五角色可唯讀 trace，但實收仍只允許原 admin／本人 sales 或 engineer；預覽 canCommit=false，不承諾當前庫存或後續可退額度。實收必須重新讀權威帳及原倉全部批次（最多200），拒絕超退與不一致的真實入庫證據。trace 不讀公司／分倉庫存或成本，commit 不讀成本集合。無新 query 類型、Collection、Rules、Index、Listener、遷移或 Firebase 部署；多品項增加有界 sibling ledger／shipment proof 與指定商品另一倉文件讀取。
+
+新增九項真實 Emulator：三品項兩商品／同商品五列及整單退貨合計、trace零寫入與過期預覽、五角色與停用／本人／actor／意圖防冒用、同ID／超額／跨品項並行、其他品項憑證／ledger與公司分倉合計不足／隱藏或損壞退貨 proof／錯倉錯批次拒絕、退貨後完成剩餘履約、真實末端 ALREADY_EXISTS 全回滾與回覆遺失、原 post-commit recovery 保留成功實收。既有完整兩品項送達測試追加 CLOSE 後仍完成的查核。配貨目標仍沿原試點限制，可能回 recovery-pending；不新增 background runner 或把後續分配失敗當成入庫失敗。
+
+正式 UI／Callable／v2閘門仍未開放。新增真實交易使用 Admin SDK adapter，真實 Auth Browser／Preview 全線 E2E、取消中多品項退貨、退貨後收貨與 lifecycle 仍待整合。完整驗收以本 PR CI 為準。

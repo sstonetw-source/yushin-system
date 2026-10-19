@@ -42,7 +42,11 @@ async function readShipmentActorOrder(tx,db,uid,orderId,roles=['admin','sales','
   if(order.deliveryHistory!==undefined&&!Array.isArray(order.deliveryHistory))fault('送達歷史格式不正確');
   return {actorRole,orderRef,order};
 }
-function shipmentDeliveryContext(order,intent,{allowReturns=false,allowCancelledCloseReturn=false}={}) {
+function shipmentDeliveryContext(order,intent,{allowReturns=false,allowCancelledCloseReturn=false,allowMultiReturn=false}={}) {
+ if(allowMultiReturn&&Array.isArray(order.items)&&order.items.length>1){
+  const context=multiShipmentDeliveryContext(order,intent);
+  return {...context,returnProjection:context.projection,cancelled:false};
+ }
  const {orderId,itemId,syncAttemptId}=intent;
   if(order.inventoryReservationStatus!=='completed'||order.inventoryReservationAttemptId!==syncAttemptId)
    fault('庫存同步未完成或來源同步識別碼已變更');
@@ -72,8 +76,8 @@ function shipmentDeliveryContext(order,intent,{allowReturns=false,allowCancelled
    fault('出貨或客戶送達投影不一致');
   return {item,productKey,projection,returnProjection,cancelled};
 }
-// Shared multi-line acknowledgement/correction context. Physical returns keep
-// their existing single-item contract until their writer is integrated.
+// Shared whole-order projection for acknowledgement/correction and explicitly
+// opted-in CLOSE return readers. Cancelled multi-line returns remain closed.
 function multiShipmentDeliveryContext(order,intent){
  const {orderId,itemId,syncAttemptId}=intent;
  if(order.inventoryReservationStatus!=='completed'||order.inventoryReservationAttemptId!==syncAttemptId)
@@ -260,4 +264,4 @@ async function reverseShipmentDelivery(db,uid,data){
   return {...result,status:'applied',operationId};
  });
 }
-module.exports={normalizeDeliveryIntent,commitShipmentDelivery,normalizeDeliveryReversalIntent,reverseShipmentDelivery,readShipmentActorOrder,shipmentDeliveryContext,readShipmentProof};
+module.exports={normalizeDeliveryIntent,commitShipmentDelivery,normalizeDeliveryReversalIntent,reverseShipmentDelivery,readShipmentActorOrder,shipmentDeliveryContext,readShipmentProof,readWholeOrderShipmentProofs};

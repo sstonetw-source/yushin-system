@@ -293,3 +293,7 @@ dispatchRecords/{dispatch-ui-operationId} 沿用原 Collection；新增 operatio
 ### 2026-10-19 多品項整單取消／恢復（已實作、待本批 CI）
 
 沿既有reservationOperationReceipts，整單action=order_v2_lifecycle新增itemIds/result.items（逐項productKey/差額）；movement原前綴增加itemId避免同倉碰撞，原actor/hash/receipt鏈保留。無新collection/Rules/Index/Listener/migration；stock文件只讀一次、最後至多寫一次，供應與receipt各以orderId一次＋逐項demandId有界query雙向查核。 仍限 demo-yushin Emulator，正式 UI／Callable 未開啟，無部署。詳見 [同一份 lifecycle 契約增補](location-lifecycle-20261017.md)。
+
+### 2026-10-19 多品項 CLOSE 退貨（已實作、待本批 CI）
+
+沿原orders.returnRecords／returnHistory與location-return-{operationId} movement。只更新選定items[].returnedQty及全單returnedQty／isDelivered，兄弟原資料保留。多品項result另含itemIsDelivered；無新Collection／ledger欄位／Rules／Index／遷移。增加最多40份出貨proof、5份ledger及原商品另一倉的有界讀取，原批次query上限維持200。見 [原退貨契約增補](location-return-receipt-emulator-20261017.md)。
