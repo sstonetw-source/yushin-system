@@ -79,3 +79,12 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 ## 2026-10-19 v2 分批出貨的下一階段傳輸準備
 
 沿用原 `commitLocationShipment`，由隔離 v2 Auth Callable adapter 增設 `shipV2WarehouseItem`，僅供真實 SDK／Auth／Firestore Emulator 端對端的後端路徑驗證。保留身份／即時角色、固定 operationId、原同步 ID、寄送方案及完整批次扣帳，不增加另一套出貨算法。實體出貨不等於客戶送達；原介面、正式 Callable export 與一般出貨流程不變。仍待接原倉庫頁的 v2 intent／刷新／未知回覆及桌機／手機操作，再完成 Preview 真實瀏覽器驗收。
+
+
+## 2026-10-19 原倉庫出貨介面 v2 整合試點（限本機 Emulator）
+
+沿用現有 `modules/inventory-workspace.js` 的 `openInventoryShipment`、`modules/warehouse-logistics.js` 的批次確認，以及唯一前端 `src/services/warehouse-shipment.js:commitInventoryShipment`。僅當 `YUSHIN_V2_SHIPMENT_EMULATOR=true` 且本機 Auth/Functions 實際專案為 `demo-yushin` 時，將原操作交給既有隔離 `shipV2WarehouseItem` Callable，再使用後端唯一 `commitLocationShipment` 扣除實貨及 v2 預留。一般正式介面路徑完全保留，不增加新的庫存公式或第二個寫入者。
+
+首次提出操作前讀取原始訂單 syncAttemptId，按登入 UID、orderId、itemId 將操作 ID、來源倉、出貨量、日期、備註、交付方案及身分寫入同分頁 sessionStorage。無法持久保存不送出；網路回覆遺失不換 ID、不走一般 legacy writer。回傳只接受帶原 movement ID 的 applied/already-applied，並且再次讀取實際訂單，才清掉原操作。刷新後即使剩餘可出貨為零，原清單仍可顯示未確認出貨並使用原資料重試。批次操作逐品項保留既有 checkpoint，先前不明結果以原 ID、原日期及原收件資訊核對；不把多品項批次誤認為單一原子交易。
+
+**邊界**：實際出貨與客戶送達仍是不同事件；v2 僅支援直接寄客戶且以目前來源倉提示操作，尚未實作完整多候選倉的介面選倉／可用量預覽；倉位不足由交易拒絕。前端尚無正式或 Preview 啟用旗標及正式 Functions 匯出。Chrome 使用腳本傳輸驗證原按鈕桌機／手機重試；真實 Auth SDK→原前端 Service→Callable→Firestore 由隔離整合測試覆蓋，不是完整真瀏覽器 Auth／Preview E2E。沒有 Firebase 正式部署、資料遷移或正式資料修改。

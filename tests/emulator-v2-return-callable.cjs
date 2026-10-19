@@ -328,3 +328,42 @@ test('signed-in shipment rejects forged identity stale synchronization and inval
  await assert.rejects(x.actor.ship(request),code('permission-denied'));
  assert.deepEqual(await snapshot(x),before);
 });
+
+
+test('original warehouse shipment Service uses real Auth Callable with frozen retry after a lost response',async()=>{
+ const x=await fixture('ship-ui-auth',{role:'purchaser',cancelled:false,multi:true});
+ const request=await followupShipment(x,'ui_auth',2),before=await snapshot(x);
+ const live=clientFirestore(x.actor.app);connectFirestoreEmulator(live,'127.0.0.1',8080);
+ const storage=new Map();let calls=0,lose=true;
+ const open=()=>{
+  const context=vm.createContext({currentUser:{uid:x.actor.uid},currentUserRole:'purchaser',
+   YUSHIN_V2_SHIPMENT_EMULATOR:true,location:{hostname:'127.0.0.1'},
+   canReceiveInventoryCapability:()=>true,canAccessPage:()=>true,
+   YushinWarehouseLogistics:require('../modules/warehouse-logistics'),
+   sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},
+   db:{collection:name=>({doc:id=>({get:async()=>{const s=await getDoc(doc(live,name,id));return {exists:s.exists(),data:()=>s.data()};}})})},
+   firebase:{auth:()=>x.actor.auth,functions:()=>({app:x.actor.app,useEmulator:()=>{},
+    httpsCallable:name=>async data=>{calls++;assert.equal(name,'shipV2WarehouseItem');
+     assert.equal(data.actorUid,undefined);assert.equal(data.actorRole,undefined);
+     const result=await httpsCallable(x.actor.functions,name)(data);
+     if(lose){lose=false;throw Error('lost UI response');}return result;}})},
+   runRoleTransaction:()=>{throw Error('legacy shipment forbidden');}});
+  vm.runInContext(fs.readFileSync('src/services/warehouse-shipment.js','utf8'),context);
+  return context;
+ };
+ const payload={orderId:x.orderId,itemId:'I',qty:2,date:request.date,notes:'',
+  operationId:request.operationId,expectedWarehouseId:'AUTH-B',expectedPlan:request.expectedPlan};
+ const first=open();
+ await assert.rejects(first.commitInventoryShipment(payload),/lost UI response/);
+ const pending=first.pendingV2WarehouseShipment(x.orderId,'I');
+ assert.equal(pending.operationId,request.operationId);assert.equal(pending.syncAttemptId,request.syncAttemptId);
+ await assert.rejects(first.commitInventoryShipment({...payload,qty:1}),/凍結/);
+ const after=await snapshot(x);
+ assert.equal(after.documents[1].onHand,before.documents[1].onHand-2);
+ assert.equal(after.documents[4].onHand,before.documents[4].onHand-2);
+ assert.equal(after.documents[0].deliveredQty,before.documents[0].deliveredQty);
+ assert.deepEqual(after.documents[0].deliveryRecords,before.documents[0].deliveryRecords);
+ await open().commitInventoryShipment(payload);
+ assert.equal(calls,2);assert.equal(storage.size,0);
+ assert.deepEqual(await snapshot(x),after);
+});

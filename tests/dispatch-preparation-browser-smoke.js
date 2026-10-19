@@ -82,5 +82,58 @@ const scripts=[read('modules/fulfillment-core.js'),read('modules/order-entry-cor
   assert.equal(await page.evaluate(()=>itemDispatchState(ordersCache[0],ordersCache[0].items[0]).pending),2);assert.deepEqual(errors,[]);
   console.log(`V2 dispatch ${width}px: original two-page UI, physical shipment Core, frozen sync/baseline and cross-page uncertain reply retry passed (scripted local transport).`);await page.close();
  }
+
+ // The original warehouse confirmation button must retain the same shipment ID
+ // after Chrome reload. Real Auth/Callable is covered by the separate Emulator test.
+ for(const width of [1280,390]){
+  const doc={id:'O',status:'active',inventoryReservationStatus:'completed',inventoryReservationAttemptId:'browser-sync',
+   items:[{itemId:'I',productId:'P',warehouseId:'B',qty:2,dispatchPreparedQty:2,warehouseShippedQty:0,
+    deliveryPlan:{mode:'CUSTOMER_SHIP',contact:'Customer',phone:'02-12345678',address:'Taipei'}}]};
+  let lost=true,calls=0,stockWrites=0;
+  const page=await browser.newPage({viewport:{width,height:850}}),errors=[];
+  page.on('pageerror',e=>errors.push(e.message));
+  await page.exposeFunction('shipmentRead',()=>structuredClone(doc));
+  await page.exposeFunction('shipmentCallable',payload=>{
+   calls++;assert.equal(payload.warehouseId,'B');assert.equal(payload.syncAttemptId,'browser-sync');
+   assert.equal(payload.actorUid,undefined);assert.equal(payload.actorRole,undefined);
+   if(!doc.warehouseShipmentRecords){doc.warehouseShipmentRecords=[{id:payload.operationId}];doc.items[0].warehouseShippedQty=2;stockWrites++;}
+   if(lost){lost=false;throw Error('response lost after stock commit');}
+   return {data:{status:'already-applied',orderId:'O',itemId:'I',warehouseId:'B',qty:2,movementId:'location-ship-'+payload.operationId}};
+  });
+  await page.route('http://127.0.0.1:4174/',route=>route.fulfill({contentType:'text/html',body:'<html lang="zh-Hant"><button id="ship" onclick="openInventoryShipment(\'O\',\'I\',this)">確認出貨</button></html>'}));
+  const initialize=async()=>{
+   await page.goto('http://127.0.0.1:4174/');
+   await page.addScriptTag({content:`let currentUser={uid:'buyer'},currentUserRole='purchaser',orderWorkQueueCache=[],warehouseMasterCache=[{id:'B',active:true}];
+    globalThis.YUSHIN_V2_SHIPMENT_EMULATOR=true;globalThis.locationSchemaFlag=true;
+    const app={options:{projectId:'demo-yushin'}};
+    globalThis.firebase={auth:()=>({app,currentUser:{uid:'buyer'},emulatorConfig:{host:'127.0.0.1',port:9099}}),
+     functions:()=>({app,useEmulator:(host,port)=>{if(host!=='127.0.0.1'||port!==5001)throw Error('remote');},httpsCallable:()=>shipmentCallable})};
+    globalThis.db={collection:()=>({doc:()=>({get:async()=>{const data=await shipmentRead();return {exists:true,data:()=>data};}})})};
+    const canReceiveInventoryCapability=()=>true,canAccessPage=()=>true,defaultWarehouse=()=>({id:'B'});
+    const normalizedOrderStatus=()=> 'normal',orderInventorySyncIncomplete=()=>false,normalizedOrderItems=o=>o.items;
+    const itemDispatchState=(o,i)=>({shippable:i.dispatchPreparedQty-i.warehouseShippedQty});
+    const invalidateWarehouseStockCache=()=>{},refreshAffectedOrderCaches=async()=>{},loadOrderWorkQueue=async()=>{},markMainPageDirty=()=>{};
+    const beginActionButton=()=>({}),endActionButton=()=>{},inventoryProductKey=i=>i.productId;
+    const renderInventoryShipping=()=>{},localDateString=()=> '2026-10-19',lifecycleRecordId=()=> 'shipment_browser_123456';
+    let feedback=[];const showActionFeedback=message=>feedback.push(message);
+    globalThis.prompt=(message,def)=>message.includes('日期')?def:'2';globalThis.confirm=()=>true;
+   `});
+   await page.addScriptTag({content:read('modules/warehouse-logistics.js')});
+   await page.addScriptTag({content:read('src/services/warehouse-shipment.js')});
+   await page.addScriptTag({content:read('modules/inventory-workspace.js')});
+   await page.evaluate(async()=>{orderWorkQueueCache=[await shipmentRead()];});
+  };
+  await initialize();await page.locator('#ship').click();
+  const shippingFeedback=await page.evaluate(()=>feedback.slice());
+  assert.ok(shippingFeedback.some(x=>x.includes('response lost')),JSON.stringify({shippingFeedback,errors}));
+  const frozen=await page.evaluate(()=>pendingV2WarehouseShipment('O','I'));
+  assert.equal(frozen.quantity,2);assert.equal(stockWrites,1);
+  await initialize();assert.equal(await page.evaluate(()=>YushinInventoryWorkspace.shippingRows(orderWorkQueueCache,warehouseMasterCache,'B',
+   {status:normalizedOrderStatus,incomplete:orderInventorySyncIncomplete,items:normalizedOrderItems,dispatch:itemDispatchState,pending:pendingV2WarehouseShipment}).length),1);
+  await page.locator('#ship').click();await page.waitForFunction(()=>!pendingV2WarehouseShipment('O','I'));
+  assert.equal(calls,2);assert.equal(stockWrites,1);assert.deepEqual(errors,[]);
+  console.log(`V2 warehouse ${width}px: original shipping button keeps ID across lost reply and reload without duplicate stock debit.`);
+  await page.close();
+ }
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

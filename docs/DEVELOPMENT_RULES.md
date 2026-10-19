@@ -259,3 +259,6 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 
 
 - v2 實體倉分批出貨登入傳輸 `shipV2WarehouseItem` 只存在隔離 `v2-return-callable-adapter`／測試用 Functions source，必須由 Firebase Auth 真實 uid 進入原 `commitLocationShipment`，在資料庫交易重讀 users 當前角色與全部來源，不能接受前端 actorRole 欄位替代授權。原 `functions/index.js` 仍不得匯出；正式 UI、Preview 與部署皆未啟用。修改須先驗真實 Auth／Callable／Firestore Emulator 的出貨與送達不混淆、五角色、偽造 claims、相同 ID 重送與錯意圖拒絕；後續接原倉庫頁時需再補瀏覽器持久 intent／未知回覆恢復／跨頁操作，而非直接把舊 deliveryRecords writer 當作新 shipment。
+
+
+- 原倉庫單筆與批次出貨的 v2 本機試點沿用 `commitInventoryShipment` 與原 `shipV2WarehouseItem` Callable；只能在 localhost/127.0.0.1 的 demo-yushin Auth/Functions/Firestore Emulator 啟用。首次提交前必須儲存凍結的 UID／角色／操作 ID／倉庫／數量／日期／交付方案及同步 ID；未知回覆、角色切換或刷新不可產生另一份實體出貨。完成必須核對 immutable movement ID，回讀 orders 後才解除原 pending。原單與批次兩個入口不得改走另一套扣帳 Service，也不得將 v2 warehouseShipmentRecords 當成客戶 deliveryRecords。原舊式介面、正式 index/Rules 不應因測試閘門而改動；多候選倉選取、客戶送達、真實 Preview 瀏覽器驗收仍為獨立未完門檻。
