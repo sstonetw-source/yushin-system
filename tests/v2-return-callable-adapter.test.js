@@ -25,7 +25,7 @@ test('disabled gate missing authentication and wrong database never call a retur
  assert.equal(reads,1);
 });
 test('production Functions entry never exports the isolated return Callables or their fixture',()=>{
- assert.doesNotMatch(fs.readFileSync('functions/index.js','utf8'),/v2-return-callable|previewV2CustomerReturn|receiveV2CustomerReturn|prepareV2OrderDispatch|shipV2WarehouseItem|confirmV2ShipmentDelivery|v2-return-auth-functions/);
+ assert.doesNotMatch(fs.readFileSync('functions/index.js','utf8'),/v2-return-callable|previewV2CustomerReturn|receiveV2CustomerReturn|prepareV2OrderDispatch|shipV2WarehouseItem|confirmV2ShipmentDelivery|reverseV2ShipmentDelivery|v2-return-auth-functions/);
 });
 test('dispatch baseline is optional for old receipts and is bound to the canonical intent when supplied',()=>{
  const {normalizeLocationDispatchIntent}=require('../functions/location-dispatch-service');
@@ -74,4 +74,17 @@ test('delivery acknowledgement Callable uses the isolated auth gate and existing
  assert.equal(calls,0);
  await assert.rejects(handler({auth:{uid:'A'},data:{actorUid:'spoof'}}),error=>error.code==='failed-precondition');
  assert.equal(calls,1);
+});
+
+test('delivery reversal Callable preserves the isolated environment and authenticated UID boundary',async()=>{
+ class HttpsError extends Error{constructor(code,message){super(message);this.code=code;}}
+ let reads=0;
+ const create=(configuration=env(),projectId='demo-yushin')=>createV2ReturnCallables({
+  onCall:(_settings,handler)=>handler,HttpsError,getDatabase:()=>{reads++;return {projectId};},env:configuration});
+ assert.equal(typeof create().reverseV2ShipmentDelivery,'function');
+ await assert.rejects(create().reverseV2ShipmentDelivery({data:{actorUid:'forged'}}),e=>e.code==='unauthenticated');
+ await assert.rejects(create({...env(),GCLOUD_PROJECT:'preview-20135'}).reverseV2ShipmentDelivery({auth:{uid:'A'},data:{}}),e=>e.code==='failed-precondition');
+ assert.equal(reads,0);
+ await assert.rejects(create(env(),'production').reverseV2ShipmentDelivery({auth:{uid:'A'},data:{}}),e=>e.code==='failed-precondition');
+ assert.equal(reads,1);
 });

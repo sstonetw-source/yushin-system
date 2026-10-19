@@ -97,3 +97,11 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 使用既有 Auth SDK＋隔離 `v2-return-callable-adapter` 新增 `confirmV2ShipmentDelivery`，後端仍直接呼叫原 `commitShipmentDelivery`，執行時重讀 users／orders／physical shipment movement、即時角色／所有權／當前送達額度；成功只更新訂單送達事件與投影，**不再扣庫存**。原「一鍵完成」、「一鍵取消已送貨」、逐筆編輯或刪除在本試點明確拒絕舊路徑，防止物理寄出後被重新扣帳或回補；送達撤銷需後續獨立 v2 入口。原一般路徑不變，沒新增第二套寫入者、Core、Collection、Index 或 Rules。
 
 本批驗證真實 Auth SDK → 原 UI Service → Callable → 原送達 Service → Firestore Emulator，包含來源出貨、同一 ID 回覆遺失後續傳、沒有新 movement／lot／庫存異動，以及匿名／偽造角色／中途降權／失效同步拒絕。原有 UI 來源選單仍需完整真實 Browser Auth（Chrome／Safari）及 Preview 五角色、退貨後已送達撤銷、跨裝置不確定狀態等另外驗收。試點未改正式 Callable index、沒啟用正式 Firebase／正式資料。
+
+## 2026-10-19 送達撤銷的真實登入傳輸驗收
+
+已實作隔離 `reverseV2ShipmentDelivery` Callable，唯一 writer 仍為既有 `reverseShipmentDelivery`，沒有新增撤銷數量公式、實貨交易或另一份履約狀態。Firebase Auth 提供真實 uid，原 Service 在交易內重讀 users 當前角色／active／disabled、訂單所有權、原送達 intent hash 與全單實體出貨 movement；多品項兄弟出貨的壞憑證不能被忽略。僅更正客戶送達確認：不回補實貨、不釋放預留、不改打單、原出貨、批次或退貨。原撤銷 operationId／日期／原因／來源與 actor 均納入原憑證；不明回覆以原 ID 重送，重新簽收使用新的送達確認操作。
+
+新增四項真實 Auth SDK → Callable → 原撤銷 Service → Firestore Emulator 整合，涵蓋單／多品項、五角色、外人、匿名、偽造 payload／claims、即時降權／停權、同 ID 重送與錯意圖、同／不同 ID 並行、失效同步、日期與來源錯誤、兄弟出貨憑證篡改、實物退貨後拒絕，以及撤銷後再次簽收。逐次核對實貨、預留、兩倉、批次及 movement 不變；已提交重送仍檢查當前權限。原後端 transaction 回滾測試保留；本批不將網路回覆丟失等同新增末端寫入失敗注入。
+
+驗收結果以本批完整 CI 為準。僅 localhost demo-yushin Auth／Functions／Firestore Emulator；正式 functions/index.js 不匯出，沒有 Rules、Index、Collection、欄位、Listener 或正式部署變更。**原 UI 撤銷仍關閉**，這批未新增前端 sessionStorage intent、原按鈕或 Chrome 撤銷驗收。後續需接原紀錄逐筆撤銷、未知回覆後刷新／續傳，再做真實 Browser／Preview 全流程。退貨後送達撤銷仍由原 Service 拒絕。

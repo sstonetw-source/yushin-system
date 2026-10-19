@@ -30,6 +30,7 @@ async function identity(tag,role='sales',{profile=true,login=true}={}){
  const functions=getFunctions(app,'asia-east1');connectFunctionsEmulator(functions,'127.0.0.1',5001);
  return {uid,auth,app,functions,dispatch:input=>httpsCallable(functions,'prepareV2OrderDispatch',{timeout:30000})(input).then(r=>r.data),
   ship:input=>httpsCallable(functions,'shipV2WarehouseItem',{timeout:30000})(input).then(r=>r.data),
+  reverse:input=>httpsCallable(functions,'reverseV2ShipmentDelivery',{timeout:30000})(input).then(r=>r.data),
   confirm:input=>httpsCallable(functions,'confirmV2ShipmentDelivery',{timeout:30000})(input).then(r=>r.data),preview:input=>httpsCallable(functions,'previewV2CustomerReturn',{timeout:30000})(input).then(r=>r.data),
   receive:input=>httpsCallable(functions,'receiveV2CustomerReturn',{timeout:30000})(input).then(r=>r.data)};
 }
@@ -431,4 +432,131 @@ test('authenticated delivery Callable refuses anonymous users and a forged role 
  await x.actor.auth.currentUser.getIdToken(true);
  await assert.rejects(x.actor.confirm(input),code('permission-denied'));
  assert.deepEqual(await snapshot(x),before);
+});
+
+function reversalInput(x,tag){
+ return {orderId:x.orderId,itemId:'I',deliveryRecordId:'return_auth_delivery_'+tag,
+  operationId:'reverse_auth_operation_'+tag,syncAttemptId:x.trace.syncAttemptId,
+  date:'2026-10-19',reason:'客戶尚未收到，更正誤登簽收'};
+}
+function assertOnlyDeliveryReversed(before,after,recordId,operationId){
+ const old=before.documents[0],order=after.documents[0];
+ assert.deepEqual(after.documents.slice(1),before.documents.slice(1));
+ assert.deepEqual(after.movements,before.movements);
+ assert.deepEqual(order.warehouseShipmentRecords,old.warehouseShipmentRecords);
+ assert.deepEqual(order.returnRecords,old.returnRecords);
+ assert.deepEqual(order.items.map(({deliveredQty,...rest})=>rest),old.items.map(({deliveredQty,...rest})=>rest));
+ assert.equal(order.deliveredQty,old.deliveredQty-4);
+ assert.equal(order.items[0].deliveredQty,old.items[0].deliveredQty-4);
+ assert.deepEqual(order.items.slice(1),old.items.slice(1));
+ assert.deepEqual(order.deliveryRecords,old.deliveryRecords.filter(row=>row.id!==recordId));
+ const event=order.deliveryHistory.at(-1);
+ assert.equal(event.source,'shipment_confirmation_reversal');assert.equal(event.operationId,operationId);
+ assert.equal(event.recordId,recordId);assert.equal(event.before.qty,4);
+}
+
+test('real Auth delivery reversal corrects acknowledgement only and preserves fixed intent after lost response',async()=>{
+ const tag='reverse-lost-multi',x=await fixture(tag,{role:'sales',cancelled:false,multi:true});
+ const input=reversalInput(x,tag),before=await snapshot(x);
+ // The response is deliberately discarded after the real Callable commits.
+ await assert.rejects((async()=>{await x.actor.reverse(input);throw Error('lost reversal reply');})(),/lost reversal reply/);
+ const after=await snapshot(x);assertOnlyDeliveryReversed(before,after,input.deliveryRecordId,input.operationId);
+ const result=await x.actor.reverse(input);
+ assert.equal(result.status,'already-applied');assert.equal(result.operationId,input.operationId);
+ assert.equal(result.reversedQty,4);assert.equal(result.pendingDeliveryQty,4);
+ assert.deepEqual(await snapshot(x),after);
+ for(const patch of [{reason:'different intent'},{date:'2026-10-20'},{itemId:'I2'}])
+  await assert.rejects(x.actor.reverse({...input,...patch}),code('already-exists'));
+ assert.deepEqual(await snapshot(x),after);
+ // The physical shipment can be acknowledged again using a fresh confirmation,
+ // while the old reversal ID remains a read-only receipt.
+ const confirmation={orderId:x.orderId,itemId:'I',shipmentId:x.trace.shipmentId,
+  quantity:2,date:'2026-10-20',notes:'收到第一批',operationId:'reconfirm_after_reverse_123456',
+  syncAttemptId:x.trace.syncAttemptId};
+ assert.equal((await x.actor.confirm(confirmation)).status,'applied');
+ const reack=await snapshot(x);
+ assert.equal(reack.documents[0].deliveredQty,2);
+ assert.equal((await x.actor.reverse(input)).status,'already-applied');
+ assert.deepEqual(await snapshot(x),reack);
+ assert.deepEqual(reack.documents.slice(1),before.documents.slice(1));
+ assert.deepEqual(reack.movements,before.movements);
+});
+
+test('real Auth delivery reversal checks all five current roles ownership disabled profiles and forged claims',async()=>{
+ for(const role of ['admin','sales','engineer','purchaser','warehouse']){
+  const tag='reverse-role-'+role,x=await fixture(tag,{role,cancelled:false,multi:true});
+  const input=reversalInput(x,tag),before=await snapshot(x);
+  if(['admin','sales','engineer'].includes(role)){
+   const result=await x.actor.reverse(input);assert.equal(result.status,'applied');
+   assertOnlyDeliveryReversed(before,await snapshot(x),input.deliveryRecordId,input.operationId);
+   assert.equal((await x.actor.reverse(input)).status,'already-applied');
+  }else{
+   await accounts.setCustomUserClaims(x.actor.uid,{role:'admin'});await x.actor.auth.currentUser.getIdToken(true);
+   await assert.rejects(x.actor.reverse(input),code('permission-denied'));
+   assert.deepEqual(await snapshot(x),before);
+  }
+ }
+ const tag='reverse-identity',x=await fixture(tag,{role:'sales',cancelled:false});
+ const input=reversalInput(x,tag),before=await snapshot(x);
+ const outsider=await identity('reverse-outsider','sales');
+ const anonymous=await identity('reverse-anonymous','sales',{login:false,profile:false});
+ await assert.rejects(outsider.reverse(input),code('permission-denied'));
+ await assert.rejects(anonymous.reverse(input),code('unauthenticated'));
+ for(const patch of [{actorUid:x.operator.uid},{actorRole:'admin'}])
+  await assert.rejects(x.actor.reverse({...input,...patch}),code('invalid-argument'));
+ for(const profile of [{role:'warehouse'},{role:'sales',active:false},{active:true,disabled:true}]){
+  await db.collection('users').doc(x.actor.uid).update(profile);
+  await accounts.setCustomUserClaims(x.actor.uid,{role:'admin'});await x.actor.auth.currentUser.getIdToken(true);
+  await assert.rejects(x.actor.reverse(input),code('permission-denied'));
+ }
+ assert.deepEqual(await snapshot(x),before);
+});
+
+test('real Auth reversal rejects stale sources physical return and sibling proof corruption without writes',async()=>{
+ const tag='reverse-proof',x=await fixture(tag,{role:'sales',cancelled:false,multi:true});
+ const input=reversalInput(x,tag),before=await snapshot(x);
+ for(const patch of [{syncAttemptId:'stale'},{deliveryRecordId:'missing'},
+  {date:'2026-10-17'},{date:'2026-02-30'},{reason:' '},{itemId:'I2'},
+  {operationId:input.deliveryRecordId}]){
+  await assert.rejects(x.actor.reverse({...input,...patch}),e=>['functions/failed-precondition','functions/invalid-argument','functions/already-exists'].includes(e.code));
+  assert.deepEqual(await snapshot(x),before);
+ }
+ // A real physical return prevents erasing the acknowledgement backing it.
+ await x.actor.receive(x.intent);
+ const returned=await snapshot(x);
+ await assert.rejects(x.actor.reverse(input),code('failed-precondition'));
+ assert.deepEqual(await snapshot(x),returned);
+ const second='reverse-sibling-proof',y=await fixture(second,{role:'sales',cancelled:false,multi:true});
+ const order=await y.data('orders',y.orderId),plan=order.items[1].deliveryPlan;
+ await commitLocationDispatchPreparation(db,y.operator.uid,{orderId:y.orderId,itemId:'I2',quantity:1,
+  syncAttemptId:y.trace.syncAttemptId,operationId:'reverse_sibling_dispatch_123456'});
+ const shipmentId='reverse_sibling_shipment_123456';
+ await commitLocationShipment(db,y.operator.uid,{orderId:y.orderId,itemId:'I2',warehouseId:'AUTH-B',quantity:1,
+  syncAttemptId:y.trace.syncAttemptId,operationId:shipmentId,date:'2026-10-19',expectedPlan:plan});
+ const ref=db.collection('inventoryMovements').doc('location-ship-'+shipmentId);
+ await ref.update({intentHash:'tampered'});
+ const corrupt=await snapshot(y);
+ await assert.rejects(y.actor.reverse(reversalInput(y,second)),code('failed-precondition'));
+ assert.deepEqual(await snapshot(y),corrupt);
+});
+
+test('real Auth reversal serializes identical and competing IDs and keeps already-applied replay under current authorization',async()=>{
+ for(const same of [true,false]){
+  const tag='reverse-race-'+same,x=await fixture(tag,{role:'sales',cancelled:false,multi:true});
+  const input=reversalInput(x,tag),before=await snapshot(x);
+  const other=same?input:{...input,operationId:input.operationId+'_other'};
+  const results=await Promise.allSettled([x.actor.reverse(input),x.actor.reverse(other)]);
+  const passed=results.filter(r=>r.status==='fulfilled').map(r=>r.value);
+  if(same)assert.deepEqual(passed.map(r=>r.status).sort(),['already-applied','applied']);
+  else{
+   assert.equal(passed.length,1);assert.equal(passed[0].status,'applied');
+   assert.equal(results.filter(r=>r.status==='rejected').length,1);
+  }
+  const after=await snapshot(x);
+  assertOnlyDeliveryReversed(before,after,input.deliveryRecordId,passed.find(r=>r.status==='applied').operationId);
+  assert.equal(after.documents[0].deliveryHistory.filter(r=>r.source==='shipment_confirmation_reversal').length,1);
+  await db.collection('users').doc(x.actor.uid).update({disabled:true});
+  await assert.rejects(x.actor.reverse({...input,operationId:passed[0].operationId}),code('permission-denied'));
+  assert.deepEqual(await snapshot(x),after);
+ }
 });
