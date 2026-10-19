@@ -74,3 +74,8 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 新增五項 Node 測試與四項 Auth SDK→原 UI handler／Service→Functions SDK→原 writer→Firestore 整合：多品項含同商品及另一商品、admin／purchaser 的不明回覆／重新載入原 ID、五角色、即時降權／claim 偽造、未登入／payload UID／停用、同 ID／競爭 ID／打單基準與同步版本。既有八組 Chrome 中，打單 suite 加測1280／390px 原兩頁 renderer 與 click handler，在尚未確認送達的實體出貨後使用正確 Core 額度並跨頁重試；其 Callable 為 scripted local transport，真實 Auth／Backend 由獨立整合測試驗證，不宣稱完整 Browser Auth／Preview E2E。
 
 本地 Node1571/1571、建置同步／語法／diff 通過；完整新增 Auth、Chrome 與既有全部 Emulator／Rules 以本批 CI 為準。v2 初始化、收貨、出貨、送達、取消／恢復與退貨的正式傳輸／UI／Preview 全線仍待逐步接線。
+
+
+## 2026-10-19 v2 分批出貨的下一階段傳輸準備
+
+沿用原 `commitLocationShipment`，由隔離 v2 Auth Callable adapter 增設 `shipV2WarehouseItem`，僅供真實 SDK／Auth／Firestore Emulator 端對端的後端路徑驗證。保留身份／即時角色、固定 operationId、原同步 ID、寄送方案及完整批次扣帳，不增加另一套出貨算法。實體出貨不等於客戶送達；原介面、正式 Callable export 與一般出貨流程不變。仍待接原倉庫頁的 v2 intent／刷新／未知回覆及桌機／手機操作，再完成 Preview 真實瀏覽器驗收。
