@@ -72,6 +72,6 @@ test('delivery acknowledgement Callable uses the isolated auth gate and existing
  await assert.rejects(create({FUNCTIONS_EMULATOR:'false'}).confirmV2ShipmentDelivery({auth:{uid:'A'},data:{}}),
   error=>error.code==='failed-precondition');
  assert.equal(calls,0);
- await assert.rejects(handler({auth:{uid:'A'},data:{actorUid:'spoof'}}),error=>error.code==='invalid-argument');
+ await assert.rejects(handler({auth:{uid:'A'},data:{actorUid:'spoof'}}),error=>error.code==='failed-precondition');
  assert.equal(calls,1);
 });
