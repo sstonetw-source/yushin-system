@@ -44,3 +44,10 @@ runner固定--project demo-yushin、--only firestore,auth,functions；不接受�
 新增五項 Node 測試與四項 Auth SDK→原 UI handler／Service→Functions SDK→原 writer→Firestore 整合：多品項含同商品及另一商品、admin／purchaser 的不明回覆／重新載入原 ID、五角色、即時降權／claim 偽造、未登入／payload UID／停用、同 ID／競爭 ID／打單基準與同步版本。既有八組 Chrome 中，打單 suite 加測1280／390px 原兩頁 renderer 與 click handler，在尚未確認送達的實體出貨後使用正確 Core 額度並跨頁重試；其 Callable 為 scripted local transport，真實 Auth／Backend 由獨立整合測試驗證，不宣稱完整 Browser Auth／Preview E2E。
 
 本地 Node1571/1571、建置同步／語法／diff 通過；完整新增 Auth、Chrome 與既有全部 Emulator／Rules 以本批 CI 為準。v2 初始化、收貨、出貨、送達、取消／恢復與退貨的正式傳輸／UI／Preview 全線仍待逐步接線。
+
+
+## 2026-10-19 實體倉分批出貨的隔離 Auth 傳輸
+
+在同一個只供本機 demo-yushin 的 v2 Auth／Functions／Firestore Emulator adapter 新增 `shipV2WarehouseItem`，直接呼叫已存在的 `commitLocationShipment`，不建立第二個出貨 writer。沿用原 adapter 的真實 Firebase 登入 token、Emulator 閘門、projectId 檢查、業務錯誤轉換及交易內 users 即時角色驗證；請求不得帶 actor 身分或自訂權限。原 Service 驗證庫存來源同步、完整 1–5 品項證據、倉庫、批次、打單額度、出貨意圖與固定 operationId；出貨扣實貨／預留，但不視為客戶送達。
+
+新增真正 Auth SDK → Callable → 原 shipment Service → Firestore 的第二倉部分出貨、原 ID 重送、意圖碰撞、五角色／中途降權／偽造 token claims、未登入與無效資料拒絕測試。此批**只補齊後端傳輸驗證入口**，原倉庫出貨 UI 尚未改走 v2，正式 `functions/index.js` 沒有匯出；不代表 Browser Auth／Preview E2E 已完成。未部署 Firebase、未修改正式資料，須待完整 CI 及後續介面接線再評估啟用。
