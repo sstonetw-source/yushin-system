@@ -19822,7 +19822,7 @@ function renderDeliveryModal() {
                 const origin=(order.warehouseShipmentRecords||[]).find(s=>s.id===row.shipmentId);
                 return `<option value="${escapeAttr(row.shipmentId)}">${escapeHtml(origin?.date||'')}／${escapeHtml(origin?.warehouseId||'')}／待確認 ${row.pendingQty}</option>`;
             }).join('');
-            field.value=frozen?.shipmentId||options.some(row=>row.shipmentId===old)?(frozen?.shipmentId||old):'';
+            field.value=frozen?.shipmentId||(options.some(row=>row.shipmentId===old)?old:'');
             field.disabled=!!frozen;
         }catch(error){
             field.innerHTML='<option value="">無法核對來源出貨：'+escapeHtml(error.message)+'</option>';
@@ -19911,7 +19911,8 @@ window.saveDeliveryRecord = async function() {
     }
     if (pendingDeliveryOrderIds.has(orderId)) return;
     const itemId=document.getElementById('deliveryItemId')?.value||'';
-    const fingerprint=JSON.stringify([orderId,itemId,date,qty,notes]);
+    const shipmentChoice=document.getElementById('deliveryShipmentId')?.value||'';
+    const fingerprint=JSON.stringify([orderId,itemId,shipmentChoice,date,qty,notes]);
     if(!editId&&deliveryCreateAttempt?.fingerprint!==fingerprint)
         deliveryCreateAttempt={fingerprint,recordId:deliveryRecordId()};
     const frozen=globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true?pendingV2DeliveryConfirmation(orderId):null;
