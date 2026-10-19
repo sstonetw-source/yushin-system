@@ -15905,8 +15905,8 @@ async function validateV2ReceiptSource(transaction, {order,supply,reservation,it
     if(order.items.length>1){
         // Validate the whole event set before selecting the receiving line.
         // A sibling acknowledgement is never this line's outstanding demand.
-        if(cancelled||order.inventoryReservationStatus!=='completed'||!order.inventoryReservationAttemptId)
-            throw new Error('多品項收貨僅支援已完成初始化的正常訂單。');
+        if(order.inventoryReservationStatus!=='completed'||!order.inventoryReservationAttemptId)
+            throw new Error('多品項收貨僅支援已完成初始化的訂單。');
         wholeShipment=globalThis.YushinFulfillment.projectOrderShipmentReturns({orderId,items:order.items,
             shipments:order.warehouseShipmentRecords??[],deliveries:order.deliveryRecords??[],returns:order.returnRecords??[]});
         if((order.warehouseShipmentRecords??[]).length>40)
@@ -15937,7 +15937,7 @@ async function validateV2ReceiptSource(transaction, {order,supply,reservation,it
                 ||!Array.isArray(ledger.lifecycleWarehouseIds)||ledger.lifecycleWarehouseIds.length!==2
                 ||new Set(ledger.lifecycleWarehouseIds).size!==2||ledger.lifecycleWarehouseIds.some(wh=>!candidates.includes(wh))
                 ||integer(ledger.quantity,'品項預留')!==row.reservedQty||integer(ledger.shortageQty,'品項缺口')!==row.shortageQty
-                ||ledger.status!==(ledger.quantity>0?'active':ledger.shortageQty>0?'shortage':'fulfilled')
+                ||ledger.status!==(cancelled?'released':ledger.quantity>0?'active':ledger.shortageQty>0?'shortage':'fulfilled')
                 ||integer(row.supplyOrderedQty??0,'品項供應量')<integer(row.receivedQty??0,'品項收貨量'))
                 throw new Error('多品項收貨的完整預留來源或供應投影不一致。');
             const projection=wholeShipment.items.find(part=>part.itemId===rowId);
@@ -15946,7 +15946,11 @@ async function validateV2ReceiptSource(transaction, {order,supply,reservation,it
                 ||integer(row.returnedQty??0,'品項退貨')!==projection.returnedQty
                 ||integer(row.dispatchPreparedQty??0,'品項打單')<projection.shippedQty
                 ||integer(row.dispatchPreparedQty??0,'品項打單')>ordered
-                ||ledger.quantity+ledger.shortageQty!==projection.outstandingQty)
+                ||(cancelled
+                    ?ledger.quantity!==0||ledger.shortageQty!==0
+                        ||globalThis.YushinReservation.reservationLocations(ledger).length!==0
+                        ||projection.pendingDeliveryQty!==0||(row.dispatchPreparedQty??0)!==projection.shippedQty
+                    :ledger.quantity+ledger.shortageQty!==projection.outstandingQty))
                 throw new Error('多品項收貨預留與來源剩餘需求不一致。');
             const held=globalThis.YushinReservation.reservationStockDeltas({},ledger);
             if(held.warehouseDeltas.some(change=>!candidates.includes(change.warehouseId)))
