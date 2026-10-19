@@ -2283,7 +2283,7 @@ test('cancelled multi-item receiving rejects live sibling holds incomplete decis
   ['service',x=>db.collection('products').doc(x.q).update({productType:'SERVICE'})],
   ['demand',x=>db.collection('procurementDemands').doc(encodeURIComponent('SALES_ORDER:'+x.orderId+':I1')).update({cancelled:false,status:'ORDERED'})],
   ['po',x=>db.collection('purchaseOrders').doc(x.po.poNo).update({supplyOrderIds:[]})],
-  ['paper',async x=>{const o=await x.read('orders',x.orderId);o.items[2].dispatchPreparedQty=1;await db.collection('orders').doc(x.orderId).update({items:o.items});}],
+  ['paper',async x=>{const o=await x.read('orders',x.orderId);o.items[2].dispatchPreparedQty=(o.items[2].warehouseShippedQty??0)+1;await db.collection('orders').doc(x.orderId).update({items:o.items});}],
   ['proof',async x=>{const o=await x.read('orders',x.orderId);await db.collection('inventoryMovements').doc(o.returnRecords.find(r=>r.itemId==='I3').movementId).update({intentHash:'forged'});}]
  ];
  for(const [name,mutate] of cases){const x=await cancelledMultiReceiptFixture('bad-'+name,{closed:true});await mutate(x);const before=await wholeLifecycleSnapshot(x);
