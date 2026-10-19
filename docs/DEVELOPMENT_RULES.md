@@ -174,3 +174,8 @@ CLOSE 後取消／恢復仍拒絕未整合的退貨刪除／更正歷史，不�
 ### 2026-10-19 多品項送達實作與測試邊界
 
 新增多品項送達必須沿用 `commitShipmentDelivery`，不能複製送達 Service 或重算數量；`projectOrderShipmentReturns` 是跨品項履約合計唯一權威來源。所有 sibling 出貨需核對 immutable movement，所有退貨證明需走原 reader。測試真實 Emulator 競態、憑證篡改、角色更新、重送與回滾；CI 全通過前不得合併，更不得開啟正式 Callable 或 UI。詳見 [本批契約](multi-item-delivery-20261019.md)。
+
+
+### 2026-10-19 多品項送達撤銷（已實作、待本批 CI）
+
+多品項撤銷必須沿用 reverseShipmentDelivery／projectOrderShipmentReturns，驗證全單出貨 proof 及隱藏退貨，不可逐項 filter 掩蓋其他品項。固定 ID 重送只回原結果。 僅 demo-yushin Emulator；未接正式 UI／Callable、未部署 Firebase，完整 Preview 仍未驗收。詳見 [同一份送達契約與驗收範圍](multi-item-delivery-20261019.md)。

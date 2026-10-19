@@ -72,8 +72,8 @@ function shipmentDeliveryContext(order,intent,{allowReturns=false,allowCancelled
    fault('出貨或客戶送達投影不一致');
   return {item,productKey,projection,returnProjection,cancelled};
 }
-// Multi-line confirmation is isolated from the single-item return/reversal
-// contracts. A delivery is an acknowledgement, never another stock movement.
+// Shared multi-line acknowledgement/correction context. Physical returns keep
+// their existing single-item contract until their writer is integrated.
 function multiShipmentDeliveryContext(order,intent){
  const {orderId,itemId,syncAttemptId}=intent;
  if(order.inventoryReservationStatus!=='completed'||order.inventoryReservationAttemptId!==syncAttemptId)
@@ -125,6 +125,12 @@ async function readShipmentProof(tx,db,order,intent,productKey) {
   if(proof.intentHash!==originalIntent.hash)fault('來源倉庫出貨與實際扣帳憑證不一致');
   return shipment;
 }
+async function readWholeOrderShipmentProofs(tx,db,order,intent){
+ const shipments=order.warehouseShipmentRecords??[];
+ if(shipments.length>40)fault('多品項歷史出貨憑證超過本試點安全上限');
+ for(const row of shipments)await readShipmentProof(tx,db,order,
+  {...intent,itemId:row.itemId,shipmentId:row.id},row.productKey);
+}
 async function commitShipmentDelivery(db,uid,data){
  if(!process.env.FIRESTORE_EMULATOR_HOST||db.projectId!=='demo-yushin')
   fault('送達確認目前僅允許 demo-yushin Emulator');
@@ -151,12 +157,7 @@ async function commitShipmentDelivery(db,uid,data){
   // All physical debits are checked, not merely the selected shipment.
   // This prevents a sibling's missing/corrupt immutable debit from being
   // concealed by an otherwise valid order-level delivery projection.
-  if(multi){
-   const shipments=order.warehouseShipmentRecords??[];
-   if(shipments.length>40)fault('多品項歷史出貨憑證超過本試點安全上限');
-   for(const row of shipments)await readShipmentProof(tx,db,order,
-    {...intent,itemId:row.itemId,shipmentId:row.id},row.productKey);
-  }
+  if(multi)await readWholeOrderShipmentProofs(tx,db,order,intent);
   const shipment=await readShipmentProof(tx,db,order,intent,productKey);
   const expectedMovementId=shipment.movementId;
   const now=new Date().toISOString();
@@ -220,9 +221,19 @@ async function reverseShipmentDelivery(db,uid,data){
   }
   if(order.deliveryRecords.some(row=>row.id===operationId)||history.some(row=>row.recordId===operationId))
    fault('撤銷識別碼與既有送達操作衝突','already-exists');
-  const {item,productKey}=shipmentDeliveryContext(order,intent);
+  const multi=Array.isArray(order.items)&&order.items.length>1;
+  const {item,productKey}=multi?multiShipmentDeliveryContext(order,intent):shipmentDeliveryContext(order,intent);
+  if(multi){
+   // Reversing an acknowledgement with a physical return requires a separate
+   // return-correction contract. Do not erase the evidence backing that return.
+   if(order.returnRecords.length)fault('退貨後的送達撤銷尚未開放');
+   await readLocationReturnProofs(tx,db,order,intent,productKey,{closedOnly:true});
+   await readWholeOrderShipmentProofs(tx,db,order,intent);
+  }
   const target=order.deliveryRecords.find(row=>row.id===deliveryRecordId);
   if(!target)fault('原送達紀錄已移除或不存在');
+  if(target.itemId!==itemId||target.productKey!==productKey||target.orderId!==orderId)
+   fault('原送達紀錄與選定品項不一致');
   if(intent.date<target.date)fault('撤銷日期不得早於送達日期');
   const original=normalizeDeliveryIntent({orderId,itemId,shipmentId:target.shipmentId,quantity:target.qty,
    date:target.date,notes:target.notes,operationId:target.id,syncAttemptId});
@@ -230,18 +241,22 @@ async function reverseShipmentDelivery(db,uid,data){
    fault('原送達紀錄意圖不一致');
   await readShipmentProof(tx,db,order,{...intent,shipmentId:target.shipmentId},productKey);
   const records=order.deliveryRecords.filter(row=>row.id!==deliveryRecordId);
-  const next=core.projectShipmentDelivery({orderId,itemId,productKey,orderedQty:item.qty??item.orderedQty,
-   shipments:order.warehouseShipmentRecords,deliveries:records});
+  const nextWhole=multi?core.projectOrderShipmentReturns({orderId,items:order.items,
+   shipments:order.warehouseShipmentRecords??[],deliveries:records,returns:order.returnRecords}):null;
+  const next=nextWhole?nextWhole.items.find(row=>row.itemId===itemId):
+   core.projectShipmentDelivery({orderId,itemId,productKey,orderedQty:item.qty??item.orderedQty,
+    shipments:order.warehouseShipmentRecords,deliveries:records});
   const result={orderId,itemId,deliveryRecordId,reversedQty:target.qty,
-   confirmedQty:next.confirmedQty,pendingDeliveryQty:next.pendingDeliveryQty,isDelivered:next.isDelivered};
+   confirmedQty:next.confirmedQty,pendingDeliveryQty:next.pendingDeliveryQty,isDelivered:(nextWhole??next).isDelivered};
+  if(nextWhole)result.itemIsDelivered=next.isDelivered;
   const now=new Date().toISOString();
   const event={action:'delete',source:'shipment_confirmation_reversal',orderId,itemId,
    recordId:deliveryRecordId,operationId,before:target,after:null,date:intent.date,reason:intent.reason,
    actorUid:uid,actorRole,by:uid,at:now,intentHash:intent.hash,result};
   // Correct only customer acknowledgement; the goods remain physically shipped.
   tx.update(orderRef,{deliveryRecords:records,deliveryHistory:[...history,event],
-   items:[{...item,deliveredQty:next.confirmedQty}],deliveredQty:next.confirmedQty,
-   isDelivered:next.isDelivered,updatedAt:now});
+   items:order.items.map(row=>row.itemId===itemId?{...row,deliveredQty:next.confirmedQty}:row),
+   deliveredQty:(nextWhole??next).confirmedQty,isDelivered:(nextWhole??next).isDelivered,updatedAt:now});
   return {...result,status:'applied',operationId};
  });
 }
