@@ -124,6 +124,9 @@ const scripts=[read('modules/fulfillment-core.js'),read('modules/order-entry-cor
    await page.evaluate(async()=>{orderWorkQueueCache=[await shipmentRead()];});
   };
   await initialize();await page.locator('#ship').click();
+  // A click completes event dispatch, not the async Auth/Callable handler.
+  // Observe its feedback before asserting the lost-response retry contract.
+  await page.waitForFunction(()=>feedback.length>0);
   const shippingFeedback=await page.evaluate(()=>feedback.slice());
   assert.ok(shippingFeedback.some(x=>x.includes('response lost')),JSON.stringify({shippingFeedback,errors}));
   const frozen=await page.evaluate(()=>pendingV2WarehouseShipment('O','I'));
