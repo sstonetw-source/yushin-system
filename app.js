@@ -19306,7 +19306,7 @@ async function commitV2WarehouseShipmentEmulator(input){
  const {orderId,itemId,qty,date,notes,operationId,expectedWarehouseId,expectedPlan}=input;
  if(!/^[-_a-zA-Z0-9]{12,96}$/.test(operationId||'')||!Number.isSafeInteger(qty)||qty<=0||!expectedWarehouseId
   ||typeof notes!=='string'||notes.length>1000||typeof date!=='string'
-  ||!/^\\d{4}-\\d{2}-\\d{2}$/.test(date)||!Number.isFinite(Date.parse(date+'T00:00:00Z'))
+  ||!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(Date.parse(date+'T00:00:00Z'))
   ||new Date(date+'T00:00:00Z').toISOString().slice(0,10)!==date)
   throw Error('v2 出貨識別碼、倉庫或數量不正確。');
  const plan=globalThis.YushinWarehouseLogistics.validatePlan(expectedPlan,true);
