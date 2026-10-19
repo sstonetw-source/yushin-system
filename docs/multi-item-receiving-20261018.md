@@ -42,7 +42,20 @@
 
 ## 待完成
 
-1. 多品項開始打單／出貨／送達後的分批收貨，須先有權威整單履約投影與原憑證核對，不能把品項 deliveredQty 當成訂單總量。
+1. 多品項無退貨的履約後收貨已接入原 Service，見下方 2026-10-19 增補；新增真實 Emulator 案例尚待本批 CI 驗收。退貨後收貨與取消 KEEP_STOCK 仍未整合。
 2. 多品項取消剩餘、恢復、退貨及取消後 KEEP_STOCK 收貨；混合服務／直送、超過五品項等獨立契約。
 3. 真實 Auth 初始化／收貨傳輸與 Preview UI 接線，以及完整桌機／手機登入 E2E；v2 正式閘門在此之前保持關閉。
 4. PR #131 仍為草稿失敗分析，不併入既有交易機制。
+
+
+## 2026-10-19 增補：部分履約後再收貨（基準 main 69655cd0／PR #176）
+
+已實作、待本批 CI：移除原多品項「任何打單／出貨即拒絕」的階段限制，以原 `projectOrderShipmentReturns` 先驗證全部 items／出貨／送達事件，再查核每一個原不可變出貨 movement 的扣帳與批次分配。只有整單驗證成功後才將選定 item 的事件傳給原 `Receiving.applyReceiptToOrderItem`／Workflow／Reservation Core。尚未送達的實體出貨不得重新預留；整單 deliveredQty／isDelivered 用整單權威投影核對，不能誤用選定品項合計。
+
+所有兄弟來源、產品主檔、原 v2 ledger、公司／分倉同產品合計持有量與供應／需求／採購單查核保留。已出完的兄弟 ledger 合法為 fulfilled；新收貨不得改寫其品項、出貨、送達或更正歷史。收貨仍只更新原選定供應、庫存、批次、成本、receipt、ledger、需求及品項收貨進度，不更新送達事件。原 fixed receipt ID／actor／role、回覆遺失、交易競態與原子提交契約不變。
+
+新增九項真實 Emulator 案例：已打單／待送達／部分及全部確認後收貨、三品項兩產品完整12件物流閉環、同產品五列與 fulfilled sibling、實際送達撤銷後收貨、收貨與送達／另一品項出貨同時提交、另一產品 sibling 憑證損壞／隱藏退貨／錯事件及來源狀態、五角色與停用／回覆遺失、獨立已存在文件的 ALREADY_EXISTS 末端回滾、同 ID／超額競爭。全部沿原整單初始化、正式 PO、在途、收貨、打單、出貨、確認及撤銷 Services；僅原始庫存／批次及顧客寄送資料為合成 fixture。
+
+讀寫效能：整單歷史出貨上限40，首次每份增加一個 movement 文件讀取，沒有新查詢（空退貨仍查原有 sourceId＋action query）、Collection、持久欄位、Index、Rules 或 Listener。原多品項 ledger／master 查核讀取保留。重送維持既有 receipt 快速回查，不重複入庫。
+
+範圍仍限 demo-yushin Emulator、2–5個正常實體倉品項、completed初始化、兩個原候選倉且整單無退貨／調撥。多品項退貨後收貨、取消／恢復、KEEP_STOCK、服務／直送混單仍拒絕；單品項既有 CLOSE／取消收貨契約維持。正式 UI／Callable／環境閘門未開啟，沒有 Firebase 部署或正式資料遷移。新增驗收使用 Admin SDK adapter，Chrome 是既有記憶體傳輸；真實 Auth Browser／Preview全線E2E尚未驗收。本地 Node1557/1557通過，完整新增交易／Rules／Auth／Chrome以本批CI為準。
