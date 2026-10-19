@@ -1,5 +1,94 @@
-// Existing physical return writers, shared by receiving and hold-release UI.
+// Customer cancellation/return writers shared by the existing UI actions.
 // No prompts, DOM, query rendering or second inventory implementation.
+function customerReturnPendingQty(order, itemId, excludeId='') {
+    return (order.returnRequests||[]).filter(r=>r.itemId===itemId && r.id!==excludeId && r.status==='PENDING')
+        .reduce((sum,r)=>sum+Math.max(0,Number(r.qty)-Number(r.receivedQty||0)),0);
+}
+function customerReturnActorContext(capability) {
+    const actorUid=currentUser?.uid,actorRole=typeof currentUserRole==='undefined'?null:currentUserRole;
+    const assertCurrent=()=>{
+        if(!actorUid||currentUser?.uid!==actorUid
+            ||(typeof currentUserRole==='undefined'?null:currentUserRole)!==actorRole||!capability())
+            throw new Error('登入帳號或權限已變更，請重新開啟作業。');
+    };
+    assertCurrent();return {actorUid,assertCurrent};
+}
+async function commitCustomerReturnRequest({orderId,itemId,operationId,qty,date,reason=''}) {
+    const {actorUid,assertCurrent}=customerReturnActorContext(()=>canManageOrderLifecycleCapability());
+    if([orderId,itemId,operationId].some(id=>typeof id!=='string'||!id||id!==id.trim()||id.includes('/')||id.length>160)
+        ||!Number.isFinite(qty)||qty<=0||typeof reason!=='string'
+        ||typeof date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(date)
+        ||!Number.isFinite(Date.parse(date+'T00:00:00Z'))
+        ||new Date(date+'T00:00:00Z').toISOString().slice(0,10)!==date)
+        throw new Error('退貨品項、日期或數量不正確。');
+    reason=reason.trim();const actor=deliveryActor();let saved;
+    await runRoleTransaction(async tx=>{
+        assertCurrent();const ref=db.collection('orders').doc(orderId),snap=await tx.get(ref);assertCurrent();
+        if(!snap.exists)throw new Error('找不到訂單。');const order={...snap.data(),id:orderId};
+        const requests=[...(order.returnRequests||[])],prior=requests.find(r=>r.id===operationId);
+        if(prior){
+            if(prior.itemId!==itemId||prior.qty!==qty||prior.date!==date||prior.reason!==reason
+                ||prior.settlement!=='CLOSE'||prior.createdByUid!==actorUid)
+                throw new Error('退貨申請識別碼已對應其他內容，請先查詢原申請結果。');
+            saved=order;return;
+        }
+        const item=normalizedOrderItems(order).find(i=>i.itemId===itemId);if(!item)throw new Error('找不到原送貨品項。');
+        const allowed=returnItemDeliveredQty(order,itemId)-returnItemReturnedQty(order,itemId)-customerReturnPendingQty(order,itemId);
+        if(requests.length>=30)throw new Error('每張訂單最多 30 次退貨申請，請先處理既有申請。');
+        if(qty>allowed+1e-9)throw new Error(`最多可申請 ${Math.max(0,allowed)} 個；已扣除其他待收退貨。`);
+        const now=new Date().toISOString(),record={id:operationId,itemId,qty,receivedQty:0,date,reason,status:'PENDING',settlement:'CLOSE',createdAt:now,createdBy:actor,createdByUid:actorUid};
+        requests.push(record);const patch={returnRequests:requests,returnPending:true,returnRequestMutationIndex:requests.length-1,updatedAt:now};
+        assertCurrent();tx.update(ref,patch);saved={...order,...patch};
+    });
+    assertCurrent();return saved;
+}
+async function commitCustomerReturnWithdrawal({orderId,requestId}) {
+    const {actorUid,assertCurrent}=customerReturnActorContext(()=>canManageOrderLifecycleCapability());let saved;
+    await runRoleTransaction(async tx=>{
+        assertCurrent();const ref=db.collection('orders').doc(orderId),snap=await tx.get(ref);assertCurrent();
+        if(!snap.exists)throw new Error('找不到訂單。');const order={...snap.data(),id:orderId},requests=[...(order.returnRequests||[])];
+        const index=requests.findIndex(r=>r.id===requestId);if(index<0)throw new Error('找不到退貨申請。');
+        if(requests[index].status!=='PENDING'){saved=order;return;}
+        const now=new Date().toISOString();requests[index]={...requests[index],status:'CANCELLED',cancelledAt:now,cancelledBy:actorUid};
+        const patch={returnRequests:requests,returnPending:requests.some(r=>r.status==='PENDING'),returnRequestMutationIndex:index,updatedAt:now};
+        assertCurrent();tx.update(ref,patch);saved={...order,...patch};
+    });
+    assertCurrent();return saved;
+}
+async function commitCancelledPurchaseKeepStock({supplyId,warehouseId,expectedDirect}) {
+    const {actorUid,assertCurrent}=customerReturnActorContext(()=>canCreatePurchaseOrderCapability());let saved;
+    const actor=deliveryActor();
+    if(typeof expectedDirect!=='boolean')throw new Error('缺少原採購收貨方式。');
+    await runRoleTransaction(async tx=>{
+        assertCurrent();const ref=supplyOrdersCollection().doc(supplyId),snap=await tx.get(ref);assertCurrent();
+        if(!snap.exists)throw new Error('找不到採購品項。');const supply={...snap.data(),id:supplyId};
+        const orderSnap=await tx.get(db.collection('orders').doc(supply.orderId));assertCurrent();
+        if(!orderSnap.exists||normalizedOrderStatus(orderSnap.data())==='normal')throw new Error('客戶訂單未取消，請重新確認。');
+        if(isPurchaseTerminalStatus(supply.status))throw new Error('採購已取消／結案。');
+        if(supply.customerCancellationDisposition==='KEEP_STOCK'){saved=supply;return;}
+        const remaining=Math.max(0,Number(supply.qty||0)-Number(supply.receivedQty||0));
+        if(!remaining)throw new Error('此品項已全部到貨。');
+        const key=String(supply.productKey||supply.productId||''),redirect=supply.fulfillmentType==='DIRECT_SHIP';
+        if(redirect!==expectedDirect)throw new Error('採購收貨方式已變更，請更新清單後重新確認。');
+        if(redirect)await assertActiveReturnWarehouse(tx,warehouseId);
+        const invRef=redirect?db.collection('inventory').doc(encodeURIComponent(key)):null;
+        const whRef=redirect?db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,key)):null;
+        const invSnap=invRef?await tx.get(invRef):null,whSnap=whRef?await tx.get(whRef):null;
+        if(redirect&&!key)throw new Error('缺少產品識別碼。');
+        const now=new Date().toISOString(),patch={customerCancellationDisposition:'KEEP_STOCK',customerCancellationResolvedAt:now,customerCancellationResolvedBy:actorUid,updatedAt:now};
+        assertCurrent();
+        if(redirect){
+            Object.assign(patch,{originalFulfillmentType:'DIRECT_SHIP',fulfillmentType:'WAREHOUSE',warehouseId,redirectInventoryId:encodeURIComponent(key),redirectWarehouseStockId:warehouseStockDocId(warehouseId,key),incomingRegisteredQty:remaining});
+            const info={productKey:key,productId:supply.productId||key,itemCode:supply.itemCode||'',itemName:supply.itemName||'',brand:supply.brand||'',updatedAt:now};
+            tx.set(invRef,{...info,incoming:Number(invSnap?.data()?.incoming||0)+remaining},{merge:true});
+            tx.set(whRef,{...info,warehouseId,incoming:Number(whSnap?.data()?.incoming||0)+remaining},{merge:true});
+            tx.set(db.collection('inventoryMovements').doc('redirect-'+supplyId),{type:'cancelled_direct_ship_redirect',qty:remaining,productKey:key,warehouseId,sourceType:'SUPPLY_ORDER',sourceId:supplyId,createdAt:now,createdBy:actor});
+        }
+        tx.update(ref,patch);saved={...supply,...patch};
+        // runRoleTransaction mirrors supply changes to the receiving view atomically.
+    });
+    assertCurrent();return saved;
+}
 async function postCustomerReturnStock(tx,order,item,qty,receiptId,warehouseId){
     const itemDeliveries=savedDeliveryRecords(order).filter(r=>r.itemId===item.itemId||(!r.itemId&&order.items.length===1));
     const itemReturns=savedReturnRecords(order).filter(r=>r.itemId===item.itemId||(!r.itemId&&order.items.length===1));

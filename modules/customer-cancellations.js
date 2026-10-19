@@ -3,10 +3,6 @@ const customerReturnActionsPending = new Set();
 let customerReturnOrders = [];
 let customerReturnHasMore = false;
 let customerReturnCursor = null;
-function customerReturnPendingQty(order, itemId, excludeId='') {
-    return (order.returnRequests||[]).filter(r=>r.itemId===itemId && r.id!==excludeId && r.status==='PENDING')
-        .reduce((sum,r)=>sum+Math.max(0,Number(r.qty)-Number(r.receivedQty||0)),0);
-}
 function customerCancellationActions(supply) {
     if(supply.customerCancellationDisposition==='KEEP_STOCK')return `${supplyCancelActionHtml(supply)} <button type="button" onclick="openSupplyReceipt(${inlineJsValue(supply.id)})">到貨入庫</button>`;
     return `<strong>採購待確認</strong><button type="button" class="btn-danger" onclick="confirmSupplierCancellation(${inlineJsValue(supply.id)})">供應商同意取消</button><button type="button" class="btn-secondary" onclick="keepCancelledPurchaseAsStock(${inlineJsValue(supply.id)})">不同意取消・到貨轉庫存</button>`;
@@ -32,37 +28,7 @@ window.keepCancelledPurchaseAsStock=async function(id){
     if(!confirm('供應商不同意取消：保留在途採購，實際到貨後轉為自由庫存。'+(direct?'供應商已確認改送所選倉庫？':'')))return;
     customerReturnActionsPending.add(id);
     try{
-        let saved;
-        await runRoleTransaction(async tx=>{
-            const ref=supplyOrdersCollection().doc(id),snap=await tx.get(ref);
-            if(!snap.exists)throw new Error('找不到採購品項。');
-            const supply={id,...snap.data()};
-            const orderSnap=await tx.get(db.collection('orders').doc(supply.orderId));
-            if(!orderSnap.exists||normalizedOrderStatus(orderSnap.data())==='normal')throw new Error('客戶訂單未取消，請重新確認。');
-            if(isPurchaseTerminalStatus(supply.status))throw new Error('採購已取消／結案。');
-            if(supply.customerCancellationDisposition==='KEEP_STOCK')return;
-            const remaining=Math.max(0,Number(supply.qty||0)-Number(supply.receivedQty||0));
-            if(!remaining)throw new Error('此品項已全部到貨。');
-            const key=String(supply.productKey||supply.productId||'');
-            const redirect=supply.fulfillmentType==='DIRECT_SHIP';
-            if(redirect!==direct)throw new Error('採購收貨方式已變更，請更新清單後重新確認。');
-            if(redirect)await assertActiveReturnWarehouse(tx,warehouseId);
-            const invRef=redirect?db.collection('inventory').doc(encodeURIComponent(key)):null;
-            const whRef=redirect?db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,key)):null;
-            const invSnap=invRef?await tx.get(invRef):null,whSnap=whRef?await tx.get(whRef):null;
-            if(redirect&&!key)throw new Error('缺少產品識別碼。');
-            const now=new Date().toISOString();
-            const patch={customerCancellationDisposition:'KEEP_STOCK',customerCancellationResolvedAt:now,customerCancellationResolvedBy:currentUser.uid,updatedAt:now};
-            if(redirect){
-                Object.assign(patch,{originalFulfillmentType:'DIRECT_SHIP',fulfillmentType:'WAREHOUSE',warehouseId,redirectInventoryId:encodeURIComponent(key),redirectWarehouseStockId:warehouseStockDocId(warehouseId,key),incomingRegisteredQty:remaining});
-                const info={productKey:key,productId:supply.productId||key,itemCode:supply.itemCode||'',itemName:supply.itemName||'',brand:supply.brand||'',updatedAt:now};
-                tx.set(invRef,{...info,incoming:Number(invSnap?.data()?.incoming||0)+remaining},{merge:true});
-                tx.set(whRef,{...info,warehouseId,incoming:Number(whSnap?.data()?.incoming||0)+remaining},{merge:true});
-                tx.set(db.collection('inventoryMovements').doc('redirect-'+id),{type:'cancelled_direct_ship_redirect',qty:remaining,productKey:key,warehouseId,sourceType:'SUPPLY_ORDER',sourceId:id,createdAt:now,createdBy:deliveryActor()});
-            }
-            tx.update(ref,patch);saved={...supply,...patch};
-            // runRoleTransaction mirrors supply changes to the receiving view atomically.
-        });
+        await commitCancelledPurchaseKeepStock({supplyId:id,warehouseId,expectedDirect:direct});
         try{await loadActiveReceivingSupplyCache(true);renderPurchasingView();}catch(refreshError){markMainPageDirty('orders.po');showActionFeedback('採購處理已完成，請重新開啟採購頁更新清單。','warning');}
         showActionFeedback('已保留採購，到貨後轉庫存。','success');
     }catch(err){alert(actionFailureMessage('採購處理',err,id));}finally{customerReturnActionsPending.delete(id);}
@@ -78,19 +44,7 @@ window.saveReturnRecord=async function(){
     // Retain an operation id on an uncertain response; retries cannot create a second request.
     const operationId=button.dataset.operationId||(button.dataset.operationId=lifecycleRecordId());
     try{
-        let saved;
-        await runRoleTransaction(async tx=>{
-            const ref=db.collection('orders').doc(orderId),snap=await tx.get(ref);
-            if(!snap.exists)throw new Error('找不到訂單。');const order={id:orderId,...snap.data()};
-            const requests=[...(order.returnRequests||[])];if(requests.some(r=>r.id===operationId)){saved=order;return;}
-            const item=normalizedOrderItems(order).find(i=>i.itemId===itemId);if(!item)throw new Error('找不到原送貨品項。');
-            const allowed=returnItemDeliveredQty(order,itemId)-returnItemReturnedQty(order,itemId)-customerReturnPendingQty(order,itemId);
-            if(requests.length>=30)throw new Error('每張訂單最多 30 次退貨申請，請先處理既有申請。');
-            if(qty>allowed+1e-9)throw new Error(`最多可申請 ${Math.max(0,allowed)} 個；已扣除其他待收退貨。`);
-            const now=new Date().toISOString(),record={id:operationId,itemId,qty,receivedQty:0,date,reason,status:'PENDING',settlement:'CLOSE',createdAt:now,createdBy:deliveryActor(),createdByUid:currentUser.uid};
-            requests.push(record);const patch={returnRequests:requests,returnPending:true,returnRequestMutationIndex:requests.length-1,updatedAt:now};
-            tx.update(ref,patch);saved={...order,...patch};
-        });
+        const saved=await commitCustomerReturnRequest({orderId,itemId,operationId,qty,date,reason});
         const index=ordersCache.findIndex(o=>o.id===orderId);if(index>=0)ordersCache[index]=saved;
         delete button.dataset.operationId;resetReturnForm();renderOrderLifecycleModal();renderOrdersList();renderCustomerReturnRequests(saved);
         showActionFeedback('已建立待收退貨；確認收貨前不增加庫存，不自動補送。','success');
@@ -104,7 +58,7 @@ const originalReturnModalRenderer=renderOrderLifecycleModal;
 renderOrderLifecycleModal=function(){originalReturnModalRenderer();const order=ordersCache.find(o=>o.id===currentLifecycleOrderId);if(order)renderCustomerReturnRequests(order);};
 window.withdrawCustomerReturn=async function(orderId,id){
     if(!canManageOrderLifecycleCapability()||!confirm('撤回尚未收到的退貨數量？已實收紀錄保留。'))return;
-    try{await runRoleTransaction(async tx=>{const ref=db.collection('orders').doc(orderId),snap=await tx.get(ref);const order=snap.data();const requests=(order.returnRequests||[]).map(r=>r.id===id&&r.status==='PENDING'?{...r,status:'CANCELLED',cancelledAt:new Date().toISOString(),cancelledBy:currentUser.uid}:r);tx.update(ref,{returnRequests:requests,returnPending:requests.some(r=>r.status==='PENDING'),returnRequestMutationIndex:requests.findIndex(r=>r.id===id),updatedAt:new Date().toISOString()});});
+    try{await commitCustomerReturnWithdrawal({orderId,requestId:id});
     await refreshAffectedOrderCaches([orderId]);renderOrderLifecycleModal();}catch(err){alert(err.message);}
 };
 let customerReturnVisibleLimit=50;

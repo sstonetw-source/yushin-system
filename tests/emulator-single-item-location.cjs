@@ -594,6 +594,7 @@ async function keepReceiptAsStock(x){
   loadWarehouseMaster:async()=>{},confirm:()=>true,loadActiveReceivingSupplyCache:async()=>{},renderPurchasingView:()=>{},
   showActionFeedback:()=>{},markMainPageDirty:()=>{},renderOrderLifecycleModal:()=>{},alert:message=>{throw Error(message);},
   actionFailureMessage:(_label,error)=>error.message});
+ if(typeof x.c.commitCancelledPurchaseKeepStock!=='function')vm.runInContext(fs.readFileSync('src/services/customer-return.js','utf8'),x.c);
  if(typeof x.c.keepCancelledPurchaseAsStock!=='function')vm.runInContext(fs.readFileSync('modules/customer-cancellations.js','utf8'),x.c);
  await x.c.keepCancelledPurchaseAsStock(x.supplyId);
 }
