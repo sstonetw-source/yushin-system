@@ -14,20 +14,7 @@ function normalizeLocationReturnIntent(data){
 async function readLocationReturnProofs(tx,db,order,intent,productKey,{closedOnly=false}={}){
  const receipts=await tx.get(db.collection('inventoryMovements').where('sourceId','==',intent.orderId)
   .where('action','==','location_customer_return').limit(201));
- if(Array.isArray(order.items)&&order.items.length>1){
-  const projection=fulfillment.projectOrderShipmentReturns({orderId:intent.orderId,items:order.items,
-   shipments:order.warehouseShipmentRecords??[],deliveries:order.deliveryRecords,returns:order.returnRecords});
-  const proofs=receipts.docs.map(s=>({id:s.id,data:s.data()}));
-  if(proofs.length>200||proofs.length!==order.returnRecords.length
-   ||proofs.some(row=>!projection.items.some(item=>item.itemId===row.data.itemId)))
-   fault('整單退貨紀錄與實際入庫憑證數量或來源不一致');
-  for(const item of projection.items)await fulfillment.validateLocationReturnProofs(
-   {...order,returnRecords:order.returnRecords.filter(row=>row.itemId===item.itemId)},
-   {...intent,itemId:item.itemId},item.productKey,proofs.filter(row=>row.data.itemId===item.itemId),
-   {closedOnly,hashIntent:value=>createHash('sha256').update(JSON.stringify(value)).digest('hex')});
-  return true;
- }
- return fulfillment.validateLocationReturnProofs(order,intent,productKey,
+ return fulfillment.validateOrderLocationReturnProofs(order,intent,productKey,
   receipts.docs.map(s=>({id:s.id,data:s.data()})),{closedOnly,
    hashIntent:value=>createHash('sha256').update(JSON.stringify(value)).digest('hex')});
 }

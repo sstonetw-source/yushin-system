@@ -243,6 +243,22 @@
    }
    return true;
   }
+  // Validate the entire event/proof set before partitioning by source item.
+  // Both browser receiving and backend lifecycle/returns use this adapter.
+  async function validateOrderLocationReturnProofs(order,intent,productKey,receipts,options={}){
+   const records=order.returnRecords??[];
+   if(!Array.isArray(order.items)||order.items.length<=1)
+    return validateLocationReturnProofs({...order,returnRecords:records},intent,productKey,receipts,options);
+   const projection=projectOrderShipmentReturns({orderId:intent.orderId,items:order.items,
+    shipments:order.warehouseShipmentRecords??[],deliveries:order.deliveryRecords??[],returns:records});
+   if(receipts.length>200||receipts.length!==records.length
+    ||receipts.some(row=>!projection.items.some(item=>item.itemId===row.data?.itemId)))
+    returnFault('整單退貨紀錄與實際入庫憑證數量或來源不一致');
+   for(const item of projection.items)await validateLocationReturnProofs(
+    {...order,returnRecords:records.filter(row=>row.itemId===item.itemId)},
+    {...intent,itemId:item.itemId},item.productKey,receipts.filter(row=>row.data.itemId===item.itemId),options);
+   return true;
+  }
   // Physical returns do not erase historical shipments/acknowledgements.
   // CLOSE fulfils that quantity commercially; REPLACE reopens demand.
   function projectShipmentReturns(input={}) {
@@ -363,6 +379,7 @@
     normalizeReturnTraceIntent,
     normalizeLocationReturnIntent,
     validateLocationReturnProofs,
+    validateOrderLocationReturnProofs,
     projectShipmentReturns,
     projectOrderShipmentReturns,
     pendingDispatchQty,

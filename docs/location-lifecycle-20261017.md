@@ -159,3 +159,14 @@ Emulator harness 呼叫原正式 PO／incoming 登記、原收貨 Service 及 `k
 整單取消釋出的原 movement 沿既有 CANCELLED_ORDER_RELEASE。原 advanceReleasedV2FreeStock reader 以同一憑證選定 item，核對 productKey／actor／role／唯一 item result、精確 movement ID 及原分倉差額；交給原 FIFO checkpoint／唯一分配 writer。新增薄協調入口 commitOrderLocationLifecycleAndRecover 僅在交易提交後執行原 continueCommittedV2FreeStock；不是跨訂單分配與取消一起原子，仍無背景 runner，原先對多品項目標與已履約目標的 FIFO 限制未放寬。
 
 驗收：新增九項真實 Emulator，包括純整單初始化取消/恢復、正式 PO/部分收貨/多品項已送達後取消及恢復後收貨、已全部出完 sibling、五列同產品與競爭訂單、五角色/停用/所有權/intent/role 綁定、同ID與不同ID競態及回覆遺失、末品項/供應/receipt/出貨proof/隱藏退貨/途中與額外打單拒絕、每stock只讀寫一次與真實ALREADY_EXISTS末端回滾、整單釋放來源的原 FIFO 配貨與重送。另新增正常化與 Core 零剩餘狀態的 Node 測試。本地1559/1559通過；完整 Emulator/Auth/Rules/Chrome以本批 CI 為準。新增整單交易仍為 Admin SDK adapter，正式 UI/Callable/環境閘門未啟用，真實Auth Browser/Preview E2E尚未驗收，未部署Firebase。
+
+
+## 2026-10-19 多品項 CLOSE 後續收貨與整單取消／恢復
+
+本節取代前述「多品項退貨後收貨／取消恢復尚未整合」限制。限原 2–5 品項、兩候選實體倉、completed 初始化及 demo-yushin Emulator。正常訂單已有可驗證 CLOSE 退貨時，可由原 receiveSupplyOrderRecord 繼續收貨，或由原整單 lifecycle 取消／恢復未出貨剩餘。CLOSE 不重開已交付需求；取消／恢復不改寫歷史出貨、送達、退貨、PO、供應在途、實收、批次及成本。
+
+新增共用 Fulfillment.validateOrderLocationReturnProofs，先驗完整整單事件與有界（200）實際退貨 movement 集合，再逐項沿原 validateLocationReturnProofs 驗證 canonical intent SHA-256 與完整 returnRecord。後端 trace／退貨／lifecycle 與瀏覽器收貨共用同一核心；資料庫 query 與 SHA-256 保持平台 adapter。兄弟品項憑證不能被 filter 隱藏，空退貨仍須查核實際入庫。收貨只將選定品項事件傳入原 Receiving／Workflow，維持全單投影與各來源 ledger／合計持有量查核。
+
+新增四項真實 Emulator 驗收：兩產品 CLOSE 後分批及固定 ID 重送收貨並完成 12 件歷史交付；兩產品退貨後原子取消／恢復及恢復後收貨；兄弟憑證遺失／hash／完整紀錄／來源／隱藏紀錄／更正歷史均零寫入；REPLACE 及取消中多品項收貨維持拒絕。fixture 沿真實初始化、PO、收貨、打單、出貨、送達、退貨 Services。
+
+本地 Node 1560/1560 通過，完整 Emulator／Auth／Rules 與八組桌機手機 Chrome 以本批 CI 為準。無新 collection、欄位、Index、Rules、Listener 或額外資料庫查詢；沒有 Firebase 部署或正式資料寫入。多品項取消中 KEEP_STOCK 收貨、取消後再新增退貨、補送／退貨更正、正式 UI／Callable／Preview 真實登入全線 E2E 仍待後續整合。

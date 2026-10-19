@@ -137,7 +137,6 @@ async function runLocationLifecycle(db,uid,data,wholeOrder){
   // only closes the unfulfilled remainder; acknowledged goods stay historical.
   const returnRecords=order.returnRecords??[];
   if(wholeOrder&&!wholeFulfillment){
-   if(returnRecords.length||(order.returnHistory??[]).length)fault('整單取消恢復尚未開放退貨來源');
    wholeFulfillment=fulfillmentCore.projectOrderShipmentReturns({orderId,items:order.items,
     shipments:order.warehouseShipmentRecords??[],deliveries:order.deliveryRecords??[],returns:returnRecords});
    if(!wholeFulfillment.outstandingQty)fault('訂單已無剩餘未交付數量');
