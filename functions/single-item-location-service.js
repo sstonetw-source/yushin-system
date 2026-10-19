@@ -803,11 +803,18 @@ async function advanceReleasedV2FreeStock(db,uid,input){
     reject('取消釋放憑證不是原子提交的有效版本');
    const receipt=await tx.get(db.collection('reservationOperationReceipts').doc(event.reservationOperationId));
    const proof=receipt.exists?receipt.data():null;
-   if(!proof||proof.action!=='single_v2_lifecycle'||proof.orderId!==event.sourceId
-     ||proof.itemId!==event.itemId||proof.productKey!==event.productKey
+   const whole=proof?.action==='order_v2_lifecycle';
+   const itemProof=whole?proof.result?.items?.filter(row=>row.itemId===event.itemId):null;
+   const result=whole?(itemProof?.length===1?itemProof[0]:null):proof?.result;
+   if(!proof||!['single_v2_lifecycle','order_v2_lifecycle'].includes(proof.action)||proof.orderId!==event.sourceId
+     ||(whole?(!proof.itemIds?.includes(event.itemId)||result?.productKey!==event.productKey
+       ||proof.actorUid!==event.actorUid||proof.actorRole!==event.actorRole
+       ||movementId!=='single-v2-life-'+event.reservationOperationId.slice('single-v2-lifecycle-'.length)
+        +'-'+encodeURIComponent(event.itemId)+'-'+encodeURIComponent(event.warehouseId))
+      :(proof.itemId!==event.itemId||proof.productKey!==event.productKey))
      ||proof.result?.nextStatus!=='cancelled'
-     ||!Array.isArray(proof.result?.warehouseDeltas)
-     ||!proof.result.warehouseDeltas.some(row=>row.warehouseId===event.warehouseId
+     ||result?.nextStatus!=='cancelled'||!Array.isArray(result?.warehouseDeltas)
+     ||!result.warehouseDeltas.some(row=>row.warehouseId===event.warehouseId
        &&row.reservedDelta===-amount))
     reject('取消釋放缺少相符的原始交易憑證');
   }else if(event.v2FreeStockSource==='CLOSED_CUSTOMER_RETURN'){

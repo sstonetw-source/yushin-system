@@ -81,3 +81,15 @@ test('single-item read-only API cannot bypass validation through the internal wh
  const {planSingleItemTwoWarehouse}=require('../functions/single-item-location-service');
  await assert.rejects(planSingleItemTwoWarehouse({},'actor',{orderId:'O',itemIds:['I1'],warehouseIds:['A','B']}),/請求內容/);
 });
+test('whole-order lifecycle intent covers all ids canonically and refuses mixed single or caller authority fields',()=>{
+ const {normalizeOrderLifecycleIntent,commitOrderLocationLifecycle}=require('../functions/single-item-location-lifecycle-service');
+ const data={orderId:'O',itemIds:['I2','I1'],warehouseIds:['B','A'],nextStatus:'cancelled',
+  operationId:'whole_life_123456',syncAttemptId:'sync_123456789',date:'2026-10-21',reason:' 取消 '};
+ const first=normalizeOrderLifecycleIntent(data);assert.deepEqual(first.itemIds,['I1','I2']);
+ assert.equal(first.hash,normalizeOrderLifecycleIntent({...data,itemIds:['I1','I2'],warehouseIds:['A','B'],reason:'取消'}).hash);
+ for(const patch of [{itemIds:['I1']},{nextStatus:'normal'},{date:'2026-10-22'},{reason:'不同'}])
+  assert.notEqual(first.hash,normalizeOrderLifecycleIntent({...data,...patch}).hash);
+ for(const patch of [{itemIds:[]},{itemIds:['I1','I1']},{itemIds:['1','2','3','4','5','6']},{itemId:'I1'},{actorRole:'admin'},{quantity:99}])
+  assert.throws(()=>normalizeOrderLifecycleIntent({...data,...patch}));
+ return assert.rejects(commitOrderLocationLifecycle({projectId:'production'},'actor',data),/僅允許/);
+});

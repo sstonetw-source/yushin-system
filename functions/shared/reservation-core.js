@@ -422,7 +422,7 @@
      locations:allocations.map(row=>({warehouseId:row.warehouseId,reservedQty:row.qty}))});
    const quantity=ledger.reservedQty;
    const next={locationSchemaVersion:2,locations:ledger.locations,quantity,shortageQty:ledger.shortageQty,
-     status:nextStatus==='cancelled'?'released':quantity>0?'active':'shortage'};
+     status:nextStatus==='cancelled'?'released':quantity>0?'active':ledger.shortageQty>0?'shortage':'fulfilled'};
    const changes=reservationStockDeltas(reservation,next);
    return {reservation:next,warehouseDeltas:changes.warehouseDeltas,
      companyReservedDelta:changes.companyReservedDelta,
