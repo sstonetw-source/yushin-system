@@ -268,7 +268,11 @@ window.saveDeliveryRecord = async function() {
         return;
     }
     if (pendingDeliveryOrderIds.has(orderId)) return;
-    const itemId=document.getElementById('deliveryItemId')?.value||'';
+    const itemId=globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true
+        ? (ordersCache.find(row=>row.id===orderId)?.items?.length===1
+            ? ordersCache.find(row=>row.id===orderId).items[0].itemId
+            : document.getElementById('deliveryItemId')?.value||'')
+        : document.getElementById('deliveryItemId')?.value||'';
     const shipmentChoice=document.getElementById('deliveryShipmentId')?.value||'';
     const fingerprint=JSON.stringify([orderId,itemId,shipmentChoice,date,qty,notes]);
     if(!editId&&deliveryCreateAttempt?.fingerprint!==fingerprint)
