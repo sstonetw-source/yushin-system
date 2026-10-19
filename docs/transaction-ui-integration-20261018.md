@@ -44,3 +44,16 @@ Service 限 admin／purchaser；真實身分與目前 profile 的最終權限由
 原正常商品使用 delivery-stock／Inventory Core 的原批次退回與 CLOSE 自由庫存邏輯，直送退貨沿用原採購追溯與批次來源。申請、撤回及取消採購保留／改送仍在原模組，尚未宣稱所有 Features 寫入完成清理。資料模型、Rules、Index、Callable 與 v2 執行閘門不變。
 
 新增真實 Client SDK＋StockPermissions＋Rules 的 Service 驗收：三個收貨角色實收及同 ID 重試；HOLD 不入庫而轉庫存只入一次；停用倉庫整筆拒絕；業務／工程師即使偽造前端 capability 也無法建立實收憑證。Node 驗證唯一 writer、無 DOM Service、hold-release 原子回滾與防重。Chrome 1280／390 px 跑原 receiveCustomerReturn click handler 與實際 Service／Inventory Core，使用記憶體交易傳輸驗證待檢及回覆遺失重送；不等同完整 Auth／瀏覽器／Firestore 單線 E2E 或 Preview。
+
+
+## 2026-10-19 退貨申請／撤回與採購保留入庫介面接線
+
+原 modules/customer-cancellations.js 的三個交易 writer 移入既有 src/services/customer-return.js：saveReturnRecord → commitCustomerReturnRequest、withdrawCustomerReturn → commitCustomerReturnWithdrawal、keepCancelledPurchaseAsStock → commitCancelledPurchaseKeepStock。Feature 保留原輸入、確認、pending 鎖、固定操作 ID、提示與 cache 刷新，已無 runRoleTransaction 或直接 tx 寫入。退貨實收／待檢轉庫存仍沿原 Service，未新增第二個 writer、畫面或操作步驟。
+
+customerReturnPendingQty 原計算原樣移入 Service，不新增退貨額度公式。申請重送核對既有 request 的 ID、item、qty、date、reason、settlement、createdByUid；即使原申請之後已部分實收或撤回，也只回原結果，不再新增。錯誤內容不能沿用原 ID。撤回只關閉原申請未收餘量，保留 receivedQty 與 returnRecords；已完成／已撤回重送不重寫時間。三動作在交易讀取前後、寫入前及回覆前核對目前帳號／前端角色與 capability；真正身份、停用、所有權與作業權限仍交由原 StockPermissions／Client Rules，不以 capability 取代授權。
+
+KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實體倉只登記尚未到貨 incoming 與原 redirect movement，不增加 onHand 或預留；沿原 runRoleTransaction 原子同步 receivingSupplyOrders，重試不重複登記。沒有新資料庫查詢、持久欄位、Collection、Index、Rules 或 Listener。
+
+新增六項 Node 行為測試、五項真實 Client SDK＋StockPermissions＋Rules 測試，涵蓋額度、原 ID 意圖／帳號、30 次上限、部分實收撤回、帳號／角色變更、回覆遺失及末端回滾；Client Rules 驗證五角色／偽造 capability、同 ID／超額競爭、停用與外人、部分實收撤回以及 KEEP_STOCK 原子來源／接收鏡像／在途。既有 1280／390 px Chrome suite 擴充原三個 click handler → 真實 Service，驗證未知回覆重試與 incoming 不重複。Chrome 為記憶體傳輸，不是完整 Auth Browser／Firestore 單線 E2E。
+
+本地 Node 1566/1566、建置同步／語法／diff 通過；新增 Client Rules 與 Chrome 以本批完整 CI 為準。本批接線為原一般介面，v2 多倉正式 Callable／UI 閘門不變，沒有 Firebase 部署或正式資料寫入。v2 正式傳輸、Preview 及完整真實登入端對端驗收仍待後續整合。

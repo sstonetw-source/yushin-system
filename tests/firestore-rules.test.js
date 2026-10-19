@@ -2869,6 +2869,71 @@ async function actualCustomerReturnFixture(uid='buyer1',role='purchaser') {
  f.receive=(receiptId,qty=1,quality='SALEABLE')=>f.context.commitCustomerReturnReceipt({orderId:f.id,requestId:'REQUEST',receiptId,qty,quality,warehouseId:'W1'});
  return f;
 }
+async function actualReturnRequestFixture(uid,role){
+ const id='request-service-'+uid,ownerUid=['sales','engineer','admin'].includes(role)?uid:'sales1';
+ await seed('orders/'+id,{...validOrderProduct,ownerUid,salesCode:role==='engineer'?'E01':'S01',
+  items:[{itemId:'I',qty:5,warehouseId:'W1'}],deliveredQty:5,returnedQty:0,
+  deliveryRecords:[{id:'D',itemId:'I',qty:5}],returnRecords:[],returnRequests:[],returnPending:false});
+ const client=compatDb(uid),native=client.runTransaction,plain=v=>JSON.parse(JSON.stringify(v));
+ client.runTransaction=fn=>native(tx=>fn({...tx,set:(r,d,o)=>o?tx.set(r,plain(d),o):tx.set(r,plain(d)),update:(r,d)=>tx.update(r,plain(d))}));
+ const c=vm.createContext({db:client,currentUser:{uid},currentUserRole:role,canManageOrderLifecycleCapability:()=>true,
+  normalizedOrderItems:o=>o.items,savedDeliveryRecords:o=>o.deliveryRecords,savedReturnRecords:o=>o.returnRecords,
+  deliveryActor:()=>uid,runRoleTransaction:fn=>stockPermissions.run(client,fn,uid,['sales','engineer'].includes(role),role)});
+ const actions=fs.readFileSync('src/features/orders/delivery-actions.js','utf8');vm.runInContext(actions.slice(actions.indexOf('function returnItemDeliveredQty('),actions.indexOf('function populateReturnItemOptions('))+fs.readFileSync('src/services/customer-return.js','utf8'),c);
+ return {c,id,request:patch=>c.commitCustomerReturnRequest({orderId:id,itemId:'I',operationId:'Q',qty:2,date:'2026-10-19',reason:'訂錯商品',...patch}),read:async()=>(await getDoc(doc(db('admin'),'orders/'+id))).data()};
+}
+test('actual request and withdrawal Services retain commercial roles despite forged frontend capability for other roles',async()=>{
+ for(const [uid,role] of [['admin','admin'],['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['wh1','warehouse']]){
+  const f=await actualReturnRequestFixture(uid,role),before=await f.read();
+  if(['admin','sales','engineer'].includes(role)){
+   await f.request();await f.request();assert.equal((await f.read()).returnRequests.length,1);
+   await f.c.commitCustomerReturnWithdrawal({orderId:f.id,requestId:'Q'});const withdrawn=await f.read();assert.equal(withdrawn.returnRequests[0].status,'CANCELLED');
+   await f.c.commitCustomerReturnWithdrawal({orderId:f.id,requestId:'Q'});assert.deepEqual(await f.read(),withdrawn);
+  }else{await assert.rejects(f.request());assert.deepEqual(await f.read(),before);}
+ }
+ const f=await actualReturnRequestFixture('sales1','sales');await seed('orders/'+f.id,{...await f.read(),ownerUid:'sales2',salesCode:'S02'});const before=await f.read();await assert.rejects(f.request());assert.deepEqual(await f.read(),before);
+});
+test('actual request Services serialize same-ID and competing allowance requests without duplicate pending quantities',async()=>{
+ const f=await actualReturnRequestFixture('sales1','sales');await Promise.all([f.request(),f.request()]);assert.equal((await f.read()).returnRequests.length,1);
+ await assert.rejects(f.request({reason:'不同意圖'}),/識別碼/);
+ const g=await actualReturnRequestFixture('sales1','sales');const race=await Promise.allSettled([g.request({operationId:'A',qty:4}),g.request({operationId:'B',qty:4})]);
+ assert.equal(race.filter(r=>r.status==='fulfilled').length,1);assert.equal((await g.read()).returnRequests.length,1);
+ await seed('users/sales1',{role:'sales',active:false,salesCode:'S01'});const before=await g.read();await assert.rejects(g.request({operationId:'disabled',qty:1}));assert.deepEqual(await g.read(),before);
+});
+test('actual request to partial receipt to withdrawal preserves already returned stock and rejects further receiving',async()=>{
+ const f=await actualCustomerReturnFixture('admin','admin'),order=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();await seed('orders/'+f.id,{...order,returnRequests:[],returnPending:false});
+ Object.assign(f.context,{currentUserRole:'admin',canManageOrderLifecycleCapability:()=>true});
+ await f.context.commitCustomerReturnRequest({orderId:f.id,itemId:'I',operationId:'REQUEST',qty:2,date:'2026-10-19',reason:'訂錯商品'});await f.receive('REQUEST-PARTIAL');
+ const before=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();await f.context.commitCustomerReturnWithdrawal({orderId:f.id,requestId:'REQUEST'});
+ const after=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();assert.equal(after.returnRequests[0].receivedQty,1);assert.equal(after.returnRequests[0].status,'CANCELLED');assert.equal(after.returnPending,false);
+ assert.deepEqual(after.returnRecords,before.returnRecords);assert.equal(after.returnedQty,1);assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().onHand,4);
+ await assert.rejects(f.receive('REQUEST-TOO-LATE'));assert.deepEqual((await getDoc(doc(db('admin'),'orders/'+f.id))).data(),after);
+});
+async function actualKeepStockFixture(uid,role){
+ const id='keep-service-'+uid,key='keep-product',supply={type:'PURCHASING_PO',orderId:id,productKey:key,productId:key,qty:5,receivedQty:2,status:'PARTIAL_RECEIPT',fulfillmentType:'DIRECT_SHIP',warehouseId:'',incomingRegisteredQty:0,ownerUid:'sales1',salesCode:'S01'};
+ await seed('orders/'+id,{ownerUid:'sales1',salesCode:'S01',status:'cancelled',orderStatus:'cancelled'});await seed('supplyOrders/'+id,supply);await seed('receivingSupplyOrders/'+id,supply);
+ await seed('warehouses/W1',{active:true});await seed('inventory/'+key,{productKey:key,onHand:2,reserved:1,incoming:4});await seed('warehouseStocks/W1__'+key,{productKey:key,warehouseId:'W1',onHand:2,reserved:1,incoming:1});
+ const client=compatDb(uid),native=client.runTransaction,plain=v=>JSON.parse(JSON.stringify(v));client.runTransaction=fn=>native(tx=>fn({...tx,set:(r,d,o)=>o?tx.set(r,plain(d),o):tx.set(r,plain(d)),update:(r,d)=>tx.update(r,plain(d))}));
+ const c=vm.createContext({db:client,currentUser:{uid},currentUserRole:role,canCreatePurchaseOrderCapability:()=>true,
+  supplyOrdersCollection:()=>client.collection('supplyOrders'),normalizedOrderStatus:o=>o.status,isPurchaseTerminalStatus:s=>['CANCELLED','CLOSED','RECEIVED'].includes(s),warehouseStockDocId:(w,k)=>w+'__'+k,deliveryActor:()=>uid,
+  runRoleTransaction:fn=>stockPermissions.run(client,fn,uid,['sales','engineer'].includes(role),role)});vm.runInContext(fs.readFileSync('src/services/customer-return.js','utf8'),c);
+ const paths=['supplyOrders/'+id,'receivingSupplyOrders/'+id,'inventory/'+key,'warehouseStocks/W1__'+key,'inventoryMovements/redirect-'+id];
+ return {c,id,run:()=>c.commitCancelledPurchaseKeepStock({supplyId:id,warehouseId:'W1',expectedDirect:true}),read:()=>Promise.all(paths.map(async path=>(await getDoc(doc(db('admin'),path))).data()))};
+}
+test('actual KEEP_STOCK Service atomically redirects only incoming and mirrors the original supply once for purchasing roles',async()=>{
+ for(const [uid,role] of [['admin','admin'],['buyer1','purchaser'],['wh1','warehouse'],['sales1','sales'],['eng1','engineer']]){
+  const f=await actualKeepStockFixture(uid,role),before=await f.read();
+  if(['admin','purchaser'].includes(role)){
+   await f.run();const after=await f.read();assert.equal(after[0].customerCancellationResolvedBy,uid);assert.equal(after[1].fulfillmentType,'WAREHOUSE');assert.equal(after[0].incomingRegisteredQty,3);
+   assert.equal(after[2].incoming,7);assert.equal(after[3].incoming,4);assert.equal(after[2].onHand,2);assert.equal(after[2].reserved,1);assert.equal(after[4].qty,3);
+   await f.run();assert.deepEqual(await f.read(),after);
+  }else{await assert.rejects(f.run());assert.deepEqual(await f.read(),before);}
+ }
+});
+test('actual KEEP_STOCK Service refuses inactive warehouse and disabled purchaser without partial supply or incoming changes',async()=>{
+ const f=await actualKeepStockFixture('buyer1','purchaser'),before=await f.read();await seed('warehouses/W1',{active:false});await assert.rejects(f.run(),/倉庫/);assert.deepEqual(await f.read(),before);
+ await seed('warehouses/W1',{active:true});await seed('users/buyer1',{role:'purchaser',active:false});await assert.rejects(f.run());assert.deepEqual(await f.read(),before);
+});
 test('actual customer return Service receives CLOSE into original stock once for admin purchaser and warehouse',async()=>{
  for(const [uid,role] of [['admin','admin'],['buyer1','purchaser'],['wh1','warehouse']]){
   const f=await actualCustomerReturnFixture(uid,role);await f.receive('RETURN-'+uid);await f.receive('RETURN-'+uid);

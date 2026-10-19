@@ -16,7 +16,7 @@ function fixture(){
  });vm.runInContext(service.slice(start,end),c);return {c,docs,stock:()=>stock};
 }
 test('request quantity includes pending requests, excluding withdrawn and already received quantities',()=>{
- const start=code.indexOf('function customerReturnPendingQty('),end=code.indexOf('\nfunction customerCancellationActions',start),c=vm.createContext({});vm.runInContext(code.slice(start,end),c);
+ const start=service.indexOf('function customerReturnPendingQty('),end=service.indexOf('\nfunction customerReturnActorContext',start),c=vm.createContext({});vm.runInContext(service.slice(start,end),c);
  assert.equal(c.customerReturnPendingQty({returnRequests:[{id:'A',itemId:'I1',qty:4,receivedQty:1,status:'PENDING'},{id:'B',itemId:'I1',qty:5,status:'CANCELLED'}]},'I1'),3);
 });
 test('saleable return changes stock only at receiving, retries do not duplicate it',async()=>{
@@ -119,7 +119,8 @@ test('cancelled direct shipment redirect enforces active physical warehouse in U
  assert.ok(start>=0&&end>start);
  const action=code.slice(start,end);
  assert.match(action,/systemCustody!==true&&w\.warehouseType!=='CUSTODY'/);
- assert.match(action,/if\(redirect\)await assertActiveReturnWarehouse\(tx,warehouseId\)/);
+ assert.match(action,/await commitCancelledPurchaseKeepStock\(/);
+ assert.match(service,/if\(redirect\)await assertActiveReturnWarehouse\(tx,warehouseId\)/);
  const rules=fs.readFileSync('firestore.rules','utf8');
  const rulesStart=rules.indexOf('function supplierCancellationResolution()');
  const rulesEnd=rules.indexOf('function validReturnPendingFlag(',rulesStart);
@@ -154,7 +155,7 @@ function redirectFixture(warehouse){
  const actionEnd=code.indexOf('window.saveReturnRecord=',actionStart);
  const guardStart=service.indexOf('async function assertActiveReturnWarehouse(');
  const guardEnd=service.indexOf('async function commitCustomerReturnReceipt(',guardStart);
- vm.runInContext(service.slice(guardStart,guardEnd)+code.slice(actionStart,actionEnd),c);
+ vm.runInContext(service+code.slice(actionStart,actionEnd),c);
  return {c,docs,alerts,feedback};
 }
 test('redirect transaction rejects stale warehouse choices without committing incoming stock',async()=>{
