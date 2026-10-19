@@ -108,7 +108,7 @@ const scripts=[read('modules/fulfillment-core.js'),read('modules/order-entry-cor
     const app={options:{projectId:'demo-yushin'}};
     globalThis.firebase={auth:()=>({app,currentUser:{uid:'buyer'},emulatorConfig:{host:'127.0.0.1',port:9099}}),
      functions:()=>({app,useEmulator:(host,port)=>{if(host!=='127.0.0.1'||port!==5001)throw Error('remote');},httpsCallable:()=>shipmentCallable})};
-    globalThis.db={collection:()=>({doc:()=>({get:async()=>({exists:true,data:()=>shipmentRead()})})})};
+    globalThis.db={collection:()=>({doc:()=>({get:async()=>{const data=await shipmentRead();return {exists:true,data:()=>data};}})})};
     const canReceiveInventoryCapability=()=>true,canAccessPage=()=>true,defaultWarehouse=()=>({id:'B'});
     const normalizedOrderStatus=()=> 'normal',orderInventorySyncIncomplete=()=>false,normalizedOrderItems=o=>o.items;
     const itemDispatchState=(o,i)=>({shippable:i.dispatchPreparedQty-i.warehouseShippedQty});
