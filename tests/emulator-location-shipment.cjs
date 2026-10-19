@@ -1952,10 +1952,13 @@ test('real CLOSE return evidence keeps multi-item acknowledgement correction clo
 });
 test('late reversal commit collision rolls back the whole order and original operation retries safely',async()=>{
  const x=await multiReversalFixture('rollback'),before=await multiShipmentSnapshot(x);
+ const collision=db.collection('inventoryMovements').doc('multi-reversal-rollback-collision');
+ await collision.set({sentinel:true});
  const guarded={projectId:db.projectId,collection:n=>db.collection(n),runTransaction:fn=>db.runTransaction(async tx=>fn({
-  get:r=>tx.get(r),update:(r,d)=>{tx.update(r,d);tx.create(r,{collision:true});}
+  get:r=>tx.get(r),update:(r,d)=>{tx.update(r,d);tx.create(collision,{sentinel:false});}
  }))};
  await assert.rejects(x.reverse(x.reversal(),x.adminUid,guarded),e=>e.code===6);
+ assert.deepEqual((await collision.get()).data(),{sentinel:true});
  assert.deepEqual(await multiShipmentSnapshot(x),before);
  assert.equal((await x.reverse()).status,'applied');assert.equal((await x.reverse()).status,'already-applied');
 });
