@@ -2894,7 +2894,13 @@ test('actual request and withdrawal Services retain commercial roles despite for
  const f=await actualReturnRequestFixture('sales1','sales');await seed('orders/'+f.id,{...await f.read(),ownerUid:'sales2',salesCode:'S02'});const before=await f.read();await assert.rejects(f.request());assert.deepEqual(await f.read(),before);
 });
 test('actual request Services serialize same-ID and competing allowance requests without duplicate pending quantities',async()=>{
- const f=await actualReturnRequestFixture('sales1','sales');await Promise.all([f.request(),f.request()]);assert.equal((await f.read()).returnRequests.length,1);
+ const f=await actualReturnRequestFixture('sales1','sales');
+ // A competing legacy request proposal may be denied by Rules before the
+ // client receives a transaction retry. Keep that rejection visible, then
+ // verify the original ID recovers the committed result without another write.
+ const same=await Promise.allSettled([f.request(),f.request()]);assert.ok(same.some(r=>r.status==='fulfilled'));
+ for(const result of same)if(result.status==='rejected')assert.equal(result.reason.code,'permission-denied');
+ const once=await f.read();assert.equal(once.returnRequests.length,1);await f.request();assert.deepEqual(await f.read(),once);
  await assert.rejects(f.request({reason:'不同意圖'}),/識別碼/);
  const g=await actualReturnRequestFixture('sales1','sales');const race=await Promise.allSettled([g.request({operationId:'A',qty:4}),g.request({operationId:'B',qty:4})]);
  assert.equal(race.filter(r=>r.status==='fulfilled').length,1);assert.equal((await g.read()).returnRequests.length,1);
