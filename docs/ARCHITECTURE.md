@@ -559,3 +559,7 @@ Workflow 的明確 warehouseShipmentContext 現包含 returns，以原 projectSh
 ### 2026-10-19 多品項整單取消／恢復（已實作、待本批 CI）
 
 單項／整單 lifecycle 共用原私有交易引擎，讀完全部品項、供應、實收與出貨證據後一次寫入；同產品共用提案餘額，各stock最後只寫一次。整單取消釋放沿原FIFO恢復入口及checkpoint。 仍限 demo-yushin Emulator，正式 UI／Callable 未開啟，無部署。詳見 [同一份 lifecycle 契約增補](location-lifecycle-20261017.md)。
+
+### 2026-10-19 多品項 CLOSE 退貨（已實作、待本批 CI）
+
+原退貨 trace／receipt 共用完整整單投影、出貨證明與 sibling ledger reader，實收仍由唯一 commitLocationReturn 呼叫既有數量及批次 Core。只寫選定商品／原倉／原批次與品項，再更新全單退貨合計；正式入口未開放。見 [原退貨契約增補](location-return-receipt-emulator-20261017.md)。

@@ -59,3 +59,18 @@ test('return allowance exposes confirmed and previously returned quantities with
  assert.throws(()=>inventory.planExplicitShipmentReturn({shipment:source(),confirmedQty:2,
   priorReturns:[{qty:1,lotAllocations:[{lotId:'L1',qty:1}]}],selections:[{lotId:'L2',qty:2}]}),/超過/);
 });
+
+test('multi-line return context is explicitly enabled and still refuses cancelled, mixed or ambiguous sources',()=>{
+ const {shipmentDeliveryContext}=require('../functions/shipment-delivery-service');
+ const order={ownerUid:'U',salesCode:'S',status:'active',inventoryReservationStatus:'completed',inventoryReservationAttemptId:'sync',
+  items:[{itemId:'I1',productId:'P',qty:2},{itemId:'I2',productId:'Q',qty:3}],
+  warehouseShipmentRecords:[],deliveryRecords:[],returnRecords:[]};
+ const intent={orderId:'O',itemId:'I2',syncAttemptId:'sync'};
+ assert.throws(()=>shipmentDeliveryContext(order,intent,{allowReturns:true}),/單品項/);
+ const context=shipmentDeliveryContext(order,intent,{allowReturns:true,allowMultiReturn:true});
+ assert.equal(context.item.itemId,'I2');assert.equal(context.productKey,'Q');assert.equal(context.whole.orderedQty,5);
+ assert.equal(context.projection.outstandingQty,3);assert.equal(context.cancelled,false);
+ for(const patch of [{status:'cancelled',orderStatus:'cancelled'},{items:[order.items[0],order.items[0]]},
+  {items:[order.items[0],{...order.items[1],fulfillmentType:'DIRECT_SHIP'}]},{deliveredQty:1}])
+  assert.throws(()=>shipmentDeliveryContext({...order,...patch},intent,{allowReturns:true,allowMultiReturn:true,allowCancelledCloseReturn:true}));
+});

@@ -189,3 +189,7 @@ CLOSE 後取消／恢復仍拒絕未整合的退貨刪除／更正歷史，不�
 ### 2026-10-19 多品項整單取消／恢復（已實作、待本批 CI）
 
 整單取消／恢復不可循環提交單項交易，必須走原 lifecycle 引擎與完整 itemIds/單份操作憑證，所有來源雙向供應/receipt proof 都需驗證。共享Core決定數量與零剩餘fulfilled狀態；CI全部通過才合併。 仍限 demo-yushin Emulator，正式 UI／Callable 未開啟，無部署。詳見 [同一份 lifecycle 契約增補](location-lifecycle-20261017.md)。
+
+### 2026-10-19 多品項 CLOSE 退貨（已實作、待本批 CI）
+
+多品項實收需沿原commitLocationReturn與整單Core，trace及receipt共用出貨證明／全ledger查核；空退貨快取也必須查實際movement。實收核對同商品公司／兩倉合計，保留兄弟原資料；不可將唯讀預覽當實收承諾。全部CI通過才合併，正式入口未啟用。見 [原退貨契約增補](location-return-receipt-emulator-20261017.md)。
