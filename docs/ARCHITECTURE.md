@@ -657,3 +657,8 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 隔離 runner 以相同 Auth／Functions／Firestore Emulator 順序執行原 SDK 整合與 emulator-v2-lifecycle-browser.cjs。後者用實際 Chrome、由 npm 本機打包的 Firebase compat SDK、原登入 handler／profile 套用、原取消與續傳 handler／renderer，直接對 Emulator 送帶 token 的 HTTP。測試主機只提供隔離頁面、導覽與 cache 呈現殼；不是整份正式 app.js 啟動。初始化仍由既有 fixture Service 準備，驗收從已同步訂單的登入取消開始。沒有正式環境切換或部署變更。
 
 首輪實測揭露 compat 區域取用錯誤：全域 firebase.functions 的參數是 app，不能放區域字串。原 grouped Preview、打單、出貨、送達／撤銷、取消與續傳改用 firebase.app().functions('asia-east1')，仍核對實際 SDK app 專案與原環境／身分 gate；重建 app.js。這是傳輸相容修正，原 Core／writer／業務規則不變。
+
+
+## 正式採購多品項後端擴充（2026-10-20）
+
+正式採購後端仍為隔離原型；既有 `commitV2FormalPurchase` 已擴充至 1–5 列 WAREHOUSE 實體來源，可包含同訂單多品項及跨訂單合併。沿用原准入驗證與 Procurement Demand Core，不另建 writer。每個 Transaction callback 內按文件路徑快取相同讀取，重試會重新建立快取；所有列驗證及 supply ID 讀取完成後才寫入，每張來源訂單合併為一次 update。
