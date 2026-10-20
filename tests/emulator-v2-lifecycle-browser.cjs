@@ -428,7 +428,7 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
   });
   await page.locator('#printPurchaseOrderBtn').click();
   await page.waitForFunction(()=>/在途庫存同步完成|在途庫存同步未完成|採購單未建立|無法產生採購單/.test(
-   document.getElementById('poSaveStatus')?.textContent||''),{timeout:45000});
+   document.getElementById('poSaveStatus')?.textContent||''),null,{timeout:45000});
   assert.match(await page.locator('#poSaveStatus').textContent(),/在途庫存同步完成/);
   assert.equal(await page.evaluate(()=>emulatorPdfCalls),1);
   const savedPo=(await db.collection('purchaseOrders').doc(poNo).get()).data();
