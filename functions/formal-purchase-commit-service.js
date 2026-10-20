@@ -27,7 +27,8 @@ function purchaseIntent(data){
   fail('invalid-argument','正式採購輸入欄位不正確');
  const base=strictRequest({poNo:data.poNo,orderId:data.orderId,itemId:data.itemId,qty:data.qty});
  if(typeof data.unitCost!=='number'||!Number.isFinite(data.unitCost)
-   ||data.unitCost<0||data.unitCost>100000000||Math.round(data.unitCost*100)!==data.unitCost*100)
+   ||data.unitCost<0||data.unitCost>100000000
+   ||Math.abs(Math.round(data.unitCost*100)-data.unitCost*100)>1e-6)
   fail('invalid-argument','採購成本須為最多兩位小數的非負數');
  return {...base,supplier:text(data.supplier,'供應商',200),
   unitCost:data.unitCost,poDate:validDate(data.poDate)};
