@@ -402,6 +402,34 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
   assert.equal(proposal[0].qty,7);
   assert.equal(proposal[0].sourceType,'SALES_ORDER');
   assert.equal(proposal[0].sourceId,fixture.sourceId);
+  // The first Cloud Functions PO migration stage is admission-only, not a
+  // second purchasing writer. Auth/role/source/demand are read by Admin SDK
+  // from the real Emulator; the browser cannot forge actor or quantities.
+  await page.waitForFunction(()=>poNoReady&&!poNoLoading);
+  const admission=await page.evaluate(async input=>{
+   const callable=firebase.app().functions('asia-east1').httpsCallable('previewV2FormalPurchase');
+   const poNo=document.getElementById('poNo').textContent.trim();
+   const valid=await callable({poNo,orderId:input.orderId,itemId:'S',qty:4});
+   let excess,forged;
+   try{await callable({poNo,orderId:input.orderId,itemId:'S',qty:8});}
+   catch(error){excess=error.code;}
+   try{await callable({poNo,orderId:input.orderId,itemId:'S',qty:4,actorRole:'admin'});}
+   catch(error){forged=error.code;}
+   return {plan:valid.data,excess,forged};
+  },{orderId:fixture.sourceId});
+  assert.equal(admission.plan.orderId,fixture.sourceId);
+  assert.equal(admission.plan.itemId,'S');
+  assert.equal(admission.plan.demandId,demandId);
+  assert.equal(admission.plan.proposedQty,4);
+  assert.equal(admission.plan.requestedQty,7);
+  assert.equal(admission.plan.remainingToOrderQty,7);
+  assert.equal(admission.plan.remainingAfterQty,3);
+  assert.equal(admission.plan.status,'preview-only');
+  assert.equal(admission.excess,'functions/failed-precondition');
+  assert.equal(admission.forged,'functions/invalid-argument');
+  assert.deepEqual(await facts(fixture),restored);
+  assert.deepEqual((await demandRef.get()).data(),demand);
+  console.log('Full site '+width+'px: authenticated PO preflight admits 4/7, blocks over-order and forged role; no stock or PO writes.');
   // Opening the actual purchase modal is a read-only proposal. The PO
   // commit and incoming-registration stages have not been authorized by UI.
   assert.equal((await db.collection('purchaseOrders').get()).size,poCountBefore);
