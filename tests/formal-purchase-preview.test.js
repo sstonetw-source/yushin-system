@@ -107,7 +107,7 @@ function writeFixture(){
   async runTransaction(fn){
    const commands=[];
    const tx={
-    async get(ref){return {exists:records.has(ref.path),data:()=>records.get(ref.path)};},
+    async get(ref){assert.equal(commands.length,0,'all reads precede writes');return {exists:records.has(ref.path),data:()=>records.get(ref.path)};},
     create(ref,document){commands.push({op:'create',path:ref.path,document});},
     set(ref,document){commands.push({op:'set',path:ref.path,document});},
     update(ref,patch){commands.push({op:'update',path:ref.path,patch});}
@@ -184,4 +184,110 @@ test('server PO intent validates exact input shape, money precision and date',()
   {...data,unitCost:9.999},{...data,poDate:'2026-02-30'},
   {...data,poDate:'yesterday'},{...data,createdByRole:'admin'}
  ])assert.throws(()=>purchaseIntent(invalid),e=>e.code==='invalid-argument');
+});
+
+function addPurchaseSource(x,orderId,itemId,{productId='P',warehouseId='W',shortageQty=7}={}){
+ const source=x.records.get('orders/'+orderId)||{
+  ownerUid:'seller',salesCode:'B',status:'active',orderStatus:'normal',
+  inventoryReservationStatus:'completed',workCategories:['dispatch','ordering'],items:[]
+ };
+ const item={itemId,productId,warehouseId,fulfillmentType:'WAREHOUSE',
+  qty:12,reservedQty:12-shortageQty,shortageQty,supplyOrderedQty:0,receivedQty:0};
+ const index=source.items.length;source.items.push(item);x.records.set('orders/'+orderId,source);
+ x.records.set('products/'+productId,{productType:'Goods',active:true});
+ x.records.set('warehouses/'+warehouseId,{active:true});
+ const demand=core.demandDocument(core.fromSalesOrder({...item,sourceType:'SALES_ORDER',
+  sourceId:orderId,sourceItemId:itemId,sourceItemIndex:index,ownerUid:'seller',salesCode:'B',productKey:productId}));
+ x.records.set('procurementDemands/'+encodeURIComponent(demand.demandId),demand);
+ return {orderId,itemId,qty:shortageQty,unitCost:10.25};
+}
+function mergedIntent(x,items){return {poNo:x.data.poNo,poDate:x.data.poDate,supplier:x.data.supplier,items};}
+
+test('five-line server PO merges same-order updates and crossed orders without overwriting siblings',async()=>{
+ const x=writeFixture();
+ const items=[{orderId:x.data.orderId,itemId:x.data.itemId,qty:4,unitCost:19.99},
+  addPurchaseSource(x,'ORDER-1','S2',{warehouseId:'W2'}),
+  addPurchaseSource(x,'ORDER-2','A',{productId:'P2'}),
+  addPurchaseSource(x,'ORDER-2','B',{warehouseId:'W2'}),
+  addPurchaseSource(x,'ORDER-3','C')];
+ const input=mergedIntent(x,items),before=structuredClone([...x.records]);
+ const result=await commitV2FormalPurchase(x.db,'buyer',input);
+ assert.equal(result.status,'committed');assert.equal(result.committedQty,32);
+ assert.equal(result.supplyOrderIds.length,5);assert.equal(result.demandIds.length,5);
+ assert.equal(x.history.length,14,'one PO, five supplies, five demands, three source updates');
+ const source=x.records.get('orders/ORDER-1');
+ assert.deepEqual(source.items.map(item=>item.supplyOrderedQty),[4,7]);
+ assert.equal(source.items[0].shortageQty,7);assert.equal(source.items[0].reservedQty,5);
+ assert.ok(source.workCategories.includes('ordering'),'partially ordered first line stays pending');
+ assert.ok(x.records.get('orders/ORDER-2').workCategories.includes('dispatch'));
+ assert.equal(x.records.get('orders/ORDER-2').workCategories.includes('ordering'),false);
+ const po=x.records.get('purchaseOrders/'+input.poNo);
+ assert.deepEqual(po.orderIds,['ORDER-1','ORDER-2','ORDER-3']);
+ assert.deepEqual(po.items.map(line=>line.warehouseId),['W','W2','W','W2','W']);
+ for(const [index,line] of items.entries()){
+  const supply=x.records.get('supplyOrders/'+result.supplyOrderIds[index]);
+  assert.equal(supply.sourceId,line.orderId);assert.equal(supply.sourceItemId,line.itemId);
+  assert.equal(supply.qty,line.qty);assert.equal(supply.unitCost,line.unitCost);
+  assert.equal(supply.receivedQty,0);assert.equal(supply.incomingRegisteredQty,0);
+ }
+ assert.equal(x.history.some(command=>/inventory|warehouseStocks/.test(command.path)),false);
+ const committed=structuredClone([...x.records]);
+ assert.equal((await commitV2FormalPurchase(x.db,'buyer',input)).status,'already-applied');
+ assert.deepEqual([...x.records],committed);assert.equal(x.history.length,14);
+ await assert.rejects(commitV2FormalPurchase(x.db,'buyer',{...input,items:[...items].reverse()}),{code:'already-exists'});
+ assert.notDeepEqual([...x.records],before);
+});
+
+test('fully purchasing one line preserves unselected sibling shortage and existing dispatch queue',async()=>{
+ const x=writeFixture();addPurchaseSource(x,'ORDER-1','S2');
+ x.records.get('orders/ORDER-1').workCategories=['dispatch','ordering'];
+ await commitV2FormalPurchase(x.db,'buyer',{...x.data,qty:7});
+ const order=x.records.get('orders/ORDER-1');
+ assert.deepEqual(order.items.map(item=>item.supplyOrderedQty),[7,0]);
+ assert.ok(order.workCategories.includes('ordering'));
+ assert.ok(order.workCategories.includes('dispatch'));
+});
+
+test('invalid final line or occupied final supply ID rejects entire merged PO with zero writes',async()=>{
+ for(const failure of ['excess','stale','warehouse','service','supply']){
+  const x=writeFixture(),second=addPurchaseSource(x,'ORDER-2','S2');
+  const items=[{orderId:x.data.orderId,itemId:x.data.itemId,qty:4,unitCost:19.99},second];
+  if(failure==='excess')second.qty=8;
+  if(failure==='stale'){
+   const id=core.demandIdForSource({sourceType:'SALES_ORDER',sourceId:'ORDER-2',sourceItemId:'S2'});
+   x.records.get('procurementDemands/'+encodeURIComponent(id)).receivedQty=1;
+  }
+  if(failure==='warehouse')x.records.get('orders/ORDER-2').items[0].warehouseId='MISSING';
+  if(failure==='service')x.records.get('orders/ORDER-2').items[0].productType='SERVICE';
+  if(failure==='supply')x.records.set('supplyOrders/po-'+encodeURIComponent(x.data.poNo)+'-1',{other:true});
+  const before=structuredClone([...x.records]);
+  await assert.rejects(commitV2FormalPurchase(x.db,'buyer',mergedIntent(x,items)),{code:failure==='supply'?'already-exists':'failed-precondition'});
+  assert.equal(x.history.length,0);assert.deepEqual([...x.records],before);
+ }
+});
+
+test('merged purchase request is bounded, rejects duplicate source rows and canonicalizes one-row replay',async()=>{
+ const x=writeFixture(),line={orderId:x.data.orderId,itemId:x.data.itemId,qty:4,unitCost:19.99};
+ assert.deepEqual(purchaseIntent(mergedIntent(x,[line])),purchaseIntent(x.data));
+ for(const bad of [[],[line,line],Array.from({length:6},(_,index)=>({...line,itemId:'I'+index})),
+  [{...line,qty:0}],[{...line,actorRole:'admin'}],[{...line,unitCost:NaN}]]){
+  assert.throws(()=>purchaseIntent(mergedIntent(x,bad)),e=>e.code==='invalid-argument');
+ }
+ await commitV2FormalPurchase(x.db,'buyer',x.data);
+ assert.equal((await commitV2FormalPurchase(x.db,'buyer',mergedIntent(x,[line]))).status,'already-applied');
+});
+
+test('merged purchase replay rejects missing or relinked supply without changing any document',async()=>{
+ for(const damage of ['missing','source','qty','po-line']){
+  const x=writeFixture(),items=[{orderId:x.data.orderId,itemId:x.data.itemId,qty:4,unitCost:19.99},addPurchaseSource(x,'ORDER-2','S2')];
+  const input=mergedIntent(x,items),result=await commitV2FormalPurchase(x.db,'buyer',input);
+  const key='supplyOrders/'+result.supplyOrderIds[1];
+  if(damage==='missing')x.records.delete(key);
+  if(damage==='source')x.records.get(key).sourceId='OTHER';
+  if(damage==='qty')x.records.get(key).qty=1;
+  if(damage==='po-line')x.records.get('purchaseOrders/'+input.poNo).items[1].qty=1;
+  const before=structuredClone([...x.records]),count=x.history.length;
+  await assert.rejects(commitV2FormalPurchase(x.db,'buyer',input),{code:'failed-precondition'});
+  assert.deepEqual([...x.records],before);assert.equal(x.history.length,count);
+ }
 });

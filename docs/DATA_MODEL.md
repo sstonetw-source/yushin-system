@@ -376,3 +376,8 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 真實 Browser Auth 驗收只建立隔離測試帳號及 fixture 文件，沿原 reservationOperationReceipts 的取消／配貨／handoff 與 movement 查核，不新增 schema。原 sessionStorage 取消意圖透過同一 browser context 重開保存，Auth 使用實際 LOCAL persistence；物流進度則從原 checkpoint 重讀。測試確認一次取消 history 與一次換人 handoff，最終批次完成且原 inventoryLots／onHand 不變。正式資料及 Auth providers 不變。
 
 區域 Functions 改從 compat app 取得，原 payload／意圖 hash／operation ID／source runId 契約不變；沒有資料遷移或欄位新增。
+
+
+## 正式採購多品項後端擴充（2026-10-20）
+
+無新 collection、Rules 或索引。`purchaseOrders` 的 `items`／`supplyOrderIds` 以列序一對一對應；`orderIds` 保存去重的來源訂單。Supply ID 仍為 `po-{encodeURIComponent(poNo)}-{index}`。每列各更新原需求；同來源訂單各品項累積採購與事件在同一次來源 update 保存。回覆多列含 `demandIds`、各列 supply IDs 與合計 `committedQty`；單列保留原 `demandId`。此階段不建立在途、實貨或批次。

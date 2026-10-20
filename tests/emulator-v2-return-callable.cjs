@@ -893,3 +893,96 @@ test('real Auth lifecycle serializes repeated competing requests and rolls back 
  assert.deepEqual(await lifecycleSnapshot(x),before);
  assert.equal((await x.actor.setLifecycle({...input,operationId:input.operationId+'_new'})).status,'applied');
 });
+
+// Same production-source PO Service; only the existing demo adapter exports it.
+// These are backend Auth/atomicity cases, not original-UI PO acceptance.
+async function mergedPurchaseFixture(tag){
+ const actor=await identity('merged-po-'+tag,'purchaser');
+ const keys=['merged-'+tag+'-P','merged-'+tag+'-Q'];
+ const warehouses=['merged-'+tag+'-A','merged-'+tag+'-B'];
+ const orderIds=['merged-'+tag+'-O1','merged-'+tag+'-O2'];
+ const items=[],batch=db.batch(),put=(name,id,value)=>batch.set(db.collection(name).doc(id),value);
+ for(const key of keys){
+  put('products',key,{productType:'Goods',active:true});
+  put('inventory',key,{productKey:key,onHand:0,reserved:0,incoming:0,transferFreeInTransit:0});
+  for(const warehouseId of warehouses)put('warehouseStocks',warehouseId+'__'+key,{warehouseId,productKey:key,onHand:0,reserved:0,incoming:0,transferFreeInTransit:0});
+ }
+ for(const warehouseId of warehouses)put('warehouses',warehouseId,{active:true});
+ for(const [orderIndex,orderId] of orderIds.entries()){
+  const rows=Array.from({length:orderIndex===0?3:2},(_,index)=>({
+   itemId:'I'+index,productId:keys[index%2],itemCode:'PO-'+index,itemName:'合併採購測試',brand:'Roche',
+   qty:7,warehouseId:warehouses[index%2],fulfillmentType:'WAREHOUSE',
+   deliveredQty:0,returnedQty:0,dispatchPreparedQty:0,warehouseShippedQty:0,
+   deliveryPlan:{mode:'CUSTOMER_SHIP',contact:'測試',phone:'02-12345678',address:'測試地址'}
+  }));
+  rows.forEach(row=>items.push({orderId,itemId:row.itemId,qty:7,unitCost:19.99}));
+  put('orders',orderId,{ownerUid:actor.uid,salesCode:'P',status:'active',orderStatus:'normal',
+   inventoryReservationStatus:'pending',inventoryReservationAttemptId:'merged_sync_'+orderId,
+   deliveryRecords:[],returnRecords:[],deliveryHistory:[],deliveredQty:0,isDelivered:false,items:rows});
+ }
+ await batch.commit();
+ for(const orderId of orderIds)await synchronizeV2OrderFixture(db,actor.uid,{orderId,warehouseIds:warehouses});
+ const input={poNo:'MERGED-'+tag,poDate:'2026-10-20',supplier:'合併測試供應商',items};
+ const commit=(data=input,who=actor)=>httpsCallable(who.functions,'commitV2FormalPurchase',{timeout:60000})(data).then(reply=>reply.data);
+ const snap=async()=>{
+  const documents=[];
+  const read=async(name,id)=>{const s=await db.collection(name).doc(id).get();documents.push([name+'/'+id,s.exists?s.data():null]);};
+  for(const orderId of orderIds)await read('orders',orderId);
+  for(const row of items){const id=procurementDemandCore.demandIdForSource({sourceType:'SALES_ORDER',sourceId:row.orderId,sourceItemId:row.itemId});await read('procurementDemands',encodeURIComponent(id));}
+  for(const key of keys){await read('inventory',key);for(const warehouse of warehouses)await read('warehouseStocks',warehouse+'__'+key);}
+  await read('purchaseOrders',input.poNo);
+  for(let index=0;index<items.length;index++)await read('supplyOrders','po-'+encodeURIComponent(input.poNo)+'-'+index);
+  return documents;
+ };
+ return {actor,keys,warehouses,orderIds,input,commit,snap};
+}
+
+test('real Auth merged PO atomically commits five lines across two orders and two warehouses, with one replay',{timeout:120000},async()=>{
+ const x=await mergedPurchaseFixture('five');
+ const before=await x.snap();
+ const results=await Promise.all([x.commit(),x.commit()]);
+ assert.deepEqual(results.map(r=>r.status).sort(),['already-applied','committed']);
+ assert.ok(results.every(r=>r.committedQty===35&&r.supplyOrderIds.length===5&&r.demandIds.length===5));
+ const after=await x.snap();
+ assert.deepEqual(after.filter(([path])=>/^(inventory|warehouseStocks)\//.test(path)),
+  before.filter(([path])=>/^(inventory|warehouseStocks)\//.test(path)),'supplier obligation is not incoming or physical stock');
+ for(const orderId of x.orderIds){
+  const source=(await db.collection('orders').doc(orderId).get()).data();
+  assert.ok(source.items.every(row=>row.supplyOrderedQty===7&&row.reservedQty===0&&row.shortageQty===7));
+  assert.ok(source.items.every(row=>row.orderEvents.filter(e=>e.id===x.input.poNo).length===1));
+  assert.equal(source.workCategories.includes('ordering'),false);
+ }
+ for(const [index,row] of x.input.items.entries()){
+  const supply=(await db.collection('supplyOrders').doc('po-'+encodeURIComponent(x.input.poNo)+'-'+index).get()).data();
+  assert.equal(supply.qty,7);assert.equal(supply.sourceId,row.orderId);assert.equal(supply.sourceItemId,row.itemId);
+  assert.equal(supply.warehouseId,x.warehouses[(index<3?index:index-3)%2]);
+  assert.equal(supply.incomingRegisteredQty,0);assert.equal(supply.receivedQty,0);
+ }
+ await assert.rejects(x.commit({...x.input,items:x.input.items.map((row,index)=>index===4?{...row,qty:6}:row)}),code('already-exists'));
+ await db.collection('users').doc(x.actor.uid).update({active:false});
+ await assert.rejects(x.commit(),code('permission-denied'));
+ assert.deepEqual(await x.snap(),after,'failed replays never change the committed PO');
+});
+
+test('real Auth merged PO refuses a bad final row and a sales actor without any partial commit',{timeout:120000},async()=>{
+ const x=await mergedPurchaseFixture('reject'),before=await x.snap();
+ const bad={...x.input,items:x.input.items.map((row,index)=>index===4?{...row,qty:8}:row)};
+ await assert.rejects(x.commit(bad),code('failed-precondition'));
+ const sales=await identity('merged-po-reject-sales','sales');
+ await assert.rejects(x.commit(x.input,sales),code('permission-denied'));
+ assert.deepEqual(await x.snap(),before);
+ assert.equal((await x.commit()).status,'committed','same fixed PO remains usable after rejected admission');
+});
+
+test('real Auth competing merged POs re-read demand and only one whole PO commits',{timeout:120000},async()=>{
+ const x=await mergedPurchaseFixture('race');
+ const other={...x.input,poNo:x.input.poNo+'-OTHER'};
+ const results=await Promise.allSettled([x.commit(),x.commit(other)]);
+ assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+ const rejected=results.find(r=>r.status==='rejected');assert.equal(rejected.reason.code,'functions/failed-precondition');
+ const winner=results.find(r=>r.status==='fulfilled').value;
+ const loserNo=winner.poNo===x.input.poNo?other.poNo:x.input.poNo;
+ assert.equal((await db.collection('purchaseOrders').doc(loserNo).get()).exists,false);
+ for(let index=0;index<x.input.items.length;index++)assert.equal((await db.collection('supplyOrders').doc('po-'+encodeURIComponent(loserNo)+'-'+index).get()).exists,false);
+ for(const orderId of x.orderIds){const source=(await db.collection('orders').doc(orderId).get()).data();assert.ok(source.items.every(row=>row.supplyOrderedQty===7));}
+});
