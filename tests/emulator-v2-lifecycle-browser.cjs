@@ -383,6 +383,8 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
   await siteNav(page,'purchasing');
   await page.waitForFunction(orderId=>document.getElementById('purchasePendingBody')?.textContent?.includes(orderId),fixture.sourceId);
   assert.match(await page.locator('#purchasePendingBody').textContent(),new RegExp(fixture.sourceId));
+  const poCountBefore=(await db.collection('purchaseOrders').get()).size;
+  const supplyCountBefore=(await db.collection('supplyOrders').get()).size;
   const pendingRow=page.locator('#purchasePendingBody tr').filter({hasText:fixture.sourceId});
   assert.equal(await pendingRow.count(),1);
   await pendingRow.getByRole('button',{name:'產生採購單'}).click();
@@ -402,8 +404,8 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
   assert.equal(proposal[0].sourceId,fixture.sourceId);
   // Opening the actual purchase modal is a read-only proposal. The PO
   // commit and incoming-registration stages have not been authorized by UI.
-  assert.equal((await db.collection('purchaseOrders').get()).size,0);
-  assert.equal((await db.collection('supplyOrders').get()).size,0);
+  assert.equal((await db.collection('purchaseOrders').get()).size,poCountBefore);
+  assert.equal((await db.collection('supplyOrders').get()).size,supplyCountBefore);
   assert.deepEqual((await demandRef.get()).data(),demand);
   assert.deepEqual(await facts(fixture),restored);
   console.log('Full site '+width+'px: purchaser opened original formal PO draft for seven shortages; no supply or incoming stock was written.');
