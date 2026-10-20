@@ -59,3 +59,15 @@
 本機原站 Chrome 1280／390 px、採購實際登入時，原 PO 草稿可在不提交交易的情況下呼叫准入入口，驗證剩餘缺口 7 件允許擬採購 4 件並阻擋超額 8 件；偽造角色、無權限業務、停用使用者、過期需求及重複 PO ID 由獨立後端單元測試查核（不可誤稱已完成真實 Auth 跨角色整站測試）。查核前後 PO、Supply、訂單預留、在途、實貨、需求資料都不變。
 
 **關鍵安全界線：** 唯讀准入不代表安全提交；未來正式 Cloud Function Transaction 必須在真正寫入時重新取得並驗證同批所有權威資料，加入固定 PO 身分／同單重跑／競爭採購/稽核紀錄；不可只憑此前端呼叫結果直接寫入。不接到正式 Functions `index.js`，目前只由隔離 Emulator 的臨時入口匯出；無 Firebase 部署。
+
+## 正式採購後端交易遷移｜第二階段：Emulator 隔離的單品項原子交易
+
+背景：Issue #199，原前端 `commitFormalPurchaseOrder` 對多份資料的 Firestore Rules 驗證已於真實登入整站 Chrome 1280／390px 複現 1000 運算式限制。
+
+新增 `functions/formal-purchase-commit-service.js` 的 `commitV2FormalPurchase`，目前**僅由 `demo-yushin` 隔離 Functions Emulator adapter 匯出**；正式 Functions `index.js`、現行前端提交按鈕、正式環境與 Firestore Rules 均不改。本階段限「**已有單筆 WAREHOUSE 實體商品需求的單一來源訂單／單一品項**」，不涵蓋多品項、跨單合併 PO、原廠直送、SERVICE 或手動備庫，也未完成原 UI 按鈕接線。
+
+此入口與第一階段共用 `validateV2FormalPurchaseTx`（正式提交交易**內**重新讀取真實 Auth UID 的 active role、來源訂單、產品、倉庫、最新需求）。需求計算**直接呼叫同一 `functions/shared/procurement-demand-core.js`**；同一 Firestore Admin SDK Transaction 建立 PO、供應紀錄、更新既有 Demand 與來源訂單。PO 號是確定性冪等 key，記錄完整意圖 SHA-256／創建者，重跑同意圖只回應 already-applied；使用相同號碼改數量或改操作員拒絕，不產生重複承諾。任何驗證失敗均不寫入。此交易階段不登記 incoming、更不建立實貨；後續必須沿用唯一現有 Incoming Service 確認第二段進度識別。
+
+原站 Chrome 真登入採購角色可從既有採購草稿直接呼叫**隔離的後端測試入口**，驗證 7 件缺口只建立 4 件供應承諾、原需求 4 已採購／3 未採購、客戶訂單累積採購量 4；原公司與分倉庫存、實貨批次、訂單預留保持不變。同一 Service 再重跑同單、換演員、使用舊需求或超額申請均須拒絕或安全回應。這些驗收**不代表原採購視窗已正式接線，也不是完整從按鈕到收貨的 Preview 驗收**。既有前端入口仍有 Issue #199 的交易運算限制，PR #198 保留失敗案例，不可視為已解決。
+
+重要風險與待續：後端投影與原前端相同欄位／事件格式的跨模組契約、產品與供應商附加欄位、工作卡快取／狀態、不同來源型態、採購文件下載仍需對照統一；目前只能把此階段視為可驗證後端交易原型，未進行正式 Functions 部署，不能將其誤當作正式環境採購 Service 已切換。
