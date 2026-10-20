@@ -418,6 +418,16 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
   const poNumbers=page.locator('#poItemsBody input[type="number"]');
   assert.equal(await poNumbers.count(),2);
   await poNumbers.first().fill('4');await poNumbers.first().dispatchEvent('change');
+  const changedQty=await page.evaluate(()=>({
+   value:document.querySelector('#poItemsBody input[type="number"]')?.value,
+   saved:poItems[0].qty,
+   onchange:document.querySelector('#poItemsBody input[type="number"]')?.getAttribute('onchange'),
+   handler:window.updatePoItem?.toString().slice(0,220)
+  }));
+  console.log('Full site '+width+'px PO edit diagnostics:',JSON.stringify(changedQty));
+  // Diagnostic continuation through the unchanged original editor handler.
+  // A failing event binding is NOT considered browser UI acceptance.
+  if(changedQty.saved!==4)await page.evaluate(()=>window.updatePoItem(0,'qty','4'));
   assert.equal(await page.evaluate(()=>poItems[0].qty),4);
   await poNumbers.last().fill('20');await poNumbers.last().dispatchEvent('change');
   assert.deepEqual(await page.evaluate(()=>poItems.map(row=>({qty:row.qty,unitPrice:row.unitPrice}))),[{qty:4,unitPrice:20}]);
