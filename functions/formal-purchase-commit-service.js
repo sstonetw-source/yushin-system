@@ -10,12 +10,12 @@ const {strictRequest,validateV2FormalPurchaseTx}=require('./formal-purchase-prev
 function fail(code,message){const e=new Error(message);e.code=code;throw e;}
 function text(value,label,max=200){
  if(typeof value!=='string'||!value.trim()||value!==value.trim()
-   ||value.length>max||/[\\x00-\\x1f]/.test(value))
+   ||value.length>max||/[\x00-\x1f]/.test(value))
   fail('invalid-argument',label+'不正確');
  return value;
 }
 function validDate(value){
- if(typeof value!=='string'||!/^\\d{4}-\\d{2}-\\d{2}$/.test(value)
+ if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value)
    ||!Number.isFinite(Date.parse(value+'T00:00:00Z'))
    ||new Date(value+'T00:00:00Z').toISOString().slice(0,10)!==value)
   fail('invalid-argument','採購日期不正確');
