@@ -830,6 +830,10 @@ async function printSavedPoDocument(poNo, vendorName) {
 window.printPurchaseOrder = async function() {
     if (poSaveInProgress) return;
     if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
+    if (globalThis.YUSHIN_FORMAL_PURCHASE_EMULATOR === true) {
+        try { if (pendingFormalPurchase()) { await recoverFormalPurchase(); return; } }
+        catch (error) { updatePoSaveStatus(error.message, true); return; }
+    }
     const leadDaysInput=document.getElementById('poLeadDays');
     if(!poEditingId&&leadDaysInput?.value&&(!Number.isInteger(Number(leadDaysInput.value))||Number(leadDaysInput.value)<0)){
         updatePoSaveStatus('預計交期請輸入 0 或以上的整數天數。',true);
@@ -999,6 +1003,7 @@ window.printPurchaseOrder = async function() {
     let poCommitted = false;
     try {
         const poDocumentId = poNo;
+        rememberFormalPurchase(poRecord, actorUid, actorRole);
         const commitPromise = commitFormalPurchaseOrder(poRecord, {actorUid,actorRole});
 
         // 採購單會同時改寫來源訂單與供應紀錄，不能像估價單一樣「先印再存」：
@@ -1008,26 +1013,7 @@ window.printPurchaseOrder = async function() {
         const {poRecord:committedRecord,committedSourceOrders,committedSupplyOrders} = await commitPromise;
         Object.assign(poRecord,committedRecord);
         poCommitted = true;
-        invalidateProcurementDemandQueue();
-        if (button) button.innerText = '同步在途庫存中…';
-
-        // The PO + source-order linkage above is the authoritative commit.
-        // Cache it before the separate incoming-stock registration so a transient
-        // failure can retry the same PO idempotently instead of attempting to
-        // create another PO with the same number.
-        syncCommittedPurchaseOrderSources(committedSourceOrders);
-        // 正式 PO 已成功建立時，立即把供應紀錄放進待到貨快取。
-        // 避免使用者本工作階段曾開過待到貨後，新增備庫 PO 卻要手動更新才看得到。
-        if (committedSupplyOrders.length) {
-            const supplyMap = new Map(supplyReceivingCache.map(row => [row.id, row]));
-            committedSupplyOrders.forEach(row => supplyMap.set(row.id, row));
-            supplyReceivingCache = [...supplyMap.values()]
-                .sort((a,b)=>String(b.orderDate||b.createdAt||'').localeCompare(String(a.orderDate||a.createdAt||'')));
-        }
-        const savedPo = { id: poDocumentId, ...poRecord };
-        const cachedIndex = poListCache.findIndex(po => po.id === savedPo.id);
-        if (cachedIndex >= 0) poListCache[cachedIndex] = savedPo;
-        else poListCache.unshift(savedPo);
+        const savedPo = cacheCommittedFormalPurchase({poRecord,committedSourceOrders,committedSupplyOrders});
         poEditingId = savedPo.id;
         poIncomingSyncPending = true;
         updatePoModeUI();
@@ -1041,6 +1027,8 @@ window.printPurchaseOrder = async function() {
         // 在途同步以 PO id 冪等處理，失敗時仍可由同一張 PO 重試，不會重複建立採購單。
         registerPurchaseIncoming(poDocumentId, poRecord, {actorUid,actorRole,onStockCommitted:invalidateWarehouseStockCache})
             .then(() => {
+                if (currentUser?.uid !== actorUid || currentUserRole !== actorRole) return;
+                clearFormalPurchasePending(poDocumentId, actorUid, actorRole);
                 if(poEditingId===poDocumentId)poIncomingSyncPending = false;
                 if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
                 if(poEditingId===poDocumentId){
@@ -1049,6 +1037,7 @@ window.printPurchaseOrder = async function() {
                 }
             })
             .catch(err => {
+                if (currentUser?.uid !== actorUid || currentUserRole !== actorRole) return;
                 console.error('採購單在途庫存背景同步失敗：', err);
                 if(poEditingId===poDocumentId){
                     poIncomingSyncPending = true;
@@ -1061,16 +1050,21 @@ window.printPurchaseOrder = async function() {
         console.error('儲存採購單紀錄失敗：', err);
         updatePoSaveStatus(poCommitted
             ? `採購單已同步雲端，但在途庫存同步未完成：${err.message}`
-            : `採購單未建立：${err.message}`, true);
+            : globalThis.YUSHIN_FORMAL_PURCHASE_EMULATOR === true
+                ? `採購結果尚未確認，請保留原單號並確認前次結果：${err.message}`
+                : `採購單未建立：${err.message}`, true);
         alert(poCommitted
             ? '採購單已同步雲端，但在途庫存同步未完成。請在這張採購單按「重試同步在途庫存」，不要另建一張：' + err.message
-            : '無法產生採購單：' + err.message);
+            : globalThis.YUSHIN_FORMAL_PURCHASE_EMULATOR === true
+                ? '採購結果尚未確認，請勿另建採購單；請使用「確認前次採購結果」核對：' + err.message
+                : '無法產生採購單：' + err.message);
     } finally {
         poSaveInProgress = false;
         if (button) {
             button.disabled = false;
         }
         updatePoSaveButton();
+        renderFormalPurchaseRecovery();
     }
 };
 

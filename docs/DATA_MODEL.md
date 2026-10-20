@@ -383,3 +383,12 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 無新 collection、Rules 或索引。`purchaseOrders` 的 `items`／`supplyOrderIds` 以列序一對一對應；`orderIds` 保存去重的來源訂單。Supply ID 仍為 `po-{encodeURIComponent(poNo)}-{index}`。每列各更新原需求；同來源訂單各品項累積採購與事件在同一次來源 update 保存。回覆多列含 `demandIds`、各列 supply IDs 與合計 `committedQty`；單列保留原 `demandId`。此階段不建立在途、實貨或批次。
 
 原採購文件試點新增可選 `document` 意圖：公司、五欄供應商快照、預計日期／來源及逐列交期；皆精確欄位與型別／上限查核並納入原冪等指紋。後端從權威列重算金額與搜尋 tokens，保存 PO 原欄位、Supply 供應商／交期及訂單↔PO 雙向連結。不帶 document 的既有隔離請求維持原指紋，不遷移舊資料。預計到貨日和原需求 required-by 日期分開；新增欄位不覆寫 demand 的 scheduleDate。
+
+
+### 原採購單斷線恢復（2026-10-20）
+
+原採購按鈕在呼叫同一 `commitFormalPurchaseOrder` 前，以 sessionStorage 固定原 UID／角色／單號及完整提交內容；未確認作業只允許原意圖重送，不建立新單號意圖。原採購頁提供「確認前次採購結果」，刷新後仍可經同一後端 writer 回讀 PO／來源／Supply，沿原 `registerPurchaseIncoming` 完成在途後才解除 checkpoint。讀取與導覽不得自行提交。僅 demo-yushin 本機試點啟用；正式／Preview 不啟用，未部署 Firebase。
+
+後端交易及需求公式沒有新增第二套；畫面快取同步抽為共用 feature helper。存取失敗在提交前停止；回覆未知、回讀失敗、在途失敗、角色改變或暫存損壞均保留 checkpoint，不默默刪除或降級 client writer。回覆已確認後的畫面更新失敗須與交易未確認分開顯示。checkpoint 僅保存於同分頁 sessionStorage，不承諾跨裝置或關閉分頁恢復；價格資料不送入新 collection。無新 Rules／Index／Listener／正式資料遷移。
+
+實作及尚未驗收範圍見 [整站驗收紀錄](full-site-emulator-boot-20261020.md)。

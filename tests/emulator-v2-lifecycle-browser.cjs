@@ -263,7 +263,7 @@ async function siteOrderAction(page,fixture,label){
 }
 for(const width of [1280,390])test('full site '+width+'px boot original navigation permissions cancellation and handoff',{timeout:240000},async()=>{
  const fixture=await seed(width,'site'),context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
- const errors=[],external=[],calls=[],loaded=new Set();let loseCancel=true,loseRecovery=true,loseRestore=true;
+ const errors=[],external=[],calls=[],loaded=new Set();let loseCancel=true,loseRecovery=true,loseRestore=true,losePurchase=true;
  await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_V2_LIFECYCLE_EMULATOR=true;window.YUSHIN_V2_RECOVERY_EMULATOR=true;window.YUSHIN_FORMAL_PURCHASE_EMULATOR=true;});
  page.on('pageerror',error=>errors.push(error.message));
  page.on('dialog',dialog=>dialog.type()==='confirm'?dialog.accept():dialog.dismiss());
@@ -277,12 +277,13 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
    assert.equal(data.actorUid,undefined);assert.equal(data.actorRole,undefined);calls.push({name,data});
    const shouldLose=name==='setV2OrderLifecycle'
     ?(data.nextStatus==='normal'?loseRestore:loseCancel)
-    :(name==='resumeV2FreeStockRecovery'&&loseRecovery);
+    :(name==='commitV2FormalPurchase'?losePurchase:(name==='resumeV2FreeStockRecovery'&&loseRecovery));
    if(shouldLose){
     const reply=await route.fetch();assert.equal(reply.status(),200);
     if(name==='setV2OrderLifecycle'){
      if(data.nextStatus==='normal')loseRestore=false;else loseCancel=false;
-    }else loseRecovery=false;
+    }else if(name==='commitV2FormalPurchase')losePurchase=false;
+    else loseRecovery=false;
     await route.abort('failed');return;
    }
   }
@@ -450,11 +451,37 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
   await page.locator('#poItemsBody input[onchange*="unitPrice"]').fill('20');
   await page.locator('#poItemsBody input[onchange*="unitPrice"]').blur();
   await page.locator('#printPurchaseOrderBtn').click();
-  await page.waitForFunction(()=>!poSaveInProgress&&poEditingId&&!poIncomingSyncPending
-   &&document.getElementById('poSaveStatus')?.textContent?.includes('在途庫存同步完成'),null,{timeout:45000});
+  await page.waitForFunction(()=>!poSaveInProgress&&document.getElementById('poSaveStatus')?.textContent?.includes('採購結果尚未確認'),null,{timeout:45000});
+  const firstPurchase=calls.filter(row=>row.name==='commitV2FormalPurchase');
+  assert.equal(firstPurchase.length,1);
+  const commitIntent=firstPurchase[0].data;
+  assert.equal((await db.collection('purchaseOrders').get()).size,poCountBefore+1);
+  const pendingKey='formal-po-pending:'+encodeURIComponent(fixture.accounts.purchaser.uid);
+  const pendingRaw=await page.evaluate(key=>sessionStorage.getItem(key),pendingKey);
+  assert.equal(JSON.parse(pendingRaw).poRecord.poNo,commitIntent.poNo);
+  assert.deepEqual(await page.evaluate(()=>window.poPdfOutputs),[],'unknown reply cannot print a formal document');
+  assert.equal((await facts(fixture)).inventory.incoming||0,0,'lost PO response has not registered incoming yet');
+  // Reload the unchanged original app. The original purchaser must explicitly
+  // resume the stored intent; navigation and reading alone cannot submit it.
+  await siteOpen(page,'purchaser');await siteNav(page,'purchasing');
+  await page.locator('#confirmFormalPurchasePendingBtn').waitFor({state:'visible'});
+  assert.equal(calls.filter(row=>row.name==='commitV2FormalPurchase').length,1);
+  assert.equal(await page.evaluate(key=>sessionStorage.getItem(key),pendingKey),pendingRaw);
+  await page.locator('#confirmFormalPurchasePendingBtn').click();
+  await page.waitForFunction(key=>!sessionStorage.getItem(key),pendingKey,{timeout:45000});
   const purchaseCalls=calls.filter(row=>row.name==='commitV2FormalPurchase');
-  assert.equal(purchaseCalls.length,1);
-  const commitIntent=purchaseCalls[0].data;
+  assert.equal(purchaseCalls.length,2);assert.deepEqual(purchaseCalls[1].data,commitIntent);
+  // Reload and repeat recovery: no checkpoint, no second PO or incoming.
+  await siteOpen(page,'purchaser');await siteNav(page,'purchasing');
+  assert.equal(await page.locator('#formalPurchaseRecoveryPanel').isVisible(),false);
+  await page.locator('#purchase-tab-history').click();
+  const savedRow=page.locator('#poListBody tr').filter({hasText:commitIntent.poNo});
+  await savedRow.locator('button').filter({hasText:'載入'}).click();
+  await page.waitForFunction(()=>!poSaveInProgress&&poEditingId&&!poIncomingSyncPending);
+  await page.evaluate(()=>{window.poPdfOutputs=[];printSavedPoDocument=async(poNo,vendor)=>window.poPdfOutputs.push({poNo,vendor});});
+  await page.locator('#printPurchaseOrderBtn').click();
+  await page.waitForFunction(()=>!poSaveInProgress&&window.poPdfOutputs.length===1);
+  assert.equal(calls.filter(row=>row.name==='commitV2FormalPurchase').length,2);
   assert.equal(commitIntent.items[0].qty,4);assert.equal(commitIntent.items[0].unitCost,20);
   const savedPo=(await db.collection('purchaseOrders').doc(commitIntent.poNo).get()).data();
   assert.equal(savedPo.items.length,1);
@@ -503,7 +530,7 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
   assert.equal((await db.collection('supplyOrders').get()).size,supplyCountBefore+1);
   assert.deepEqual((await demandRef.get()).data(),afterCommit);
   assert.deepEqual(await facts(fixture),updated);
-  console.log('Full site '+width+'px: original submit saved 4/7 PO through server, registered four incoming units with real Rules; physical stock unchanged.');
+  console.log('Full site '+width+'px: original PO lost its real HTTP reply; unchanged app reloaded and recovered the exact intent, registered four incoming units once and reprinted without another purchase.');
 
   console.log('Full site '+width+'px: seller restored five free units with seven shortages; lost-reply and stale-cancel retries are immutable.');
   for(const match of read('index.html').matchAll(/<script[^>]+src="([^"?]+)(?:\?[^\"]*)?"/g)){

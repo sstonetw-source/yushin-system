@@ -947,9 +947,11 @@ test('formal purchase order commit immediately hydrates the receiving supply cac
     assert.match(formalService,/let committedSupplyOrders = \[\]/);
     assert.match(formalService,/committedSupplyOrders = \[\]/);
     assert.match(formalService,/committedSupplyOrders\.push\(\{id:supplyId,\.\.\.supplyRecord\}\)/);
-    assert.match(source,/const supplyMap = new Map\(supplyReceivingCache\.map/);
-    assert.match(source,/committedSupplyOrders\.forEach\(row => supplyMap\.set\(row\.id, row\)\)/);
-    assert.match(source,/supplyReceivingCache = \[\.\.\.supplyMap\.values\(\)\]/);
+    assert.match(source,/cacheCommittedFormalPurchase\(\{poRecord,committedSourceOrders,committedSupplyOrders\}\)/);
+    const cache=app.slice(app.indexOf('function cacheCommittedFormalPurchase('),app.indexOf('function renderFormalPurchaseRecovery('));
+    assert.match(cache,/const supplyMap = new Map\(supplyReceivingCache\.map/);
+    assert.match(cache,/committedSupplyOrders\.forEach\(row => supplyMap\.set\(row\.id, row\)\)/);
+    assert.match(cache,/supplyReceivingCache = \[\.\.\.supplyMap\.values\(\)\]/);
 });
 
 test('receiving queue keeps standalone stock and cancelled-order warehouse supplies visible', () => {

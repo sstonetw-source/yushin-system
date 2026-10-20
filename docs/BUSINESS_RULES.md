@@ -429,3 +429,12 @@ Browser 發現的區域 SDK 入口修正只恢復既定後端連線方式，不�
 隔離正式採購一次限 1–5 個不同的 `(orderId,itemId)`；同來源重複列安全拒絕，須由未來介面契約先合併。每列由交易內最新來源／需求決定可採購量，任一列不合法則整張 PO、Supply、Demand、來源訂單均不提交。同張訂單買齊某列，不可移除其他未購列的 ordering 工作分類。單列陣列與既有單列請求具有相同冪等指紋；多列順序決定 supply ID，重排視為不同意圖並拒絕同號重用。
 
 原按鈕後端試點只接客戶訂單實體入庫採購；手動備庫、直送與服務品項不得悄悄降級舊交易。採購金額與搜尋投影沿單一 Supplier Core，前後端共用；文件 metadata 不能傳入角色、任意總額或庫存結果。後端沿既有交易驗證數量，不將供應承諾視為在途或實貨；在途仍由原 `registerPurchaseIncoming` 獨立冪等同步。
+
+
+### 原採購單斷線恢復（2026-10-20）
+
+原採購按鈕在呼叫同一 `commitFormalPurchaseOrder` 前，以 sessionStorage 固定原 UID／角色／單號及完整提交內容；未確認作業只允許原意圖重送，不建立新單號意圖。原採購頁提供「確認前次採購結果」，刷新後仍可經同一後端 writer 回讀 PO／來源／Supply，沿原 `registerPurchaseIncoming` 完成在途後才解除 checkpoint。讀取與導覽不得自行提交。僅 demo-yushin 本機試點啟用；正式／Preview 不啟用，未部署 Firebase。
+
+後端交易及需求公式沒有新增第二套；畫面快取同步抽為共用 feature helper。存取失敗在提交前停止；回覆未知、回讀失敗、在途失敗、角色改變或暫存損壞均保留 checkpoint，不默默刪除或降級 client writer。回覆已確認後的畫面更新失敗須與交易未確認分開顯示。checkpoint 僅保存於同分頁 sessionStorage，不承諾跨裝置或關閉分頁恢復；價格資料不送入新 collection。無新 Rules／Index／Listener／正式資料遷移。
+
+實作及尚未驗收範圍見 [整站驗收紀錄](full-site-emulator-boot-20261020.md)。

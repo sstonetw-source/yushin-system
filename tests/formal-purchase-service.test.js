@@ -240,3 +240,69 @@ test('formal boundary rejects invalid cost quantity and missing permission',asyn
     const x=setup();x.c.canCreatePurchaseOrderCapability=()=>false;
     await assert.rejects(x.c.commitFormalPurchaseOrder(x.po),/無採購作業權限/);
 });
+
+function recoverySetup() {
+ const x=emulatorSetup(),storage=new Map(),incoming=new Set(),feedback=[];
+ Object.assign(x.c,{
+  sessionStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},
+  document:{getElementById:()=>null},poSaveInProgress:false,poEditingId:null,poIncomingSyncPending:true,
+  poListCache:[],supplyReceivingCache:[],invalidateProcurementDemandQueue:()=>{},
+  syncCommittedPurchaseOrderSources:()=>{},invalidateWarehouseStockCache:()=>{},
+  registerPurchaseIncoming:async id=>incoming.add(id),renderPurchasingView:()=>{},
+  showActionFeedback:(message,type)=>feedback.push({message,type}),window:{}
+ });
+ vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/features/purchasing/formal-purchase-recovery.js'),'utf8'),x.c);
+ return {...x,storage,incoming,feedback};
+}
+test('formal pending checkpoint freezes original intent across reload and resumes the same Service without another writer',async()=>{
+ const x=recoverySetup();x.c.rememberFormalPurchase(x.po,'buyer','purchaser');
+ const raw=[...x.storage.values()][0];x.po.items[0].qty=99;
+ assert.equal(x.c.pendingFormalPurchase().poRecord.items[0].qty,1);
+ // Re-evaluate the browser feature as a new page using the same session data.
+ const reloaded=recoverySetup();for(const entry of x.storage)reloaded.storage.set(...entry);
+ await reloaded.c.recoverFormalPurchase();
+ assert.equal(reloaded.calls.find(row=>row.name).request.items[0].qty,1);
+ assert.equal(reloaded.storage.size,0);assert.equal(reloaded.incoming.size,1);
+ assert.equal(reloaded.c.poListCache[0].buyerName,'Server Buyer');
+ assert.equal(reloaded.c.supplyReceivingCache.length,1);assert.equal(reloaded.writes.length,0);
+ await reloaded.c.recoverFormalPurchase();assert.equal(reloaded.calls.filter(row=>row.name).length,1);
+ assert.ok(raw.includes('PO1'));
+});
+test('formal unknown reply and incoming failure retain the exact checkpoint and block a new intent until recovered',async()=>{
+ for(const stage of ['callable','incoming']){
+  const x=recoverySetup();x.c.rememberFormalPurchase(x.po,'buyer','purchaser');const before=[...x.storage.values()][0];
+  const transport=x.functions.httpsCallable;
+  if(stage==='callable')x.functions.httpsCallable=()=>async()=>{throw Error('reply lost');};
+  else x.c.registerPurchaseIncoming=async()=>{throw Error('incoming reply lost');};
+  await x.c.recoverFormalPurchase();assert.equal([...x.storage.values()][0],before);
+  assert.throws(()=>x.c.rememberFormalPurchase({...x.po,poNo:'OTHER'},'buyer','purchaser'),/前次/);
+  x.functions.httpsCallable=transport;x.c.registerPurchaseIncoming=async id=>x.incoming.add(id);
+  await x.c.recoverFormalPurchase();assert.equal(x.storage.size,0);assert.equal(x.incoming.size,1);
+  assert.equal(x.c.poListCache.length,1);assert.equal(x.c.supplyReceivingCache.length,1);
+ }
+});
+test('formal recovery serializes clicks and account switching cannot clear the original checkpoint or hydrate another session',async()=>{
+ const x=recoverySetup();x.c.rememberFormalPurchase(x.po,'buyer','purchaser');const original=[...x.storage.values()][0];
+ let finish;x.functions.httpsCallable=()=>()=>new Promise(resolve=>{finish=resolve;});
+ const first=x.c.recoverFormalPurchase();await x.c.recoverFormalPurchase();
+ x.c.currentUser={uid:'other'};x.auth.currentUser={uid:'other'};
+ finish({data:{status:'committed',poNo:'PO1',supplyOrderIds:['PO1-0']}});await first;
+ assert.equal([...x.storage.values()][0],original);assert.equal(x.c.poListCache.length,0);
+ assert.equal(x.incoming.size,0);assert.equal(x.feedback.length,0);
+ x.c.currentUser={uid:'buyer'};x.auth.currentUser={uid:'buyer'};
+ assert.equal(x.c.pendingFormalPurchase().poRecord.poNo,'PO1');
+});
+test('formal corrupt checkpoint, changed role, unsupported input or unavailable storage fail closed before submission',async()=>{
+ const x=recoverySetup();x.c.rememberFormalPurchase(x.po,'buyer','purchaser');
+ x.c.currentUserRole='admin';assert.throws(()=>x.c.pendingFormalPurchase(),/原帳號及角色/);
+ await x.c.recoverFormalPurchase();assert.equal(x.calls.filter(row=>row.name).length,0);assert.equal(x.storage.size,1);
+ x.c.currentUserRole='purchaser';x.storage.set(x.c.formalPurchasePendingKey(),'{broken');
+ assert.throws(()=>x.c.pendingFormalPurchase(),/前次採購/);await x.c.recoverFormalPurchase();
+ assert.equal(x.calls.filter(row=>row.name).length,0);assert.equal(x.storage.size,1);
+ x.storage.clear();
+ assert.throws(()=>x.c.rememberFormalPurchase({...x.po,items:[{...x.po.items[0],fulfillmentType:'DIRECT_SHIP'}]},'buyer','purchaser'),/1–5/);
+ assert.equal(x.storage.size,0);
+ x.c.sessionStorage.setItem=()=>{throw Error('storage disabled');};
+ assert.throws(()=>x.c.rememberFormalPurchase(x.po,'buyer','purchaser'),/storage disabled/);
+ assert.equal(x.calls.filter(row=>row.name).length,0);
+});

@@ -285,3 +285,12 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 後端正式採購多列變更須覆蓋：五列上限、同訂單多品項、跨單／同產品不同倉、最後一列拒絕且零部分寫入、同號並行重送、不同號競爭同需求，以及停用使用者重送。不得把本階段測試當成原 UI、收貨或正式部署驗收。
 
 原 PO 按鈕接線驗收必須實際點擊原表單，經真 Auth／Functions／Firestore Emulator，驗證 4/7 PO、來源與需求、四件在途、實貨與原批次不變。只允許隔離 PDF 實體輸出；不得改寫 handler、Service、Rules 或偽造 Callable 成功。驗收未通過不得合併，正式部署與正式資料遷移仍另行授權。文件 helper 與前端金額／搜尋投影使用 shared Supplier Core，須執行 build-functions-core 及 build-app 一致性檢查。
+
+
+### 原採購單斷線恢復（2026-10-20）
+
+原採購按鈕在呼叫同一 `commitFormalPurchaseOrder` 前，以 sessionStorage 固定原 UID／角色／單號及完整提交內容；未確認作業只允許原意圖重送，不建立新單號意圖。原採購頁提供「確認前次採購結果」，刷新後仍可經同一後端 writer 回讀 PO／來源／Supply，沿原 `registerPurchaseIncoming` 完成在途後才解除 checkpoint。讀取與導覽不得自行提交。僅 demo-yushin 本機試點啟用；正式／Preview 不啟用，未部署 Firebase。
+
+後端交易及需求公式沒有新增第二套；畫面快取同步抽為共用 feature helper。存取失敗在提交前停止；回覆未知、回讀失敗、在途失敗、角色改變或暫存損壞均保留 checkpoint，不默默刪除或降級 client writer。回覆已確認後的畫面更新失敗須與交易未確認分開顯示。checkpoint 僅保存於同分頁 sessionStorage，不承諾跨裝置或關閉分頁恢復；價格資料不送入新 collection。無新 Rules／Index／Listener／正式資料遷移。
+
+實作及尚未驗收範圍見 [整站驗收紀錄](full-site-emulator-boot-20261020.md)。

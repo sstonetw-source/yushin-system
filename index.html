@@ -903,6 +903,7 @@
     <!-- ============ 採購管理系統 ============ -->
     <div id="purchasing-system" class="content-section">
         <h2 class="workspace-page-title no-print">採購 <button type="button" class="page-help-trigger no-print" data-page-help="purchasing-system" aria-label="採購功能與注意事項" aria-haspopup="dialog" aria-controls="pageHelpDialog">!</button></h2><section class="panel no-print" id="customerCancellationQueue" hidden></section>
+        <section class="panel no-print" id="formalPurchaseRecoveryPanel" role="status" aria-live="polite" hidden></section>
         <div class="purchase-view-tabs no-print" aria-label="採購頁面">
             <button type="button" id="purchase-tab-work" class="active" onclick="switchPurchasingView('ordering')">採購需求</button>
             <button type="button" id="purchase-tab-history" onclick="switchPurchasingView('history')">採購單</button>
@@ -1682,7 +1683,7 @@
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261013-file-share"></script>
     <script src="modules/order-entry-core.js?v=20261014-1"></script>
-    <script src="app.js?v=20261020-4"></script>
+    <script src="app.js?v=20261020-5"></script>
     <script src="modules/order-self-order-required.js?v=20261013-1"></script>
     <script src="modules/customer-cancellations.js?v=20261015-1"></script>
     <script src="modules/free-stock-recovery.js?v=20261014-9"></script>
