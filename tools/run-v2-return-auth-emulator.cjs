@@ -18,11 +18,11 @@ try{
  fs.writeFileSync(config,JSON.stringify({functions:{source:'functions',runtime:'nodejs22'},
   firestore:{rules:path.join(root,'firestore.rules'),indexes:path.join(root,'firestore.indexes.json')},
   emulators:{firestore:{port:8080},auth:{port:9099},functions:{port:5001},ui:{enabled:false}}}));
- const testFile=path.join(root,'tests/emulator-v2-return-callable.cjs');
+ const testFiles=['tests/emulator-v2-return-callable.cjs','tests/emulator-v2-lifecycle-browser.cjs'].map(file=>path.join(root,file));
  const shellQuote=value=>"'"+value.split("'").join("'"+String.fromCharCode(92)+"''")+"'";
  const result=spawnSync('npx',['--yes','firebase-tools@15','emulators:exec','--config',config,
   '--only','firestore,auth,functions','--project','demo-yushin',
-  'node --test '+shellQuote(testFile)],{cwd:root,stdio:'inherit',env:{...process.env,
+  'node --test --test-concurrency=1 '+testFiles.map(shellQuote).join(' ')],{cwd:root,stdio:'inherit',env:{...process.env,
    ENABLE_V2_RETURN_AUTH_EMULATOR:'true'}});
  if(result.error)throw result.error;
  process.exitCode=result.status??1;

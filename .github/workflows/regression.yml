@@ -74,8 +74,8 @@ jobs:
         run: node tests/lifecycle-browser-smoke.js
       - name: Check customer return receiving Service in desktop and mobile Chrome
         run: node tests/customer-return-browser-smoke.js
-      - name: Install Firestore rules test dependencies
-        run: npm install --no-save @firebase/rules-unit-testing firebase firebase-admin@14.2.0
+      - name: Install Firestore rules and real browser integration dependencies
+        run: npm install --no-save @firebase/rules-unit-testing firebase firebase-admin@14.2.0 playwright-core@1.56.0 esbuild@0.25.0
       - name: Set up Java 21 for Firestore emulator
         uses: actions/setup-java@v4
         with:
@@ -89,7 +89,7 @@ jobs:
         env:
           ENABLE_GROUPED_RESERVATION: "true"
         run: npx --yes firebase-tools@15 emulators:exec --only firestore,auth,functions --project demo-yushin "node --test tests/emulator-grouped-reservation-callable.cjs"
-      - name: Verify v2 return Auth and Callable integration in isolated demo Emulator
+      - name: Verify v2 Auth Callables and real browser lifecycle handoff in isolated demo Emulator
         run: node tools/run-v2-return-auth-emulator.cjs
       - name: Verify single-item and whole-order dual-warehouse atomic reservation in Emulator
         run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --test tests/emulator-single-item-location.cjs tests/emulator-order-location.cjs"

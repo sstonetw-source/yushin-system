@@ -651,3 +651,7 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 ### 取消釋放後的原物流續傳（2026-10-20，本機 Emulator）
 
 原 modules/free-stock-recovery.js 面板在明確 YUSHIN_V2_RECOVERY_EMULATOR 下，唯讀 listV2FreeStockRecovery → 原 Service 的 listReleasedV2FreeStock；原列按鈕 → resumeV2FreeStockRecovery → drainReleasedV2FreeStock → advanceReleasedV2FreeStock／原 coordinator／唯一 allocation writer。每次列表最多 21 筆來源 lookahead、20 筆 checkpoint 及一筆當前 users，同一唯讀交易，完成列也推進 cursor。一次續傳最多五步，來源 ID 衍生同一 runId；沒有新配貨 Core／writer、Collection、Rules、Index 或排程。正式 index／Preview 未開放。
+
+### 瀏覽器真實登入驗收邊界（2026-10-20）
+
+隔離 runner 以相同 Auth／Functions／Firestore Emulator 順序執行原 SDK 整合與 emulator-v2-lifecycle-browser.cjs。後者用實際 Chrome、由 npm 本機打包的 Firebase compat SDK、原登入 handler／profile 套用、原取消與續傳 handler／renderer，直接對 Emulator 送帶 token 的 HTTP。測試主機只提供隔離頁面、導覽與 cache 呈現殼；不是整份正式 app.js 啟動。初始化仍由既有 fixture Service 準備，驗收從已同步訂單的登入取消開始。沒有正式環境切換或部署變更。

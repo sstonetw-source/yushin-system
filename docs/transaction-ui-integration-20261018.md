@@ -144,4 +144,14 @@ PR #190 完整 CI 39347832242 通過 2097 項測試與九組桌機／手機 Chro
 
 每次成功回覆核對原 source、產品、倉、額度與累計，回讀該次涉及的訂單、失效分倉／需求及標記原頁待刷新；舊完成批次重送的 affectedOrderIds 可為空，不宣稱回補所有歷史 cache。已確認配貨後畫面更新失敗與配貨結果未知明確分開。列表只涵蓋取消釋放，CLOSE／receipt 的自動接線及多品項目標配貨仍依原能力邊界，未由本批擴張。
 
-新增四項 Node（含全頁完成的分頁）、三項真 Auth（物流三角色正常／只讀列表／同 ID、兩業務角色／停用／偽造 payload／proof 損壞拒絕、原列回覆遺失與換人核對）；擴充既有 Chrome suite 的 1280／390 px 原面板分頁、部分續傳、遺失回覆及重開讀取。Node1591/1591、build／語法／diff 通過，新增 Auth／Chrome 與完整 CI 待執行。Chrome 為 scripted transport，完整 Browser Auth／Preview 尚未驗收。沒有新 Firestore 欄位、Collection、Rules、Index、Listener、背景排程或 Firebase 部署。
+新增四項 Node（含全頁完成的分頁）、三項真 Auth（物流三角色正常／只讀列表／同 ID、兩業務角色／停用／偽造 payload／proof 損壞拒絕、原列回覆遺失與換人核對）；擴充既有 Chrome suite 的 1280／390 px 原面板分頁、部分續傳、遺失回覆及重開讀取。PR #192 完整 CI 39353898396 通過 2110 項測試及十組桌機／手機 Chrome，合併 main f2ef514。這些 Chrome 為 scripted transport；以下批次另外驗證真實 Browser Auth。
+
+## 2026-10-20 真實 Chrome 登入、取消與物流換人接手
+
+新增 emulator-v2-lifecycle-browser.cjs 的 1280／390 px 兩項實際 Chrome 驗收：本機 esbuild 打包 Firebase compat app／auth／firestore／functions SDK，原登入畫面及 handleLogin／applyUserProfile 真正登入 Auth Emulator；原取消 renderer／quickSetOrderLifecycle／Service 直接送帶 Auth token 的 Callable，再由原後端讀／寫 Firestore Emulator。使用本機 HTTP host，不透過 Node exposeFunction 代送交易、不偽造 Firebase SDK。攔阻並記錄非本機網路，確認沒有正式 Firebase 請求。
+
+場景使用原 fixture 同步一筆持有雙倉共 12 個的來源單、七筆各缺一個的目標單。業務取消成功後，測試在真 HTTP 已收到 200 時中斷瀏覽器回覆；重開保留原 Auth session／取消 intent，以相同 operationId 核對。驗證業務 UI 隱藏配貨且後端拒絕直接 list；再從原登入畫面登入倉管，唯讀列表不改資料，按原列配貨五個後再中斷回覆。重開後改由採購真實登入接續同 movement／runId，查核一次 handoff 及總共七個目標預留、一次取消歷史，實貨 onHand／原批次完整保留；完成再重開沒有重複配貨。
+
+範圍是原登入／取消／配貨元件與真正傳輸的整段整合：導覽、cache 呈現及一般頁面權限由最小測試殼提供，預留初始化仍是原 fixture Service；未宣稱整份正式 index/app 啟動、瀏覽器建單／初始化／全部履約／Preview 全線通過。測試中間直接後端拒絕檢查不取代原按鈕操作。原隔離 runner 依序跑既有 31 項 Auth 與新 Browser 兩項，沒有更改正式 app／Core／writer／schema／Rules／Index／Auth providers 或部署。
+
+本地 Node1591/1591、build／語法／diff 通過；新 Browser Auth 及完整 CI 待執行。CI 同批保留原十組 scripted Chrome，另跑本組真 Browser Auth。正式／Preview 全站啟動與其餘履約場景仍待驗收。
