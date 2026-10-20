@@ -84,3 +84,12 @@
 本批將上節「按鈕未接線」延伸至本機隔離 gate：Chrome 1280／390 px 在同一恢復後 7 件缺口的原 PO 草稿，實際填入 4 件、成本 20，點原建立 PDF 按鈕。只替代實體 PDF 輸出，核對輸出前權威 PO 已落帳；原 Service 呼叫真實 Auth Callable 進入同一後端 writer，回讀權威資料後續走原在途 Service 和真實 Rules。驗收須確認採購 4／剩餘待採購 3、在途 4、實貨／預留／批次與其他訂單不變，並核對公司、供應商快照、金額及來源連結。
 
 此為 Issue #199 原失敗操作的針對性修正驗收，狀態以本批 PR 最新 CI 為準。不是正式部署；部分收貨、完整履約、斷線後刷新原 PO 恢復、全類型採購與 Preview 切換仍需後續驗收。正式 index.js 與 Rules 不變，#198 仍不得未經整合直接合併。
+
+
+## 2026-10-20 原採購單斷線恢復（隔離試點）
+
+已實作、待本批完整 CI 驗收：原採購按鈕在呼叫同一 `commitFormalPurchaseOrder` 前，以 sessionStorage 固定原 UID／角色／單號及完整提交內容；未確認作業只允許原意圖重送，不建立新單號意圖。原採購頁提供「確認前次採購結果」，刷新後仍可經同一後端 writer 回讀 PO／來源／Supply，沿原 `registerPurchaseIncoming` 完成在途後才解除 checkpoint。讀取與導覽不得自行提交。僅 demo-yushin 本機試點啟用；正式／Preview 不啟用，未部署 Firebase。
+
+後端交易及需求公式沒有新增第二套；畫面快取同步抽為共用 feature helper。存取失敗在提交前停止；回覆未知、回讀失敗、在途失敗、角色改變或暫存損壞均保留 checkpoint，不默默刪除或降級 client writer。回覆已確認後的畫面更新失敗須與交易未確認分開顯示。checkpoint 僅保存於同分頁 sessionStorage，不承諾跨裝置或關閉分頁恢復；價格資料不送入新 collection。無新 Rules／Index／Listener／正式資料遷移。
+
+驗收：新增執行式 Node 測試涵蓋原意圖凍結、重新載入、Callable／在途失敗、重複點擊、帳號／角色切換、損壞與儲存停用；原整站 Chrome 1280／390 px 在真實後端已完成後中斷 HTTP 回覆，刷新原網站並由按鈕重送完全相同 payload，核對唯一 PO／Supply、四件在途、實貨與原批次不變，再由原歷史載入／下載按鈕確認不重建採購。完整 CI 通過前不得合併。部分收貨、全類型採購、跨分頁關閉及 Preview／正式切換仍未完成。

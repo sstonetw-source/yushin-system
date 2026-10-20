@@ -606,6 +606,7 @@ window.loadPurchasingAnalytics = async function(force = false) {
 };
 
 window.renderPurchasingView = function() {
+    renderFormalPurchaseRecovery();
     populatePurchasingFilters();
     if (purchasingView === 'suppliers') {
         renderSupplierMasterAdmin();
