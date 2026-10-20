@@ -235,17 +235,28 @@ async function siteLogin(page,account,role){
  assert.equal(await page.evaluate(()=>firebase.auth().currentUser.uid),account.uid);
 }
 async function siteLogout(page){
- const toggle=page.locator('.mobile-nav-toggle');
- if(await toggle.isVisible()&&await toggle.getAttribute('aria-expanded')!=='true')await toggle.click();
+ await siteMenu(page);
  await page.locator('button[onclick="handleLogout()"]').click();await page.locator('#loginScreen').waitFor({state:'visible'});
 }
-async function siteNav(page,key){
+async function siteMenu(page){
  const toggle=page.locator('.mobile-nav-toggle');
- if(await toggle.isVisible()&&await toggle.getAttribute('aria-expanded')!=='true')await toggle.click();
+ if(await toggle.isVisible()){
+  // Finish the original container's scroll/autocollapse before opening its menu.
+  await page.evaluate(()=>document.getElementById('appContainer').scrollTo({top:0,behavior:'instant'}));
+  await page.waitForFunction(()=>document.getElementById('appContainer').scrollTop===0);
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  if(await toggle.getAttribute('aria-expanded')!=='true')await toggle.click();
+  await page.waitForFunction(()=>document.querySelector('.nav-tabs').classList.contains('mobile-open'));
+ }
+}
+async function siteNav(page,key){
+ await siteMenu(page);
  await page.locator('.nav-tab[data-main-nav="'+key+'"]').click();
 }
 async function siteOrderAction(page,fixture,label){
  await siteNav(page,'orders');
+ await page.evaluate(()=>ensureBrandSettingsLoaded());
+ await page.waitForFunction(()=>!mainPageLoads.has('orders.list')&&!orderPageLoading);
  const row=page.locator('#ordersBody > tr').filter({hasText:fixture.sourceId});await row.waitFor({state:'visible'});
  await row.locator('.order-more-menu > summary').click();await row.locator('button').filter({hasText:label}).click();
 }
@@ -321,7 +332,8 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
   console.log('Full site '+width+'px: five real role boot/restores, original navigation, seven holds and one handoff passed.');
  }catch(error){
   console.log('Full site '+width+'px diagnostic:',JSON.stringify(await page.evaluate(()=>({role:typeof currentUserRole==='undefined'?'not-booted':currentUserRole,
-   loginError:document.getElementById('loginError')?.textContent,feedback:document.getElementById('actionFeedback')?.textContent,errors:[]}))),JSON.stringify(errors));
+   loginError:document.getElementById('loginError')?.textContent,feedback:document.getElementById('actionFeedback')?.textContent,
+   menu:document.querySelector('.nav-tabs')?.className,scrollTop:document.getElementById('appContainer')?.scrollTop}))),JSON.stringify(errors));
   throw error;
  }finally{await context.close();}
 });
