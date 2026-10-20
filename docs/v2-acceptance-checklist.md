@@ -1,5 +1,9 @@
 # V2 驗收清單
 
+## 2026-10-20 整站啟動 gate
+- 原首頁 + 完整 app.js / 模組 + 真實 Auth / Functions / Firestore，桌機與手機、五角色登入恢復、原導航取消及物流接手：新增 CI 驗收，通過前不可宣告完成。
+- 詳見 [驗收邊界](full-site-emulator-boot-20261020.md)。不涵蓋正式部署、真實資料遷移或 PDF 匯出。
+
 ## 自動測試
 - [x] legacy single-item order 仍可讀
 - [x] multi-item order 每 item 有 stable itemId

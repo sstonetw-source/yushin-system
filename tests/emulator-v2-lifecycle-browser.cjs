@@ -1,6 +1,7 @@
 'use strict';
 // Actual Chrome -> original login/actions -> Firebase browser SDK -> isolated
-// Auth/Functions/Firestore. Only navigation/cache presentation is a test shell.
+// Auth/Functions/Firestore. Component cases retain their presentation shell;
+// full-site cases serve unchanged app.js and every original local module.
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),http=require('node:http');
 const {spawnSync}=require('node:child_process'),{build}=require('esbuild'),{chromium}=require('playwright-core');
 const admin=require('firebase-admin'),{getFirestore}=require('firebase-admin/firestore'),{getAuth}=require('firebase-admin/auth');
@@ -16,8 +17,26 @@ test.before(async()=>{
  const bundle=await build({entryPoints:[path.join(root,'tests/fixtures/v2-browser-firebase.mjs')],bundle:true,write:false,format:'iife',platform:'browser',target:'es2020',logLevel:'silent'});
  sdk=bundle.outputFiles[0].text;
  host=http.createServer((request,response)=>{
+  const pathname=new URL(request.url,'http://localhost').pathname;
+  if(pathname==='/site'){
+   const html=read('index.html').replace(/https:\/\/www\.gstatic\.com\/firebasejs\/10\.8\.0\/firebase-app-compat\.js/g,'/sdk.js')
+    .replace(/https:\/\/www\.gstatic\.com\/firebasejs\/10\.8\.0\/firebase-(?:firestore|auth)-compat\.js/g,'/sdk-ready.js')
+    .replace('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js','/vendor/html2canvas.js')
+    .replace('https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js','/vendor/jspdf.js');
+   response.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});response.end(html);return;
+  }
+  if(pathname==='/sdk-ready.js'){response.writeHead(200,{'Content-Type':'application/javascript'});response.end('// Real compat Auth/Firestore already included in sdk.js.');return;}
+  const vendor={'/vendor/html2canvas.js':'html2canvas/dist/html2canvas.min.js','/vendor/jspdf.js':'jspdf/dist/jspdf.umd.min.js'}[pathname];
+  if(vendor){response.writeHead(200,{'Content-Type':'application/javascript'});response.end(fs.readFileSync(require.resolve(vendor)));return;}
   if(request.url==='/sdk.js'){response.writeHead(200,{'Content-Type':'application/javascript'});response.end(sdk);return;}
-  if(request.url==='/styles.css'){response.writeHead(200,{'Content-Type':'text/css'});response.end(read('styles.css'));return;}
+  if(/^\/(app\.js|styles\.css|modules\/[\w.-]+\.js|assets\/[\w./-]+)$/.test(pathname)){
+   const file=path.resolve(root,'.'+pathname);
+   if(file.startsWith(root+path.sep)&&fs.existsSync(file)&&fs.statSync(file).isFile()){
+    response.writeHead(200,{'Content-Type':({'.js':'application/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png'})[path.extname(file)]||'application/octet-stream'});
+    response.end(fs.readFileSync(file));return;
+   }
+  }
+  if(pathname!=='/'){response.writeHead(404);response.end();return;}
   response.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});response.end(harness());
  });
  await new Promise(resolve=>host.listen(0,'127.0.0.1',resolve));origin='http://127.0.0.1:'+host.address().port;
@@ -31,12 +50,12 @@ function harness(){
  return '<html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/styles.css">'
   +login+'<main id="testApp" hidden><div id="testIdentity"></div><div id="feedback" role="status"></div><div id="orderButtons"></div><div id="inventory-system" class="content-section active">'+panel+'</div></main><script src="/sdk.js"></script></html>';
 }
-async function seed(width){
- const tag='browser'+width,sourceId=tag+'-source',productKey=tag+'-product',warehouseIds=[tag+'-A',tag+'-B'];
+async function seed(width,prefix='browser'){
+ const tag=prefix+width,sourceId=tag+'-source',productKey=tag+'-product',warehouseIds=[tag+'-A',tag+'-B'];
  const accounts={};
- for(const role of ['sales','warehouse','purchaser','engineer']){
+ for(const role of ['sales','warehouse','purchaser','engineer','admin']){
   const uid=tag+'-'+role,email=uid+'@example.test';await auth.createUser({uid,email,password});
-  await db.collection('users').doc(uid).set({role,active:true,name:role,code:'B'});accounts[role]={uid,email};
+  await db.collection('users').doc(uid).set({role,active:true,name:role,email,code:role==='sales'?'B':role});accounts[role]={uid,email};
  }
  const batch=db.batch(),put=(name,id,data)=>batch.set(db.collection(name).doc(id),data);
  put('products',productKey,{productType:'Goods'});put('inventory',productKey,{productKey,onHand:12,reserved:0,transferFreeInTransit:0});
@@ -47,7 +66,7 @@ async function seed(width){
  }
  await batch.commit();
  const create=async(orderId,qty,itemId)=>{
-  await db.collection('orders').doc(orderId).set({ownerUid:accounts.sales.uid,salesCode:'B',status:'active',orderStatus:'normal',orderDate:'2026-01-01',
+  await db.collection('orders').doc(orderId).set({orderNo:orderId,customerName:'整站驗收客戶',ownerUid:accounts.sales.uid,salesCode:'B',status:'active',orderStatus:'normal',orderDate:'2026-01-01',
    inventoryReservationStatus:'pending',inventoryReservationAttemptId:'browser_sync_'+orderId,deliveryRecords:[],returnRecords:[],deliveryHistory:[],deliveredQty:0,isDelivered:false,
    items:[{itemId,productId:productKey,qty,warehouseId:warehouseIds[0],reservedQty:0,deliveredQty:0,returnedQty:0,dispatchPreparedQty:0,warehouseShippedQty:0,
     fulfillmentType:'WAREHOUSE',deliveryPlan:{mode:'CUSTOMER_SHIP',contact:'測試客戶',phone:'02-12345678',address:'測試地址'}}]});
@@ -199,6 +218,122 @@ for(const width of [1280,390])test('real browser '+width+'px original login canc
  }catch(error){
   console.log('Browser '+width+'px diagnostic:',JSON.stringify(await page.evaluate(()=>({feedback:document.getElementById('feedback')?.textContent,
    rows:document.getElementById('freeStockRecoveryBody')?.textContent,completedRecoveryClicks:window.completedRecoveryClicks}))));
+  throw error;
+ }finally{await context.close();}
+});
+
+async function siteOpen(page,role){
+ await page.goto(origin+'/site');
+ if(role){await page.locator('#appContainer').waitFor({state:'visible'});await page.waitForFunction(value=>currentUserRole===value,role);}
+ else await page.locator('#loginScreen').waitFor({state:'visible'});
+ assert.equal(await page.evaluate(()=>APP_ENVIRONMENT),'emulator');
+ assert.match(await page.locator('#previewEnvironmentBanner').textContent(),/本機 Emulator/);
+}
+async function siteLogin(page,account,role){
+ await page.fill('#loginEmail',account.email);await page.fill('#loginPassword',password);await page.locator('#loginScreen button').click();
+ await page.locator('#appContainer').waitFor({state:'visible'});await page.waitForFunction(value=>currentUserRole===value,role);
+ assert.equal(await page.evaluate(()=>firebase.auth().currentUser.uid),account.uid);
+}
+async function siteLogout(page){
+ await siteMenu(page);
+ await page.locator('button[onclick="handleLogout()"]').click();await page.locator('#loginScreen').waitFor({state:'visible'});
+}
+async function siteMenu(page){
+ const toggle=page.locator('.mobile-nav-toggle');
+ if(await toggle.isVisible()){
+  // Finish the original container's scroll/autocollapse before opening its menu.
+  await page.evaluate(()=>document.getElementById('appContainer').scrollTo({top:0,behavior:'instant'}));
+  await page.waitForFunction(()=>document.getElementById('appContainer').scrollTop===0);
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  if(await toggle.getAttribute('aria-expanded')!=='true')await toggle.click();
+  await page.waitForFunction(()=>document.querySelector('.nav-tabs').classList.contains('mobile-open'));
+ }
+}
+async function siteNav(page,key){
+ await siteMenu(page);
+ await page.locator('.nav-tab[data-main-nav="'+key+'"]').click();
+}
+async function siteOrderAction(page,fixture,label){
+ await siteNav(page,'orders');
+ await page.evaluate(()=>ensureBrandSettingsLoaded());
+ await page.waitForFunction(()=>!mainPageLoads.has('orders.list')&&!orderPageLoading);
+ const row=page.locator('#ordersBody > tr').filter({hasText:fixture.sourceId});await row.waitFor({state:'visible'});
+ await row.locator('.order-more-menu > summary').click();await row.locator('button').filter({hasText:label}).click();
+}
+for(const width of [1280,390])test('full site '+width+'px boot original navigation permissions cancellation and handoff',{timeout:240000},async()=>{
+ const fixture=await seed(width,'site'),context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
+ const errors=[],external=[],calls=[],loaded=new Set();let loseCancel=true,loseRecovery=true;
+ await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_V2_LIFECYCLE_EMULATOR=true;window.YUSHIN_V2_RECOVERY_EMULATOR=true;});
+ page.on('pageerror',error=>errors.push(error.message));
+ page.on('dialog',dialog=>dialog.type()==='confirm'?dialog.accept():dialog.dismiss());
+ page.on('response',response=>{if(response.status()===200)loaded.add(new URL(response.url()).pathname);});
+ await context.route('**/*',async route=>{
+  const request=route.request(),url=new URL(request.url());
+  if(!['localhost','127.0.0.1'].includes(url.hostname)){external.push(url.hostname);await route.abort();return;}
+  if(url.port==='5001'&&request.method()==='POST'){
+   const name=url.pathname.split('/').at(-1),data=request.postDataJSON().data;
+   assert.ok((await request.allHeaders()).authorization?.startsWith('Bearer '));
+   assert.equal(data.actorUid,undefined);assert.equal(data.actorRole,undefined);calls.push({name,data});
+   if((name==='setV2OrderLifecycle'&&loseCancel)||(name==='resumeV2FreeStockRecovery'&&loseRecovery)){
+    const reply=await route.fetch();assert.equal(reply.status(),200);
+    if(name==='setV2OrderLifecycle')loseCancel=false;else loseRecovery=false;
+    await route.abort('failed');return;
+   }
+  }
+  await route.continue();
+ });
+ try{
+  await siteOpen(page);await siteLogin(page,fixture.accounts.sales,'sales');const before=await facts(fixture);
+  assert.equal(await page.evaluate(()=>canAccessPage('admin')),false);
+  console.log('Full site '+width+'px: original bootstrap and seller profile loaded.');
+  await siteOrderAction(page,fixture,'取消訂單');
+  await page.waitForFunction(id=>!pendingLifecycleOrderIds.size&&!!pendingV2OrderLifecycle(id),fixture.sourceId);
+  assert.equal((await facts(fixture)).source.orderStatus,'cancelled');
+  await siteOpen(page,'sales');await siteOrderAction(page,fixture,'確認前次取消／恢復結果');
+  await page.waitForFunction(id=>!pendingV2OrderLifecycle(id),fixture.sourceId);
+  const cancel=calls.filter(row=>row.name==='setV2OrderLifecycle');assert.equal(cancel.length,2);assert.deepEqual(cancel[0].data,cancel[1].data);
+  console.log('Full site '+width+'px: original order list and persisted cancel reconciliation passed.');
+  await siteLogout(page);await siteLogin(page,fixture.accounts.warehouse,'warehouse');
+  assert.equal(await page.evaluate(()=>canAccessPage('quote')),false);
+  assert.equal(await page.evaluate(()=>canManageOrderLifecycleCapability()),false);
+  await siteNav(page,'inventory');const canceled=await facts(fixture),rows=await loadSourceRows(page,fixture.productKey);
+  assert.deepEqual(await facts(fixture),canceled);assert.equal(await rows.count(),2);await rows.first().locator('button').click();
+  await page.waitForFunction(()=>document.getElementById('actionFeedback')?.textContent.includes('配貨結果尚待確認'));
+  assert.equal((await facts(fixture)).targets.reduce((sum,row)=>sum+row.items[0].reservedQty,0),5);
+  const movement=calls.find(row=>row.name==='resumeV2FreeStockRecovery').data.movementId;
+  await siteOpen(page,'warehouse');await siteLogout(page);await siteLogin(page,fixture.accounts.purchaser,'purchaser');
+  await siteNav(page,'inventory');await loadSourceRows(page,fixture.productKey);
+  // Observe completion only; retain the original handler, renderer and cache invalidation.
+  await page.evaluate(()=>{const original=window.retryFreeStockRecovery;window.completedRecoveryClicks=0;
+   window.retryFreeStockRecovery=async(...args)=>{try{return await original(...args);}finally{window.completedRecoveryClicks++;}};});
+  for(let step=0;step<5;step++){
+   const buttons=page.locator('#freeStockRecoveryBody tr:visible').filter({hasText:fixture.productKey}).locator('button');
+   if(!await buttons.count())break;
+   const previous=await page.evaluate(()=>completedRecoveryClicks);await buttons.first().click();await page.waitForFunction(count=>completedRecoveryClicks>count,previous);
+  }
+  const after=await facts(fixture);assert.equal(after.targets.reduce((sum,row)=>sum+row.items[0].reservedQty,0),7);
+  assert.equal(after.source.orderLifecycleHistory.length,1);assert.equal(after.inventory.onHand,before.inventory.onHand);
+  assert.deepEqual(after.stocks.map(row=>row.onHand),before.stocks.map(row=>row.onHand));assert.deepEqual(after.lots,before.lots);
+  const batchId='single-v2-free-batch-source_v2_'+require('node:crypto').createHash('sha256').update(movement).digest('hex').slice(0,40);
+  const job=(await db.collection('reservationOperationReceipts').doc(batchId).get()).data();
+  assert.equal(job.actorUid,fixture.accounts.purchaser.uid);assert.equal(job.handoffCount,1);assert.equal(job.status,'completed');
+  await siteOpen(page,'purchaser');await siteNav(page,'inventory');await page.evaluate(()=>loadFreeStockRecovery());
+  for(let scan=0;scan<20&&await page.locator('#freeStockRecoveryMore').isVisible();scan++)await page.locator('#freeStockRecoveryMore').click();
+  assert.equal(await page.locator('#freeStockRecoveryBody tr:visible').filter({hasText:fixture.productKey}).count(),0);assert.deepEqual(await facts(fixture),after);
+  for(const role of ['engineer','admin']){
+   await siteLogout(page);await siteLogin(page,fixture.accounts[role],role);await siteOpen(page,role);
+   assert.equal(await page.evaluate(()=>canAccessPage('admin')),role==='admin');
+   assert.equal(await page.evaluate(()=>canAccessPage('quote')),true);await siteNav(page,'orders');
+  }
+  for(const match of read('index.html').matchAll(/<script[^>]+src="([^"?]+)(?:\?[^\"]*)?"/g)){
+   if(!match[1].startsWith('https:'))assert.ok(loaded.has('/'+match[1]),'original script loaded: '+match[1]);
+  }
+  assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
+  console.log('Full site '+width+'px: five real role boot/restores, original navigation, seven holds and one handoff passed.');
+ }catch(error){
+  console.log('Full site '+width+'px diagnostic:',JSON.stringify(await page.evaluate(()=>({role:typeof currentUserRole==='undefined'?'not-booted':currentUserRole,
+   loginError:document.getElementById('loginError')?.textContent,feedback:document.getElementById('actionFeedback')?.textContent,
+   menu:document.querySelector('.nav-tabs')?.className,scrollTop:document.getElementById('appContainer')?.scrollTop}))),JSON.stringify(errors));
   throw error;
  }finally{await context.close();}
 });

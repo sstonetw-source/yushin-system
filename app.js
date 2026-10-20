@@ -16,6 +16,12 @@ const FIREBASE_CONFIGS = Object.freeze({
         appId: "1:22622213823:web:c3f0a9c367a88e271ed80a",
         measurementId: "G-861X26VW6M"
     },
+    emulator: {
+        apiKey: 'fake-api-key',
+        authDomain: 'demo-yushin.firebaseapp.com',
+        projectId: 'demo-yushin',
+        appId: 'yushin-local-emulator'
+    },
     preview: {
         apiKey: "AIzaSyDSbSZiwiHmdgi6146vqpfE84JgWU1KhK8",
         authDomain: "preview-20135.firebaseapp.com",
@@ -28,6 +34,7 @@ const FIREBASE_CONFIGS = Object.freeze({
 
 function resolveAppEnvironment() {
     const host = String(window.location.hostname || '').toLowerCase();
+    if (['localhost','127.0.0.1'].includes(host) && window.YUSHIN_LOCAL_EMULATOR === true) return 'emulator';
     return host === 'preview-20135.web.app' || host === 'preview-20135.firebaseapp.com'
         ? 'preview'
         : 'production';
@@ -37,6 +44,9 @@ const firebaseConfig = FIREBASE_CONFIGS[APP_ENVIRONMENT];
 
 if (!firebase.apps.length) {
     firebase.initializeApp(firebaseConfig);
+}
+if (APP_ENVIRONMENT === 'emulator' && firebase.app().options.projectId !== 'demo-yushin') {
+    throw new Error('本機 Emulator 不可沿用其他專案的 Firebase app。');
 }
 const db = firebase.firestore();
 
@@ -51,11 +61,19 @@ try {
 } catch (err) {
     console.warn('Firestore long polling 設定未套用：', err);
 }
-if (APP_ENVIRONMENT === 'preview') {
-    document.documentElement.dataset.appEnvironment = 'preview';
+if (APP_ENVIRONMENT === 'emulator') {
+    firebase.auth().useEmulator('http://127.0.0.1:9099', { disableWarnings: true });
+    db.useEmulator('127.0.0.1',8080);
+    if (firebase.functions) firebase.app().functions('asia-east1').useEmulator('127.0.0.1',5001);
+}
+if (APP_ENVIRONMENT === 'preview' || APP_ENVIRONMENT === 'emulator') {
+    document.documentElement.dataset.appEnvironment = APP_ENVIRONMENT;
     window.addEventListener('DOMContentLoaded', () => {
         const banner = document.getElementById('previewEnvironmentBanner');
-        if (banner) banner.hidden = false;
+        if (banner) {
+            if (APP_ENVIRONMENT === 'emulator') banner.textContent = '本機 Emulator｜隔離測試資料，未連接正式 Firebase';
+            banner.hidden = false;
+        }
     });
 }
 
@@ -1560,7 +1578,6 @@ function actuallySwitchMainTab(tabId, el, options = {}) {
 
     if (tabId === 'inventory-system') {
         if (!options.skipReload) initializePageData('inventory');
-        loadCustomerReturnQueue();
     } else if (tabId === 'forecast-system') {
         if (!options.skipReload) initializePageData('forecast');
     } else if (tabId === 'equipment-system') {

@@ -236,7 +236,6 @@ function actuallySwitchMainTab(tabId, el, options = {}) {
 
     if (tabId === 'inventory-system') {
         if (!options.skipReload) initializePageData('inventory');
-        loadCustomerReturnQueue();
     } else if (tabId === 'forecast-system') {
         if (!options.skipReload) initializePageData('forecast');
     } else if (tabId === 'equipment-system') {

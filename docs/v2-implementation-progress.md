@@ -1,5 +1,9 @@
 # V2 Implementation Progress — 2026-09-21
 
+## 2026-10-20 — Full-site boot acceptance
+- Added localhost-only demo-yushin initialization and two full-site real Auth browser cases; see [scope and gates](full-site-emulator-boot-20261020.md).
+- Original navigation, bootstrap, permission handling and order cache remain in use. CI validation is required before merge; no production deployment is included.
+
 ## Active branch
 upgrade/v2-fulfillment-20260920
 Base main: 7cf91049ac3dee5b24b9560241d941f24e648c6e
