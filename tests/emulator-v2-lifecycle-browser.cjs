@@ -58,7 +58,7 @@ async function seed(width,prefix='browser'){
   await db.collection('users').doc(uid).set({role,active:true,name:role,email,code:role==='sales'?'B':role});accounts[role]={uid,email};
  }
  const batch=db.batch(),put=(name,id,data)=>batch.set(db.collection(name).doc(id),data);
- put('products',productKey,{productType:'Goods'});put('inventory',productKey,{productKey,onHand:12,reserved:0,transferFreeInTransit:0});
+ put('products',productKey,{productType:'Goods',productId:productKey,itemCode:tag+'-code',model:tag+'-code',brand:'Roche',nameCn:'驗收試劑'});put('inventory',productKey,{productKey,onHand:12,reserved:0,transferFreeInTransit:0});
  for(const warehouseId of warehouseIds){
   put('warehouses',warehouseId,{active:true,warehouseName:warehouseId});
   put('warehouseStocks',warehouseId+'__'+productKey,{warehouseId,productKey,onHand:6,reserved:0,transferFreeInTransit:0});
@@ -68,7 +68,7 @@ async function seed(width,prefix='browser'){
  const create=async(orderId,qty,itemId)=>{
   await db.collection('orders').doc(orderId).set({orderNo:orderId,customerName:'整站驗收客戶',ownerUid:accounts.sales.uid,salesCode:'B',status:'active',orderStatus:'normal',orderDate:'2026-01-01',
    inventoryReservationStatus:'pending',inventoryReservationAttemptId:'browser_sync_'+orderId,deliveryRecords:[],returnRecords:[],deliveryHistory:[],deliveredQty:0,isDelivered:false,
-   items:[{itemId,productId:productKey,qty,warehouseId:warehouseIds[0],reservedQty:0,deliveredQty:0,returnedQty:0,dispatchPreparedQty:0,warehouseShippedQty:0,
+   items:[{itemId,productId:productKey,itemCode:tag+'-code',itemName:'驗收試劑',brand:'Roche',unitPrice:100,qty,warehouseId:warehouseIds[0],reservedQty:0,deliveredQty:0,returnedQty:0,dispatchPreparedQty:0,warehouseShippedQty:0,
     fulfillmentType:'WAREHOUSE',deliveryPlan:{mode:'CUSTOMER_SHIP',contact:'測試客戶',phone:'02-12345678',address:'測試地址'}}]});
   await synchronizeV2OrderFixture(db,accounts.sales.uid,{orderId,warehouseIds});
  };
@@ -383,9 +383,32 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
   await siteNav(page,'purchasing');
   await page.waitForFunction(orderId=>document.getElementById('purchasePendingBody')?.textContent?.includes(orderId),fixture.sourceId);
   assert.match(await page.locator('#purchasePendingBody').textContent(),new RegExp(fixture.sourceId));
+  const poCountBefore=(await db.collection('purchaseOrders').get()).size;
+  const supplyCountBefore=(await db.collection('supplyOrders').get()).size;
+  const pendingRow=page.locator('#purchasePendingBody tr').filter({hasText:fixture.sourceId});
+  assert.equal(await pendingRow.count(),1);
+  await pendingRow.getByRole('button',{name:'產生採購單'}).click();
+  await page.locator('#poModalOverlay.active').waitFor({state:'visible'});
+  await page.waitForFunction(()=>document.getElementById('poSaveStatus')?.textContent?.includes('尚未建立'));
+  const proposal=await page.evaluate(()=>poItems.map(item=>({
+   orderId:item.orderId,itemId:item.itemId,productId:item.productId,
+   itemCode:item.itemCode,qty:item.qty,sourceType:item.sourceType,sourceId:item.sourceId
+  })));
+  assert.equal(proposal.length,1);
+  assert.equal(proposal[0].orderId,fixture.sourceId);
+  assert.equal(proposal[0].itemId,'S');
+  assert.equal(proposal[0].productId,fixture.productKey);
+  assert.equal(proposal[0].itemCode,fixture.sourceId.replace('-source','-code'));
+  assert.equal(proposal[0].qty,7);
+  assert.equal(proposal[0].sourceType,'SALES_ORDER');
+  assert.equal(proposal[0].sourceId,fixture.sourceId);
+  // Opening the actual purchase modal is a read-only proposal. The PO
+  // commit and incoming-registration stages have not been authorized by UI.
+  assert.equal((await db.collection('purchaseOrders').get()).size,poCountBefore);
+  assert.equal((await db.collection('supplyOrders').get()).size,supplyCountBefore);
   assert.deepEqual((await demandRef.get()).data(),demand);
   assert.deepEqual(await facts(fixture),restored);
-  console.log('Full site '+width+'px: restored shortage creates one purchase demand; original purchaser workspace displays it without altering physical inventory.');
+  console.log('Full site '+width+'px: purchaser opened original formal PO draft for seven shortages; no supply or incoming stock was written.');
   console.log('Full site '+width+'px: seller restored five free units with seven shortages; lost-reply and stale-cancel retries are immutable.');
   for(const match of read('index.html').matchAll(/<script[^>]+src="([^"?]+)(?:\?[^\"]*)?"/g)){
    if(!match[1].startsWith('https:'))assert.ok(loaded.has('/'+match[1]),'original script loaded: '+match[1]);
