@@ -609,12 +609,10 @@ window.removePoItem = function(idx) {
 };
 
 function recalcPoTotals() {
-    const subtotal = poItems.reduce((sum, item) => sum + (item.qty * item.unitPrice), 0);
-    const tax = Math.round(subtotal * 0.05);
-    const grandTotal = Math.round(subtotal) + tax;
-    document.getElementById('poSubtotal').innerText = Math.round(subtotal).toLocaleString();
-    document.getElementById('poTax').innerText = tax.toLocaleString();
-    document.getElementById('poGrandTotal').innerText = grandTotal.toLocaleString();
+    const amounts=globalThis.YushinSupplier.purchaseAmountMetadata(poItems);
+    document.getElementById('poSubtotal').innerText = amounts.subtotalExTax.toLocaleString();
+    document.getElementById('poTax').innerText = amounts.taxAmount.toLocaleString();
+    document.getElementById('poGrandTotal').innerText = amounts.totalIncTax.toLocaleString();
 }
 
 function formalSupplyOrderId(purchaseOrderId, itemIndex) {
@@ -946,7 +944,6 @@ window.printPurchaseOrder = async function() {
         return;
     }
     const orderIds = [...new Set(poItems.map(item => item.orderId).filter(Boolean))];
-    const poNetTotal = poItems.reduce((sum, item) => sum + (Number(item.qty || 0) * Number(item.unitPrice || 0)), 0);
     const supplierContact = supplierForVendorName(vendorName);
     if (!globalThis.YushinSupplier?.snapshotForPurchaseOrder) {
         throw new Error('Supplier core 未載入，無法建立供應商快照。');
@@ -985,7 +982,7 @@ window.printPurchaseOrder = async function() {
             const brand = resolveBrandName(item.brand || '');
             return { ...item, brand, brandId:item.brandId || brandIdForName(brand) };
         }),
-        ...netAmountMetadata(poNetTotal),
+        ...globalThis.YushinSupplier.purchaseAmountMetadata(scheduledPoItems),
         createdAt: new Date().toISOString(),
         lastOutputAt: new Date().toISOString(),
         lastOutputType: 'PDF',

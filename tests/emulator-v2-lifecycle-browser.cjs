@@ -264,7 +264,7 @@ async function siteOrderAction(page,fixture,label){
 for(const width of [1280,390])test('full site '+width+'px boot original navigation permissions cancellation and handoff',{timeout:240000},async()=>{
  const fixture=await seed(width,'site'),context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
  const errors=[],external=[],calls=[],loaded=new Set();let loseCancel=true,loseRecovery=true,loseRestore=true;
- await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_V2_LIFECYCLE_EMULATOR=true;window.YUSHIN_V2_RECOVERY_EMULATOR=true;});
+ await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_V2_LIFECYCLE_EMULATOR=true;window.YUSHIN_V2_RECOVERY_EMULATOR=true;window.YUSHIN_FORMAL_PURCHASE_EMULATOR=true;});
  page.on('pageerror',error=>errors.push(error.message));
  page.on('dialog',dialog=>dialog.type()==='confirm'?dialog.accept():dialog.dismiss());
  page.on('response',response=>{if(response.status()===200)loaded.add(new URL(response.url()).pathname);});
@@ -437,27 +437,42 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
   assert.deepEqual((await demandRef.get()).data(),demand);
   assert.deepEqual(await facts(fixture),restored);
   console.log('Full site '+width+'px: purchaser opened original formal PO draft for seven shortages; no supply or incoming stock was written.');
-  // The next migration checkpoint exercises the same server transaction
-  // through a REAL authenticated Callable. This is NOT yet wired to the
-  // original UI submit button, which still uses the old client writer.
-  const commitIntent={poNo:admission.plan.poNo,orderId:fixture.sourceId,itemId:'S',
-    qty:4,unitCost:20,supplier:'測試供應商',poDate:'2026-10-20'};
-  const committed=await page.evaluate(async request=>
-    (await firebase.app().functions('asia-east1').httpsCallable('commitV2FormalPurchase')(request)).data,commitIntent);
-  assert.equal(committed.status,'committed');
-  assert.equal(committed.committedQty,4);
-  assert.equal(committed.demandId,demandId);
+  // Real original submit click -> original Service -> real Auth Callable.
+  // Only physical PDF output is replaced; PO, source, incoming and Rules run.
+  await page.evaluate(()=>{window.poPdfOutputs=[];printSavedPoDocument=async(poNo,vendor)=>{
+   if(!poListCache.some(row=>row.id===poNo))throw Error('PDF before authoritative PO commit');
+   window.poPdfOutputs.push({poNo,vendor});
+  };});
+  await page.locator('#poVendorName').fill('測試供應商');
+  await page.locator('#poDate').fill('2026-10-20');
+  await page.locator('#poItemsBody input[onchange*="qty"]').fill('4');
+  await page.locator('#poItemsBody input[onchange*="qty"]').blur();
+  await page.locator('#poItemsBody input[onchange*="unitPrice"]').fill('20');
+  await page.locator('#poItemsBody input[onchange*="unitPrice"]').blur();
+  await page.locator('#printPurchaseOrderBtn').click();
+  await page.waitForFunction(()=>!poSaveInProgress&&poEditingId&&!poIncomingSyncPending
+   &&document.getElementById('poSaveStatus')?.textContent?.includes('在途庫存同步完成'),null,{timeout:45000});
+  const purchaseCalls=calls.filter(row=>row.name==='commitV2FormalPurchase');
+  assert.equal(purchaseCalls.length,1);
+  const commitIntent=purchaseCalls[0].data;
+  assert.equal(commitIntent.items[0].qty,4);assert.equal(commitIntent.items[0].unitCost,20);
   const savedPo=(await db.collection('purchaseOrders').doc(commitIntent.poNo).get()).data();
   assert.equal(savedPo.items.length,1);
   assert.equal(savedPo.items[0].qty,4);
   assert.equal(savedPo.vendorName,'測試供應商');
+  assert.equal(savedPo.company,commitIntent.document.company);
+  assert.deepEqual(savedPo.supplierSnapshot,commitIntent.document.supplierSnapshot);
+  assert.equal(savedPo.subtotalExTax,80);assert.equal(savedPo.taxAmount,4);assert.equal(savedPo.totalIncTax,84);
+  assert.deepEqual(savedPo.linkedDocuments,[{type:'order',id:fixture.sourceId,relation:'source'}]);
+  assert.ok(savedPo.searchTokens.length>0);
+  assert.deepEqual(await page.evaluate(()=>window.poPdfOutputs),[{poNo:commitIntent.poNo,vendor:'測試供應商'}]);
   const supplyId='po-'+encodeURIComponent(commitIntent.poNo)+'-0';
   assert.deepEqual(savedPo.supplyOrderIds,[supplyId]);
   const savedSupply=(await db.collection('supplyOrders').doc(supplyId).get()).data();
   assert.equal(savedSupply.status,'ORDERED');
   assert.equal(savedSupply.qty,4);
   assert.equal(savedSupply.receivedQty,0);
-  assert.equal(savedSupply.incomingRegisteredQty,0);
+  assert.equal(savedSupply.incomingRegisteredQty,4);
   assert.equal(savedSupply.warehouseId,fixture.warehouseIds[0]);
   const afterCommit=(await demandRef.get()).data();
   assert.equal(afterCommit.requestedQty,7);
@@ -468,9 +483,12 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
   const updated=await facts(fixture);
   assert.equal(updated.source.items[0].supplyOrderedQty,4);
   assert.equal(updated.source.items[0].reservedQty,restored.source.items[0].reservedQty);
-  assert.equal(updated.inventory.incoming||0,restored.inventory.incoming||0);
+  assert.equal(updated.inventory.incoming,4);
   assert.equal(updated.inventory.onHand,restored.inventory.onHand);
-  assert.deepEqual(updated.stocks,restored.stocks);
+  updated.stocks.forEach((stock,index)=>{
+   assert.equal(stock.incoming||0,index===0?4:0);
+   assert.equal(stock.onHand,restored.stocks[index].onHand);assert.equal(stock.reserved,restored.stocks[index].reserved);
+  });
   assert.deepEqual(updated.lots,restored.lots);
   assert.deepEqual(updated.targets,restored.targets);
   // The exact same authoritative server Service, under the REAL Emulator
@@ -478,14 +496,14 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
   const buyer=fixture.accounts.purchaser.uid;
   const retry=await commitV2FormalPurchase(db,buyer,commitIntent);
   assert.equal(retry.status,'already-applied');
-  await assert.rejects(commitV2FormalPurchase(db,buyer,{...commitIntent,qty:3}),{code:'already-exists'});
+  await assert.rejects(commitV2FormalPurchase(db,buyer,{...commitIntent,items:commitIntent.items.map(row=>({...row,qty:3}))}),{code:'already-exists'});
   await assert.rejects(commitV2FormalPurchase(db,fixture.accounts.sales.uid,{...commitIntent,poNo:commitIntent.poNo+'-sales'}),{code:'permission-denied'});
-  await assert.rejects(commitV2FormalPurchase(db,buyer,{...commitIntent,poNo:commitIntent.poNo+'-excess',qty:8}),{code:'failed-precondition'});
+  await assert.rejects(commitV2FormalPurchase(db,buyer,{...commitIntent,poNo:commitIntent.poNo+'-excess',items:commitIntent.items.map(row=>({...row,qty:8}))}),{code:'failed-precondition'});
   assert.equal((await db.collection('purchaseOrders').get()).size,poCountBefore+1);
   assert.equal((await db.collection('supplyOrders').get()).size,supplyCountBefore+1);
   assert.deepEqual((await demandRef.get()).data(),afterCommit);
   assert.deepEqual(await facts(fixture),updated);
-  console.log('Full site '+width+'px: server PO transaction atomically committed 4/7 and safely replayed; no incoming or physical stock added.');
+  console.log('Full site '+width+'px: original submit saved 4/7 PO through server, registered four incoming units with real Rules; physical stock unchanged.');
 
   console.log('Full site '+width+'px: seller restored five free units with seven shortages; lost-reply and stale-cancel retries are immutable.');
   for(const match of read('index.html').matchAll(/<script[^>]+src="([^"?]+)(?:\?[^\"]*)?"/g)){

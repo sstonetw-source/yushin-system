@@ -662,3 +662,7 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 ## 正式採購多品項後端擴充（2026-10-20）
 
 正式採購後端仍為隔離原型；既有 `commitV2FormalPurchase` 已擴充至 1–5 列 WAREHOUSE 實體來源，可包含同訂單多品項及跨訂單合併。沿用原准入驗證與 Procurement Demand Core，不另建 writer。每個 Transaction callback 內按文件路徑快取相同讀取，重試會重新建立快取；所有列驗證及 supply ID 讀取完成後才寫入，每張來源訂單合併為一次 update。
+
+## 原採購按鈕避開 Rules 運算限制（2026-10-20）
+
+本機明確開啟 `YUSHIN_FORMAL_PURCHASE_EMULATOR` 時，原按鈕仍呼叫唯一 `commitFormalPurchaseOrder`，由同一 Service 轉接既有 `commitV2FormalPurchase`；不再讓原 PO 多文件寫入經過用戶端 Rules 複雜驗證。呼叫前後及回讀期間核對實際 Auth／前端身分，固定 demo-yushin、本機 Auth 9099／Functions 5001；任何錯誤不可退回舊 writer。成功後回讀權威 PO、來源訂單與 Supply，沿原快取／PDF／在途 Service 接續。正式環境與 Preview 未切換，原採購超限是否解除須以原站真實按鈕 CI 案例為準。

@@ -1815,24 +1815,7 @@ window.openPurchaseOrderTimeline = async function(poId) {
 };
 
 function purchaseOrderSearchTokens(po={}) {
-    const values=[
-        po.poNo,po.vendorName,po.supplierName,po.supplierEmail,po.buyerName,po.company,po.poDate,
-        ...(Array.isArray(po.items)?po.items.flatMap(item=>[item.itemCode,item.itemName,item.brand,item.orderNo,item.orderId]):[])
-    ];
-    const tokens=new Set();
-    for(const raw of values){
-        const normalized=normalizeFullHistorySearchValue(raw);
-        if(!normalized)continue;
-        tokens.add(normalized);
-        const maxGram=Math.min(6,normalized.length);
-        for(let size=1;size<=maxGram;size++){
-            for(let i=0;i+size<=normalized.length;i++){
-                tokens.add(normalized.slice(i,i+size));
-                if(tokens.size>=300)return [...tokens];
-            }
-        }
-    }
-    return [...tokens];
+    return globalThis.YushinSupplier.purchaseOrderSearchTokens(po);
 }
 
 function purchaseOrderHistoryMatches(po, keyword) {

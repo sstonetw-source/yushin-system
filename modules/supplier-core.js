@@ -94,6 +94,34 @@
     };
   }
 
+  // Purchase-document projections shared by the original UI and server writer.
+  function purchaseAmountMetadata(items=[]){
+    const net=Math.round(items.reduce((sum,item)=>sum+Number(item.qty||0)*Number(item.unitPrice||0),0));
+    const tax=Math.round(net*0.05);
+    return {currency:'TWD',taxRate:0.05,priceIncludesTax:false,
+      subtotalExTax:net,taxAmount:tax,totalIncTax:net+tax};
+  }
+
+  function purchaseOrderSearchTokens(po={}){
+    const values=[po.poNo,po.vendorName,po.supplierName,po.supplierEmail,po.buyerName,po.company,po.poDate,
+      ...(Array.isArray(po.items)?po.items.flatMap(item=>[item.itemCode,item.itemName,item.brand,item.orderNo,item.orderId]):[])];
+    const tokens=new Set();
+    for(const raw of values){
+      const normalized=String(raw||'').normalize('NFKC').toLocaleLowerCase()
+        .replace(/[\s\-_.\/\\,，。:：;；()（）\[\]{}]+/g,'');
+      if(!normalized)continue;
+      tokens.add(normalized);
+      const maxGram=Math.min(6,normalized.length);
+      for(let size=1;size<=maxGram;size++){
+        for(let i=0;i+size<=normalized.length;i++){
+          tokens.add(normalized.slice(i,i+size));
+          if(tokens.size>=300)return [...tokens];
+        }
+      }
+    }
+    return [...tokens];
+  }
+
   function purchaseOrderContact(po={},suppliers=[]){
     const snapshot=documentSnapshot(po);
     const live=findLiveSupplier({
@@ -178,6 +206,8 @@
   }
 
   return {
+    purchaseAmountMetadata,
+    purchaseOrderSearchTokens,
     normalizeEmail,
     isValidEmail,
     normalizeSupplier,

@@ -7,6 +7,7 @@
 const {createHash}=require('node:crypto');
 const demandCore=require('./shared/procurement-demand-core.js');
 const {strictRequest,validateV2FormalPurchaseTx}=require('./formal-purchase-preview-service.js');
+const {normalizePurchaseDocument,purchaseDocumentFields}=require('./formal-purchase-document');
 function fail(code,message){const e=new Error(message);e.code=code;throw e;}
 function text(value,label,max=200){
  if(typeof value!=='string'||!value.trim()||value!==value.trim()
@@ -35,7 +36,7 @@ function purchaseLine(data){
 function purchaseIntent(data){
  if(!data||typeof data!=='object'||Array.isArray(data))
   fail('invalid-argument','正式採購輸入欄位不正確');
- const keys=Object.keys(data).sort().join(',');
+ const keys=Object.keys(data).filter(key=>key!=='document').sort().join(',');
  let rawLines;
  if(keys==='itemId,orderId,poDate,poNo,qty,supplier,unitCost')
   rawLines=[{orderId:data.orderId,itemId:data.itemId,qty:data.qty,unitCost:data.unitCost}];
@@ -52,8 +53,10 @@ function purchaseIntent(data){
  const supplier=text(data.supplier,'供應商',200),poDate=validDate(data.poDate);
  // Preserve the original single-line fingerprint, including its field order.
  // One-row array and original scalar requests represent the same intent.
- return lines.length===1?{...base,supplier,unitCost:lines[0].unitCost,poDate}
+ const intent=lines.length===1?{...base,supplier,unitCost:lines[0].unitCost,poDate}
   :{poNo:base.poNo,supplier,poDate,items:lines};
+ if(Object.hasOwn(data,'document'))intent.document=normalizePurchaseDocument(data.document,lines.length,supplier);
+ return intent;
 }
 function intentLines(intent){
  return intent.items||[{orderId:intent.orderId,itemId:intent.itemId,qty:intent.qty,unitCost:intent.unitCost}];
@@ -86,6 +89,11 @@ async function commitV2FormalPurchase(db,uid,data){
      ||saved.poNo!==intent.poNo||JSON.stringify(saved.supplyOrderIds)!==JSON.stringify(supplyIds)
      ||!Array.isArray(saved.items)||saved.items.length!==lines.length)
     fail('already-exists','此採購單號已有不同的權威交易紀錄');
+   if(intent.document){
+    const expected=purchaseDocumentFields(intent,saved.items,saved.buyerName);
+    if(Object.keys(expected).some(key=>JSON.stringify(saved[key])!==JSON.stringify(expected[key])))
+     fail('failed-precondition','採購文件欄位與原始交易不一致，請先稽核');
+   }
    for(const [index,line] of lines.entries()){
     const snapshot=supplySnapshots[index],supply=snapshot.exists?snapshot.data():null;
     if(!supply||supply.purchaseDocumentId!==intent.poNo||supply.type!=='PURCHASING_PO'
@@ -97,6 +105,11 @@ async function commitV2FormalPurchase(db,uid,data){
       ||saved.items[index].itemId!==line.itemId||saved.items[index].qty!==line.qty
       ||saved.items[index].unitPrice!==line.unitCost)
      fail('failed-precondition','採購單與供應承諾不一致，請先稽核');
+    if(intent.document&&(supply.supplierId!==intent.document.supplierSnapshot.supplierId
+      ||supply.supplierEmail!==intent.document.supplierSnapshot.email
+      ||supply.expectedDate!==intent.document.lineScheduleDates[index]
+      ||saved.items[index].scheduleDate!==intent.document.lineScheduleDates[index]))
+     fail('failed-precondition','採購交期或供應商快照與原始交易不一致');
    }
    return purchaseResult('already-applied',intent,supplyIds,supplySnapshots.map(s=>s.data().demandId));
   }
@@ -116,7 +129,8 @@ async function commitV2FormalPurchase(db,uid,data){
     itemCode:String(sourceItem.itemCode||''),itemName:String(sourceItem.itemName||''),
     brand:String(sourceItem.brand||''),brandId:String(sourceItem.brandId||''),
     qty:lineIntent.qty,unitPrice:lineIntent.unitCost,warehouseId:plan.warehouseId,
-    fulfillmentType:'WAREHOUSE'
+    fulfillmentType:'WAREHOUSE',
+    ...(intent.document?{scheduleDate:intent.document.lineScheduleDates[index]}:{})
    };
    poLines.push(line);
    supplies.push({
@@ -128,8 +142,10 @@ async function commitV2FormalPurchase(db,uid,data){
     ownerUid,salesCode,salesName:source.salesName||'',productId:sourceItem.productId,
     productKey,itemCode:line.itemCode,itemName:line.itemName,brand:line.brand,brandId:line.brandId,
     qty:lineIntent.qty,receivedQty:0,incomingRegisteredQty:0,
-    supplier:intent.supplier,supplierId:'',supplierEmail:'',unitCost:lineIntent.unitCost,
-    orderDate:intent.poDate,expectedDate:'',scheduleDate:demandBefore.scheduleDate||'',
+    supplier:intent.supplier,supplierId:intent.document?.supplierSnapshot.supplierId||'',
+    supplierEmail:intent.document?.supplierSnapshot.email||'',unitCost:lineIntent.unitCost,
+    orderDate:intent.poDate,expectedDate:intent.document?.lineScheduleDates[index]||'',
+    scheduleDate:intent.document?intent.document.lineScheduleDates[index]:(demandBefore.scheduleDate||''),
     fulfillmentType:'WAREHOUSE',warehouseId:plan.warehouseId,
     createdAt:now,updatedAt:now,createdByUid:uid,createdBy:actorName,createdByRole:actorRole
    });
@@ -155,7 +171,8 @@ async function commitV2FormalPurchase(db,uid,data){
    poDate:intent.poDate,buyerName:actorName,items:poLines,supplyOrderIds:supplyIds,
    orderIds:[...sourceUpdates.keys()],createdAt:now,updatedAt:now,
    createdByUid:uid,createdByRole:actorRole,serverCommitHash:fingerprint,
-   lastOutputAt:'',lastOutputType:''
+   lastOutputAt:'',lastOutputType:'',
+   ...purchaseDocumentFields(intent,poLines,actorName)
   };
   // No writes are staged until EVERY line passes and all deterministic supply
   // IDs have been read. A bad final row rejects the whole PO, never a prefix.
@@ -170,6 +187,9 @@ async function commitV2FormalPurchase(db,uid,data){
    else categories.delete('ordering');
    tx.update(ref('orders',orderId),{
     items,itemCount:items.length,orderSchemaVersion:2,
+    ...(intent.document?{linkedDocuments:[...(source.linkedDocuments||[]).filter(link=>
+     !(link.type==='purchaseOrder'&&link.id===intent.poNo&&link.relation==='document')),
+     {type:'purchaseOrder',id:intent.poNo,relation:'document'}]}:{}),
     workCategories:[...categories],workCategoryUpdatedAt:now,updatedAt:now
    });
   }
