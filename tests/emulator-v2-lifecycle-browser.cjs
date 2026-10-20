@@ -431,6 +431,8 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
   assert.deepEqual((await demandRef.get()).data(),demand);
   // Owning salesperson is authorized for this sales order, but may NOT
   // acquire purchaser authority by knowing its ID or the PO number.
+  // Dismiss the original PO overlay before operating the original navbar.
+  await page.evaluate(()=>closePurchaseOrderModal());
   await siteLogout(page);
   await siteLogin(page,fixture.accounts.sales,'sales');
   const deniedRole=await page.evaluate(async input=>{
