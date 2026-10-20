@@ -360,3 +360,7 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 新增五項 Node 測試與四項 Auth SDK→原 UI handler／Service→Functions SDK→原 writer→Firestore 整合：多品項含同商品及另一商品、admin／purchaser 的不明回覆／重新載入原 ID、五角色、即時降權／claim 偽造、未登入／payload UID／停用、同 ID／競爭 ID／打單基準與同步版本。既有八組 Chrome 中，打單 suite 加測1280／390px 原兩頁 renderer 與 click handler，在尚未確認送達的實體出貨後使用正確 Core 額度並跨頁重試；其 Callable 為 scripted local transport，真實 Auth／Backend 由獨立整合測試驗證，不宣稱完整 Browser Auth／Preview E2E。
 
 本地 Node1571/1571、建置同步／語法／diff 通過；完整新增 Auth、Chrome 與既有全部 Emulator／Rules 以本批 CI 為準。v2 初始化、收貨、出貨、送達、取消／恢復與退貨的正式傳輸／UI／Preview 全線仍待逐步接線。
+
+### v2 原介面送達撤銷的暫存（2026-10-20，本機試點）
+
+不新增 Firestore 欄位或集合；權威仍是原 orders.deliveryHistory 的 shipment_confirmation_reversal 及現有送達投影。sessionStorage 的 v2-delivery-reversal:{UID}:{orderId} 只保存待核對 intent（record／item／sync／operation／日期／原因及原角色），不是權威事件。未知回覆保留，確認回覆且重讀 orders 後才清除；同分頁刷新可續傳，不宣稱跨分頁／裝置持久化。確認與撤銷使用獨立 key。正式／Preview 未啟用。
