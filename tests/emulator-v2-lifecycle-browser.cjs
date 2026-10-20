@@ -91,6 +91,10 @@ async function open(page,fixture){
  await page.addScriptTag({content:section(workspace,'function orderLifecycleActionButtons(','// Only a fully ready')});
  await page.addScriptTag({content:section(read('src/features/orders/lifecycle-workspace.js'),'function confirmOrderCancellation(','window.toggleOrderProgressStatus')});
  await page.addScriptTag({content:read('modules/free-stock-recovery.js')});
+ await page.evaluate(()=>{
+  const original=window.retryFreeStockRecovery;window.completedRecoveryClicks=0;
+  window.retryFreeStockRecovery=async(...args)=>{try{return await original(...args);}finally{window.completedRecoveryClicks++;}};
+ });
  await page.evaluate(async()=>{
   await new Promise(resolve=>{const unsubscribe=firebase.auth().onAuthStateChanged(()=>{unsubscribe();resolve();});});
   currentUser=firebase.auth().currentUser;
@@ -171,9 +175,12 @@ for(const width of [1280,390])test('real browser '+width+'px original login canc
   for(let step=0;step<5;step++){
    const buttons=page.locator('#freeStockRecoveryBody tr').filter({hasText:fixture.productKey}).locator('button');
    if(!await buttons.count())break;
-   await buttons.first().click();await page.waitForFunction(product=>[...document.querySelectorAll('#freeStockRecoveryBody tr')]
-    .filter(row=>row.textContent.includes(product)).every(row=>!row.querySelector('button[disabled]')),fixture.productKey);
+   assert.equal(await buttons.first().isEnabled(),true,await page.locator('#freeStockRecoveryBody').textContent());
+   const previous=await page.evaluate(()=>completedRecoveryClicks);await buttons.first().click();
+   await page.waitForFunction(count=>completedRecoveryClicks>count,previous);
   }
+  assert.equal(await page.locator('#freeStockRecoveryBody tr').filter({hasText:fixture.productKey}).count(),0,
+   await page.locator('#freeStockRecoveryBody').textContent());
   const after=await facts(fixture);assert.equal(after.targets.reduce((sum,row)=>sum+row.items[0].reservedQty,0),7);
   assert.equal(after.inventory.onHand,before.inventory.onHand);assert.deepEqual(after.lots,before.lots);
   assert.deepEqual(after.stocks.map(row=>row.onHand),before.stocks.map(row=>row.onHand));
@@ -188,5 +195,9 @@ for(const width of [1280,390])test('real browser '+width+'px original login canc
   assert.equal(await page.locator('#freeStockRecoveryBody tr').filter({hasText:fixture.productKey}).count(),0);
   assert.deepEqual(await facts(fixture),after);assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
   console.log('Browser '+width+'px: purchaser handoff, seven target holds, unchanged physical lots and idempotent reload passed.');
+ }catch(error){
+  console.log('Browser '+width+'px diagnostic:',JSON.stringify(await page.evaluate(()=>({feedback:document.getElementById('feedback')?.textContent,
+   rows:document.getElementById('freeStockRecoveryBody')?.textContent,completedRecoveryClicks:window.completedRecoveryClicks}))));
+  throw error;
  }finally{await context.close();}
 });
