@@ -93,3 +93,14 @@
 後端交易及需求公式沒有新增第二套；畫面快取同步抽為共用 feature helper。存取失敗在提交前停止；回覆未知、回讀失敗、在途失敗、角色改變或暫存損壞均保留 checkpoint，不默默刪除或降級 client writer。回覆已確認後的畫面更新失敗須與交易未確認分開顯示。checkpoint 僅保存於同分頁 sessionStorage，不承諾跨裝置或關閉分頁恢復；價格資料不送入新 collection。無新 Rules／Index／Listener／正式資料遷移。
 
 驗收：新增執行式 Node 測試涵蓋原意圖凍結、重新載入、Callable／在途失敗、重複點擊、帳號／角色切換、損壞與儲存停用；原整站 Chrome 1280／390 px 在真實後端已完成後中斷 HTTP 回覆，刷新原網站並由按鈕重送完全相同 payload，核對唯一 PO／Supply、四件在途、實貨與原批次不變，再由原歷史載入／下載按鈕確認不重建採購。完整 CI 通過前不得合併。部分收貨、全類型採購、跨分頁關閉及 Preview／正式切換仍未完成。
+
+
+## 2026-10-20 原採購單部分收貨後端接線（待本批 CI 驗收）
+
+已實作：原 receiveSupplyOrderRecord 在明確 YUSHIN_V2_RECEIVING_EMULATOR gate 中轉至 receiveV2Supply，僅 localhost／demo-yushin Auth 9099／Functions 5001 可呼叫，不回退原 client writer。原收貨工作保存 qty／lot／expiry／operationBase；傳輸前須核對 sessionStorage 已保存的同一意圖，回覆後回讀 receipts 權威憑證並核對真實 UID／角色，未知回覆保留既有工作與重試入口。
+
+唯一權威收貨 writer 仍為 src/services/receiving.js。tools/build-receiving-runtime.cjs 從它與現有訂單／需求投影產生 functions/shared/receiving-runtime.js，僅注入每請求身分、SDK 與共用 Core，執行時不使用 eval／VM，不另寫數量或扣帳公式。build-functions-core --check 同時驗證這份 Service 生成內容。隔離後端每次交易重新讀 users 當前 active／disabled／角色、原 Supply／Order／v2 ledger；權限為 admin／purchaser／warehouse，不接受 payload uid、role 或 claims 替代。供應更新在同一交易經既有 sanitizeSupply 更新 receivingSupplyOrders，不暴露成本。
+
+本批新交易入口僅接受正常單品項 WAREHOUSE 客戶訂單 PO、尚未打單／出貨／送達／退貨的來源。已提交憑證以原身分／內容核對後可冪等重試，不再次入庫。舊一般收貨路徑不變，取消、服務型、直送、備庫、多品項與後續履約的此新傳輸尚未開放。無新增 Collection／Rules／Index／Listener，正式 index.js 不匯出，未部署 Firebase。
+
+新增真 Auth 測試涵蓋三合格／兩不合格角色、停用／偽造 claims／注入 UID、相同 ID 並行、不同 ID 超額競爭與原憑證不符拒絕；原整站 1280／390px 延續同一張 4/7 PO，以原收貨按鈕先收 2 件，後端已完成才中斷 HTTP 回覆，刷新原網站用原工作重試，核對只新增一個 lot／receipt、在途 4→2、公司及收貨倉實貨／預留各 +2、另一倉與七筆目標預留不變，來源 reserved=7／shortage=5、需求待採購仍 3、待收 2。以上整合仍須本批完整 CI 通過，不能將 Node 或生成一致性通過當作 E2E 已驗收。

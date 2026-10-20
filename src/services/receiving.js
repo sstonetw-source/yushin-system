@@ -329,6 +329,8 @@ async function validateV2ReceiptSource(transaction, {order,supply,reservation,it
 }
 
 async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',operationId='',options={}) {
+    if(globalThis.YUSHIN_V2_RECEIVING_EMULATOR===true)
+        return receiveV2SupplyEmulator(supplyId,qty,lotNo,expiryDate,operationId,options);
     const actorUid=options.actorUid??currentUser?.uid,actorRole=options.actorRole??currentUserRole;
     const assertActor=(supply=null)=>{
         if(!actorUid||actorUid!==currentUser?.uid||actorRole!==currentUserRole)throw new Error('登入帳號或角色已變更，請以原身分重試到貨作業。');
