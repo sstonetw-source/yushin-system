@@ -16,7 +16,7 @@ function v2DeliveryEmulatorTransport(){
  const local=host=>host==='localhost'||host==='127.0.0.1';
  if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR!==true||!local(globalThis.location?.hostname)||typeof firebase==='undefined'||!firebase.auth||!firebase.functions)
   throw Error('v2 送達目前僅限本機 Emulator。');
- const auth=firebase.auth(),functions=firebase.functions('asia-east1'),uid=currentUser?.uid,role=currentUserRole;
+ const auth=firebase.auth(),functions=firebase.app().functions('asia-east1'),uid=currentUser?.uid,role=currentUserRole;
  if(auth.app?.options?.projectId!=='demo-yushin'||functions.app?.options?.projectId!=='demo-yushin'
    ||!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099)
   throw Error('v2 送達只允許本機 demo-yushin Auth／Functions Emulator。');

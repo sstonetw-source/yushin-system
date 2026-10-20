@@ -11,7 +11,7 @@ function fixture(){
    currentUser:{uid:'U'},currentUserRole:'sales',canManageOrderLifecycleCapability:()=>true,canEditPage:()=>true,
    sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>{if(failSave)throw Error('storage failed');storage.set(k,v);},removeItem:k=>storage.delete(k)},
    db:{collection:()=>({doc:()=>({get:async options=>{assert.equal(options?.source,'server');if(failRead)throw Error('read failed');afterRead(context);return {exists:true,data:()=>structuredClone(order)};}})})},
-   firebase:{auth:()=>({app:{options:{projectId:'demo-yushin'}},currentUser:{uid:'U'},emulatorConfig:{host:'localhost',port:9099}}),
+   firebase:{app(){return {functions:region=>this.functions(region)};},auth:()=>({app:{options:{projectId:'demo-yushin'}},currentUser:{uid:'U'},emulatorConfig:{host:'localhost',port:9099}}),
     functions:()=>({app:{options:{projectId:'demo-yushin'}},useEmulator:()=>{},httpsCallable:name=>async payload=>{assert.equal(name,'reverseV2ShipmentDelivery');calls.push(structuredClone(payload));return transport(payload,context);}})},
    runRoleTransaction:()=>{throw Error('legacy stock writer forbidden');}});
   vm.runInContext(source,context);return context;

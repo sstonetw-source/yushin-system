@@ -72,7 +72,7 @@ const scripts=[read('modules/fulfillment-core.js'),read('modules/order-entry-cor
   await page.route('http://127.0.0.1:4173/',route=>route.fulfill({contentType:'text/html',body:'<html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="order-system" class="active"><div id="orderActions"></div></div><div id="purchasing-system"><table><tbody id="purchaseDispatchBody"></tbody></table><div id="purchaseDispatchStatus"></div><button id="purchaseDispatchMoreBtn"></button></div></html>'}));
   async function loadV2(){await page.goto('http://127.0.0.1:4173/');for(const content of scripts)await page.addScriptTag({content});await page.evaluate(()=>{
    globalThis.YUSHIN_V2_DISPATCH_EMULATOR=true;const app={options:{projectId:'demo-yushin'}};
-   globalThis.firebase={auth:()=>({app,currentUser:{uid:'buyer'},emulatorConfig:{host:'127.0.0.1',port:9099}}),functions:()=>({app,useEmulator:(host,port)=>{if(host!=='127.0.0.1'||port!==5001)throw Error('remote endpoint forbidden');},httpsCallable:name=>{if(name!=='prepareV2OrderDispatch')throw Error('wrong endpoint');return nativeV2Callable;}})};
+   globalThis.firebase={app(){return {functions:region=>this.functions(region)};},auth:()=>({app,currentUser:{uid:'buyer'},emulatorConfig:{host:'127.0.0.1',port:9099}}),functions:()=>({app,useEmulator:(host,port)=>{if(host!=='127.0.0.1'||port!==5001)throw Error('remote endpoint forbidden');},httpsCallable:name=>{if(name!=='prepareV2OrderDispatch')throw Error('wrong endpoint');return nativeV2Callable;}})};
   });await page.evaluate(()=>reloadOrder());}
   await loadV2();assert.match(await page.locator('#orderActions button').first().textContent(),/× 2/);await page.locator('#orderActions button').first().click();await page.waitForFunction(()=>alerts.length===1);
   const id=calls[0].operationId;docs.get('orders/O').items[0].reservedQty=4;await loadV2();assert.match(await page.locator('#orderActions button').first().textContent(),/確認打單結果/);
@@ -106,7 +106,7 @@ const scripts=[read('modules/fulfillment-core.js'),read('modules/order-entry-cor
    await page.addScriptTag({content:`let currentUser={uid:'buyer'},currentUserRole='purchaser',orderWorkQueueCache=[],warehouseMasterCache=[{id:'B',active:true}];
     globalThis.YUSHIN_V2_SHIPMENT_EMULATOR=true;globalThis.locationSchemaFlag=true;
     const app={options:{projectId:'demo-yushin'}};
-    globalThis.firebase={auth:()=>({app,currentUser:{uid:'buyer'},emulatorConfig:{host:'127.0.0.1',port:9099}}),
+    globalThis.firebase={app(){return {functions:region=>this.functions(region)};},auth:()=>({app,currentUser:{uid:'buyer'},emulatorConfig:{host:'127.0.0.1',port:9099}}),
      functions:()=>({app,useEmulator:(host,port)=>{if(host!=='127.0.0.1'||port!==5001)throw Error('remote');},httpsCallable:()=>shipmentCallable})};
     globalThis.db={collection:()=>({doc:()=>({get:async()=>{const data=await shipmentRead();return {exists:true,data:()=>data};}})})};
     const canReceiveInventoryCapability=()=>true,canAccessPage=()=>true,defaultWarehouse=()=>({id:'B'});

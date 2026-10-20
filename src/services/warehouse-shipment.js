@@ -14,7 +14,7 @@ async function commitV2WarehouseShipmentEmulator(input){
  const local=s=>s==='localhost'||s==='127.0.0.1';
  if(!local(globalThis.location?.hostname)||typeof firebase==='undefined'||!firebase.auth||!firebase.functions)
   throw Error('v2 出貨僅限本機 Emulator。');
- const auth=firebase.auth(),fn=firebase.functions('asia-east1'),uid=currentUser?.uid,role=currentUserRole;
+ const auth=firebase.auth(),fn=firebase.app().functions('asia-east1'),uid=currentUser?.uid,role=currentUserRole;
  if(auth.app?.options?.projectId!=='demo-yushin'||fn.app?.options?.projectId!=='demo-yushin'
   ||!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099)
   throw Error('v2 出貨必須使用本機 demo-yushin 的 Auth 與 Functions。');

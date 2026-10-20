@@ -25,7 +25,7 @@ function setup({host='localhost',authUid='buyer',lost=true}={}){
   YushinWarehouseLogistics:logistics,canReceiveInventoryCapability:()=>true,canAccessPage:()=>true,
   sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},
   db:{collection:()=>({doc:()=>({get:async()=>({exists:true,data:()=>order})})})},
-  firebase:{auth:()=>auth,functions:()=>functions},
+  firebase:{app:()=>({functions:()=>functions}),auth:()=>auth,functions:()=>functions},
   runRoleTransaction:()=>{throw Error('legacy write prohibited');}});
  vm.runInContext(source,c);
  return {c,storage,sent,applied:()=>applied};

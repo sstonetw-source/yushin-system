@@ -62,7 +62,7 @@ const allocateFreeReceiptStockToShortages=async(key,warehouseId,qty)=>{if(failAl
    await v2.addScriptTag({content:bootstrap+`
     globalThis.YUSHIN_V2_RECOVERY_EMULATOR=true;
     const app={options:{projectId:'demo-yushin'}};
-    const firebase={auth:()=>({app,currentUser:{uid:'receiver'},emulatorConfig:{host:'localhost',port:9099}}),
+    const firebase={app(){return {functions:region=>this.functions(region)};},auth:()=>({app,currentUser:{uid:'receiver'},emulatorConfig:{host:'localhost',port:9099}}),
      functions:()=>({app,useEmulator:(h,p)=>{if(h!=='127.0.0.1'||p!==5001)throw Error('remote emulator');},
       httpsCallable:name=>name==='listV2FreeStockRecovery'?async p=>({data:await readV2Recovery(p)}):resumeV2Recovery})};`});
    await v2.addScriptTag({content:fs.readFileSync('modules/free-stock-recovery.js','utf8')});

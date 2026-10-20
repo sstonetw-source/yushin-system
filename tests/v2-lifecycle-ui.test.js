@@ -25,7 +25,7 @@ function fixture(){
     assert.equal(options?.source,'server');reads.push([n,id]);if(failRead)throw Error('server read failed');afterRead(c);
     const row=n==='orders'?order:ledgers.get(id.slice(3));return {exists:!!row,data:()=>structuredClone(row)};
    }})})},
-   firebase:{auth:()=>({app:{options:{projectId:'demo-yushin'}},currentUser:{uid:'U'},emulatorConfig:{host:'localhost',port:9099}}),
+   firebase:{app(){return {functions:region=>this.functions(region)};},auth:()=>({app:{options:{projectId:'demo-yushin'}},currentUser:{uid:'U'},emulatorConfig:{host:'localhost',port:9099}}),
     functions:()=>({app:{options:{projectId:'demo-yushin'}},useEmulator:(h,p)=>{assert.equal(h,'127.0.0.1');assert.equal(p,5001);},
      httpsCallable:name=>async payload=>{assert.equal(name,'setV2OrderLifecycle');calls.push(structuredClone(payload));return transport(payload,c);}})},
    runRoleTransaction:()=>{throw Error('legacy writer forbidden');}});
@@ -86,4 +86,12 @@ test('old lifecycle receipt displays current authoritative status after another 
  f.order.orderStatus='normal';f.order.status='active';
  f.setTransport(p=>({data:{...f.applied(p).data,status:'already-applied'}}));
  assert.equal((await f.open().setOrderLifecycleStatus('O','cancelled')).orderStatus,'normal');assert.equal(f.storage.size,0);
+});
+
+test('regional callable uses the compat app API, not a region string in the global app argument',async()=>{
+ const f=fixture(),c=f.open(),functions=c.firebase.functions();let region;
+ c.firebase.app=()=>({functions:value=>{region=value;return functions;}});
+ c.firebase.functions=()=>{throw Error('namespace argument is an app, not a region');};
+ assert.equal((await c.setOrderLifecycleStatus('O','cancelled')).orderStatus,'cancelled');
+ assert.equal(region,'asia-east1');assert.equal(f.calls.length,1);
 });

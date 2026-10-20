@@ -274,3 +274,7 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 - 本機原取消／恢復兩入口已沿單一 setOrderLifecycleStatus 接上述 Callable，獨立 YUSHIN_V2_LIFECYCLE_EMULATOR gate 同時查實際 Auth／Functions 專案、本機 Auth 9099 與固定 Functions 5001。每個 await 後查原 UID／角色／capability；前端不授權後端。未知回覆保留原 intent，刷新後清單與表單都須提供確認入口；角色變更／暫存損壞顯示警告而非刪暫存。已確認提交後 UI 更新失敗與未確認交易須分開；cache 失效涵蓋所有原候選倉。須跑 Node、真 Auth 原 handler 整合及桌機／手機 Chrome。正式／Preview 與獨立 metadata 更正未開放。
 
 - 原 free-stock-recovery 面板的 v2 試點須明確 YUSHIN_V2_RECOVERY_EMULATOR，本機 demo Auth／Functions gate 及原真實 users 三物流角色。唯讀載入不得啟動配貨；全完成的掃描頁也須保留正確 lookahead／cursor，不能把空結果當全部讀完。續傳只送原 movementId、最多五步；由原 release proof／coordinator 及 allocation writer 查核接手與重送。禁止新 ID／legacy fallback／自動重新取消。非同步回覆須核對 UID／角色及 UI generation；已確認配貨與畫面刷新失敗分開。需驗證 Node、真 Auth 原列接手、三合格／兩不合格角色、竄改拒絕、分頁與桌機／手機 Chrome。正式 index 不匯出、Preview／部署未開放。
+
+- 真 Browser Auth 驗收不可用假的 firebase.auth／httpsCallable 或 Node 暴露函式代送瀏覽器的交易。SDK 本機打包，實際 Chrome 直接登入與呼叫 Emulator；只在真 HTTP 已完成後中斷回覆測重試，不偽造成功 payload。攔阻所有非本機瀏覽器網路，驗證 token 存在但不輸出 token／密碼。原登入／取消／續傳 source boundaries 改動應使測試失敗。頁面導覽／cache 殼與 Admin fixture 初始化須明列，不能稱為整站啟動或 Browser 建單全線。此驗收納入原隔離 runner、與原 Auth 測試依序執行。
+
+- compat 的區域 callable 使用 firebase.app().functions(region)，全域 firebase.functions(app) 不是區域入口。測試替身須提供正確 app.functions 形狀；取消及物流傳輸另以全域 namespace 禁止 region 的行為回歸，不能再用接受任意參數的替身掩蓋錯誤。修改 src 同步重建 app.js；原環境／角色與後端 gate 全部保留。

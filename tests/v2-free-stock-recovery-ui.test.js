@@ -7,7 +7,7 @@ function fixture(){
   :{sourceMovementId:payload.movementId,status:'completed',productKey:'P',warehouseId:'W',maxQty:2,allocatedQty:2,recoveryPending:false,affectedOrderIds:['O']};
  const c=vm.createContext({YUSHIN_V2_RECOVERY_EMULATOR:true,location:{hostname:'localhost'},currentUser:{uid:'U'},currentUserRole:'warehouse',
   canReceiveInventoryCapability:()=>true,canAccessPage:()=>true,
-  firebase:{auth:()=>({app:{options:{projectId:'demo-yushin'}},currentUser:{uid:'U'},emulatorConfig:{host:'localhost',port:9099}}),
+  firebase:{app(){return {functions:region=>this.functions(region)};},auth:()=>({app:{options:{projectId:'demo-yushin'}},currentUser:{uid:'U'},emulatorConfig:{host:'localhost',port:9099}}),
    functions:()=>({app:{options:{projectId:'demo-yushin'}},useEmulator:(host,port)=>{assert.equal(host,'127.0.0.1');assert.equal(port,5001);},
     httpsCallable:name=>async payload=>{calls.push({name,payload:structuredClone(payload)});return {data:await handler(name,payload,c)};}})}});
  vm.runInContext(source,c);return {c,calls,api:c.YushinFreeStockRecovery,setHandler:f=>handler=f};
@@ -19,6 +19,13 @@ test('recovery list is read-only and retry sends the same durable source ID with
  f.setHandler((name,p)=>({sourceMovementId:p.movementId,status:'completed',productKey:'P',warehouseId:'W',maxQty:2,allocatedQty:2,recoveryPending:false,affectedOrderIds:['O']}));
  assert.equal((await f.api.resumeV2Recovery('M')).completed,true);assert.deepEqual(f.calls[1],f.calls[2]);
  assert.deepEqual(f.calls[1].payload,{movementId:'M'});
+});
+
+test('recovery selects a region through the real compat app interface',async()=>{
+ const f=fixture(),functions=f.c.firebase.functions();let region;
+ f.c.firebase.app=()=>({functions:value=>{region=value;return functions;}});
+ f.c.firebase.functions=()=>{throw Error('namespace argument accepts an app only');};
+ assert.equal((await f.api.listV2Recovery()).rows.length,1);assert.equal(region,'asia-east1');
 });
 test('recovery transport checks flag project local Auth role capability and account before and after response',async()=>{
  for(const mode of ['flag','host','sales','capability','account','role-after']){

@@ -50,7 +50,7 @@
     const local=host=>host==='localhost'||host==='127.0.0.1';
     if(root.YUSHIN_V2_RECOVERY_EMULATOR!==true||!local(root.location?.hostname)
       ||typeof firebase==='undefined'||!firebase.auth||!firebase.functions)throw Error('庫存續傳僅限本機 Emulator。');
-    const uid=currentUser?.uid,role=currentUserRole,auth=firebase.auth(),functions=firebase.functions('asia-east1');
+    const uid=currentUser?.uid,role=currentUserRole,auth=firebase.auth(),functions=firebase.app().functions('asia-east1');
     if(auth.app?.options?.projectId!=='demo-yushin'||functions.app?.options?.projectId!=='demo-yushin'
       ||!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099)throw Error('庫存續傳只允許本機 demo-yushin Auth／Functions Emulator。');
     const check=()=>{

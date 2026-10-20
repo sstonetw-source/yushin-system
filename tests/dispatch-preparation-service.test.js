@@ -75,7 +75,7 @@ function emulatorFixture(){
  const functions={app:auth.app,useEmulator:(...args)=>calls.push({endpoint:args}),httpsCallable:name=>async data=>{
   calls.push({name,data});if(f.c.replyError)throw f.c.replyError;
   return {data:{status:'applied',orderId:'O',itemId:'I',qty:data.quantity,recordId:'v2-'+data.operationId}};}};
- f.c.YUSHIN_V2_DISPATCH_EMULATOR=true;f.c.location={hostname:'localhost'};f.c.firebase={auth:()=>auth,functions:()=>functions};
+ f.c.YUSHIN_V2_DISPATCH_EMULATOR=true;f.c.location={hostname:'localhost'};f.c.firebase={app:()=>({functions:()=>functions}),auth:()=>auth,functions:()=>functions};
  f.c.runRoleTransaction=()=>{throw Error('legacy fallback forbidden');};
  f.c.db.collection=n=>({doc:id=>({get:async()=>{f.c.afterRead?.();return {exists:true,data:()=>({...f.order(),latest:true})};}})});
  return {...f,calls,auth,functions,run:()=>f.c.prepareOrderDispatch('O','I',f.intent({syncAttemptId:'original-sync'}))};
