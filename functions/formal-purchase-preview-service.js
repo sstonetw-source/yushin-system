@@ -31,13 +31,14 @@ function stockNumber(value,label){
  if(!Number.isSafeInteger(value)||value<0)reject('failed-precondition',label+'數量異常');
  return value;
 }
-async function previewV2FormalPurchase(db,uid,data){
+// Shared read-only validation inside the final transaction, not an earlier
+// preflight authorization that could become stale before commit.
+async function validateV2FormalPurchaseTx(tx,db,uid,intent,{allowExistingPo=false}={}){
  identifier(uid,'登入使用者',200);
- const intent=strictRequest(data),ref=(collection,id)=>db.collection(collection).doc(id);
+ const ref=(collection,id)=>db.collection(collection).doc(id);
  const demandId=demandCore.demandIdForSource({
   sourceType:'SALES_ORDER',sourceId:intent.orderId,sourceItemId:intent.itemId
  });
- return db.runTransaction(async tx=>{
   // Do not trust client role or UI hidden buttons. Read live user and business
   // facts under the same transaction snapshot that a future commit must use.
   const user=await tx.get(ref('users',uid));
@@ -45,7 +46,10 @@ async function previewV2FormalPurchase(db,uid,data){
     ||!['admin','purchaser'].includes(user.data().role))
    reject('permission-denied','登入使用者沒有正式採購權限');
   const po=await tx.get(ref('purchaseOrders',intent.poNo));
-  if(po.exists)reject('already-exists','此採購單號已建立，請開啟既有單據');
+  if(po.exists){
+   if(!allowExistingPo)reject('already-exists','此採購單號已建立，請開啟既有單據');
+   return {existingPo:po.data(),actorRole:user.data().role,actorName:String(user.data().name||'')};
+  }
   const order=await tx.get(ref('orders',intent.orderId));
   if(!order.exists)reject('not-found','來源訂單不存在');
   const source=order.data();
@@ -105,12 +109,17 @@ async function previewV2FormalPurchase(db,uid,data){
   const plan=demandCore.applyOrder(expected,intent.qty);
   if(plan.appliedQty!==intent.qty)
    reject('failed-precondition','採購超過目前缺貨需求');
-  return {poNo:intent.poNo,orderId:intent.orderId,itemId:intent.itemId,
+  return {plan:{poNo:intent.poNo,orderId:intent.orderId,itemId:intent.itemId,
    productId:masterId,warehouseId,demandId,
    requestedQty:expected.requestedQty,orderedQty:expected.orderedQty,
    remainingToOrderQty:expected.remainingToOrderQty,
    proposedQty:intent.qty,remainingAfterQty:plan.demand.remainingToOrderQty,
-   status:'preview-only'};
- });
+   status:'preview-only'},
+   source,sourceItem:row,sourceItemIndex:index,demandBefore:doc,demandAfter:plan.demand,
+   actorRole:user.data().role,actorName:String(user.data().name||'')};
 }
-module.exports={previewV2FormalPurchase,strictRequest};
+async function previewV2FormalPurchase(db,uid,data){
+ const intent=strictRequest(data);
+ return db.runTransaction(async tx=>(await validateV2FormalPurchaseTx(tx,db,uid,intent)).plan);
+}
+module.exports={previewV2FormalPurchase,strictRequest,validateV2FormalPurchaseTx};
