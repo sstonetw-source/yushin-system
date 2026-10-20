@@ -58,8 +58,7 @@ async function receiveV2Supply(db,uid,input){
   localDateString:()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()),
   firestoreReadWithTimeout:promise=>promise,
   readQueryInBatches:async query=>{const page=await query.limit(201).get();if(page.size>200)fail('failed-precondition','收貨憑證超過試點安全上限');return page.docs.map(doc=>({id:doc.id,...doc.data()}));},
-  brandIdentityForRecord:record=>({brand:record.brand||'',brandId:record.brandId||''}),
-  buildInventorySearchTokens:()=>fail('failed-precondition','來源庫存必須先由既有初始化建立')});
+  brandIdentityForRecord:record=>({brand:record.brand||'',brandId:record.brandId||''})});
  const affectedOrderIds=await runtime.receiveSupplyOrderRecord(intent.supplyId,intent.qty,intent.lotNo,intent.expiryDate,intent.operationId,{actorUid:uid,actorRole:role});
  return {status:'confirmed',supplyId:intent.supplyId,operationId:intent.operationId,affectedOrderIds};
 }
