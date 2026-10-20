@@ -235,6 +235,8 @@ async function siteLogin(page,account,role){
  assert.equal(await page.evaluate(()=>firebase.auth().currentUser.uid),account.uid);
 }
 async function siteLogout(page){
+ const toggle=page.locator('.mobile-nav-toggle');
+ if(await toggle.isVisible()&&await toggle.getAttribute('aria-expanded')!=='true')await toggle.click();
  await page.locator('button[onclick="handleLogout()"]').click();await page.locator('#loginScreen').waitFor({state:'visible'});
 }
 async function siteNav(page,key){
