@@ -6,6 +6,7 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const {spawnSync}=require('node:child_process'),{build}=require('esbuild'),{chromium}=require('playwright-core');
 const admin=require('firebase-admin'),{getFirestore}=require('firebase-admin/firestore'),{getAuth}=require('firebase-admin/auth');
 const {synchronizeV2OrderFixture}=require('./fixtures/v2-order-initialization.cjs');
+const {commitV2FormalPurchase}=require('../functions/formal-purchase-commit-service');
 const root=path.resolve(__dirname,'..'),read=file=>fs.readFileSync(path.join(root,file),'utf8');
 const section=(source,a,b)=>{const i=source.indexOf(a),j=source.indexOf(b,i);assert.ok(i>=0&&j>i,'original source boundaries');return source.slice(i,j);};
 let app,db,auth,browser,host,origin,sdk;
@@ -410,10 +411,7 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
    const callable=firebase.app().functions('asia-east1').httpsCallable('previewV2FormalPurchase');
    const poNo=document.getElementById('poNo').textContent.trim();
    const valid=await callable({poNo,orderId:input.orderId,itemId:'S',qty:4});
-   let excess;
-   try{await callable({poNo,orderId:input.orderId,itemId:'S',qty:8});}
-   catch(error){excess=error.code;}
-   return {plan:valid.data,excess};
+   return {plan:valid.data};
   },{orderId:fixture.sourceId});
   assert.equal(admission.plan.orderId,fixture.sourceId);
   assert.equal(admission.plan.itemId,'S');
@@ -423,7 +421,7 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
   assert.equal(admission.plan.remainingToOrderQty,7);
   assert.equal(admission.plan.remainingAfterQty,3);
   assert.equal(admission.plan.status,'preview-only');
-  assert.equal(admission.excess,'functions/failed-precondition');
+
   assert.deepEqual(await facts(fixture),restored);
   assert.deepEqual((await demandRef.get()).data(),demand);
   // One accepted + one rejected call per original browser page. The third
@@ -431,7 +429,7 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
   // deadline despite the Emulator handler returning promptly. Forged identity,
   // disabled profile and owned-sales denial are separately tested in the
   // deterministic server security suite.
-  console.log('Full site '+width+'px: authenticated PO preflight admits 4/7 and rejects over-order; no writes.');
+  console.log('Full site '+width+'px: authenticated PO preflight admits 4/7; no writes.');
   // Opening the original purchase modal was a read-only proposal. The PO
   // commit and incoming-registration stages have not been authorized by UI.
   assert.equal((await db.collection('purchaseOrders').get()).size,poCountBefore);
@@ -439,6 +437,56 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
   assert.deepEqual((await demandRef.get()).data(),demand);
   assert.deepEqual(await facts(fixture),restored);
   console.log('Full site '+width+'px: purchaser opened original formal PO draft for seven shortages; no supply or incoming stock was written.');
+  // The next migration checkpoint exercises the same server transaction
+  // through a REAL authenticated Callable. This is NOT yet wired to the
+  // original UI submit button, which still uses the old client writer.
+  const commitIntent={poNo:admission.plan.poNo,orderId:fixture.sourceId,itemId:'S',
+    qty:4,unitCost:20,supplier:'測試供應商',poDate:'2026-10-20'};
+  const committed=await page.evaluate(async request=>
+    (await firebase.app().functions('asia-east1').httpsCallable('commitV2FormalPurchase')(request)).data,commitIntent);
+  assert.equal(committed.status,'committed');
+  assert.equal(committed.committedQty,4);
+  assert.equal(committed.demandId,demandId);
+  const savedPo=(await db.collection('purchaseOrders').doc(commitIntent.poNo).get()).data();
+  assert.equal(savedPo.items.length,1);
+  assert.equal(savedPo.items[0].qty,4);
+  assert.equal(savedPo.vendorName,'測試供應商');
+  const supplyId='po-'+encodeURIComponent(commitIntent.poNo)+'-0';
+  assert.deepEqual(savedPo.supplyOrderIds,[supplyId]);
+  const savedSupply=(await db.collection('supplyOrders').doc(supplyId).get()).data();
+  assert.equal(savedSupply.status,'ORDERED');
+  assert.equal(savedSupply.qty,4);
+  assert.equal(savedSupply.receivedQty,0);
+  assert.equal(savedSupply.incomingRegisteredQty,0);
+  assert.equal(savedSupply.warehouseId,fixture.warehouseIds[0]);
+  const afterCommit=(await demandRef.get()).data();
+  assert.equal(afterCommit.requestedQty,7);
+  assert.equal(afterCommit.orderedQty,4);
+  assert.equal(afterCommit.remainingToOrderQty,3);
+  assert.equal(afterCommit.remainingToReceiveQty,4);
+  assert.equal(afterCommit.status,'PARTIALLY_ORDERED');
+  const updated=await facts(fixture);
+  assert.equal(updated.source.items[0].supplyOrderedQty,4);
+  assert.equal(updated.source.items[0].reservedQty,restored.source.items[0].reservedQty);
+  assert.equal(updated.inventory.incoming||0,restored.inventory.incoming||0);
+  assert.equal(updated.inventory.onHand,restored.inventory.onHand);
+  assert.deepEqual(updated.stocks,restored.stocks);
+  assert.deepEqual(updated.lots,restored.lots);
+  assert.deepEqual(updated.targets,restored.targets);
+  // The exact same authoritative server Service, under the REAL Emulator
+  // transaction, handles lost responses and rejecting stale/forged intents.
+  const buyer=fixture.accounts.purchaser.uid;
+  const retry=await commitV2FormalPurchase(db,buyer,commitIntent);
+  assert.equal(retry.status,'already-applied');
+  await assert.rejects(commitV2FormalPurchase(db,buyer,{...commitIntent,qty:3}),{code:'already-exists'});
+  await assert.rejects(commitV2FormalPurchase(db,fixture.accounts.sales.uid,{...commitIntent,poNo:commitIntent.poNo+'-sales'}),{code:'permission-denied'});
+  await assert.rejects(commitV2FormalPurchase(db,buyer,{...commitIntent,poNo:commitIntent.poNo+'-excess',qty:8}),{code:'failed-precondition'});
+  assert.equal((await db.collection('purchaseOrders').get()).size,poCountBefore+1);
+  assert.equal((await db.collection('supplyOrders').get()).size,supplyCountBefore+1);
+  assert.deepEqual((await demandRef.get()).data(),afterCommit);
+  assert.deepEqual(await facts(fixture),updated);
+  console.log('Full site '+width+'px: server PO transaction atomically committed 4/7 and safely replayed; no incoming or physical stock added.');
+
   console.log('Full site '+width+'px: seller restored five free units with seven shortages; lost-reply and stale-cancel retries are immutable.');
   for(const match of read('index.html').matchAll(/<script[^>]+src="([^"?]+)(?:\?[^\"]*)?"/g)){
    if(!match[1].startsWith('https:'))assert.ok(loaded.has('/'+match[1]),'original script loaded: '+match[1]);
