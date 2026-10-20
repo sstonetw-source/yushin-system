@@ -33,3 +33,12 @@
 以真實 Callable 已提交但瀏覽器 HTTP 回覆中斷模擬結果未知，保留原 sessionStorage 作業識別並刷新原網站，按「確認前次取消／恢復結果」以相同 payload 核對，不得二次預留；再重送更早的取消 operationId，確定不得覆蓋已恢復狀態。
 
 此處只擴充本機 demo-yushin 端對端的「取消 → 跨角色配貨 → 恢復」段落，**不代表原頁面建單 → 採購 → 收貨 → 打單 → 出貨 → 送達 → 退貨全流程完成**。沒有改正式 Firebase、Firestore Rules、資料或部署設定。以新 PR 完整 CI 為通過判定。
+
+## 恢復訂單後的缺貨採購需求（下一段端對端驗收）
+
+延續原 Chrome 1280／390 px 真實登入、取消及跨角色配貨後恢復，追加查核原 12 件的來源訂單只剩 5 件可預留時，原 Procurement Demand Core／Service 在同一個恢復交易中對該品項產生**唯一一筆** 7 件採購需求。必須是 requestedQty=7、remainingToOrderQty=7、orderedQty=receivedQty=0，且公司／兩倉實貨、原批次及採購在途沒有被虛增。
+
+重新使用原登入畫面以採購角色進入正式版結構的「採購需求」工作區，確認來源訂單實際顯示於原列表；唯讀瀏覽不應寫入來源或庫存。此項查核是真正 Browser Auth／原整站／Firestore Emulator 的完整需求顯示段落，但**不是**採購單建立、正式進貨及整張訂單最終履約的驗收。測試資料、Auth、Functions 與 Firestore 仍嚴格隔離於本機 demo-yushin。
+
+此批只增加測試與文件；不新增需求 writer、查詢、集合或正式 Firebase 部署。通過標準以對應 PR 最新完整 CI 為準。
+
