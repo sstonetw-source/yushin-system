@@ -449,3 +449,10 @@ Browser 發現的區域 SDK 入口修正只恢復既定後端連線方式，不�
 本批新交易入口僅接受正常單品項 WAREHOUSE 客戶訂單 PO、尚未打單／出貨／送達／退貨的來源。已提交憑證以原身分／內容核對後可冪等重試，不再次入庫。舊一般收貨路徑不變，取消、服務型、直送、備庫、多品項與後續履約的此新傳輸尚未開放。無新增 Collection／Rules／Index／Listener，正式 index.js 不匯出，未部署 Firebase。
 
 驗收邊界見 [整站驗收紀錄](full-site-emulator-boot-20261020.md)。
+
+
+### 同 PO 收齊後原打單與分批寄出（2026-10-21，待 CI）
+
+同一張採購 4 件的 PO 以兩次各 2 件完成，收齊只代表該 PO 已收 4 件，不代表原訂單 12 件全部足額；原 7 件缺口仍有 3 件未採購。第二次收貨應將 incoming 歸零、累計 receivedQty=4、來源 reservedQty=9／shortageQty=3。打單 9 件不扣實貨；來源倉分批寄出 2+2 件後預留剩 5 件、缺口仍 3 件，客戶 deliveredQty 仍為 0，不得將實體寄出當作送達。
+
+本批本機語法與建置一致性檢查已通過；真 Auth、Chrome 及全套 Emulator／Rules 的執行結果以本批 PR 最新 CI 為準。未部署 Firebase，未修改正式資料。

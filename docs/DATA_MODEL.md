@@ -403,3 +403,10 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 本批新交易入口僅接受正常單品項 WAREHOUSE 客戶訂單 PO、尚未打單／出貨／送達／退貨的來源。已提交憑證以原身分／內容核對後可冪等重試，不再次入庫。舊一般收貨路徑不變，取消、服務型、直送、備庫、多品項與後續履約的此新傳輸尚未開放。無新增 Collection／Rules／Index／Listener，正式 index.js 不匯出，未部署 Firebase。
 
 驗收邊界見 [整站驗收紀錄](full-site-emulator-boot-20261020.md)。
+
+
+### 同 PO 收齊後原打單與分批寄出（2026-10-21，待 CI）
+
+不新增持久欄位或集合。兩次真實到貨使用不同固定 receipts operationId 與各自 lot；同次回覆遺失後重試保持該次 ID、批號、效期與數量。兩次實體寄出保留既有 warehouseShipmentRecords 與 location-ship-* movements；deliveryRecords 不變。既有 receivingSupplyOrders 繼續由 sanitizeSupply 投影且不含成本。
+
+本批本機語法與建置一致性檢查已通過；真 Auth、Chrome 及全套 Emulator／Rules 的執行結果以本批 PR 最新 CI 為準。未部署 Firebase，未修改正式資料。
