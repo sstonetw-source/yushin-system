@@ -262,7 +262,7 @@ async function siteOrderAction(page,fixture,label){
 }
 for(const width of [1280,390])test('full site '+width+'px boot original navigation permissions cancellation and handoff',{timeout:240000},async()=>{
  const fixture=await seed(width,'site'),context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
- const errors=[],external=[],calls=[],loaded=new Set();let loseCancel=true,loseRecovery=true;
+ const errors=[],external=[],calls=[],loaded=new Set();let loseCancel=true,loseRecovery=true,loseRestore=true;
  await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_V2_LIFECYCLE_EMULATOR=true;window.YUSHIN_V2_RECOVERY_EMULATOR=true;});
  page.on('pageerror',error=>errors.push(error.message));
  page.on('dialog',dialog=>dialog.type()==='confirm'?dialog.accept():dialog.dismiss());
@@ -274,9 +274,14 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
    const name=url.pathname.split('/').at(-1),data=request.postDataJSON().data;
    assert.ok((await request.allHeaders()).authorization?.startsWith('Bearer '));
    assert.equal(data.actorUid,undefined);assert.equal(data.actorRole,undefined);calls.push({name,data});
-   if((name==='setV2OrderLifecycle'&&loseCancel)||(name==='resumeV2FreeStockRecovery'&&loseRecovery)){
+   const shouldLose=name==='setV2OrderLifecycle'
+    ?(data.nextStatus==='normal'?loseRestore:loseCancel)
+    :(name==='resumeV2FreeStockRecovery'&&loseRecovery);
+   if(shouldLose){
     const reply=await route.fetch();assert.equal(reply.status(),200);
-    if(name==='setV2OrderLifecycle')loseCancel=false;else loseRecovery=false;
+    if(name==='setV2OrderLifecycle'){
+     if(data.nextStatus==='normal')loseRestore=false;else loseCancel=false;
+    }else loseRecovery=false;
     await route.abort('failed');return;
    }
   }
@@ -325,6 +330,34 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
    assert.equal(await page.evaluate(()=>canAccessPage('admin')),role==='admin');
    assert.equal(await page.evaluate(()=>canAccessPage('quote')),true);await siteNav(page,'orders');
   }
+
+  // A subsequent restoration must not steal the seven allocations handed off
+  // to logistics; it can only reserve the five units still physically free.
+  await siteLogout(page);await siteLogin(page,fixture.accounts.sales,'sales');await siteOpen(page,'sales');
+  await siteOrderAction(page,fixture,'恢復訂單');
+  await page.waitForFunction(id=>!pendingLifecycleOrderIds.size&&!!pendingV2OrderLifecycle(id),fixture.sourceId);
+  const restored=await facts(fixture);
+  assert.equal(restored.source.orderStatus,'normal');
+  assert.equal(restored.source.orderLifecycleHistory.length,2);
+  assert.equal(restored.source.items[0].reservedQty,5);
+  assert.equal(restored.source.items[0].shortageQty,7);
+  assert.equal(restored.inventory.reserved,12);
+  assert.equal(restored.stocks.reduce((sum,row)=>sum+row.reserved,0),12);
+  assert.equal(restored.targets.reduce((sum,row)=>sum+row.items[0].reservedQty,0),7);
+  assert.equal(restored.inventory.onHand,before.inventory.onHand);
+  assert.deepEqual(restored.lots,before.lots);
+  await siteOpen(page,'sales');await siteOrderAction(page,fixture,'確認前次取消／恢復結果');
+  await page.waitForFunction(id=>!pendingV2OrderLifecycle(id),fixture.sourceId);
+  const restoreCalls=calls.filter(row=>row.name==='setV2OrderLifecycle'&&row.data.nextStatus==='normal');
+  assert.equal(restoreCalls.length,2);assert.deepEqual(restoreCalls[0].data,restoreCalls[1].data);
+  assert.deepEqual(await facts(fixture),restored);
+  // Even after a later restore, replaying the old committed cancel ID cannot
+  // cancel this order again or modify either warehouse's reservation.
+  const oldCancellation=calls.find(row=>row.name==='setV2OrderLifecycle'&&row.data.nextStatus==='cancelled').data;
+  const oldReplay=await page.evaluate(async input=>(await firebase.app().functions('asia-east1').httpsCallable('setV2OrderLifecycle')(input)).data,oldCancellation);
+  assert.equal(oldReplay.status,'already-applied');
+  assert.deepEqual(await facts(fixture),restored);
+  console.log('Full site '+width+'px: seller restored five free units with seven shortages; lost-reply and stale-cancel retries are immutable.');
   for(const match of read('index.html').matchAll(/<script[^>]+src="([^"?]+)(?:\?[^\"]*)?"/g)){
    if(!match[1].startsWith('https:'))assert.ok(loaded.has('/'+match[1]),'original script loaded: '+match[1]);
   }
