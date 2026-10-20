@@ -268,3 +268,5 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 - v2 送達撤銷的登入傳輸僅隔離 `reverseV2ShipmentDelivery` → 原 `reverseShipmentDelivery`，不得改用 legacy delivery-stock 還原實貨。正式 index 不匯出、原 UI 仍關閉；後續接線需固定撤銷 intent／操作 ID 與提交後回讀，未知回覆不可重建 ID 或退回一般更正路徑。測試用真 Auth SDK 驗證五角色、當前權限、來源 proof、重送與競爭；已有實物退貨仍拒絕。詳見 [原介面驗收邊界](transaction-ui-integration-20261018.md)。
 
 - 2026-10-20 本機 v2 原送達紀錄的逐筆撤銷已接原 deleteDeliveryRecord → reverseV2ShipmentDeliveryEmulator → 唯一 reverseShipmentDelivery；取代上一條「原 UI 仍關閉」的本機限制。確認與撤銷共用環境／身分 gate，分開保存固定 intent；未知回覆或提交後回讀失敗不可換 ID／降級 legacy。原紀錄已消失仍需顯示同 ID 核對入口；角色變更／損壞暫存須關閉操作並顯示提示，不能靜默清掉。正式／Preview 未啟用，已有實物退貨仍拒絕。詳見原介面驗收文件。
+
+- 2026-10-20 隔離 setV2OrderLifecycle 只接原 commitOrderLocationLifecycleAndRecover，唯一整單交易與後續有界配貨責任不變。真 Auth uid／當前 profile／所有權須在原交易查核；來源 applied／already-applied 和 postCommitAllocation.recovery-pending 必須分開，不得將配貨無權限視為取消回滾。原頁面尚未接線、正式 index 不匯出，沒有 Auth provider／正式部署變更。新 Auth 測試驗證來源、五角色、重送、競爭與末端失敗回滾；UI 接線前須另外驗證固定意圖、刷新回讀及原兩入口。

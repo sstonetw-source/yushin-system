@@ -25,7 +25,7 @@ test('disabled gate missing authentication and wrong database never call a retur
  assert.equal(reads,1);
 });
 test('production Functions entry never exports the isolated return Callables or their fixture',()=>{
- assert.doesNotMatch(fs.readFileSync('functions/index.js','utf8'),/v2-return-callable|previewV2CustomerReturn|receiveV2CustomerReturn|prepareV2OrderDispatch|shipV2WarehouseItem|confirmV2ShipmentDelivery|reverseV2ShipmentDelivery|v2-return-auth-functions/);
+ assert.doesNotMatch(fs.readFileSync('functions/index.js','utf8'),/v2-return-callable|previewV2CustomerReturn|receiveV2CustomerReturn|prepareV2OrderDispatch|shipV2WarehouseItem|confirmV2ShipmentDelivery|reverseV2ShipmentDelivery|setV2OrderLifecycle|v2-return-auth-functions/);
 });
 test('dispatch baseline is optional for old receipts and is bound to the canonical intent when supplied',()=>{
  const {normalizeLocationDispatchIntent}=require('../functions/location-dispatch-service');
@@ -86,5 +86,20 @@ test('delivery reversal Callable preserves the isolated environment and authenti
  await assert.rejects(create({...env(),GCLOUD_PROJECT:'preview-20135'}).reverseV2ShipmentDelivery({auth:{uid:'A'},data:{}}),e=>e.code==='failed-precondition');
  assert.equal(reads,0);
  await assert.rejects(create(env(),'production').reverseV2ShipmentDelivery({auth:{uid:'A'},data:{}}),e=>e.code==='failed-precondition');
+ assert.equal(reads,1);
+});
+
+test('whole-order lifecycle Callable uses the same isolated project and authenticated identity gate',async()=>{
+ class HttpsError extends Error{constructor(code,message){super(message);this.code=code;}}
+ let reads=0;
+ const create=(configuration=env(),projectId='demo-yushin')=>createV2ReturnCallables({
+  onCall:(_settings,handler)=>handler,HttpsError,getDatabase:()=>{reads++;return {projectId};},env:configuration});
+ assert.equal(typeof create().setV2OrderLifecycle,'function');
+ await assert.rejects(create().setV2OrderLifecycle({data:{actorUid:'forged'}}),e=>e.code==='unauthenticated');
+ for(const patch of [{GCLOUD_PROJECT:'preview-20135'},{FUNCTIONS_EMULATOR:'false'},
+  {ENABLE_V2_RETURN_AUTH_EMULATOR:'false'},{FIREBASE_AUTH_EMULATOR_HOST:'remote.example:9099'}])
+  await assert.rejects(create({...env(),...patch}).setV2OrderLifecycle({auth:{uid:'A'},data:{}}),e=>e.code==='failed-precondition');
+ assert.equal(reads,0);
+ await assert.rejects(create(env(),'production').setV2OrderLifecycle({auth:{uid:'A'},data:{}}),e=>e.code==='failed-precondition');
  assert.equal(reads,1);
 });
