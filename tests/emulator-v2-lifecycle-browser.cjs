@@ -594,7 +594,7 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
   // Original purchasing dispatch button prepares the nine held units. Its lost
   // reply survives reload without a second dispatch record or stock mutation.
   await siteNav(page,'purchasing');await page.locator('#purchase-card-dispatch').click();
-  const dispatchButton=()=>page.locator('#purchaseDispatchBody tr').filter({hasText:fixture.sourceId.replace('-source','-code')}).locator('button');
+  const dispatchButton=()=>page.locator('#purchaseDispatchBody button[onclick*="'+fixture.sourceId+'"]');
   await dispatchButton().click();
   await page.waitForFunction(id=>!pendingDispatchOrderIds.size&&!!pendingDispatchPreparation(id,'S'),fixture.sourceId,{timeout:45000});
   const prepared=await facts(fixture),dispatchIntent=calls.find(row=>row.name==='prepareV2OrderDispatch').data;
