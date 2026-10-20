@@ -1053,3 +1053,47 @@ test('real Auth receipt rejects forged roles, invalid intent and competing exces
  assert.equal(outcomes.filter(result=>result.status==='fulfilled').length,1);
  const after=await x.snap();assert.equal(after.receipts.length,1);assert.equal(after.inventory.onHand,before.inventory.onHand+3);assert.equal(after.inventory.incoming,1);assert.equal(after.supply.receivedQty,3);
 });
+test('real Auth same PO receives its final two once then dispatches and split-ships without repeating receipt or delivering',{timeout:120000},async()=>{
+ const x=await partialReceiptFixture('complete'),before=await x.snap();await x.receive();
+ const final={...x.input,operationId:x.input.operationId+'_final',lotNo:'FINAL',expiryDate:'2028-02-01'};
+ await Promise.all([x.receive(final),x.receive(final)]);
+ const completed=await x.snap();
+ assert.equal(completed.supply.status,'RECEIVED');assert.equal(completed.supply.receivedQty,4);assert.equal(completed.supply.incomingRegisteredQty,0);
+ assert.equal(completed.inventory.onHand,before.inventory.onHand+4);assert.equal(completed.inventory.reserved,before.inventory.reserved+4);assert.equal(completed.inventory.incoming,0);
+ assert.equal(completed.order.items[0].reservedQty,9);assert.equal(completed.order.items[0].shortageQty,3);assert.equal(completed.order.items[0].receivedQty,4);
+ assert.equal(completed.demand.remainingToOrderQty,3);assert.equal(completed.demand.remainingToReceiveQty,0);assert.equal(completed.demand.receivedQty,4);
+ assert.equal(completed.receipts.length,2);assert.equal(completed.inventoryLots.length,before.inventoryLots.length+2);assert.deepEqual(completed.stocks[1],before.stocks[1]);
+ assert.deepEqual(completed.view,require('../modules/stock-permissions').sanitizeSupply(completed.supply));
+ await assert.rejects(x.receive({...final,operationId:final.operationId+'_excess',qty:1}));assert.deepEqual(await x.snap(),completed);
+ // Supply fixture deliberately has no delivery plan until dispatch starts;
+ // this is customer shipping setup, not a quantity/stock fixture shortcut.
+ const plan={mode:'CUSTOMER_SHIP',contact:'測試客戶',phone:'02-12345678',address:'測試地址'};
+ await db.collection('orders').doc(x.orderId).update({items:completed.order.items.map(item=>({...item,deliveryPlan:plan}))});
+ const syncAttemptId=completed.order.inventoryReservationAttemptId;
+ await x.buyer.dispatch({orderId:x.orderId,itemId:'I',quantity:9,expectedPreparedQty:0,operationId:'receipt_complete_dispatch',syncAttemptId});
+ const prepared=await x.snap();assert.equal(prepared.order.items[0].dispatchPreparedQty,9);
+ for(const key of ['inventory','stocks','reservation','inventoryLots','inventoryLotCosts','inventoryMovements','receipts','demand','supply','view'])assert.deepEqual(prepared[key],completed[key]);
+ const ship={orderId:x.orderId,itemId:'I',warehouseId:x.warehouses[0],quantity:2,date:'2026-10-21',expectedPlan:plan,syncAttemptId,operationId:'receipt_complete_ship_first'};
+ assert.equal((await x.buyer.ship(ship)).status,'applied');const first=await x.snap();
+ assert.equal((await x.buyer.ship(ship)).status,'already-applied');assert.deepEqual(await x.snap(),first);
+ await x.buyer.ship({...ship,operationId:'receipt_complete_ship_second'});const shipped=await x.snap();
+ assert.equal(shipped.order.warehouseShipmentRecords.length,2);assert.equal(shipped.order.items[0].warehouseShippedQty,4);assert.equal(shipped.order.items[0].reservedQty,5);assert.equal(shipped.order.items[0].shortageQty,3);
+ assert.equal(shipped.inventory.onHand,prepared.inventory.onHand-4);assert.equal(shipped.inventory.reserved,prepared.inventory.reserved-4);assert.equal(shipped.inventory.incoming,0);
+ assert.deepEqual(shipped.stocks[1],prepared.stocks[1]);assert.deepEqual(shipped.demand,completed.demand);
+ assert.deepEqual(shipped.order.deliveryRecords,[]);assert.equal(shipped.order.deliveredQty,0);assert.equal(shipped.order.isDelivered,false);
+ for(const record of shipped.order.warehouseShipmentRecords){const proof=shipped.inventoryMovements.find(m=>m.id===record.movementId);require('../modules/fulfillment-core').validateShipmentMovement(record,proof,{orderId:x.orderId,itemId:'I',productKey:x.key});}
+ // An old committed receipt may be reconciled after later shipment, whereas
+ // a new receipt remains blocked by the existing transport pilot boundary.
+ await x.receive(x.input);await x.receive(final);assert.deepEqual(await x.snap(),shipped);
+ await assert.rejects(x.receive({...final,operationId:final.operationId+'_after_ship',qty:1}),code('failed-precondition'));assert.deepEqual(await x.snap(),shipped);
+});
+test('real Auth two final-arrival IDs competing for the last two commit only one and reject altered retries',{timeout:120000},async()=>{
+ const x=await partialReceiptFixture('final-race');await x.receive();
+ const partial=await x.snap(),final={...x.input,operationId:x.input.operationId+'_final',lotNo:'FINAL'};
+ const outcomes=await Promise.allSettled([x.receive(final),x.receive({...final,operationId:final.operationId+'_competitor'})]);
+ assert.equal(outcomes.filter(r=>r.status==='fulfilled').length,1);assert.equal(outcomes.filter(r=>r.status==='rejected').length,1);
+ const completed=await x.snap();assert.equal(completed.supply.status,'RECEIVED');assert.equal(completed.supply.receivedQty,4);assert.equal(completed.inventory.onHand,partial.inventory.onHand+2);assert.equal(completed.inventory.reserved,partial.inventory.reserved+2);assert.equal(completed.inventory.incoming,0);assert.equal(completed.receipts.length,2);assert.equal(completed.inventoryLots.length,partial.inventoryLots.length+1);
+ const winner=outcomes[0].status==='fulfilled'?final:{...final,operationId:final.operationId+'_competitor'};
+ for(const patch of [{qty:1},{lotNo:'ALTERED'},{expiryDate:'2029-01-01'}]){await assert.rejects(x.receive({...winner,...patch}));assert.deepEqual(await x.snap(),completed);}
+ await x.receive(winner);assert.deepEqual(await x.snap(),completed);
+});
