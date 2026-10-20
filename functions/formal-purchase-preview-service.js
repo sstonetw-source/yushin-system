@@ -3,7 +3,7 @@
 // formal PO transaction. This is not a second purchase writer. It deliberately
 // performs no mutation and must be re-run INSIDE the eventual commit transaction.
 // Quantity formulas use the exact browser Procurement Demand Core.
-const demandCore=require('../modules/procurement-demand-core.js');
+const demandCore=require('./shared/procurement-demand-core.js');
 function reject(code,message){const error=new Error(message);error.code=code;throw error;}
 function identifier(value,label,max=160){
  if(typeof value!=='string'||!value||value.trim()!==value||value.length>max||value.includes('/'))
