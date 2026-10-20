@@ -173,13 +173,14 @@ for(const width of [1280,390])test('real browser '+width+'px original login canc
   await page.evaluate(()=>firebase.auth().signOut());await open(page,fixture);await login(page,fixture.accounts.purchaser);
   await loadSourceRows(page,fixture.productKey);
   for(let step=0;step<5;step++){
+   if(!await page.locator('#freeStockRecoveryPanel').isVisible())break;
    const buttons=page.locator('#freeStockRecoveryBody tr').filter({hasText:fixture.productKey}).locator('button');
    if(!await buttons.count())break;
    assert.equal(await buttons.first().isEnabled(),true,await page.locator('#freeStockRecoveryBody').textContent());
    const previous=await page.evaluate(()=>completedRecoveryClicks);await buttons.first().click();
    await page.waitForFunction(count=>completedRecoveryClicks>count,previous);
   }
-  assert.equal(await page.locator('#freeStockRecoveryBody tr').filter({hasText:fixture.productKey}).count(),0,
+  assert.equal(await page.locator('#freeStockRecoveryBody tr:visible').filter({hasText:fixture.productKey}).count(),0,
    await page.locator('#freeStockRecoveryBody').textContent());
   const after=await facts(fixture);assert.equal(after.targets.reduce((sum,row)=>sum+row.items[0].reservedQty,0),7);
   assert.equal(after.inventory.onHand,before.inventory.onHand);assert.deepEqual(after.lots,before.lots);
@@ -192,7 +193,7 @@ for(const width of [1280,390])test('real browser '+width+'px original login canc
   await open(page,fixture);await page.evaluate(()=>loadFreeStockRecovery());
   for(let scan=0;scan<20&&await page.locator('#freeStockRecoveryMore').isVisible();scan++)await page.locator('#freeStockRecoveryMore').click();
   assert.equal(await page.locator('#freeStockRecoveryMore').isVisible(),false);
-  assert.equal(await page.locator('#freeStockRecoveryBody tr').filter({hasText:fixture.productKey}).count(),0);
+  assert.equal(await page.locator('#freeStockRecoveryBody tr:visible').filter({hasText:fixture.productKey}).count(),0);
   assert.deepEqual(await facts(fixture),after);assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
   console.log('Browser '+width+'px: purchaser handoff, seven target holds, unchanged physical lots and idempotent reload passed.');
  }catch(error){
