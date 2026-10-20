@@ -535,7 +535,9 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
   // Same PO and original receipt dialog: two units arrive, response is lost.
   await page.locator('#poModalOverlay button[onclick="closePurchaseOrderModal()"]').click();
   await page.locator('#purchase-tab-work').click();await page.locator('#purchase-card-receiving').click();
-  await page.locator('button[data-receipt-supply="'+supplyId+'"]').first().click();
+  // The original purchasing button navigates to warehouse receiving first.
+  await page.locator('#poListBody button[data-receipt-supply="'+supplyId+'"]').first().click();
+  await page.locator('#inventoryReceivingBody button[data-receipt-supply="'+supplyId+'"]').first().click();
   await page.locator('#poReceiptBatchBody .po-receive-qty').fill('2');
   await page.locator('#poReceiptBatchBody .po-receive-lot').fill('PARTIAL-'+width);
   await page.locator('#poReceiptBatchBody .po-receive-expiry').fill('2028-01-01');

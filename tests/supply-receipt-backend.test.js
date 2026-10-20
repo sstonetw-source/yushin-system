@@ -40,3 +40,13 @@ test('generated server receipt runtime stays identical to src and is not a runti
  const source=fs.readFileSync('functions/supply-receipt-service.js','utf8');assert.doesNotMatch(source,/node:vm|new Function|\.update\([^\n]*(receivedQty|onHand|reserved)/);
  assert.doesNotMatch(fs.readFileSync('functions/index.js','utf8'),/receiveV2Supply/);
 });
+test('generated receiving Service resolves its terminal PO dependency before any database write',async()=>{
+ const create=require('../functions/shared/receiving-runtime'),supply={type:'PURCHASING_PO',qty:4,receivedQty:0,status:'CANCELLED',fulfillmentType:'WAREHOUSE',productKey:'P',warehouseId:'W'};
+ let writes=0;
+ const db={projectId:'demo-yushin',collection:name=>({doc:(id='unused')=>({path:name+'/'+id,id})})};
+ const c={db,currentUser:{uid:'buyer'},currentUserRole:'purchaser',runRoleTransaction:fn=>fn({get:async ref=>({exists:ref.path==='supplyOrders/S',data:()=>supply}),set:()=>writes++,update:()=>writes++}),
+  cores:{YushinSupply:require('../modules/supply-core'),YushinReceiving:require('../modules/receiving-core'),YushinProcurementDemand:require('../modules/procurement-demand-core')},
+  canConfirmSupplyReceipt:()=>true,deliveryActor:()=> 'buyer',localDateString:()=> '2026-10-20'};
+ await assert.rejects(create(c).receiveSupplyOrderRecord('S',2,'LOT','2028-01-01','receipt_test'),error=>!(error instanceof ReferenceError)&&/取消/.test(error.message));
+ assert.equal(writes,0);
+});

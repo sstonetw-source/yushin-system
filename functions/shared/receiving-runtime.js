@@ -254,6 +254,9 @@ function procurementDemandDocument(demand={},context={},meta={}) {
 function remainingProcurementQty(order, item, dispatchOverride = null) {
     return procurementDemandForOrderItem(order,item,dispatchOverride).remainingToOrderQty;
 }
+function isPurchaseTerminalStatus(status) {
+    return ['CANCELLED','CLOSED'].includes(String(status || '').toUpperCase());
+}
 function inventoryProductKey(record) {
     return String(record?.productId || (record?.itemCode ? `code:${normalizeHistoryItemCode(record.itemCode)}` : '')).trim();
 }
