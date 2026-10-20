@@ -75,7 +75,7 @@ jobs:
       - name: Check customer return receiving Service in desktop and mobile Chrome
         run: node tests/customer-return-browser-smoke.js
       - name: Install Firestore rules and real browser integration dependencies
-        run: npm install --no-save @firebase/rules-unit-testing firebase firebase-admin@14.2.0 playwright-core@1.56.0 esbuild@0.25.0
+        run: npm install --no-save @firebase/rules-unit-testing firebase firebase-admin@14.2.0 playwright-core@1.56.0 esbuild@0.25.0 html2canvas@1.4.1 jspdf@2.5.2
       - name: Set up Java 21 for Firestore emulator
         uses: actions/setup-java@v4
         with:

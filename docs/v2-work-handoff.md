@@ -1,5 +1,9 @@
 # V2 Work Mode 交接
 
+## 2026-10-20 整站啟動驗收
+- 本批詳見 [完整首頁 Emulator 啟動驗收](full-site-emulator-boot-20261020.md)。保留原元件驗收，再增加原整站啟動與五角色恢復，CI 全綠前不可合併。
+- 不部署正式 Firebase、不變更真實角色或 provider；正式環境全流程仍另有發布 gate。
+
 使用者明天只需說「繼續」。不要重新討論需求，直接依本文件與 v2-upgrade-plan.md 施工。
 
 ## 起點

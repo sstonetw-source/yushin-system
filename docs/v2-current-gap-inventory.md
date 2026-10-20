@@ -1,5 +1,9 @@
 # V2 Current Gap Inventory
 
+## 2026-10-20 驗收範圍更新
+- 新增原 index/app/模組整站啟動案例，涵蓋五角色登入恢復與取消→物流接手。測試設計與尚存邊界見 [本批說明](full-site-emulator-boot-20261020.md)；未通過 CI 不視為驗收完成。
+- 本機通過仍不等於正式資料遷移、正式部署或所有業務流程驗收完成。
+
 盤點基準：main 7cf91049；本文件供 Work 模式避免重複大範圍分析。
 
 | Area | Main current state | V2 target | Action |
