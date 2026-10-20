@@ -270,3 +270,5 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 - 2026-10-20 本機 v2 原送達紀錄的逐筆撤銷已接原 deleteDeliveryRecord → reverseV2ShipmentDeliveryEmulator → 唯一 reverseShipmentDelivery；取代上一條「原 UI 仍關閉」的本機限制。確認與撤銷共用環境／身分 gate，分開保存固定 intent；未知回覆或提交後回讀失敗不可換 ID／降級 legacy。原紀錄已消失仍需顯示同 ID 核對入口；角色變更／損壞暫存須關閉操作並顯示提示，不能靜默清掉。正式／Preview 未啟用，已有實物退貨仍拒絕。詳見原介面驗收文件。
 
 - 2026-10-20 隔離 setV2OrderLifecycle 只接原 commitOrderLocationLifecycleAndRecover，唯一整單交易與後續有界配貨責任不變。真 Auth uid／當前 profile／所有權須在原交易查核；來源 applied／already-applied 和 postCommitAllocation.recovery-pending 必須分開，不得將配貨無權限視為取消回滾。原頁面尚未接線、正式 index 不匯出，沒有 Auth provider／正式部署變更。新 Auth 測試驗證來源、五角色、重送、競爭與末端失敗回滾；UI 接線前須另外驗證固定意圖、刷新回讀及原兩入口。
+
+- 本機原取消／恢復兩入口已沿單一 setOrderLifecycleStatus 接上述 Callable，獨立 YUSHIN_V2_LIFECYCLE_EMULATOR gate 同時查實際 Auth／Functions 專案、本機 Auth 9099 與固定 Functions 5001。每個 await 後查原 UID／角色／capability；前端不授權後端。未知回覆保留原 intent，刷新後清單與表單都須提供確認入口；角色變更／暫存損壞顯示警告而非刪暫存。已確認提交後 UI 更新失敗與未確認交易須分開；cache 失效涵蓋所有原候選倉。須跑 Node、真 Auth 原 handler 整合及桌機／手機 Chrome。正式／Preview 與獨立 metadata 更正未開放。

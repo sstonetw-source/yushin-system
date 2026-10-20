@@ -124,4 +124,14 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 
 新增一項 Node gate 測試、四項真實 Auth SDK → Callable → 原 Service → Firestore Emulator 整合：單／三品項含同商品與另一商品、已送達及 CLOSE 歷史、五角色／所有權／缺 profile／匿名／偽造 payload 與 claims／即時降權停用、來源及 sibling proof 損壞零寫入、同 ID／競爭 ID、回覆遺失、原取消 ID 不覆蓋後來恢復、真實末端 movement create 衝突全回滾。五品項／真採購收貨與更多供應邊界仍由既有後端 Emulator 測試覆蓋，不能描述為本批 Auth 端到端新增驗收。
 
-本機 Node1582/1582、建置同步、語法及 diff 通過；完整 CI 尚待執行。原頁面、sessionStorage 意圖／未知回覆顯示與 Chrome 取消／恢復操作尚未接線；正式 functions/index.js 不匯出，僅既有 demo-yushin 本機 Auth／Functions／Firestore 隔離 runner。沒有新 Collection、持久欄位、Rules、Index、Listener、背景 runner 或正式 Firebase 部署。後續接原按鈕時須區分來源已提交與後續配貨待處理，不能提示取消失敗或自行換 ID。
+PR #190 完整 CI 39347832242 通過 2097 項測試與九組桌機／手機 Chrome，已合併 main 8fdc4da。此批只完成傳輸；原 UI 由以下後續批次接線。正式 functions/index.js 不匯出，僅既有 demo-yushin 本機 Auth／Functions／Firestore 隔離 runner。
+
+## 2026-10-20 原取消／恢復清單與表單接線
+
+原 quickSetOrderLifecycle／saveOrderLifecycleStatus 共用 setOrderLifecycleStatus 的明確 YUSHIN_V2_LIFECYCLE_EMULATOR 分支，唯一後端 writer 不變。僅 localhost／127.0.0.1、實際 demo-yushin Auth／Functions、Auth Emulator 9099 與固定 Functions Emulator 5001；不符不 fallback legacy。原 UID／角色／capability 在每次非同步讀取／回覆後核對，payload 不帶 UID／role，實際五角色、停用及所有權由原後端查核。
+
+新操作 server get 原單及最多五筆 deterministic inventoryReservations，須有完整原 lifecycleWarehouseIds 且各品項一致；不能以單一提示倉、現存有量位置或全部倉庫猜測。sessionStorage 分 UID／order 保存固定完整意圖；未知結果跨同分頁刷新續傳，不重讀來源拼新意圖。清單及原表單顯示確認入口，即使訂單已改為目標狀態仍可核對；表單凍結原狀態／日期／原因。暫存損壞或角色變更顯示可見提示並拒絕寫入。
+
+核對 applied／already-applied、原 receiptId、整單 itemIds 與後續配貨狀態，再 server get 原 orders 並核對原 operationId／操作者／狀態／日期／原因 history，才清除暫存。舊取消憑證重送只顯示當前原單，不覆蓋後來恢復。原兩入口共用快取更新、兩倉失效及採購 cache；取消成功而配貨待處理明示成功／待續傳，畫面更新失敗不稱交易失敗。v2 相同狀態的獨立 metadata 更正目前拒絕。
+
+新增五項 Node 行為、真 Auth 原 quick／form → SDK → Callable → Service → Firestore 的斷線／刷新／原 ID 整合，以及第十組 Chrome（1280／390 px 原清單按鈕、表單、renderer、角色提示與固定意圖）。Chrome 為 scripted transport，不能替代完整 Browser Auth／Preview。本地 Node1587/1587、建置同步、語法／diff 通過；新增 Auth／Chrome 與完整 CI 待執行。沒有新 Collection、Firestore 欄位、Rules、Index、Listener、背景 runner 或 Firebase 部署。正式／Preview 全線、跨分頁／裝置續傳及物流角色的待配貨 UI 仍待後續驗收。

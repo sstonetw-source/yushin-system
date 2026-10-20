@@ -643,3 +643,7 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 ### v2 整單取消／恢復登入傳輸（2026-10-20，本機 Emulator）
 
 隔離 setV2OrderLifecycle → 原 commitOrderLocationLifecycleAndRecover → 唯一整單 runLocationLifecycle；提交後再沿原 continueCommittedV2FreeStock 有界續傳。來源原子交易與後續配貨是分開的責任，後者權限不足回 recovery-pending。沒有新 Core／writer；正式 index、原 UI／Preview 尚未接線，完整 CI 以本批結果為準。
+
+### v2 原取消／恢復介面（2026-10-20，隔離本機 Emulator）
+
+原 quickSetOrderLifecycle／saveOrderLifecycleStatus → 唯一 setOrderLifecycleStatus 的明確 YUSHIN_V2_LIFECYCLE_EMULATOR 分支 → setV2OrderLifecycleEmulator → 上述隔離 Callable。新操作最多讀原單及五筆 deterministic inventoryReservations，再回讀原單；不猜測雙倉、不直接寫庫存，未知回覆不 fallback legacy。原清單／表單提供固定意圖核對，刷新後即使已是目標狀態仍可重試。正式 index／Preview 未開放。

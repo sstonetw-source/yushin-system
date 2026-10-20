@@ -13,30 +13,41 @@ function confirmOrderCancellation(order) {
         return confirm(message);
 }
 
+function applySavedOrderLifecycle(orderId,savedOrder){
+    normalizedOrderItems(savedOrder).forEach(item=>{
+        const productKey=inventoryProductKey(item);
+        const warehouseIds=savedOrder.v2LifecycleOutcome?.warehouseIds
+            ||[(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'?'':(item.warehouseId||savedOrder.warehouseId||'')];
+        warehouseIds.forEach(warehouseId=>{if(productKey&&warehouseId)invalidateWarehouseStockCache(productKey,warehouseId);});
+    });
+    const index=ordersCache.findIndex(item=>item.id===orderId),syncedOrder={id:orderId,...savedOrder};
+    if(index>=0)ordersCache[index]=syncedOrder;
+    syncOrderIntoPurchasingCaches(syncedOrder);
+    writeAppDataCache('orders',ordersCache);
+    if(savedOrder.v2LifecycleOutcome?.postCommitAllocation.status==='recovery-pending')
+        showActionFeedback('訂單取消已完成；釋放庫存的後續配貨仍待合格物流角色續處理，不代表取消失敗。','warning');
+}
+
 window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
     if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) { alert('此操作僅限訂單負責業務或管理員。'); return; }
     if (!['normal', 'cancelled'].includes(nextStatus)) return;
     const cachedOrder = ordersCache.find(item => item.id === orderId);
     if (!cachedOrder) return;
-    if(cachedOrder.inventoryReservationStatus==='pending'){showActionFeedback('這筆訂單庫存仍在同步，請完成或重試同步後再變更狀態。','warning');return;}
-    if (pendingLifecycleOrderIds.has(orderId) || normalizedOrderStatus(cachedOrder) === nextStatus) return;
-    if(nextStatus==='cancelled'&&!confirmOrderCancellation(cachedOrder))return;
+    let retry;
+    try{retry=globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true?pendingV2OrderLifecycle(orderId):null;}catch(err){alert(err.message);return;}
+    if(!retry&&cachedOrder.inventoryReservationStatus==='pending'){showActionFeedback('這筆訂單庫存仍在同步，請完成或重試同步後再變更狀態。','warning');return;}
+    if(retry&&retry.nextStatus!==nextStatus){alert('請先確認前次取消／恢復結果。');return;}
+    if (pendingLifecycleOrderIds.has(orderId) || (!retry&&normalizedOrderStatus(cachedOrder) === nextStatus)) return;
+    if(!retry&&nextStatus==='cancelled'&&!confirmOrderCancellation(cachedOrder))return;
     pendingLifecycleOrderIds.add(orderId);
     renderOrdersList();
     if (currentDeliveryOrderId === orderId) { renderDeliveryModal(); renderOrderLifecycleModal(); }
+    let committed=false;
     try {
         const savedOrder=await setOrderLifecycleStatus(orderId,nextStatus);
+        committed=true;
         // The lifecycle transaction already synchronizes stock and purchase demand.
-        normalizedOrderItems(savedOrder).forEach(item=>{
-            const productKey=inventoryProductKey(item);
-            const warehouseId=(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'?'':(item.warehouseId||savedOrder.warehouseId||'');
-            if(productKey&&warehouseId) invalidateWarehouseStockCache(productKey,warehouseId);
-        });
-        const index = ordersCache.findIndex(item => item.id === orderId);
-        const syncedOrder = { id: orderId, ...savedOrder };
-        if (index >= 0) ordersCache[index] = syncedOrder;
-        syncOrderIntoPurchasingCaches(syncedOrder);
-        writeAppDataCache('orders', ordersCache);
+        applySavedOrderLifecycle(orderId,savedOrder);
         pendingLifecycleOrderIds.delete(orderId);
         renderOrdersList();
         if (currentDeliveryOrderId === orderId) { renderDeliveryModal(); renderOrderLifecycleModal(); }
@@ -44,7 +55,7 @@ window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
         pendingLifecycleOrderIds.delete(orderId);
         renderOrdersList();
         if (currentDeliveryOrderId === orderId) { renderDeliveryModal(); renderOrderLifecycleModal(); }
-        alert(`${nextStatus === 'normal' ? '恢復' : '取消'}訂單失敗：` + err.message);
+        alert((committed?'訂單狀態已確認，但畫面更新失敗；請重新讀取，勿重建作業：':`${nextStatus === 'normal' ? '恢復' : '取消'}訂單結果未確認：`) + err.message);
     }
 };
 

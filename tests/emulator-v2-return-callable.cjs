@@ -7,7 +7,7 @@ const admin=require('firebase-admin'),{getFirestore}=require('firebase-admin/fir
 const {initializeApp,deleteApp}=require('firebase/app');
 const {getAuth,connectAuthEmulator,signInWithEmailAndPassword}=require('firebase/auth');
 const {getFunctions,connectFunctionsEmulator,httpsCallable}=require('firebase/functions');
-const {getFirestore:clientFirestore,connectFirestoreEmulator,doc,collection,getDoc,runTransaction,setDoc}=require('firebase/firestore');
+const {getFirestore:clientFirestore,connectFirestoreEmulator,doc,collection,getDoc,getDocFromServer,runTransaction,setDoc}=require('firebase/firestore');
 const procurementDemandCore=require('../modules/procurement-demand-core');
 const {synchronizeV2OrderFixture}=require('./fixtures/v2-order-initialization.cjs');
 const {commitLocationDispatchPreparation}=require('../functions/location-dispatch-service');
@@ -610,6 +610,51 @@ async function lifecycleInput(x,operationId,nextStatus='cancelled'){
  return {orderId:x.orderId,itemIds:order.items.map(row=>row.itemId),warehouseIds:['AUTH-A','AUTH-B'],
   syncAttemptId:order.inventoryReservationAttemptId,operationId,nextStatus,date:'2026-10-20',reason:'客戶取消剩餘需求'};
 }
+
+test('original quick and form lifecycle actions reconcile frozen operations through real Auth and server reads after reload',async()=>{
+ const x=await fixture('lifecycle-original-ui',{role:'sales',cancelled:false,multi:true}),before=await lifecycleSnapshot(x);
+ const live=clientFirestore(x.actor.app);connectFirestoreEmulator(live,'127.0.0.1',8080);
+ const storage=new Map(),payloads=[],invalidated=[],feedback=[];let lose=true,prompts=0;
+ const open=async()=>{
+  const alerts=[],order=(await getDocFromServer(doc(live,'orders',x.orderId))).data();
+  const fields={orderLifecycleStatus:{value:'normal'},orderLifecycleDate:{value:'2026-10-20'},orderLifecycleReason:{value:'客戶恢復'},orderLifecycleSaveBtn:{}};
+  const c=vm.createContext({YUSHIN_V2_LIFECYCLE_EMULATOR:true,location:{hostname:'localhost'},crypto:require('node:crypto').webcrypto,
+   currentUser:{uid:x.actor.uid},currentUserRole:'sales',ordersCache:[{id:x.orderId,...order}],pendingLifecycleOrderIds:new Set(),
+   currentDeliveryOrderId:null,currentLifecycleOrderId:x.orderId,
+   normalizedOrderStatus:o=>o.orderStatus,normalizedOrderItems:o=>o.items,inventoryProductKey:i=>i.inventoryProductKey||i.productId,
+   canManageOrderLifecycleCapability:()=>true,canEditPage:()=>true,deliveryProgressInfo:()=>({remaining:1}),
+   localDateString:()=> '2026-10-20',confirmOrderCancellation:()=>{prompts++;return true;},
+   alert:m=>alerts.push(m),renderOrdersList(){},renderDeliveryModal(){},renderOrderLifecycleModal(){},
+   invalidateWarehouseStockCache:(p,w)=>invalidated.push([p,w]),syncOrderIntoPurchasingCaches(){},writeAppDataCache(){},showActionFeedback:m=>feedback.push(m),
+   document:{getElementById:id=>fields[id]},
+   sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},
+   db:{collection:n=>({doc:id=>({get:async options=>{assert.equal(options.source,'server');const s=await getDocFromServer(doc(live,n,id));return {exists:s.exists(),data:()=>s.data()};}})})},
+   firebase:{auth:()=>x.actor.auth,functions:()=>({app:x.actor.app,useEmulator(){},httpsCallable:name=>async payload=>{
+    assert.equal(name,'setV2OrderLifecycle');payloads.push(structuredClone(payload));
+    const reply=await httpsCallable(x.actor.functions,name)(payload);
+    if(lose){lose=false;throw Error('lifecycle UI reply lost');}return reply;
+   }})},runRoleTransaction:()=>{throw Error('legacy writer forbidden');}});
+  c.window=c;vm.runInContext(fs.readFileSync('src/services/order-lifecycle.js','utf8'),c);
+  const quick=fs.readFileSync('src/features/orders/lifecycle-workspace.js','utf8');
+  vm.runInContext(quick.slice(quick.indexOf('function applySavedOrderLifecycle('),quick.indexOf('window.toggleOrderProgressStatus')),c);
+  const form=fs.readFileSync('src/features/orders/delivery-actions.js','utf8');
+  vm.runInContext(form.slice(form.indexOf('window.saveOrderLifecycleStatus ='),form.indexOf('// Customer return mutations')),c);
+  return {c,alerts,fields};
+ };
+ const first=await open();await first.c.quickSetOrderLifecycle(x.orderId,'cancelled');assert.match(first.alerts[0],/lifecycle UI reply lost/);
+ assert.equal(first.c.ordersCache[0].orderStatus,'normal');assert.equal(storage.size,1);
+ const canceled=await lifecycleSnapshot(x);assertPhysicalLifecycleUnchanged(before,canceled);
+ const retry=await open();await retry.c.quickSetOrderLifecycle(x.orderId,'cancelled');
+ assert.deepEqual(retry.alerts,[]);assert.deepEqual(payloads[1],payloads[0]);assert.equal(prompts,1);assert.equal(storage.size,0);
+ assert.equal(retry.c.ordersCache[0].orderStatus,'cancelled');assert.match(feedback[0],/取消已完成/);
+ assert.ok(invalidated.some(([,w])=>w==='AUTH-A'));assert.ok(invalidated.some(([,w])=>w==='AUTH-B'));
+ lose=true;await retry.c.saveOrderLifecycleStatus();assert.match(retry.alerts[0],/lifecycle UI reply lost/);assert.equal(storage.size,1);
+ const restored=await lifecycleSnapshot(x);assertPhysicalLifecycleUnchanged(before,restored);
+ const formRetry=await open();await formRetry.c.saveOrderLifecycleStatus();
+ assert.deepEqual(formRetry.alerts,[]);assert.deepEqual(payloads[3],payloads[2]);assert.equal(storage.size,0);
+ assert.equal(formRetry.c.ordersCache[0].orderStatus,'normal');assert.equal(restored.documents.orders.orderLifecycleHistory.length,2);
+ assert.deepEqual(await lifecycleSnapshot(x),restored);
+});
 async function lifecycleSnapshot(x){
  const order=await x.data('orders',x.orderId),documents={orders:order},lots={};
  for(const key of new Set(order.items.map(row=>row.inventoryProductKey||row.productId))){
