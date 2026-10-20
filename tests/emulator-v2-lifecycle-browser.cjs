@@ -409,6 +409,75 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
   assert.deepEqual((await demandRef.get()).data(),demand);
   assert.deepEqual(await facts(fixture),restored);
   console.log('Full site '+width+'px: purchaser opened original formal PO draft for seven shortages; no supply or incoming stock was written.');
+  // Continue via the original purchase UI. Only PDF file output is stubbed;
+  // the original PO + incoming Services, Rules and Firestore remain live.
+  await page.waitForFunction(()=>poNoReady&&!poNoLoading);
+  const poNo=(await page.locator('#poNo').textContent()).trim();
+  assert.match(poNo,/^PO-/);
+  await page.locator('#poVendorName').fill('模擬供應商');
+  const poNumbers=page.locator('#poItemsBody input[type="number"]');
+  assert.equal(await poNumbers.count(),2);
+  await poNumbers.first().fill('4');await poNumbers.first().press('Tab');
+  await poNumbers.last().fill('20');await poNumbers.last().press('Tab');
+  assert.deepEqual(await page.evaluate(()=>poItems.map(row=>({qty:row.qty,unitPrice:row.unitPrice}))),[{qty:4,unitPrice:20}]);
+  await page.evaluate(()=>{
+   if(!window.DocumentDownloads?.prepare||typeof printSavedPoDocument!=='function')throw Error('Original PDF boundary unavailable');
+   window.emulatorPdfCalls=0;
+   window.DocumentDownloads.prepare=async()=>{};
+   window.printSavedPoDocument=async()=>{window.emulatorPdfCalls++;};
+  });
+  await page.locator('#printPurchaseOrderBtn').click();
+  await page.waitForFunction(()=>/在途庫存同步完成|在途庫存同步未完成|採購單未建立|無法產生採購單/.test(
+   document.getElementById('poSaveStatus')?.textContent||''),{timeout:45000});
+  assert.match(await page.locator('#poSaveStatus').textContent(),/在途庫存同步完成/);
+  assert.equal(await page.evaluate(()=>emulatorPdfCalls),1);
+  const savedPo=(await db.collection('purchaseOrders').doc(poNo).get()).data();
+  assert.ok(savedPo);
+  assert.equal(savedPo.items.length,1);
+  assert.equal(savedPo.items[0].orderId,fixture.sourceId);
+  assert.equal(savedPo.items[0].qty,4);
+  const supplyId='po-'+encodeURIComponent(poNo)+'-0';
+  assert.deepEqual(savedPo.supplyOrderIds,[supplyId]);
+  const supply=(await db.collection('supplyOrders').doc(supplyId).get()).data();
+  assert.equal(supply.purchaseDocumentId,poNo);
+  assert.equal(supply.qty,4);
+  assert.equal(supply.receivedQty,0);
+  assert.equal(supply.incomingRegisteredQty,4);
+  assert.equal(supply.warehouseId,fixture.warehouseIds[0]);
+  const orderedDemand=(await demandRef.get()).data();
+  assert.equal(orderedDemand.requestedQty,7);
+  assert.equal(orderedDemand.orderedQty,4);
+  assert.equal(orderedDemand.remainingToOrderQty,3);
+  assert.equal(orderedDemand.receivedQty,0);
+  assert.equal(orderedDemand.remainingToReceiveQty,4);
+  assert.equal(orderedDemand.status,'PARTIALLY_ORDERED');
+  const purchased=await facts(fixture);
+  assert.equal(purchased.source.items[0].supplyOrderedQty,4);
+  assert.equal(purchased.source.items[0].reservedQty,5);
+  assert.equal(purchased.source.items[0].shortageQty,7);
+  assert.equal(purchased.inventory.incoming,4);
+  assert.equal(purchased.stocks[0].incoming,4);
+  assert.equal(purchased.stocks[1].incoming||0,0);
+  assert.equal(purchased.inventory.onHand,restored.inventory.onHand);
+  assert.deepEqual(purchased.lots,restored.lots);
+  assert.equal(purchased.targets.reduce((sum,row)=>sum+row.items[0].reservedQty,0),7);
+  const movementQuery=()=>db.collection('inventoryMovements').where('purchaseDocumentId','==',poNo).get();
+  const incomingMovements=(await movementQuery()).docs;
+  assert.equal(incomingMovements.length,1);
+  assert.equal(incomingMovements[0].data().type,'purchase_incoming');
+  // Retry the existing purchase's incoming checkpoint with its original
+  // source id: the authoritative Service must not register extra stock.
+  await page.evaluate(async id=>{
+   const poSnap=await db.collection('purchaseOrders').doc(id).get({source:'server'});
+   await registerPurchaseIncoming(id,poSnap.data(),{
+    actorUid:currentUser.uid,actorRole:currentUserRole
+   });
+  },poNo);
+  assert.deepEqual(await facts(fixture),purchased);
+  assert.deepEqual((await demandRef.get()).data(),orderedDemand);
+  assert.equal((await movementQuery()).size,1);
+  console.log('Full site '+width+'px: purchaser submitted 4/7 through original PO form, registered only four incoming, and safely replayed incoming checkpoint.');
+
   console.log('Full site '+width+'px: seller restored five free units with seven shortages; lost-reply and stale-cancel retries are immutable.');
   for(const match of read('index.html').matchAll(/<script[^>]+src="([^"?]+)(?:\?[^\"]*)?"/g)){
    if(!match[1].startsWith('https:'))assert.ok(loaded.has('/'+match[1]),'original script loaded: '+match[1]);
