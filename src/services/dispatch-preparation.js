@@ -5,7 +5,7 @@ async function prepareV2OrderDispatchEmulator(orderId,itemId,intent,assertActor)
     if(globalThis.YUSHIN_V2_DISPATCH_EMULATOR!==true||!local(globalThis.location?.hostname)
         ||typeof firebase==='undefined'||!firebase.auth||!firebase.functions)
         throw new Error('v2 打單傳輸僅限明確啟用的本機 Emulator。');
-    const auth=firebase.auth(),functions=firebase.functions('asia-east1');
+    const auth=firebase.auth(),functions=firebase.app().functions('asia-east1');
     if(auth.app?.options?.projectId!=='demo-yushin'||functions.app?.options?.projectId!=='demo-yushin'
         ||!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099)
         throw new Error('v2 打單須使用 demo-yushin 的本機登入與 Functions Emulator。');

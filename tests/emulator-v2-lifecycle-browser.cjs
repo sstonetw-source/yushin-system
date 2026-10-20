@@ -122,8 +122,8 @@ async function facts(fixture){
   targets:await Promise.all(fixture.targets.map(id=>readDoc('orders',id)))};
 }
 for(const width of [1280,390])test('real browser '+width+'px original login cancellation reload and logistics handoff',{timeout:180000},async()=>{
- const fixture=await seed(width),context=await browser.newContext({viewport:{width,height:1000}}),page=await context.newPage(),errors=[],external=[],calls=[];
- page.on('pageerror',error=>errors.push(error.message));page.on('dialog',dialog=>dialog.type()==='confirm'?dialog.accept():dialog.dismiss());
+ const fixture=await seed(width),context=await browser.newContext({viewport:{width,height:1000}}),page=await context.newPage(),errors=[],external=[],calls=[],dialogs=[];
+ page.on('pageerror',error=>errors.push(error.message));page.on('dialog',dialog=>{dialogs.push({type:dialog.type(),message:dialog.message()});return dialog.type()==='confirm'?dialog.accept():dialog.dismiss();});
  let loseCancel=true,loseRecovery=true;
  await context.route('**/*',async route=>{
   const request=route.request(),url=new URL(request.url());
@@ -144,7 +144,8 @@ for(const width of [1280,390])test('real browser '+width+'px original login canc
   await open(page,fixture);await login(page,fixture.accounts.sales);await loadOrder(page);const before=await facts(fixture);
   console.log('Browser '+width+'px: original seller login completed.');
   await page.locator('#orderButtons button').filter({hasText:'取消訂單'}).click();
-  await page.waitForFunction(()=>!pendingLifecycleOrderIds.size&&!!pendingV2OrderLifecycle(sourceId));
+  await page.waitForFunction(()=>!pendingLifecycleOrderIds.size);
+  assert.equal(await page.evaluate(()=>!!pendingV2OrderLifecycle(sourceId)),true,JSON.stringify(dialogs));
   assert.equal((await facts(fixture)).source.orderStatus,'cancelled');
   const operation=await page.evaluate(()=>pendingV2OrderLifecycle(sourceId).operationId);
   await open(page,fixture);assert.equal(await page.evaluate(()=>currentUserRole),'sales');await loadOrder(page);
@@ -154,7 +155,7 @@ for(const width of [1280,390])test('real browser '+width+'px original login canc
   assert.equal(cancellation[0].data.operationId,operation);
   console.log('Browser '+width+'px: committed cancellation reconciled after lost HTTP reply and reload.');
   await page.evaluate(()=>loadFreeStockRecovery());assert.equal(await page.locator('#freeStockRecoveryPanel').isVisible(),false);
-  const salesDenied=await page.evaluate(async()=>{try{await firebase.functions('asia-east1').httpsCallable('listV2FreeStockRecovery')({});return '';}catch(error){return error.code;}});
+  const salesDenied=await page.evaluate(async()=>{try{await firebase.app().functions('asia-east1').httpsCallable('listV2FreeStockRecovery')({});return '';}catch(error){return error.code;}});
   assert.equal(salesDenied,'functions/permission-denied');
   await page.evaluate(()=>firebase.auth().signOut());await open(page,fixture);await login(page,fixture.accounts.warehouse);
   const canceled=await facts(fixture),rows=await loadSourceRows(page,fixture.productKey);assert.deepEqual(await facts(fixture),canceled);

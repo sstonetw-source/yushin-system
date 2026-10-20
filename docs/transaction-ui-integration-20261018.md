@@ -152,6 +152,8 @@ PR #190 完整 CI 39347832242 通過 2097 項測試與九組桌機／手機 Chro
 
 場景使用原 fixture 同步一筆持有雙倉共 12 個的來源單、七筆各缺一個的目標單。業務取消成功後，測試在真 HTTP 已收到 200 時中斷瀏覽器回覆；重開保留原 Auth session／取消 intent，以相同 operationId 核對。驗證業務 UI 隱藏配貨且後端拒絕直接 list；再從原登入畫面登入倉管，唯讀列表不改資料，按原列配貨五個後再中斷回覆。重開後改由採購真實登入接續同 movement／runId，查核一次 handoff 及總共七個目標預留、一次取消歷史，實貨 onHand／原批次完整保留；完成再重開沒有重複配貨。
 
-範圍是原登入／取消／配貨元件與真正傳輸的整段整合：導覽、cache 呈現及一般頁面權限由最小測試殼提供，預留初始化仍是原 fixture Service；未宣稱整份正式 index/app 啟動、瀏覽器建單／初始化／全部履約／Preview 全線通過。測試中間直接後端拒絕檢查不取代原按鈕操作。原隔離 runner 依序跑既有 31 項 Auth 與新 Browser 兩項，沒有更改正式 app／Core／writer／schema／Rules／Index／Auth providers 或部署。
+範圍是原登入／取消／配貨元件與真正傳輸的整段整合：導覽、cache 呈現及一般頁面權限由最小測試殼提供，預留初始化仍是原 fixture Service；未宣稱整份正式 index/app 啟動、瀏覽器建單／初始化／全部履約／Preview 全線通過。測試中間直接後端拒絕檢查不取代原按鈕操作。原隔離 runner 依序跑既有 31 項 Auth 與新 Browser 兩項，沒有改 Core／writer／schema／Rules／Index／Auth providers 或部署。
 
-本地 Node1591/1591、build／語法／diff 通過；新 Browser Auth 及完整 CI 待執行。CI 同批保留原十組 scripted Chrome，另跑本組真 Browser Auth。正式／Preview 全站啟動與其餘履約場景仍待驗收。
+首輪 CI 39355953092 的既有 31 項 Auth 通過，兩個 Browser 場景在取消送出前停止，揭露原區域連線錯把字串傳給全域 firebase.functions(app)。依官方 compat 介面改為 firebase.app().functions('asia-east1')，同步修正 grouped Preview、打單、出貨、送達／撤銷、取消及物流續傳的相同用法，重建 app.js。原 mock 補正 app.functions 形狀，新增兩項嚴格回歸：全域 functions 不接受區域時，原取消／續傳仍須成功選正確區域。未放寬任何環境或權限。
+
+本地 Node1593/1593、build／語法／diff 通過；修正後 Browser Auth 及完整 CI 待重跑。CI 同批保留原十組 scripted Chrome，另跑本組真 Browser Auth。正式／Preview 全站啟動與其餘履約場景仍待驗收。

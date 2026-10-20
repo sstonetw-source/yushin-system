@@ -374,3 +374,5 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 待配貨 UI 沿 inventoryMovements.v2FreeStockSource=CANCELLED_ORDER_RELEASE 單欄位篩選與文件 ID 分頁，原 reservationOperationReceipts/single-v2-free-batch-source_v2_{sourceId hash} 為進度權威。共用 releasedV2FreeStockRunId，瀏覽器不產生替代 ID；沒有新增 sessionStorage 或持久欄位。列表由受驗證的隔離 Callable 讀取，前端不直接開放 checkpoint Rules。每次 drain 回覆該次所接觸的 affectedOrderIds 供 cache 回讀，舊完成批次重送可能回空集合；仍將原訂單／採購頁標記待刷新。清單不複製成本或操作者敏感資料。
 
 真實 Browser Auth 驗收只建立隔離測試帳號及 fixture 文件，沿原 reservationOperationReceipts 的取消／配貨／handoff 與 movement 查核，不新增 schema。原 sessionStorage 取消意圖透過同一 browser context 重開保存，Auth 使用實際 LOCAL persistence；物流進度則從原 checkpoint 重讀。測試確認一次取消 history 與一次換人 handoff，最終批次完成且原 inventoryLots／onHand 不變。正式資料及 Auth providers 不變。
+
+區域 Functions 改從 compat app 取得，原 payload／意圖 hash／operation ID／source runId 契約不變；沒有資料遷移或欄位新增。

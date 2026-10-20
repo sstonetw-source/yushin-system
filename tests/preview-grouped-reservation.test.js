@@ -20,7 +20,7 @@ function fixture({environment='preview',enabled=true}={}){
  const context=vm.createContext({
   APP_ENVIRONMENT:environment,currentUser:{get uid(){return actor;}},console,
   globalThis:globals,document:{},
-  firebase:{functions:region=>({httpsCallable:name=>async payload=>{
+  firebase:{app(){return {functions:region=>this.functions(region)};},functions:region=>({httpsCallable:name=>async payload=>{
    calls.push({region,name,payload});return {data:{status:'applied'}};
   }})},
   normalizedOrderStatus:o=>o.status==='active'?'normal':'cancelled',

@@ -54,7 +54,7 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
       deliveryPartialFormOpen=true,deliveryCreateAttempt=null,pendingDeliveryOrderIds=new Set();
       globalThis.YUSHIN_V2_DELIVERY_EMULATOR=true;
       const app={options:{projectId:'demo-yushin'}};
-      globalThis.firebase={auth:()=>({app,currentUser:{uid:'buyer'},emulatorConfig:{host:'127.0.0.1',port:9099}}),
+      globalThis.firebase={app(){return {functions:region=>this.functions(region)};},auth:()=>({app,currentUser:{uid:'buyer'},emulatorConfig:{host:'127.0.0.1',port:9099}}),
        functions:()=>({app,useEmulator:(host,port)=>{if(host!=='127.0.0.1'||port!==5001)throw Error('remote endpoint');},
         httpsCallable:name=>name==='confirmV2ShipmentDelivery'?deliveryConfirm:name==='reverseV2ShipmentDelivery'?deliveryReverse:()=>{throw Error('unexpected endpoint');}})};
       const db={collection:()=>({doc:()=>({get:async()=>{const row=await deliveryRead();return {exists:true,data:()=>row};}})})};

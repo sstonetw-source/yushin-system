@@ -10296,7 +10296,7 @@ async function groupedReservationPreviewCallable() {
         await groupedReservationFunctionsScriptPromise;
     }
     if (!firebase.functions) throw new Error('Firebase Functions 尚未初始化，跨倉同步未提交。');
-    return firebase.functions('asia-east1').httpsCallable('commitGroupedWarehouseReservation');
+    return firebase.app().functions('asia-east1').httpsCallable('commitGroupedWarehouseReservation');
 }
 async function commitInitialGroupedReservationPreview(orderId,liveOrder,actorUid) {
     const groups=initialGroupedReservationCandidates(liveOrder);
@@ -10687,7 +10687,7 @@ async function prepareV2OrderDispatchEmulator(orderId,itemId,intent,assertActor)
     if(globalThis.YUSHIN_V2_DISPATCH_EMULATOR!==true||!local(globalThis.location?.hostname)
         ||typeof firebase==='undefined'||!firebase.auth||!firebase.functions)
         throw new Error('v2 打單傳輸僅限明確啟用的本機 Emulator。');
-    const auth=firebase.auth(),functions=firebase.functions('asia-east1');
+    const auth=firebase.auth(),functions=firebase.app().functions('asia-east1');
     if(auth.app?.options?.projectId!=='demo-yushin'||functions.app?.options?.projectId!=='demo-yushin'
         ||!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099)
         throw new Error('v2 打單須使用 demo-yushin 的本機登入與 Functions Emulator。');
@@ -18533,7 +18533,7 @@ async function setV2OrderLifecycleEmulator(orderId,nextStatus,details=null){
  const local=host=>host==='localhost'||host==='127.0.0.1';
  if(globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR!==true||!local(globalThis.location?.hostname)
   ||typeof firebase==='undefined'||!firebase.auth||!firebase.functions)throw Error('v2 取消／恢復僅限本機 Emulator。');
- const auth=firebase.auth(),functions=firebase.functions('asia-east1'),uid=currentUser?.uid,role=currentUserRole;
+ const auth=firebase.auth(),functions=firebase.app().functions('asia-east1'),uid=currentUser?.uid,role=currentUserRole;
  if(auth.app?.options?.projectId!=='demo-yushin'||functions.app?.options?.projectId!=='demo-yushin'
   ||!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099)
   throw Error('v2 取消／恢復只允許本機 demo-yushin Auth／Functions Emulator。');
@@ -18988,7 +18988,7 @@ function v2DeliveryEmulatorTransport(){
  const local=host=>host==='localhost'||host==='127.0.0.1';
  if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR!==true||!local(globalThis.location?.hostname)||typeof firebase==='undefined'||!firebase.auth||!firebase.functions)
   throw Error('v2 送達目前僅限本機 Emulator。');
- const auth=firebase.auth(),functions=firebase.functions('asia-east1'),uid=currentUser?.uid,role=currentUserRole;
+ const auth=firebase.auth(),functions=firebase.app().functions('asia-east1'),uid=currentUser?.uid,role=currentUserRole;
  if(auth.app?.options?.projectId!=='demo-yushin'||functions.app?.options?.projectId!=='demo-yushin'
    ||!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099)
   throw Error('v2 送達只允許本機 demo-yushin Auth／Functions Emulator。');
@@ -19534,7 +19534,7 @@ async function commitV2WarehouseShipmentEmulator(input){
  const local=s=>s==='localhost'||s==='127.0.0.1';
  if(!local(globalThis.location?.hostname)||typeof firebase==='undefined'||!firebase.auth||!firebase.functions)
   throw Error('v2 出貨僅限本機 Emulator。');
- const auth=firebase.auth(),fn=firebase.functions('asia-east1'),uid=currentUser?.uid,role=currentUserRole;
+ const auth=firebase.auth(),fn=firebase.app().functions('asia-east1'),uid=currentUser?.uid,role=currentUserRole;
  if(auth.app?.options?.projectId!=='demo-yushin'||fn.app?.options?.projectId!=='demo-yushin'
   ||!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099)
   throw Error('v2 出貨必須使用本機 demo-yushin 的 Auth 與 Functions。');

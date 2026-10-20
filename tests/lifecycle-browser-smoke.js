@@ -40,7 +40,7 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
     currentDeliveryOrderId=null,currentLifecycleOrderId='O',orderLifecycleFormOpen=false,orderReturnFormOpen=false;
     globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR=true;
     const app={options:{projectId:'demo-yushin'}};
-    const firebase={auth:()=>({app,currentUser:{uid:'U'},emulatorConfig:{host:'localhost',port:9099}}),
+    const firebase={app(){return {functions:region=>this.functions(region)};},auth:()=>({app,currentUser:{uid:'U'},emulatorConfig:{host:'localhost',port:9099}}),
      functions:()=>({app,useEmulator:(h,p)=>{if(h!=='127.0.0.1'||p!==5001)throw Error('remote transport');},
       httpsCallable:name=>{if(name!=='setV2OrderLifecycle')throw Error('wrong endpoint');return lifecycleCall;}})};
     const db={collection:n=>({doc:id=>({get:async options=>{if(options.source!=='server')throw Error('cache read');const row=await lifecycleRead(n,id);return {exists:true,data:()=>row};}})})};

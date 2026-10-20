@@ -153,7 +153,7 @@ async function dispatchUI(x,actor=x.actor,role='purchaser',{storage=new Map(),lo
   document:{getElementById:()=>null},renderOrdersList(){},renderPurchasingDispatchOrders(){},renderPurchasingView(){},renderDeliveryModal(){},
   syncOrderIntoPurchasingCaches(){},writeAppDataCache(){},alert:m=>alerts.push(m),runRoleTransaction:()=>{throw Error('v2 cannot use the legacy transaction');},
   db:{collection:n=>({doc:id=>{const ref=id?doc(live,n,id):doc(collection(live,n));return {id:ref.id,get:async()=>{const s=await getDoc(ref);return {exists:s.exists(),data:()=>s.data()};}};}})},
-  firebase:{auth:()=>actor.auth,functions:()=>({app:actor.app,useEmulator:(host,port)=>connectFunctionsEmulator(actor.functions,host,port),
+  firebase:{app(){return {functions:region=>this.functions(region)};},auth:()=>actor.auth,functions:()=>({app:actor.app,useEmulator:(host,port)=>connectFunctionsEmulator(actor.functions,host,port),
    httpsCallable:name=>async data=>{calls.push({name,data});const reply=await httpsCallable(actor.functions,name)(data);if(lose){lose=false;throw Error('UI Callable reply lost');}return reply;}})}});
  c.window=c;const workspace=fs.readFileSync('src/features/orders/order-workspace.js','utf8');
  const section=(a,b)=>workspace.slice(workspace.indexOf(a),workspace.indexOf(b,workspace.indexOf(a)));
@@ -347,7 +347,7 @@ test('original warehouse shipment Service uses real Auth Callable with frozen re
    YushinWarehouseLogistics:require('../modules/warehouse-logistics'),
    sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},
    db:{collection:name=>({doc:id=>({get:async()=>{const s=await getDoc(doc(live,name,id));return {exists:s.exists(),data:()=>s.data()};}})})},
-   firebase:{auth:()=>x.actor.auth,functions:()=>({app:x.actor.app,useEmulator:()=>{},
+   firebase:{app(){return {functions:region=>this.functions(region)};},auth:()=>x.actor.auth,functions:()=>({app:x.actor.app,useEmulator:()=>{},
     httpsCallable:name=>async data=>{calls++;assert.equal(name,'shipV2WarehouseItem');
      assert.equal(data.actorUid,undefined);assert.equal(data.actorRole,undefined);
      const result=await httpsCallable(x.actor.functions,name)(data);
@@ -389,7 +389,7 @@ test('real Auth original delivery Service confirms an existing shipment and resu
    YushinFulfillment:require('../modules/fulfillment-core'),
    sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},
    db:{collection:n=>({doc:id=>({get:async()=>{const s=await getDoc(doc(live,n,id));return {exists:s.exists(),data:()=>s.data()};}})})},
-   firebase:{auth:()=>({app:x.actor.app,currentUser:{uid:x.actor.uid},emulatorConfig:{host:'127.0.0.1',port:9099}}),
+   firebase:{app(){return {functions:region=>this.functions(region)};},auth:()=>({app:x.actor.app,currentUser:{uid:x.actor.uid},emulatorConfig:{host:'127.0.0.1',port:9099}}),
     functions:()=>({app:x.actor.app,useEmulator:()=>{},
      httpsCallable:name=>async payload=>{calls++;assert.equal(name,'confirmV2ShipmentDelivery');
       assert.equal(payload.actorUid,undefined);assert.equal(payload.actorRole,undefined);
@@ -580,7 +580,7 @@ test('original delivery reversal click resumes frozen intent through real Auth a
    resetDeliveryForm:()=>{},renderDeliveryModal:()=>{},renderOrderLifecycleModal:()=>{},renderOrdersList:()=>{},
    sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},
    db:{collection:n=>({doc:id=>({get:async()=>{const s=await getDoc(doc(live,n,id));return {exists:s.exists(),data:()=>s.data()};}})})},
-   firebase:{auth:()=>x.actor.auth,functions:()=>({app:x.actor.app,useEmulator:()=>{},
+   firebase:{app(){return {functions:region=>this.functions(region)};},auth:()=>x.actor.auth,functions:()=>({app:x.actor.app,useEmulator:()=>{},
     httpsCallable:name=>async payload=>{calls++;assert.equal(name,'reverseV2ShipmentDelivery');payloads.push(structuredClone(payload));
      assert.equal(payload.actorUid,undefined);assert.equal(payload.actorRole,undefined);
      const response=await httpsCallable(x.actor.functions,name)(payload);
@@ -684,7 +684,7 @@ test('real Auth original recovery row preserves the committed source after a los
   document:{getElementById:id=>{if(!elements.has(id))elements.set(id,{hidden:false,innerHTML:'',textContent:''});return elements.get(id);}},
   escapeHtml:String,inlineJsValue:JSON.stringify,showActionFeedback:m=>alerts.push(m),beginActionButton:()=>({}),endActionButton(){},
   invalidateWarehouseStockCache(){},invalidateProcurementDemandQueue(){},markMainPageDirty(){},refreshAffectedOrderCaches:async()=>{},
-  firebase:{auth:()=>operator.auth,functions:()=>({app:operator.app,useEmulator(){},httpsCallable:name=>async payload=>{
+  firebase:{app(){return {functions:region=>this.functions(region)};},auth:()=>operator.auth,functions:()=>({app:operator.app,useEmulator(){},httpsCallable:name=>async payload=>{
    calls.push({name,payload:structuredClone(payload)});const reply=await httpsCallable(operator.functions,name)(payload);
    if(name==='resumeV2FreeStockRecovery'&&lose){lose=false;throw Error('recovery UI reply lost');}return reply;
   }})}});c.window=c;
@@ -723,7 +723,7 @@ test('original quick and form lifecycle actions reconcile frozen operations thro
    document:{getElementById:id=>fields[id]},
    sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},
    db:{collection:n=>({doc:id=>({get:async options=>{assert.equal(options.source,'server');const s=await getDocFromServer(doc(live,n,id));return {exists:s.exists(),data:()=>s.data()};}})})},
-   firebase:{auth:()=>x.actor.auth,functions:()=>({app:x.actor.app,useEmulator(){},httpsCallable:name=>async payload=>{
+   firebase:{app(){return {functions:region=>this.functions(region)};},auth:()=>x.actor.auth,functions:()=>({app:x.actor.app,useEmulator(){},httpsCallable:name=>async payload=>{
     assert.equal(name,'setV2OrderLifecycle');payloads.push(structuredClone(payload));
     const reply=await httpsCallable(x.actor.functions,name)(payload);
     if(lose){lose=false;throw Error('lifecycle UI reply lost');}return reply;

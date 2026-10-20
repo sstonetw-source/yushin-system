@@ -48,7 +48,7 @@ async function groupedReservationPreviewCallable() {
         await groupedReservationFunctionsScriptPromise;
     }
     if (!firebase.functions) throw new Error('Firebase Functions 尚未初始化，跨倉同步未提交。');
-    return firebase.functions('asia-east1').httpsCallable('commitGroupedWarehouseReservation');
+    return firebase.app().functions('asia-east1').httpsCallable('commitGroupedWarehouseReservation');
 }
 async function commitInitialGroupedReservationPreview(orderId,liveOrder,actorUid) {
     const groups=initialGroupedReservationCandidates(liveOrder);
