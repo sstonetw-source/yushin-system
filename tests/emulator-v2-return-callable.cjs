@@ -986,3 +986,70 @@ test('real Auth competing merged POs re-read demand and only one whole PO commit
  for(let index=0;index<x.input.items.length;index++)assert.equal((await db.collection('supplyOrders').doc('po-'+encodeURIComponent(loserNo)+'-'+index).get()).exists,false);
  for(const orderId of x.orderIds){const source=(await db.collection('orders').doc(orderId).get()).data();assert.ok(source.items.every(row=>row.supplyOrderedQty===7));}
 });
+
+async function partialReceiptFixture(tag){
+ const buyer=await identity('receipt-'+tag,'purchaser'),key='receipt-'+tag+'-P',orderId='receipt-'+tag+'-O';
+ const warehouses=['receipt-'+tag+'-A','receipt-'+tag+'-B'];
+ const batch=db.batch(),put=(name,id,data)=>batch.set(db.collection(name).doc(id),data);
+ put('products',key,{productType:'Goods',active:true});put('inventory',key,{productKey:key,onHand:5,reserved:0,incoming:0,transferFreeInTransit:0});
+ for(const [index,id] of warehouses.entries()){
+  const onHand=index===0?2:3;put('warehouses',id,{active:true});
+  put('warehouseStocks',id+'__'+key,{warehouseId:id,productKey:key,onHand,reserved:0,incoming:0,transferFreeInTransit:0});
+  put('inventoryLots',key+'-'+index,{productKey:key,warehouseId:id,receivedQty:onHand,remainingQty:onHand,lotNo:'INITIAL',expiryDate:'2028-01-01'});
+ }
+ put('orders',orderId,{ownerUid:buyer.uid,salesCode:'P',status:'active',orderStatus:'normal',inventoryReservationStatus:'pending',inventoryReservationAttemptId:'receipt_sync_'+tag,
+  deliveryRecords:[],returnRecords:[],deliveryHistory:[],deliveredQty:0,isDelivered:false,
+  items:[{itemId:'I',productId:key,itemCode:'CODE',itemName:'部分收貨驗收',brand:'Roche',qty:12,warehouseId:warehouses[0],reservedQty:0,receivedQty:0,deliveredQty:0,returnedQty:0,dispatchPreparedQty:0,warehouseShippedQty:0,fulfillmentType:'WAREHOUSE'}]});
+ await batch.commit();await synchronizeV2OrderFixture(db,buyer.uid,{orderId,warehouseIds:warehouses});
+ const poNo='RECEIPT-PO-'+tag;
+ const committed=(await httpsCallable(buyer.functions,'commitV2FormalPurchase')({poNo,poDate:'2026-10-20',supplier:'供應商',items:[{orderId,itemId:'I',qty:4,unitCost:20}]})).data;
+ // Same existing incoming Service, not hand-crafted inventory/demand counters.
+ const c=vm.createContext({db,currentUser:{uid:buyer.uid},currentUserRole:'purchaser',currentUserName:'採購',
+  canCreatePurchaseOrderCapability:()=>true,canAccessPage:()=>true,YushinReceiving:require('../modules/receiving-core'),
+  isPurchaseTerminalStatus:status=>['CANCELLED','CLOSED'].includes(String(status||'').toUpperCase()),
+  supplyOrdersCollection:()=>db.collection('supplyOrders'),inventoryNumbers:require('../modules/inventory-core').normalizeStock,
+  warehouseStockDocId:(wh,p)=>encodeURIComponent(wh)+'__'+encodeURIComponent(p),resolveBrandName:value=>value,brandIdForName:()=>'',buildInventorySearchTokens:()=>[],
+  runRoleTransaction:callback=>require('../modules/stock-permissions').run(db,callback,buyer.uid,false,'purchaser')});
+ vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/services/supply-order.js'),'utf8'),c);
+ const po=(await db.collection('purchaseOrders').doc(poNo).get()).data();await c.registerPurchaseIncoming(poNo,po);
+ const supplyId=committed.supplyOrderIds[0],input={supplyId,qty:2,lotNo:'PARTIAL',expiryDate:'2028-01-01',operationId:'receipt_partial_'+tag};
+ const receive=(data=input,actor=buyer)=>httpsCallable(actor.functions,'receiveV2Supply',{timeout:30000})(data).then(reply=>reply.data);
+ const snap=async()=>{
+  const read=async(name,id)=>(await db.collection(name).doc(id).get()).data();
+  const demandId=procurementDemandCore.demandIdForSource({sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:'I'});
+  const extra={};for(const name of ['inventoryLots','inventoryLotCosts','inventoryMovements'])extra[name]=(await db.collection(name).where('productKey','==',key).get()).docs.map(doc=>({id:doc.id,...doc.data()})).sort((a,b)=>a.id.localeCompare(b.id));
+  return {order:await read('orders',orderId),inventory:await read('inventory',key),stocks:await Promise.all(warehouses.map(id=>read('warehouseStocks',id+'__'+key))),
+   reservation:await read('inventoryReservations',orderId+'__I'),supply:await read('supplyOrders',supplyId),view:await read('receivingSupplyOrders',supplyId),demand:await read('procurementDemands',encodeURIComponent(demandId)),
+   receipts:(await db.collection('receipts').where('supplyOrderId','==',supplyId).get()).docs.map(doc=>({id:doc.id,...doc.data()})).sort((a,b)=>a.id.localeCompare(b.id)),...extra};
+ };
+ return {buyer,key,orderId,warehouses,supplyId,input,receive,snap};
+}
+test('real Auth partial PO receipt uses the original Receiving Service, preserves two warehouses and same-ID retries',{timeout:120000},async()=>{
+ for(const role of ['admin','purchaser','warehouse']){
+  const x=await partialReceiptFixture('roles-'+role),operator=role==='purchaser'?x.buyer:await identity('receipt-role-'+role,role),before=await x.snap();
+  const results=await Promise.all([x.receive(x.input,operator),x.receive(x.input,operator)]);assert.ok(results.every(result=>result.status==='confirmed'));
+  const after=await x.snap();assert.equal(after.inventory.onHand,before.inventory.onHand+2);assert.equal(after.inventory.reserved,before.inventory.reserved+2);assert.equal(after.inventory.incoming,2);
+  assert.equal(after.stocks[0].onHand,before.stocks[0].onHand+2);assert.deepEqual(after.stocks[1],before.stocks[1]);
+  assert.equal(after.order.items[0].receivedQty,2);assert.equal(after.order.items[0].reservedQty,7);assert.equal(after.order.items[0].shortageQty,5);
+  assert.equal(after.supply.receivedQty,2);assert.equal(after.supply.incomingRegisteredQty,2);assert.equal(after.demand.remainingToOrderQty,3);assert.equal(after.demand.remainingToReceiveQty,2);
+  assert.equal(after.receipts.length,1);assert.equal(after.inventoryLots.length,before.inventoryLots.length+1);
+  assert.deepEqual(after.view,require('../modules/stock-permissions').sanitizeSupply(after.supply));assert.equal(after.view.unitCost,undefined);
+  await assert.rejects(x.receive({...x.input,qty:1},operator));assert.deepEqual(await x.snap(),after);
+  await db.collection('users').doc(operator.uid).update({disabled:true});await assert.rejects(x.receive(x.input,operator),code('permission-denied'));assert.deepEqual(await x.snap(),after);
+ }
+});
+test('real Auth receipt rejects forged roles, invalid intent and competing excess with zero partial writes',{timeout:120000},async()=>{
+ const x=await partialReceiptFixture('denials'),before=await x.snap();
+ for(const role of ['sales','engineer']){
+  const other=await identity('receipt-denied-'+role,role);await accounts.setCustomUserClaims(other.uid,{role:'admin'});await other.auth.currentUser.getIdToken(true);
+  await assert.rejects(x.receive(x.input,other),code('permission-denied'));assert.deepEqual(await x.snap(),before);
+ }
+ const anonymous=await identity('receipt-anonymous','purchaser',{login:false,profile:false});await assert.rejects(x.receive(x.input,anonymous),code('unauthenticated'));
+ for(const patch of [{actorUid:x.buyer.uid},{actorRole:'admin'},{qty:0},{qty:1.5},{expiryDate:'2026-02-30'},{operationId:'bad/id'}]){
+  await assert.rejects(x.receive({...x.input,...patch}),code('invalid-argument'));assert.deepEqual(await x.snap(),before);
+ }
+ await assert.rejects(x.receive({...x.input,qty:5}));assert.deepEqual(await x.snap(),before);
+ const outcomes=await Promise.allSettled([x.receive({...x.input,qty:3}),x.receive({...x.input,qty:3,operationId:x.input.operationId+'_other'})]);
+ assert.equal(outcomes.filter(result=>result.status==='fulfilled').length,1);
+ const after=await x.snap();assert.equal(after.receipts.length,1);assert.equal(after.inventory.onHand,before.inventory.onHand+3);assert.equal(after.inventory.incoming,1);assert.equal(after.supply.receivedQty,3);
+});

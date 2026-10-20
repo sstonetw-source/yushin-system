@@ -263,8 +263,8 @@ async function siteOrderAction(page,fixture,label){
 }
 for(const width of [1280,390])test('full site '+width+'px boot original navigation permissions cancellation and handoff',{timeout:240000},async()=>{
  const fixture=await seed(width,'site'),context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
- const errors=[],external=[],calls=[],loaded=new Set();let loseCancel=true,loseRecovery=true,loseRestore=true,losePurchase=true;
- await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_V2_LIFECYCLE_EMULATOR=true;window.YUSHIN_V2_RECOVERY_EMULATOR=true;window.YUSHIN_FORMAL_PURCHASE_EMULATOR=true;});
+ const errors=[],external=[],calls=[],loaded=new Set();let loseCancel=true,loseRecovery=true,loseRestore=true,losePurchase=true,loseReceipt=true;
+ await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_V2_LIFECYCLE_EMULATOR=true;window.YUSHIN_V2_RECOVERY_EMULATOR=true;window.YUSHIN_FORMAL_PURCHASE_EMULATOR=true;window.YUSHIN_V2_RECEIVING_EMULATOR=true;});
  page.on('pageerror',error=>errors.push(error.message));
  page.on('dialog',dialog=>dialog.type()==='confirm'?dialog.accept():dialog.dismiss());
  page.on('response',response=>{if(response.status()===200)loaded.add(new URL(response.url()).pathname);});
@@ -277,12 +277,13 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
    assert.equal(data.actorUid,undefined);assert.equal(data.actorRole,undefined);calls.push({name,data});
    const shouldLose=name==='setV2OrderLifecycle'
     ?(data.nextStatus==='normal'?loseRestore:loseCancel)
-    :(name==='commitV2FormalPurchase'?losePurchase:(name==='resumeV2FreeStockRecovery'&&loseRecovery));
+    :(name==='commitV2FormalPurchase'?losePurchase:(name==='receiveV2Supply'?loseReceipt:(name==='resumeV2FreeStockRecovery'&&loseRecovery)));
    if(shouldLose){
     const reply=await route.fetch();assert.equal(reply.status(),200);
     if(name==='setV2OrderLifecycle'){
      if(data.nextStatus==='normal')loseRestore=false;else loseCancel=false;
     }else if(name==='commitV2FormalPurchase')losePurchase=false;
+    else if(name==='receiveV2Supply')loseReceipt=false;
     else loseRecovery=false;
     await route.abort('failed');return;
    }
@@ -531,6 +532,36 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
   assert.deepEqual((await demandRef.get()).data(),afterCommit);
   assert.deepEqual(await facts(fixture),updated);
   console.log('Full site '+width+'px: original PO lost its real HTTP reply; unchanged app reloaded and recovered the exact intent, registered four incoming units once and reprinted without another purchase.');
+  // Same PO and original receipt dialog: two units arrive, response is lost.
+  await page.locator('#poModalOverlay button[onclick="closePurchaseOrderModal()"]').click();
+  await page.locator('#purchase-tab-work').click();await page.locator('#purchase-card-receiving').click();
+  // The original purchasing button navigates to warehouse receiving first.
+  await page.locator('#poListBody button[data-receipt-supply="'+supplyId+'"]').first().click();
+  await page.locator('#inventoryReceivingBody button[data-receipt-supply="'+supplyId+'"]').first().click();
+  await page.locator('#poReceiptBatchBody .po-receive-qty').fill('2');
+  await page.locator('#poReceiptBatchBody .po-receive-lot').fill('PARTIAL-'+width);
+  await page.locator('#poReceiptBatchBody .po-receive-expiry').fill('2028-01-01');
+  await page.locator('#savePoReceiptBatchBtn').click();
+  await page.waitForFunction(id=>receiptTaskJobs.get(receiptTaskKey(id))?.state==='error',supplyId,{timeout:45000});
+  const receiptCalls=calls.filter(row=>row.name==='receiveV2Supply');assert.equal(receiptCalls.length,1);
+  const receiptIntent=receiptCalls[0].data;
+  const partial=await facts(fixture),partialSupply=(await db.collection('supplyOrders').doc(supplyId).get()).data();
+  assert.equal(partial.inventory.onHand,updated.inventory.onHand+2);assert.equal(partial.inventory.reserved,updated.inventory.reserved+2);assert.equal(partial.inventory.incoming,2);
+  assert.equal(partial.source.items[0].receivedQty,2);assert.equal(partial.source.items[0].reservedQty,7);assert.equal(partial.source.items[0].shortageQty,5);
+  assert.equal(partialSupply.receivedQty,2);assert.equal(partialSupply.incomingRegisteredQty,2);
+  assert.equal(partial.stocks[0].onHand,updated.stocks[0].onHand+2);assert.deepEqual(partial.stocks[1],updated.stocks[1]);
+  assert.deepEqual(partial.targets,updated.targets);assert.equal(partial.lots.length,updated.lots.length+1);
+  const receiptProof=(await db.collection('receipts').doc(receiptIntent.operationId).get()).data();
+  assert.equal(receiptProof.reservationLocationSchemaVersion,2);assert.equal(receiptProof.qty,2);
+  const partialDemand=(await demandRef.get()).data();assert.equal(partialDemand.receivedQty,2);assert.equal(partialDemand.remainingToReceiveQty,2);assert.equal(partialDemand.remainingToOrderQty,3);
+  await siteOpen(page,'purchaser');await siteNav(page,'purchasing');
+  await page.locator('#receiptTaskStatus button').filter({hasText:'用原資料重試'}).click();
+  await page.waitForFunction(id=>!receiptTaskJobs.has(receiptTaskKey(id)),supplyId,{timeout:45000});
+  const retried=calls.filter(row=>row.name==='receiveV2Supply');assert.equal(retried.length,2);assert.deepEqual(retried[1].data,receiptIntent);
+  assert.deepEqual(await facts(fixture),partial);assert.deepEqual((await db.collection('supplyOrders').doc(supplyId).get()).data(),partialSupply);
+  assert.deepEqual((await demandRef.get()).data(),partialDemand);assert.equal((await db.collection('receipts').where('supplyOrderId','==',supplyId).get()).size,1);
+  console.log('Full site '+width+'px: original PO partially received two of four through real Auth and original Receiving Service; lost reply/reload reused one receipt, one lot and reduced incoming to two.');
+
 
   console.log('Full site '+width+'px: seller restored five free units with seven shortages; lost-reply and stale-cancel retries are immutable.');
   for(const match of read('index.html').matchAll(/<script[^>]+src="([^"?]+)(?:\?[^\"]*)?"/g)){
