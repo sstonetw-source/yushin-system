@@ -417,8 +417,9 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
   await page.locator('#poVendorName').fill('模擬供應商');
   const poNumbers=page.locator('#poItemsBody input[type="number"]');
   assert.equal(await poNumbers.count(),2);
-  await poNumbers.first().fill('4');await poNumbers.first().press('Tab');
-  await poNumbers.last().fill('20');await poNumbers.last().press('Tab');
+  await poNumbers.first().fill('4');await poNumbers.first().dispatchEvent('change');
+  assert.equal(await page.evaluate(()=>poItems[0].qty),4);
+  await poNumbers.last().fill('20');await poNumbers.last().dispatchEvent('change');
   assert.deepEqual(await page.evaluate(()=>poItems.map(row=>({qty:row.qty,unitPrice:row.unitPrice}))),[{qty:4,unitPrice:20}]);
   await page.evaluate(()=>{
    if(!window.DocumentDownloads?.prepare||typeof printSavedPoDocument!=='function')throw Error('Original PDF boundary unavailable');
