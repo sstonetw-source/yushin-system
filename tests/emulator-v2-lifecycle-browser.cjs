@@ -357,6 +357,35 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
   const oldReplay=await page.evaluate(async input=>(await firebase.app().functions('asia-east1').httpsCallable('setV2OrderLifecycle')(input)).data,oldCancellation);
   assert.equal(oldReplay.status,'already-applied');
   assert.deepEqual(await facts(fixture),restored);
+  // The next authoritative business stage is a new shortage demand, not stock
+  // or supplier inventory. Verify the *same* restored source is visible to the
+  // actual purchaser in the original full-site purchase workspace.
+  const demandId=require('../modules/procurement-demand-core').demandIdForSource({
+   sourceType:'SALES_ORDER',sourceId:fixture.sourceId,sourceItemId:'S'
+  });
+  const demandRef=db.collection('procurementDemands').doc(encodeURIComponent(demandId));
+  const demandSnap=await demandRef.get();assert.equal(demandSnap.exists,true);
+  const demand=demandSnap.data();
+  assert.equal(demand.demandId,demandId);
+  assert.equal(demand.sourceId,fixture.sourceId);
+  assert.equal(demand.sourceItemId,'S');
+  assert.equal(demand.requestedQty,7);
+  assert.equal(demand.orderedQty,0);
+  assert.equal(demand.receivedQty,0);
+  assert.equal(demand.remainingToOrderQty,7);
+  assert.equal(demand.remainingToReceiveQty,0);
+  assert.equal(demand.status,'PENDING');
+  assert.equal(restored.inventory.incoming||0,0);
+  assert.equal(restored.stocks.reduce((sum,row)=>sum+(row.incoming||0),0),0);
+  const sourceDemands=await db.collection('procurementDemands').where('sourceId','==',fixture.sourceId).get();
+  assert.equal(sourceDemands.size,1);
+  await siteLogout(page);await siteLogin(page,fixture.accounts.purchaser,'purchaser');
+  await siteNav(page,'purchasing');
+  await page.waitForFunction(orderId=>document.getElementById('purchasePendingBody')?.textContent?.includes(orderId),fixture.sourceId);
+  assert.match(await page.locator('#purchasePendingBody').textContent(),new RegExp(fixture.sourceId));
+  assert.deepEqual((await demandRef.get()).data(),demand);
+  assert.deepEqual(await facts(fixture),restored);
+  console.log('Full site '+width+'px: restored shortage creates one purchase demand; original purchaser workspace displays it without altering physical inventory.');
   console.log('Full site '+width+'px: seller restored five free units with seven shortages; lost-reply and stale-cancel retries are immutable.');
   for(const match of read('index.html').matchAll(/<script[^>]+src="([^"?]+)(?:\?[^\"]*)?"/g)){
    if(!match[1].startsWith('https:'))assert.ok(loaded.has('/'+match[1]),'original script loaded: '+match[1]);
