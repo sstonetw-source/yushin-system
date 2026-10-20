@@ -368,3 +368,5 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 ### v2 整單取消／恢復的登入傳輸（2026-10-20，本機試點）
 
 不新增 schema。隔離 Callable 沿 reservationOperationReceipts/single-v2-lifecycle-{operationId} 的 order_v2_lifecycle 原憑證與含 itemId 的原 reserve／release movement；postCommitAllocation 只回報後續原配貨進度，不能當成第二筆取消事實。沒有新 Collection、Rules、Index 或正式資料遷移；前端固定意圖尚未接線。
+
+原本機介面新增 sessionStorage v2-lifecycle:{UID}:{orderId}，保存完整 itemIds、原 lifecycleWarehouseIds、syncAttemptId、目標狀態、日期／原因及操作 ID／原 UID／角色；不是 Firestore schema。只有回覆 receipt／全部 itemIds 核對成功、server 重讀原單並找到相同 operationId／操作者／意圖 history 後才清除。依原權限直接 get 預留帳，不讀受保護 reservationOperationReceipts；只支援同分頁刷新，不宣稱跨裝置保存。

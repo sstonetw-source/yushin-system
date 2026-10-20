@@ -70,6 +70,8 @@ jobs:
         run: node tests/dispatch-preparation-browser-smoke.js
       - name: Check v2 customer delivery original form in desktop and mobile Chrome
         run: node tests/delivery-confirmation-browser-smoke.js
+      - name: Check v2 lifecycle original quick and form actions in desktop and mobile Chrome
+        run: node tests/lifecycle-browser-smoke.js
       - name: Check customer return receiving Service in desktop and mobile Chrome
         run: node tests/customer-return-browser-smoke.js
       - name: Install Firestore rules test dependencies

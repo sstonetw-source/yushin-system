@@ -457,11 +457,13 @@ function renderOrderLifecycleStatusOptions(order) {
     const currentStatus = normalizedOrderStatus(order);
     const selected = select.value || currentStatus;
     const canCancel = progress.remaining > 0;
+    let pendingCancel=false;
+    if(globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true){try{pendingCancel=pendingV2OrderLifecycle(order.id)?.nextStatus==='cancelled';}catch(_){/* visible error rendered below */}}
     const cancelLabel = currentStatus === 'cancelled' ? '已取消'
         : progress.grossDelivered > 0 ? '取消剩餘未送貨數量' : '取消訂單';
     select.innerHTML = '<option value="normal">正常</option>'
-        + (canCancel || currentStatus === 'cancelled' ? `<option value="cancelled">${cancelLabel}</option>` : '');
-    select.value = selected === 'cancelled' && (canCancel || currentStatus === 'cancelled') ? 'cancelled' : 'normal';
+        + (canCancel || currentStatus === 'cancelled' || pendingCancel ? `<option value="cancelled">${cancelLabel}</option>` : '');
+    select.value = selected === 'cancelled' && (canCancel || currentStatus === 'cancelled' || pendingCancel) ? 'cancelled' : 'normal';
     const hint = document.getElementById('orderLifecycleStatusHint');
     if (hint) hint.innerText = canCancel
         ? (progress.grossDelivered > 0 ? '僅取消剩餘未送貨數量；已送貨部分請申請退貨。' : '')
@@ -485,6 +487,23 @@ function renderOrderLifecycleModal() {
     const reorderButton=document.getElementById('reorderAfterReturnBtn');
     if(reorderButton)reorderButton.hidden=!editable||!savedReturnRecords(order).some(row=>row.settlement==='CLOSE'&&Number(row.qty)>0);
     document.getElementById('orderLifecycleActionHint').textContent = !canCancel && !cancelled ? '已無剩餘未送貨數量；退貨請建立申請，由倉庫頁確認實收。' : '取消僅處理未送貨數量；已送貨部分請申請退貨。';
+    if(globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true){
+        let retry,error;
+        try{retry=pendingV2OrderLifecycle(order.id);}catch(err){error=err.message;}
+        if(retry||error){
+            document.getElementById('orderLifecycleActionHint').textContent=error||'前次取消／恢復結果未確認；請以原操作核對，不會重新建立作業。';
+            lifecycleButton.hidden=!editable||!!error;
+            lifecycleButton.textContent='確認前次取消／恢復結果';
+            document.getElementById('orderStatusEditPanel').style.display=editable&&orderLifecycleFormOpen&&!error?'':'none';
+        }
+        for(const [id,value] of [['orderLifecycleStatus',retry?.nextStatus],['orderLifecycleDate',retry?.date],['orderLifecycleReason',retry?.reason]]){
+            const input=document.getElementById(id);
+            input.disabled=!!retry||!!error;
+            if(retry)input.value=value;
+        }
+        const save=document.getElementById('orderLifecycleSaveBtn');
+        if(save){save.disabled=!editable||!!error||pendingLifecycleOrderIds.has(order.id);save.innerText=retry?'確認前次結果':'💾 儲存狀態';}
+    }
     const isEditingReturn = !!document.getElementById('returnEditId').value;
     document.getElementById('returnFormPanel').style.display = editable && (orderReturnFormOpen || isEditingReturn) && (info.effectiveDelivered > 0 || isEditingReturn) ? '' : 'none';
     const records = savedReturnRecords(order).slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
@@ -510,25 +529,29 @@ window.saveOrderLifecycleStatus = async function() {
     const reason = document.getElementById('orderLifecycleReason').value.trim();
     if (!date) { alert('請填寫狀態日期。'); return; }
     const previous = { status: normalizedOrderStatus(order), date: order.orderStatusDate || '', reason: order.orderStatusReason || '' };
-    if (previous.status === nextStatus && previous.date === date && previous.reason === reason) return;
+    let retry;
+    try{retry=globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true?pendingV2OrderLifecycle(order.id):null;}catch(err){alert(err.message);return;}
+    if (!retry&&previous.status === nextStatus && previous.date === date && previous.reason === reason) return;
     if (pendingLifecycleOrderIds.has(order.id)) return;
-    if(nextStatus==='cancelled'&&previous.status!=='cancelled'&&!confirmOrderCancellation(order))return;
+    if(!retry&&nextStatus==='cancelled'&&previous.status!=='cancelled'&&!confirmOrderCancellation(order))return;
     const saveButton = document.getElementById('orderLifecycleSaveBtn');
     pendingLifecycleOrderIds.add(order.id);
     if (saveButton) { saveButton.disabled = true; saveButton.innerText = '儲存中…'; }
+    let committed=false;
     try {
         const savedOrder=await setOrderLifecycleStatus(order.id,nextStatus,{date,reason});
+        committed=true;
         // The lifecycle transaction already synchronizes stock and purchase demand.
-        const index = ordersCache.findIndex(item => item.id === order.id);
-        if (index >= 0) ordersCache[index] = { id: order.id, ...savedOrder };
+        applySavedOrderLifecycle(order.id,savedOrder);
         renderDeliveryModal();
         renderOrderLifecycleModal();
         renderOrdersList();
     } catch (err) {
-        alert('訂單狀態儲存失敗：' + err.message + '\n請確認目前這筆資料及連線／權限，重試前先查詢作業結果；若持續失敗，請聯絡管理員。');
+        alert((committed?'訂單狀態已確認，但畫面更新失敗；請重新讀取，勿重建作業：':'訂單狀態結果未確認：') + err.message + '\n請確認目前這筆資料及連線／權限，重試前先查詢作業結果；若持續失敗，請聯絡管理員。');
     } finally {
         pendingLifecycleOrderIds.delete(order.id);
         if (saveButton) { saveButton.disabled = false; saveButton.innerText = '💾 儲存狀態'; }
+        if(globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true)renderOrderLifecycleModal();
     }
 };
 
