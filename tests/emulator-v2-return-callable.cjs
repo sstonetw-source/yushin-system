@@ -32,6 +32,8 @@ async function identity(tag,role='sales',{profile=true,login=true}={}){
   ship:input=>httpsCallable(functions,'shipV2WarehouseItem',{timeout:30000})(input).then(r=>r.data),
   reverse:input=>httpsCallable(functions,'reverseV2ShipmentDelivery',{timeout:30000})(input).then(r=>r.data),
   setLifecycle:input=>httpsCallable(functions,'setV2OrderLifecycle',{timeout:30000})(input).then(r=>r.data),
+  listRecovery:input=>httpsCallable(functions,'listV2FreeStockRecovery',{timeout:30000})(input).then(r=>r.data),
+  resumeRecovery:input=>httpsCallable(functions,'resumeV2FreeStockRecovery',{timeout:30000})(input).then(r=>r.data),
   confirm:input=>httpsCallable(functions,'confirmV2ShipmentDelivery',{timeout:30000})(input).then(r=>r.data),preview:input=>httpsCallable(functions,'previewV2CustomerReturn',{timeout:30000})(input).then(r=>r.data),
   receive:input=>httpsCallable(functions,'receiveV2CustomerReturn',{timeout:30000})(input).then(r=>r.data)};
 }
@@ -610,6 +612,98 @@ async function lifecycleInput(x,operationId,nextStatus='cancelled'){
  return {orderId:x.orderId,itemIds:order.items.map(row=>row.itemId),warehouseIds:['AUTH-A','AUTH-B'],
   syncAttemptId:order.inventoryReservationAttemptId,operationId,nextStatus,date:'2026-10-20',reason:'客戶取消剩餘需求'};
 }
+
+async function recoveryDemand(x,tag){
+ const source=await x.data('orders',x.orderId),productId=source.items[0].productId,orderId='recovery-demand-'+tag;
+ await db.collection('orders').doc(orderId).set({ownerUid:x.actor.uid,salesCode:'R',status:'active',orderStatus:'normal',orderDate:'2026-01-01',
+  inventoryReservationStatus:'pending',inventoryReservationAttemptId:'recovery_sync_'+tag,deliveryRecords:[],returnRecords:[],deliveryHistory:[],deliveredQty:0,isDelivered:false,
+  items:[{itemId:'R',productId,qty:8,warehouseId:'AUTH-A',reservedQty:0,deliveredQty:0,returnedQty:0,dispatchPreparedQty:0,warehouseShippedQty:0,
+   fulfillmentType:'WAREHOUSE',deliveryPlan:{mode:'CUSTOMER_SHIP',contact:'測試',phone:'02-12345678',address:'測試地址'}}]});
+ await synchronizeV2OrderFixture(db,x.actor.uid,{orderId,warehouseIds:['AUTH-A','AUTH-B']});
+ return {orderId,productId};
+}
+async function allRecoveryRows(actor){
+ const rows=[];let afterId='';
+ for(let page=0;page<20;page++){
+  const result=await actor.listRecovery({afterId});assert.ok(result.rows.length<=20);rows.push(...result.rows);
+  if(!result.hasMore)return rows;
+  assert.notEqual(result.afterId,afterId);afterId=result.afterId;
+ }
+ assert.fail('fixture source pagination did not terminate');
+}
+test('real Auth logistics roles list committed cancellations without writes and allocate through the original source worker',async()=>{
+ for(const role of ['admin','purchaser','warehouse']){
+  const tag='recovery-auth-'+role,x=await fixture(tag,{cancelled:false}),target=await recoveryDemand(x,tag);
+  const before=await lifecycleSnapshot(x),cancel=await x.actor.setLifecycle(await lifecycleInput(x,'recovery_auth_cancel_'+role));
+  const ids=cancel.postCommitAllocation.sources.map(s=>s.movementId);assert.ok(ids.length>0);
+  const operator=await identity(tag+'-logistics',role),canceled=await lifecycleSnapshot(x);
+  const rows=(await allRecoveryRows(operator)).filter(row=>ids.includes(row.movementId));
+  assert.equal(rows.length,ids.length);assert.deepEqual(await lifecycleSnapshot(x),canceled);
+  for(const row of rows){
+   const result=await operator.resumeRecovery({movementId:row.movementId});assert.equal(result.status,'completed');
+   assert.ok(result.stepsAttempted<=5);assert.equal(result.sourceMovementId,row.movementId);
+   assert.ok(Array.isArray(result.affectedOrderIds));
+   const repeat=await operator.resumeRecovery({movementId:row.movementId});assert.equal(repeat.allocatedQty,result.allocatedQty);
+  }
+  const current=await x.data('orders',target.orderId);assert.equal(current.items[0].reservedQty,8);assert.equal(current.items[0].shortageQty,0);
+  assert.equal((await allRecoveryRows(operator)).some(row=>ids.includes(row.movementId)),false);
+  assertPhysicalLifecycleUnchanged(before,await lifecycleSnapshot(x));
+ }
+});
+test('real Auth recovery rejects business roles disabled users spoofed payload and corrupt release proof without stock changes',async()=>{
+ const x=await fixture('recovery-auth-denied',{cancelled:false});await recoveryDemand(x,'recovery-denied');
+ const canceled=await x.actor.setLifecycle(await lifecycleInput(x,'recovery_auth_denied_cancel'));
+ const movementId=canceled.postCommitAllocation.sources[0].movementId,before=await lifecycleSnapshot(x);
+ for(const role of ['sales','engineer']){
+  const actor=role==='sales'?x.actor:await identity('recovery-denied-'+role,role);
+  await accounts.setCustomUserClaims(actor.uid,{role:'admin',admin:true});
+  await assert.rejects(actor.listRecovery({}),code('permission-denied'));
+  await assert.rejects(actor.resumeRecovery({movementId}),code('permission-denied'));
+ }
+ const operator=await identity('recovery-denied-warehouse','warehouse');
+ for(const input of [{movementId,actorUid:x.actor.uid},{movementId,maxSteps:100},{movementId,quantity:10}])
+  await assert.rejects(operator.resumeRecovery(input),code('invalid-argument'));
+ await db.collection('users').doc(operator.uid).update({disabled:true});
+ await assert.rejects(operator.listRecovery({}),code('permission-denied'));
+ await assert.rejects(operator.resumeRecovery({movementId}),code('permission-denied'));
+ assert.deepEqual(await lifecycleSnapshot(x),before);
+ await db.collection('users').doc(operator.uid).update({disabled:false});
+ await db.collection('inventoryMovements').doc(movementId).update({qty:-999});const corrupt=await lifecycleSnapshot(x);
+ const row=(await allRecoveryRows(operator)).find(row=>row.movementId===movementId);assert.equal(row.status,'blocked');
+ await assert.rejects(operator.resumeRecovery({movementId}),code('failed-precondition'));
+ assert.deepEqual(await lifecycleSnapshot(x),corrupt);
+});
+test('real Auth original recovery row preserves the committed source after a lost reply and reconciles through another logistics actor',async()=>{
+ const x=await fixture('recovery-original-ui',{cancelled:false}),target=await recoveryDemand(x,'recovery-original-ui');
+ const canceled=await x.actor.setLifecycle(await lifecycleInput(x,'recovery_original_ui_cancel'));
+ const movementId=canceled.postCommitAllocation.sources[0].movementId;
+ const operator=await identity('recovery-ui-warehouse','warehouse'),next=await identity('recovery-ui-purchaser','purchaser');
+ let lose=true;const calls=[],alerts=[],elements=new Map();
+ const c=vm.createContext({YUSHIN_V2_RECOVERY_EMULATOR:true,location:{hostname:'localhost'},currentUser:{uid:operator.uid},currentUserRole:'warehouse',
+  canReceiveInventoryCapability:()=>true,canAccessPage:()=>true,warehouseMasterCache:[],
+  document:{getElementById:id=>{if(!elements.has(id))elements.set(id,{hidden:false,innerHTML:'',textContent:''});return elements.get(id);}},
+  escapeHtml:String,inlineJsValue:JSON.stringify,showActionFeedback:m=>alerts.push(m),beginActionButton:()=>({}),endActionButton(){},
+  invalidateWarehouseStockCache(){},invalidateProcurementDemandQueue(){},markMainPageDirty(){},refreshAffectedOrderCaches:async()=>{},
+  firebase:{auth:()=>operator.auth,functions:()=>({app:operator.app,useEmulator(){},httpsCallable:name=>async payload=>{
+   calls.push({name,payload:structuredClone(payload)});const reply=await httpsCallable(operator.functions,name)(payload);
+   if(name==='resumeV2FreeStockRecovery'&&lose){lose=false;throw Error('recovery UI reply lost');}return reply;
+  }})}});c.window=c;
+ vm.runInContext(fs.readFileSync('modules/free-stock-recovery.js','utf8'),c);
+ // Sources may be on a later bounded page; loading performs no allocation.
+ for(let page=0;page<20;page++){
+  await c.loadFreeStockRecovery(page>0);
+  if(elements.get('freeStockRecoveryBody').innerHTML.includes(movementId))break;
+ }
+ const before=await lifecycleSnapshot(x);await c.retryFreeStockRecovery(movementId);
+ assert.match(alerts.at(-1),/recovery UI reply lost/);
+ assert.match(elements.get('freeStockRecoveryBody').innerHTML,/接續配貨／核對結果/);
+ const after=await lifecycleSnapshot(x);assertPhysicalLifecycleUnchanged(before,after);
+ const checked=await next.resumeRecovery({movementId});assert.equal(checked.status,'completed');
+ await c.retryFreeStockRecovery(movementId);
+ const writes=calls.filter(row=>row.name==='resumeV2FreeStockRecovery');assert.deepEqual(writes[0],writes[1]);
+ assert.deepEqual(await lifecycleSnapshot(x),after);
+ assert.ok((await x.data('orders',target.orderId)).items[0].reservedQty>4);
+});
 
 test('original quick and form lifecycle actions reconcile frozen operations through real Auth and server reads after reload',async()=>{
  const x=await fixture('lifecycle-original-ui',{role:'sales',cancelled:false,multi:true}),before=await lifecycleSnapshot(x);

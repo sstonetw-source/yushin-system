@@ -370,3 +370,5 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 不新增 schema。隔離 Callable 沿 reservationOperationReceipts/single-v2-lifecycle-{operationId} 的 order_v2_lifecycle 原憑證與含 itemId 的原 reserve／release movement；postCommitAllocation 只回報後續原配貨進度，不能當成第二筆取消事實。沒有新 Collection、Rules、Index 或正式資料遷移；前端固定意圖尚未接線。
 
 原本機介面新增 sessionStorage v2-lifecycle:{UID}:{orderId}，保存完整 itemIds、原 lifecycleWarehouseIds、syncAttemptId、目標狀態、日期／原因及操作 ID／原 UID／角色；不是 Firestore schema。只有回覆 receipt／全部 itemIds 核對成功、server 重讀原單並找到相同 operationId／操作者／意圖 history 後才清除。依原權限直接 get 預留帳，不讀受保護 reservationOperationReceipts；只支援同分頁刷新，不宣稱跨裝置保存。
+
+待配貨 UI 沿 inventoryMovements.v2FreeStockSource=CANCELLED_ORDER_RELEASE 單欄位篩選與文件 ID 分頁，原 reservationOperationReceipts/single-v2-free-batch-source_v2_{sourceId hash} 為進度權威。共用 releasedV2FreeStockRunId，瀏覽器不產生替代 ID；沒有新增 sessionStorage 或持久欄位。列表由受驗證的隔離 Callable 讀取，前端不直接開放 checkpoint Rules。每次 drain 回覆該次所接觸的 affectedOrderIds 供 cache 回讀，舊完成批次重送可能回空集合；仍將原訂單／採購頁標記待刷新。清單不複製成本或操作者敏感資料。
