@@ -50,3 +50,12 @@
 
 此處驗收的是原介面將權威缺口轉為**可編輯採購草稿**，不是採購單正式儲存、供應承諾／在途註冊、部分實收到貨或客戶交付；仍必須用後續案例逐段接續，不能把現有單獨 Service 測試視為整站連續流程。
 
+## 正式採購 Cloud Functions 安全遷移｜第一階段：唯讀准入查核
+
+針對 Issue #199 原用戶端 PO 多文件原子交易超過 Firestore Rules 1000 運算式上限，先建立 **Emulator-only、唯讀、不產生 PO** 的後端准入入口 `previewV2FormalPurchase`。本階段與既有核心 `modules/procurement-demand-core.js` 共用需求數量投影及 `applyOrder`，不建立第二套數量公式／交易寫入；實際採購仍使用原 `commitFormalPurchaseOrder` 且**正式提交仍未驗收通過**。
+
+後端透過 Firebase Auth UID 查閱交易內最新 users 身分及角色（只允許 active admin/purchaser）；在同一個資料快照查核來源訂單、實體產品主檔、實體倉庫、權威需求與版本；不可採購取消、停用、品項不符、需求過期或超額數量。API 輸入僅允許 `poNo`、`orderId`、`itemId`、`qty`，不能傳入任意欄位、管理員角色或庫存結果。
+
+本機原站 Chrome 1280／390 px、採購實際登入時，原 PO 草稿可在不提交交易的情況下呼叫准入入口，驗證剩餘缺口 7 件允許擬採購 4 件並阻擋超額 8 件；偽造角色、無權限業務、停用使用者、過期需求及重複 PO ID 由獨立後端單元測試查核（不可誤稱已完成真實 Auth 跨角色整站測試）。查核前後 PO、Supply、訂單預留、在途、實貨、需求資料都不變。
+
+**關鍵安全界線：** 唯讀准入不代表安全提交；未來正式 Cloud Function Transaction 必須在真正寫入時重新取得並驗證同批所有權威資料，加入固定 PO 身分／同單重跑／競爭採購/稽核紀錄；不可只憑此前端呼叫結果直接寫入。不接到正式 Functions `index.js`，目前只由隔離 Emulator 的臨時入口匯出；無 Firebase 部署。
