@@ -7,6 +7,7 @@ const {commitLocationDispatchPreparation}=require('./location-dispatch-service')
 const {commitLocationShipment}=require('./location-shipment-service');
 const {commitShipmentDelivery,reverseShipmentDelivery}=require('./shipment-delivery-service');
 const {commitOrderLocationLifecycleAndRecover}=require('./single-item-location-lifecycle-service');
+const {listReleasedV2FreeStock,resumeReleasedV2FreeStock}=require('./single-item-location-service');
 function allowV2ReturnAuthEmulator(env=process.env){
  const local=value=>typeof value==='string'&&/^(127\.0\.0\.1|localhost):[0-9]+$/.test(value);
  return env.ENABLE_V2_RETURN_AUTH_EMULATOR==='true'&&env.FUNCTIONS_EMULATOR==='true'
@@ -32,6 +33,8 @@ function createV2ReturnCallables({onCall,HttpsError,getDatabase,env=process.env}
   shipV2WarehouseItem:wrap(commitLocationShipment),
   confirmV2ShipmentDelivery:wrap(commitShipmentDelivery),
   reverseV2ShipmentDelivery:wrap(reverseShipmentDelivery),
-  setV2OrderLifecycle:wrap(commitOrderLocationLifecycleAndRecover)};
+  setV2OrderLifecycle:wrap(commitOrderLocationLifecycleAndRecover),
+  listV2FreeStockRecovery:wrap(listReleasedV2FreeStock),
+  resumeV2FreeStockRecovery:wrap(resumeReleasedV2FreeStock)};
 }
 module.exports={allowV2ReturnAuthEmulator,createV2ReturnCallables};

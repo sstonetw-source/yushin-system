@@ -647,3 +647,7 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 ### v2 原取消／恢復介面（2026-10-20，隔離本機 Emulator）
 
 原 quickSetOrderLifecycle／saveOrderLifecycleStatus → 唯一 setOrderLifecycleStatus 的明確 YUSHIN_V2_LIFECYCLE_EMULATOR 分支 → setV2OrderLifecycleEmulator → 上述隔離 Callable。新操作最多讀原單及五筆 deterministic inventoryReservations，再回讀原單；不猜測雙倉、不直接寫庫存，未知回覆不 fallback legacy。原清單／表單提供固定意圖核對，刷新後即使已是目標狀態仍可重試。正式 index／Preview 未開放。
+
+### 取消釋放後的原物流續傳（2026-10-20，本機 Emulator）
+
+原 modules/free-stock-recovery.js 面板在明確 YUSHIN_V2_RECOVERY_EMULATOR 下，唯讀 listV2FreeStockRecovery → 原 Service 的 listReleasedV2FreeStock；原列按鈕 → resumeV2FreeStockRecovery → drainReleasedV2FreeStock → advanceReleasedV2FreeStock／原 coordinator／唯一 allocation writer。每次列表最多 21 筆來源 lookahead、20 筆 checkpoint 及一筆當前 users，同一唯讀交易，完成列也推進 cursor。一次續傳最多五步，來源 ID 衍生同一 runId；沒有新配貨 Core／writer、Collection、Rules、Index 或排程。正式 index／Preview 未開放。

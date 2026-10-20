@@ -870,9 +870,66 @@ async function advanceReleasedV2FreeStock(db,uid,input){
   if(amount>1000)reject('釋放量超過試點批次 1000 件限制，需分段排程但不得遺失事件');
   return {productKey:event.productKey,warehouseId:event.warehouseId,maxQty:amount};
  });
- const runId='source_v2_'+createHash('sha256').update(movementId).digest('hex').slice(0,40);
+ const runId=releasedV2FreeStockRunId(movementId);
  const result=await advanceAutomaticFreeStockAllocation(db,uid,{...source,runId});
  return {...result,sourceMovementId:movementId};
+}
+
+function releasedV2FreeStockRunId(movementId){
+ return 'source_v2_'+createHash('sha256').update(movementId).digest('hex').slice(0,40);
+}
+
+// Read adapter for the original logistics recovery panel. Scan at most 20
+// durable cancellation sources; completed checkpoints still advance the cursor.
+async function listReleasedV2FreeStock(db,uid,input){
+ if(!process.env.FIRESTORE_EMULATOR_HOST||db.projectId!=='demo-yushin')
+  reject('來源庫存釋放清單僅允許 demo-yushin Emulator');
+ ident(uid,'登入者');
+ if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(k=>k!=='afterId'))
+  reject('釋放來源清單請求不正確','invalid-argument');
+ if(input.afterId!==undefined&&typeof input.afterId!=='string')reject('分頁 ID 不正確','invalid-argument');
+ const afterId=input.afterId||'';
+ if(afterId.includes('/')||Buffer.byteLength(afterId,'utf8')>1500)reject('分頁 ID 不正確','invalid-argument');
+ return db.runTransaction(async tx=>{
+  const actor=await tx.get(db.collection('users').doc(uid));
+  if(!actor.exists||actor.data().active===false||actor.data().disabled===true
+   ||!['admin','purchaser','warehouse'].includes(actor.data().role))
+   reject('目前登入角色不能讀取自由庫存分配','permission-denied');
+  let query=db.collection('inventoryMovements').where('v2FreeStockSource','==','CANCELLED_ORDER_RELEASE').orderBy('__name__').limit(21);
+  if(afterId)query=query.startAfter(afterId);
+  const page=await tx.get(query),scanned=page.docs.slice(0,20),rows=[];
+  for(const snap of scanned){
+   const event=snap.data(),movementId=snap.id;
+   const row={movementId,productKey:typeof event.productKey==='string'?event.productKey:'',
+    warehouseId:typeof event.warehouseId==='string'?event.warehouseId:'',
+    quantity:Number.isSafeInteger(event.freeAllocationQty)?event.freeAllocationQty:0,allocatedQty:0,status:'pending'};
+   try{
+    ident(movementId,'來源異動 ID');
+    if(!row.quantity||row.quantity<0||row.quantity>1000||event.type!=='release'
+     ||event.reason!=='order_cancelled'||event.qty!==-row.quantity)
+     reject('取消釋放來源需由管理員核對');
+    const intent=normalizeAutomaticFreeStockIntent({productKey:row.productKey,warehouseId:row.warehouseId,
+     maxQty:row.quantity,runId:releasedV2FreeStockRunId(movementId)});
+    const checkpoint=await tx.get(db.collection('reservationOperationReceipts').doc('single-v2-free-batch-'+intent.runId));
+    if(checkpoint.exists){
+     const job=checkpoint.data();
+     if(job.action!=='single_v2_free_stock_batch'||job.intentHash!==intent.hash||job.productKey!==intent.productKey
+      ||job.warehouseId!==intent.warehouseId||job.maxQty!==intent.maxQty)reject('釋放來源與配貨進度不一致');
+     validateAutomaticFreeStockCheckpoint(job,intent);
+     if(job.status==='completed')continue;
+     row.allocatedQty=job.allocatedQty;row.status='active';
+    }
+   }catch(error){row.status='blocked';row.errorMessage=error.message;}
+   rows.push(row);
+  }
+  return {rows,hasMore:page.docs.length>20,afterId:scanned.at(-1)?.id||afterId};
+ });
+}
+
+async function resumeReleasedV2FreeStock(db,uid,input){
+ if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(k=>k!=='movementId'))
+  reject('釋放來源續傳請求含未授權欄位','invalid-argument');
+ return drainReleasedV2FreeStock(db,uid,{movementId:input.movementId,maxSteps:5});
 }
 
 
@@ -887,15 +944,16 @@ async function drainReleasedV2FreeStock(db,uid,input){
  const maxSteps=input.maxSteps===undefined?5:input.maxSteps;
  if(!Number.isSafeInteger(maxSteps)||maxSteps<1||maxSteps>10)
   reject('每次執行最多十個步驟','invalid-argument');
- let result=null,calls=0;
+ let result=null,calls=0;const affectedOrderIds=new Set();
  while(calls<maxSteps){
   result=await advanceReleasedV2FreeStock(db,uid,{movementId});
+  if(result.lastOrderId)affectedOrderIds.add(result.lastOrderId);
   calls++;
   if(result.status==='completed'||result.status==='retry')break;
   if(result.status!=='active')
    reject('庫存分配批次回傳非預期狀態，必須原批次核對');
  }
- return {...result,stepsAttempted:calls,recoveryPending:result.status!=='completed'};
+ return {...result,stepsAttempted:calls,recoveryPending:result.status!=='completed',affectedOrderIds:[...affectedOrderIds]};
 }
 // Never throw an allocation failure as a failed cancellation/return. The
 // source mutation is already committed; return an explicit durable list of
@@ -919,4 +977,4 @@ async function continueCommittedV2FreeStock(db,uid,movementIds,maxSteps=5){
  return {status:results.some(row=>row.recoveryPending)?'recovery-pending':'completed',sources:results};
 }
 
-module.exports={normalizeSingleItemIntent,normalizeCommitIntent,normalizeOrderCommitIntent,planSingleItemTwoWarehouse,commitSingleItemTwoWarehouse,commitOrderTwoWarehouse,normalizeFreeStockIntent,commitSingleItemFreeStockAllocation,normalizeAutomaticFreeStockIntent,validateAutomaticFreeStockCheckpoint,advanceAutomaticFreeStockAllocation,advanceReleasedV2FreeStock,drainReleasedV2FreeStock,continueCommittedV2FreeStock};
+module.exports={normalizeSingleItemIntent,normalizeCommitIntent,normalizeOrderCommitIntent,planSingleItemTwoWarehouse,commitSingleItemTwoWarehouse,commitOrderTwoWarehouse,normalizeFreeStockIntent,commitSingleItemFreeStockAllocation,normalizeAutomaticFreeStockIntent,validateAutomaticFreeStockCheckpoint,advanceAutomaticFreeStockAllocation,advanceReleasedV2FreeStock,drainReleasedV2FreeStock,continueCommittedV2FreeStock,listReleasedV2FreeStock,resumeReleasedV2FreeStock};

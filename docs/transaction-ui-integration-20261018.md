@@ -134,4 +134,14 @@ PR #190 完整 CI 39347832242 通過 2097 項測試與九組桌機／手機 Chro
 
 核對 applied／already-applied、原 receiptId、整單 itemIds 與後續配貨狀態，再 server get 原 orders 並核對原 operationId／操作者／狀態／日期／原因 history，才清除暫存。舊取消憑證重送只顯示當前原單，不覆蓋後來恢復。原兩入口共用快取更新、兩倉失效及採購 cache；取消成功而配貨待處理明示成功／待續傳，畫面更新失敗不稱交易失敗。v2 相同狀態的獨立 metadata 更正目前拒絕。
 
-新增五項 Node 行為、真 Auth 原 quick／form → SDK → Callable → Service → Firestore 的斷線／刷新／原 ID 整合，以及第十組 Chrome（1280／390 px 原清單按鈕、表單、renderer、角色提示與固定意圖）。Chrome 為 scripted transport，不能替代完整 Browser Auth／Preview。本地 Node1587/1587、建置同步、語法／diff 通過；新增 Auth／Chrome 與完整 CI 待執行。沒有新 Collection、Firestore 欄位、Rules、Index、Listener、背景 runner 或 Firebase 部署。正式／Preview 全線、跨分頁／裝置續傳及物流角色的待配貨 UI 仍待後續驗收。
+新增五項 Node 行為、真 Auth 原 quick／form → SDK → Callable → Service → Firestore 的斷線／刷新／原 ID 整合，以及第十組 Chrome（1280／390 px 原清單按鈕、表單、renderer、角色提示與固定意圖）。PR #191 完整 CI 39349614457 通過 2103 項測試及十組桌機／手機 Chrome，合併 main 5f24fba。Chrome 為 scripted transport，不能替代完整 Browser Auth／Preview；物流待配貨接線由以下後續批次完成。
+
+## 2026-10-20 取消釋放後的原物流面板續傳
+
+原庫存「庫存分配待處理」面板沿獨立 YUSHIN_V2_RECOVERY_EMULATOR，讀取隔離 listV2FreeStockRecovery；原按鈕呼叫 resumeV2FreeStockRecovery → 原 drainReleasedV2FreeStock／advanceReleasedV2FreeStock／coordinator／唯一 allocation writer。只送原 movementId，沒有第二套數量算法、writer 或新 ID。真實 Auth uid 進後端，列表唯讀交易及真正配貨交易皆查當前 users，僅 admin／purchaser／warehouse 可讀／寫；前端另核對本機、demo-yushin Auth／Functions、Auth 9099、Functions 5001、UID／角色／capability 及 UI generation。
+
+列表每次以單欄位 v2FreeStockSource 篩選及文件 ID 排序讀 21 筆（20＋lookahead），最多 20 個原批次 checkpoint；完成頁照樣推進原 cursor，不跳過 lookahead。列表不啟動配貨，也不修改來源或 checkpoint；異常來源／checkpoint 顯示待管理員核對。按原列才以固定 runId 最多續五步，部分進度留原列；回覆遺失仍以同 source ID 重送，換物流操作者由既有協調器安全接手。原批次完成後列表隱藏，跨頁／重開不依賴業務帳號的 sessionStorage。來源本身需通過原 proof，前端不能指定數量／角色／runId 或放大步數。
+
+每次成功回覆核對原 source、產品、倉、額度與累計，回讀該次涉及的訂單、失效分倉／需求及標記原頁待刷新；舊完成批次重送的 affectedOrderIds 可為空，不宣稱回補所有歷史 cache。已確認配貨後畫面更新失敗與配貨結果未知明確分開。列表只涵蓋取消釋放，CLOSE／receipt 的自動接線及多品項目標配貨仍依原能力邊界，未由本批擴張。
+
+新增四項 Node（含全頁完成的分頁）、三項真 Auth（物流三角色正常／只讀列表／同 ID、兩業務角色／停用／偽造 payload／proof 損壞拒絕、原列回覆遺失與換人核對）；擴充既有 Chrome suite 的 1280／390 px 原面板分頁、部分續傳、遺失回覆及重開讀取。Node1591/1591、build／語法／diff 通過，新增 Auth／Chrome 與完整 CI 待執行。Chrome 為 scripted transport，完整 Browser Auth／Preview 尚未驗收。沒有新 Firestore 欄位、Collection、Rules、Index、Listener、背景排程或 Firebase 部署。
