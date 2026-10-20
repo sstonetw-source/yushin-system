@@ -417,19 +417,16 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
   await page.locator('#poVendorName').fill('模擬供應商');
   const poNumbers=page.locator('#poItemsBody input[type="number"]');
   assert.equal(await poNumbers.count(),2);
-  await poNumbers.first().fill('4');await poNumbers.first().dispatchEvent('change');
-  const changedQty=await page.evaluate(()=>({
-   value:document.querySelector('#poItemsBody input[type="number"]')?.value,
-   saved:poItems[0].qty,
-   onchange:document.querySelector('#poItemsBody input[type="number"]')?.getAttribute('onchange'),
-   handler:window.updatePoItem?.toString().slice(0,220)
-  }));
-  console.log('Full site '+width+'px PO edit diagnostics:',JSON.stringify(changedQty));
-  // Diagnostic continuation through the unchanged original editor handler.
-  // A failing event binding is NOT considered browser UI acceptance.
-  if(changedQty.saved!==4)await page.evaluate(()=>window.updatePoItem(0,'qty','4'));
+  // Render-on-change replaces the active input. Set its value and dispatch
+  // precisely one genuine DOM change event on that same node, otherwise a
+  // second event against the new element can restore the former value.
+  await poNumbers.first().evaluate(el=>{
+   el.value='4';el.dispatchEvent(new Event('change',{bubbles:true}));
+  });
   assert.equal(await page.evaluate(()=>poItems[0].qty),4);
-  await poNumbers.last().fill('20');await poNumbers.last().dispatchEvent('change');
+  await poNumbers.last().evaluate(el=>{
+   el.value='20';el.dispatchEvent(new Event('change',{bubbles:true}));
+  });
   assert.deepEqual(await page.evaluate(()=>poItems.map(row=>({qty:row.qty,unitPrice:row.unitPrice}))),[{qty:4,unitPrice:20}]);
   await page.evaluate(()=>{
    if(!window.DocumentDownloads?.prepare||typeof printSavedPoDocument!=='function')throw Error('Original PDF boundary unavailable');
