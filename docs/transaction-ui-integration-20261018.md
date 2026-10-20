@@ -114,4 +114,14 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 
 環境及當前身分檢查由送達確認／撤銷共用 v2DeliveryEmulatorTransport；只允許明確旗標、localhost／127.0.0.1、實際 demo-yushin Auth／Functions app、Auth Emulator 9099 與固定本機 Functions 5001。payload 不含 UID／role，真正作業權限及退貨後拒絕仍由原後端交易決定。沒有新 Firestore Query／Collection／欄位／Index／Rules／Listener；每新操作只沿既有讀原單、Callable、提交後回讀原單。
 
-已實作四項 Node 行為測試、原 handler → 真 Auth SDK／Callable／Firestore 的回覆遺失與刷新續傳整合，既有 1280／390 px Chrome suite 擴充原紀錄按鈕、原因提示、已撤掉紀錄的確認列與同 ID 重送；Chrome 仍是 scripted transport，不能替代完整 Browser Auth／Preview。Node1581/1581；新增 Auth／Chrome 及完整回歸結果以本批 CI 為準。未部署 Firebase／修改正式資料，跨分頁／裝置續傳、已有實物退貨的撤銷及 Preview 全線仍未驗收。
+已實作四項 Node 行為測試、原 handler → 真 Auth SDK／Callable／Firestore 的回覆遺失與刷新續傳整合，既有 1280／390 px Chrome suite 擴充原紀錄按鈕、原因提示、已撤掉紀錄的確認列與同 ID 重送；Chrome 仍是 scripted transport，不能替代完整 Browser Auth／Preview。PR #189 的完整 CI 39286532998 已通過 2092 項測試及九組桌機／手機 Chrome，合併 main 為 c10c115。未部署 Firebase／修改正式資料，跨分頁／裝置續傳、已有實物退貨的撤銷及 Preview 全線仍未驗收。
+
+## 2026-10-20 整單取消／恢復的真實登入傳輸
+
+已實作隔離 setV2OrderLifecycle Callable，直接呼叫原 commitOrderLocationLifecycleAndRecover：整單原子交易仍是唯一 commitOrderLocationLifecycle／runLocationLifecycle，取消後再由原 continueCommittedV2FreeStock 嘗試有界配貨，並非取消與跨訂單分配一起原子。沒有新增數量算法、取消 writer 或另造來源憑證。Firebase Auth 的真實 uid 進入原交易，重讀當前 users 角色／停用與訂單所有權；payload 不能覆寫 actor 或 role。
+
+原 1–5 個實體倉品項、兩個原候選倉、completed 同步、出貨／CLOSE 退貨／供應／receipt proof 與固定操作 ID 契約不變。業務／工程師可取消本單，但不能冒充物流角色分配釋放的庫存；來源交易已提交而配貨沒有權限時，明確回傳 applied／already-applied 與 postCommitAllocation.recovery-pending 及原 movement IDs。重送只沿原 receipt 與來源進度，不重做取消，不覆蓋後來的恢復。
+
+新增一項 Node gate 測試、四項真實 Auth SDK → Callable → 原 Service → Firestore Emulator 整合：單／三品項含同商品與另一商品、已送達及 CLOSE 歷史、五角色／所有權／缺 profile／匿名／偽造 payload 與 claims／即時降權停用、來源及 sibling proof 損壞零寫入、同 ID／競爭 ID、回覆遺失、原取消 ID 不覆蓋後來恢復、真實末端 movement create 衝突全回滾。五品項／真採購收貨與更多供應邊界仍由既有後端 Emulator 測試覆蓋，不能描述為本批 Auth 端到端新增驗收。
+
+本機 Node1582/1582、建置同步、語法及 diff 通過；完整 CI 尚待執行。原頁面、sessionStorage 意圖／未知回覆顯示與 Chrome 取消／恢復操作尚未接線；正式 functions/index.js 不匯出，僅既有 demo-yushin 本機 Auth／Functions／Firestore 隔離 runner。沒有新 Collection、持久欄位、Rules、Index、Listener、背景 runner 或正式 Firebase 部署。後續接原按鈕時須區分來源已提交與後續配貨待處理，不能提示取消失敗或自行換 ID。

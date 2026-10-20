@@ -31,6 +31,7 @@ async function identity(tag,role='sales',{profile=true,login=true}={}){
  return {uid,auth,app,functions,dispatch:input=>httpsCallable(functions,'prepareV2OrderDispatch',{timeout:30000})(input).then(r=>r.data),
   ship:input=>httpsCallable(functions,'shipV2WarehouseItem',{timeout:30000})(input).then(r=>r.data),
   reverse:input=>httpsCallable(functions,'reverseV2ShipmentDelivery',{timeout:30000})(input).then(r=>r.data),
+  setLifecycle:input=>httpsCallable(functions,'setV2OrderLifecycle',{timeout:30000})(input).then(r=>r.data),
   confirm:input=>httpsCallable(functions,'confirmV2ShipmentDelivery',{timeout:30000})(input).then(r=>r.data),preview:input=>httpsCallable(functions,'previewV2CustomerReturn',{timeout:30000})(input).then(r=>r.data),
   receive:input=>httpsCallable(functions,'receiveV2CustomerReturn',{timeout:30000})(input).then(r=>r.data)};
 }
@@ -602,4 +603,154 @@ test('original delivery reversal click resumes frozen intent through real Auth a
  assert.equal(resumed.c.pendingDeliveryOrderIds.size,0);
  assert.equal(resumed.c.ordersCache[0].deliveredQty,0);
  assert.deepEqual(await snapshot(x),after);
+});
+
+async function lifecycleInput(x,operationId,nextStatus='cancelled'){
+ const order=await x.data('orders',x.orderId);
+ return {orderId:x.orderId,itemIds:order.items.map(row=>row.itemId),warehouseIds:['AUTH-A','AUTH-B'],
+  syncAttemptId:order.inventoryReservationAttemptId,operationId,nextStatus,date:'2026-10-20',reason:'客戶取消剩餘需求'};
+}
+async function lifecycleSnapshot(x){
+ const order=await x.data('orders',x.orderId),documents={orders:order},lots={};
+ for(const key of new Set(order.items.map(row=>row.inventoryProductKey||row.productId))){
+  documents['inventory/'+key]=await x.data('inventory',key);
+  for(const warehouseId of ['AUTH-A','AUTH-B'])
+   documents['warehouseStocks/'+warehouseId+'__'+key]=await x.data('warehouseStocks',warehouseId+'__'+key);
+  const result=await db.collection('inventoryLots').where('productKey','==',key).get();
+  for(const row of result.docs)lots[row.id]=row.data();
+ }
+ for(const item of order.items)
+  documents['inventoryReservations/'+item.itemId]=await x.data('inventoryReservations',x.orderId+'__'+item.itemId);
+ const query=async(name,field)=>{
+  const result=await db.collection(name).where(field,'==',x.orderId).get();
+  return result.docs.map(row=>({id:row.id,...row.data()})).sort((a,b)=>a.id.localeCompare(b.id));
+ };
+ return {documents,lots,demands:await query('procurementDemands','sourceId'),
+  movements:await query('inventoryMovements','sourceId'),operations:await query('reservationOperationReceipts','orderId')};
+}
+function assertPhysicalLifecycleUnchanged(before,after){
+ assert.deepEqual(after.lots,before.lots);
+ for(const [path,value] of Object.entries(before.documents))if(path.startsWith('inventory/')||path.startsWith('warehouseStocks/')){
+  const next=after.documents[path];
+  assert.equal(next.onHand,value.onHand);assert.equal(next.incoming,value.incoming);
+  assert.equal(next.transferFreeInTransit,value.transferFreeInTransit);
+ }
+ for(const field of ['warehouseShipmentRecords','deliveryRecords','deliveryHistory','returnRecords','returnHistory'])
+  assert.deepEqual(after.documents.orders[field],before.documents.orders[field]);
+ for(const old of before.movements)assert.deepEqual(after.movements.find(row=>row.id===old.id),old);
+}
+
+test('real Auth whole-order cancellation and restoration preserve physical fulfillment and immutable retry for one or multiple items',async()=>{
+ for(const multi of [false,true]){
+  const tag='lifecycle-flow-'+multi,x=await fixture(tag,{role:'sales',cancelled:false,multi});
+  if(multi)await x.actor.receive(x.intent); // Genuine CLOSE return remains closed after restoration.
+  const input=await lifecycleInput(x,'lifecycle_auth_cancel_'+multi),before=await lifecycleSnapshot(x);
+  let committed;
+  await assert.rejects((async()=>{committed=await x.actor.setLifecycle(input);throw Error('lifecycle reply lost');})(),/lifecycle reply lost/);
+  assert.equal(committed.status,'applied');assert.equal(committed.items.length,before.documents.orders.items.length);
+  assert.equal(committed.postCommitAllocation.status,'recovery-pending');
+  assert.ok(committed.postCommitAllocation.sources.length>0);
+  assert.ok(committed.postCommitAllocation.sources.every(row=>row.recoveryPending&&row.errorCode==='permission-denied'));
+  const cancelled=await lifecycleSnapshot(x);assert.equal(cancelled.documents.orders.orderStatus,'cancelled');
+  assertPhysicalLifecycleUnchanged(before,cancelled);
+  for(const item of committed.items){
+   assert.equal(item.reservedQty,0);
+   assert.equal(cancelled.documents['inventoryReservations/'+item.itemId].status,'released');
+  }
+  assert.equal((await x.actor.setLifecycle({...input,itemIds:[...input.itemIds].reverse()})).status,'already-applied');
+  assert.deepEqual(await lifecycleSnapshot(x),cancelled);
+  for(const patch of [{reason:'different reason'},{nextStatus:'normal'},{date:'2026-10-21'}])
+   await assert.rejects(x.actor.setLifecycle({...input,...patch}),code('already-exists'));
+  const restored=await x.actor.setLifecycle({...input,nextStatus:'normal',operationId:'lifecycle_auth_restore_'+multi});
+  assert.equal(restored.status,'applied');assert.equal(restored.postCommitAllocation.status,'not-applicable');
+  const after=await lifecycleSnapshot(x);assertPhysicalLifecycleUnchanged(before,after);
+  assert.equal(after.documents.orders.orderStatus,'normal');
+  assert.equal(restored.items.find(row=>row.itemId==='I').reservedQty,6);
+  assert.equal(after.documents.orders.items[0].deliveredQty,4);
+  if(multi){assert.equal(after.documents.orders.items[0].returnedQty,1);assert.equal(restored.items.find(row=>row.itemId==='I2').reservedQty,2);}
+  // An old cancellation receipt cannot overwrite a later restoration.
+  assert.equal((await x.actor.setLifecycle(input)).status,'already-applied');
+  assert.deepEqual(await lifecycleSnapshot(x),after);
+ }
+});
+
+test('real Auth lifecycle applies current five-role ownership and disabled-profile authorization independently of claims or payload',async()=>{
+ for(const role of ['admin','sales','engineer','purchaser','warehouse']){
+  const x=await fixture('lifecycle-role-'+role,{role,cancelled:false,multi:true});
+  const input=await lifecycleInput(x,'lifecycle_auth_role_'+role),before=await lifecycleSnapshot(x);
+  if(['admin','sales','engineer'].includes(role)){
+   assert.equal((await x.actor.setLifecycle(input)).status,'applied');
+   const applied=await lifecycleSnapshot(x);assertPhysicalLifecycleUnchanged(before,applied);
+   await db.collection('users').doc(x.actor.uid).update({disabled:true});
+   await assert.rejects(x.actor.setLifecycle(input),code('permission-denied'));
+   assert.deepEqual(await lifecycleSnapshot(x),applied);
+  }else{
+   await accounts.setCustomUserClaims(x.actor.uid,{role:'admin'});await x.actor.auth.currentUser.getIdToken(true);
+   await assert.rejects(x.actor.setLifecycle(input),code('permission-denied'));
+   assert.deepEqual(await lifecycleSnapshot(x),before);
+  }
+ }
+ const x=await fixture('lifecycle-identity',{role:'sales',cancelled:false,multi:true});
+ const input=await lifecycleInput(x,'lifecycle_auth_identity'),before=await lifecycleSnapshot(x);
+ const outsider=await identity('lifecycle-outsider','sales');
+ const anonymous=await identity('lifecycle-anonymous','sales',{login:false,profile:false});
+ const missing=await identity('lifecycle-unprofiled','sales',{profile:false});
+ await assert.rejects(outsider.setLifecycle(input),code('permission-denied'));
+ await assert.rejects(anonymous.setLifecycle(input),code('unauthenticated'));
+ await assert.rejects(missing.setLifecycle(input),code('permission-denied'));
+ for(const patch of [{actorUid:x.operator.uid},{actorRole:'admin'}])
+  await assert.rejects(x.actor.setLifecycle({...input,...patch}),code('invalid-argument'));
+ await db.collection('users').doc(x.actor.uid).update({role:'purchaser'});
+ await accounts.setCustomUserClaims(x.actor.uid,{role:'admin'});await x.actor.auth.currentUser.getIdToken(true);
+ await assert.rejects(x.actor.setLifecycle(input),code('permission-denied'));
+ await db.collection('users').doc(x.actor.uid).update({role:'sales',active:false});
+ await assert.rejects(x.actor.setLifecycle(input),code('permission-denied'));
+ assert.deepEqual(await lifecycleSnapshot(x),before);
+});
+
+test('real Auth lifecycle refuses incomplete intent stale synchronization and corrupted sibling shipment without partial release',async()=>{
+ const x=await fixture('lifecycle-proof',{role:'sales',cancelled:false,multi:true});
+ const input=await lifecycleInput(x,'lifecycle_auth_proof'),before=await lifecycleSnapshot(x);
+ for(const patch of [{itemIds:['I']},{itemIds:['I','I','I3']},{itemIds:[...input.itemIds,'missing']},
+  {warehouseIds:['AUTH-A','AUTH-C']},{syncAttemptId:'superseded'},
+  {date:'2026-02-30'},{nextStatus:'finished'}]){
+  await assert.rejects(x.actor.setLifecycle({...input,...patch}),e=>['functions/failed-precondition','functions/invalid-argument'].includes(e.code));
+  assert.deepEqual(await lifecycleSnapshot(x),before);
+ }
+ const sibling=(await x.data('orders',x.orderId)).items[1],shipmentId='lifecycle_auth_sibling_ship';
+ await commitLocationDispatchPreparation(db,x.operator.uid,{orderId:x.orderId,itemId:'I2',quantity:1,
+  operationId:'lifecycle_auth_sibling_prepare',syncAttemptId:input.syncAttemptId});
+ await commitLocationShipment(db,x.operator.uid,{orderId:x.orderId,itemId:'I2',quantity:1,warehouseId:'AUTH-B',
+  operationId:shipmentId,syncAttemptId:input.syncAttemptId,date:'2026-10-19',expectedPlan:sibling.deliveryPlan});
+ await commitShipmentDelivery(db,x.operator.uid,{orderId:x.orderId,itemId:'I2',shipmentId,quantity:1,
+  operationId:'lifecycle_auth_sibling_delivery',syncAttemptId:input.syncAttemptId,date:'2026-10-20'});
+ await db.collection('inventoryMovements').doc('location-ship-'+shipmentId).update({intentHash:'tampered'});
+ const corrupt=await lifecycleSnapshot(x);
+ await assert.rejects(x.actor.setLifecycle(input),code('failed-precondition'));
+ assert.deepEqual(await lifecycleSnapshot(x),corrupt);
+});
+
+test('real Auth lifecycle serializes repeated competing requests and rolls back a genuine late movement-create conflict',async()=>{
+ for(const same of [true,false]){
+  const x=await fixture('lifecycle-race-'+same,{role:'sales',cancelled:false,multi:true});
+  const input=await lifecycleInput(x,'lifecycle_auth_race_'+same),before=await lifecycleSnapshot(x);
+  const other=same?input:{...input,operationId:input.operationId+'_other'};
+  const results=await Promise.allSettled([x.actor.setLifecycle(input),x.actor.setLifecycle(other)]);
+  const passed=results.filter(row=>row.status==='fulfilled').map(row=>row.value);
+  if(same)assert.deepEqual(passed.map(row=>row.status).sort(),['already-applied','applied']);
+  else{assert.equal(passed.length,1);assert.equal(passed[0].status,'applied');assert.equal(results.filter(row=>row.status==='rejected').length,1);}
+  const after=await lifecycleSnapshot(x);assertPhysicalLifecycleUnchanged(before,after);
+  assert.equal(after.operations.filter(row=>row.action==='order_v2_lifecycle').length,1);
+  assert.equal(after.documents.orders.orderLifecycleHistory.length,1);
+ }
+ const x=await fixture('lifecycle-rollback',{role:'sales',cancelled:false,multi:true});
+ const input=await lifecycleInput(x,'lifecycle_auth_rollback');
+ const ledger=await x.data('inventoryReservations',x.orderId+'__I');
+ const location=ledger.locations.find(row=>row.reservedQty>0);
+ const collision='single-v2-life-'+input.operationId+'-I-'+encodeURIComponent(location.warehouseId);
+ await db.collection('inventoryMovements').doc(collision).set({sourceId:x.orderId,fixture:'late create conflict'});
+ const before=await lifecycleSnapshot(x);
+ await assert.rejects(x.actor.setLifecycle(input),e=>['functions/internal','functions/already-exists'].includes(e.code));
+ assert.deepEqual(await lifecycleSnapshot(x),before);
+ assert.equal((await x.actor.setLifecycle({...input,operationId:input.operationId+'_new'})).status,'applied');
 });

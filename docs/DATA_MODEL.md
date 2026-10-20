@@ -364,3 +364,7 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 ### v2 原介面送達撤銷的暫存（2026-10-20，本機試點）
 
 不新增 Firestore 欄位或集合；權威仍是原 orders.deliveryHistory 的 shipment_confirmation_reversal 及現有送達投影。sessionStorage 的 v2-delivery-reversal:{UID}:{orderId} 只保存待核對 intent（record／item／sync／operation／日期／原因及原角色），不是權威事件。未知回覆保留，確認回覆且重讀 orders 後才清除；同分頁刷新可續傳，不宣稱跨分頁／裝置持久化。確認與撤銷使用獨立 key。正式／Preview 未啟用。
+
+### v2 整單取消／恢復的登入傳輸（2026-10-20，本機試點）
+
+不新增 schema。隔離 Callable 沿 reservationOperationReceipts/single-v2-lifecycle-{operationId} 的 order_v2_lifecycle 原憑證與含 itemId 的原 reserve／release movement；postCommitAllocation 只回報後續原配貨進度，不能當成第二筆取消事實。沒有新 Collection、Rules、Index 或正式資料遷移；前端固定意圖尚未接線。

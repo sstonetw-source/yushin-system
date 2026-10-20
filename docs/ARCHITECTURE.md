@@ -639,3 +639,7 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 ### v2 原介面送達撤銷（2026-10-20，隔離本機 Emulator）
 
 原 delivery-actions 的紀錄按鈕 → delivery-records 的 reverseV2ShipmentDeliveryEmulator → 隔離 reverseV2ShipmentDelivery → 原 reverseShipmentDelivery。前端確認／撤銷共用 v2DeliveryEmulatorTransport，獨立固定 pending intent；UI 不含庫存交易或數量重算。正式 index／Preview 未開啟，真實 Browser Auth 全線仍待驗收；詳見 transaction-ui-integration-20261018.md。
+
+### v2 整單取消／恢復登入傳輸（2026-10-20，本機 Emulator）
+
+隔離 setV2OrderLifecycle → 原 commitOrderLocationLifecycleAndRecover → 唯一整單 runLocationLifecycle；提交後再沿原 continueCommittedV2FreeStock 有界續傳。來源原子交易與後續配貨是分開的責任，後者權限不足回 recovery-pending。沒有新 Core／writer；正式 index、原 UI／Preview 尚未接線，完整 CI 以本批結果為準。
