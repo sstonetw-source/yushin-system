@@ -291,3 +291,52 @@ test('merged purchase replay rejects missing or relinked supply without changing
   assert.deepEqual([...x.records],before);assert.equal(x.history.length,count);
  }
 });
+
+function documentIntent(){return {company:'yushin',
+ supplierSnapshot:{supplierId:'SUP-1',supplierName:'權威供應商',purchaseHeaderName:'供應商採購抬頭',email:'orders@example.test',leadTimeDays:7},
+ expectedDate:'2026-10-27',expectedDateSource:'manual',lineScheduleDates:['2026-10-27']};}
+test('server PO preserves original document header, price projection, supplier and bidirectional source links',async()=>{
+ const x=writeFixture(),data={...x.data,document:documentIntent()};
+ x.records.get('orders/'+data.orderId).linkedDocuments=[{type:'quote',id:'Q1',relation:'source'}];
+ const result=await commitV2FormalPurchase(x.db,'buyer',data);
+ const po=x.records.get('purchaseOrders/'+data.poNo),supply=x.records.get('supplyOrders/'+result.supplyOrderIds[0]);
+ assert.equal(po.company,'yushin');assert.equal(po.vendorName,'供應商採購抬頭');
+ assert.deepEqual(po.supplierSnapshot,data.document.supplierSnapshot);
+ assert.deepEqual([po.subtotalExTax,po.taxAmount,po.totalIncTax],[80,4,84]);
+ assert.equal(po.expectedDate,'2026-10-27');assert.equal(po.items[0].scheduleDate,'2026-10-27');
+ assert.equal(supply.expectedDate,'2026-10-27');assert.equal(supply.supplierId,'SUP-1');assert.equal(supply.supplierEmail,'orders@example.test');
+ assert.deepEqual(po.linkedDocuments,[{type:'order',id:data.orderId,relation:'source'}]);
+ assert.deepEqual(x.records.get('orders/'+data.orderId).linkedDocuments,[{type:'quote',id:'Q1',relation:'source'},{type:'purchaseOrder',id:data.poNo,relation:'document'}]);
+ assert.ok(po.searchTokens.includes('供應商'));assert.ok(po.searchTokens.length<=300);
+ const before=structuredClone([...x.records]);
+ assert.equal((await commitV2FormalPurchase(x.db,'buyer',data)).status,'already-applied');
+ assert.deepEqual([...x.records],before);
+ await assert.rejects(commitV2FormalPurchase(x.db,'buyer',{...data,document:{...data.document,company:'morningstar'}}),{code:'already-exists'});
+});
+test('server document input cannot inject totals, actor, stock fields, invalid dates or arbitrary companies',async()=>{
+ const cases=[d=>({...d,subtotalExTax:1}),d=>({...d,actorRole:'admin'}),d=>({...d,company:'foreign'}),
+  d=>({...d,expectedDate:'2026-02-30'}),d=>({...d,lineScheduleDates:[]}),
+  d=>({...d,supplierSnapshot:{...d.supplierSnapshot,email:'invalid'}}),
+  d=>({...d,supplierSnapshot:{...d.supplierSnapshot,leadTimeDays:-1}}),
+  d=>({...d,supplierSnapshot:{...d.supplierSnapshot,supplierName:'改名'}}),
+  d=>({...d,supplierSnapshot:{...d.supplierSnapshot,incoming:999}})];
+ for(const mutate of cases){const x=writeFixture();
+  await assert.rejects(commitV2FormalPurchase(x.db,'buyer',{...x.data,document:mutate(documentIntent())}),{code:'invalid-argument'});
+  assert.equal(x.history.length,0);
+ }
+});
+test('document replay rejects corrupted saved metadata and supplier dates while preserving receipt progress',async()=>{
+ for(const damage of ['header','supplier','date']){
+  const x=writeFixture(),input={...x.data,document:documentIntent()};
+  const result=await commitV2FormalPurchase(x.db,'buyer',input);
+  const supply=x.records.get('supplyOrders/'+result.supplyOrderIds[0]);
+  supply.receivedQty=1;supply.incomingRegisteredQty=3;
+  assert.equal((await commitV2FormalPurchase(x.db,'buyer',input)).status,'already-applied');
+  if(damage==='header')x.records.get('purchaseOrders/'+input.poNo).totalIncTax=1;
+  if(damage==='supplier')supply.supplierEmail='other@example.test';
+  if(damage==='date')supply.expectedDate='2026-11-01';
+  const before=structuredClone([...x.records]);
+  await assert.rejects(commitV2FormalPurchase(x.db,'buyer',input),{code:'failed-precondition'});
+  assert.deepEqual([...x.records],before);
+ }
+});

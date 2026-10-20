@@ -381,3 +381,5 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 ## 正式採購多品項後端擴充（2026-10-20）
 
 無新 collection、Rules 或索引。`purchaseOrders` 的 `items`／`supplyOrderIds` 以列序一對一對應；`orderIds` 保存去重的來源訂單。Supply ID 仍為 `po-{encodeURIComponent(poNo)}-{index}`。每列各更新原需求；同來源訂單各品項累積採購與事件在同一次來源 update 保存。回覆多列含 `demandIds`、各列 supply IDs 與合計 `committedQty`；單列保留原 `demandId`。此階段不建立在途、實貨或批次。
+
+原採購文件試點新增可選 `document` 意圖：公司、五欄供應商快照、預計日期／來源及逐列交期；皆精確欄位與型別／上限查核並納入原冪等指紋。後端從權威列重算金額與搜尋 tokens，保存 PO 原欄位、Supply 供應商／交期及訂單↔PO 雙向連結。不帶 document 的既有隔離請求維持原指紋，不遷移舊資料。預計到貨日和原需求 required-by 日期分開；新增欄位不覆寫 demand 的 scheduleDate。

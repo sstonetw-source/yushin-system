@@ -44,6 +44,46 @@ function setup({retry=false,fail=false,changeAtRead=false,stock=false}={}) {
     vm.runInContext(validator+service,c);
     return {c,records,writes,po};
 }
+function emulatorSetup(){
+ const x=setup(),calls=[];
+ Object.assign(x.po,{company:'yushin',supplierName:'Vendor',supplierSnapshot:{supplierId:'',supplierName:'Vendor',purchaseHeaderName:'Vendor',email:'',leadTimeDays:0}});
+ x.po.items[0].fulfillmentType='WAREHOUSE';
+ const options={projectId:'demo-yushin'};
+ const auth={app:{options},emulatorConfig:{host:'127.0.0.1',port:9099},currentUser:{uid:'buyer'}};
+ const functions={app:{options},useEmulator:(host,port)=>calls.push({emulator:[host,port]}),
+  httpsCallable:name=>async request=>{calls.push({name,request});
+   return {data:{status:'committed',poNo:'PO1',supplyOrderIds:['PO1-0']}};}};
+ x.records.set('purchaseOrders/PO1',{...x.po,buyerName:'Server Buyer'});
+ x.records.set('supplyOrders/PO1-0',{purchaseDocumentId:'PO1',qty:1,unitCost:0});
+ x.c.YUSHIN_FORMAL_PURCHASE_EMULATOR=true;x.c.APP_ENVIRONMENT='emulator';x.c.location={hostname:'localhost'};
+ x.c.firebase={auth:()=>auth,functions:()=>functions,app:()=>({functions:()=>functions})};
+ x.c.db={collection:name=>({doc:id=>({get:async()=>({exists:x.records.has(name+'/'+id),data:()=>structuredClone(x.records.get(name+'/'+id))})})})};
+ return {...x,auth,functions,calls};
+}
+test('formal PO original Service calls scoped backend and re-reads authoritative records without legacy writes',async()=>{
+ const x=emulatorSetup(),result=await x.c.commitFormalPurchaseOrder(x.po);
+ assert.equal(result.poRecord.buyerName,'Server Buyer');assert.equal(result.committedSourceOrders.length,1);
+ assert.equal(result.committedSupplyOrders.length,1);assert.equal(x.writes.length,0);
+ const request=x.calls.find(row=>row.name).request;
+ assert.equal(request.actorUid,undefined);assert.equal(request.actorRole,undefined);
+ assert.equal(request.document.company,'yushin');assert.equal(request.items[0].unitCost,0);
+});
+test('formal backend gate refuses remote project, wrong Auth or switched real account without fallback',async()=>{
+ for(const mutate of [x=>x.c.APP_ENVIRONMENT='production',x=>x.c.location.hostname='example.com',
+  x=>x.auth.app.options.projectId='production',x=>x.auth.emulatorConfig.port=1234,x=>x.auth.currentUser.uid='other']){
+  const x=emulatorSetup();mutate(x);await assert.rejects(x.c.commitFormalPurchaseOrder(x.po));
+  assert.equal(x.writes.length,0);assert.equal(x.calls.some(row=>row.name),false);
+ }
+});
+test('formal backend unknown reply and account changes never fall back to client transaction',async()=>{
+ for(const change of [false,true]){
+  const x=emulatorSetup();x.functions.httpsCallable=()=>async()=>{
+   if(change){x.auth.currentUser.uid='other';return {data:{status:'committed',poNo:'PO1',supplyOrderIds:['PO1-0']}};}
+   throw Error('reply lost');
+  };
+  await assert.rejects(x.c.commitFormalPurchaseOrder(x.po));assert.equal(x.writes.length,0);
+ }
+});
 test('formal service accumulates split lines into one demand and source order atomically',async()=>{
     const x=setup({retry:true});x.po.items.push({...x.po.items[0],qty:2});
     const result=await x.c.commitFormalPurchaseOrder(x.po);

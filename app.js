@@ -14165,24 +14165,7 @@ window.openPurchaseOrderTimeline = async function(poId) {
 };
 
 function purchaseOrderSearchTokens(po={}) {
-    const values=[
-        po.poNo,po.vendorName,po.supplierName,po.supplierEmail,po.buyerName,po.company,po.poDate,
-        ...(Array.isArray(po.items)?po.items.flatMap(item=>[item.itemCode,item.itemName,item.brand,item.orderNo,item.orderId]):[])
-    ];
-    const tokens=new Set();
-    for(const raw of values){
-        const normalized=normalizeFullHistorySearchValue(raw);
-        if(!normalized)continue;
-        tokens.add(normalized);
-        const maxGram=Math.min(6,normalized.length);
-        for(let size=1;size<=maxGram;size++){
-            for(let i=0;i+size<=normalized.length;i++){
-                tokens.add(normalized.slice(i,i+size));
-                if(tokens.size>=300)return [...tokens];
-            }
-        }
-    }
-    return [...tokens];
+    return globalThis.YushinSupplier.purchaseOrderSearchTokens(po);
 }
 
 function purchaseOrderHistoryMatches(po, keyword) {
@@ -15532,6 +15515,45 @@ window.cancelPurchaseOrderOutstanding = async function(poId) {
 };
 
 // Authoritative PO, supply commitments and source-order linkage. Incoming remains a separate checkpoint.
+async function commitFormalPurchaseEmulator(poRecord,actorUid,assertActor) {
+    const local=host=>['localhost','127.0.0.1'].includes(host);
+    if(typeof APP_ENVIRONMENT==='undefined'||APP_ENVIRONMENT!=='emulator'
+        ||!local(globalThis.location?.hostname)||typeof firebase==='undefined'||!firebase.functions)
+        throw new Error('採購後端試點僅限明確啟用的本機 Emulator。');
+    const auth=firebase.auth(),functions=firebase.app().functions('asia-east1');
+    if(auth.app?.options?.projectId!=='demo-yushin'||functions.app?.options?.projectId!=='demo-yushin'
+        ||!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099)
+        throw new Error('採購必須使用 demo-yushin 本機登入與 Functions Emulator。');
+    const check=()=>{assertActor();if(auth.currentUser?.uid!==actorUid)throw new Error('實際登入身分已變更，請以原帳號核對採購結果。');};
+    check();
+    if(poRecord.items.length>5||poRecord.items.some(item=>!item.orderId||!item.itemId
+        ||(item.sourceType&&item.sourceType!=='SALES_ORDER')
+        ||(item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'))
+        throw new Error('採購後端試點目前只支援 1–5 個客戶訂單實體入庫品項。');
+    const request={poNo:poRecord.poNo,poDate:poRecord.poDate,
+        supplier:poRecord.supplierName||poRecord.vendorName,
+        items:poRecord.items.map(item=>({orderId:item.orderId,itemId:item.itemId,
+            qty:Number(item.qty),unitCost:Number(item.unitPrice)})),
+        document:{company:poRecord.company,supplierSnapshot:poRecord.supplierSnapshot,
+            expectedDate:poRecord.expectedDate||'',expectedDateSource:poRecord.expectedDateSource||'',
+            lineScheduleDates:poRecord.items.map(item=>item.scheduleDate||'')}};
+    functions.useEmulator('127.0.0.1',5001);
+    // A failed/unknown Callable never falls through to the old client writer.
+    const reply=await functions.httpsCallable('commitV2FormalPurchase')(request);check();
+    const result=reply?.data,ids=request.items.map((_,index)=>formalSupplyOrderId(request.poNo,index));
+    if(!['committed','already-applied'].includes(result?.status)||result.poNo!==request.poNo
+        ||JSON.stringify(result.supplyOrderIds)!==JSON.stringify(ids))
+        throw new Error('採購回覆不明確，請保留原單號核對，勿另建新單。');
+    const read=async(name,id)=>{
+        const snapshot=await db.collection(name).doc(id).get({source:'server'});check();
+        if(!snapshot.exists)throw new Error('採購可能已提交，但回讀資料不完整，請保留原單號核對。');
+        return {id,...snapshot.data()};
+    };
+    const saved=await read('purchaseOrders',request.poNo);
+    const committedSourceOrders=[];for(const id of [...new Set(request.items.map(item=>item.orderId))])committedSourceOrders.push(await read('orders',id));
+    const committedSupplyOrders=[];for(const id of ids)committedSupplyOrders.push(await read('supplyOrders',id));
+    check();return {poRecord:saved,committedSourceOrders,committedSupplyOrders};
+}
 async function commitFormalPurchaseOrder(poRecord, {actorUid=currentUser?.uid,actorRole=currentUserRole}={}) {
         // Validate numbers before JSON snapshotting: JSON turns NaN/Infinity into null.
         if(poRecord && Array.isArray(poRecord.items) && poRecord.items.some(item=>
@@ -15555,6 +15577,8 @@ async function commitFormalPurchaseOrder(poRecord, {actorUid=currentUser?.uid,ac
             if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) throw new Error('目前無採購作業權限。');
         };
         assertActor();
+        if(globalThis.YUSHIN_FORMAL_PURCHASE_EMULATOR===true)
+            return commitFormalPurchaseEmulator(poRecord,actorUid,assertActor);
         const actorName=currentUserName||currentUser?.email||'', now=poRecord.createdAt||new Date().toISOString();
         const poNo=poRecord.poNo, vendorName=poRecord.vendorName, poDocumentId=poNo;
         const orderIds=[...new Set(poRecord.items.map(item=>item.orderId).filter(Boolean))];
@@ -17416,12 +17440,10 @@ window.removePoItem = function(idx) {
 };
 
 function recalcPoTotals() {
-    const subtotal = poItems.reduce((sum, item) => sum + (item.qty * item.unitPrice), 0);
-    const tax = Math.round(subtotal * 0.05);
-    const grandTotal = Math.round(subtotal) + tax;
-    document.getElementById('poSubtotal').innerText = Math.round(subtotal).toLocaleString();
-    document.getElementById('poTax').innerText = tax.toLocaleString();
-    document.getElementById('poGrandTotal').innerText = grandTotal.toLocaleString();
+    const amounts=globalThis.YushinSupplier.purchaseAmountMetadata(poItems);
+    document.getElementById('poSubtotal').innerText = amounts.subtotalExTax.toLocaleString();
+    document.getElementById('poTax').innerText = amounts.taxAmount.toLocaleString();
+    document.getElementById('poGrandTotal').innerText = amounts.totalIncTax.toLocaleString();
 }
 
 function formalSupplyOrderId(purchaseOrderId, itemIndex) {
@@ -17753,7 +17775,6 @@ window.printPurchaseOrder = async function() {
         return;
     }
     const orderIds = [...new Set(poItems.map(item => item.orderId).filter(Boolean))];
-    const poNetTotal = poItems.reduce((sum, item) => sum + (Number(item.qty || 0) * Number(item.unitPrice || 0)), 0);
     const supplierContact = supplierForVendorName(vendorName);
     if (!globalThis.YushinSupplier?.snapshotForPurchaseOrder) {
         throw new Error('Supplier core 未載入，無法建立供應商快照。');
@@ -17792,7 +17813,7 @@ window.printPurchaseOrder = async function() {
             const brand = resolveBrandName(item.brand || '');
             return { ...item, brand, brandId:item.brandId || brandIdForName(brand) };
         }),
-        ...netAmountMetadata(poNetTotal),
+        ...globalThis.YushinSupplier.purchaseAmountMetadata(scheduledPoItems),
         createdAt: new Date().toISOString(),
         lastOutputAt: new Date().toISOString(),
         lastOutputType: 'PDF',

@@ -283,3 +283,5 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 ## 正式採購多品項後端擴充（2026-10-20）
 
 後端正式採購多列變更須覆蓋：五列上限、同訂單多品項、跨單／同產品不同倉、最後一列拒絕且零部分寫入、同號並行重送、不同號競爭同需求，以及停用使用者重送。不得把本階段測試當成原 UI、收貨或正式部署驗收。
+
+原 PO 按鈕接線驗收必須實際點擊原表單，經真 Auth／Functions／Firestore Emulator，驗證 4/7 PO、來源與需求、四件在途、實貨與原批次不變。只允許隔離 PDF 實體輸出；不得改寫 handler、Service、Rules 或偽造 Callable 成功。驗收未通過不得合併，正式部署與正式資料遷移仍另行授權。文件 helper 與前端金額／搜尋投影使用 shared Supplier Core，須執行 build-functions-core 及 build-app 一致性檢查。
