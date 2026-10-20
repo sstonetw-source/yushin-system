@@ -429,8 +429,21 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
   assert.equal(admission.forged,'functions/invalid-argument');
   assert.deepEqual(await facts(fixture),restored);
   assert.deepEqual((await demandRef.get()).data(),demand);
-  console.log('Full site '+width+'px: authenticated PO preflight admits 4/7, blocks over-order and forged role; no stock or PO writes.');
-  // Opening the actual purchase modal is a read-only proposal. The PO
+  // Owning salesperson is authorized for this sales order, but may NOT
+  // acquire purchaser authority by knowing its ID or the PO number.
+  await siteLogout(page);
+  await siteLogin(page,fixture.accounts.sales,'sales');
+  const deniedRole=await page.evaluate(async input=>{
+   try{
+    await firebase.app().functions('asia-east1').httpsCallable('previewV2FormalPurchase')(input);
+    return 'unexpected-success';
+   }catch(error){return error.code;}
+  },{poNo:admission.plan.poNo,orderId:fixture.sourceId,itemId:'S',qty:4});
+  assert.equal(deniedRole,'functions/permission-denied');
+  assert.deepEqual(await facts(fixture),restored);
+  assert.deepEqual((await demandRef.get()).data(),demand);
+  console.log('Full site '+width+'px: authenticated PO preflight admits 4/7, denies owning salesperson, over-order and forged role; no writes.');
+  // Opening the original purchase modal was a read-only proposal. The PO
   // commit and incoming-registration stages have not been authorized by UI.
   assert.equal((await db.collection('purchaseOrders').get()).size,poCountBefore);
   assert.equal((await db.collection('supplyOrders').get()).size,supplyCountBefore);
