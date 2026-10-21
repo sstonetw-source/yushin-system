@@ -327,3 +327,6 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 
 
 - 原退貨申請 UI 驗收須走原選單／表單／Client Service／真 Rules，並在角色切換與重載後核對待收清單、撤回及實貨零變更。v2 原實收尚未整合申請與物流角色前，customerReturn Service 的 SALEABLE／INSPECTION／DAMAGED 及 HOLD 轉庫存不得寫入該來源。不可只在頁面隱藏按鈕；原 receipt 已提交的冪等核對保留。下一階段必須沿唯一 commitLocationReturn 整合，不能另開入庫 writer 或直接以業務 token 假扮倉管。
+
+
+- 商務退貨申請的 Rules 路徑只允許 returnRequests／returnPending／returnRequestMutationIndex／updatedAt，並沿原 validCommercialReturnRequestMutation；不可為避開運算上限放寬其他訂單欄位、角色或所有權。pending 掃描仍須涵蓋最多三十筆。須驗真 Auth／Client 三十筆末端 pending 與全部撤回、上限／旗標／夾帶實收成本及所有權拒絕，以及原同 ID／不同 ID 競爭與全套 Rules。前端與 firestore.rules 需配套發布，不得宣稱已部署。

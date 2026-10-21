@@ -149,3 +149,8 @@
 目前 v2 隔離 commitLocationReturn 只有管理員／本人業務／工程師履約權限，尚未接原「管理員／採購／倉管」實收角色與 returnRequests 實收回填。故本批不把它直接接倉庫按鈕，也不增加第二個 stock writer。customerReturn Service 與原待收列封鎖有 warehouseShipmentRecords 的來源走 legacy SALEABLE／INSPECTION／DAMAGED 實收及待檢轉庫存；申請保留待收，legacy 正常流程不變，已確認原 receipt 的相同重送仍可核對。需另案在原 v2 writer 內整合申請證據、物流角色與原子實收，再解除此限制。
 
 本機 Node／建置同步通過情況與完整真 Auth／Chrome／Rules 結果，以本批 PR 最新 CI 為準。仍限 demo-yushin；未新增 Collection／Rules／Index／Listener、未啟用 Preview 或部署 Firebase。
+
+
+首輪 CI 39545741422：原表單兩種尺寸、五角色／非本人／停用測試通過；新增 Client 同 ID 並行／不同 ID 額度競爭／撤回重送測試觸發現有 Firestore Rules 1,000 expressions 限制，完整驗收未通過。為保持原 Client Service，不另新增後端 writer，本批針對僅四個申請欄位的變更，在既有商務角色分支先執行原 mutation validator；嚴格欄位白名單禁止同時修改其他事實，零差異重試仍須原所有權，其他動作繼續原驗證。validReturnPendingFlag 改為六組五筆、依清單長度短路，仍核對完整三十筆與真實 PENDING 狀態，沒有新增旗標投影。
+
+新增真 Auth／Client Rules 三十筆上限測試，含末筆 PENDING／全部撤回、第三十一筆拒絕、錯 pending 旗標、冒用 owner／creator、qty／實收／成本／同步版本夾帶修改拒絕及零寫入；重跑原失敗併發／重送與完整 CI。修改既有 firestore.rules，需要前端／Rules 配套發布；本批沒有部署 Firebase，不能把 GitHub 合併視為正式上限問題已修復。
