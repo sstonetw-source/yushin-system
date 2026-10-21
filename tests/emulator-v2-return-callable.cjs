@@ -1207,6 +1207,14 @@ test('real Client request transactions serialize allowance and preserve original
  const withdrawn=await snapshot(x);assert.equal(withdrawn.documents[0].returnPending,false);
  await client.commitCustomerReturnRequest(intent);await client.commitCustomerReturnWithdrawal({orderId:x.orderId,requestId:intent.operationId});
  assert.deepEqual(await snapshot(x),withdrawn);assert.deepEqual(withdrawn.documents[0].returnRecords,[]);assert.deepEqual(withdrawn.documents.slice(1),before.documents.slice(1));
+ const changedId='request_changed_intent_race';
+ const contenders=await Promise.allSettled([1,2].map(qty=>client.commitCustomerReturnRequest({...intent,operationId:changedId,qty})));
+ assert.equal(contenders.filter(row=>row.status==='fulfilled').length,1,'one ID cannot confirm two different intents');
+ const winner=await snapshot(x),record=winner.documents[0].returnRequests.find(row=>row.id===changedId);
+ assert.ok([1,2].includes(record.qty));assert.equal(winner.documents[0].returnRequests.length,3);
+ await client.commitCustomerReturnRequest({...intent,operationId:changedId,qty:record.qty});assert.deepEqual(await snapshot(x),winner);
+ assert.deepEqual(winner.documents.slice(1),before.documents.slice(1));assert.deepEqual(winner.movements,before.movements);
+
 });
 
 

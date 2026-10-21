@@ -154,3 +154,6 @@
 首輪 CI 39545741422：原表單兩種尺寸、五角色／非本人／停用測試通過；新增 Client 同 ID 並行／不同 ID 額度競爭／撤回重送測試觸發現有 Firestore Rules 1,000 expressions 限制，完整驗收未通過。為保持原 Client Service，不另新增後端 writer，本批針對僅四個申請欄位的變更，在既有商務角色分支先執行原 mutation validator；嚴格欄位白名單禁止同時修改其他事實，零差異重試仍須原所有權，其他動作繼續原驗證。validReturnPendingFlag 改為六組五筆、依清單長度短路，仍核對完整三十筆與真實 PENDING 狀態，沒有新增旗標投影。
 
 新增真 Auth／Client Rules 三十筆上限測試，含末筆 PENDING／全部撤回、第三十一筆拒絕、錯 pending 旗標、冒用 owner／creator、qty／實收／成本／同步版本夾帶修改拒絕及零寫入；重跑原失敗併發／重送與完整 CI。修改既有 firestore.rules，需要前端／Rules 配套發布；本批沒有部署 Firebase，不能把 GitHub 合併視為正式上限問題已修復。
+
+
+第二輪 CI 39546751227：原畫面、五角色及新增三十筆／保護欄位測試通過，唯一失敗精確落於同 ID 並行提交。兩份讀到舊版的提案可能在另一份已提交後被 Rules 拒絕，SDK 不一定先進行 callback 重跑。現將純申請欄位的非法／過期提案直接拒絕，不再落入其他訂單 writer 驗證；Service 僅對 permission-denied，以原 UID／角色和原 operationId 啟動一次唯讀交易，重讀目前 users 與 orders，確認真實啟用商務角色、Client Rules 所有權及完整原意圖。只有完全相同的已提交申請才回原結果，不改 createdAt／申請內容、不產生新 ID 或寫入；無對應、角色／停用／所有權／內容不符仍維持拒絕。原先直接重送與恢復後的意圖核對共用同一 matcher。新增執行式測試覆蓋成功核對與拒絕，修正後完整 CI 仍待最新結果。

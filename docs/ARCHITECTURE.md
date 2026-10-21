@@ -715,3 +715,6 @@ normalizedOrderItems 的 returnedQty 為既有顯示／補送用途，排除 CLO
 
 
 原退貨申請保留 Client Service；本批既有 Rules 新增欄位範圍明確的前置分支，僅接受原商務角色／所有權與原 request mutation validator。完整 pending 狀態按六組五筆有界掃描；不額外維護統計欄位。此為執行路徑減少不相關驗證，非將角色驗證移往按鈕或免除實收保護。前端／Rules 需配套發布，正式部署尚未執行。
+
+
+同 ID Client 衝突的結果確認也由原 customer-return Service 負責：permission-denied 後追加一次 users／orders 唯讀交易，只確認已提交且意圖相同的原申請，無額外 writer／查詢／Collection。正常成功路徑不增加讀取；未匹配或目前角色／啟用／所有權驗證失敗仍回原錯誤。此確認不是未提交交易的成功替身，也不承諾未知意圖的跨刷新恢復。

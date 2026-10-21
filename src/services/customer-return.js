@@ -18,10 +18,34 @@ function customerReturnActorContext(capability) {
             ||(typeof currentUserRole==='undefined'?null:currentUserRole)!==actorRole||!capability())
             throw new Error('登入帳號或權限已變更，請重新開啟作業。');
     };
-    assertCurrent();return {actorUid,assertCurrent};
+    assertCurrent();return {actorUid,actorRole,assertCurrent};
+}
+function customerReturnRequestMatches(record,{operationId,itemId,qty,date,reason,actorUid}) {
+    return !!record && record.id===operationId && record.itemId===itemId
+        && record.qty===qty && record.date===date && record.reason===reason
+        && record.settlement==='CLOSE' && record.createdByUid===actorUid;
+}
+async function readCommittedCustomerReturnRequest(intent,actorRole,assertCurrent) {
+    // A concurrent stale proposal can be denied before the SDK retries it.
+    // Re-read the profile and immutable request in one fresh, read-only transaction.
+    let confirmed=null;
+    await runRoleTransaction(async tx=>{
+        confirmed=null;assertCurrent();
+        const user=await tx.get(db.collection('users').doc(intent.actorUid));assertCurrent();
+        if(!user.exists)return;
+        const profile=user.data();
+        if((profile.active!==undefined&&profile.active!==true)||profile.disabled===true
+            ||profile.role!==actorRole||!['admin','sales','engineer'].includes(profile.role))return;
+        // Client Rules recheck ownership; transaction retries also re-read this profile.
+        const snapshot=await tx.get(db.collection('orders').doc(intent.orderId));assertCurrent();
+        if(!snapshot.exists)return;
+        const order={...snapshot.data(),id:intent.orderId};
+        if(customerReturnRequestMatches((order.returnRequests||[]).find(r=>r.id===intent.operationId),intent))confirmed=order;
+    });
+    assertCurrent();return confirmed;
 }
 async function commitCustomerReturnRequest({orderId,itemId,operationId,qty,date,reason=''}) {
-    const {actorUid,assertCurrent}=customerReturnActorContext(()=>canManageOrderLifecycleCapability());
+    const {actorUid,actorRole,assertCurrent}=customerReturnActorContext(()=>canManageOrderLifecycleCapability());
     if([orderId,itemId,operationId].some(id=>typeof id!=='string'||!id||id!==id.trim()||id.includes('/')||id.length>160)
         ||!Number.isFinite(qty)||qty<=0||typeof reason!=='string'
         ||typeof date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(date)
@@ -29,13 +53,13 @@ async function commitCustomerReturnRequest({orderId,itemId,operationId,qty,date,
         ||new Date(date+'T00:00:00Z').toISOString().slice(0,10)!==date)
         throw new Error('退貨品項、日期或數量不正確。');
     reason=reason.trim();const actor=deliveryActor();let saved;
-    await runRoleTransaction(async tx=>{
+    const intent={orderId,itemId,operationId,qty,date,reason,actorUid};
+    try{await runRoleTransaction(async tx=>{
         assertCurrent();const ref=db.collection('orders').doc(orderId),snap=await tx.get(ref);assertCurrent();
         if(!snap.exists)throw new Error('找不到訂單。');const order={...snap.data(),id:orderId};
         const requests=[...(order.returnRequests||[])],prior=requests.find(r=>r.id===operationId);
         if(prior){
-            if(prior.itemId!==itemId||prior.qty!==qty||prior.date!==date||prior.reason!==reason
-                ||prior.settlement!=='CLOSE'||prior.createdByUid!==actorUid)
+            if(!customerReturnRequestMatches(prior,intent))
                 throw new Error('退貨申請識別碼已對應其他內容，請先查詢原申請結果。');
             saved=order;return;
         }
@@ -46,7 +70,13 @@ async function commitCustomerReturnRequest({orderId,itemId,operationId,qty,date,
         const now=new Date().toISOString(),record={id:operationId,itemId,qty,receivedQty:0,date,reason,status:'PENDING',settlement:'CLOSE',createdAt:now,createdBy:actor,createdByUid:actorUid};
         requests.push(record);const patch={returnRequests:requests,returnPending:true,returnRequestMutationIndex:requests.length-1,updatedAt:now};
         assertCurrent();tx.update(ref,patch);saved={...order,...patch};
-    });
+    });}catch(error){
+        if(error.code!=='permission-denied')throw error;
+        assertCurrent();
+        try{saved=await readCommittedCustomerReturnRequest(intent,actorRole,assertCurrent);}
+        catch(_){assertCurrent();throw error;}
+        if(!saved)throw error;
+    }
     assertCurrent();return saved;
 }
 async function commitCustomerReturnWithdrawal({orderId,requestId}) {
