@@ -962,7 +962,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   const remainingSupply=(await db.collection('supplyOrders').doc(remainingSupplyId).get()).data();
   assert.equal(remainingSupply.qty,3);
   assert.equal(remainingSupply.receivedQty,0);
-  assert.equal(remainingSupply.incomingRegisteredQty,3);
+  assert.equal(remainingSupply.incomingRegisteredQty,0); // Callable commit registers PO; legacy UI background sync is a separate stage.
   assert.equal(remainingSupply.orderId,fixture.sourceId);
   assert.equal(remainingSupply.itemId,'S');
   const remainingDemand=(await demandRef.get()).data();
