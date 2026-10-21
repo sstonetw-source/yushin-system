@@ -39,3 +39,29 @@ test('legacy gate keeps the original partly received and shippable action rule',
  f.c.itemDispatchState=()=>({shippable:1,grossDelivered:4,returned:0});
  assert.equal(f.c.orderContextActionState(f.order).showPartialDelivery,true);
 });
+
+function completedFormFixture(){
+ const source=fs.readFileSync('src/features/orders/lifecycle-workspace.js','utf8');
+ const code=source.slice(source.indexOf('window.openPartialDeliveryForm ='),source.indexOf('\nwindow.openPartialDeliveryForOrder ='));
+ const fields={deliveryFormPanel:{style:{display:'none'}},deliveryQty:{value:''},deliveryDate:{focus(){}}},alerts=[];
+ const c=vm.createContext({window:null,YUSHIN_V2_DELIVERY_EMULATOR:true,currentDeliveryOrderId:'O',
+  ordersCache:[{id:'O',status:'normal'}],canManageOrderLifecycleCapability:()=>true,canEditPage:()=>true,
+  normalizedOrderStatus:o=>o.status,deliveryProgressInfo:()=>({remaining:0}),
+  pendingV2DeliveryConfirmation:()=>({orderId:'O',quantity:3,shipmentId:'last',operationId:'frozen'}),
+  document:{getElementById:id=>fields[id]},alert:s=>alerts.push(s),selectOrderProgressTab(){},
+  renderDeliveryModal(){fields.deliveryQty.value='3';}});
+ c.window=c;vm.runInContext(code,c);return {c,fields,alerts};
+}
+test('completed order can open its frozen successful-delivery confirmation after reload',()=>{
+ const f=completedFormFixture();f.c.openPartialDeliveryForm();
+ assert.equal(f.fields.deliveryFormPanel.style.display,'');assert.equal(f.fields.deliveryQty.value,'3');
+ assert.deepEqual(f.alerts,[]);
+});
+test('completed order cannot open a new delivery or bypass cancelled legacy and mismatched-actor gates',()=>{
+ for(const mutate of [f=>f.c.pendingV2DeliveryConfirmation=()=>null,
+  f=>f.c.YUSHIN_V2_DELIVERY_EMULATOR=false,f=>f.c.ordersCache[0].status='cancelled',
+  f=>f.c.pendingV2DeliveryConfirmation=()=>{throw Error('原帳號與角色不符');}]){
+  const f=completedFormFixture();mutate(f);f.c.openPartialDeliveryForm();
+  assert.equal(f.fields.deliveryFormPanel.style.display,'none');assert.equal(f.alerts.length,1);
+ }
+});

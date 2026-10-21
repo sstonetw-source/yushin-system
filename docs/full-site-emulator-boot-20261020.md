@@ -243,3 +243,11 @@
 發現既有 v2 表單只鎖批次選單，待確認時日期／數量／備註仍可改，Service 會拒絕變更意圖。本批改為待確認時鎖原值，失敗後立即重畫、重整維持鎖定，確認成功後解鎖供下一批使用；既有 Chrome smoke 與真 Auth 原站皆驗證。沿原 Shipment Delivery Service／Core，不新增交易 writer 或計算公式。只限既有本機 demo gate；PDF 實體輸出、初始 fixture、多品項、剩餘 3 件及 Preview／正式部署等原邊界保留。完整 CI 通過前不合併。
 
 首輪 CI 39693307620（head 55cc3fa）在原站切回業務後找不到「分批交貨」，54／56，未合併。原 orderContextActionState 以倉庫 shippable 決定入口；他倉5件全部出庫後 shippable=0，但仍有5件未確認。修正 v2 入口沿既有 projectOrderShipmentReturns.pendingDeliveryQty，並在最後一筆已成功、回覆中斷時保留 frozen checkpoint 的原結果確認入口；原 legacy 規則不變。新增原來源／CLOSE／他倉已出庫、最後一筆凍結、取消／損壞／未同步／REPLACE 與 legacy gate 四項回歸。未減弱原站操作、未知回覆及零實貨寫入斷言，須以新 head 完整 CI 判定。
+
+## 2026-10-22 — 原來源最後 3 件履約（待本批完整 CI）
+
+#216 已於完整 CI 39694406977（2217 項、零失敗／略過，另 10 組 Chrome smoke）成功後合併 main `30500e2`。本批接續同來源，原採購打單剩3（累計9→12）、來源倉原出貨列出3（累計9→12），原業務從原分批交貨確認3（累計9→12）。每一項均真交易成功後丟棄回覆，重整原角色、原 ID、原數量與原倉確認；打單只增加一份，實貨只扣3一次，送達不動任何實貨／批次／預留或供應資料。
+
+預期最後有兩筆打單、四筆出貨及六筆送達確認，原四件 CLOSE 退貨完整保留；歷史已出／已送各12、待確認0、未履約0、來源預留0／缺貨0，原商業履約完成。四件 CLOSE 屬已結案退貨，不能把歷史已送12誤稱為客戶現持有12；核銷與商業履約是不同狀態，本批未操作核銷。
+
+查核發現全單送達成功但回覆中斷後，openPartialDeliveryForm 原 remaining<=0 判斷會擋住原 checkpoint 的確認。修正僅限既有 v2 gate 與有效凍結意圖，不允許已完成單新建送達，取消／角色錯誤仍拒絕。新增兩項 Node 邊界回歸及完整原站最後成功回覆中斷驗收；沿原三個唯一 Service 與 Core，不增加 writer／公式／Collection／Rules／Index／Listener／正式 Functions 匯出。PDF、初始 fixture、多品項、Preview／正式啟用及人工核銷等邊界保留。完整 CI 通過前不可合併。

@@ -88,7 +88,12 @@ window.openPartialDeliveryForm = function() {
     if (!order || !canManageOrderLifecycleCapability() || !canEditPage('orders.list')) return;
     if (normalizedOrderStatus(order) !== 'normal') { alert('已取消的訂單不能新增送貨紀錄。'); return; }
     const progress = deliveryProgressInfo(order);
-    if (progress.remaining <= 0) { alert('這筆訂單已全數送貨。'); return; }
+    let awaitingConfirmation=false;
+    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true){
+        try{awaitingConfirmation=!!pendingV2DeliveryConfirmation(order.id);}
+        catch(error){alert(error.message);return;}
+    }
+    if (progress.remaining <= 0&&!awaitingConfirmation) { alert('這筆訂單已全數送貨。'); return; }
     selectOrderProgressTab('delivery');
     deliveryPartialFormOpen = true;
     document.getElementById('deliveryFormPanel').style.display = '';

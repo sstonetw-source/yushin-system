@@ -1210,6 +1210,90 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   assert.equal(await otherDeliveryOption.count(),0,'fully acknowledged shipment cannot be selected for another new confirmation');
   console.log('Full site '+width+'px: original owner acknowledged OTHER warehouse two plus three after CLOSE returns; both successful replies lost and reloaded with identical frozen intents, five total confirmations, no new stock/reservation/lot/movement writes and three units still outstanding.');
 
+  // Finish the SAME order's three remaining units through original actions.
+  // Each final operation succeeds before its response is lost and reloaded.
+  await page.locator('#deliveryModalOverlay button[onclick="closeDeliveryModal()"]').click();
+  await siteLogout(page);await siteLogin(page,fixture.accounts.purchaser,'purchaser');
+  await siteNav(page,'purchasing');await page.locator('#purchase-card-dispatch').click();
+  loseDispatch=true;await dispatchButton().click();
+  await page.waitForFunction(id=>!pendingDispatchOrderIds.size&&!!pendingDispatchPreparation(id,'S'),fixture.sourceId,{timeout:45000});
+  const lastDispatchIntent=calls.filter(row=>row.name==='prepareV2OrderDispatch').at(-1).data;
+  assert.equal(lastDispatchIntent.quantity,3);assert.equal(lastDispatchIntent.expectedPreparedQty,9);
+  assert.notEqual(lastDispatchIntent.operationId,dispatchIntent.operationId);
+  const finalPrepared=await facts(fixture);assert.equal(finalPrepared.source.items[0].dispatchPreparedQty,12);
+  assert.deepEqual({...finalPrepared,source:null},{...otherAllDelivered,source:null});
+  for(const field of ['warehouseShipmentRecords','deliveryRecords','returnRecords','returnRequests','deliveredQty','returnedQty','isDelivered'])
+   assert.deepEqual(finalPrepared.source[field],otherAllDelivered.source[field]);
+  assert.deepEqual(await otherDeliveryPhysicalFacts(),beforeOtherDelivery);
+  await siteOpen(page,'purchaser');await siteNav(page,'purchasing');await page.locator('#purchase-card-dispatch').click();
+  await dispatchButton().filter({hasText:'確認打單結果'}).click();
+  await page.waitForFunction(id=>!pendingDispatchOrderIds.size&&!pendingDispatchPreparation(id,'S'),fixture.sourceId,{timeout:45000});
+  assert.deepEqual(calls.filter(row=>row.name==='prepareV2OrderDispatch').at(-1).data,lastDispatchIntent);
+  assert.deepEqual(await facts(fixture),finalPrepared);
+  assert.equal((await db.collection('dispatchRecords').where('orderId','==',fixture.sourceId).get()).size,2);
+
+  await siteLogout(page);await siteLogin(page,fixture.accounts.warehouse,'warehouse');await openShipmentBatch();
+  assert.equal(await page.locator('[data-batch-qty="0"]').inputValue(),'3');
+  await page.locator('#warehouseShippingBatchDate').fill('2026-10-22');
+  loseShipment=true;await page.locator('#warehouseShippingBatchConfirm').click();
+  await page.waitForFunction(()=>document.getElementById('warehouseShippingBatchConfirm')?.textContent==='重試未完成品項',null,{timeout:45000});
+  const lastShipmentIntent=calls.filter(row=>row.name==='shipV2WarehouseItem').at(-1).data;
+  assert.equal(lastShipmentIntent.warehouseId,fixture.warehouseIds[0]);assert.equal(lastShipmentIntent.quantity,3);
+  assert.notEqual(lastShipmentIntent.operationId,otherShipmentIntent.operationId);
+  const finalShipped=await facts(fixture),lastShipment=finalShipped.source.warehouseShipmentRecords.at(-1);
+  assert.equal(finalShipped.source.items[0].warehouseShippedQty,12);assert.equal(finalShipped.source.items[0].reservedQty,0);
+  assert.equal(finalShipped.source.items[0].shortageQty,0);assert.equal(finalShipped.source.deliveredQty,9);
+  assert.equal(finalShipped.source.isDelivered,false);
+  assert.equal(finalShipped.inventory.onHand,finalPrepared.inventory.onHand-3);
+  assert.equal(finalShipped.inventory.reserved,finalPrepared.inventory.reserved-3);assert.equal(finalShipped.inventory.incoming,0);
+  assert.equal(finalShipped.stocks[0].onHand,finalPrepared.stocks[0].onHand-3);
+  assert.equal(finalShipped.stocks[0].reserved,finalPrepared.stocks[0].reserved-3);
+  assert.deepEqual(finalShipped.stocks[1],finalPrepared.stocks[1]);assert.deepEqual(finalShipped.targets,finalPrepared.targets);
+  assert.deepEqual(finalShipped.source.deliveryRecords,otherAllDelivered.source.deliveryRecords);
+  assert.deepEqual(finalShipped.source.returnRecords,otherAllDelivered.source.returnRecords);
+  assert.deepEqual((await demandRef.get()).data(),lastDemand);
+  require('../modules/fulfillment-core').validateShipmentMovement(lastShipment,
+   (await db.collection('inventoryMovements').doc(lastShipment.movementId).get()).data(),
+   {orderId:fixture.sourceId,itemId:'S',productKey:fixture.productKey});
+  await siteOpen(page,'warehouse');await openShipmentBatch();
+  assert.equal(await page.locator('[data-batch-qty="0"]').inputValue(),'3');
+  await page.locator('#warehouseShippingBatchConfirm').click();await page.locator('#warehouseLogisticsOverlay.active').waitFor({state:'hidden'});
+  assert.deepEqual(calls.filter(row=>row.name==='shipV2WarehouseItem').at(-1).data,lastShipmentIntent);
+  assert.deepEqual(await facts(fixture),finalShipped);assert.equal(finalShipped.source.warehouseShipmentRecords.length,4);
+
+  const beforeFinalDelivery=await otherDeliveryPhysicalFacts();
+  await siteLogout(page);await siteLogin(page,fixture.accounts.sales,'sales');await openCustomerDelivery();
+  await page.locator('#deliveryShipmentId').selectOption(lastShipment.id);
+  await page.locator('#deliveryDate').fill('2026-10-22');await page.locator('#deliveryQty').fill('3');
+  await page.locator('#deliveryNotes').fill('原來源倉最後三件已送達');
+  loseDelivery=true;await deliverySave.click();
+  await page.waitForFunction(id=>!pendingDeliveryOrderIds.size&&!!pendingV2DeliveryConfirmation(id),fixture.sourceId,{timeout:45000});
+  const lastDeliveryIntent=calls.filter(row=>row.name==='confirmV2ShipmentDelivery').at(-1).data;
+  assert.equal(lastDeliveryIntent.shipmentId,lastShipment.id);assert.equal(lastDeliveryIntent.quantity,3);
+  assert.notEqual(lastDeliveryIntent.operationId,otherFinalDeliveryIntent.operationId);
+  const completedSource=await facts(fixture);
+  assert.equal(completedSource.source.deliveredQty,12);assert.equal(completedSource.source.items[0].deliveredQty,12);
+  assert.equal(completedSource.source.isDelivered,true);assert.equal(completedSource.source.deliveryRecords.length,6);
+  assert.deepEqual(await otherDeliveryPhysicalFacts(),beforeFinalDelivery);
+  await siteOpen(page,'sales');await openCustomerDelivery();
+  assert.equal(await page.locator('#deliveryShipmentId').inputValue(),lastShipment.id);
+  assert.equal(await page.locator('#deliveryQty').inputValue(),'3');
+  for(const id of ['deliveryShipmentId','deliveryDate','deliveryQty','deliveryNotes'])assert.equal(await page.locator('#'+id).isDisabled(),true);
+  await deliverySave.click();
+  await page.waitForFunction(id=>!pendingDeliveryOrderIds.size&&!pendingV2DeliveryConfirmation(id),fixture.sourceId,{timeout:45000});
+  assert.deepEqual(calls.filter(row=>row.name==='confirmV2ShipmentDelivery').at(-1).data,lastDeliveryIntent);
+  assert.deepEqual(await facts(fixture),completedSource);assert.deepEqual(await otherDeliveryPhysicalFacts(),beforeFinalDelivery);
+  const completedProjection=require('../modules/fulfillment-core').projectOrderShipmentReturns({orderId:fixture.sourceId,
+   items:completedSource.source.items,shipments:completedSource.source.warehouseShipmentRecords,
+   deliveries:completedSource.source.deliveryRecords,returns:completedSource.source.returnRecords});
+  assert.equal(completedProjection.shippedQty,12);assert.equal(completedProjection.confirmedQty,12);
+  assert.equal(completedProjection.closedQty,4);assert.equal(completedProjection.outstandingQty,0);
+  assert.equal(completedProjection.pendingDeliveryQty,0);assert.equal(completedProjection.isDelivered,true);
+  assert.equal(await page.locator('#openPartialDeliveryBtn').isVisible(),false);
+  const finalRow=page.locator('#ordersBody > tr').filter({hasText:fixture.sourceId});
+  assert.equal(await finalRow.locator('button').filter({hasText:'分批交貨'}).count(),0);
+  console.log('Full site '+width+'px: final original dispatch three, source-warehouse shipment three and owner delivery three each lost a successful reply and reloaded the same intent; one final debit, six total confirmations, four CLOSE returns preserved and original order commercially fulfilled with no remaining quota.');
+
   console.log('Full site '+width+'px: seller restored five free units with seven shortages; lost-reply and stale-cancel retries are immutable.');
   for(const match of read('index.html').matchAll(/<script[^>]+src="([^"?]+)(?:\?[^\"]*)?"/g)){
    if(!match[1].startsWith('https:'))assert.ok(loaded.has('/'+match[1]),'original script loaded: '+match[1]);
