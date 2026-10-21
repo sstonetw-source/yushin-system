@@ -51,3 +51,12 @@ test('unknown shipment reply remains on its original warehouse even when there i
  const rows=workspace.shippingRows([f.order],[{id:'A'},{id:'B'}],'A',helpers);
  assert.deepEqual(rows.map(row=>[row.warehouseId,row.qty,row.key]),[['B',5,'O__I__B']]);
 });
+
+
+test('post-shipment location validation uses stored source quantities rather than legacy display shortage',async()=>{
+ const f=fixture();f.item.shortageQty=3;f.ledger.shortageQty=3;
+ const displayed={...f.item,shortageQty:5};f.c.normalizedOrderItems=()=>[displayed];
+ await f.c.loadV2WarehouseShipmentLocations([f.order]);
+ assert.deepEqual(JSON.parse(JSON.stringify(f.c.v2WarehouseShipmentLocations(f.order,displayed))),[{warehouseId:'A',qty:3},{warehouseId:'B',qty:5}]);
+ f.item.shortageQty=2;assert.equal(f.c.v2WarehouseShipmentLocations(f.order,displayed),null,'stored source changes still invalidate projection');
+});

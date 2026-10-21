@@ -6,7 +6,7 @@
 - 本批在原出貨清單讀取 inventoryReservations 的權威位置，按倉庫分列、選取與確認；保留原 Shipment Service，沒有新 writer。只限 localhost demo-yushin 的既有 Shipment Emulator gate、CUSTOMER_SHIP，其他模式維持原流程。
 - 一次最多核對 200 個品項，每批 20 個 server 點讀，不新增 Listener／Index／Collection／Rules。檢查真 Auth、角色、來源／產品／預留一致性；讀取失敗、帳號切換或版本過期不猜回來源倉。未知回覆仍顯示原倉／原數量，重送同 ID。
 - 原 1280／390px 整站驗收接續第二張 PO 實收後，由另一倉出 5 件、丟失成功回覆、重整原列重試；來源倉不變、另一倉實扣一次、其他需求／目標訂單／送達／退貨不變。送達總數仍為 4，總出貨增為 9，尚有來源倉預留 3；不能宣稱全部履約完成。
-- 本機 Node 1668／1668 通過，完整 Chrome／真 Auth／Emulator／Rules 以本批最新 CI 為準，通過才合併。未部署 Firebase，未修改正式資料與角色；多品項、剩餘送達及 Preview／正式啟用仍須後續驗收。
+- 本機 Node 1669／1669 通過，完整 Chrome／真 Auth／Emulator／Rules 以本批最新 CI 為準，通過才合併。未部署 Firebase，未修改正式資料與角色；多品項、剩餘送達及 Preview／正式啟用仍須後續驗收。
 
 ## 2026-10-20 驗收範圍更新
 - 新增原 index/app/模組整站啟動案例，涵蓋五角色登入恢復與取消→物流接手。測試設計與尚存邊界見 [本批說明](full-site-emulator-boot-20261020.md)；未通過 CI 不視為驗收完成。
@@ -71,3 +71,5 @@ Additional hardening completed after the baseline:
 Remaining external gates are Firebase deployment/migration and manual desktop/mobile five-role acceptance. Do not merge main until those are complete.
 
 本批首次 CI 39627998910 在原站出貨列遇到背景重新讀取後未重畫的問題（54／56），未合併。修正原工作佇列 finally 在庫存頁重畫出貨清單，等待位置核對完成才顯示；新增非同步回歸測試，原站測試也等待清單與倉庫主檔就緒後選倉。其餘斷言與權威交易驗證保留，須以新 head 完整 CI 判定。
+
+第二輪 CI 39629304557 診斷確認更深層原因：出貨後 normalizedOrderItems 的 legacy display shortage 與原始 items.shortageQty 不同，位置核對不可把顯示投影當原帳。本批改用原始來源 item 數量核對與版本失效，保留既有 normalize 與後端公式；新增出貨後投影差異回歸。前述兩輪皆非驗收完成，待新 head 完整 CI。

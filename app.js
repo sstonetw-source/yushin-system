@@ -8401,7 +8401,11 @@ window.unmarkQuoteAsDeal = async function(quoteNo) {
 // Read-only v2 shipment-location projection. The shipment Service remains authoritative.
 let v2ShipmentLocationCache=new Map(),v2ShipmentLocationGeneration=0,v2ShipmentLocationContext='';
 window.resetV2ShipmentLocations=function(){v2ShipmentLocationGeneration++;v2ShipmentLocationCache.clear();v2ShipmentLocationContext='';};
+function v2ShipmentSourceItem(order,item){
+    return order.items?.find(row=>row.itemId===item.itemId)||item;
+}
 function v2ShipmentLocationVersion(order,item){
+    item=v2ShipmentSourceItem(order,item);
     return JSON.stringify([order.inventoryReservationAttemptId,item.productId,item.reservedQty,item.shortageQty,
         item.dispatchPreparedQty,item.warehouseShippedQty]);
 }
@@ -8432,10 +8436,10 @@ window.loadV2WarehouseShipmentLocations=async function(orders){
             const snap=await db.collection('inventoryReservations').doc(id).get({source:'server'});
             if(!current())return;
             if(!snap.exists)throw Error('出貨品項缺少預留來源，請重新整理。');
-            const ledger=snap.data();
+            const ledger=snap.data(),sourceItem=v2ShipmentSourceItem(order,item);
             if(ledger.orderId!==order.id||ledger.itemId!==item.itemId||ledger.productKey!==inventoryProductKey(item)
                 ||ledger.ownerUid!==order.ownerUid||ledger.salesCode!==order.salesCode
-                ||ledger.quantity!==item.reservedQty||ledger.shortageQty!==item.shortageQty)
+                ||ledger.quantity!==sourceItem.reservedQty||ledger.shortageQty!==sourceItem.shortageQty)
                 throw Error('出貨位置與訂單預留不一致，請重新整理。');
             if(ledger.locationSchemaVersion===2&&ledger.status!=='active')throw Error('多倉出貨預留不是有效狀態。');
             const locations=ledger.locationSchemaVersion===2?globalThis.YushinReservation.reservationLocations(ledger):undefined;
