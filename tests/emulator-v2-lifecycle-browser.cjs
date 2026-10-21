@@ -896,6 +896,78 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   const proofs=(await db.collection('customerReturnReceipts').where('orderId','==',fixture.sourceId).get()).docs.map(d=>d.data()).filter(r=>r.requestId===uiRequest.id);
   assert.equal(proofs.length,2);for(const proof of proofs){assert.equal(proof.receivedBy,fixture.accounts.warehouse.uid);assert.equal(proof.quality,'SALEABLE');assert.equal(proof.warehouseId,chosenShipment.warehouseId);}
   console.log('Full site '+width+'px: original warehouse queue and explicit lot form received 1+1 CLOSE; both real successful replies lost, reload offered immutable confirmation even after returnPending=false; original proofs/stock/other holds verified without duplicate credit.');
+  // Keep the SAME original 12-unit order after two receipts, physical
+  // shipments, three delivery acknowledgements and both forms of CLOSE
+  // returns. Four units were purchased and received; three are still a
+  // legitimate procurement shortage, not another warehouse stock credit.
+  const remainingBefore=(await demandRef.get()).data();
+  assert.equal(remainingBefore.requestedQty,7);
+  assert.equal(remainingBefore.orderedQty,4);
+  assert.equal(remainingBefore.receivedQty,4);
+  assert.equal(remainingBefore.remainingToOrderQty,3);
+  assert.equal(remainingBefore.remainingToReceiveQty,0);
+  const priorPoCount=(await db.collection('purchaseOrders').get()).size;
+  const priorSupplyCount=(await db.collection('supplyOrders').get()).size;
+  const remainingIntent={
+   poNo:commitIntent.poNo+'-R3',
+   poDate:'2026-10-21',
+   supplier:commitIntent.supplier,
+   items:[{orderId:fixture.sourceId,itemId:'S',qty:3,unitCost:commitIntent.items[0].unitCost}]
+  };
+  const nextPurchase=await commitV2FormalPurchase(db,buyer,remainingIntent);
+  assert.equal(nextPurchase.status,'committed');
+  assert.equal(nextPurchase.committedQty,3);
+  assert.equal(nextPurchase.supplyOrderIds.length,1);
+  const remainingSupplyId=nextPurchase.supplyOrderIds[0];
+  const remainingSupply=(await db.collection('supplyOrders').doc(remainingSupplyId).get()).data();
+  assert.equal(remainingSupply.qty,3);
+  assert.equal(remainingSupply.receivedQty,0);
+  assert.equal(remainingSupply.incomingRegisteredQty,3);
+  assert.equal(remainingSupply.orderId,fixture.sourceId);
+  assert.equal(remainingSupply.itemId,'S');
+  const remainingDemand=(await demandRef.get()).data();
+  assert.equal(remainingDemand.requestedQty,7);
+  assert.equal(remainingDemand.orderedQty,7);
+  assert.equal(remainingDemand.receivedQty,4);
+  assert.equal(remainingDemand.remainingToOrderQty,0);
+  assert.equal(remainingDemand.remainingToReceiveQty,3);
+  const afterRemaining=await facts(fixture);
+  assert.equal(afterRemaining.source.items[0].supplyOrderedQty,7);
+  assert.equal(afterRemaining.source.items[0].receivedQty,4);
+  assert.equal(afterRemaining.source.items[0].reservedQty,5);
+  assert.equal(afterRemaining.source.items[0].shortageQty,3);
+  assert.equal(afterRemaining.source.items[0].warehouseShippedQty,4);
+  assert.equal(afterRemaining.source.deliveredQty,4);
+  assert.equal(afterRemaining.inventory.incoming,3);
+  assert.equal(afterRemaining.stocks[0].incoming,3);
+  for(const field of ['onHand','reserved','transferFreeInTransit']){
+   assert.equal(afterRemaining.inventory[field],uiAfter.inventory[field]);
+   assert.equal(afterRemaining.stocks[0][field],uiAfter.stocks[0][field]);
+  }
+  assert.deepEqual(afterRemaining.stocks[1],uiAfter.stocks[1]);
+  assert.deepEqual(afterRemaining.lots,uiAfter.lots);
+  assert.deepEqual(afterRemaining.targets,uiAfter.targets);
+  for(const field of ['deliveryRecords','warehouseShipmentRecords','returnRecords','returnRequests'])
+   assert.deepEqual(afterRemaining.source[field],uiAfter.source[field]);
+  assert.deepEqual((await db.collection('supplyOrders').doc(supplyId).get()).data(),uiAfterStock.supply);
+  assert.equal((await db.collection('receipts').where('supplyOrderId','==',supplyId).get()).size,2);
+  assert.equal((await db.collection('receipts').where('supplyOrderId','==',remainingSupplyId).get()).size,0);
+  const remainingRetry=await commitV2FormalPurchase(db,buyer,remainingIntent);
+  assert.equal(remainingRetry.status,'already-applied');
+  assert.deepEqual(await facts(fixture),afterRemaining);
+  assert.deepEqual((await demandRef.get()).data(),remainingDemand);
+  await assert.rejects(commitV2FormalPurchase(db,buyer,{
+   ...remainingIntent,items:[{...remainingIntent.items[0],qty:2}]
+  }),{code:'already-exists'});
+  await assert.rejects(commitV2FormalPurchase(db,buyer,{
+   ...remainingIntent,poNo:remainingIntent.poNo+'-EXTRA',
+   items:[{...remainingIntent.items[0],qty:1}]
+  }),{code:'failed-precondition'});
+  assert.equal((await db.collection('purchaseOrders').get()).size,priorPoCount+1);
+  assert.equal((await db.collection('supplyOrders').get()).size,priorSupplyCount+1);
+  assert.deepEqual(await facts(fixture),afterRemaining);
+  console.log('Full site '+width+'px: after original delivery/CLOSE returns, the remaining 3/7 shortage became one second atomic PO; replay and overpurchase do not duplicate incoming, shipment, receipt or customer return.');
+
 
   console.log('Full site '+width+'px: seller restored five free units with seven shortages; lost-reply and stale-cancel retries are immutable.');
   for(const match of read('index.html').matchAll(/<script[^>]+src="([^"?]+)(?:\?[^\"]*)?"/g)){
