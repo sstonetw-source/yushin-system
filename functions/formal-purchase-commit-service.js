@@ -36,7 +36,7 @@ function purchaseLine(data){
 function purchaseIntent(data){
  if(!data||typeof data!=='object'||Array.isArray(data))
   fail('invalid-argument','正式採購輸入欄位不正確');
- const keys=Object.keys(data).filter(key=>key!=='document').sort().join(',');
+ const keys=Object.keys(data).filter(key=>key!=='document'&&key!=='documentRevision').sort().join(',');
  let rawLines;
  if(keys==='itemId,orderId,poDate,poNo,qty,supplier,unitCost')
   rawLines=[{orderId:data.orderId,itemId:data.itemId,qty:data.qty,unitCost:data.unitCost}];
@@ -55,6 +55,10 @@ function purchaseIntent(data){
  // One-row array and original scalar requests represent the same intent.
  const intent=lines.length===1?{...base,supplier,unitCost:lines[0].unitCost,poDate}
   :{poNo:base.poNo,supplier,poDate,items:lines};
+ if(Object.hasOwn(data,'documentRevision')){
+  if(!Number.isSafeInteger(data.documentRevision)||data.documentRevision<1)fail('invalid-argument','文件版本不正確');
+  intent.documentRevision=data.documentRevision;
+ }
  if(Object.hasOwn(data,'document'))intent.document=normalizePurchaseDocument(data.document,lines.length,supplier);
  return intent;
 }
@@ -85,7 +89,7 @@ async function commitV2FormalPurchase(db,uid,data){
   for(const supplyRef of supplyRefs)supplySnapshots.push(await reader.get(supplyRef));
   if(details[0].existingPo){
    const saved=details[0].existingPo;
-   if(saved.serverCommitHash!==fingerprint||saved.createdByUid!==uid
+   if(saved.serverCommitHash!==fingerprint||(saved.confirmedByUid||saved.createdByUid)!==uid
      ||saved.poNo!==intent.poNo||JSON.stringify(saved.supplyOrderIds)!==JSON.stringify(supplyIds)
      ||!Array.isArray(saved.items)||saved.items.length!==lines.length)
     fail('already-exists','此採購單號已有不同的權威交易紀錄');
@@ -112,6 +116,24 @@ async function commitV2FormalPurchase(db,uid,data){
      fail('failed-precondition','採購交期或供應商快照與原始交易不一致');
    }
    return purchaseResult('already-applied',intent,supplyIds,supplySnapshots.map(s=>s.data().demandId));
+  }
+  const draft=details[0].draftPo;
+  if(draft){
+   let draftIntent;
+   try { draftIntent=purchaseIntent({poNo:draft.poNo,poDate:draft.poDate,
+    ...(draft.documentRevision?{documentRevision:draft.documentRevision}:{}),
+    supplier:draft.supplierName||draft.vendorName,
+    items:draft.items.map(item=>({orderId:item.orderId,itemId:item.itemId,qty:item.qty,unitCost:item.unitPrice})),
+    document:{company:draft.company,supplierSnapshot:draft.supplierSnapshot,
+     expectedDate:draft.expectedDate||'',expectedDateSource:draft.expectedDateSource||'',
+     lineScheduleDates:draft.items.map(item=>item.scheduleDate||'')}}); }
+   catch(_){fail('failed-precondition','原採購文件不完整，不能確認採購');}
+   if(draft.items.some((item,index)=>item.productId!==details[index].sourceItem.productId
+     || (item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
+     || item.warehouseId!==details[index].plan.warehouseId))
+    fail('failed-precondition','採購文件產品或入庫倉庫與來源不同');
+   if(signature(draftIntent)!==fingerprint || !draft.createdByUid || draft.supplyOrderIds?.length)
+    fail('failed-precondition','確認內容與原採購文件不同');
   }
   if(supplySnapshots.some(snapshot=>snapshot.exists))
    fail('already-exists','供應紀錄 ID 已被其他交易使用');
@@ -165,18 +187,20 @@ async function commitV2FormalPurchase(db,uid,data){
      qty:lineIntent.qty,documentNo:intent.poNo,by:actorName
     }]};
   }
+  const savedItems=draft?draft.items:poLines,buyerName=draft?.buyerName||actorName;
   const savedPo={
    poNo:intent.poNo,purchaseType:'order',vendorName:intent.supplier,
    supplierName:intent.supplier,supplierId:'',supplierEmail:'',
-   poDate:intent.poDate,buyerName:actorName,items:poLines,supplyOrderIds:supplyIds,
-   orderIds:[...sourceUpdates.keys()],createdAt:now,updatedAt:now,
-   createdByUid:uid,createdByRole:actorRole,serverCommitHash:fingerprint,
-   lastOutputAt:'',lastOutputType:'',
-   ...purchaseDocumentFields(intent,poLines,actorName)
+   poDate:intent.poDate,buyerName,items:savedItems,supplyOrderIds:supplyIds,
+   orderIds:[...sourceUpdates.keys()],createdAt:draft?.createdAt||now,updatedAt:now,
+   createdByUid:draft?.createdByUid||uid,createdByRole:draft?.createdByRole||actorRole,serverCommitHash:fingerprint,
+   lastOutputAt:draft?.lastOutputAt||'',lastOutputType:draft?.lastOutputType||'',
+   ...(draft?{status:'ORDERED',documentOnly:false,documentRevision:draft.documentRevision||1,confirmedAt:now,confirmedByUid:uid}:{}),
+   ...purchaseDocumentFields(intent,savedItems,buyerName)
   };
   // No writes are staged until EVERY line passes and all deterministic supply
   // IDs have been read. A bad final row rejects the whole PO, never a prefix.
-  tx.create(poRef,savedPo);
+  if(draft)tx.set(poRef,savedPo);else tx.create(poRef,savedPo);
   supplies.forEach((supply,index)=>tx.create(supplyRefs[index],supply));
   demands.forEach(demand=>tx.set(demand.ref,demand.data));
   for(const [orderId,{source,items}] of sourceUpdates){

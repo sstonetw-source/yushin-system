@@ -455,8 +455,24 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   await page.locator('#poItemsBody input[onchange*="qty"]').blur();
   await page.locator('#poItemsBody input[onchange*="unitPrice"]').fill('20');
   await page.locator('#poItemsBody input[onchange*="unitPrice"]').blur();
+  assert.equal(await page.locator('#poVendorName').inputValue(),'測試供應商',
+   'editing PO quantity/price must preserve the supplier entered earlier');
+  await page.locator('#poVendorName').blur();
   await page.locator('#printPurchaseOrderBtn').click();
-  await page.waitForFunction(()=>!poSaveInProgress&&document.getElementById('poSaveStatus')?.textContent?.includes('採購結果尚未確認'),null,{timeout:45000});
+  await page.waitForFunction(()=>!poSaveInProgress&&poEditingId&&window.poPdfOutputs.length===1);
+  const draftPoId=await page.evaluate(()=>poEditingId);
+  const preparedPo=(await db.collection('purchaseOrders').doc(draftPoId).get()).data();
+  assert.equal(preparedPo.status,'DRAFT');assert.equal(preparedPo.documentOnly,true);
+  assert.equal(calls.filter(row=>row.name==='commitV2FormalPurchase').length,0);
+  assert.equal((await db.collection('supplyOrders').get()).size,supplyCountBefore);
+  assert.deepEqual((await demandRef.get()).data(),demand);
+  assert.deepEqual(await facts(fixture),restored,'document/PDF cannot change stock or source order');
+  // Reprint, including a failed PDF, cannot purchase or register incoming.
+  await page.locator('#printPurchaseOrderBtn').click();
+  await page.waitForFunction(()=>!poSaveInProgress&&window.poPdfOutputs.length===2);
+  assert.equal(calls.filter(row=>row.name==='commitV2FormalPurchase').length,0);
+  await page.locator('#confirmPoOrderedBtn').click();
+  await page.waitForFunction(()=>!formalPurchaseRecoveryRunning&&document.getElementById('actionFeedback')?.textContent?.includes('採購結果尚未確認'),null,{timeout:45000});
   const firstPurchase=calls.filter(row=>row.name==='commitV2FormalPurchase');
   assert.equal(firstPurchase.length,1);
   const commitIntent=firstPurchase[0].data;
@@ -464,7 +480,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   const pendingKey='formal-po-pending:'+encodeURIComponent(fixture.accounts.purchaser.uid);
   const pendingRaw=await page.evaluate(key=>sessionStorage.getItem(key),pendingKey);
   assert.equal(JSON.parse(pendingRaw).poRecord.poNo,commitIntent.poNo);
-  assert.deepEqual(await page.evaluate(()=>window.poPdfOutputs),[],'unknown reply cannot print a formal document');
+  assert.equal(await page.evaluate(()=>window.poPdfOutputs.length),2,'confirmation does not produce another PDF');
   assert.equal((await facts(fixture)).inventory.incoming||0,0,'lost PO response has not registered incoming yet');
   // Reload the unchanged original app. The original purchaser must explicitly
   // resume the stored intent; navigation and reading alone cannot submit it.
@@ -896,6 +912,151 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   const proofs=(await db.collection('customerReturnReceipts').where('orderId','==',fixture.sourceId).get()).docs.map(d=>d.data()).filter(r=>r.requestId===uiRequest.id);
   assert.equal(proofs.length,2);for(const proof of proofs){assert.equal(proof.receivedBy,fixture.accounts.warehouse.uid);assert.equal(proof.quality,'SALEABLE');assert.equal(proof.warehouseId,chosenShipment.warehouseId);}
   console.log('Full site '+width+'px: original warehouse queue and explicit lot form received 1+1 CLOSE; both real successful replies lost, reload offered immutable confirmation even after returnPending=false; original proofs/stock/other holds verified without duplicate credit.');
+  // Continue the SAME 12-unit source after all physical receipts, shipments,
+  // acknowledgements and CLOSE returns. The original purchaser should still
+  // see exactly the three units that were never ordered.
+  const remainingBefore=(await demandRef.get()).data();
+  assert.equal(remainingBefore.requestedQty,7);
+  assert.equal(remainingBefore.orderedQty,4);
+  assert.equal(remainingBefore.receivedQty,4);
+  assert.equal(remainingBefore.remainingToOrderQty,3);
+  assert.equal(remainingBefore.remainingToReceiveQty,0);
+  const priorPoCount=(await db.collection('purchaseOrders').get()).size;
+  const priorSupplyCount=(await db.collection('supplyOrders').get()).size;
+  await siteLogout(page);await siteLogin(page,fixture.accounts.purchaser,'purchaser');
+  await siteNav(page,'purchasing');
+  // This browser previously visited receiving and dispatch; the selected
+  // work-card survives a role handoff. Explicitly choose ordering and use
+  // the ORIGINAL refresh action before expecting a new source projection.
+  await page.locator('#purchase-card-ordering').click();
+  await page.waitForFunction(()=>!pendingPurchaseLoading);
+  await page.evaluate(()=>loadPendingPurchaseOrders(true));
+  await page.waitForFunction(()=>!pendingPurchaseLoading&&procurementDemandLoaded);
+  const status=await page.locator('#purchasePendingStatus').textContent();
+  assert.doesNotMatch(status,/讀取失敗/);
+  const remainingRow=page.locator('#purchasePendingBody tr').filter({hasText:fixture.sourceId});
+  assert.equal(await remainingRow.count(),1);
+  await remainingRow.getByRole('button',{name:'產生採購單'}).click();
+  await page.locator('#poModalOverlay.active').waitFor({state:'visible'});
+  await page.waitForFunction(()=>poNoReady&&!poNoLoading);
+  const remainingProposal=await page.evaluate(()=>poItems.map(row=>({
+   orderId:row.orderId,itemId:row.itemId,productId:row.productId,qty:row.qty
+  })));
+  assert.deepEqual(remainingProposal,[{
+   orderId:fixture.sourceId,itemId:'S',productId:fixture.productKey,qty:3
+  }]);
+  await page.evaluate(()=>{window.poPdfOutputs=[];printSavedPoDocument=async(poNo,vendor)=>{
+   if(!poListCache.some(row=>row.id===poNo))throw Error('PDF before remaining PO commit');
+   window.poPdfOutputs.push({poNo,vendor});
+  };});
+  await page.locator('#poDate').fill('2026-10-21');
+  // A user may enter the supplier before editing quantity and price. Those
+  // unrelated line updates must not silently discard the supplier header.
+  await page.locator('#poVendorName').fill('測試供應商');
+  await page.locator('#poItemsBody input[onchange*="qty"]').fill('3');
+  await page.locator('#poItemsBody input[onchange*="qty"]').blur();
+  await page.locator('#poItemsBody input[onchange*="unitPrice"]').fill('20');
+  await page.locator('#poItemsBody input[onchange*="unitPrice"]').blur();
+  const priorPurchaseCalls=calls.filter(row=>row.name==='commitV2FormalPurchase').length;
+  // Preserve the pre-submit form state when the UI declines the second PO.
+  const beforeRemainingSubmit=await page.evaluate(()=>({
+   poNo:document.querySelector('#poNo')?.textContent,
+   vendor:document.querySelector('#poVendorName')?.value,
+   date:document.querySelector('#poDate')?.value,
+   items:poItems.map(item=>({qty:item.qty,unitPrice:item.unitPrice,orderId:item.orderId,itemId:item.itemId})),
+   editingId:poEditingId,directStock:poDirectStockMode,
+   buttonDisabled:document.querySelector('#printPurchaseOrderBtn')?.disabled,
+   buttonText:document.querySelector('#printPurchaseOrderBtn')?.textContent
+  }));
+  await page.locator('#printPurchaseOrderBtn').click();
+  // The click handler starts asynchronously: saveInProgress is initially false.
+  // Never treat its initial idle state as proof that the purchase finished.
+  try{
+   await page.waitForFunction(()=>window.poPdfOutputs.length===1,null,{timeout:45000});
+  }catch(error){
+   const earlyPurchaseState=await page.evaluate(()=>({pdf:window.poPdfOutputs,status:document.querySelector('#poSaveStatus')?.textContent||'',saveInProgress:poSaveInProgress,pending:poIncomingSyncPending,buttonDisabled:document.querySelector('#printPurchaseOrderBtn')?.disabled}));
+   assert.fail('Remaining PO PDF did not complete: '+JSON.stringify({beforeRemainingSubmit,earlyPurchaseState,purchaseCallCount:calls.filter(row=>row.name==='commitV2FormalPurchase').length-priorPurchaseCalls}));
+  }
+  const purchaseDiagnostic=await page.evaluate(()=>({pending:poIncomingSyncPending,pdf:window.poPdfOutputs,status:document.querySelector('#poSaveStatus')?.textContent||'',modal:document.querySelector('#poModalOverlay')?.className||''}));
+  assert.equal(purchaseDiagnostic.pdf.length,1,JSON.stringify(purchaseDiagnostic));
+  // The original UI explicitly syncs incoming stock in the background after PDF.
+  // A transient pending flag is not a failed purchase; verify persisted facts below.
+  assert.equal(calls.filter(row=>row.name==='commitV2FormalPurchase').length,priorPurchaseCalls);
+  assert.equal((await db.collection('supplyOrders').get()).size,priorSupplyCount);
+  assert.deepEqual(await facts(fixture),uiAfter,'second document alone cannot change purchase or stock');
+  assert.deepEqual((await demandRef.get()).data(),remainingBefore);
+  await page.locator('#confirmPoOrderedBtn').click();
+  await page.waitForFunction(()=>!formalPurchaseRecoveryRunning&&!pendingFormalPurchase()&&poListCache.find(po=>po.id===poEditingId)?.status==='ORDERED',null,{timeout:45000});
+  const nextPurchaseCalls=calls.filter(row=>row.name==='commitV2FormalPurchase');
+  assert.equal(nextPurchaseCalls.length,priorPurchaseCalls+1);
+  const remainingIntent=nextPurchaseCalls.at(-1).data;
+  assert.equal(remainingIntent.items.length,1);
+  assert.equal(remainingIntent.items[0].orderId,fixture.sourceId);
+  assert.equal(remainingIntent.items[0].itemId,'S');
+  assert.equal(remainingIntent.items[0].qty,3);
+  assert.equal(remainingIntent.items[0].unitCost,20);
+  assert.notEqual(remainingIntent.poNo,commitIntent.poNo);
+  assert.deepEqual(await page.evaluate(()=>window.poPdfOutputs),[{
+   poNo:remainingIntent.poNo,vendor:'測試供應商'
+  }]);
+  const remainingSupplyId='po-'+encodeURIComponent(remainingIntent.poNo)+'-0';
+  // PDF completes before the existing incoming checkpoint; wait for the actual
+  // authoritative supply state, not the transient UI flag or a fixed delay.
+  const incomingDeadline=Date.now()+45000;
+  let remainingSupply;
+  do {
+   remainingSupply=(await db.collection('supplyOrders').doc(remainingSupplyId).get()).data();
+   if(remainingSupply?.incomingRegisteredQty===3)break;
+   await new Promise(resolve=>setTimeout(resolve,250));
+  }while(Date.now()<incomingDeadline);
+  assert.equal(remainingSupply?.incomingRegisteredQty,3,'second PO incoming checkpoint did not finish');
+  assert.equal(remainingSupply.qty,3);
+  assert.equal(remainingSupply.receivedQty,0);
+  assert.equal(remainingSupply.incomingRegisteredQty,3);
+  assert.equal(remainingSupply.orderId,fixture.sourceId);
+  assert.equal(remainingSupply.itemId,'S');
+  const remainingDemand=(await demandRef.get()).data();
+  assert.equal(remainingDemand.requestedQty,7);
+  assert.equal(remainingDemand.orderedQty,7);
+  assert.equal(remainingDemand.receivedQty,4);
+  assert.equal(remainingDemand.remainingToOrderQty,0);
+  assert.equal(remainingDemand.remainingToReceiveQty,3);
+  const afterRemaining=await facts(fixture);
+  assert.equal(afterRemaining.source.items[0].supplyOrderedQty,7);
+  assert.equal(afterRemaining.source.items[0].receivedQty,4);
+  assert.equal(afterRemaining.source.items[0].reservedQty,5);
+  assert.equal(afterRemaining.source.items[0].shortageQty,3);
+  assert.equal(afterRemaining.source.items[0].warehouseShippedQty,4);
+  assert.equal(afterRemaining.source.deliveredQty,4);
+  assert.equal(afterRemaining.inventory.incoming,3);
+  assert.equal(afterRemaining.stocks[0].incoming,3);
+  for(const field of ['onHand','reserved','transferFreeInTransit']){
+   assert.equal(afterRemaining.inventory[field],uiAfter.inventory[field]);
+   assert.equal(afterRemaining.stocks[0][field],uiAfter.stocks[0][field]);
+  }
+  assert.deepEqual(afterRemaining.stocks[1],uiAfter.stocks[1]);
+  assert.deepEqual(afterRemaining.lots,uiAfter.lots);
+  assert.deepEqual(afterRemaining.targets,uiAfter.targets);
+  for(const field of ['deliveryRecords','warehouseShipmentRecords','returnRecords','returnRequests'])
+   assert.deepEqual(afterRemaining.source[field],uiAfter.source[field]);
+  assert.deepEqual((await db.collection('supplyOrders').doc(supplyId).get()).data(),uiAfterStock.supply);
+  assert.equal((await db.collection('receipts').where('supplyOrderId','==',supplyId).get()).size,2);
+  assert.equal((await db.collection('receipts').where('supplyOrderId','==',remainingSupplyId).get()).size,0);
+  const remainingRetry=await commitV2FormalPurchase(db,buyer,remainingIntent);
+  assert.equal(remainingRetry.status,'already-applied');
+  assert.deepEqual(await facts(fixture),afterRemaining);
+  assert.deepEqual((await demandRef.get()).data(),remainingDemand);
+  await assert.rejects(commitV2FormalPurchase(db,buyer,{
+   ...remainingIntent,items:[{...remainingIntent.items[0],qty:2}]
+  }),{code:'already-exists'});
+  await assert.rejects(commitV2FormalPurchase(db,buyer,{
+   ...remainingIntent,poNo:remainingIntent.poNo+'-EXTRA',
+   items:[{...remainingIntent.items[0],qty:1}]
+  }),{code:'failed-precondition'});
+  assert.equal((await db.collection('purchaseOrders').get()).size,priorPoCount+1);
+  assert.equal((await db.collection('supplyOrders').get()).size,priorSupplyCount+1);
+  assert.deepEqual(await facts(fixture),afterRemaining);
+  console.log('Full site '+width+'px: original purchaser reopened remaining 3/7 shortage after CLOSE returns; second PO and incoming registered once, same-ID replay and overpurchase blocked without extra stock, receipts or shipment.');
 
   console.log('Full site '+width+'px: seller restored five free units with seven shortages; lost-reply and stale-cancel retries are immutable.');
   for(const match of read('index.html').matchAll(/<script[^>]+src="([^"?]+)(?:\?[^\"]*)?"/g)){

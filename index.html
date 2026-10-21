@@ -1247,7 +1247,7 @@
                 <h2 style="text-align:center;letter-spacing:10px;margin:10px 0;">採 購 單</h2>
 
                 <div class="meta-row-three">
-                    <div style="white-space:nowrap;"><label style="white-space:nowrap;">供應商：</label><input type="text" id="poVendorName" list="poVendorSuggestions" autocomplete="off" placeholder="請輸入供應商名稱" style="min-width:0;" onchange="autoFillPoExpectedDate(); renderPoItemsTable()"><datalist id="poVendorSuggestions"></datalist></div>
+                    <div style="white-space:nowrap;"><label style="white-space:nowrap;">供應商：</label><input type="text" id="poVendorName" list="poVendorSuggestions" autocomplete="off" placeholder="請輸入供應商名稱" style="min-width:0;" onchange="autoFillPoExpectedDate()"><datalist id="poVendorSuggestions"></datalist></div>
                     <div><label>採購人員：</label><span id="poBuyerName"></span></div>
                     <div><label>採購日期：</label><input type="date" id="poDate" onchange="autoFillPoExpectedDate()"></div>
                 </div>
@@ -1288,7 +1288,8 @@
                     <button type="button" class="btn-secondary" data-download-folder-button onclick="configureDocumentDownloadFolder('purchase')">設定下載資料夾</button>
                     <span data-download-folder="purchase" role="status">使用瀏覽器預設下載</span>
                 </div>
-                <button type="button" id="printPurchaseOrderBtn" onclick="printPurchaseOrder()">📄 建立採購單並下載 PDF</button>
+                <button type="button" id="printPurchaseOrderBtn" onclick="printPurchaseOrder()">📄 儲存文件並下載 PDF</button>
+                <button type="button" id="confirmPoOrderedBtn" hidden onclick="confirmSavedPurchaseOrder(poEditingId)">確認已採購</button>
             </div>
         </div>
     </div>
@@ -1696,7 +1697,7 @@
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261013-file-share"></script>
     <script src="modules/order-entry-core.js?v=20261014-1"></script>
-    <script src="app.js?v=20261021-6"></script>
+    <script src="app.js?v=20261021-8"></script>
     <script src="modules/order-self-order-required.js?v=20261013-1"></script>
     <script src="modules/customer-cancellations.js?v=20261021-3"></script>
     <script src="modules/free-stock-recovery.js?v=20261014-9"></script>

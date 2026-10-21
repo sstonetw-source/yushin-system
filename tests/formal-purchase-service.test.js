@@ -306,3 +306,48 @@ test('formal corrupt checkpoint, changed role, unsupported input or unavailable 
  assert.throws(()=>x.c.rememberFormalPurchase(x.po,'buyer','purchaser'),/storage disabled/);
  assert.equal(x.calls.filter(row=>row.name).length,0);
 });
+
+test('document preparation persists only PO snapshot and replays without supply or demand writes',async()=>{
+ const x=setup(),before=structuredClone([...x.records]);
+ const doc=await x.c.saveFormalPurchaseDocument(x.po);
+ assert.equal(doc.status,'DRAFT');assert.equal(doc.documentOnly,true);
+ assert.equal(doc.createdByUid,'buyer');assert.equal(doc.supplyOrderIds,undefined);
+ assert.deepEqual(x.writes,['purchaseOrders/PO1']);
+ assert.deepEqual([...x.records].filter(([key])=>key!=='purchaseOrders/PO1'),before);
+ await x.c.saveFormalPurchaseDocument(x.po);assert.equal(x.writes.length,1);
+ await assert.rejects(x.c.saveFormalPurchaseDocument({...x.po,items:[{...x.po.items[0],qty:2}]}),/不同內容/);
+});
+test('explicit confirmation upgrades original document through existing trade Service once',async()=>{
+ const x=setup();const draft=await x.c.saveFormalPurchaseDocument(x.po);
+ const result=await x.c.commitFormalPurchaseOrder(draft);
+ assert.equal(result.poRecord.status,'ORDERED');assert.equal(result.poRecord.documentOnly,false);
+ assert.equal(result.committedSourceOrders[0].items[0].supplyOrderedQty,1);
+ assert.equal(result.committedSupplyOrders.length,1);
+ const writes=x.writes.length,before=structuredClone([...x.records]);
+ await x.c.commitFormalPurchaseOrder(draft);
+ assert.equal(x.writes.length,writes);assert.deepEqual([...x.records],before);
+ await assert.rejects(x.c.saveFormalPurchaseDocument(x.po),/已確認採購/);
+});
+test('changed source demand or changed document intent rejects confirmation without trade writes',async()=>{
+ for(const change of ['demand','document']){
+  const x=setup();const draft=await x.c.saveFormalPurchaseDocument(x.po);
+  if(change==='demand')x.records.get('orders/o').items[0].supplyOrderedQty=3;
+  else draft.items[0].qty=2;
+  const before=structuredClone([...x.records]),count=x.writes.length;
+  await assert.rejects(x.c.commitFormalPurchaseOrder(draft));
+  assert.equal(x.writes.length,count);assert.deepEqual([...x.records],before);
+ }
+});
+
+test('unconfirmed documents allow versioned edits and reject stale concurrent changes',async()=>{
+ const x=setup();const original=await x.c.saveFormalPurchaseDocument(x.po);
+ assert.equal(original.documentRevision,1);
+ const changed={...x.po,items:[{...x.po.items[0],qty:2}]};
+ const saved=await x.c.saveFormalPurchaseDocument(changed,{expectedRevision:1});
+ assert.equal(saved.documentRevision,2);assert.equal(saved.items[0].qty,2);
+ assert.equal((await x.c.saveFormalPurchaseDocument(changed,{expectedRevision:1})).documentRevision,2,'unknown reply replay returns original revision');
+ await assert.rejects(x.c.saveFormalPurchaseDocument({...x.po,items:[{...x.po.items[0],qty:3}]},{expectedRevision:1}),/重新載入/);
+ const before=structuredClone([...x.records]);
+ await assert.rejects(x.c.commitFormalPurchaseOrder(original),/不同/);assert.deepEqual([...x.records],before);
+ assert.equal([...x.records.keys()].some(key=>key.startsWith('supplyOrders/')),false);
+});

@@ -154,7 +154,7 @@ test('loaded purchase hides cancellation for fully received orders and checks ev
   purchaseItemsFromSavedPo:po=>po.items,purchaseOrderSupplierContact:()=>({}),
   isPurchaseTerminalStatus:status=>['CLOSED','CANCELLED'].includes(status),
   purchaseHistoryItemReceiptProgress:(po,index)=>({remainingQty:po.items[index].remainingQty}),
-  canCreatePurchaseOrderCapability:()=>true,canEditPage:()=>true,updatePoSaveButton(){}
+  canCreatePurchaseOrderCapability:()=>true,canEditPage:()=>true,poDraftLoading:false,editingUnconfirmedPurchaseDocument:()=>false,setPoDraftLoading(){},updatePoSaveButton(){}
  });
  vm.runInContext(section('function updatePoModeUI()', '\nfunction clearPoExpectedDate'),c);
  function cancellationVisible(items,status='ORDERED',allowed=true){

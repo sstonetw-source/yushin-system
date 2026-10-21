@@ -46,7 +46,7 @@ async function validateV2FormalPurchaseTx(tx,db,uid,intent,{allowExistingPo=fals
     ||!['admin','purchaser'].includes(user.data().role))
    reject('permission-denied','登入使用者沒有正式採購權限');
   const po=await tx.get(ref('purchaseOrders',intent.poNo));
-  if(po.exists){
+  if(po.exists && !(allowExistingPo && po.data().status==='DRAFT' && po.data().documentOnly===true)){
    if(!allowExistingPo)reject('already-exists','此採購單號已建立，請開啟既有單據');
    return {existingPo:po.data(),actorRole:user.data().role,actorName:String(user.data().name||'')};
   }
@@ -116,6 +116,7 @@ async function validateV2FormalPurchaseTx(tx,db,uid,intent,{allowExistingPo=fals
    proposedQty:intent.qty,remainingAfterQty:plan.demand.remainingToOrderQty,
    status:'preview-only'},
    source,sourceItem:row,sourceItemIndex:index,demandBefore:doc,demandAfter:plan.demand,
+   draftPo:po.exists?po.data():null,
    actorRole:user.data().role,actorName:String(user.data().name||'')};
 }
 async function previewV2FormalPurchase(db,uid,data){

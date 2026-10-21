@@ -340,3 +340,51 @@ test('document replay rejects corrupted saved metadata and supplier dates while 
   assert.deepEqual([...x.records],before);
  }
 });
+
+function savedDocumentFixture(x){
+ const data={...x.data,document:documentIntent()};
+ const draft={poNo:data.poNo,poDate:data.poDate,supplierName:data.supplier,vendorName:data.document.supplierSnapshot.purchaseHeaderName,
+  company:data.document.company,supplierSnapshot:data.document.supplierSnapshot,
+  expectedDate:data.document.expectedDate,expectedDateSource:data.document.expectedDateSource,
+  status:'DRAFT',documentOnly:true,createdByUid:'buyer',createdByRole:'purchaser',
+  items:[{orderId:data.orderId,itemId:data.itemId,productId:'P',warehouseId:'W',qty:data.qty,unitPrice:data.unitCost,scheduleDate:data.document.lineScheduleDates[0]}]};
+ x.records.set('purchaseOrders/'+data.poNo,draft);return {data,draft};
+}
+test('server confirmation upgrades draft document through same validated atomic writer and replays read-only',async()=>{
+ const x=writeFixture(),{data}=savedDocumentFixture(x),before=structuredClone(x.records.get('orders/ORDER-1'));
+ assert.equal(x.history.length,0);assert.equal(before.items[0].supplyOrderedQty,0);
+ const result=await commitV2FormalPurchase(x.db,'buyer',data),po=x.records.get('purchaseOrders/'+data.poNo);
+ assert.equal(result.status,'committed');assert.equal(po.status,'ORDERED');assert.equal(po.documentOnly,false);
+ assert.equal(x.records.get('orders/ORDER-1').items[0].supplyOrderedQty,data.qty);
+ const written=x.history.length,after=structuredClone([...x.records]);
+ assert.equal((await commitV2FormalPurchase(x.db,'buyer',data)).status,'already-applied');
+ assert.equal(x.history.length,written);assert.deepEqual([...x.records],after);
+});
+test('draft confirmation revalidates current role, source demand and immutable intent before any write',async()=>{
+ for(const change of ['qty','supplier','company','date','product','warehouse','disabled','cancelled','filled','occupied-supply']){
+  const x=writeFixture(),{data,draft}=savedDocumentFixture(x);
+  if(change==='qty')data.qty=3;
+  if(change==='supplier')draft.supplierName='Changed';
+  if(change==='company')data.document.company='morningstar';
+  if(change==='date')draft.poDate='2026-10-19';
+  if(change==='product')draft.items[0].productId='OTHER';
+  if(change==='warehouse')draft.items[0].warehouseId='OTHER';
+  if(change==='disabled')x.records.get('users/buyer').active=false;
+  if(change==='cancelled')x.records.get('orders/ORDER-1').status='cancelled';
+  if(change==='filled')x.records.get('orders/ORDER-1').items[0].supplyOrderedQty=7;
+  if(change==='occupied-supply')x.records.set('supplyOrders/po-'+encodeURIComponent(data.poNo)+'-0',{other:true});
+  const before=structuredClone([...x.records]);
+  await assert.rejects(commitV2FormalPurchase(x.db,'buyer',data));
+  assert.equal(x.history.length,0);assert.deepEqual([...x.records],before);
+ }
+});
+
+test('server confirmation rejects stale document revision even when quantities are unchanged',async()=>{
+ const x=writeFixture(),{data,draft}=savedDocumentFixture(x);
+ draft.documentRevision=2;data.documentRevision=1;
+ const before=structuredClone([...x.records]);
+ await assert.rejects(commitV2FormalPurchase(x.db,'buyer',data),{code:'failed-precondition'});
+ assert.deepEqual([...x.records],before);assert.equal(x.history.length,0);
+ data.documentRevision=2;
+ assert.equal((await commitV2FormalPurchase(x.db,'buyer',data)).status,'committed');
+});
