@@ -629,9 +629,10 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   await siteLogout(page);await siteLogin(page,fixture.accounts.warehouse,'warehouse');
   async function openShipmentBatch(){
    await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();
+   await page.waitForFunction(()=>orderWorkQueueReady&&!orderWorkQueueError&&warehouseMasterCache.length>0,null,{timeout:45000});
    const main=await page.evaluate(()=>defaultWarehouse()?.id||'');
    await page.locator(main===fixture.warehouseIds[0]?'#inventoryShippingMainBtn':'#inventoryShippingBranchBtn').click();
-   const row=page.locator('#inventoryShippingBody tr').filter({hasText:fixture.sourceId});
+   const row=page.locator('#inventoryShippingBody tr[data-shipping-warehouse="'+fixture.warehouseIds[0]+'"]').filter({hasText:fixture.sourceId});
    await row.locator('input[type="checkbox"]').check();await page.locator('#warehouseShippingBatchBtn').click();
    await page.locator('#warehouseShippingBatchConfirm').waitFor({state:'visible'});
   }
@@ -1100,6 +1101,39 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   assert.equal((await db.collection('receipts').where('supplyOrderId','==',remainingSupplyId).get()).size,2);
   console.log('Full site '+width+'px: after shipment, delivery and four CLOSE returns, original warehouse received remaining PO 1+2; final successful reply lost, reload replay kept two receipts/lots and preserved all prior fulfillment and other warehouse.');
 
+  // Ship the five ORIGINAL holds from the OTHER warehouse using its actual
+  // location row. Original item.warehouseId remains A throughout this action.
+  async function openOtherWarehouseBatch(){
+   await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();
+   await page.waitForFunction(()=>orderWorkQueueReady&&!orderWorkQueueError&&warehouseMasterCache.length>0,null,{timeout:45000});
+   const main=await page.evaluate(()=>defaultWarehouse()?.id||'');
+   await page.locator(main===fixture.warehouseIds[1]?'#inventoryShippingMainBtn':'#inventoryShippingBranchBtn').click();
+   const row=page.locator('#inventoryShippingBody tr[data-shipping-warehouse="'+fixture.warehouseIds[1]+'"]').filter({hasText:fixture.sourceId});
+   await row.locator('input[type="checkbox"]').check();await page.locator('#warehouseShippingBatchBtn').click();
+   await page.locator('#warehouseShippingBatchConfirm').waitFor({state:'visible'});
+  }
+  await openOtherWarehouseBatch();assert.equal(await page.locator('[data-batch-qty="0"]').inputValue(),'5');
+  await page.locator('#warehouseShippingBatchDate').fill('2026-10-21');
+  loseShipment=true;await page.locator('#warehouseShippingBatchConfirm').click();
+  await page.waitForFunction(()=>document.getElementById('warehouseShippingBatchConfirm')?.textContent==='重試未完成品項',null,{timeout:45000});
+  const otherShipmentIntent=calls.filter(row=>row.name==='shipV2WarehouseItem').at(-1).data;
+  assert.equal(otherShipmentIntent.warehouseId,fixture.warehouseIds[1]);assert.equal(otherShipmentIntent.quantity,5);
+  const otherShipped=await facts(fixture),newShipment=otherShipped.source.warehouseShipmentRecords.at(-1);
+  assert.equal(otherShipped.source.items[0].warehouseId,fixture.warehouseIds[0]);
+  assert.equal(otherShipped.source.items[0].warehouseShippedQty,9);assert.equal(otherShipped.source.items[0].reservedQty,3);assert.equal(otherShipped.source.items[0].shortageQty,0);assert.equal(otherShipped.source.items[0].dispatchPreparedQty,9);
+  assert.equal(otherShipped.inventory.onHand,fullyReceived.inventory.onHand-5);assert.equal(otherShipped.inventory.reserved,fullyReceived.inventory.reserved-5);assert.equal(otherShipped.inventory.incoming,0);
+  assert.deepEqual(otherShipped.stocks[0],fullyReceived.stocks[0]);assert.equal(otherShipped.stocks[1].onHand,fullyReceived.stocks[1].onHand-5);assert.equal(otherShipped.stocks[1].reserved,fullyReceived.stocks[1].reserved-5);
+  assert.deepEqual(otherShipped.targets,fullyReceived.targets);assert.deepEqual((await demandRef.get()).data(),lastDemand);
+  for(const field of ['deliveryRecords','returnRecords','returnRequests','deliveredQty','returnedQty','isDelivered'])assert.deepEqual(otherShipped.source[field],fullyReceived.source[field]);
+  require('../modules/fulfillment-core').validateShipmentMovement(newShipment,(await db.collection('inventoryMovements').doc(newShipment.movementId).get()).data(),{orderId:fixture.sourceId,itemId:'S',productKey:fixture.productKey});
+  await siteOpen(page,'warehouse');await openOtherWarehouseBatch();
+  assert.equal(await page.locator('[data-batch-qty="0"]').inputValue(),'5');
+  await page.locator('#warehouseShippingBatchConfirm').click();await page.locator('#warehouseLogisticsOverlay.active').waitFor({state:'hidden'});
+  assert.deepEqual(calls.filter(row=>row.name==='shipV2WarehouseItem').at(-1).data,otherShipmentIntent);
+  assert.deepEqual(await facts(fixture),otherShipped);assert.deepEqual((await demandRef.get()).data(),lastDemand);
+  assert.equal(otherShipped.source.warehouseShipmentRecords.length,3);
+  console.log('Full site '+width+'px: original other-warehouse row shipped its five held units after final receiving; successful reply lost, reload retained frozen warehouse/quantity/id and one debit, source warehouse and prior fulfillment unchanged.');
+
   console.log('Full site '+width+'px: seller restored five free units with seven shortages; lost-reply and stale-cancel retries are immutable.');
   for(const match of read('index.html').matchAll(/<script[^>]+src="([^"?]+)(?:\?[^\"]*)?"/g)){
    if(!match[1].startsWith('https:'))assert.ok(loaded.has('/'+match[1]),'original script loaded: '+match[1]);
@@ -1109,7 +1143,10 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
  }catch(error){
   console.log('Full site '+width+'px diagnostic:',JSON.stringify(await page.evaluate(()=>({role:typeof currentUserRole==='undefined'?'not-booted':currentUserRole,
    loginError:document.getElementById('loginError')?.textContent,feedback:document.getElementById('actionFeedback')?.textContent,
-   menu:document.querySelector('.nav-tabs')?.className,scrollTop:document.getElementById('appContainer')?.scrollTop}))),JSON.stringify(errors));
+   menu:document.querySelector('.nav-tabs')?.className,scrollTop:document.getElementById('appContainer')?.scrollTop,
+   shipping:document.getElementById('inventoryShippingBody')?.textContent,queueReady:orderWorkQueueReady,queueError:orderWorkQueueError,
+   locations:typeof v2ShipmentLocationContext==='undefined'?null:{context:v2ShipmentLocationContext,values:[...v2ShipmentLocationCache]},
+   shipmentOrders:orderWorkQueueCache.map(o=>({id:o.id,attempt:o.inventoryReservationAttemptId,items:normalizedOrderItems(o)})),warehouses:warehouseMasterCache}))),JSON.stringify(errors));
   throw error;
  }finally{await context.close();}
 });

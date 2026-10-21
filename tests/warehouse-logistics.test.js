@@ -406,3 +406,17 @@ test('business delivery is enabled only for main pickup or goods already mailed 
  assert.equal(core.businessDeliveryState({}, {warehouseId:'EXT',deliveryPlan:{mode:'CUSTOMER_SHIP'}},state,'MAIN').shippable,0);
  assert.equal(core.businessDeliveryState({}, {warehouseId:'EXT',fulfillmentType:'DIRECT_SHIP'},state,'MAIN'),state);
 });
+
+test('multi-warehouse batch checks one shared dispatch allowance before submitting any row',async()=>{
+ const f=batchUiFixture(),first=f.list[0],second=f.list[1];
+ first.located=true;first.key='O__A__MAIN';second.located=true;second.key='O__A__OTHER';
+ second.item={...first.item};second.warehouseId='OTHER';second.warehouse={id:'OTHER'};second.qty=5;
+ f.inputs[0].value='3';f.inputs[1].value='5';f.c.itemDispatchState=()=>({shippable:5});
+ f.c.clearWarehouseShippingSelection();f.c.setWarehouseShippingVisibleRows(f.list);f.c.selectVisibleWarehouseShipping(true);
+ await f.c.openWarehouseShippingBatch();f.node('warehouseShippingBatchDate').value='2026-10-21';
+ await f.c.confirmWarehouseShippingBatch(f.node('confirm'));
+ assert.equal(f.calls.length,0);assert.ok(f.feedback.some(([m])=>/合計超過/.test(m)));
+ f.inputs[1].value='2';await f.c.confirmWarehouseShippingBatch(f.node('confirm'));
+ assert.equal(f.calls.length,2);assert.equal(f.calls[0][1].expectedWarehouseId,'MAIN');assert.equal(f.calls[1][1].expectedWarehouseId,'OTHER');
+ assert.deepEqual(f.calls.map(row=>row[1].qty),[3,2]);
+});

@@ -182,3 +182,15 @@ test('download settings keep folder selection without the default-download reset
  assert.match(html,/configureDocumentDownloadFolder\('quote'\)/);
  assert.match(html,/configureDocumentDownloadFolder\('purchase'\)/);
 });
+
+
+test('background work queue refresh repaints shipping only after its location projection completes',async()=>{
+ const d=deferred(),query={where(){return this;},orderBy(){return this;}};let renders=0;
+ const c=context({currentUser:{uid:'U'},currentUserRole:'warehouse',BUSINESS_STATUS:{ACTIVE:'active'},ordersCache:[],
+  canAccessPage:()=>true,canViewAllData:()=>true,db:{collection:()=>query},readQueryInBatches:async()=>[{id:'O'}],
+  orderWorkCategories:()=>['dispatch'],loadV2WarehouseShipmentLocations:()=>d.promise,renderInventoryShipping(){renders++;},
+  document:{getElementById:id=>id==='inventory-system'?{classList:{contains:()=>true}}:null}});
+ vm.runInContext(section('const OPEN_ORDER_WORK_CATEGORIES =', '\nwindow.setOrderWorkFilter'),c);
+ const loading=c.loadOrderWorkQueue();await tick();assert.equal(renders,0);
+ d.resolve();await loading;assert.equal(renders,1);
+});

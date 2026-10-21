@@ -1452,6 +1452,7 @@ let sessionDataGeneration = 0;
 function resetSessionData() {
     sessionDataGeneration++;
     window.resetCustomerReturnReceiptView?.();
+    window.resetV2ShipmentLocations?.();
     window.closePurchaseOrderModal?.();
     permissionRulesReady=false; permissionRulesCheckedUid=''; permissionRulesCheckPromise=null;
     // 先清掉前一個視角的分頁狀態，避免非同步查詢完成前短暫顯示不屬於新視角的資料。
@@ -8397,6 +8398,67 @@ window.unmarkQuoteAsDeal = async function(quoteNo) {
         endActionButton(button,buttonState);
     }
 };
+// Read-only v2 shipment-location projection. The shipment Service remains authoritative.
+let v2ShipmentLocationCache=new Map(),v2ShipmentLocationGeneration=0,v2ShipmentLocationContext='';
+window.resetV2ShipmentLocations=function(){v2ShipmentLocationGeneration++;v2ShipmentLocationCache.clear();v2ShipmentLocationContext='';};
+function v2ShipmentSourceItem(order,item){
+    return order.items?.find(row=>row.itemId===item.itemId)||item;
+}
+function v2ShipmentLocationVersion(order,item){
+    item=v2ShipmentSourceItem(order,item);
+    return JSON.stringify([order.inventoryReservationAttemptId,item.productId,item.reservedQty,item.shortageQty,
+        item.dispatchPreparedQty,item.warehouseShippedQty]);
+}
+window.loadV2WarehouseShipmentLocations=async function(orders){
+    if(globalThis.YUSHIN_V2_SHIPMENT_EMULATOR!==true)return;
+    const uid=currentUser?.uid,role=currentUserRole,generation=++v2ShipmentLocationGeneration;
+    const scope=JSON.stringify([uid,role]);
+    if(!uid||!canReceiveInventoryCapability()||!canAccessPage('inventory'))return;
+    if(typeof APP_ENVIRONMENT==='undefined'||APP_ENVIRONMENT!=='emulator'
+        ||!['localhost','127.0.0.1'].includes(globalThis.location?.hostname)
+        ||firebase.auth().app?.options?.projectId!=='demo-yushin'||firebase.auth().currentUser?.uid!==uid)throw Error('多倉出貨位置僅限本機 demo-yushin。');
+    v2ShipmentLocationCache.clear();v2ShipmentLocationContext='';
+    const current=()=>generation===v2ShipmentLocationGeneration&&uid===currentUser?.uid&&role===currentUserRole;
+    const candidates=[];
+    for(const order of orders||[]){
+        if(normalizedOrderStatus(order)!=='normal'||orderInventorySyncIncomplete(order))continue;
+        for(const item of normalizedOrderItems(order)){
+            if((item.fulfillmentType||'WAREHOUSE')==='WAREHOUSE'
+                &&(item.deliveryPlan||order.shippingInstructions||{}).mode==='CUSTOMER_SHIP'
+                &&itemDispatchState(order,item).shippable>0)
+                candidates.push({order,item,id:order.id+'__'+item.itemId});
+        }
+    }
+    if(candidates.length>200)throw Error('本機多倉出貨試點一次最多核對 200 個品項。');
+    const next=new Map();
+    for(let start=0;start<candidates.length;start+=20){
+        await Promise.all(candidates.slice(start,start+20).map(async({order,item,id})=>{
+            const snap=await db.collection('inventoryReservations').doc(id).get({source:'server'});
+            if(!current())return;
+            if(!snap.exists)throw Error('出貨品項缺少預留來源，請重新整理。');
+            const ledger=snap.data(),sourceItem=v2ShipmentSourceItem(order,item);
+            if(ledger.orderId!==order.id||ledger.itemId!==item.itemId||ledger.productKey!==inventoryProductKey(item)
+                ||ledger.ownerUid!==order.ownerUid||ledger.salesCode!==order.salesCode
+                ||ledger.quantity!==sourceItem.reservedQty||ledger.shortageQty!==sourceItem.shortageQty)
+                throw Error('出貨位置與訂單預留不一致，請重新整理。');
+            if(ledger.locationSchemaVersion===2&&ledger.status!=='active')throw Error('多倉出貨預留不是有效狀態。');
+            const locations=ledger.locationSchemaVersion===2?globalThis.YushinReservation.reservationLocations(ledger):undefined;
+            next.set(id,{version:v2ShipmentLocationVersion(order,item),locations});
+        }));
+        if(!current())return;
+    }
+    if(current()){v2ShipmentLocationCache=next;v2ShipmentLocationContext=scope;}
+};
+window.v2WarehouseShipmentLocations=function(order,item){
+    if(globalThis.YUSHIN_V2_SHIPMENT_EMULATOR!==true
+        ||(item.deliveryPlan||order.shippingInstructions||{}).mode!=='CUSTOMER_SHIP')return undefined;
+    if(v2ShipmentLocationContext!==JSON.stringify([currentUser?.uid,currentUserRole]))return null;
+    const cached=v2ShipmentLocationCache.get(order.id+'__'+item.itemId);
+    if(!cached||cached.version!==v2ShipmentLocationVersion(order,item))return null;
+    return cached.locations;
+};
+// End v2 shipment location projection.
+
 /* =========================================================
    訂單管理系統
    ========================================================= */
@@ -11545,6 +11607,8 @@ async function loadOrderWorkQueue(force = false) {
             records.concat(finished).forEach(row=>merged.set(row.id,row));
             finishedIds.filter(id=>!finished.some(row=>row.id===id)).forEach(id=>merged.delete(id));
             ordersCache = [...merged.values()];
+            await window.loadV2WarehouseShipmentLocations?.(orderWorkQueueCache);
+            if (generation !== orderWorkQueueGeneration || uid !== currentUser?.uid || role !== currentUserRole) return;
             orderWorkQueueReady = true;
             orderWorkQueueLoadedAt = Date.now(); orderWorkQueueLoadedScope = scope;
         } catch (err) {
@@ -11556,6 +11620,7 @@ async function loadOrderWorkQueue(force = false) {
             if (generation === orderWorkQueueGeneration && uid === currentUser?.uid && role === currentUserRole) {
                 if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
                 if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
+                if (document.getElementById('inventory-system')?.classList.contains('active')) window.renderInventoryShipping?.();
             }
         }
     })();
