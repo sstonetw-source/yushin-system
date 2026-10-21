@@ -126,3 +126,12 @@
 本機建置一致性與語法檢查已通過；完整真 Auth／Chrome／Emulator／Rules 結果以本批 PR 最新 CI 為準。未部署 Firebase，未修改正式資料。
 
 首輪整站驗收發現：原 openPartialDeliveryForm 在 renderDeliveryModal 已回填原待確認意圖後，又清空 deliveryQty。現於本機 v2 入口重新呼叫同一 renderer 恢復原數量／來源，不改寫 intent、不另造交易。既有 desktop／phone delivery smoke 同步改走原開表單函式，覆蓋此重整恢復回歸；修 src 後已重建 app.js 並更新靜態版本。修正後全套 CI 仍待執行，不將首輪失敗當通過。
+
+
+### 同 PO 送達後原倉退貨的真 Browser SDK 傳輸驗收（2026-10-21，待 CI）
+
+接續 #207 的同一張 PO、來源訂單、兩次到貨、分批出貨及三次送達。原 v2 退貨畫面尚未串接，本批明確使用原站已登入業務的 Firebase Browser SDK 呼叫既有隔離 previewV2CustomerReturn／receiveV2CustomerReturn；這是傳輸與資料一致性續段，不能稱為原退貨按鈕或完整退貨 UI 驗收。
+
+測試從第二筆出貨明確選取原 lot，先唯讀追溯，再分兩次各退一件 CLOSE；第一筆後端提交後丟棄真正 HTTP 回覆，刷新原網站後由測試保留原 intent 重送。驗證同 ID 不重複入庫、改意圖／錯倉／超量拒絕，原 lot 與實貨合計只回補二件；另一倉、七筆目標預留、原供應／需求／收貨憑證、成本、原出貨及簽收不變。來源預留仍五、缺口三，有效交付二、結案退貨二、補送零、未交八，不自動建立新單。測試持有 intent 不代表原 UI 已具備退貨刷新恢復。
+
+本機既有 Node 回歸 1,628 項通過，零失敗／略過；app 與 Functions 生成一致性及語法檢查通過。新增真 Auth／Chrome／Emulator 續段須以本批 CI 實際執行結果為準；通過前不得合併。沒有新增 writer、Collection、Rules、Index、Listener 或正式 Functions 匯出。原退貨畫面接線、多品項收貨、其他倉續出、剩餘採購及 Preview／正式部署仍未完成。

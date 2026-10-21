@@ -261,9 +261,9 @@ async function siteOrderAction(page,fixture,label){
  const row=page.locator('#ordersBody > tr').filter({hasText:fixture.sourceId});await row.waitFor({state:'visible'});
  await row.locator('.order-more-menu > summary').click();await row.locator('button').filter({hasText:label}).click();
 }
-for(const width of [1280,390])test('full site '+width+'px original PO receipt split shipment and customer acknowledgements',{timeout:360000},async()=>{
+for(const width of [1280,390])test('full site '+width+'px original PO receipt shipment acknowledgements and same-source return transport',{timeout:360000},async()=>{
  const fixture=await seed(width,'site'),context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
- const errors=[],external=[],calls=[],loaded=new Set();let loseCancel=true,loseRecovery=true,loseRestore=true,losePurchase=true,loseReceipt=true,loseDispatch=true,loseShipment=true,loseDelivery=true;
+ const errors=[],external=[],calls=[],loaded=new Set();let loseCancel=true,loseRecovery=true,loseRestore=true,losePurchase=true,loseReceipt=true,loseDispatch=true,loseShipment=true,loseDelivery=true,loseReturn=true;
  await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_V2_LIFECYCLE_EMULATOR=true;window.YUSHIN_V2_RECOVERY_EMULATOR=true;window.YUSHIN_FORMAL_PURCHASE_EMULATOR=true;window.YUSHIN_V2_RECEIVING_EMULATOR=true;window.YUSHIN_V2_DISPATCH_EMULATOR=true;window.YUSHIN_V2_SHIPMENT_EMULATOR=true;window.YUSHIN_V2_DELIVERY_EMULATOR=true;});
  page.on('pageerror',error=>errors.push(error.message));
  page.on('dialog',dialog=>dialog.type()==='confirm'?dialog.accept():dialog.dismiss());
@@ -277,7 +277,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sp
    assert.equal(data.actorUid,undefined);assert.equal(data.actorRole,undefined);calls.push({name,data});
    const shouldLose=name==='setV2OrderLifecycle'
     ?(data.nextStatus==='normal'?loseRestore:loseCancel)
-    :(name==='commitV2FormalPurchase'?losePurchase:(name==='receiveV2Supply'?loseReceipt:(name==='prepareV2OrderDispatch'?loseDispatch:(name==='shipV2WarehouseItem'?loseShipment:(name==='confirmV2ShipmentDelivery'?loseDelivery:(name==='resumeV2FreeStockRecovery'&&loseRecovery))))));
+    :(name==='commitV2FormalPurchase'?losePurchase:(name==='receiveV2Supply'?loseReceipt:(name==='prepareV2OrderDispatch'?loseDispatch:(name==='shipV2WarehouseItem'?loseShipment:(name==='confirmV2ShipmentDelivery'?loseDelivery:(name==='receiveV2CustomerReturn'?loseReturn:(name==='resumeV2FreeStockRecovery'&&loseRecovery)))))));
    if(shouldLose){
     const reply=await route.fetch();assert.equal(reply.status(),200);
     if(name==='setV2OrderLifecycle'){
@@ -287,6 +287,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sp
     else if(name==='prepareV2OrderDispatch')loseDispatch=false;
     else if(name==='shipV2WarehouseItem')loseShipment=false;
     else if(name==='confirmV2ShipmentDelivery')loseDelivery=false;
+    else if(name==='receiveV2CustomerReturn')loseReturn=false;
     else loseRecovery=false;
     await route.abort('failed');return;
    }
@@ -703,6 +704,74 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sp
   assert.equal(deliveryProgress.confirmedQty,4);assert.equal(deliveryProgress.pendingDeliveryQty,0);assert.equal(deliveryProgress.isDelivered,false);
   assert.equal(acknowledgedAllShipments.source.deliveryHistory.filter(row=>row.source==='shipment_confirmation').length,3);
   console.log('Full site '+width+'px: original owner acknowledged first shipment one plus one and second shipment two; first/final lost replies reloaded with identical intents, three confirmations total and zero stock/reservation/lot/movement changes; twelve-unit order remains incomplete.');
+
+  // The original v2 return form is NOT connected. This is explicitly a
+  // browser-SDK transport/provenance continuation, not an original-UI return
+  // acceptance. Use the same real signed-in owner and the actual second debit.
+  const returnShipment=shipmentRecords[1],returnLot=returnShipment.lotAllocations[0].lotId;
+  const trace={orderId:fixture.sourceId,itemId:'S',shipmentId:returnShipment.id,
+   syncAttemptId:acknowledgedAllShipments.source.inventoryReservationAttemptId,selections:[{lotId:returnLot,qty:1}]};
+  const returnIntent={...trace,operationId:'same_po_return_'+width+'_first',warehouseId:returnShipment.warehouseId,
+   date:'2026-10-21',reason:'訂錯貨退回原倉，另單訂購',condition:'RESTOCKABLE',settlement:'CLOSE'};
+  async function returnTransport(name,data){
+   return page.evaluate(async({name,data})=>{
+    try{return {result:(await firebase.app().functions('asia-east1').httpsCallable(name)(data)).data};}
+    catch(error){return {error:error.code};}
+   },{name,data});
+  }
+  const beforeReturn=await stockFacts();
+  const preview=await returnTransport('previewV2CustomerReturn',trace);
+  assert.equal(preview.result.canCommit,false);assert.equal(preview.result.returnQty,1);
+  assert.equal(preview.result.warehouseId,returnShipment.warehouseId);assert.deepEqual(await stockFacts(),beforeReturn);
+  // Reject source/quantity tampering before the first real receipt, atomically.
+  loseReturn=false;
+  for(const invalid of [{...returnIntent,warehouseId:fixture.warehouseIds[1]},
+    {...returnIntent,selections:[{lotId:returnLot,qty:3}]}]){
+   assert.ok((await returnTransport('receiveV2CustomerReturn',invalid)).error);assert.deepEqual(await stockFacts(),beforeReturn);
+   assert.deepEqual((await facts(fixture)).source,acknowledgedAllShipments.source);
+  }
+  loseReturn=true;
+  assert.ok((await returnTransport('receiveV2CustomerReturn',returnIntent)).error,'real committed HTTP reply is lost');
+  const firstReturn=await facts(fixture),firstReturnFacts=await stockFacts();
+  assert.equal(firstReturn.source.returnRecords.length,1);assert.equal(firstReturn.source.returnedQty,1);
+  await siteOpen(page,'sales');
+  assert.equal((await returnTransport('receiveV2CustomerReturn',returnIntent)).result.status,'already-applied');
+  assert.deepEqual(await facts(fixture),firstReturn);assert.deepEqual(await stockFacts(),firstReturnFacts);
+  assert.ok((await returnTransport('receiveV2CustomerReturn',{...returnIntent,reason:'changed intent'})).error);
+  assert.deepEqual(await stockFacts(),firstReturnFacts);
+  const secondReturnIntent={...returnIntent,operationId:'same_po_return_'+width+'_second'};
+  assert.equal((await returnTransport('receiveV2CustomerReturn',secondReturnIntent)).result.status,'applied');
+  const returned=await facts(fixture),returnedFacts=await stockFacts();
+  assert.equal(returned.source.returnRecords.length,2);assert.equal(returned.source.returnedQty,2);
+  assert.equal(returned.source.items[0].returnedQty,2);assert.equal(returned.source.items[0].reservedQty,5);
+  assert.equal(returned.source.items[0].shortageQty,3);assert.equal(returned.source.deliveredQty,4);assert.equal(returned.source.isDelivered,false);
+  assert.deepEqual(returned.source.deliveryRecords,acknowledgedAllShipments.source.deliveryRecords);
+  assert.deepEqual(returned.source.warehouseShipmentRecords,shipmentRecords);
+  for(const field of ['onHand','reserved','incoming'])assert.equal(returned.inventory[field],shipped.inventory[field]+(field==='onHand'?2:0));
+  for(const field of ['onHand','reserved'])assert.equal(returned.stocks[0][field],shipped.stocks[0][field]+(field==='onHand'?2:0));
+  assert.deepEqual(returned.stocks[1],shipped.stocks[1]);assert.deepEqual(returned.targets,shipped.targets);
+  for(const lot of shipped.lots){
+   const actual=returned.lots.find(row=>row.id===lot.id);assert.ok(actual);
+   assert.equal(actual.remainingQty,lot.remainingQty+(lot.id===returnLot?2:0));
+   if(lot.id!==returnLot)assert.deepEqual(actual,lot);
+  }
+  assert.equal(returned.lots.length,shipped.lots.length);
+  for(const field of ['inventoryLotCosts','supply','demand','receipts'])assert.deepEqual(returnedFacts[field],beforeReturn[field]);
+  const ledgerBalances=rows=>rows.map(({updatedAt,...row})=>row);
+  assert.deepEqual(ledgerBalances(returnedFacts.inventoryReservations),ledgerBalances(beforeReturn.inventoryReservations));
+  const priorMovementIds=new Set(beforeReturn.inventoryMovements.map(row=>row.id));
+  assert.deepEqual(returnedFacts.inventoryMovements.filter(row=>priorMovementIds.has(row.id)),beforeReturn.inventoryMovements);
+  const returnMovements=returnedFacts.inventoryMovements.filter(row=>!priorMovementIds.has(row.id));assert.equal(returnMovements.length,2);
+  for(const proof of returnMovements){assert.equal(proof.action,'location_customer_return');assert.equal(proof.qty,1);assert.equal(proof.reservedDelta,0);assert.equal(proof.actorUid,fixture.accounts.sales.uid);}
+  const returnProgress=require('../modules/fulfillment-core').projectShipmentReturns({orderId:fixture.sourceId,itemId:'S',productKey:fixture.productKey,orderedQty:12,
+   shipments:shipmentRecords,deliveries:returned.source.deliveryRecords,returns:returned.source.returnRecords});
+  assert.equal(returnProgress.closedQty,2);assert.equal(returnProgress.effectiveDeliveredQty,2);assert.equal(returnProgress.replacementQty,0);assert.equal(returnProgress.outstandingQty,8);
+  const allReturned=await stockFacts();
+  assert.ok((await returnTransport('receiveV2CustomerReturn',{...returnIntent,operationId:'same_po_return_'+width+'_excess'})).error);
+  assert.deepEqual(await stockFacts(),allReturned);assert.deepEqual(await facts(fixture),returned);
+  const returnCalls=calls.filter(row=>row.name==='receiveV2CustomerReturn'&&row.data.operationId===returnIntent.operationId&&row.data.reason===returnIntent.reason&&row.data.warehouseId===returnIntent.warehouseId&&row.data.selections[0].qty===1);
+  assert.equal(returnCalls.length,2);assert.deepEqual(returnCalls[0].data,returnCalls[1].data);
+  console.log('Full site '+width+'px: same PO/shipment browser-SDK return transport restored two explicitly selected units to original lot, CLOSE/no replacement, first lost reply retried identically; no duplicate credit, other holds/incoming/cost/receipts unchanged. Original return UI remains unconnected.');
 
   console.log('Full site '+width+'px: seller restored five free units with seven shortages; lost-reply and stale-cancel retries are immutable.');
   for(const match of read('index.html').matchAll(/<script[^>]+src="([^"?]+)(?:\?[^\"]*)?"/g)){
