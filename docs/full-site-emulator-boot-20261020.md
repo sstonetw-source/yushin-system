@@ -175,3 +175,11 @@
 從原採購視窗填入剩餘 3 件、供應商、日期與成本，點原建立按鈕；僅以既有方式隔離 PDF 實體輸出，採購意圖仍經真 Auth Callable → 唯一 `commitV2FormalPurchase` → 原在途註冊。查核新增單獨 PO／Supply、原需求待採購 3→0／待收 0→3、公司及來源倉 incoming 0→3；已收／實貨／批次、已出貨／已送達／CLOSE 退貨、其他倉／七筆目標預留與原 PO 兩份收貨憑證完全不變。另重送同一 ID、修改原意圖和新建超額 PO，驗證權威去重與拒絕。
 
 僅新增原整站 Emulator 驗收案例及本段紀錄；**不是新採購 writer**，未修改 Rules、正式 Functions export、Collection、欄位、Index 或 Listener，亦未部署 Firebase。新增測試須以本批最新完整 CI 判定；未通過不得合併。這仍不代表第二張 PO 已收貨，因隔離 `receiveV2Supply` 對已打單／履約來源仍有明確限制。下一段需先安全完成該既有 Receiving Service 的履約後收貨驗證，再驗收他倉續出、多品項、Preview／正式啟用，不得為了測試暫時關掉限制。
+
+## 採購在途責任邊界（2026-10-21 驗收發現，尚未實作）
+
+- 現行正式採購後端試點 `functions/formal-purchase-commit-service.js` 只原子提交採購單、供應承諾、需求及來源訂單；供應紀錄初始 `incomingRegisteredQty=0`。這是明確的試點邊界，不應把 PDF 完成視為庫存登記完成。
+- 既有 `src/services/supply-order.js` 的 `registerPurchaseIncoming` 是有冪等 checkpoint 的在途登記權威寫入者，且有 `tests/purchase-incoming-checkpoint.test.js` 驗證失敗續傳、重試、取消及身份變更。正式採購 UI 仍有前端交易路徑；後端試點只在本機 Emulator 啟用，不能把試點直接宣稱已在正式環境上線。
+- 建議在後續獨立 PR 將「正式採購提交 + 在途登記」移至共同後端 Service，重用現有 Receiving/Inventory Core；交易內同時讀取、驗證並更新公司庫存與倉庫庫存、供應 checkpoint 及必要異動紀錄，避免新增第二套數量計算。多品項、跨倉及 Firestore transaction 讀取順序須先評估。
+- 必須先以 Emulator 驗證：同單號重試、不同意圖同單號拒絕、並發超額採購、部分收貨、取消、重複同步、身份切換、在途不得當現貨、PDF 失敗不影響已提交交易；CI 全部通過才考慮合併，正式部署另行驗收。
+- PR #213 的第二張採購單 UI 驗收仍有 PDF 逾時與在途檢查未通過；不可只修改預期值或移除斷言以假裝流程已驗收。
