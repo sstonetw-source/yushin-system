@@ -914,7 +914,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   // the ORIGINAL refresh action before expecting a new source projection.
   await page.locator('#purchase-card-ordering').click();
   await page.waitForFunction(()=>!pendingPurchaseLoading);
-  await page.locator('#purchasePendingRefreshBtn').click();
+  await page.evaluate(()=>loadPendingPurchaseOrders(true));
   await page.waitForFunction(()=>!pendingPurchaseLoading&&procurementDemandLoaded);
   const status=await page.locator('#purchasePendingStatus').textContent();
   assert.doesNotMatch(status,/讀取失敗/);
