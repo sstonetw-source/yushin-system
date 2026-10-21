@@ -765,7 +765,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   for(const proof of returnMovements){assert.equal(proof.action,'location_customer_return');assert.equal(proof.qty,1);assert.equal(proof.reservedDelta,0);assert.equal(proof.actorUid,fixture.accounts.sales.uid);}
   const returnProgress=require('../modules/fulfillment-core').projectShipmentReturns({orderId:fixture.sourceId,itemId:'S',productKey:fixture.productKey,orderedQty:12,
    shipments:shipmentRecords,deliveries:returned.source.deliveryRecords,returns:returned.source.returnRecords});
-  assert.equal(returnProgress.closedQty,2);assert.equal(returnProgress.effectiveDeliveredQty,2);assert.equal(returnProgress.replacementQty,0);assert.equal(returnProgress.outstandingQty,8);
+  assert.equal(returnProgress.closedQty,2);assert.equal(returnProgress.effectiveDeliveredQty,4,'CLOSE remains commercially fulfilled without replacement');assert.equal(returnProgress.replacementQty,0);assert.equal(returnProgress.outstandingQty,8);
   const allReturned=await stockFacts();
   assert.ok((await returnTransport('receiveV2CustomerReturn',{...returnIntent,operationId:'same_po_return_'+width+'_excess'})).error);
   assert.deepEqual(await stockFacts(),allReturned);assert.deepEqual(await facts(fixture),returned);
