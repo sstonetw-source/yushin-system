@@ -707,3 +707,8 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 ### 採購讀取的 v2 退貨數量邊界（2026-10-21，待本批 CI）
 
 normalizedOrderItems 的 returnedQty 為既有顯示／補送用途，排除 CLOSE；v2 shipment context 則驗證全部實收退貨。採購讀取由原 itemDispatchState 提供累計實收值，傳入既有 Workflow／Fulfillment Core 核對，不新增事件、資料投影或第二套數量公式。修正避免一筆合法 CLOSE 退貨使其他訂單的採購清單整頁失敗。僅隔離 v2 試點驗收，原退貨 UI 與 Preview／正式部署仍未完成。
+
+
+### 退貨申請與 v2 實收入口（2026-10-21，待 CI）
+
+原退貨表單／撤回仍由 customer-return Service 的既有 Client 交易及 Rules 執行，不為串接新增另一套申請 Service／Callable。customerReturnNeedsLocationReceipt 僅辨識具有分倉實體出貨事件的來源；該來源禁止走一般退貨實收／待檢轉庫存，防止以 legacy writer 改動 v2 實貨或遺失原倉憑證。原庫存頁待收列顯示尚未開放的實收狀態。v2 實收須後續在唯一 commitLocationReturn 交易內整合申請及物流角色，不能因現有 Callable 可由本人業務操作就改變公司實收分工。

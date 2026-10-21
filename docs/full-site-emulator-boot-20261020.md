@@ -138,3 +138,14 @@
 
 
 首輪 CI 39523173349：桌機同來源退貨傳輸通過，但後續手機採購清單因先前已退貨訂單而失敗，不能記為完整驗收。原因是 normalizedOrderItems 為既有補送顯示排除 CLOSE，procurementDemandForOrderItem 卻把該快照的 returnedQty=0 當成 v2 累計實物退貨，與原事件二件不一致。修正為有倉庫出貨來源時，傳入原 itemDispatchState 的累計退貨數量，仍由同一 Workflow／Fulfillment Core 查核權威事件，不改公式／權限／writer。新增真實 normalize→dispatch→procurement 執行式回歸，保留錯累計值與未支援 REPLACE 拒絕；重新產生 app.js 並更新快取版本。修正後本機 Node／完整 CI 結果以最新 PR 為準。
+
+
+### 原退貨申請／撤回與待收清單（2026-10-21，待本批 CI）
+
+延續 #208 同來源已送達四件、CLOSE 實收二件。1280／390px 原訂單「退貨」選單及原表單各新增兩筆一件申請，沿既有 commitCustomerReturnRequest → 原 runRoleTransaction → 真 Auth／Client Rules，沒有新 Callable 或申請 writer。重新載入後保留兩份待收申請；切換原倉管登入，經原倉庫「收貨→退貨收貨」看到待收申請，再由原業務撤回兩筆，所有實貨／預留／lot／原出貨簽收及既有實收二件均不變。
+
+新增真 Client SDK／Rules 測試涵蓋五角色、前端偽造角色、非本人、停用、同 ID 並行、不同 ID 競爭剩餘額度、改意圖拒絕與撤回後原 ID 重送。原 UI 申請使用現有 Client Service，這段沒有以 Callable 替代，也不把申請視為入庫。未模擬申請的 HTTP 回覆遺失或宣稱跨重新整理恢復未確認意圖；原 DOM operationId 的限制仍待續。
+
+目前 v2 隔離 commitLocationReturn 只有管理員／本人業務／工程師履約權限，尚未接原「管理員／採購／倉管」實收角色與 returnRequests 實收回填。故本批不把它直接接倉庫按鈕，也不增加第二個 stock writer。customerReturn Service 與原待收列封鎖有 warehouseShipmentRecords 的來源走 legacy SALEABLE／INSPECTION／DAMAGED 實收及待檢轉庫存；申請保留待收，legacy 正常流程不變，已確認原 receipt 的相同重送仍可核對。需另案在原 v2 writer 內整合申請證據、物流角色與原子實收，再解除此限制。
+
+本機 Node／建置同步通過情況與完整真 Auth／Chrome／Rules 結果，以本批 PR 最新 CI 為準。仍限 demo-yushin；未新增 Collection／Rules／Index／Listener、未啟用 Preview 或部署 Firebase。

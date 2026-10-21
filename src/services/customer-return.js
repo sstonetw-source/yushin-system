@@ -1,5 +1,12 @@
 // Customer cancellation/return writers shared by the existing UI actions.
 // No prompts, DOM, query rendering or second inventory implementation.
+function customerReturnNeedsLocationReceipt(order) {
+    return Array.isArray(order?.warehouseShipmentRecords) && order.warehouseShipmentRecords.length > 0;
+}
+function assertLegacyCustomerReturnSource(order) {
+    if(customerReturnNeedsLocationReceipt(order))
+        throw new Error('此出貨來源的退貨收貨尚未開放，請保留待收申請；不能使用一般退貨入庫。');
+}
 function customerReturnPendingQty(order, itemId, excludeId='') {
     return (order.returnRequests||[]).filter(r=>r.itemId===itemId && r.id!==excludeId && r.status==='PENDING')
         .reduce((sum,r)=>sum+Math.max(0,Number(r.qty)-Number(r.receivedQty||0)),0);
@@ -90,6 +97,7 @@ async function commitCancelledPurchaseKeepStock({supplyId,warehouseId,expectedDi
     assertCurrent();return saved;
 }
 async function postCustomerReturnStock(tx,order,item,qty,receiptId,warehouseId){
+    assertLegacyCustomerReturnSource(order);
     const itemDeliveries=savedDeliveryRecords(order).filter(r=>r.itemId===item.itemId||(!r.itemId&&order.items.length===1));
     const itemReturns=savedReturnRecords(order).filter(r=>r.itemId===item.itemId||(!r.itemId&&order.items.length===1));
     if((item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'){
@@ -132,7 +140,9 @@ async function commitCustomerReturnReceipt({orderId,requestId,receiptId,qty,qual
             return;
         }
         if(!orderSnap.exists)throw new Error('來源訂單已不存在。');
-        const order={id:orderId,...orderSnap.data()},requests=[...(order.returnRequests||[])],index=requests.findIndex(r=>r.id===requestId);
+        const order={id:orderId,...orderSnap.data()};
+        assertLegacyCustomerReturnSource(order);
+        const requests=[...(order.returnRequests||[])],index=requests.findIndex(r=>r.id===requestId);
         if(index<0||requests[index].status!=='PENDING')throw new Error('退貨申請已撤回或完成。');
         const request=requests[index],remaining=Number(request.qty)-Number(request.receivedQty||0);
         if(!Number.isFinite(qty)||qty<=0||qty>remaining+1e-9)throw new Error(`實收數量不可超過 ${remaining}。`);
@@ -167,7 +177,9 @@ async function commitCustomerReturnHoldRelease(id){
         const receiptRef=db.collection('customerReturnReceipts').doc(id),snap=await tx.get(receiptRef);
         if(!snap.exists)throw new Error('找不到退貨收貨紀錄。');const receipt=snap.data();if(receipt.disposition!=='HOLD')return;
         const orderRef=db.collection('orders').doc(receipt.orderId),orderSnap=await tx.get(orderRef);if(!orderSnap.exists)throw new Error('原訂單已不存在。');
-        const order={id:receipt.orderId,...orderSnap.data()},item=normalizedOrderItems(order).find(i=>i.itemId===receipt.itemId);
+        const order={id:receipt.orderId,...orderSnap.data()};
+        assertLegacyCustomerReturnSource(order);
+        const item=normalizedOrderItems(order).find(i=>i.itemId===receipt.itemId);
         const record=savedReturnRecords(order).find(r=>r.id===id);if(!item||!record)throw new Error('找不到原退貨品項或紀錄。');
         await assertActiveReturnWarehouse(tx,receipt.warehouseId);
         if((item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'&&item.warehouseId&&item.warehouseId!==receipt.warehouseId)

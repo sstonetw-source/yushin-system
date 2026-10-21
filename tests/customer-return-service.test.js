@@ -84,3 +84,19 @@ test('the three extracted writers preserve atomic rollback and uncertain request
   await assert.rejects(run(),/rollback/);assert.equal(JSON.stringify([...f.docs]),before,action);}
  const f=requestFixture();f.c.lose=true;await assert.rejects(f.request(),/reply lost/);const before=JSON.stringify([...f.docs]);await f.request();assert.equal(JSON.stringify([...f.docs]),before);
 });
+
+
+test('v2 physical shipment requests cannot enter legacy SALEABLE INSPECTION or DAMAGED receipt writers',async()=>{
+ for(const quality of ['SALEABLE','INSPECTION','DAMAGED']){
+  const f=requestFixture();await f.request();f.c.canReceiveInventoryCapability=()=>true;
+  f.docs.get('orders/O').warehouseShipmentRecords=[{id:'v2-source',sourceType:'WAREHOUSE_CUSTOMER_SHIPMENT'}];
+  const before=JSON.stringify([...f.docs]);
+  await assert.rejects(f.c.commitCustomerReturnReceipt({orderId:'O',requestId:'Q',receiptId:'R',qty:1,quality,warehouseId:'A'}),/退貨收貨尚未開放/);
+  assert.equal(JSON.stringify([...f.docs]),before);
+ }
+});
+test('v2 HOLD release and direct legacy return posting reject before any stock writes',async()=>{
+ const f=fixture();const order=f.docs.get('orders/O');order.warehouseShipmentRecords=[{id:'v2-source'}];
+ const before=structuredClone([...f.docs]);await assert.rejects(f.c.commitCustomerReturnHoldRelease('R'),/退貨收貨尚未開放/);assert.deepEqual([...f.docs],before);
+ let writes=0;await assert.rejects(f.c.postCustomerReturnStock({set(){writes++;},update(){writes++;}},order,order.items[0],1,'R','A'),/退貨收貨尚未開放/);assert.equal(writes,0);
+});

@@ -324,3 +324,6 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 
 
 - 採購 v2 出貨來源的退貨量必須沿原 itemDispatchState 的累計實收退貨快照進入 Workflow，不能使用 normalizedOrderItems 為補送顯示排除 CLOSE 後的 returnedQty。回歸須實際執行 normalize→dispatch→procurement，不能只 stub dispatch 且傳未正規化品項；保持 Core 對事件／投影一致性及未支援 REPLACE 的拒絕，並保留不同訂單共存的整站測試。
+
+
+- 原退貨申請 UI 驗收須走原選單／表單／Client Service／真 Rules，並在角色切換與重載後核對待收清單、撤回及實貨零變更。v2 原實收尚未整合申請與物流角色前，customerReturn Service 的 SALEABLE／INSPECTION／DAMAGED 及 HOLD 轉庫存不得寫入該來源。不可只在頁面隱藏按鈕；原 receipt 已提交的冪等核對保留。下一階段必須沿唯一 commitLocationReturn 整合，不能另開入庫 writer 或直接以業務 token 假扮倉管。

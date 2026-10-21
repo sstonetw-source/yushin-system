@@ -2,6 +2,7 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const code=fs.readFileSync('modules/customer-cancellations.js','utf8'),app=fs.readFileSync('app.js','utf8');
 const inventory=require('../modules/inventory-core');
 const service=fs.readFileSync('src/services/customer-return.js','utf8');
+const guards=service.slice(service.indexOf('function customerReturnNeedsLocationReceipt('),service.indexOf('function customerReturnPendingQty('));
 const start=service.indexOf('async function assertActiveReturnWarehouse('),end=service.indexOf('async function commitCustomerReturnHoldRelease(',start);
 function fixture(){
  const order={items:[{itemId:'I1',qty:5,fulfillmentType:'WAREHOUSE',warehouseId:'W1'}],ownerUid:'S1',salesCode:'S01',deliveredQty:5,returnRequests:[{id:'Q1',itemId:'I1',qty:3,receivedQty:0,status:'PENDING',reason:'test'}],returnRecords:[],deliveryRecords:[{itemId:'I1',qty:5,lotAllocations:[{lotId:'L1',qty:5}]}]};
@@ -13,7 +14,7 @@ function fixture(){
   savedDeliveryRecords:o=>o.deliveryRecords,savedReturnRecords:o=>o.returnRecords,YushinInventory:inventory,
   postCustomerReturnStock:async(_tx,_o,_i,qty)=>{stock+=qty;return {lotAllocations:[{lotId:'L1',qty}],newReservedQty:0};},
   currentUser:{uid:'receiver'},deliveryActor:()=> 'Receiver',localDateString:()=> '2026-10-06',orderWorkIndexFields:()=>({workCategories:['complete']})
- });vm.runInContext(service.slice(start,end),c);return {c,docs,stock:()=>stock};
+ });vm.runInContext(guards+service.slice(start,end),c);return {c,docs,stock:()=>stock};
 }
 test('request quantity includes pending requests, excluding withdrawn and already received quantities',()=>{
  const start=service.indexOf('function customerReturnPendingQty('),end=service.indexOf('\nfunction customerReturnActorContext',start),c=vm.createContext({});vm.runInContext(service.slice(start,end),c);
@@ -101,7 +102,7 @@ test('receive action locks before warehouse loading and cannot double submit on 
   refreshAffectedOrderCaches:async()=>{},loadCustomerReturnQueue:async()=>{},
   markMainPageDirty:()=>{},showActionFeedback:()=>{},actionFailureMessage:(_a,e)=>e.message
  });
- vm.runInContext(code.slice(start,end),c);
+ vm.runInContext(guards+code.slice(start,end),c);
  const first=c.window.receiveCustomerReturn('O1','Q1',button);
  assert.equal(button.disabled,true);
  const second=c.window.receiveCustomerReturn('O1','Q1',button);

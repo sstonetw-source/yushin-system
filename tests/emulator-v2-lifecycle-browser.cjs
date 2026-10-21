@@ -781,6 +781,60 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   assert.deepEqual(await stockFacts(),allReturned);assert.deepEqual(await facts(fixture),returned);
   console.log('Full site '+width+'px: original purchasing list still renders the returned source with three units to procure; reopening it is read-only.');
 
+  // Request/withdrawal use their ORIGINAL client Service and real Rules.
+  // A request is not a physical receipt and must not credit any stock.
+  await siteLogout(page);await siteLogin(page,fixture.accounts.sales,'sales');
+  async function openReturnRequest(){
+   await siteOrderAction(page,fixture,'退貨');
+   await page.locator('#returnFormPanel').waitFor({state:'visible'});
+  }
+  const priorRequests=returned.source.returnRequests||[],requestIds=[];
+  for(let n=0;n<2;n++){
+   if(n===0)await openReturnRequest();else await page.locator('#openReturnFormBtn').click();
+   await page.locator('#returnDate').fill('2026-10-21');await page.locator('#returnQty').fill('1');
+   await page.locator('#returnReason').fill('待倉庫實收的退貨申請 '+n);
+   await page.locator('#returnSaveBtn').click();
+   await page.waitForFunction(id=>!customerReturnActionsPending.has(id)&&document.getElementById('returnRequestsSummary')?.textContent.includes('退貨待收貨'),fixture.sourceId);
+   const now=await facts(fixture);assert.equal(now.source.returnRequests.length,priorRequests.length+n+1);
+   const request=now.source.returnRequests.at(-1);requestIds.push(request.id);
+   assert.equal(request.receivedQty,0);assert.equal(request.status,'PENDING');assert.equal(request.createdByUid,fixture.accounts.sales.uid);
+   assert.equal(now.source.returnPending,true);assert.deepEqual(now.source.returnRecords,returned.source.returnRecords);
+   assert.deepEqual(await stockFacts(),allReturned);
+  }
+  assert.equal(await page.locator('#openReturnFormBtn').isHidden(),true,'all remaining delivered units are pending return');
+  await siteOpen(page,'sales');await siteOrderAction(page,fixture,'退貨');
+  await page.locator('#orderProgressTab-returns').click();
+  await page.locator('#returnRequestsSummary').waitFor({state:'visible'});
+  assert.equal(await page.locator('#returnRequestsSummary button').count(),2);
+  await page.locator('#deliveryModalOverlay button[onclick="closeDeliveryModal()"]').click();
+  await siteLogout(page);await siteLogin(page,fixture.accounts.warehouse,'warehouse');
+  await siteNav(page,'inventory');await page.locator('#inventoryReceivingTabBtn').click();
+  await page.locator('[data-inventory-receiving-kind="returns"]').click();
+  await page.waitForFunction(id=>customerReturnOrders.some(o=>o.id===id)&&document.getElementById('customerReturnQueue')?.textContent.includes('申請保留待收'),fixture.sourceId);
+  assert.match(await page.locator('#customerReturnQueue').textContent(),/申請保留待收/);
+  assert.equal(await page.locator('#customerReturnQueue button[onclick^="receiveCustomerReturn("]').count(),0);
+  for(const quality of ['SALEABLE','INSPECTION','DAMAGED']){
+   const error=await page.evaluate(async({orderId,requestId,quality})=>{
+    try{await commitCustomerReturnReceipt({orderId,requestId,receiptId:'guard_'+quality,qty:1,quality,warehouseId:'unused'});return '';}
+    catch(error){return error.message;}
+   },{orderId:fixture.sourceId,requestId:requestIds[0],quality});
+   assert.match(error,/退貨收貨尚未開放/);assert.deepEqual(await stockFacts(),allReturned);
+  }
+  await siteLogout(page);await siteLogin(page,fixture.accounts.sales,'sales');
+  await siteOrderAction(page,fixture,'退貨');
+  await page.locator('#orderProgressTab-returns').click();
+  for(const requestId of requestIds){
+   await page.locator('#returnRequestsSummary button[onclick*="'+requestId+'"]').click();
+   await page.waitForFunction(({orderId,requestId})=>ordersCache.find(o=>o.id===orderId)?.returnRequests.find(r=>r.id===requestId)?.status==='CANCELLED',{orderId:fixture.sourceId,requestId});
+  }
+  const withdrawn=await facts(fixture);assert.equal(withdrawn.source.returnPending,false);
+  for(const id of requestIds){const request=withdrawn.source.returnRequests.find(r=>r.id===id);assert.equal(request.receivedQty,0);assert.equal(request.cancelledBy,fixture.accounts.sales.uid);}
+  assert.deepEqual(withdrawn.source.returnRecords,returned.source.returnRecords);assert.equal(withdrawn.source.returnedQty,2);
+  assert.deepEqual(await stockFacts(),allReturned);
+  await siteOpen(page,'sales');await siteOrderAction(page,fixture,'退貨');
+  assert.equal(await page.locator('#returnRequestsSummary button').count(),0);assert.equal(await page.locator('#openReturnFormBtn').isHidden(),false);
+  console.log('Full site '+width+'px: original request form created two pending one-unit returns via actual Client Rules, reload preserved both; warehouse queue cannot route v2 into legacy receipt/hold, original owner withdrew both without stock changes. Physical receipt UI remains pending.');
+
   console.log('Full site '+width+'px: seller restored five free units with seven shortages; lost-reply and stale-cancel retries are immutable.');
   for(const match of read('index.html').matchAll(/<script[^>]+src="([^"?]+)(?:\?[^\"]*)?"/g)){
    if(!match[1].startsWith('https:'))assert.ok(loaded.has('/'+match[1]),'original script loaded: '+match[1]);
