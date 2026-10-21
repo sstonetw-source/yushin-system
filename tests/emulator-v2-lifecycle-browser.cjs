@@ -629,6 +629,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   await siteLogout(page);await siteLogin(page,fixture.accounts.warehouse,'warehouse');
   async function openShipmentBatch(){
    await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();
+   await page.waitForFunction(()=>orderWorkQueueReady&&!orderWorkQueueError&&warehouseMasterCache.length>0,null,{timeout:45000});
    const main=await page.evaluate(()=>defaultWarehouse()?.id||'');
    await page.locator(main===fixture.warehouseIds[0]?'#inventoryShippingMainBtn':'#inventoryShippingBranchBtn').click();
    const row=page.locator('#inventoryShippingBody tr[data-shipping-warehouse="'+fixture.warehouseIds[0]+'"]').filter({hasText:fixture.sourceId});
@@ -1104,6 +1105,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   // location row. Original item.warehouseId remains A throughout this action.
   async function openOtherWarehouseBatch(){
    await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();
+   await page.waitForFunction(()=>orderWorkQueueReady&&!orderWorkQueueError&&warehouseMasterCache.length>0,null,{timeout:45000});
    const main=await page.evaluate(()=>defaultWarehouse()?.id||'');
    await page.locator(main===fixture.warehouseIds[1]?'#inventoryShippingMainBtn':'#inventoryShippingBranchBtn').click();
    const row=page.locator('#inventoryShippingBody tr[data-shipping-warehouse="'+fixture.warehouseIds[1]+'"]').filter({hasText:fixture.sourceId});
@@ -1141,7 +1143,10 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
  }catch(error){
   console.log('Full site '+width+'px diagnostic:',JSON.stringify(await page.evaluate(()=>({role:typeof currentUserRole==='undefined'?'not-booted':currentUserRole,
    loginError:document.getElementById('loginError')?.textContent,feedback:document.getElementById('actionFeedback')?.textContent,
-   menu:document.querySelector('.nav-tabs')?.className,scrollTop:document.getElementById('appContainer')?.scrollTop}))),JSON.stringify(errors));
+   menu:document.querySelector('.nav-tabs')?.className,scrollTop:document.getElementById('appContainer')?.scrollTop,
+   shipping:document.getElementById('inventoryShippingBody')?.textContent,queueReady:orderWorkQueueReady,queueError:orderWorkQueueError,
+   locations:typeof v2ShipmentLocationContext==='undefined'?null:{context:v2ShipmentLocationContext,values:[...v2ShipmentLocationCache]},
+   shipmentOrders:orderWorkQueueCache.map(o=>({id:o.id,attempt:o.inventoryReservationAttemptId,items:normalizedOrderItems(o)})),warehouses:warehouseMasterCache}))),JSON.stringify(errors));
   throw error;
  }finally{await context.close();}
 });

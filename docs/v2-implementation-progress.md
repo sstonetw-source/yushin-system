@@ -6,7 +6,7 @@
 - 本批在原出貨清單讀取 inventoryReservations 的權威位置，按倉庫分列、選取與確認；保留原 Shipment Service，沒有新 writer。只限 localhost demo-yushin 的既有 Shipment Emulator gate、CUSTOMER_SHIP，其他模式維持原流程。
 - 一次最多核對 200 個品項，每批 20 個 server 點讀，不新增 Listener／Index／Collection／Rules。檢查真 Auth、角色、來源／產品／預留一致性；讀取失敗、帳號切換或版本過期不猜回來源倉。未知回覆仍顯示原倉／原數量，重送同 ID。
 - 原 1280／390px 整站驗收接續第二張 PO 實收後，由另一倉出 5 件、丟失成功回覆、重整原列重試；來源倉不變、另一倉實扣一次、其他需求／目標訂單／送達／退貨不變。送達總數仍為 4，總出貨增為 9，尚有來源倉預留 3；不能宣稱全部履約完成。
-- 本機 Node 1667／1667 通過，完整 Chrome／真 Auth／Emulator／Rules 以本批最新 CI 為準，通過才合併。未部署 Firebase，未修改正式資料與角色；多品項、剩餘送達及 Preview／正式啟用仍須後續驗收。
+- 本機 Node 1668／1668 通過，完整 Chrome／真 Auth／Emulator／Rules 以本批最新 CI 為準，通過才合併。未部署 Firebase，未修改正式資料與角色；多品項、剩餘送達及 Preview／正式啟用仍須後續驗收。
 
 ## 2026-10-20 — Full-site boot acceptance
 - Added localhost-only demo-yushin initialization and two full-site real Auth browser cases; see [scope and gates](full-site-emulator-boot-20261020.md).
@@ -104,3 +104,5 @@ This branch received concurrent V2 commits during implementation. Always refetch
 - Fixed the audit's collection mapper so Firestore always receives the intended positive page size instead of `limit(0)`.
 - Full backup coverage now matches governed collections and includes nested Forecast progress.
 - CI #471 passed JavaScript syntax, 140 Node regression tests, and Firestore Rules emulator after these changes.
+
+本批首次 CI 39627998910 在原站出貨列遇到背景重新讀取後未重畫的問題（54／56），未合併。修正原工作佇列 finally 在庫存頁重畫出貨清單，等待位置核對完成才顯示；新增非同步回歸測試，原站測試也等待清單與倉庫主檔就緒後選倉。其餘斷言與權威交易驗證保留，須以新 head 完整 CI 判定。

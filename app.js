@@ -11616,6 +11616,7 @@ async function loadOrderWorkQueue(force = false) {
             if (generation === orderWorkQueueGeneration && uid === currentUser?.uid && role === currentUserRole) {
                 if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
                 if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
+                if (document.getElementById('inventory-system')?.classList.contains('active')) window.renderInventoryShipping?.();
             }
         }
     })();
