@@ -241,3 +241,5 @@
 每次確認與重試前後比較公司／兩倉實貨與預留、全部批次、預留帳、異動及成本憑證、兩張 PO 的供應與收貨憑證、採購需求與七筆目標訂單，必須完全不變。原出貨與退貨事件不得被改寫，不將「送達」重當實貨出庫。
 
 發現既有 v2 表單只鎖批次選單，待確認時日期／數量／備註仍可改，Service 會拒絕變更意圖。本批改為待確認時鎖原值，失敗後立即重畫、重整維持鎖定，確認成功後解鎖供下一批使用；既有 Chrome smoke 與真 Auth 原站皆驗證。沿原 Shipment Delivery Service／Core，不新增交易 writer 或計算公式。只限既有本機 demo gate；PDF 實體輸出、初始 fixture、多品項、剩餘 3 件及 Preview／正式部署等原邊界保留。完整 CI 通過前不合併。
+
+首輪 CI 39693307620（head 55cc3fa）在原站切回業務後找不到「分批交貨」，54／56，未合併。原 orderContextActionState 以倉庫 shippable 決定入口；他倉5件全部出庫後 shippable=0，但仍有5件未確認。修正 v2 入口沿既有 projectOrderShipmentReturns.pendingDeliveryQty，並在最後一筆已成功、回覆中斷時保留 frozen checkpoint 的原結果確認入口；原 legacy 規則不變。新增原來源／CLOSE／他倉已出庫、最後一筆凍結、取消／損壞／未同步／REPLACE 與 legacy gate 四項回歸。未減弱原站操作、未知回覆及零實貨寫入斷言，須以新 head 完整 CI 判定。

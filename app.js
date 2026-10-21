@@ -11254,9 +11254,21 @@ function orderContextActionState(order, normalizedItems = null, dispatchStateByI
         // 避免部分到貨紀錄存在，但該批已全數送出時仍顯示無效操作。
         return ordered > 0 && received > 0 && received < ordered && Number(state?.shippable || 0) > 0;
     });
+    let showPartialDelivery=hasPartialArrival || (items.length > 1 && states.some(state => Number(state?.shippable || 0) > 0));
+    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true){
+        try{
+            // Customer acknowledgement consumes shipped quota. Once all printed
+            // goods leave the warehouse, shippable is zero but arrival is pending.
+            const frozen=pendingV2DeliveryConfirmation(order.id);
+            const projected=globalThis.YushinFulfillment.projectOrderShipmentReturns({orderId:order.id,items:order.items,
+                shipments:order.warehouseShipmentRecords||[],deliveries:order.deliveryRecords||[],returns:order.returnRecords||[]});
+            showPartialDelivery=!!frozen||(!orderInventorySyncIncomplete(order)
+                &&(order.returnRecords||[]).every(row=>row.settlement==='CLOSE')&&projected.pendingDeliveryQty>0);
+        }catch(_){showPartialDelivery=false;}
+    }
     return {
         showPartialDelivery: normalizedOrderStatus(order) === 'normal'
-            && (hasPartialArrival || (items.length > 1 && states.some(state => Number(state?.shippable || 0) > 0))),
+            && showPartialDelivery,
         showReturn: netDelivered > 0
     };
 }
