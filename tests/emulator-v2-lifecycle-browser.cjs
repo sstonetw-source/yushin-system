@@ -843,6 +843,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   await page.locator('#returnReason').fill('原倉管畫面分批實收');await page.locator('#returnSaveBtn').click();
   await page.waitForFunction(id=>!customerReturnActionsPending.has(id)&&ordersCache.find(o=>o.id===id)?.returnRequests.at(-1).qty===2,fixture.sourceId);
   const uiRequest=(await facts(fixture)).source.returnRequests.at(-1),uiBefore=await facts(fixture),uiBeforeStock=await stockFacts();
+  await page.locator('#deliveryModalOverlay button[onclick="closeDeliveryModal()"]').click();
   await siteLogout(page);await siteLogin(page,fixture.accounts.warehouse,'warehouse');
   async function openReturnQueue(){
    await siteNav(page,'inventory');await page.locator('#inventoryReceivingTabBtn').click();
