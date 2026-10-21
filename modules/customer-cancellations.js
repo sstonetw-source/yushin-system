@@ -62,15 +62,17 @@ window.withdrawCustomerReturn=async function(orderId,id){
     await refreshAffectedOrderCaches([orderId]);renderOrderLifecycleModal();}catch(err){alert(err.message);}
 };
 let customerReturnVisibleLimit=50;
+let customerReturnQueueGeneration=0;
 window.loadCustomerReturnQueue=async function(more=false){
     const target=document.getElementById('customerReturnQueue');if(!target)return;
     if(!canReceiveInventoryCapability()){target.textContent='退貨收貨由管理員、採購或倉管確認。';return;}
     target.textContent='載入待收退貨…';
     const recovery=globalThis.YUSHIN_V2_RETURN_RECEIPT_EMULATOR===true?customerReturnReceiptRecoveryHtml():'';
     if(recovery)target.innerHTML=recovery+'<p>載入待收退貨…</p>';
+    const queueGeneration=++customerReturnQueueGeneration;
     const role=currentUserRole,uid=currentUser?.uid;
     const generation=typeof sessionDataGeneration==='number'?sessionDataGeneration:0;
-    const current=()=>role===currentUserRole&&uid===currentUser?.uid&&canReceiveInventoryCapability()
+    const current=()=>queueGeneration===customerReturnQueueGeneration&&role===currentUserRole&&uid===currentUser?.uid&&canReceiveInventoryCapability()
         &&generation===(typeof sessionDataGeneration==='number'?sessionDataGeneration:0);
     try{
         if(!more){

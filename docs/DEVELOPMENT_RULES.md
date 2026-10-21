@@ -349,4 +349,6 @@ receiveV2CustomerReturnEmulator 僅在明確 YUSHIN_V2_RETURN_RECEIPT_EMULATOR �
 
 本節取代上節原 UI 未接線的本機限制。僅明確 YUSHIN_V2_RETURN_RECEIPT_EMULATOR 與既有本機 demo gate 開啟；原正式／Preview 及 Functions index 不變。所有非同步回覆核對 UID／角色／session generation／原表單；resetSessionData 清除舊畫面，不刪待確認意圖。未知結果凍結表單且不能新建意圖；已確認交易後刷新失敗須明示成功並阻止再次提交。接線須驗收原1280／390px、分批實收、每批成功回覆遺失後重整確認、最終 returnPending=false 仍有確認入口，保留 legacy／撤回／成本隱私／全套 Rules 回歸。
 
-本機 Node 1647／1647 通過，零失敗／略過；新增5項UI行為測試。原站真Auth／Chrome與完整CI結果以本批PR為準。未部署Firebase，未修改正式資料或角色。
+本機 Node 1648／1648 通過，零失敗／略過；新增6項UI行為測試。原站真Auth／Chrome與完整CI結果以本批PR為準。未部署Firebase，未修改正式資料或角色。
+
+同分頁的待收清單同時載入時，使用 queue generation 拒絕較舊回覆；收貨後的新清單不能被前次慢查詢或舊錯誤覆蓋。
