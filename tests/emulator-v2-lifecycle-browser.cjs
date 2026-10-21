@@ -941,7 +941,9 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   await page.locator('#poItemsBody input[onchange*="unitPrice"]').blur();
   const priorPurchaseCalls=calls.filter(row=>row.name==='commitV2FormalPurchase').length;
   await page.locator('#printPurchaseOrderBtn').click();
-  await page.waitForFunction(()=>window.poPdfOutputs.length===1,null,{timeout:45000});
+  await page.waitForFunction(()=>window.poPdfOutputs.length===1||poSaveInProgress===false,null,{timeout:45000});
+  const earlyPurchaseState=await page.evaluate(()=>({pdf:window.poPdfOutputs,status:document.querySelector('#poSaveStatus')?.textContent||'',saveInProgress:poSaveInProgress,pending:poIncomingSyncPending,buttonDisabled:document.querySelector('#printPurchaseOrderBtn')?.disabled}));
+  assert.equal(earlyPurchaseState.pdf.length,1,JSON.stringify(earlyPurchaseState));
   const purchaseDiagnostic=await page.evaluate(()=>({pending:poIncomingSyncPending,pdf:window.poPdfOutputs,status:document.querySelector('#poSaveStatus')?.textContent||'',modal:document.querySelector('#poModalOverlay')?.className||''}));
   assert.equal(purchaseDiagnostic.pdf.length,1,JSON.stringify(purchaseDiagnostic));
   // The original UI explicitly syncs incoming stock in the background after PDF.
