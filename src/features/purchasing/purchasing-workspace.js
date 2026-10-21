@@ -230,10 +230,11 @@ function procurementDemandForOrderItem(order, item, dispatchOverride = null) {
     const dispatch = dispatchOverride || itemDispatchState(order,item);
     const fulfillmentType = item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE';
     const directShip = fulfillmentType === 'DIRECT_SHIP';
+    const hasWarehouseShipments = Array.isArray(order.warehouseShipmentRecords) && order.warehouseShipmentRecords.length > 0;
     const quantities = globalThis.YushinWorkflow?.procurementQuantities({
         orderedQty:item.orderedQty ?? item.qty,
         fulfillmentType,
-        ...(Array.isArray(order.warehouseShipmentRecords)&&order.warehouseShipmentRecords.length?{
+        ...(hasWarehouseShipments?{
             warehouseShipmentContext:{orderId:order.id,itemId:item.itemId,productKey:item.inventoryProductKey||item.productId,
                 shipments:order.warehouseShipmentRecords,deliveries:order.deliveryRecords??[],returns:order.returnRecords??[]},
             warehouseShippedQty:item.warehouseShippedQty
@@ -244,7 +245,10 @@ function procurementDemandForOrderItem(order, item, dispatchOverride = null) {
         receivedQty:item.receivedQty,
         deliveredQty:dispatch.grossDelivered,
         effectiveDeliveredQty:dispatch.delivered,
-        returnedQty:directShip ? dispatch.returned : Number(item.returnedQty ?? dispatch.returned ?? 0)
+        // Normalized items exclude CLOSE returns for legacy replacement demand.
+        // The v2 dispatch adapter reads the original cumulative return snapshot,
+        // which Workflow checks against the authoritative shipment/return events.
+        returnedQty:directShip || hasWarehouseShipments ? dispatch.returned : Number(item.returnedQty ?? dispatch.returned ?? 0)
     });
     if (!quantities) throw new Error('Workflow core 未載入，無法計算採購需求。');
     const demand = globalThis.YushinProcurementDemand?.fromSalesOrder({
