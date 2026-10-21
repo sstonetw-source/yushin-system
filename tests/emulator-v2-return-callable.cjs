@@ -80,7 +80,9 @@ async function snapshot(x){
  for(const [n,k] of [['orders',x.orderId],['inventory',x.key],['inventoryReservations',x.orderId+'__I'],
   ['warehouseStocks','AUTH-A__'+x.key],['warehouseStocks','AUTH-B__'+x.key],['inventoryLots',x.key+'-AUTH-A'],['inventoryLots',x.key+'-AUTH-B']])documents.push(await x.data(n,k));
  const movements=await db.collection('inventoryMovements').where('sourceId','==',x.orderId).get();
- return {documents,movements:movements.docs.map(s=>({id:s.id,...s.data()}))};
+ const receipts=await db.collection('customerReturnReceipts').where('orderId','==',x.orderId).get();
+ return {documents,movements:movements.docs.map(s=>({id:s.id,...s.data()})),
+  returnReceipts:receipts.docs.map(s=>({id:s.id,...s.data()})).sort((a,b)=>a.id.localeCompare(b.id))};
 }
 
 test('real signed-in client creates an order through the existing Order Creation Service and Rules before genuine v2 synchronization',async()=>{
@@ -1236,4 +1238,147 @@ test('real Rules request-only path handles thirty records without allowing colla
  await client.commitCustomerReturnRequest(intent);assert.deepEqual(await snapshot(x),withdrawn);
  await assert.rejects(updateDoc(doc(live,'orders',x.orderId),{returnRequests:[...withdrawn.documents[0].returnRequests,{...request,id:'overflow'}],returnPending:true,returnRequestMutationIndex:30}));
  assert.deepEqual(await snapshot(x),withdrawn);
+});
+
+
+async function requestedReturnFixture(tag,{qty=2,multi=false}={}){
+ const x=await fixture('requested-'+tag,{cancelled:false,multi}),client=originalReturnRequestClient(x.actor);
+ const requestId='request_'+tag;
+ await client.commitCustomerReturnRequest({orderId:x.orderId,itemId:'I',operationId:requestId,qty,
+  date:'2026-10-21',reason:'原介面申請，交倉庫分批實收'});
+ return {...x,client,requestId,intent:{...x.intent,requestId,date:'2026-10-21'}};
+}
+function assertRequestedStockIncrease(before,after,amount){
+ assert.equal(after.documents[1].onHand,before.documents[1].onHand+amount);
+ assert.equal(after.documents[3].onHand,before.documents[3].onHand+amount);
+ assert.equal(after.documents[5].remainingQty,before.documents[5].remainingQty+amount);
+ for(const i of [1,3])assert.equal(after.documents[i].reserved,before.documents[i].reserved);
+ assert.deepEqual({...after.documents[2],updatedAt:undefined},{...before.documents[2],updatedAt:undefined});
+ for(const i of [4,6])assert.deepEqual(after.documents[i],before.documents[i]);
+ const order=after.documents[0],original=before.documents[0];
+ assert.deepEqual(order.deliveryRecords,original.deliveryRecords);
+ assert.deepEqual(order.warehouseShipmentRecords,original.warehouseShipmentRecords);
+ assert.equal(order.deliveredQty,original.deliveredQty);
+ assert.equal(order.items[0].reservedQty,original.items[0].reservedQty);
+ assert.equal(after.movements.length,before.movements.length+after.returnReceipts.length-before.returnReceipts.length);
+}
+test('real Auth request-backed receipt permits logistics roles only and atomically creates the original receipt projection',{timeout:120000},async()=>{
+ for(const role of ['admin','purchaser','warehouse','sales','engineer']){
+  const x=await requestedReturnFixture('roles-'+role),receiver=role==='admin'?x.operator:
+   role==='sales'?x.actor:await identity('request-receiver-'+role,role),before=await snapshot(x);
+  if(['sales','engineer'].includes(role)){
+   await accounts.setCustomUserClaims(receiver.uid,{role:'admin'});await receiver.auth.currentUser.getIdToken(true);
+   await assert.rejects(receiver.receive(x.intent),code('permission-denied'));assert.deepEqual(await snapshot(x),before);continue;
+  }
+  const result=await receiver.receive(x.intent),after=await snapshot(x);
+  assert.equal(result.status,'applied');assert.equal(result.requestId,x.requestId);
+  assert.equal(result.requestReceivedQty,1);assert.equal(result.requestStatus,'PENDING');
+  assertRequestedStockIncrease(before,after,1);
+  const request=after.documents[0].returnRequests[0],receipt=after.returnReceipts[0];
+  assert.deepEqual(request,{...before.documents[0].returnRequests[0],receivedQty:1});
+  assert.equal(after.documents[0].returnPending,true);assert.equal(after.documents[0].returnReceiptId,x.intent.operationId);
+  assert.equal(receipt.id,x.intent.operationId);assert.equal(receipt.requestId,x.requestId);
+  assert.equal(receipt.receivedBy,receiver.uid);assert.equal(receipt.receivedByRole,role);
+  assert.equal(receipt.disposition,'STOCK');assert.equal(receipt.quality,'SALEABLE');
+  assert.deepEqual(receipt.record,after.documents[0].returnRecords[0]);
+  assert.deepEqual(after.movements.find(m=>m.id===result.movementId).returnRecord,receipt.record);
+  await receiver.receive(x.intent);assert.deepEqual(await snapshot(x),after);
+ }
+});
+test('real Auth request receipt parallel retry then final receipt preserves old receipt and all original request intent',{timeout:120000},async()=>{
+ const x=await requestedReturnFixture('partial-final',{multi:true}),receiver=await identity('request-partial-warehouse','warehouse'),before=await snapshot(x);
+ const first=await Promise.all([receiver.receive(x.intent),receiver.receive(x.intent)]);
+ assert.deepEqual(first.map(r=>r.status).sort(),['already-applied','applied']);
+ const partial=await snapshot(x);assertRequestedStockIncrease(before,partial,1);assert.equal(partial.returnReceipts.length,1);
+ const final={...x.intent,operationId:x.intent.operationId+'_final'};
+ const result=await receiver.receive(final),after=await snapshot(x);
+ assert.equal(result.requestStatus,'RECEIVED');assert.equal(result.requestReceivedQty,2);
+ assert.equal(after.documents[0].returnPending,false);assert.equal(after.returnReceipts.length,2);
+ assertRequestedStockIncrease(before,after,2);
+ assert.deepEqual(after.documents[0].items.slice(1),before.documents[0].items.slice(1));
+ assert.deepEqual(after.returnReceipts.find(r=>r.id===x.intent.operationId),partial.returnReceipts[0]);
+ assert.deepEqual(after.documents[0].returnRequests[0],{...before.documents[0].returnRequests[0],receivedQty:2,status:'RECEIVED'});
+ for(const input of [x.intent,final])assert.equal((await receiver.receive(input)).status,'already-applied');
+ assert.deepEqual(await snapshot(x),after);
+ for(const patch of [{requestId:'OTHER'},{date:'2026-10-22'},{reason:'改理由'},{selections:[{lotId:x.key+'-AUTH-A',qty:2}]}])
+  await assert.rejects(receiver.receive({...x.intent,...patch}),code('already-exists'));
+ await assert.rejects(receiver.receive({...final,operationId:final.operationId+'_excess'}),code('failed-precondition'));
+ assert.deepEqual(await snapshot(x),after);
+ // A later request can still be created through original Client Rules after backend receipt.
+ await x.client.commitCustomerReturnRequest({orderId:x.orderId,itemId:'I',operationId:'request_after_receipt',qty:1,date:'2026-10-21',reason:'下一件退回'});
+ const pending=await snapshot(x);assert.equal(pending.documents[0].returnRequests.length,2);assert.equal(pending.documents[0].returnPending,true);
+ await receiver.receive({...x.intent,requestId:'request_after_receipt',operationId:x.intent.operationId+'_next'});
+ const next=await snapshot(x);assertRequestedStockIncrease(before,next,3);assert.equal(next.documents[0].returnPending,false);
+ await receiver.receive(x.intent);assert.deepEqual(await snapshot(x),next);
+});
+test('real Auth request receipt rejects stale request source stock proof identity and collisions with no partial writes',{timeout:120000},async()=>{
+ const x=await requestedReturnFixture('guards'),receiver=await identity('request-guard-warehouse','warehouse'),before=await snapshot(x);
+ for(const patch of [{requestId:'missing'},{itemId:'OTHER'},{warehouseId:'AUTH-B'},{syncAttemptId:'old-sync'},
+  {selections:[{lotId:x.key+'-AUTH-A',qty:3}]},{selections:[{lotId:x.key+'-AUTH-B',qty:1}]}]){
+  await assert.rejects(receiver.receive({...x.intent,...patch}));assert.deepEqual(await snapshot(x),before);
+ }
+ for(const patch of [{actorUid:x.operator.uid},{actorRole:'admin'},{condition:'DAMAGED'},{settlement:'REPLACE'}])
+  await assert.rejects(receiver.receive({...x.intent,...patch}),code('invalid-argument'));
+ // Omitting the request cannot bypass either logistics authority or pending allowance.
+ const {requestId,...unlinked}=x.intent;
+ await assert.rejects(receiver.receive(unlinked),code('permission-denied'));
+ await assert.rejects(x.actor.receive(unlinked),code('failed-precondition'));assert.deepEqual(await snapshot(x),before);
+ for(const patch of [{active:false},{active:true,disabled:true},{disabled:false,role:'sales'}]){
+  await db.collection('users').doc(receiver.uid).update(patch);
+  await assert.rejects(receiver.receive(x.intent),code('permission-denied'));assert.deepEqual(await snapshot(x),before);
+ }
+ await db.collection('users').doc(receiver.uid).update({role:'warehouse',active:true,disabled:false});
+ const ref=db.collection('customerReturnReceipts').doc(x.intent.operationId);
+ await ref.set({orderId:'other',requestId:'other'});const collision=await snapshot(x);
+ await assert.rejects(receiver.receive(x.intent),code('already-exists'));assert.deepEqual(await snapshot(x),collision);await ref.delete();
+ const orderRef=db.collection('orders').doc(x.orderId),source=before.documents[0];
+ for(const patch of [{returnPending:false},{returnRequests:[{...source.returnRequests[0],receivedQty:1}]},
+  {returnRequests:[{...source.returnRequests[0],itemId:'OTHER'}]},
+  {returnRequests:[{...source.returnRequests[0],status:'CANCELLED'}],returnPending:false}]){
+  await orderRef.set({...source,...patch});const corrupt=await snapshot(x);
+  await assert.rejects(receiver.receive(x.intent),code('failed-precondition'));assert.deepEqual(await snapshot(x),corrupt);
+ }
+ await orderRef.set(source);
+ const lotRef=db.collection('inventoryLots').doc(x.key+'-AUTH-A'),lot=before.documents[5];
+ await lotRef.update({remainingQty:lot.remainingQty+1});const badLot=await snapshot(x);
+ await assert.rejects(receiver.receive(x.intent),code('failed-precondition'));assert.deepEqual(await snapshot(x),badLot);await lotRef.set(lot);
+ const proofRef=db.collection('inventoryMovements').doc('location-ship-'+x.intent.shipmentId),proof=(await proofRef.get()).data();
+ await proofRef.update({intentHash:'invalid'});const badProof=await snapshot(x);
+ await assert.rejects(receiver.receive(x.intent),code('failed-precondition'));assert.deepEqual(await snapshot(x),badProof);await proofRef.set(proof);
+ assert.deepEqual(await snapshot(x),before);
+});
+test('real Auth two receivers compete for final request unit and replay rechecks current actor and immutable receipt',{timeout:120000},async()=>{
+ const x=await requestedReturnFixture('final-race',{qty:1}),a=await identity('request-racer-A','warehouse'),b=await identity('request-racer-B','purchaser'),before=await snapshot(x);
+ const other={...x.intent,operationId:x.intent.operationId+'_other'};
+ const results=await Promise.allSettled([a.receive(x.intent),b.receive(other)]);
+ assert.equal(results.filter(r=>r.status==='fulfilled').length,1);assert.equal(results.filter(r=>r.status==='rejected').length,1);
+ const won=await snapshot(x);assertRequestedStockIncrease(before,won,1);
+ assert.equal(won.returnReceipts.length,1);assert.equal(won.documents[0].returnPending,false);
+ const winner=results[0].status==='fulfilled'?a:b,input=winner===a?x.intent:other,loser=winner===a?b:a;
+ await assert.rejects(loser.receive(input),code('already-exists'));assert.deepEqual(await snapshot(x),won);
+ await db.collection('users').doc(winner.uid).update({disabled:true});
+ await assert.rejects(winner.receive(input),code('permission-denied'));assert.deepEqual(await snapshot(x),won);
+ await db.collection('users').doc(winner.uid).update({disabled:false});
+ const receiptRef=db.collection('customerReturnReceipts').doc(input.operationId),receipt=(await receiptRef.get()).data();
+ await receiptRef.update({qty:2});const corrupted=await snapshot(x);
+ await assert.rejects(winner.receive(input),code('failed-precondition'));assert.deepEqual(await snapshot(x),corrupted);
+ await receiptRef.set(receipt);await winner.receive(input);assert.deepEqual(await snapshot(x),won);
+});
+test('real Auth withdrawal and request receipt serialize without resurrecting pending state or losing received stock',{timeout:120000},async()=>{
+ const x=await requestedReturnFixture('withdraw-race'),receiver=await identity('request-withdraw-warehouse','warehouse'),before=await snapshot(x);
+ const results=await Promise.allSettled([receiver.receive(x.intent),x.client.commitCustomerReturnWithdrawal({orderId:x.orderId,requestId:x.requestId})]);
+ // Rules may reject a stale client proposal before SDK retry. An explicit retry
+ // uses the same original request; it must retain any already committed receipt.
+ if(results[1].status==='rejected'){
+  assert.equal(results[1].reason.code,'permission-denied');
+  await x.client.commitCustomerReturnWithdrawal({orderId:x.orderId,requestId:x.requestId});
+ }
+ const after=await snapshot(x),received=results[0].status==='fulfilled'?1:0;
+ assertRequestedStockIncrease(before,after,received);
+ assert.equal(after.documents[0].returnPending,false);assert.equal(after.documents[0].returnRequests[0].status,'CANCELLED');
+ assert.equal(after.documents[0].returnRequests[0].receivedQty,received);
+ assert.equal(after.returnReceipts.length,received);
+ await assert.rejects(receiver.receive({...x.intent,operationId:x.intent.operationId+'_new'}),code('failed-precondition'));
+ if(received)await receiver.receive(x.intent);
+ assert.deepEqual(await snapshot(x),after);
 });

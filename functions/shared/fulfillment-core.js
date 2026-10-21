@@ -194,7 +194,7 @@
    return intent;
   }
   function normalizeLocationReturnIntent(data){
-   const keys=['orderId','itemId','shipmentId','syncAttemptId','selections','operationId','warehouseId','date','reason','condition','settlement'];
+   const keys=['orderId','itemId','shipmentId','syncAttemptId','selections','operationId','warehouseId','date','reason','condition','settlement','requestId'];
    if(!data||typeof data!=='object'||Array.isArray(data)||Object.keys(data).some(k=>!keys.includes(k)))
     returnFault('退貨入庫請求含未授權欄位','invalid-argument');
    const intent=normalizeReturnTraceIntent(Object.fromEntries(['orderId','itemId','shipmentId','syncAttemptId','selections'].map(k=>[k,data[k]])));
@@ -214,6 +214,11 @@
    intent.selections.sort((a,b)=>a.lotId.localeCompare(b.lotId));
    Object.assign(intent,{operationId:data.operationId,warehouseId:data.warehouseId,date:data.date,
     reason:data.reason.trim(),condition:data.condition,settlement});
+   // Omit this field for historical callers: their canonical hash stays unchanged.
+   if(Object.prototype.hasOwnProperty.call(data,'requestId')){
+    intent.requestId=returnId(data.requestId);
+    if(settlement!=='CLOSE')returnFault('申請實收僅支援 CLOSE 結案','invalid-argument');
+   }
    return intent;
   }
 
@@ -231,7 +236,8 @@
     const priorIntent=normalizeLocationReturnIntent({orderId,itemId,shipmentId:row.shipmentId,
      syncAttemptId:intent.syncAttemptId,selections:row.lotAllocations.map(a=>({lotId:a.lotId,qty:a.qty})),
      operationId:row.id,warehouseId:row.warehouseId,date:row.date,reason:row.reason,
-     condition:row.condition,settlement:row.settlement});
+     condition:row.condition,settlement:row.settlement,
+     ...(Object.prototype.hasOwnProperty.call(row,'requestId')?{requestId:row.requestId}:{})});
     const hash=await hashIntent(priorIntent);
     const proof=byMovement.get('location-return-'+row.id);
     if(row.movementId!=='location-return-'+row.id||row.intentHash!==hash||!proof
