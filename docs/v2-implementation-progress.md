@@ -1,5 +1,13 @@
 # V2 Implementation Progress — 2026-09-21
 
+## 2026-10-21 — 他倉續出原介面整合（待本批完整 CI）
+
+- #213 已合併：製作／編輯 DRAFT 採購文件獨立，只有「確認已採購」提交交易與在途；#214 已合併，完整 CI 2205 項通過，原站已驗收履約／CLOSE 退貨後第二張 PO 的 1＋2 分批實收及未知回覆重試。
+- 本批在原出貨清單讀取 inventoryReservations 的權威位置，按倉庫分列、選取與確認；保留原 Shipment Service，沒有新 writer。只限 localhost demo-yushin 的既有 Shipment Emulator gate、CUSTOMER_SHIP，其他模式維持原流程。
+- 一次最多核對 200 個品項，每批 20 個 server 點讀，不新增 Listener／Index／Collection／Rules。檢查真 Auth、角色、來源／產品／預留一致性；讀取失敗、帳號切換或版本過期不猜回來源倉。未知回覆仍顯示原倉／原數量，重送同 ID。
+- 原 1280／390px 整站驗收接續第二張 PO 實收後，由另一倉出 5 件、丟失成功回覆、重整原列重試；來源倉不變、另一倉實扣一次、其他需求／目標訂單／送達／退貨不變。送達總數仍為 4，總出貨增為 9，尚有來源倉預留 3；不能宣稱全部履約完成。
+- 本機 Node 1667／1667 通過，完整 Chrome／真 Auth／Emulator／Rules 以本批最新 CI 為準，通過才合併。未部署 Firebase，未修改正式資料與角色；多品項、剩餘送達及 Preview／正式啟用仍須後續驗收。
+
 ## 2026-10-20 — Full-site boot acceptance
 - Added localhost-only demo-yushin initialization and two full-site real Auth browser cases; see [scope and gates](full-site-emulator-boot-20261020.md).
 - Original navigation, bootstrap, permission handling and order cache remain in use. CI validation is required before merge; no production deployment is included.

@@ -620,6 +620,8 @@ async function loadOrderWorkQueue(force = false) {
             records.concat(finished).forEach(row=>merged.set(row.id,row));
             finishedIds.filter(id=>!finished.some(row=>row.id===id)).forEach(id=>merged.delete(id));
             ordersCache = [...merged.values()];
+            await window.loadV2WarehouseShipmentLocations?.(orderWorkQueueCache);
+            if (generation !== orderWorkQueueGeneration || uid !== currentUser?.uid || role !== currentUserRole) return;
             orderWorkQueueReady = true;
             orderWorkQueueLoadedAt = Date.now(); orderWorkQueueLoadedScope = scope;
         } catch (err) {

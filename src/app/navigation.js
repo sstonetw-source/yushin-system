@@ -110,6 +110,7 @@ let sessionDataGeneration = 0;
 function resetSessionData() {
     sessionDataGeneration++;
     window.resetCustomerReturnReceiptView?.();
+    window.resetV2ShipmentLocations?.();
     window.closePurchaseOrderModal?.();
     permissionRulesReady=false; permissionRulesCheckedUid=''; permissionRulesCheckPromise=null;
     // 先清掉前一個視角的分頁狀態，避免非同步查詢完成前短暫顯示不屬於新視角的資料。
