@@ -343,3 +343,10 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 receiveV2CustomerReturnEmulator 僅在明確 YUSHIN_V2_RETURN_RECEIPT_EMULATOR 與實際 demo-yushin 本機 Auth 9099／Functions 5001 開啟。所有 await 後核對 UID／role／capability；禁止 fallback legacy writer。固定意圖與刷新確認、並行衝突、當前後端停權和失敗回讀需有行為及真 Auth 測試。原 UI 尚未開放，下一階段必須補明確 shipment／lot 選擇、可見 pending 入口與 1280／390px 真 Browser 實收驗收後才能接按鈕。
 
 本機 Node 1642／1642 通過；新增真 Auth 整合與完整 CI 結果以本批 PR 為準。未部署 Firebase、未變更正式資料或角色；詳細契約與未驗收邊界見 transaction-ui-integration-20261018.md 同日章節。
+
+
+## 2026-10-21 原倉管退貨收貨畫面（本機 Emulator 試點）
+
+本節取代上節原 UI 未接線的本機限制。僅明確 YUSHIN_V2_RETURN_RECEIPT_EMULATOR 與既有本機 demo gate 開啟；原正式／Preview 及 Functions index 不變。所有非同步回覆核對 UID／角色／session generation／原表單；resetSessionData 清除舊畫面，不刪待確認意圖。未知結果凍結表單且不能新建意圖；已確認交易後刷新失敗須明示成功並阻止再次提交。接線須驗收原1280／390px、分批實收、每批成功回覆遺失後重整確認、最終 returnPending=false 仍有確認入口，保留 legacy／撤回／成本隱私／全套 Rules 回歸。
+
+本機 Node 1647／1647 通過，零失敗／略過；新增5項UI行為測試。原站真Auth／Chrome與完整CI結果以本批PR為準。未部署Firebase，未修改正式資料或角色。

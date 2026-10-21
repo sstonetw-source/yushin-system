@@ -705,9 +705,8 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   assert.equal(acknowledgedAllShipments.source.deliveryHistory.filter(row=>row.source==='shipment_confirmation').length,3);
   console.log('Full site '+width+'px: original owner acknowledged first shipment one plus one and second shipment two; first/final lost replies reloaded with identical intents, three confirmations total and zero stock/reservation/lot/movement changes; twelve-unit order remains incomplete.');
 
-  // The original v2 return form is NOT connected. This is explicitly a
-  // browser-SDK transport/provenance continuation, not an original-UI return
-  // acceptance. Use the same real signed-in owner and the actual second debit.
+  // This segment exercises browser-SDK provenance with the actual second
+  // debit. A later segment enables and tests the original warehouse receipt UI.
   const returnShipment=shipmentRecords[1],returnLot=returnShipment.lotAllocations[0].lotId;
   const trace={orderId:fixture.sourceId,itemId:'S',shipmentId:returnShipment.id,
    syncAttemptId:acknowledgedAllShipments.source.inventoryReservationAttemptId,selections:[{lotId:returnLot,qty:1}]};
@@ -834,6 +833,68 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   await siteOpen(page,'sales');await siteOrderAction(page,fixture,'退貨');
   assert.equal(await page.locator('#returnRequestsSummary button').count(),0);assert.equal(await page.locator('#openReturnFormBtn').isHidden(),false);
   console.log('Full site '+width+'px: original request form created two pending one-unit returns via actual Client Rules, reload preserved both; warehouse queue cannot route v2 into legacy receipt/hold, original owner withdrew both without stock changes. Physical receipt UI remains pending.');
+
+  // Original queue -> explicit original shipment/batch form -> original receipt
+  // Service -> true SDK/Callable/transaction. Both partial and final receipts
+  // lose their successful HTTP response before a reload and same-ID recovery.
+  await context.addInitScript(()=>{window.YUSHIN_V2_RETURN_RECEIPT_EMULATOR=true;});
+  if(!await page.locator('#returnFormPanel').isVisible())await page.locator('#openReturnFormBtn').click();
+  await page.locator('#returnDate').fill('2026-10-21');await page.locator('#returnQty').fill('2');
+  await page.locator('#returnReason').fill('原倉管畫面分批實收');await page.locator('#returnSaveBtn').click();
+  await page.waitForFunction(id=>!customerReturnActionsPending.has(id)&&ordersCache.find(o=>o.id===id)?.returnRequests.at(-1).qty===2,fixture.sourceId);
+  const uiRequest=(await facts(fixture)).source.returnRequests.at(-1),uiBefore=await facts(fixture),uiBeforeStock=await stockFacts();
+  await siteLogout(page);await siteLogin(page,fixture.accounts.warehouse,'warehouse');
+  async function openReturnQueue(){
+   await siteNav(page,'inventory');await page.locator('#inventoryReceivingTabBtn').click();
+   await page.locator('[data-inventory-receiving-kind="returns"]').click();
+   await page.waitForFunction(id=>document.getElementById('customerReturnQueue')?.innerHTML.includes(id),fixture.sourceId);
+  }
+  // The flag takes effect on the real original page reload, never a replaced handler.
+  await siteOpen(page,'warehouse');await openReturnQueue();
+  const uiReceiptsBefore=calls.filter(row=>row.name==='receiveV2CustomerReturn').length;
+  const chosenShipment=shipmentRecords[0],chosenLot=chosenShipment.lotAllocations[0].lotId;
+  for(let n=0;n<2;n++){
+   await page.locator('#customerReturnQueue button[onclick*="'+uiRequest.id+'"]').click();
+   await page.locator('#customerReturnReceiptOverlay').waitFor({state:'visible'});
+   await page.locator('#customerReturnReceiptShipment').selectOption(chosenShipment.id);
+   const inputs=page.locator('#customerReturnReceiptLots input');assert.ok(await inputs.count()>0);
+   const selected=await page.evaluate(lotId=>customerReturnReceiptView.lots.findIndex(row=>row.lotId===lotId),chosenLot);assert.ok(selected>=0);
+   await page.locator('#customerReturnReceiptLot'+selected).fill('1');
+   await page.locator('#customerReturnReceiptDate').fill('2026-10-21');
+   await page.locator('#customerReturnReceiptSaleable').check();
+   loseReturn=true;
+   await page.locator('#customerReturnReceiptSave').click();
+   await page.waitForFunction(()=>!customerReturnReceiptView?.busy&&document.getElementById('customerReturnReceiptStatus').textContent.includes('結果尚未確認'),null,{timeout:45000});
+   const partial=await facts(fixture),request=partial.source.returnRequests.find(r=>r.id===uiRequest.id);
+   assert.equal(request.receivedQty,n+1);assert.equal(request.status,n===0?'PENDING':'RECEIVED');
+   assert.equal(partial.source.returnPending,n===0);assert.equal(partial.inventory.onHand,uiBefore.inventory.onHand+n+1);
+   const matching=calls.filter(row=>row.name==='receiveV2CustomerReturn'&&row.data.requestId===uiRequest.id);
+   const intent=matching.at(-1).data;
+   assert.equal(intent.shipmentId,chosenShipment.id);assert.deepEqual(intent.selections,[{lotId:chosenLot,qty:1}]);
+   const pendingKey='v2-return-receipt:'+encodeURIComponent(fixture.accounts.warehouse.uid)+':'+encodeURIComponent(fixture.sourceId);
+   const raw=await page.evaluate(key=>sessionStorage.getItem(key),pendingKey);assert.equal(JSON.parse(raw).intent.operationId,intent.operationId);
+   await siteOpen(page,'warehouse');await openReturnQueue();
+   const recover=page.locator('#customerReturnQueue button[data-return-recovery="'+fixture.sourceId+'"]');await recover.waitFor({state:'visible'});
+   assert.equal(calls.filter(row=>row.name==='receiveV2CustomerReturn'&&row.data.requestId===uiRequest.id).length,n*2+1,'reload must not submit');
+   await recover.click();await page.locator('#customerReturnReceiptOverlay').waitFor({state:'visible'});
+   assert.equal(await page.locator('#customerReturnReceiptShipment').count(),0,'pending source stays frozen');
+   await page.locator('#customerReturnReceiptSave').click();
+   await page.waitForFunction(key=>!sessionStorage.getItem(key),pendingKey,{timeout:45000});
+   await page.locator('#customerReturnReceiptOverlay').waitFor({state:'hidden'});
+   const replay=calls.filter(row=>row.name==='receiveV2CustomerReturn'&&row.data.requestId===uiRequest.id);
+   assert.deepEqual(replay.at(-1).data,intent);assert.deepEqual(await facts(fixture),partial,'confirmation must not credit stock twice');
+  }
+  const uiAfter=await facts(fixture),uiAfterStock=await stockFacts();
+  assert.equal(calls.filter(row=>row.name==='receiveV2CustomerReturn').length,uiReceiptsBefore+4);
+  assert.equal(uiAfter.source.returnedQty,4);assert.equal(uiAfter.source.deliveredQty,4);assert.equal(uiAfter.source.isDelivered,false);
+  assert.equal(uiAfter.source.items[0].reservedQty,5);assert.equal(uiAfter.source.items[0].shortageQty,3);
+  assert.deepEqual(uiAfter.source.deliveryRecords,uiBefore.source.deliveryRecords);assert.deepEqual(uiAfter.source.warehouseShipmentRecords,uiBefore.source.warehouseShipmentRecords);
+  assert.deepEqual(uiAfter.stocks[1],uiBefore.stocks[1]);assert.deepEqual(uiAfter.targets,uiBefore.targets);
+  for(const field of ['inventoryLotCosts','supply','demand','receipts'])assert.deepEqual(uiAfterStock[field],uiBeforeStock[field]);
+  assert.deepEqual(ledgerBalances(uiAfterStock.inventoryReservations),ledgerBalances(uiBeforeStock.inventoryReservations));
+  const proofs=(await db.collection('customerReturnReceipts').where('orderId','==',fixture.sourceId).get()).docs.map(d=>d.data()).filter(r=>r.requestId===uiRequest.id);
+  assert.equal(proofs.length,2);for(const proof of proofs){assert.equal(proof.receivedBy,fixture.accounts.warehouse.uid);assert.equal(proof.quality,'SALEABLE');assert.equal(proof.warehouseId,chosenShipment.warehouseId);}
+  console.log('Full site '+width+'px: original warehouse queue and explicit lot form received 1+1 CLOSE; both real successful replies lost, reload offered immutable confirmation even after returnPending=false; original proofs/stock/other holds verified without duplicate credit.');
 
   console.log('Full site '+width+'px: seller restored five free units with seven shortages; lost-reply and stale-cancel retries are immutable.');
   for(const match of read('index.html').matchAll(/<script[^>]+src="([^"?]+)(?:\?[^\"]*)?"/g)){

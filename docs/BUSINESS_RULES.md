@@ -487,3 +487,10 @@ Browser 發現的區域 SDK 入口修正只恢復既定後端連線方式，不�
 申請實收前明確指定原申請、出貨、批次及原倉；僅 RESTOCKABLE／SALEABLE／CLOSE。未知回覆須保留同一 operationId 與完整意圖，不能更換來源或重新實收。成功後確認原 receipt 與 orders 事件才解除 checkpoint；不自動補送。
 
 本機 Node 1642／1642 通過；新增真 Auth 整合與完整 CI 結果以本批 PR 為準。未部署 Firebase、未變更正式資料或角色；詳細契約與未驗收邊界見 transaction-ui-integration-20261018.md 同日章節。
+
+
+## 2026-10-21 原倉管退貨收貨畫面（本機 Emulator 試點）
+
+倉管明確指定原出貨、原批次、本次實收量、日期、原因及可再銷售確認；原倉固定，不猜 FEFO 或自動補送。前端共用 projectOrderShipmentReturns／availableReturnAllocations／planExplicitShipmentReturn 驗證預覽，後端仍於原交易重讀權威額度及真實角色。僅 RESTOCKABLE／SALEABLE／CLOSE；待檢／損壞仍不開放。
+
+本機 Node 1647／1647 通過，零失敗／略過；新增5項UI行為測試。原站真Auth／Chrome與完整CI結果以本批PR為準。未部署Firebase，未修改正式資料或角色。

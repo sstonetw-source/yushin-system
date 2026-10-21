@@ -168,3 +168,18 @@ PR #190 完整 CI 39347832242 通過 2097 項測試與九組桌機／手機 Chro
 成功回覆後經 server 讀原 customerReturnReceipts 及 orders，核對原角色、原申請、批次、數量、日期、意圖及原事件，才清除 checkpoint。相同 ID 並行確認不重入庫；不同意圖並行不得覆蓋原 checkpoint。只使用原兩個集合定址讀取，沒有新集合、Query、Index、Listener、Rules 或正式資料變更。正常新操作多一次來源讀取、成功後兩次定址回讀。僅支援 SALEABLE／RESTOCKABLE／CLOSE，不含待檢／損壞。
 
 本機 1642 項 Node 測試通過、零失敗／略過，含 5 項新增異常回覆、刷新、並行及身份行為測試；另新增 2 項真 Auth SDK→此原前端 Service→隔離 Callable→Firestore／Client Rules 的部分實收、回覆遺失、刷新、收齊及即時停權測試，完整 CI 結果以本批 PR 為準。尚未驗收原倉管 UI 的明確來源選擇、可見 pending 確認入口與 1280／390px 真 Browser 實收；本批不宣稱 UI 已接線或 Preview／正式開放。
+
+
+## 2026-10-21 原倉管退貨收貨畫面（本機 Emulator 試點）
+
+原 customer-cancellations 的 receiveCustomerReturn 在明確本機退貨旗標下進入既有退貨收貨清單的表單，Feature 僅讀取來源／呈現選擇，沿 receiveV2CustomerReturnEmulator → 隔離 Callable → 唯一 commitLocationReturn。一般 legacy 路徑與其 v2 寫入 guard 不變。沒有新增交易核心或 writer。
+
+倉管明確指定原出貨、原批次、本次實收量、日期、原因及可再銷售確認；原倉固定，不猜 FEFO 或自動補送。前端共用 projectOrderShipmentReturns／availableReturnAllocations／planExplicitShipmentReturn 驗證預覽，後端仍於原交易重讀權威額度及真實角色。僅 RESTOCKABLE／SALEABLE／CLOSE；待檢／損壞仍不開放。
+
+無新集合、欄位、Query、Rules、Index 或 Listener。開表單定址讀原 orders，提交沿既有實收傳輸與憑證回讀。待確認列由原 UID 的 sessionStorage 意圖產生，不依賴 returnPending 查詢，因此最後一批已收齊仍能在重整後確認。讀取列表與開待確認表單均不提交。成功後依原產品／倉失效庫存及批次 cache、刷新原訂單與待收清單。
+
+本節取代上節原 UI 未接線的本機限制。僅明確 YUSHIN_V2_RETURN_RECEIPT_EMULATOR 與既有本機 demo gate 開啟；原正式／Preview 及 Functions index 不變。所有非同步回覆核對 UID／角色／session generation／原表單；resetSessionData 清除舊畫面，不刪待確認意圖。未知結果凍結表單且不能新建意圖；已確認交易後刷新失敗須明示成功並阻止再次提交。接線須驗收原1280／390px、分批實收、每批成功回覆遺失後重整確認、最終 returnPending=false 仍有確認入口，保留 legacy／撤回／成本隱私／全套 Rules 回歸。
+
+驗收延伸相同 PO／原出貨及原批次，先保留原申請／撤回與 legacy guard 測試，再由原業務申請2件、原倉管表單分1+1實收。每次真HTTP成功後丟棄回覆，刷新原站、按原待確認列及凍結表單同ID確認，最後收齊後來源已不在returnPending查詢仍須可核對。逐次檢查原實貨、另一倉、其他預留、採購／收貨／成本資料與兩份customerReturnReceipts。開表單及刷新不得提交。
+
+本機1647項Node與build／語法／diff通過；完整CI尚待本PR執行。僅demo-yushin本機，Preview／正式、跨裝置恢復、待檢／損壞及更多批次／出貨組合尚未開放或驗收。
