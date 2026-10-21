@@ -9,7 +9,7 @@ function fixture(){
  const query={where:()=>query,limit:()=>query,get:()=>{notifyStarted();return pending;},orderBy:()=>query};
  const c=vm.createContext({window:{},document:{getElementById:()=>target},canReceiveInventoryCapability:()=>['warehouse','purchaser','admin'].includes(c.currentUserRole),
   currentUserRole:'warehouse',currentUser:{uid:'W'},sessionDataGeneration:1,db:{collection:()=>query},firebase:{firestore:{FieldPath:{documentId:()=> '__name__'}}},
-  readQueryInBatches:async()=>[],customerReturnOrders:[],customerReturnVisibleLimit:50,warehouseMasterCache:[],inventoryReturnQueueUpdated:e=>events.push(e)});
+  readQueryInBatches:async()=>[],customerReturnOrders:[],customerReturnVisibleLimit:50,customerReturnQueueGeneration:0,warehouseMasterCache:[],inventoryReturnQueueUpdated:e=>events.push(e)});
  vm.runInContext(code,c);return {c,target,events,finish,fail,started};
 }
 for(const change of ['different user','same user new session','business role'])test('return queue discards late rejected hold reads after '+change,async()=>{
@@ -30,3 +30,11 @@ test('inventory navigation delegates queue reads to the existing workspace, with
  assert.match(navigation,/initializePageData\('inventory'\)/);
  assert.match(fs.readFileSync('modules/inventory-workspace.js','utf8'),/Promise\.allSettled\([\s\S]*?loadCustomerReturnQueue\(\)/);
 });
+
+ test('return queue ignores an older same-session load after newer receipt refresh has started',async()=>{
+ const f=fixture();const first=f.c.window.loadCustomerReturnQueue();await f.started;
+ const fresh={where(){return this;},limit(){return this;},orderBy(){return this;},get:async()=>({docs:[],size:0})};
+ f.c.db.collection=()=>fresh;await f.c.window.loadCustomerReturnQueue();
+ const rendered=f.target.innerHTML;f.fail(Error('old hold read rejected'));await first;
+ assert.equal(f.target.innerHTML,rendered);assert.deepEqual(f.events,[undefined]);
+ });

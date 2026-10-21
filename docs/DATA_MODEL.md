@@ -437,3 +437,10 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 無新增 Firestore 集合、欄位、Query、Index、Rules 或 Listener。前端同分頁 sessionStorage 以 v2-return-receipt:{UID}:{orderId} 保存 actorUid／actorRole／完整 intent，每人每單一筆；不承諾跨裝置或關閉分頁恢復。新操作定址讀 orders；成功後讀原 customerReturnReceipts/{operationId} 及 orders，核對權威憑證才清除暫存。
 
 本機 Node 1642／1642 通過；新增真 Auth 整合與完整 CI 結果以本批 PR 為準。未部署 Firebase、未變更正式資料或角色；詳細契約與未驗收邊界見 transaction-ui-integration-20261018.md 同日章節。
+
+
+## 2026-10-21 原倉管退貨收貨畫面（本機 Emulator 試點）
+
+無新集合、欄位、Query、Rules、Index 或 Listener。開表單定址讀原 orders，提交沿既有實收傳輸與憑證回讀。待確認列由原 UID 的 sessionStorage 意圖產生，不依賴 returnPending 查詢，因此最後一批已收齊仍能在重整後確認。讀取列表與開待確認表單均不提交。成功後依原產品／倉失效庫存及批次 cache、刷新原訂單與待收清單。
+
+本機 Node 1648／1648 通過，零失敗／略過；新增6項UI行為測試。原站真Auth／Chrome與完整CI結果以本批PR為準。未部署Firebase，未修改正式資料或角色。

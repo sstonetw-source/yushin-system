@@ -732,3 +732,10 @@ normalizedOrderItems 的 returnedQty 為既有顯示／補送用途，排除 CLO
 前端新增 customer-return-transport Service，以既有隔離 receiveV2CustomerReturn 呼叫唯一 commitLocationReturn；使用既有 Fulfillment Core 正規化意圖，不新增入庫或數量算法。實際 Auth／Functions 專案、本機 Emulator 與物流權限皆須核對。原 UI／legacy guard 不變，僅為後續接線準備。
 
 本機 Node 1642／1642 通過；新增真 Auth 整合與完整 CI 結果以本批 PR 為準。未部署 Firebase、未變更正式資料或角色；詳細契約與未驗收邊界見 transaction-ui-integration-20261018.md 同日章節。
+
+
+## 2026-10-21 原倉管退貨收貨畫面（本機 Emulator 試點）
+
+原 customer-cancellations 的 receiveCustomerReturn 在明確本機退貨旗標下進入既有退貨收貨清單的表單，Feature 僅讀取來源／呈現選擇，沿 receiveV2CustomerReturnEmulator → 隔離 Callable → 唯一 commitLocationReturn。一般 legacy 路徑與其 v2 寫入 guard 不變。沒有新增交易核心或 writer。
+
+本機 Node 1648／1648 通過，零失敗／略過；新增6項UI行為測試。原站真Auth／Chrome與完整CI結果以本批PR為準。未部署Firebase，未修改正式資料或角色。

@@ -4393,3 +4393,8 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
     #newOrderItemsBody td:nth-child(8) { display:flex; flex-wrap:wrap; gap:8px; }
     #newOrderItemsBody td:nth-child(8)::before { content:none; }
 }
+
+.customer-return-receipt-form { display:grid; gap:10px; overflow-wrap:anywhere; }
+.customer-return-receipt-form select, .customer-return-receipt-form textarea, .customer-return-receipt-form input:not([type="checkbox"]) { width:100%; min-width:0; box-sizing:border-box; }
+.customer-return-receipt-form textarea { min-height:72px; }
+#customerReturnReceiptStatus { overflow-wrap:anywhere; }
