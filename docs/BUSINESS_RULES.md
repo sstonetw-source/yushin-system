@@ -456,3 +456,12 @@ Browser 發現的區域 SDK 入口修正只恢復既定後端連線方式，不�
 同一張採購 4 件的 PO 以兩次各 2 件完成，收齊只代表該 PO 已收 4 件，不代表原訂單 12 件全部足額；原 7 件缺口仍有 3 件未採購。第二次收貨應將 incoming 歸零、累計 receivedQty=4、來源 reservedQty=9／shortageQty=3。打單 9 件不扣實貨；來源倉分批寄出 2+2 件後預留剩 5 件、缺口仍 3 件，客戶 deliveredQty 仍為 0，不得將實體寄出當作送達。
 
 本批本機語法與建置一致性檢查已通過；真 Auth、Chrome 及全套 Emulator／Rules 的執行結果以本批 PR 最新 CI 為準。未部署 Firebase，未修改正式資料。
+
+
+### 同 PO 出貨後分批送達與不重扣驗收（2026-10-21，待 CI）
+
+倉庫兩次各寄出 2 件後，客戶可先收到第一批 1 件，再收到第一批剩餘 1 件，最後收到第二批 2 件。三筆送達分別關聯原出貨，不再扣實貨／預留／批次。全數已寄出的 4 件收到，不等於原 12 件訂單完成：reservedQty=5、shortageQty=3、dispatchPreparedQty=9、warehouseShippedQty=4，isDelivered 仍 false。已確認的來源出貨不能重複登記超額送達。
+
+本機建置一致性與語法檢查已通過；完整真 Auth／Chrome／Emulator／Rules 結果以本批 PR 最新 CI 為準。未部署 Firebase，未修改正式資料。
+
+首輪整站驗收發現：原 openPartialDeliveryForm 在 renderDeliveryModal 已回填原待確認意圖後，又清空 deliveryQty。現於本機 v2 入口重新呼叫同一 renderer 恢復原數量／來源，不改寫 intent、不另造交易。既有 desktop／phone delivery smoke 同步改走原開表單函式，覆蓋此重整恢復回歸；修 src 後已重建 app.js 並更新靜態版本。修正後全套 CI 仍待執行，不將首輪失敗當通過。

@@ -14,7 +14,7 @@ const input=`<html lang="zh-Hant"><meta charset="utf-8"><input id="deliveryEditI
 <button id="openPartialDeliveryBtn"></button><table><tbody id="deliveryRecordsBody"></tbody></table></html>`;
 const fixture=()=>({id:'O',ownerUid:'buyer',salesCode:'S',status:'active',orderStatus:'normal',inventoryReservationStatus:'completed',
  inventoryReservationAttemptId:'delivery_browser_sync',deliveryRecords:[],returnRecords:[],deliveredQty:0,isDelivered:false,
- items:[{itemId:'I',productId:'P',qty:2,warehouseId:'B',dispatchPreparedQty:2,warehouseShippedQty:2,deliveredQty:0}],
+ items:[{itemId:'I',productId:'P',qty:3,warehouseId:'B',dispatchPreparedQty:2,warehouseShippedQty:2,deliveredQty:0}],
  warehouseShipmentRecords:[{id:'shipment_source_12345',orderId:'O',itemId:'I',productKey:'P',warehouseId:'B',
   sourceType:'WAREHOUSE_CUSTOMER_SHIPMENT',qty:2,date:'2026-10-18'}]});
 const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','google-chrome-stable','chromium'].map(n=>spawnSync('which',[n],{encoding:'utf8'})).find(r=>r.status===0)?.stdout.trim();
@@ -33,7 +33,7 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
    if(!applied){
     applied++;order.deliveryRecords.push({id:payload.operationId,orderId:'O',itemId:'I',shipmentId:payload.shipmentId,
      productKey:'P',warehouseId:'B',sourceType:'WAREHOUSE_SHIPMENT_CONFIRMATION',qty:2,date:payload.date});
-    order.deliveredQty=2;order.items[0].deliveredQty=2;order.isDelivered=true;
+    order.deliveredQty=2;order.items[0].deliveredQty=2;order.isDelivered=false;
    }
    if(lost){lost=false;throw Error('simulated lost delivery reply');}
    return {data:{status:'already-applied',orderId:'O',itemId:'I',shipmentId:payload.shipmentId,recordId:payload.operationId}};
@@ -61,16 +61,18 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
       const canManageOrderLifecycleCapability=()=>['admin','sales','engineer'].includes(currentUserRole),canEditPage=()=>true;
       const normalizedOrderItems=o=>o.items,normalizedOrderStatus=()=> 'normal';
       const savedDeliveryRecords=o=>o.deliveryRecords, savedReturnRecords=o=>o.returnRecords;
-      const deliveryProgressInfo=o=>({state:o.isDelivered?'complete':'none',remaining:2-o.deliveredQty,total:2,delivered:o.deliveredQty});
+      const deliveryProgressInfo=o=>({state:o.isDelivered?'complete':o.deliveredQty?'partial':'none',remaining:3-o.deliveredQty,total:3,delivered:o.deliveredQty});
       const orderLifecycleInfo=()=>({status:'normal',label:'正常'});
       const purchaseProgressInfo=()=>({state:'ready',label:'已採購'});
       const fulfillmentProgressInfo=()=>({state:'ready',label:'已出貨'});
       const escapeHtml=s=>String(s||''),escapeAttr=s=>String(s||''),inlineJsValue=s=>JSON.stringify(s).replaceAll(String.fromCharCode(34),'&quot;');
       const formatOrderStatusTime=()=>'',labelOrderProgressRecords=()=>{},localDateString=()=> '2026-10-19';
       const deliveryRecordId=()=> 'browser_'+crypto.randomUUID();
-      const resetDeliveryForm=()=>{},renderOrderLifecycleModal=()=>{},renderOrdersList=()=>{};
+      const resetDeliveryForm=()=>{},renderOrderLifecycleModal=()=>{},renderOrdersList=()=>{},selectOrderProgressTab=()=>{};
       window.alerts=[];window.alert=s=>alerts.push(s);window.promptCalls=0;window.prompt=()=>{promptCalls++;return '誤登簽收';};`});
    await page.addScriptTag({content:read('src/services/delivery-records.js')});
+   const lifecycle=read('src/features/orders/lifecycle-workspace.js');
+   await page.addScriptTag({content:lifecycle.slice(lifecycle.indexOf('window.openPartialDeliveryForm ='),lifecycle.indexOf('window.openPartialDeliveryForOrder ='))});
    await page.addScriptTag({content:section('function renderDeliveryModal() {','window.editDeliveryRecord =')
       +section('window.saveDeliveryRecord =','window.clearLegacyDelivery =')});
    await page.evaluate(async()=>{ordersCache=[await deliveryRead()];renderDeliveryModal();});
@@ -83,6 +85,7 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
   assert.match((await page.evaluate(()=>alerts))[0],/simulated lost delivery reply/);
   assert.equal(applied,1);assert.equal(order.deliveredQty,2);assert.equal(order.warehouseShipmentRecords.length,1);
   await setup();
+  await page.evaluate(()=>openPartialDeliveryForm());
   assert.equal(await page.locator('#deliveryShipmentId').inputValue(),'shipment_source_12345');
   assert.equal(await page.locator('#deliveryQty').inputValue(),'2');
   await page.locator('[onclick="saveDeliveryRecord()"]').click();

@@ -115,3 +115,14 @@
 這是 demo-yushin 的 1280／390 px 真 Browser Auth 連續段落，原訂單建立及初始同步仍為既有 fixture。PDF 實體輸出沿既有隔離；客戶送達、剩餘 3 件再採購、他倉選取、後續退貨、多品項／取消中收貨及 Preview／正式全線仍未在此案例驗收。
 
 本批本機語法與建置一致性檢查已通過；真 Auth、Chrome 及全套 Emulator／Rules 的執行結果以本批 PR 最新 CI 為準。未部署 Firebase，未修改正式資料。
+
+
+### 同 PO 出貨後分批送達與不重扣驗收（2026-10-21，待 CI）
+
+接續 PR #206 相同 PO、來源訂單及兩筆各 2 件真實出貨，從原倉管登出，以原登入表單登入來源業務，再由原訂單清單「分批交貨」進入既有送貨表單。第一筆出貨分別確認 1 件與 1 件，第二筆出貨確認 2 件；首筆及末筆真 HTTP 已提交後中斷回覆，重新載入原 app.js，原來源選取保持凍結並以相同 payload／operationId 確認，合計僅三份簽收與三筆簽收歷史。
+
+每次送達與重送都核對公司／兩倉實貨、所有來源預留、lot、lot cost、movement、原 receipt／供應／需求及七筆目標訂單完全不變。最終原出貨 4 件均已確認、pendingDeliveryQty=0，但原 12 件訂單仍 isDelivered=false、預留 5、缺口 3。此案例不涵蓋剩餘 3 件再採購、他倉 5 件續出、退貨、取消／恢復後送達、多品項收貨或 Preview／正式部署；初始建單／預留仍是既有 fixture，PDF 實體輸出沿原隔離。
+
+本機建置一致性與語法檢查已通過；完整真 Auth／Chrome／Emulator／Rules 結果以本批 PR 最新 CI 為準。未部署 Firebase，未修改正式資料。
+
+首輪整站驗收發現：原 openPartialDeliveryForm 在 renderDeliveryModal 已回填原待確認意圖後，又清空 deliveryQty。現於本機 v2 入口重新呼叫同一 renderer 恢復原數量／來源，不改寫 intent、不另造交易。既有 desktop／phone delivery smoke 同步改走原開表單函式，覆蓋此重整恢復回歸；修 src 後已重建 app.js 並更新靜態版本。修正後全套 CI 仍待執行，不將首輪失敗當通過。

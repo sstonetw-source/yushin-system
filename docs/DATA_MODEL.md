@@ -410,3 +410,12 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 不新增持久欄位或集合。兩次真實到貨使用不同固定 receipts operationId 與各自 lot；同次回覆遺失後重試保持該次 ID、批號、效期與數量。兩次實體寄出保留既有 warehouseShipmentRecords 與 location-ship-* movements；deliveryRecords 不變。既有 receivingSupplyOrders 繼續由 sanitizeSupply 投影且不含成本。
 
 本批本機語法與建置一致性檢查已通過；真 Auth、Chrome 及全套 Emulator／Rules 的執行結果以本批 PR 最新 CI 為準。未部署 Firebase，未修改正式資料。
+
+
+### 同 PO 出貨後分批送達與不重扣驗收（2026-10-21，待 CI）
+
+無新欄位／集合。送達沿既有 deliveryRecords 的 shipmentId／shipmentMovementId／intentHash 與 deliveryHistory。首次與最後一次簽收回覆中斷後，sessionStorage 原 intent 維持同操作 ID、來源出貨、數量、日期及備註；重送不新增第四筆簽收。inventory、warehouseStocks、inventoryReservations、inventoryLots、inventoryLotCosts、inventoryMovements、receipts、supplyOrders、procurementDemands 均須完整不變。
+
+本機建置一致性與語法檢查已通過；完整真 Auth／Chrome／Emulator／Rules 結果以本批 PR 最新 CI 為準。未部署 Firebase，未修改正式資料。
+
+首輪整站驗收發現：原 openPartialDeliveryForm 在 renderDeliveryModal 已回填原待確認意圖後，又清空 deliveryQty。現於本機 v2 入口重新呼叫同一 renderer 恢復原數量／來源，不改寫 intent、不另造交易。既有 desktop／phone delivery smoke 同步改走原開表單函式，覆蓋此重整恢復回歸；修 src 後已重建 app.js 並更新靜態版本。修正後全套 CI 仍待執行，不將首輪失敗當通過。
