@@ -1134,6 +1134,82 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   assert.equal(otherShipped.source.warehouseShipmentRecords.length,3);
   console.log('Full site '+width+'px: original other-warehouse row shipped its five held units after final receiving; successful reply lost, reload retained frozen warehouse/quantity/id and one debit, source warehouse and prior fulfillment unchanged.');
 
+  // The original owner acknowledges this OTHER-warehouse shipment after the
+  // earlier CLOSE returns. Delivery consumes shipment quota, never stock.
+  const otherDeliveryPhysicalFacts=async()=>({...await stockFacts(),
+   remainingSupply:(await db.collection('supplyOrders').doc(remainingSupplyId).get()).data(),
+   remainingReceipts:(await db.collection('receipts').where('supplyOrderId','==',remainingSupplyId).get()).docs
+    .map(doc=>({id:doc.id,...doc.data()})).sort((a,b)=>a.id.localeCompare(b.id))});
+  const beforeOtherDelivery=await otherDeliveryPhysicalFacts();
+  await siteLogout(page);await siteLogin(page,fixture.accounts.sales,'sales');
+  await openCustomerDelivery();
+  const otherDeliveryOption=page.locator('#deliveryShipmentId option[value="'+newShipment.id+'"]');
+  assert.match(await otherDeliveryOption.textContent(),new RegExp(fixture.warehouseIds[1]));
+  assert.match(await otherDeliveryOption.textContent(),/待確認 5/);
+  await page.locator('#deliveryShipmentId').selectOption(newShipment.id);
+  await page.locator('#deliveryDate').fill('2026-10-22');await page.locator('#deliveryQty').fill('2');
+  await page.locator('#deliveryNotes').fill('另一倉第一批兩件送達');
+  loseDelivery=true;await deliverySave.click();
+  await page.waitForFunction(id=>!pendingDeliveryOrderIds.size&&!!pendingV2DeliveryConfirmation(id),fixture.sourceId,{timeout:45000});
+  const otherDeliveryIntent=calls.filter(row=>row.name==='confirmV2ShipmentDelivery').at(-1).data;
+  assert.equal(otherDeliveryIntent.shipmentId,newShipment.id);assert.equal(otherDeliveryIntent.quantity,2);
+  for(const id of ['deliveryDate','deliveryQty','deliveryNotes'])assert.equal(await page.locator('#'+id).isDisabled(),true);
+  assert.notEqual(otherDeliveryIntent.operationId,finalDeliveryIntent.operationId);
+  const otherPartDelivered=await facts(fixture);
+  assert.equal(otherPartDelivered.source.deliveredQty,6);assert.equal(otherPartDelivered.source.deliveryRecords.length,4);
+  assert.equal(otherPartDelivered.source.deliveryRecords.at(-1).warehouseId,fixture.warehouseIds[1]);
+  assert.deepEqual(await otherDeliveryPhysicalFacts(),beforeOtherDelivery);
+  await siteOpen(page,'sales');await openCustomerDelivery();
+  assert.equal(await page.locator('#deliveryShipmentId').inputValue(),newShipment.id);
+  assert.equal(await page.locator('#deliveryShipmentId').isDisabled(),true);
+  assert.equal(await page.locator('#deliveryQty').inputValue(),'2');
+  assert.equal(await page.locator('#deliveryQty').isDisabled(),true);
+  await deliverySave.click();
+  await page.waitForFunction(id=>!pendingDeliveryOrderIds.size&&!pendingV2DeliveryConfirmation(id),fixture.sourceId,{timeout:45000});
+  assert.deepEqual(calls.filter(row=>row.name==='confirmV2ShipmentDelivery').at(-1).data,otherDeliveryIntent);
+  assert.deepEqual(await facts(fixture),otherPartDelivered);
+  assert.deepEqual(await otherDeliveryPhysicalFacts(),beforeOtherDelivery);
+
+  await page.locator('#openPartialDeliveryBtn').click();
+  assert.match(await otherDeliveryOption.textContent(),/待確認 3/);
+  for(const id of ['deliveryDate','deliveryQty','deliveryNotes'])assert.equal(await page.locator('#'+id).isDisabled(),false);
+  await page.locator('#deliveryShipmentId').selectOption(newShipment.id);
+  await page.locator('#deliveryDate').fill('2026-10-22');await page.locator('#deliveryQty').fill('3');
+  await page.locator('#deliveryNotes').fill('另一倉其餘三件送達');
+  loseDelivery=true;await deliverySave.click();
+  await page.waitForFunction(id=>!pendingDeliveryOrderIds.size&&!!pendingV2DeliveryConfirmation(id),fixture.sourceId,{timeout:45000});
+  const otherFinalDeliveryIntent=calls.filter(row=>row.name==='confirmV2ShipmentDelivery').at(-1).data;
+  assert.equal(otherFinalDeliveryIntent.shipmentId,newShipment.id);assert.equal(otherFinalDeliveryIntent.quantity,3);
+  assert.notEqual(otherFinalDeliveryIntent.operationId,otherDeliveryIntent.operationId);
+  const otherAllDelivered=await facts(fixture);
+  assert.equal(otherAllDelivered.source.deliveredQty,9);assert.equal(otherAllDelivered.source.items[0].deliveredQty,9);
+  assert.equal(otherAllDelivered.source.deliveryRecords.length,5);assert.equal(otherAllDelivered.source.isDelivered,false);
+  for(const field of ['warehouseShipmentRecords','returnRecords','returnHistory','returnRequests','returnedQty'])
+   assert.deepEqual(otherAllDelivered.source[field],otherShipped.source[field]);
+  for(const field of ['reservedQty','shortageQty','dispatchPreparedQty','warehouseShippedQty','returnedQty'])
+   assert.deepEqual(otherAllDelivered.source.items[0][field],otherShipped.source.items[0][field]);
+  assert.deepEqual(otherAllDelivered.source.deliveryRecords.slice(0,3),otherShipped.source.deliveryRecords);
+  assert.deepEqual(await otherDeliveryPhysicalFacts(),beforeOtherDelivery);
+  await siteOpen(page,'sales');await openCustomerDelivery();
+  assert.equal(await page.locator('#deliveryShipmentId').inputValue(),newShipment.id);
+  assert.equal(await page.locator('#deliveryShipmentId').isDisabled(),true);
+  assert.equal(await page.locator('#deliveryQty').inputValue(),'3');
+  await deliverySave.click();
+  await page.waitForFunction(id=>!pendingDeliveryOrderIds.size&&!pendingV2DeliveryConfirmation(id),fixture.sourceId,{timeout:45000});
+  assert.deepEqual(calls.filter(row=>row.name==='confirmV2ShipmentDelivery').at(-1).data,otherFinalDeliveryIntent);
+  assert.deepEqual(await facts(fixture),otherAllDelivered);
+  assert.deepEqual(await otherDeliveryPhysicalFacts(),beforeOtherDelivery);
+  const afterOtherDeliveryProjection=require('../modules/fulfillment-core').projectOrderShipmentReturns({orderId:fixture.sourceId,
+   items:otherAllDelivered.source.items,shipments:otherAllDelivered.source.warehouseShipmentRecords,
+   deliveries:otherAllDelivered.source.deliveryRecords,returns:otherAllDelivered.source.returnRecords});
+  assert.equal(afterOtherDeliveryProjection.confirmedQty,9);assert.equal(afterOtherDeliveryProjection.pendingDeliveryQty,0);
+  assert.equal(afterOtherDeliveryProjection.closedQty,4);assert.equal(afterOtherDeliveryProjection.outstandingQty,3);
+  assert.equal(afterOtherDeliveryProjection.isDelivered,false);
+  assert.equal(otherAllDelivered.source.deliveryHistory.filter(row=>row.source==='shipment_confirmation').length,5);
+  await page.locator('#openPartialDeliveryBtn').click();
+  assert.equal(await otherDeliveryOption.count(),0,'fully acknowledged shipment cannot be selected for another new confirmation');
+  console.log('Full site '+width+'px: original owner acknowledged OTHER warehouse two plus three after CLOSE returns; both successful replies lost and reloaded with identical frozen intents, five total confirmations, no new stock/reservation/lot/movement writes and three units still outstanding.');
+
   console.log('Full site '+width+'px: seller restored five free units with seven shortages; lost-reply and stale-cancel retries are immutable.');
   for(const match of read('index.html').matchAll(/<script[^>]+src="([^"?]+)(?:\?[^\"]*)?"/g)){
    if(!match[1].startsWith('https:'))assert.ok(loaded.has('/'+match[1]),'original script loaded: '+match[1]);
