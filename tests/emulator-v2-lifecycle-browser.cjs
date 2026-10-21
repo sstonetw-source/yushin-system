@@ -940,6 +940,16 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   await page.locator('#poItemsBody input[onchange*="unitPrice"]').fill('20');
   await page.locator('#poItemsBody input[onchange*="unitPrice"]').blur();
   const priorPurchaseCalls=calls.filter(row=>row.name==='commitV2FormalPurchase').length;
+  // Preserve the pre-submit form state when the UI declines the second PO.
+  const beforeRemainingSubmit=await page.evaluate(()=>({
+   poNo:document.querySelector('#poNo')?.textContent,
+   vendor:document.querySelector('#poVendorName')?.value,
+   date:document.querySelector('#poDate')?.value,
+   items:poItems.map(item=>({qty:item.qty,unitPrice:item.unitPrice,orderId:item.orderId,itemId:item.itemId})),
+   editingId:poEditingId,directStock:poDirectStockMode,
+   buttonDisabled:document.querySelector('#printPurchaseOrderBtn')?.disabled,
+   buttonText:document.querySelector('#printPurchaseOrderBtn')?.textContent
+  }));
   await page.locator('#printPurchaseOrderBtn').click();
   // The click handler starts asynchronously: saveInProgress is initially false.
   // Never treat its initial idle state as proof that the purchase finished.
@@ -947,7 +957,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
    await page.waitForFunction(()=>window.poPdfOutputs.length===1,null,{timeout:45000});
   }catch(error){
    const earlyPurchaseState=await page.evaluate(()=>({pdf:window.poPdfOutputs,status:document.querySelector('#poSaveStatus')?.textContent||'',saveInProgress:poSaveInProgress,pending:poIncomingSyncPending,buttonDisabled:document.querySelector('#printPurchaseOrderBtn')?.disabled}));
-   assert.fail('Remaining PO PDF did not complete: '+JSON.stringify(earlyPurchaseState));
+   assert.fail('Remaining PO PDF did not complete: '+JSON.stringify({beforeRemainingSubmit,earlyPurchaseState,purchaseCallCount:calls.filter(row=>row.name==='commitV2FormalPurchase').length-priorPurchaseCalls}));
   }
   const purchaseDiagnostic=await page.evaluate(()=>({pending:poIncomingSyncPending,pdf:window.poPdfOutputs,status:document.querySelector('#poSaveStatus')?.textContent||'',modal:document.querySelector('#poModalOverlay')?.className||''}));
   assert.equal(purchaseDiagnostic.pdf.length,1,JSON.stringify(purchaseDiagnostic));
