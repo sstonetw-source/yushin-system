@@ -333,3 +333,6 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 
 
 - Client 退貨申請同 ID 並行可能先被 Rules 以舊提案拒絕；不得因此允許覆寫原申請的 createdAt 或重建 ID。僅在 permission-denied 後，以既有 runRoleTransaction 唯讀查 users／orders，核對目前啟用角色、真 Rules 所有權與原 UID／完整意圖；完全匹配才確認既有結果。callback 每次清空前次 confirmed 值，其他拒絕保留，禁止 fallback writer。純申請欄位的無效提案應直接拒絕，不串入其他更新驗證耗盡預算。
+
+
+- v2 申請實收必須沿 commitLocationReturn 原交易，以可選 requestId 綁定原 operationId／hash；不可另寫一筆庫存交易後才回填申請。交易內讀真實物流角色及待收申請，核對已收量與原 linked events、申請餘量、出貨／lot／movement，原子建立 customerReturnReceipts。未帶 requestId 不得擴張原業務權限，有同品項待收時須走申請實收。舊 hash、完成後原 ID 重試、撤回／實收競爭與雙收貨人競爭須驗證。原 UI、固定意圖／未知回覆恢復、Preview／正式啟用在本契約批次仍未完成。

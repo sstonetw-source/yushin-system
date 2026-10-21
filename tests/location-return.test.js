@@ -1,7 +1,7 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs');
 const inventory=require('../modules/inventory-core'),reservation=require('../modules/reservation-core'),core=require('../modules/fulfillment-core');
-const {normalizeLocationReturnIntent,commitLocationReturn}=require('../functions/location-return-service');
+const {normalizeLocationReturnIntent,planLocationReturnRequest,commitLocationReturn}=require('../functions/location-return-service');
 const request=(patch={})=>({orderId:'O',itemId:'I',shipmentId:'shipment_12345',syncAttemptId:'sync_12345',
  selections:[{lotId:'L',qty:1}],operationId:'return_123456',warehouseId:'A',date:'2026-10-19',reason:'客戶退回',
  condition:'RESTOCKABLE',settlement:'REPLACE',...patch});
@@ -91,4 +91,54 @@ test('shared return intent keeps the historical SHA-256 serialization in browser
  const digest=await webcrypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(intent)));
  assert.equal(Buffer.from(digest).toString('hex'),original.hash);
  assert.equal(normalizeLocationReturnIntent(request()).hash,original.hash);
+});
+
+test('request-linked receipt binds request ID to the original hash and rejects replacement or ambiguous links',()=>{
+ const original=normalizeLocationReturnIntent(request({settlement:'CLOSE'}));
+ const linked=normalizeLocationReturnIntent(request({settlement:'CLOSE',requestId:'REQUEST'}));
+ assert.notEqual(linked.hash,original.hash);
+ assert.notEqual(normalizeLocationReturnIntent(request({settlement:'CLOSE',requestId:'OTHER'})).hash,linked.hash);
+ for(const requestId of [undefined,null,'',' REQUEST','R/Q',1])
+  assert.throws(()=>normalizeLocationReturnIntent(request({settlement:'CLOSE',requestId})));
+ assert.throws(()=>normalizeLocationReturnIntent(request({requestId:'REQUEST'})),/CLOSE/);
+});
+const pendingRequest=(patch={})=>({id:'REQUEST',itemId:'I',qty:2,receivedQty:0,status:'PENDING',settlement:'CLOSE',...patch});
+const requestOrder=()=>({returnRequests:[pendingRequest()],returnPending:true,returnRecords:[]});
+test('request receipt projection preserves request intent and history while partially then fully receiving',()=>{
+ const order=requestOrder(),intent={itemId:'I',requestId:'REQUEST'};
+ const first=planLocationReturnRequest(order,intent,1);
+ assert.equal(first.requests[0].receivedQty,1);assert.equal(first.requests[0].status,'PENDING');assert.equal(first.returnPending,true);
+ assert.equal(order.returnRequests[0].receivedQty,0);
+ const final=planLocationReturnRequest({...order,returnRequests:first.requests,
+  returnRecords:[{requestId:'REQUEST',itemId:'I',qty:1,settlement:'CLOSE'}]},intent,1);
+ assert.deepEqual(final.requests[0],pendingRequest({receivedQty:2,status:'RECEIVED'}));assert.equal(final.returnPending,false);
+ assert.throws(()=>planLocationReturnRequest(order,{itemId:'I'},1),/原申請/);
+ assert.equal(planLocationReturnRequest({returnRequests:[pendingRequest({itemId:'OTHER'})]}, {itemId:'I'},1),null);
+});
+test('request receipt rejects stale flags counters states mismatched items and corrupted received history',()=>{
+ const intent={itemId:'I',requestId:'REQUEST'},order=requestOrder();
+ for(const patch of [{returnPending:false},{returnRequests:{}},{returnRequests:[pendingRequest(),pendingRequest()]},
+  {returnRequests:[pendingRequest({status:'CANCELLED'})],returnPending:false},
+  {returnRequests:[pendingRequest({itemId:'OTHER'})]},
+  {returnRequests:[pendingRequest({status:'RECEIVED',receivedQty:2})],returnPending:false},
+  {returnRequests:[pendingRequest({receivedQty:1})]},
+  {returnRequests:[pendingRequest({qty:2.5})]},
+  {returnRecords:[{requestId:'REQUEST',itemId:'I',qty:1,settlement:'CLOSE'}]}])
+  assert.throws(()=>planLocationReturnRequest({...order,...patch},intent,1));
+ for(const amount of [0,-1,1.5,3,NaN])assert.throws(()=>planLocationReturnRequest(order,intent,amount));
+ const valid={...order,returnRequests:[pendingRequest(),pendingRequest({id:'ANOTHER',itemId:'OTHER'})]};
+ assert.equal(planLocationReturnRequest(valid,intent,2).returnPending,true);
+});
+test('shared return proof reconstructs linked intent and detects request-link tampering',async()=>{
+ const data=request({settlement:'CLOSE',requestId:'REQUEST'}),{hash,...intent}=normalizeLocationReturnIntent(data);
+ const record={...returned({id:data.operationId,shipmentId:data.shipmentId,qty:1,settlement:'CLOSE'}),
+  requestId:data.requestId,warehouseId:data.warehouseId,date:data.date,reason:data.reason,
+  lotAllocations:[{lotId:'L',qty:1}],movementId:'location-return-'+data.operationId,intentHash:hash};
+ const proof={id:record.movementId,data:{action:'location_customer_return',type:'return',qty:1,
+  sourceId:'O',itemId:'I',productKey:'P',warehouseId:'A',intentHash:hash,returnRecord:record}};
+ const hashIntent=value=>require('node:crypto').createHash('sha256').update(JSON.stringify(value)).digest('hex');
+ assert.equal(await core.validateLocationReturnProofs({returnRecords:[record]},intent,'P',[proof],{hashIntent}),true);
+ const tampered={...record,requestId:'OTHER'};
+ await assert.rejects(core.validateLocationReturnProofs({returnRecords:[tampered]},intent,'P',
+  [{...proof,data:{...proof.data,returnRecord:tampered}}],{hashIntent}),/憑證/);
 });

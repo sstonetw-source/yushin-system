@@ -157,3 +157,12 @@
 
 
 第二輪 CI 39546751227：原畫面、五角色及新增三十筆／保護欄位測試通過，唯一失敗精確落於同 ID 並行提交。兩份讀到舊版的提案可能在另一份已提交後被 Rules 拒絕，SDK 不一定先進行 callback 重跑。現將純申請欄位的非法／過期提案直接拒絕，不再落入其他訂單 writer 驗證；Service 僅對 permission-denied，以原 UID／角色和原 operationId 啟動一次唯讀交易，重讀目前 users 與 orders，確認真實啟用商務角色、Client Rules 所有權及完整原意圖。只有完全相同的已提交申請才回原結果，不改 createdAt／申請內容、不產生新 ID 或寫入；無對應、角色／停用／所有權／內容不符仍維持拒絕。原先直接重送與恢復後的意圖核對共用同一 matcher。新增執行式測試覆蓋成功核對與拒絕，修正後完整 CI 仍待最新結果。
+
+
+## 2026-10-21：申請連結的 v2 後端原子實收（待本批 CI）
+
+沿 PR #209 的原申請 Service／Client Rules 與既有 receiveV2CustomerReturn／commitLocationReturn，新增可選 requestId 契約。唯一原交易同步更新原 lot、公司／分倉／預留、returnRecords／history、申請 receivedQty／status／returnPending，並建立原 customerReturnReceipts 及 movement。未帶連結的原商業角色及歷史 hash 不變，帶連結只允許真實物流角色。
+
+本機 Node 1637／1637，建置一致性／語法／git diff 檢查通過；新增四項核心測試與五項真 Auth→隔離 Callable→原交易整合，覆蓋五角色／偽造 claims、部分後全收、同 ID 並行、原申請已收與事件一致性、跨倉／批次／扣帳憑證／帳目錯誤回滾、同 ID 不同內容、降權／停用、receipt ID 衝突或損壞、兩收貨人競爭最後餘量，以及撤回與實收競爭。完整 GitHub CI 仍待執行，不把新增整合宣稱已通過。
+
+本批未修改倉管原 UI 的未開放訊息或 legacy source guard；下一步為按原申請明確選原 shipment／lot 的原介面、同 UID／角色固定意圖、未知回覆保留並刷新以原 ID 回讀／續傳及 1280／390px 真實 Browser Auth 驗收。INSPECTION／DAMAGED、Preview 與正式仍未開放；未部署 Firebase，未修改正式資料／角色。

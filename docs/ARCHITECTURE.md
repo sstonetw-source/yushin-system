@@ -718,3 +718,10 @@ normalizedOrderItems 的 returnedQty 為既有顯示／補送用途，排除 CLO
 
 
 同 ID Client 衝突的結果確認也由原 customer-return Service 負責：permission-denied 後追加一次 users／orders 唯讀交易，只確認已提交且意圖相同的原申請，無額外 writer／查詢／Collection。正常成功路徑不增加讀取；未匹配或目前角色／啟用／所有權驗證失敗仍回原錯誤。此確認不是未提交交易的成功替身，也不承諾未知意圖的跨刷新恢復。
+
+
+### v2 退貨申請實收契約（2026-10-21）
+
+既有隔離 receiveV2CustomerReturn 仍只委派 commitLocationReturn，不新增 stock writer。可選 requestId 將倉管 admin／purchaser／warehouse 的有效申請實收與原 admin／本人 sales／engineer 未連結入口分開驗證。共用 fulfillment-core 的 canonical intent／歷史 proof 重建納入可選連結；舊 hash 保持不變。庫存及原批次規劃沿 planExplicitShipmentReturn、planReservationReturn、planLotRestoration；同一交易更新申請及原 customerReturnReceipts。所有讀取先於寫入，申請最多 30 筆、原批次／事件查詢上限沿既有 200 筆，額外只多讀一份固定 ID receipt，無新 listener／索引。
+
+目前僅後端隔離契約；原介面及未知回覆跨刷新恢復待接，不代表倉管 UI／Preview／正式實收已啟用。

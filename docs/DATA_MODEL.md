@@ -419,3 +419,14 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 本機建置一致性與語法檢查已通過；完整真 Auth／Chrome／Emulator／Rules 結果以本批 PR 最新 CI 為準。未部署 Firebase，未修改正式資料。
 
 首輪整站驗收發現：原 openPartialDeliveryForm 在 renderDeliveryModal 已回填原待確認意圖後，又清空 deliveryQty。現於本機 v2 入口重新呼叫同一 renderer 恢復原數量／來源，不改寫 intent、不另造交易。既有 desktop／phone delivery smoke 同步改走原開表單函式，覆蓋此重整恢復回歸；修 src 後已重建 app.js 並更新靜態版本。修正後全套 CI 仍待執行，不將首輪失敗當通過。
+
+
+### v2 退貨申請原子實收（2026-10-21，本機隔離契約）
+
+沿用 orders.returnRequests、returnRecords、returnHistory、customerReturnReceipts 與 inventoryMovements；無新集合、Rules、索引或正式資料遷移。normalizeLocationReturnIntent 新增可選 requestId，提供時必須 CLOSE，並納入原 canonical hash；未提供時的歷史序列化及 hash 完全保留。原退貨紀錄帶 requestId／quality=SALEABLE，實收憑證 ID 使用同一 operationId，另保存 movementId／intentHash／receivedByRole／sourceType=WAREHOUSE_CUSTOMER_RETURN，仍保留既有 receipt 的 ownerUid、salesCode、record、STOCK disposition 與 requestIndex 欄位。
+
+唯一 commitLocationReturn 交易先讀目前 users 與原單、原 movement 及同 ID receipt，再沿原出貨／退貨憑證、v2 ledger、公司／分倉及原批次驗證，最後一次寫入公司實貨、分倉實貨、預留帳、原 lot 餘量、退貨事件與 history、申請 receivedQty／PENDING 或 RECEIVED／returnPending、customerReturnReceipts 及 movement。不改原申請 qty／日期／原因／建立者，亦不另造批次。申請已收量必須等於原 linked returnRecords 合計；同品項有待收申請時不得用未連結舊入口繞過申請餘量。
+
+帶 requestId 的角色限 admin／purchaser／warehouse，從交易內 users 真實角色驗證；未帶者沿 admin／本人 sales／engineer。申請撤回或完成後禁止新實收；已提交同 ID 可核對原操作者／角色／hash／receipt／原退貨紀錄後只讀回覆，不能再次入庫。兩個 ID 競爭最後餘量由同一 orders 交易序列化。RESTOCKABLE／SALEABLE 以外品質、REPLACE 與跨倉回收仍拒絕。
+
+本批只接既有隔離 Callable 與後端原交易；原倉管 UI 仍保留未開放訊息及 legacy source guard，尚未接上固定意圖、刷新恢復與真實 UI 實收。正式 index.js 未匯出；未部署 Firebase。測試結果見整站驗收紀錄。

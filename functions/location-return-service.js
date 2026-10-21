@@ -2,25 +2,76 @@
 // Internal Emulator-only receipt of restockable goods into their source warehouse.
 const inventory=require('./shared/inventory-core'),reservation=require('./shared/reservation-core');
 const fulfillment=require('./shared/fulfillment-core');
+const {isDeepStrictEqual}=require('node:util');
 const {normalizeLocationReturnIntent,readLocationReturnProofs,assertCancelledCloseReturnContext,readMultiReturnSource}=require('./location-return-trace-service');
 const {readShipmentActorOrder,shipmentDeliveryContext,readShipmentProof}=require('./shipment-delivery-service');
 function fault(message,code='failed-precondition'){const e=new Error(message);e.code=code;throw e;}
 function qty(value){if(!Number.isSafeInteger(value)||value<0)fault('退貨帳目數量不正確');return value;}
+// Pure request projection; stock/lot planning remains in the original writer below.
+function planLocationReturnRequest(order,intent,returnQty){
+ const requests=order.returnRequests??[];
+ if(!Array.isArray(requests)||requests.length>30)fault('退貨申請格式或筆數不正確');
+ if(!intent.requestId){
+  if(requests.some(r=>r?.itemId===intent.itemId&&r.status==='PENDING'))
+   fault('此品項有待收退貨，請依原申請實收');
+  return null;
+ }
+ const ids=new Set();
+ for(const r of requests){
+  if(!r||typeof r.id!=='string'||!r.id||ids.has(r.id)||typeof r.itemId!=='string'||!r.itemId
+   ||!Number.isSafeInteger(r.qty)||r.qty<=0||!Number.isSafeInteger(r.receivedQty)||r.receivedQty<0||r.receivedQty>r.qty
+   ||!['PENDING','RECEIVED','CANCELLED'].includes(r.status)||r.settlement!=='CLOSE'
+   ||(r.status==='PENDING'&&r.receivedQty===r.qty)||(r.status==='RECEIVED'&&r.receivedQty!==r.qty))
+   fault('退貨申請狀態或已收數量不一致');
+  ids.add(r.id);
+  const received=(order.returnRecords??[]).filter(row=>row.requestId===r.id);
+  if(received.some(row=>row.itemId!==r.itemId||row.settlement!=='CLOSE'||!Number.isSafeInteger(row.qty)||row.qty<=0)
+   ||received.reduce((sum,row)=>sum+row.qty,0)!==r.receivedQty)
+   fault('退貨申請已收量與原入庫紀錄不一致');
+ }
+ if(order.returnPending!==requests.some(r=>r.status==='PENDING'))fault('退貨待收旗標不一致');
+ const index=requests.findIndex(r=>r.id===intent.requestId),request=requests[index];
+ if(!request||request.status!=='PENDING'||request.itemId!==intent.itemId)
+  fault('找不到此品項的有效待收退貨申請');
+ if(!Number.isSafeInteger(returnQty)||returnQty<=0||returnQty>request.qty-request.receivedQty)
+  fault('退貨實收量超過申請餘量');
+ const next={...request,receivedQty:request.receivedQty+returnQty};
+ if(next.receivedQty===next.qty)next.status='RECEIVED';
+ const updated=requests.map((r,i)=>i===index?next:r);
+ return {requests:updated,index,returnPending:updated.some(r=>r.status==='PENDING')};
+}
+function assertLinkedReceipt(order,intent,record,receipt,uid,actorRole){
+ const request=(order.returnRequests??[]).find(r=>r.id===intent.requestId);
+ if(!record||record.requestId!==intent.requestId||record.id!==intent.operationId
+  ||!request||request.itemId!==intent.itemId||!Number.isSafeInteger(request.receivedQty)||request.receivedQty<record.qty
+  ||!receipt||receipt.orderId!==intent.orderId||receipt.requestId!==intent.requestId
+  ||receipt.itemId!==intent.itemId||receipt.qty!==record.qty||receipt.warehouseId!==intent.warehouseId
+  ||receipt.quality!=='SALEABLE'||receipt.disposition!=='STOCK'||receipt.receivedBy!==uid||receipt.receivedByRole!==actorRole
+  ||receipt.intentHash!==intent.hash||receipt.movementId!==record.movementId
+  ||!isDeepStrictEqual(receipt.record,record)
+  ||!(order.returnRecords??[]).some(row=>isDeepStrictEqual(row,record)))
+  fault('退貨申請實收缺少一致的原入庫憑證');
+}
 async function commitLocationReturn(db,uid,data){
  if(!process.env.FIRESTORE_EMULATOR_HOST||db.projectId!=='demo-yushin')fault('實物退貨目前僅允許 demo-yushin Emulator');
  const intent=normalizeLocationReturnIntent(data),{orderId,itemId,warehouseId,operationId}=intent;
  const ref=(n,k)=>db.collection(n).doc(k),movementRef=ref('inventoryMovements','location-return-'+operationId);
  return db.runTransaction(async tx=>{
-  // Preserve the existing customer-return lifecycle authority: admin/own sales/engineer.
-  const {actorRole,orderRef,order}=await readShipmentActorOrder(tx,db,uid,orderId);
+  // Logistics may receive a real pending request; unlinked lifecycle authority stays unchanged.
+  const {actorRole,orderRef,order}=await readShipmentActorOrder(tx,db,uid,orderId,
+   intent.requestId?['admin','purchaser','warehouse']:['admin','sales','engineer']);
   const applied=await tx.get(movementRef);
+  const receiptRef=intent.requestId?ref('customerReturnReceipts',operationId):null;
+  const receipt=receiptRef?await tx.get(receiptRef):null;
   if(applied.exists){
    const prior=applied.data();
    if(prior.action!=='location_customer_return'||prior.actorUid!==uid||prior.actorRole!==actorRole
     ||prior.intentHash!==intent.hash||prior.sourceId!==orderId||prior.itemId!==itemId)
     fault('退貨操作識別碼已用於其他交易','already-exists');
+   if(intent.requestId)assertLinkedReceipt(order,intent,prior.returnRecord,receipt?.exists?receipt.data():null,uid,actorRole);
    return {...prior.result,status:'already-applied',movementId:movementRef.id};
   }
+  if(receipt?.exists)fault('退貨收貨識別碼已用於其他交易','already-exists');
   const context=shipmentDeliveryContext(order,intent,{
    allowReturns:true,allowCancelledCloseReturn:intent.settlement==='CLOSE',allowMultiReturn:true});
   const {item,productKey,projection,returnProjection,cancelled,whole}=context;
@@ -35,6 +86,7 @@ async function commitLocationReturn(db,uid,data){
   const confirmedQty=projection.shipments.find(r=>r.shipmentId===intent.shipmentId)?.confirmedQty??0;
   const plan=inventory.planExplicitShipmentReturn({shipment,confirmedQty,selections:intent.selections,
    priorReturns:order.returnRecords.filter(r=>r.shipmentId===shipment.id)});
+  const requestPlan=planLocationReturnRequest(order,intent,plan.returnQty);
   const invRef=ref('inventory',encodeURIComponent(productKey));
   const stockRef=ref('warehouseStocks',encodeURIComponent(warehouseId)+'__'+encodeURIComponent(productKey));
   const ledgerRef=ref('inventoryReservations',orderId+'__'+itemId);
@@ -75,7 +127,8 @@ async function commitLocationReturn(db,uid,data){
   const record={id:operationId,orderId,itemId,shipmentId:shipment.id,productKey,warehouseId,
    qty:plan.returnQty,sourceType:'WAREHOUSE_CUSTOMER_RETURN',date:intent.date,reason:intent.reason,
    settlement:intent.settlement,condition:intent.condition,lotAllocations:plan.allocations,
-   movementId:movementRef.id,createdByUid:uid,createdByRole:actorRole,createdAt:now,intentHash:intent.hash};
+   movementId:movementRef.id,createdByUid:uid,createdByRole:actorRole,createdAt:now,intentHash:intent.hash,
+   ...(requestPlan?{requestId:intent.requestId,quality:'SALEABLE'}:{})};
   const records=[...order.returnRecords,record];
   const nextWhole=whole?fulfillment.projectOrderShipmentReturns({orderId,items:order.items,
    shipments:order.warehouseShipmentRecords??[],deliveries:order.deliveryRecords,returns:records}):null;
@@ -88,6 +141,9 @@ async function commitLocationReturn(db,uid,data){
    returnedQty:next.returnedQty,closedQty:next.closedQty,replacementQty:next.replacementQty,
    effectiveDeliveredQty:next.effectiveDeliveredQty,isDelivered:(nextWhole??next).isDelivered,reservedQty:stockPlan.reservation.quantity};
   if(nextWhole)result.itemIsDelivered=next.isDelivered;
+  if(requestPlan)Object.assign(result,{requestId:intent.requestId,receiptId:operationId,
+   requestReceivedQty:requestPlan.requests[requestPlan.index].receivedQty,
+   requestStatus:requestPlan.requests[requestPlan.index].status});
   tx.update(invRef,{...stockPlan.aggregateStock,updatedAt:now});
   tx.update(stockRef,{...stockPlan.warehouseStock,updatedAt:now});
   tx.set(ledgerRef,{...stockPlan.reservation,updatedAt:now});
@@ -95,7 +151,13 @@ async function commitLocationReturn(db,uid,data){
   tx.update(orderRef,{items:order.items.map(row=>row.itemId===itemId?
    {...row,reservedQty:result.reservedQty,returnedQty:next.returnedQty}:row),
    returnedQty:(nextWhole??next).returnedQty,isDelivered:(nextWhole??next).isDelivered,returnRecords:records,
-   returnHistory:[...(order.returnHistory||[]),{action:'add',recordId:operationId,before:null,after:record,by:uid,at:now}],updatedAt:now});
+   returnHistory:[...(order.returnHistory||[]),{action:'add',recordId:operationId,before:null,after:record,by:uid,at:now}],
+   ...(requestPlan?{returnRequests:requestPlan.requests,returnPending:requestPlan.returnPending,returnReceiptId:operationId}:{}),updatedAt:now});
+  if(requestPlan)tx.create(receiptRef,{orderId,requestId:intent.requestId,requestIndex:requestPlan.index,
+   qty:plan.returnQty,quality:'SALEABLE',warehouseId,itemId,itemName:item.itemName||'',
+   ownerUid:order.ownerUid,salesCode:order.salesCode,disposition:'STOCK',record,
+   sourceType:'WAREHOUSE_CUSTOMER_RETURN',movementId:movementRef.id,intentHash:intent.hash,
+   createdAt:now,receivedBy:uid,receivedByRole:actorRole});
   tx.create(movementRef,{action:'location_customer_return',type:'return',qty:plan.returnQty,
    sourceType:'order',sourceId:orderId,itemId,productKey,warehouseId,actorUid:uid,actorRole,
    ownerUid:order.ownerUid,salesCode:order.salesCode,createdAt:now,reservedDelta:stockPlan.reservedDelta,
@@ -119,4 +181,4 @@ async function commitLocationReturnAndRecover(db,uid,input){
  return {...committed,postCommitAllocation};
 }
 
-module.exports={normalizeLocationReturnIntent,commitLocationReturn,commitLocationReturnAndRecover};
+module.exports={normalizeLocationReturnIntent,planLocationReturnRequest,commitLocationReturn,commitLocationReturnAndRecover};
