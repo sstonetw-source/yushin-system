@@ -124,3 +124,5 @@
 每次送達與重送都核對公司／兩倉實貨、所有來源預留、lot、lot cost、movement、原 receipt／供應／需求及七筆目標訂單完全不變。最終原出貨 4 件均已確認、pendingDeliveryQty=0，但原 12 件訂單仍 isDelivered=false、預留 5、缺口 3。此案例不涵蓋剩餘 3 件再採購、他倉 5 件續出、退貨、取消／恢復後送達、多品項收貨或 Preview／正式部署；初始建單／預留仍是既有 fixture，PDF 實體輸出沿原隔離。
 
 本機建置一致性與語法檢查已通過；完整真 Auth／Chrome／Emulator／Rules 結果以本批 PR 最新 CI 為準。未部署 Firebase，未修改正式資料。
+
+首輪整站驗收發現：原 openPartialDeliveryForm 在 renderDeliveryModal 已回填原待確認意圖後，又清空 deliveryQty。現於本機 v2 入口重新呼叫同一 renderer 恢復原數量／來源，不改寫 intent、不另造交易。既有 desktop／phone delivery smoke 同步改走原開表單函式，覆蓋此重整恢復回歸；修 src 後已重建 app.js 並更新靜態版本。修正後全套 CI 仍待執行，不將首輪失敗當通過。

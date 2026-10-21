@@ -319,3 +319,5 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 延伸原 1280／390 px 完整網站與相同 PO／來源訂單，原業務登入後使用原「分批交貨」選單及送貨表單，分別確認 1+1+2 件。首筆及末筆真 HTTP 成功後丟棄回覆，刷新原站後用原 intent 重試；完整核對所有實體帳／憑證不變與總共三筆 deliveryRecords。另跑真 Auth 同 ID 並行、不同 ID 競爭、錯意圖／超額／錯同步／無來源／扣帳憑證竄改、目前角色／所有權及停用拒絕。不得用假的 Callable 或直接改 deliveredQty 完成驗收。
 
 本機建置一致性與語法檢查已通過；完整真 Auth／Chrome／Emulator／Rules 結果以本批 PR 最新 CI 為準。未部署 Firebase，未修改正式資料。
+
+首輪整站驗收發現：原 openPartialDeliveryForm 在 renderDeliveryModal 已回填原待確認意圖後，又清空 deliveryQty。現於本機 v2 入口重新呼叫同一 renderer 恢復原數量／來源，不改寫 intent、不另造交易。既有 desktop／phone delivery smoke 同步改走原開表單函式，覆蓋此重整恢復回歸；修 src 後已重建 app.js 並更新靜態版本。修正後全套 CI 仍待執行，不將首輪失敗當通過。

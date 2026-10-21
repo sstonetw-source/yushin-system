@@ -18882,6 +18882,9 @@ window.openPartialDeliveryForm = function() {
     deliveryPartialFormOpen = true;
     document.getElementById('deliveryFormPanel').style.display = '';
     document.getElementById('deliveryQty').value = '';
+    // The original renderer restores the frozen acknowledgement after reload;
+    // opening the form must not erase its quantity or shipment selection.
+    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true)renderDeliveryModal();
     document.getElementById('deliveryDate').focus();
 };
 

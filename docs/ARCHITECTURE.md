@@ -697,6 +697,8 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 
 ### 同 PO 出貨後分批送達與不重扣驗收（2026-10-21，待 CI）
 
-本批僅延伸既有原站真 Auth 驗收，沿 saveDeliveryRecord → saveOrderDeliveryRecord → confirmV2ShipmentDelivery → commitShipmentDelivery，數量由原 Fulfillment Core 投影。無第二套送達 writer，未修改正式入口、Rules、Index 或產品查詢；送達保持 orders 單文件交易，不寫實貨、預留或 lot。
+本批延伸既有原站真 Auth 驗收並修正原分批表單的凍結數量恢復，沿 saveDeliveryRecord → saveOrderDeliveryRecord → confirmV2ShipmentDelivery → commitShipmentDelivery，數量由原 Fulfillment Core 投影。無第二套送達 writer，未修改正式入口、Rules、Index 或產品查詢；送達保持 orders 單文件交易，不寫實貨、預留或 lot。
 
 本機建置一致性與語法檢查已通過；完整真 Auth／Chrome／Emulator／Rules 結果以本批 PR 最新 CI 為準。未部署 Firebase，未修改正式資料。
+
+首輪整站驗收發現：原 openPartialDeliveryForm 在 renderDeliveryModal 已回填原待確認意圖後，又清空 deliveryQty。現於本機 v2 入口重新呼叫同一 renderer 恢復原數量／來源，不改寫 intent、不另造交易。既有 desktop／phone delivery smoke 同步改走原開表單函式，覆蓋此重整恢復回歸；修 src 後已重建 app.js 並更新靜態版本。修正後全套 CI 仍待執行，不將首輪失敗當通過。
