@@ -36,7 +36,7 @@ function purchaseLine(data){
 function purchaseIntent(data){
  if(!data||typeof data!=='object'||Array.isArray(data))
   fail('invalid-argument','正式採購輸入欄位不正確');
- const keys=Object.keys(data).filter(key=>key!=='document').sort().join(',');
+ const keys=Object.keys(data).filter(key=>key!=='document'&&key!=='documentRevision').sort().join(',');
  let rawLines;
  if(keys==='itemId,orderId,poDate,poNo,qty,supplier,unitCost')
   rawLines=[{orderId:data.orderId,itemId:data.itemId,qty:data.qty,unitCost:data.unitCost}];
@@ -55,6 +55,10 @@ function purchaseIntent(data){
  // One-row array and original scalar requests represent the same intent.
  const intent=lines.length===1?{...base,supplier,unitCost:lines[0].unitCost,poDate}
   :{poNo:base.poNo,supplier,poDate,items:lines};
+ if(Object.hasOwn(data,'documentRevision')){
+  if(!Number.isSafeInteger(data.documentRevision)||data.documentRevision<1)fail('invalid-argument','文件版本不正確');
+  intent.documentRevision=data.documentRevision;
+ }
  if(Object.hasOwn(data,'document'))intent.document=normalizePurchaseDocument(data.document,lines.length,supplier);
  return intent;
 }
@@ -117,6 +121,7 @@ async function commitV2FormalPurchase(db,uid,data){
   if(draft){
    let draftIntent;
    try { draftIntent=purchaseIntent({poNo:draft.poNo,poDate:draft.poDate,
+    ...(draft.documentRevision?{documentRevision:draft.documentRevision}:{}),
     supplier:draft.supplierName||draft.vendorName,
     items:draft.items.map(item=>({orderId:item.orderId,itemId:item.itemId,qty:item.qty,unitCost:item.unitPrice})),
     document:{company:draft.company,supplierSnapshot:draft.supplierSnapshot,
@@ -190,7 +195,7 @@ async function commitV2FormalPurchase(db,uid,data){
    orderIds:[...sourceUpdates.keys()],createdAt:draft?.createdAt||now,updatedAt:now,
    createdByUid:draft?.createdByUid||uid,createdByRole:draft?.createdByRole||actorRole,serverCommitHash:fingerprint,
    lastOutputAt:draft?.lastOutputAt||'',lastOutputType:draft?.lastOutputType||'',
-   ...(draft?{status:'ORDERED',documentOnly:false,confirmedAt:now,confirmedByUid:uid}:{}),
+   ...(draft?{status:'ORDERED',documentOnly:false,documentRevision:draft.documentRevision||1,confirmedAt:now,confirmedByUid:uid}:{}),
    ...purchaseDocumentFields(intent,savedItems,buyerName)
   };
   // No writes are staged until EVERY line passes and all deterministic supply

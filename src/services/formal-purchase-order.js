@@ -1,12 +1,12 @@
-// Document preparation writes only the immutable PO snapshot, never supply/demand/stock.
+// Document preparation writes only the versioned PO snapshot, never supply/demand/stock.
 function formalPurchaseDocumentIntent(record) {
     const ignored = new Set(['id','createdAt','updatedAt','lastOutputAt','lastOutputType','supplyOrderIds',
-        'status','documentOnly','confirmedAt','confirmedByUid']);
+        'status','documentOnly','documentRevision','confirmedAt','confirmedByUid']);
     const canonical = value => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object'
         ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
     return JSON.stringify(canonical(Object.fromEntries(Object.entries(record).filter(([key]) => !ignored.has(key)))));
 }
-async function saveFormalPurchaseDocument(record, {actorUid=currentUser?.uid,actorRole=currentUserRole}={}) {
+async function saveFormalPurchaseDocument(record, {actorUid=currentUser?.uid,actorRole=currentUserRole,expectedRevision=0}={}) {
     const check = () => {
         if (!actorUid || actorUid!==currentUser?.uid || actorRole!==currentUserRole
             || !canCreatePurchaseOrderCapability() || !canAccessPage('orders.po'))
@@ -20,7 +20,7 @@ async function saveFormalPurchaseDocument(record, {actorUid=currentUser?.uid,act
             || item.unitPrice===null || item.unitPrice==='' || !Number.isFinite(Number(item.unitPrice)) || Number(item.unitPrice)<0))
         throw Error('採購文件的單號、供應商、數量或價格不完整。');
     delete record.id; delete record.supplyOrderIds;
-    record={...record,status:'DRAFT',documentOnly:true,createdByUid:actorUid,createdByRole:actorRole};
+    record={...record,status:'DRAFT',documentOnly:true,documentRevision:1,createdByUid:actorUid,createdByRole:actorRole};
     let saved;
     await runRoleTransaction(async tx=>{
         check();
@@ -28,10 +28,15 @@ async function saveFormalPurchaseDocument(record, {actorUid=currentUser?.uid,act
         check();
         if (snapshot.exists) {
             saved=snapshot.data();
-            if (saved.status!=='DRAFT' || saved.documentOnly!==true
-                || formalPurchaseDocumentIntent(saved)!==formalPurchaseDocumentIntent(record))
-                throw Error('這個單號已有不同內容或已確認採購，請開啟原單核對。');
-            return;
+            if(saved.status!=='DRAFT' || saved.documentOnly!==true)
+                throw Error('這個單號已確認採購，請開啟原單核對。');
+            record.createdByUid=saved.createdByUid;record.createdByRole=saved.createdByRole;
+            if(formalPurchaseDocumentIntent(saved)===formalPurchaseDocumentIntent(record))return;
+            if(!Number.isSafeInteger(expectedRevision) || expectedRevision<1
+                || expectedRevision!==(saved.documentRevision||1))
+                throw Error('這個單號已有不同內容，請重新載入原文件後再編輯。');
+            saved={...record,createdAt:saved.createdAt,documentRevision:expectedRevision+1,updatedAt:new Date().toISOString()};
+            tx.set(ref,saved);return;
         }
         saved=record;tx.set(ref,record);
     });
@@ -60,6 +65,7 @@ async function commitFormalPurchaseEmulator(poRecord,actorUid,assertActor) {
         document:{company:poRecord.company,supplierSnapshot:poRecord.supplierSnapshot,
             expectedDate:poRecord.expectedDate||'',expectedDateSource:poRecord.expectedDateSource||'',
             lineScheduleDates:poRecord.items.map(item=>item.scheduleDate||'')}};
+    if(poRecord.documentRevision)request.documentRevision=poRecord.documentRevision;
     functions.useEmulator('127.0.0.1',5001);
     // A failed/unknown Callable never falls through to the old client writer.
     const reply=await functions.httpsCallable('commitV2FormalPurchase')(request);check();

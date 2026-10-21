@@ -77,3 +77,15 @@ test('saving or printing temporarily blocks explicit confirmation then enables i
  vm.runInContext('poSaveInProgress=false;updatePoSaveButton()',x.c);
  assert.equal(x.node('confirmPoOrderedBtn').disabled,false);
 });
+
+test('saved draft stays editable and confirmation detects unsaved quantity or header edits',()=>{
+ const x=fixture();x.c.poListCache=[{id:'PO1',status:'DRAFT',documentOnly:true}];
+ vm.runInContext("poEditingId='PO1';poItems=[{orderId:'O',itemId:'I',itemName:'Item',qty:3,unitPrice:20}];setPoDraftLoading(false)",x.c);
+ assert.ok(x.controls.every(control=>!control.disabled));
+ const record={poNo:'PO1',vendorName:'Vendor',poDate:'2026-10-21',expectedDate:'',items:[{orderId:'O',itemId:'I',itemName:'Item',qty:3,unitPrice:20}]};
+ x.node('poVendorName').value='Vendor';x.node('poDate').value='2026-10-21';
+ assert.equal(x.c.purchaseDocumentHasUnsavedChanges(record),false);
+ x.c.updatePoItem(0,'qty','2');assert.equal(x.c.purchaseDocumentHasUnsavedChanges(record),true);
+ vm.runInContext('poItems[0].qty=3',x.c);x.node('poVendorName').value='Other';
+ assert.equal(x.c.purchaseDocumentHasUnsavedChanges(record),true);
+});

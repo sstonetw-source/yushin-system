@@ -750,3 +750,5 @@ normalizedOrderItems 的 returnedQty 為既有顯示／補送用途，排除 CLO
 
 原 saveFormalPurchaseDocument 僅保存 purchaseOrders 文件快照。printPurchaseOrder／重印只呼叫文件儲存與 PDF；confirmSavedPurchaseOrder 明確確認後，沿既有 commitFormalPurchaseOrder（隔離 gate 沿同一 commitV2FormalPurchase）和 registerPurchaseIncoming 執行交易。沒有第二套採購數量公式／stock writer。原快捷「已採購」仍沿既有 Quick Purchase Service。
 本節取代先前「產生 PDF 即登記採購」的操作契約；正式 Firebase 尚未部署。
+
+補充：尚未確認的 DRAFT 文件可以編輯原單；同一 purchaseOrders 文件以 documentRevision 遞增、交易內比對預期版本，舊畫面不得覆蓋他人的修改或已確認單據。相同內容的未知回覆重試回原版本，不重複修改；確認意圖帶原版本，後端拒絕過期確認。載入視窗有未儲存內容時不能直接確認，須先儲存；只有已確認文件鎖定。此補充取代前述草稿一律鎖定／不可更新的描述。

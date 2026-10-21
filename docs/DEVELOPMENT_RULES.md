@@ -363,3 +363,5 @@ receiveV2CustomerReturnEmulator 僅在明確 YUSHIN_V2_RETURN_RECEIPT_EMULATOR �
 
 文件輸出禁止呼叫採購承諾、在途修復或恢復交易。新增入口沿原 Service；確認前以原 UID／角色／單號及完整意圖保存 sessionStorage checkpoint，未知回覆保留原意圖，由獨立確認入口續傳。採購與 incoming 仍是既有可恢復分段流程，沒有宣稱跨所有品項已合為單一後端交易。欄位 change 只更新金額與缺價提示，禁止重建正在輸入的相鄰欄位；供應商 change 不重建品項表。
 本節取代先前「產生 PDF 即登記採購」的操作契約；正式 Firebase 尚未部署。
+
+補充：尚未確認的 DRAFT 文件可以編輯原單；同一 purchaseOrders 文件以 documentRevision 遞增、交易內比對預期版本，舊畫面不得覆蓋他人的修改或已確認單據。相同內容的未知回覆重試回原版本，不重複修改；確認意圖帶原版本，後端拒絕過期確認。載入視窗有未儲存內容時不能直接確認，須先儲存；只有已確認文件鎖定。此補充取代前述草稿一律鎖定／不可更新的描述。

@@ -124,6 +124,8 @@ window.confirmSavedPurchaseOrder = async function(poId) {
         if(currentUser?.uid!==uid || currentUserRole!==role || sessionDataGeneration!==generation)return;
         if(!snap.exists)throw Error('找不到原採購文件。');
         const record=snap.data();
+        if(poEditingId===poId && document.getElementById('poModalOverlay')?.classList.contains('active')
+            && purchaseDocumentHasUnsavedChanges(record))throw Error('文件有尚未儲存的修改，請先儲存文件，再確認已採購。');
         if(record.status!=='DRAFT' || record.documentOnly!==true)throw Error('此文件已確認或已停止，請更新清單並核對原採購紀錄。');
         if(!confirm(`確認採購單 ${record.poNo} 已向供應商下單？本次將登記文件上的品項與數量，並列入待到貨。`))return;
         rememberFormalPurchase(record,uid,role);

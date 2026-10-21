@@ -121,7 +121,7 @@ test('purchase order action distinguishes creation from downloading an existing 
     const start = app.indexOf('function updatePoSaveButton()');
     const end = app.indexOf('function purchaseItemsFromSavedPo', start);
     const source = app.slice(start, end);
-    assert.match(source, /poEditingId \? '📄 下載 PDF' : '📄 儲存文件並下載 PDF'/);
+    assert.match(source, /poEditingId && !editingUnconfirmedPurchaseDocument\(\) \? '📄 下載 PDF' : '📄 儲存文件並下載 PDF'/);
     assert.doesNotMatch(source, /重試同步在途庫存/);
 });
 
@@ -260,7 +260,7 @@ test('saved document reprint never repairs incoming or confirms a purchase', asy
  const c=vm.createContext({window:{DocumentDownloads:{prepare:async()=>{}}},poEditingId:'PO1',poListCache:[{id:'PO1',poNo:'PO1',vendorName:'Vendor'}],
   currentUser:{uid:'buyer'},currentUserRole:'purchaser',poSaveInProgress:false,poDraftLoading:false,poIncomingSyncPending:true,
   canCreatePurchaseOrderCapability:()=>true,canAccessPage:()=>true,document:{getElementById:()=>null},
-  printSavedPoDocument:async()=>{prints++;},updatePoSaveStatus:()=>{},updatePoSaveButton:()=>{},alert:()=>{},
+  editingUnconfirmedPurchaseDocument:()=>false,printSavedPoDocument:async()=>{prints++;},updatePoSaveStatus:()=>{},updatePoSaveButton:()=>{},alert:()=>{},
   registerPurchaseIncoming:()=>{throw Error('PDF cannot write incoming');},commitFormalPurchaseOrder:()=>{throw Error('PDF cannot purchase');}});
  vm.runInContext(app.slice(start,end)+'}',c);
  await c.window.printPurchaseOrder();await c.window.printPurchaseOrder();assert.equal(prints,2);
@@ -501,7 +501,7 @@ test('formal PO creates authoritative supplyOrders before saving the document sn
     const printStart = app.indexOf('window.printPurchaseOrder = async function()');
     const printEnd = app.indexOf("window.addEventListener('afterprint'", printStart);
     const printSource = app.slice(printStart, printEnd);
-    assert.match(printSource,/saveFormalPurchaseDocument\(poRecord,\{actorUid,actorRole\}\)/);
+    assert.match(printSource,/saveFormalPurchaseDocument\(poRecord,\{actorUid,actorRole,expectedRevision:/);
     const coreTransaction = formalService;
     assert.match(coreTransaction, /(?:db\.collection\('supplyOrders'\)|supplyOrdersCollection\(\))\.doc\(supplyId\)/);
     assert.match(coreTransaction, /type:'PURCHASING_PO'/);
@@ -1411,7 +1411,7 @@ test('purchase cost preload preserves already resolved costs across repeated PO 
 test('new PO cannot be saved until its number is ready', () => {
     const buttonSource = app.match(/function updatePoSaveButton\(\) \{[\s\S]*?\n\}/)?.[0];
     const saveStart = app.indexOf('window.printPurchaseOrder = async function()');
-    const saveEnd = app.indexOf('    if (poEditingId) {', saveStart);
+    const saveEnd = app.indexOf('    if (poEditingId && !originalDraft) {', saveStart);
     assert.ok(buttonSource && saveStart >= 0 && saveEnd > saveStart);
     assert.match(buttonSource, /waitingForNumber = !poEditingId && !poNoReady/);
     assert.match(buttonSource, /button\.disabled = poSaveInProgress \|\| waitingForNumber/);

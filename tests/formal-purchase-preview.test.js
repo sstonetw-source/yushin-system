@@ -378,3 +378,13 @@ test('draft confirmation revalidates current role, source demand and immutable i
   assert.equal(x.history.length,0);assert.deepEqual([...x.records],before);
  }
 });
+
+test('server confirmation rejects stale document revision even when quantities are unchanged',async()=>{
+ const x=writeFixture(),{data,draft}=savedDocumentFixture(x);
+ draft.documentRevision=2;data.documentRevision=1;
+ const before=structuredClone([...x.records]);
+ await assert.rejects(commitV2FormalPurchase(x.db,'buyer',data),{code:'failed-precondition'});
+ assert.deepEqual([...x.records],before);assert.equal(x.history.length,0);
+ data.documentRevision=2;
+ assert.equal((await commitV2FormalPurchase(x.db,'buyer',data)).status,'committed');
+});

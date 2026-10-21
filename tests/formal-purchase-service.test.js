@@ -338,3 +338,16 @@ test('changed source demand or changed document intent rejects confirmation with
   assert.equal(x.writes.length,count);assert.deepEqual([...x.records],before);
  }
 });
+
+test('unconfirmed documents allow versioned edits and reject stale concurrent changes',async()=>{
+ const x=setup();const original=await x.c.saveFormalPurchaseDocument(x.po);
+ assert.equal(original.documentRevision,1);
+ const changed={...x.po,items:[{...x.po.items[0],qty:2}]};
+ const saved=await x.c.saveFormalPurchaseDocument(changed,{expectedRevision:1});
+ assert.equal(saved.documentRevision,2);assert.equal(saved.items[0].qty,2);
+ assert.equal((await x.c.saveFormalPurchaseDocument(changed,{expectedRevision:1})).documentRevision,2,'unknown reply replay returns original revision');
+ await assert.rejects(x.c.saveFormalPurchaseDocument({...x.po,items:[{...x.po.items[0],qty:3}]},{expectedRevision:1}),/重新載入/);
+ const before=structuredClone([...x.records]);
+ await assert.rejects(x.c.commitFormalPurchaseOrder(original),/不同/);assert.deepEqual([...x.records],before);
+ assert.equal([...x.records.keys()].some(key=>key.startsWith('supplyOrders/')),false);
+});

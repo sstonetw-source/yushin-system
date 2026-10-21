@@ -15543,15 +15543,15 @@ window.cancelPurchaseOrderOutstanding = async function(poId) {
     }
 };
 
-// Document preparation writes only the immutable PO snapshot, never supply/demand/stock.
+// Document preparation writes only the versioned PO snapshot, never supply/demand/stock.
 function formalPurchaseDocumentIntent(record) {
     const ignored = new Set(['id','createdAt','updatedAt','lastOutputAt','lastOutputType','supplyOrderIds',
-        'status','documentOnly','confirmedAt','confirmedByUid']);
+        'status','documentOnly','documentRevision','confirmedAt','confirmedByUid']);
     const canonical = value => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object'
         ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
     return JSON.stringify(canonical(Object.fromEntries(Object.entries(record).filter(([key]) => !ignored.has(key)))));
 }
-async function saveFormalPurchaseDocument(record, {actorUid=currentUser?.uid,actorRole=currentUserRole}={}) {
+async function saveFormalPurchaseDocument(record, {actorUid=currentUser?.uid,actorRole=currentUserRole,expectedRevision=0}={}) {
     const check = () => {
         if (!actorUid || actorUid!==currentUser?.uid || actorRole!==currentUserRole
             || !canCreatePurchaseOrderCapability() || !canAccessPage('orders.po'))
@@ -15565,7 +15565,7 @@ async function saveFormalPurchaseDocument(record, {actorUid=currentUser?.uid,act
             || item.unitPrice===null || item.unitPrice==='' || !Number.isFinite(Number(item.unitPrice)) || Number(item.unitPrice)<0))
         throw Error('採購文件的單號、供應商、數量或價格不完整。');
     delete record.id; delete record.supplyOrderIds;
-    record={...record,status:'DRAFT',documentOnly:true,createdByUid:actorUid,createdByRole:actorRole};
+    record={...record,status:'DRAFT',documentOnly:true,documentRevision:1,createdByUid:actorUid,createdByRole:actorRole};
     let saved;
     await runRoleTransaction(async tx=>{
         check();
@@ -15573,10 +15573,15 @@ async function saveFormalPurchaseDocument(record, {actorUid=currentUser?.uid,act
         check();
         if (snapshot.exists) {
             saved=snapshot.data();
-            if (saved.status!=='DRAFT' || saved.documentOnly!==true
-                || formalPurchaseDocumentIntent(saved)!==formalPurchaseDocumentIntent(record))
-                throw Error('這個單號已有不同內容或已確認採購，請開啟原單核對。');
-            return;
+            if(saved.status!=='DRAFT' || saved.documentOnly!==true)
+                throw Error('這個單號已確認採購，請開啟原單核對。');
+            record.createdByUid=saved.createdByUid;record.createdByRole=saved.createdByRole;
+            if(formalPurchaseDocumentIntent(saved)===formalPurchaseDocumentIntent(record))return;
+            if(!Number.isSafeInteger(expectedRevision) || expectedRevision<1
+                || expectedRevision!==(saved.documentRevision||1))
+                throw Error('這個單號已有不同內容，請重新載入原文件後再編輯。');
+            saved={...record,createdAt:saved.createdAt,documentRevision:expectedRevision+1,updatedAt:new Date().toISOString()};
+            tx.set(ref,saved);return;
         }
         saved=record;tx.set(ref,record);
     });
@@ -15605,6 +15610,7 @@ async function commitFormalPurchaseEmulator(poRecord,actorUid,assertActor) {
         document:{company:poRecord.company,supplierSnapshot:poRecord.supplierSnapshot,
             expectedDate:poRecord.expectedDate||'',expectedDateSource:poRecord.expectedDateSource||'',
             lineScheduleDates:poRecord.items.map(item=>item.scheduleDate||'')}};
+    if(poRecord.documentRevision)request.documentRevision=poRecord.documentRevision;
     functions.useEmulator('127.0.0.1',5001);
     // A failed/unknown Callable never falls through to the old client writer.
     const reply=await functions.httpsCallable('commitV2FormalPurchase')(request);check();
@@ -16958,10 +16964,24 @@ let poNoReady = false;
 let poNoLoading = false;
 let poDraftLoading = false;
 
+function editingUnconfirmedPurchaseDocument() {
+    if(!poEditingId || typeof poListCache==='undefined')return false;
+    const po=poListCache.find(row=>row.id===poEditingId);
+    return po?.status==='DRAFT' && po.documentOnly===true;
+}
+function purchaseDocumentHasUnsavedChanges(record) {
+    if(document.getElementById('poVendorName')?.value.trim()!==record.vendorName
+        || document.getElementById('poDate')?.value!==record.poDate
+        || (document.getElementById('poExpectedDate')?.value||'')!==(record.expectedDate||''))return true;
+    const fields=['orderId','itemId','productId','warehouseId','fulfillmentType','itemCode','itemName','brand','qty','unitPrice'];
+    const intent=items=>items.map(item=>Object.fromEntries(fields.map(key=>[key,
+        ['qty','unitPrice'].includes(key)?Number(item[key]):String(item[key]||'')])));
+    return JSON.stringify(intent(poItems))!==JSON.stringify(intent(purchaseItemsFromSavedPo(record)));
+}
 function setPoDraftLoading(loading) {
     poDraftLoading = loading;
     document.querySelectorAll('#poVendorName, #poDate, #poExpectedDate, #poLeadDays, #poItemsBody input, #poItemsBody button, #poModalOverlay .sub-tab').forEach(control => {
-        control.disabled = loading || !!poEditingId;
+        control.disabled = loading || (!!poEditingId && (!editingUnconfirmedPurchaseDocument() || control.matches?.('.sub-tab')));
     });
     updatePoSaveButton();
 }
@@ -16984,7 +17004,7 @@ function updatePoSaveButton() {
     button.disabled = poSaveInProgress || waitingForNumber || poDraftLoading;
     button.textContent = poDraftLoading ? '載入採購資料中…' : waitingForNumber
         ? (poNoLoading ? '產生單號中…' : '單號未就緒')
-        : poEditingId ? '📄 下載 PDF' : '📄 儲存文件並下載 PDF';
+        : poEditingId && !editingUnconfirmedPurchaseDocument() ? '📄 下載 PDF' : '📄 儲存文件並下載 PDF';
 }
 
 function purchaseItemsFromSavedPo(po) {
@@ -17253,7 +17273,7 @@ function updatePoModeUI() {
     if (brandList) brandList.innerHTML = getUnifiedBrandNames(false).map(name => `<option value="${escapeAttr(name)}"></option>`).join('');
 
     const viewingExisting = !!poEditingId;
-    overlay?.classList.toggle('po-viewing-existing', viewingExisting);
+    overlay?.classList.toggle('po-viewing-existing', viewingExisting && !editingUnconfirmedPurchaseDocument());
     if (title) title.textContent = viewingExisting ? '查看採購單' : '建立採購單';
     if (existingBanner) existingBanner.style.display = viewingExisting ? 'flex' : 'none';
     if (existingNumber) existingNumber.textContent = viewingExisting ? (document.getElementById('poNo')?.innerText || poEditingId) : '';
@@ -17555,7 +17575,7 @@ function renderPoItemsTable() {
 }
 
 window.updatePoItem = function(idx, field, value) {
-    if (poDraftLoading || poEditingId || !poItems[idx] || !['qty','unitPrice'].includes(field)) return;
+    if (poDraftLoading || (poEditingId&&!editingUnconfirmedPurchaseDocument()) || !poItems[idx] || !['qty','unitPrice'].includes(field)) return;
     poItems[idx][field] = field === 'unitPrice' && String(value).trim() === '' ? null : parseFloat(value);
     // Keep focused inputs mounted: a change handler must not replace the next
     // input after the browser has already moved focus into it.
@@ -17800,7 +17820,7 @@ window.printPurchaseOrder = async function() {
     if (poSaveInProgress || poDraftLoading) return;
     if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
     const leadDaysInput=document.getElementById('poLeadDays');
-    if(!poEditingId&&leadDaysInput?.value&&(!Number.isInteger(Number(leadDaysInput.value))||Number(leadDaysInput.value)<0)){
+    if((!poEditingId||editingUnconfirmedPurchaseDocument())&&leadDaysInput?.value&&(!Number.isInteger(Number(leadDaysInput.value))||Number(leadDaysInput.value)<0)){
         updatePoSaveStatus('預計交期請輸入 0 或以上的整數天數。',true);
         return;
     }
@@ -17809,11 +17829,12 @@ window.printPurchaseOrder = async function() {
         return;
     }
     const actorUid=currentUser?.uid, actorRole=currentUserRole;
+    const originalDraft=editingUnconfirmedPurchaseDocument()?poListCache.find(po=>po.id===poEditingId):null;
     poSaveInProgress = true;
     try { await window.DocumentDownloads.prepare('purchase'); }
     catch (err) { updatePoSaveStatus(err.message, true); return; }
     finally { poSaveInProgress = false; }
-    if (poEditingId) {
+    if (poEditingId && !originalDraft) {
         const savedPo=poListCache.find(po=>po.id===poEditingId);
         if(!savedPo){alert('找不到已儲存的採購文件，請重新整理。');return;}
         poSaveInProgress=true;updatePoSaveButton();
@@ -17938,12 +17959,14 @@ window.printPurchaseOrder = async function() {
     const generation=poDirectStockOpenGeneration;
     let saved=false;
     try {
-        const documentRecord=await saveFormalPurchaseDocument(poRecord,{actorUid,actorRole});
+        const documentRecord=await saveFormalPurchaseDocument(poRecord,{actorUid,actorRole,expectedRevision:originalDraft?.documentRevision|| (originalDraft?1:0)});
         saved=true;
         if(currentUser?.uid!==actorUid || currentUserRole!==actorRole || generation!==poDirectStockOpenGeneration)return;
         const index=poListCache.findIndex(po=>po.id===documentRecord.id);
         if(index>=0)poListCache[index]=documentRecord;else poListCache.unshift(documentRecord);
         poEditingId=documentRecord.id;poIncomingSyncPending=false;
+        document.getElementById('poVendorName').value=documentRecord.vendorName;
+        poItems=purchaseItemsFromSavedPo(documentRecord);poAllItems=poItems;renderPoItemsTable();
         updatePoModeUI();
         updatePoSaveStatus(`採購文件 ${poNo} 已儲存，尚未確認採購；下載 PDF 不會增加在途。`);
         await printSavedPoDocument(poNo,vendorName);
@@ -18087,6 +18110,8 @@ window.confirmSavedPurchaseOrder = async function(poId) {
         if(currentUser?.uid!==uid || currentUserRole!==role || sessionDataGeneration!==generation)return;
         if(!snap.exists)throw Error('找不到原採購文件。');
         const record=snap.data();
+        if(poEditingId===poId && document.getElementById('poModalOverlay')?.classList.contains('active')
+            && purchaseDocumentHasUnsavedChanges(record))throw Error('文件有尚未儲存的修改，請先儲存文件，再確認已採購。');
         if(record.status!=='DRAFT' || record.documentOnly!==true)throw Error('此文件已確認或已停止，請更新清單並核對原採購紀錄。');
         if(!confirm(`確認採購單 ${record.poNo} 已向供應商下單？本次將登記文件上的品項與數量，並列入待到貨。`))return;
         rememberFormalPurchase(record,uid,role);

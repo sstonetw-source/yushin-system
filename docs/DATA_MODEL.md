@@ -455,3 +455,5 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 
 沿用 purchaseOrders：新製作文件為 status=DRAFT、documentOnly=true、createdByUid／Role 保存製作者，沒有 supplyOrderIds；確認交易更新為 ORDERED／documentOnly=false，新增 confirmedAt／confirmedByUid 並填既有供應連結。沒有上述旗標的舊採購單仍按既有交易紀錄顯示，不倒退為未採購、不做正式資料遷移。既有 Supply／Demand／庫存權威分工不變；新欄位不是交易授權依據，後端仍查真角色／來源／產品／需求。
 本節取代先前「產生 PDF 即登記採購」的操作契約；正式 Firebase 尚未部署。
+
+補充：尚未確認的 DRAFT 文件可以編輯原單；同一 purchaseOrders 文件以 documentRevision 遞增、交易內比對預期版本，舊畫面不得覆蓋他人的修改或已確認單據。相同內容的未知回覆重試回原版本，不重複修改；確認意圖帶原版本，後端拒絕過期確認。載入視窗有未儲存內容時不能直接確認，須先儲存；只有已確認文件鎖定。此補充取代前述草稿一律鎖定／不可更新的描述。
