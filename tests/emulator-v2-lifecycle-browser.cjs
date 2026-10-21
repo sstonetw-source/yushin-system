@@ -909,7 +909,15 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   const priorSupplyCount=(await db.collection('supplyOrders').get()).size;
   await siteLogout(page);await siteLogin(page,fixture.accounts.purchaser,'purchaser');
   await siteNav(page,'purchasing');
-  await page.waitForFunction(id=>document.getElementById('purchasePendingBody')?.textContent?.includes(id),fixture.sourceId);
+  // This browser previously visited receiving and dispatch; the selected
+  // work-card survives a role handoff. Explicitly choose ordering and use
+  // the ORIGINAL refresh action before expecting a new source projection.
+  await page.locator('#purchase-card-ordering').click();
+  await page.waitForFunction(()=>!pendingPurchaseLoading);
+  await page.locator('#purchasePendingRefreshBtn').click();
+  await page.waitForFunction(()=>!pendingPurchaseLoading&&procurementDemandLoaded);
+  const status=await page.locator('#purchasePendingStatus').textContent();
+  assert.doesNotMatch(status,/讀取失敗/);
   const remainingRow=page.locator('#purchasePendingBody tr').filter({hasText:fixture.sourceId});
   assert.equal(await remainingRow.count(),1);
   await remainingRow.getByRole('button',{name:'產生採購單'}).click();
