@@ -1,5 +1,12 @@
 // Customer cancellation/return writers shared by the existing UI actions.
 // No prompts, DOM, query rendering or second inventory implementation.
+function customerReturnNeedsLocationReceipt(order) {
+    return Array.isArray(order?.warehouseShipmentRecords) && order.warehouseShipmentRecords.length > 0;
+}
+function assertLegacyCustomerReturnSource(order) {
+    if(customerReturnNeedsLocationReceipt(order))
+        throw new Error('此出貨來源的退貨收貨尚未開放，請保留待收申請；不能使用一般退貨入庫。');
+}
 function customerReturnPendingQty(order, itemId, excludeId='') {
     return (order.returnRequests||[]).filter(r=>r.itemId===itemId && r.id!==excludeId && r.status==='PENDING')
         .reduce((sum,r)=>sum+Math.max(0,Number(r.qty)-Number(r.receivedQty||0)),0);
@@ -11,10 +18,34 @@ function customerReturnActorContext(capability) {
             ||(typeof currentUserRole==='undefined'?null:currentUserRole)!==actorRole||!capability())
             throw new Error('登入帳號或權限已變更，請重新開啟作業。');
     };
-    assertCurrent();return {actorUid,assertCurrent};
+    assertCurrent();return {actorUid,actorRole,assertCurrent};
+}
+function customerReturnRequestMatches(record,{operationId,itemId,qty,date,reason,actorUid}) {
+    return !!record && record.id===operationId && record.itemId===itemId
+        && record.qty===qty && record.date===date && record.reason===reason
+        && record.settlement==='CLOSE' && record.createdByUid===actorUid;
+}
+async function readCommittedCustomerReturnRequest(intent,actorRole,assertCurrent) {
+    // A concurrent stale proposal can be denied before the SDK retries it.
+    // Re-read the profile and immutable request in one fresh, read-only transaction.
+    let confirmed=null;
+    await runRoleTransaction(async tx=>{
+        confirmed=null;assertCurrent();
+        const user=await tx.get(db.collection('users').doc(intent.actorUid));assertCurrent();
+        if(!user.exists)return;
+        const profile=user.data();
+        if((profile.active!==undefined&&profile.active!==true)||profile.disabled===true
+            ||profile.role!==actorRole||!['admin','sales','engineer'].includes(profile.role))return;
+        // Client Rules recheck ownership; transaction retries also re-read this profile.
+        const snapshot=await tx.get(db.collection('orders').doc(intent.orderId));assertCurrent();
+        if(!snapshot.exists)return;
+        const order={...snapshot.data(),id:intent.orderId};
+        if(customerReturnRequestMatches((order.returnRequests||[]).find(r=>r.id===intent.operationId),intent))confirmed=order;
+    });
+    assertCurrent();return confirmed;
 }
 async function commitCustomerReturnRequest({orderId,itemId,operationId,qty,date,reason=''}) {
-    const {actorUid,assertCurrent}=customerReturnActorContext(()=>canManageOrderLifecycleCapability());
+    const {actorUid,actorRole,assertCurrent}=customerReturnActorContext(()=>canManageOrderLifecycleCapability());
     if([orderId,itemId,operationId].some(id=>typeof id!=='string'||!id||id!==id.trim()||id.includes('/')||id.length>160)
         ||!Number.isFinite(qty)||qty<=0||typeof reason!=='string'
         ||typeof date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(date)
@@ -22,13 +53,13 @@ async function commitCustomerReturnRequest({orderId,itemId,operationId,qty,date,
         ||new Date(date+'T00:00:00Z').toISOString().slice(0,10)!==date)
         throw new Error('退貨品項、日期或數量不正確。');
     reason=reason.trim();const actor=deliveryActor();let saved;
-    await runRoleTransaction(async tx=>{
+    const intent={orderId,itemId,operationId,qty,date,reason,actorUid};
+    try{await runRoleTransaction(async tx=>{
         assertCurrent();const ref=db.collection('orders').doc(orderId),snap=await tx.get(ref);assertCurrent();
         if(!snap.exists)throw new Error('找不到訂單。');const order={...snap.data(),id:orderId};
         const requests=[...(order.returnRequests||[])],prior=requests.find(r=>r.id===operationId);
         if(prior){
-            if(prior.itemId!==itemId||prior.qty!==qty||prior.date!==date||prior.reason!==reason
-                ||prior.settlement!=='CLOSE'||prior.createdByUid!==actorUid)
+            if(!customerReturnRequestMatches(prior,intent))
                 throw new Error('退貨申請識別碼已對應其他內容，請先查詢原申請結果。');
             saved=order;return;
         }
@@ -39,7 +70,13 @@ async function commitCustomerReturnRequest({orderId,itemId,operationId,qty,date,
         const now=new Date().toISOString(),record={id:operationId,itemId,qty,receivedQty:0,date,reason,status:'PENDING',settlement:'CLOSE',createdAt:now,createdBy:actor,createdByUid:actorUid};
         requests.push(record);const patch={returnRequests:requests,returnPending:true,returnRequestMutationIndex:requests.length-1,updatedAt:now};
         assertCurrent();tx.update(ref,patch);saved={...order,...patch};
-    });
+    });}catch(error){
+        if(error.code!=='permission-denied')throw error;
+        assertCurrent();
+        try{saved=await readCommittedCustomerReturnRequest(intent,actorRole,assertCurrent);}
+        catch(_){assertCurrent();throw error;}
+        if(!saved)throw error;
+    }
     assertCurrent();return saved;
 }
 async function commitCustomerReturnWithdrawal({orderId,requestId}) {
@@ -90,6 +127,7 @@ async function commitCancelledPurchaseKeepStock({supplyId,warehouseId,expectedDi
     assertCurrent();return saved;
 }
 async function postCustomerReturnStock(tx,order,item,qty,receiptId,warehouseId){
+    assertLegacyCustomerReturnSource(order);
     const itemDeliveries=savedDeliveryRecords(order).filter(r=>r.itemId===item.itemId||(!r.itemId&&order.items.length===1));
     const itemReturns=savedReturnRecords(order).filter(r=>r.itemId===item.itemId||(!r.itemId&&order.items.length===1));
     if((item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'){
@@ -132,7 +170,9 @@ async function commitCustomerReturnReceipt({orderId,requestId,receiptId,qty,qual
             return;
         }
         if(!orderSnap.exists)throw new Error('來源訂單已不存在。');
-        const order={id:orderId,...orderSnap.data()},requests=[...(order.returnRequests||[])],index=requests.findIndex(r=>r.id===requestId);
+        const order={id:orderId,...orderSnap.data()};
+        assertLegacyCustomerReturnSource(order);
+        const requests=[...(order.returnRequests||[])],index=requests.findIndex(r=>r.id===requestId);
         if(index<0||requests[index].status!=='PENDING')throw new Error('退貨申請已撤回或完成。');
         const request=requests[index],remaining=Number(request.qty)-Number(request.receivedQty||0);
         if(!Number.isFinite(qty)||qty<=0||qty>remaining+1e-9)throw new Error(`實收數量不可超過 ${remaining}。`);
@@ -167,7 +207,9 @@ async function commitCustomerReturnHoldRelease(id){
         const receiptRef=db.collection('customerReturnReceipts').doc(id),snap=await tx.get(receiptRef);
         if(!snap.exists)throw new Error('找不到退貨收貨紀錄。');const receipt=snap.data();if(receipt.disposition!=='HOLD')return;
         const orderRef=db.collection('orders').doc(receipt.orderId),orderSnap=await tx.get(orderRef);if(!orderSnap.exists)throw new Error('原訂單已不存在。');
-        const order={id:receipt.orderId,...orderSnap.data()},item=normalizedOrderItems(order).find(i=>i.itemId===receipt.itemId);
+        const order={id:receipt.orderId,...orderSnap.data()};
+        assertLegacyCustomerReturnSource(order);
+        const item=normalizedOrderItems(order).find(i=>i.itemId===receipt.itemId);
         const record=savedReturnRecords(order).find(r=>r.id===id);if(!item||!record)throw new Error('找不到原退貨品項或紀錄。');
         await assertActiveReturnWarehouse(tx,receipt.warehouseId);
         if((item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'&&item.warehouseId&&item.warehouseId!==receipt.warehouseId)

@@ -324,3 +324,12 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 
 
 - 採購 v2 出貨來源的退貨量必須沿原 itemDispatchState 的累計實收退貨快照進入 Workflow，不能使用 normalizedOrderItems 為補送顯示排除 CLOSE 後的 returnedQty。回歸須實際執行 normalize→dispatch→procurement，不能只 stub dispatch 且傳未正規化品項；保持 Core 對事件／投影一致性及未支援 REPLACE 的拒絕，並保留不同訂單共存的整站測試。
+
+
+- 原退貨申請 UI 驗收須走原選單／表單／Client Service／真 Rules，並在角色切換與重載後核對待收清單、撤回及實貨零變更。v2 原實收尚未整合申請與物流角色前，customerReturn Service 的 SALEABLE／INSPECTION／DAMAGED 及 HOLD 轉庫存不得寫入該來源。不可只在頁面隱藏按鈕；原 receipt 已提交的冪等核對保留。下一階段必須沿唯一 commitLocationReturn 整合，不能另開入庫 writer 或直接以業務 token 假扮倉管。
+
+
+- 商務退貨申請的 Rules 路徑只允許 returnRequests／returnPending／returnRequestMutationIndex／updatedAt，並沿原 validCommercialReturnRequestMutation；不可為避開運算上限放寬其他訂單欄位、角色或所有權。pending 掃描仍須涵蓋最多三十筆。須驗真 Auth／Client 三十筆末端 pending 與全部撤回、上限／旗標／夾帶實收成本及所有權拒絕，以及原同 ID／不同 ID 競爭與全套 Rules。前端與 firestore.rules 需配套發布，不得宣稱已部署。
+
+
+- Client 退貨申請同 ID 並行可能先被 Rules 以舊提案拒絕；不得因此允許覆寫原申請的 createdAt 或重建 ID。僅在 permission-denied 後，以既有 runRoleTransaction 唯讀查 users／orders，核對目前啟用角色、真 Rules 所有權與原 UID／完整意圖；完全匹配才確認既有結果。callback 每次清空前次 confirmed 值，其他拒絕保留，禁止 fallback writer。純申請欄位的無效提案應直接拒絕，不串入其他更新驗證耗盡預算。

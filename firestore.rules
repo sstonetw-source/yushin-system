@@ -1328,8 +1328,21 @@ service cloud.firestore {
           && after.get('incomingRegisteredQty', 0) == before.get('incomingRegisteredQty', 0));
     }
 
+    // Skip groups beyond the actual list length instead of evaluating all 30
+    // candidates for a short, fully withdrawn request list.
+    function returnPendingInGroup(requests, start) {
+      let count = requests.size();
+      return count > start && (requests[start].status == 'PENDING'
+        || (count > start + 1 && requests[start + 1].status == 'PENDING')
+        || (count > start + 2 && requests[start + 2].status == 'PENDING')
+        || (count > start + 3 && requests[start + 3].status == 'PENDING')
+        || (count > start + 4 && requests[start + 4].status == 'PENDING'));
+    }
     function validReturnPendingFlag(requests, flag) {
-      return requests.size() <= 30 && flag == !((requests.size() <= 0 || requests[0].status != 'PENDING') && (requests.size() <= 1 || requests[1].status != 'PENDING') && (requests.size() <= 2 || requests[2].status != 'PENDING') && (requests.size() <= 3 || requests[3].status != 'PENDING') && (requests.size() <= 4 || requests[4].status != 'PENDING') && (requests.size() <= 5 || requests[5].status != 'PENDING') && (requests.size() <= 6 || requests[6].status != 'PENDING') && (requests.size() <= 7 || requests[7].status != 'PENDING') && (requests.size() <= 8 || requests[8].status != 'PENDING') && (requests.size() <= 9 || requests[9].status != 'PENDING') && (requests.size() <= 10 || requests[10].status != 'PENDING') && (requests.size() <= 11 || requests[11].status != 'PENDING') && (requests.size() <= 12 || requests[12].status != 'PENDING') && (requests.size() <= 13 || requests[13].status != 'PENDING') && (requests.size() <= 14 || requests[14].status != 'PENDING') && (requests.size() <= 15 || requests[15].status != 'PENDING') && (requests.size() <= 16 || requests[16].status != 'PENDING') && (requests.size() <= 17 || requests[17].status != 'PENDING') && (requests.size() <= 18 || requests[18].status != 'PENDING') && (requests.size() <= 19 || requests[19].status != 'PENDING') && (requests.size() <= 20 || requests[20].status != 'PENDING') && (requests.size() <= 21 || requests[21].status != 'PENDING') && (requests.size() <= 22 || requests[22].status != 'PENDING') && (requests.size() <= 23 || requests[23].status != 'PENDING') && (requests.size() <= 24 || requests[24].status != 'PENDING') && (requests.size() <= 25 || requests[25].status != 'PENDING') && (requests.size() <= 26 || requests[26].status != 'PENDING') && (requests.size() <= 27 || requests[27].status != 'PENDING') && (requests.size() <= 28 || requests[28].status != 'PENDING') && (requests.size() <= 29 || requests[29].status != 'PENDING'));
+      return requests.size() <= 30 && flag == (
+        returnPendingInGroup(requests, 0) || returnPendingInGroup(requests, 5)
+        || returnPendingInGroup(requests, 10) || returnPendingInGroup(requests, 15)
+        || returnPendingInGroup(requests, 20) || returnPendingInGroup(requests, 25));
     }
 
     function returnReceiptOrderUpdate(id) {
@@ -1363,6 +1376,13 @@ service cloud.firestore {
         ]) && operationalItemsOnly(['reservedQty']) && sameCommercialOwner();
     }
 
+    // A return request never edits stock, delivery, products, costs or ownership.
+    // Keep the existing mutation validator, without evaluating unrelated writers.
+    function commercialReturnRequestOnlyUpdate() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return changed.hasOnly(['returnRequests', 'returnPending', 'returnRequestMutationIndex', 'updatedAt'])
+        && owns(resource.data) && (changed.size() == 0 || validCommercialReturnRequestMutation());
+    }
     function commercialReturnProtection() {
       let changed = request.resource.data.diff(resource.data).affectedKeys();
       return !changed.hasAny(['returnRecords', 'returnedQty', 'returnReceiptId'])
@@ -1702,11 +1722,14 @@ service cloud.firestore {
 
     function orderUpdateAllowed(id) {
       let userRole = role();
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
       return userRole == 'admin' ? true
         : userRole == 'purchaser' ? (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) && warehouseDeliveryPlanUpdate()) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['warehouseLogisticsId','warehouseLogisticsEventId']) && warehouseLogisticsOrderUpdate(id)) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id)) || purchaserOrderWorkflowUpdate(id) || returnReceiptOrderUpdate(id)
         : userRole == 'warehouse' ? (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) && warehouseDeliveryPlanUpdate()) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['warehouseLogisticsId','warehouseLogisticsEventId']) && warehouseLogisticsOrderUpdate(id)) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id)) || warehouseOrderWorkflowUpdate() || returnReceiptOrderUpdate(id)
         : userRole in ['sales', 'engineer'] && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId'])
-          && ((request.resource.data.diff(resource.data).affectedKeys().hasAny(['deliveryRecords']) && directShipReceiptOrderUpdate(id)) || (owns(resource.data) && owns(request.resource.data) && (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) ? warehouseDeliveryPlanUpdate() : (sameCommercialOwner() && preservesCreator() && validCommercialOrderCostUpdate() && businessOrderFactsProtected(id) && commercialReturnProtection() && (resource.data.get('warehouseLogisticsId', '') == '' || commercialKeepsPendingTransfer())))));
+          && (changed.hasOnly(['returnRequests', 'returnPending', 'returnRequestMutationIndex', 'updatedAt'])
+            && (changed.size() == 0 || changed.hasAny(['returnRequests', 'returnPending']))
+            ? commercialReturnRequestOnlyUpdate() : ((request.resource.data.diff(resource.data).affectedKeys().hasAny(['deliveryRecords']) && directShipReceiptOrderUpdate(id)) || (owns(resource.data) && owns(request.resource.data) && (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) ? warehouseDeliveryPlanUpdate() : (sameCommercialOwner() && preservesCreator() && validCommercialOrderCostUpdate() && businessOrderFactsProtected(id) && commercialReturnProtection() && (resource.data.get('warehouseLogisticsId', '') == '' || commercialKeepsPendingTransfer()))))));
     }
 
     function businessDeliveryRecordChange(before, after, index) {

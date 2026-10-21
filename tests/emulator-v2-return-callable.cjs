@@ -7,7 +7,7 @@ const admin=require('firebase-admin'),{getFirestore}=require('firebase-admin/fir
 const {initializeApp,deleteApp}=require('firebase/app');
 const {getAuth,connectAuthEmulator,signInWithEmailAndPassword}=require('firebase/auth');
 const {getFunctions,connectFunctionsEmulator,httpsCallable}=require('firebase/functions');
-const {getFirestore:clientFirestore,connectFirestoreEmulator,doc,collection,getDoc,getDocFromServer,runTransaction,setDoc}=require('firebase/firestore');
+const {getFirestore:clientFirestore,connectFirestoreEmulator,doc,collection,getDoc,getDocFromServer,runTransaction,setDoc,updateDoc}=require('firebase/firestore');
 const procurementDemandCore=require('../modules/procurement-demand-core');
 const {synchronizeV2OrderFixture}=require('./fixtures/v2-order-initialization.cjs');
 const {commitLocationDispatchPreparation}=require('../functions/location-dispatch-service');
@@ -1152,4 +1152,88 @@ test('real Auth received PO delivery checks current owner roles debit proofs and
  const final={...x.delivery,quantity:2},race=await Promise.allSettled([x.owner.confirm(final),x.owner.confirm({...final,operationId:final.operationId+'_competitor'})]);
  assert.equal(race.filter(r=>r.status==='fulfilled').length,1);assert.equal(race.filter(r=>r.status==='rejected').length,1);
  const after=await x.snap();assert.equal(after.order.deliveredQty,2);assert.equal(after.order.deliveryRecords.length,1);assertDeliveryDidNotTouchStock(before,after);
+});
+
+
+function originalReturnRequestClient(actor,{role='sales'}={}){
+ const live=clientFirestore(actor.app);connectFirestoreEmulator(live,'127.0.0.1',8080);
+ const context=vm.createContext({currentUser:{uid:actor.uid},currentUserRole:role,
+  canManageOrderLifecycleCapability:()=>['admin','sales','engineer'].includes(context.currentUserRole),deliveryActor:()=>actor.uid,
+  normalizedOrderItems:order=>order.items,savedDeliveryRecords:order=>order.deliveryRecords,savedReturnRecords:order=>order.returnRecords,
+  db:{collection:name=>({doc:id=>doc(live,name,id)})},
+  runRoleTransaction:callback=>runTransaction(live,async transaction=>callback({
+   get:async ref=>{const snapshot=await transaction.get(ref);return {exists:snapshot.exists(),data:()=>snapshot.data()};},
+   update:(ref,value)=>transaction.update(ref,JSON.parse(JSON.stringify(value)))
+  }))});
+ const actions=fs.readFileSync(path.join(__dirname,'../src/features/orders/delivery-actions.js'),'utf8');
+ vm.runInContext(actions.slice(actions.indexOf('function returnItemDeliveredQty('),actions.indexOf('function populateReturnItemOptions(')),context);
+ vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/services/customer-return.js'),'utf8'),context);
+ return context;
+}
+test('real Auth original request Service keeps v2 stock unchanged and Client Rules enforce current roles and owner',async()=>{
+ for(const role of ['admin','sales','engineer','purchaser','warehouse']){
+  const x=await fixture('original-request-'+role,{role,cancelled:false}),client=originalReturnRequestClient(x.actor,{role}),before=await snapshot(x);
+  const intent={orderId:x.orderId,itemId:'I',operationId:'request_'+role,qty:2,date:'2026-10-21',reason:'訂錯貨，等倉庫實收'};
+  if(['admin','sales','engineer'].includes(role)){
+   await client.commitCustomerReturnRequest(intent);const after=await snapshot(x);
+   assert.deepEqual(after.documents.slice(1),before.documents.slice(1));assert.deepEqual(after.movements,before.movements);
+   const order=after.documents[0];assert.equal(order.returnRecords.length,0);assert.equal(order.returnPending,true);assert.equal(order.returnRequests[0].receivedQty,0);
+   const stranger=await identity('request-stranger-'+role,'sales'),strangerClient=originalReturnRequestClient(stranger);
+   await assert.rejects(strangerClient.commitCustomerReturnRequest({...intent,operationId:'stranger-request'}));
+   await db.collection('users').doc(x.actor.uid).update({active:false});
+   await assert.rejects(client.commitCustomerReturnWithdrawal({orderId:x.orderId,requestId:intent.operationId}));
+   assert.deepEqual(await snapshot(x),after);
+  }else{
+   // A forged front-end sales role must still fail the real database Rules.
+   client.currentUserRole='sales';await assert.rejects(client.commitCustomerReturnRequest(intent));assert.deepEqual(await snapshot(x),before);
+  }
+ }
+});
+test('real Client request transactions serialize allowance and preserve original replay and withdrawal after v2 delivery',async()=>{
+ const x=await fixture('original-request-race',{cancelled:false}),client=originalReturnRequestClient(x.actor),before=await snapshot(x);
+ const intent={orderId:x.orderId,itemId:'I',operationId:'request_same',qty:3,date:'2026-10-21',reason:'待收退貨'};
+ console.log('Return request race: same-ID submit');
+ await Promise.all([client.commitCustomerReturnRequest(intent),client.commitCustomerReturnRequest(intent)]);
+ console.log('Return request race: same-ID submit passed');
+ const applied=await snapshot(x);assert.equal(applied.documents[0].returnRequests.length,1);assert.deepEqual(applied.documents.slice(1),before.documents.slice(1));
+ await assert.rejects(client.commitCustomerReturnRequest({...intent,qty:2}));
+ const final=await Promise.allSettled(['request_next_a','request_next_b'].map(operationId=>client.commitCustomerReturnRequest({...intent,operationId,qty:1})));
+ assert.equal(final.filter(row=>row.status==='fulfilled').length,1);
+ const fullyPending=await snapshot(x);assert.equal(fullyPending.documents[0].returnRequests.length,2);
+ assert.equal(fullyPending.documents[0].returnRequests.reduce((sum,row)=>sum+row.qty,0),4);assert.deepEqual(fullyPending.documents.slice(1),before.documents.slice(1));assert.deepEqual(fullyPending.movements,before.movements);
+ console.log('Return request race: withdraw both requests');
+ for(const request of fullyPending.documents[0].returnRequests)await client.commitCustomerReturnWithdrawal({orderId:x.orderId,requestId:request.id});
+ console.log('Return request race: withdrawal passed');
+ const withdrawn=await snapshot(x);assert.equal(withdrawn.documents[0].returnPending,false);
+ await client.commitCustomerReturnRequest(intent);await client.commitCustomerReturnWithdrawal({orderId:x.orderId,requestId:intent.operationId});
+ assert.deepEqual(await snapshot(x),withdrawn);assert.deepEqual(withdrawn.documents[0].returnRecords,[]);assert.deepEqual(withdrawn.documents.slice(1),before.documents.slice(1));
+ const changedId='request_changed_intent_race';
+ const contenders=await Promise.allSettled([1,2].map(qty=>client.commitCustomerReturnRequest({...intent,operationId:changedId,qty})));
+ assert.equal(contenders.filter(row=>row.status==='fulfilled').length,1,'one ID cannot confirm two different intents');
+ const winner=await snapshot(x),record=winner.documents[0].returnRequests.find(row=>row.id===changedId);
+ assert.ok([1,2].includes(record.qty));assert.equal(winner.documents[0].returnRequests.length,3);
+ await client.commitCustomerReturnRequest({...intent,operationId:changedId,qty:record.qty});assert.deepEqual(await snapshot(x),winner);
+ assert.deepEqual(winner.documents.slice(1),before.documents.slice(1));assert.deepEqual(winner.movements,before.movements);
+
+});
+
+
+test('real Rules request-only path handles thirty records without allowing collateral stock delivery ownership or cost changes',async()=>{
+ const x=await fixture('request-rules-bound',{cancelled:false}),client=originalReturnRequestClient(x.actor),live=clientFirestore(x.actor.app);
+ const history=Array.from({length:29},(_,i)=>({id:'old_'+i,itemId:'I',qty:1,receivedQty:0,date:'2026-10-20',reason:'舊申請已撤回',status:'CANCELLED',settlement:'CLOSE',createdByUid:x.actor.uid}));
+ await db.collection('orders').doc(x.orderId).update({returnRequests:history,returnPending:false});
+ const before=await snapshot(x),intent={orderId:x.orderId,itemId:'I',operationId:'request_bound_30',qty:1,date:'2026-10-21',reason:'最後一筆待收'};
+ const request={...intent,id:intent.operationId,status:'PENDING',receivedQty:0,settlement:'CLOSE',createdByUid:x.actor.uid};delete request.operationId;delete request.orderId;
+ const patch={returnRequests:[...history,request],returnPending:true,returnRequestMutationIndex:29};
+ for(const invalid of [{...patch,returnPending:false},{...patch,returnedQty:1},{...patch,returnRecords:[{id:'fake'}]},
+  {...patch,ownerUid:'other'},{...patch,qty:99},{...patch,createdByUid:'forged_creator'},
+  {...patch,inventoryReservationAttemptId:'tampered'},{...patch,items:[{...before.documents[0].items[0],unitCost:1}]}]){
+  await assert.rejects(updateDoc(doc(live,'orders',x.orderId),invalid));assert.deepEqual(await snapshot(x),before);
+ }
+ await client.commitCustomerReturnRequest(intent);const pending=await snapshot(x);assert.equal(pending.documents[0].returnRequests.length,30);assert.equal(pending.documents[0].returnPending,true);
+ await client.commitCustomerReturnWithdrawal({orderId:x.orderId,requestId:intent.operationId});const withdrawn=await snapshot(x);
+ assert.equal(withdrawn.documents[0].returnPending,false);assert.deepEqual(withdrawn.documents.slice(1),before.documents.slice(1));assert.deepEqual(withdrawn.movements,before.movements);
+ await client.commitCustomerReturnRequest(intent);assert.deepEqual(await snapshot(x),withdrawn);
+ await assert.rejects(updateDoc(doc(live,'orders',x.orderId),{returnRequests:[...withdrawn.documents[0].returnRequests,{...request,id:'overflow'}],returnPending:true,returnRequestMutationIndex:30}));
+ assert.deepEqual(await snapshot(x),withdrawn);
 });

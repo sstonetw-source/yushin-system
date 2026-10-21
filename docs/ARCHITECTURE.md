@@ -707,3 +707,14 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 ### 採購讀取的 v2 退貨數量邊界（2026-10-21，待本批 CI）
 
 normalizedOrderItems 的 returnedQty 為既有顯示／補送用途，排除 CLOSE；v2 shipment context 則驗證全部實收退貨。採購讀取由原 itemDispatchState 提供累計實收值，傳入既有 Workflow／Fulfillment Core 核對，不新增事件、資料投影或第二套數量公式。修正避免一筆合法 CLOSE 退貨使其他訂單的採購清單整頁失敗。僅隔離 v2 試點驗收，原退貨 UI 與 Preview／正式部署仍未完成。
+
+
+### 退貨申請與 v2 實收入口（2026-10-21，待 CI）
+
+原退貨表單／撤回仍由 customer-return Service 的既有 Client 交易及 Rules 執行，不為串接新增另一套申請 Service／Callable。customerReturnNeedsLocationReceipt 僅辨識具有分倉實體出貨事件的來源；該來源禁止走一般退貨實收／待檢轉庫存，防止以 legacy writer 改動 v2 實貨或遺失原倉憑證。原庫存頁待收列顯示尚未開放的實收狀態。v2 實收須後續在唯一 commitLocationReturn 交易內整合申請及物流角色，不能因現有 Callable 可由本人業務操作就改變公司實收分工。
+
+
+原退貨申請保留 Client Service；本批既有 Rules 新增欄位範圍明確的前置分支，僅接受原商務角色／所有權與原 request mutation validator。完整 pending 狀態按六組五筆有界掃描；不額外維護統計欄位。此為執行路徑減少不相關驗證，非將角色驗證移往按鈕或免除實收保護。前端／Rules 需配套發布，正式部署尚未執行。
+
+
+同 ID Client 衝突的結果確認也由原 customer-return Service 負責：permission-denied 後追加一次 users／orders 唯讀交易，只確認已提交且意圖相同的原申請，無額外 writer／查詢／Collection。正常成功路徑不增加讀取；未匹配或目前角色／啟用／所有權驗證失敗仍回原錯誤。此確認不是未提交交易的成功替身，也不承諾未知意圖的跨刷新恢復。

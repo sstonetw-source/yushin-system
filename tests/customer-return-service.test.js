@@ -84,3 +84,43 @@ test('the three extracted writers preserve atomic rollback and uncertain request
   await assert.rejects(run(),/rollback/);assert.equal(JSON.stringify([...f.docs]),before,action);}
  const f=requestFixture();f.c.lose=true;await assert.rejects(f.request(),/reply lost/);const before=JSON.stringify([...f.docs]);await f.request();assert.equal(JSON.stringify([...f.docs]),before);
 });
+
+
+test('v2 physical shipment requests cannot enter legacy SALEABLE INSPECTION or DAMAGED receipt writers',async()=>{
+ for(const quality of ['SALEABLE','INSPECTION','DAMAGED']){
+  const f=requestFixture();await f.request();f.c.canReceiveInventoryCapability=()=>true;
+  f.docs.get('orders/O').warehouseShipmentRecords=[{id:'v2-source',sourceType:'WAREHOUSE_CUSTOMER_SHIPMENT'}];
+  const before=JSON.stringify([...f.docs]);
+  await assert.rejects(f.c.commitCustomerReturnReceipt({orderId:'O',requestId:'Q',receiptId:'R',qty:1,quality,warehouseId:'A'}),/退貨收貨尚未開放/);
+  assert.equal(JSON.stringify([...f.docs]),before);
+ }
+});
+test('v2 HOLD release and direct legacy return posting reject before any stock writes',async()=>{
+ const f=fixture();const order=f.docs.get('orders/O');order.warehouseShipmentRecords=[{id:'v2-source'}];
+ const before=structuredClone([...f.docs]);await assert.rejects(f.c.commitCustomerReturnHoldRelease('R'),/退貨收貨尚未開放/);assert.deepEqual([...f.docs],before);
+ let writes=0;await assert.rejects(f.c.postCustomerReturnStock({set(){writes++;},update(){writes++;}},order,order.items[0],1,'R','A'),/退貨收貨尚未開放/);assert.equal(writes,0);
+});
+
+
+function requestRecoveryReads(f){
+ f.docs.set('users/sales',{role:'sales',active:true});
+}
+test('concurrent permission conflict confirms only the exact committed request through fresh role and authority reads',async()=>{
+ const f=requestFixture();requestRecoveryReads(f);const transaction=f.c.runRoleTransaction;let attempts=0;
+ f.c.runRoleTransaction=async callback=>{await transaction(callback);if(++attempts===1)throw Object.assign(Error('concurrent stale proposal'),{code:'permission-denied'});};
+ const result=await f.request();assert.equal(result.returnRequests.length,1);assert.equal(result.returnRequests[0].id,'Q');
+ const committed=JSON.stringify([...f.docs]);await f.request();assert.equal(JSON.stringify([...f.docs]),committed);
+});
+test('request conflict recovery rejects changed roles inactive profiles missing or mismatched authority and current session changes',async()=>{
+ for(const mode of ['role','inactive','disabled','intent','missing','session']){
+  const f=requestFixture();requestRecoveryReads(f);if(mode!=='missing')await f.request();
+  if(mode==='role')f.docs.set('users/sales',{role:'warehouse',active:true});
+  if(mode==='inactive')f.docs.set('users/sales',{role:'sales',active:false});
+  if(mode==='disabled')f.docs.set('users/sales',{role:'sales',active:true,disabled:true});
+  if(mode==='intent')f.docs.get('orders/O').returnRequests[0].reason='different original intent';
+  const before=JSON.stringify([...f.docs]);
+  const transaction=f.c.runRoleTransaction;let first=true;
+  f.c.runRoleTransaction=async callback=>{if(first){first=false;if(mode==='session')f.c.currentUserRole='admin';throw Object.assign(Error('denied'),{code:'permission-denied'});}return transaction(callback);};
+  await assert.rejects(f.request());assert.equal(JSON.stringify([...f.docs]),before,mode);
+ }
+});
