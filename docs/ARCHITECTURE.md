@@ -693,3 +693,10 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 本批僅擴充原整站與真 Auth／Callable 的連續驗收，不新增 writer。原 receiveSupplyOrderRecord／receiveV2Supply、prepareOrderDispatch／commitLocationDispatchPreparation、commitInventoryShipment／commitLocationShipment 維持唯一既有入口；隔離 runner 啟用既有本機旗標，正式 index、Rules、Index 與部署設定不變。
 
 本批本機語法與建置一致性檢查已通過；真 Auth、Chrome 及全套 Emulator／Rules 的執行結果以本批 PR 最新 CI 為準。未部署 Firebase，未修改正式資料。
+
+
+### 同 PO 出貨後分批送達與不重扣驗收（2026-10-21，待 CI）
+
+本批僅延伸既有原站真 Auth 驗收，沿 saveDeliveryRecord → saveOrderDeliveryRecord → confirmV2ShipmentDelivery → commitShipmentDelivery，數量由原 Fulfillment Core 投影。無第二套送達 writer，未修改正式入口、Rules、Index 或產品查詢；送達保持 orders 單文件交易，不寫實貨、預留或 lot。
+
+本機建置一致性與語法檢查已通過；完整真 Auth／Chrome／Emulator／Rules 結果以本批 PR 最新 CI 為準。未部署 Firebase，未修改正式資料。

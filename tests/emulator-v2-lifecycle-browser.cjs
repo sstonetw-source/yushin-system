@@ -261,10 +261,10 @@ async function siteOrderAction(page,fixture,label){
  const row=page.locator('#ordersBody > tr').filter({hasText:fixture.sourceId});await row.waitFor({state:'visible'});
  await row.locator('.order-more-menu > summary').click();await row.locator('button').filter({hasText:label}).click();
 }
-for(const width of [1280,390])test('full site '+width+'px boot original navigation PO receipt completion and split shipment',{timeout:360000},async()=>{
+for(const width of [1280,390])test('full site '+width+'px original PO receipt split shipment and customer acknowledgements',{timeout:360000},async()=>{
  const fixture=await seed(width,'site'),context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
- const errors=[],external=[],calls=[],loaded=new Set();let loseCancel=true,loseRecovery=true,loseRestore=true,losePurchase=true,loseReceipt=true,loseDispatch=true,loseShipment=true;
- await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_V2_LIFECYCLE_EMULATOR=true;window.YUSHIN_V2_RECOVERY_EMULATOR=true;window.YUSHIN_FORMAL_PURCHASE_EMULATOR=true;window.YUSHIN_V2_RECEIVING_EMULATOR=true;window.YUSHIN_V2_DISPATCH_EMULATOR=true;window.YUSHIN_V2_SHIPMENT_EMULATOR=true;});
+ const errors=[],external=[],calls=[],loaded=new Set();let loseCancel=true,loseRecovery=true,loseRestore=true,losePurchase=true,loseReceipt=true,loseDispatch=true,loseShipment=true,loseDelivery=true;
+ await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_V2_LIFECYCLE_EMULATOR=true;window.YUSHIN_V2_RECOVERY_EMULATOR=true;window.YUSHIN_FORMAL_PURCHASE_EMULATOR=true;window.YUSHIN_V2_RECEIVING_EMULATOR=true;window.YUSHIN_V2_DISPATCH_EMULATOR=true;window.YUSHIN_V2_SHIPMENT_EMULATOR=true;window.YUSHIN_V2_DELIVERY_EMULATOR=true;});
  page.on('pageerror',error=>errors.push(error.message));
  page.on('dialog',dialog=>dialog.type()==='confirm'?dialog.accept():dialog.dismiss());
  page.on('response',response=>{if(response.status()===200)loaded.add(new URL(response.url()).pathname);});
@@ -277,7 +277,7 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
    assert.equal(data.actorUid,undefined);assert.equal(data.actorRole,undefined);calls.push({name,data});
    const shouldLose=name==='setV2OrderLifecycle'
     ?(data.nextStatus==='normal'?loseRestore:loseCancel)
-    :(name==='commitV2FormalPurchase'?losePurchase:(name==='receiveV2Supply'?loseReceipt:(name==='prepareV2OrderDispatch'?loseDispatch:(name==='shipV2WarehouseItem'?loseShipment:(name==='resumeV2FreeStockRecovery'&&loseRecovery)))));
+    :(name==='commitV2FormalPurchase'?losePurchase:(name==='receiveV2Supply'?loseReceipt:(name==='prepareV2OrderDispatch'?loseDispatch:(name==='shipV2WarehouseItem'?loseShipment:(name==='confirmV2ShipmentDelivery'?loseDelivery:(name==='resumeV2FreeStockRecovery'&&loseRecovery))))));
    if(shouldLose){
     const reply=await route.fetch();assert.equal(reply.status(),200);
     if(name==='setV2OrderLifecycle'){
@@ -286,6 +286,7 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
     else if(name==='receiveV2Supply')loseReceipt=false;
     else if(name==='prepareV2OrderDispatch')loseDispatch=false;
     else if(name==='shipV2WarehouseItem')loseShipment=false;
+    else if(name==='confirmV2ShipmentDelivery')loseDelivery=false;
     else loseRecovery=false;
     await route.abort('failed');return;
    }
@@ -640,6 +641,68 @@ for(const width of [1280,390])test('full site '+width+'px boot original navigati
   for(const record of shipmentRecords){const proof=(await db.collection('inventoryMovements').doc(record.movementId).get()).data();require('../modules/fulfillment-core').validateShipmentMovement(record,proof,{orderId:fixture.sourceId,itemId:'S',productKey:fixture.productKey});}
   assert.deepEqual((await demandRef.get()).data(),completeDemand);
   console.log('Full site '+width+'px: original dispatch prepared nine once, warehouse split-shipped two plus two with lost-reply/reload retry; two physical debit proofs, no customer delivery and other warehouse/target holds unchanged.');
+
+  // The SAME source owner uses the original order menu and original delivery
+  // form. Acknowledgement must never repeat the previous physical stock debit.
+  const stockFacts=async()=>{
+   const all=await facts(fixture),extra={};
+   for(const name of ['inventoryReservations','inventoryMovements','inventoryLotCosts']){
+    extra[name]=(await db.collection(name).where('productKey','==',fixture.productKey).get()).docs.map(doc=>({id:doc.id,...doc.data()})).sort((a,b)=>a.id.localeCompare(b.id));
+   }
+   return {...all,source:null,...extra,supply:(await db.collection('supplyOrders').doc(supplyId).get()).data(),
+    demand:(await demandRef.get()).data(),receipts:(await db.collection('receipts').where('supplyOrderId','==',supplyId).get()).docs.map(doc=>({id:doc.id,...doc.data()})).sort((a,b)=>a.id.localeCompare(b.id))};
+  };
+  const physicalBeforeDelivery=await stockFacts();
+  await siteLogout(page);await siteLogin(page,fixture.accounts.sales,'sales');
+  async function openCustomerDelivery(){
+   await siteOrderAction(page,fixture,'分批交貨');
+   await page.locator('#deliveryModalOverlay.active').waitFor({state:'visible'});
+   await page.locator('#deliveryFormPanel').waitFor({state:'visible'});
+  }
+  const deliverySave=page.locator('#deliveryFormPanel button[onclick="saveDeliveryRecord()"]');
+  await openCustomerDelivery();
+  await page.locator('#deliveryShipmentId').selectOption(shipmentRecords[0].id);
+  await page.locator('#deliveryDate').fill('2026-10-21');await page.locator('#deliveryQty').fill('1');await page.locator('#deliveryNotes').fill('第一批先收到一件');
+  await deliverySave.click();
+  await page.waitForFunction(id=>!pendingDeliveryOrderIds.size&&!!pendingV2DeliveryConfirmation(id),fixture.sourceId,{timeout:45000});
+  const firstDeliveryIntent=calls.find(row=>row.name==='confirmV2ShipmentDelivery').data;
+  const acknowledgedOne=await facts(fixture);assert.equal(acknowledgedOne.source.deliveredQty,1);assert.equal(acknowledgedOne.source.deliveryRecords.length,1);assert.equal(acknowledgedOne.source.isDelivered,false);
+  assert.deepEqual(await stockFacts(),physicalBeforeDelivery);assert.deepEqual(acknowledgedOne.source.warehouseShipmentRecords,shipmentRecords);
+  await siteOpen(page,'sales');await openCustomerDelivery();
+  assert.equal(await page.locator('#deliveryShipmentId').inputValue(),shipmentRecords[0].id);assert.equal(await page.locator('#deliveryShipmentId').isDisabled(),true);assert.equal(await page.locator('#deliveryQty').inputValue(),'1');
+  await deliverySave.click();
+  await page.waitForFunction(id=>!pendingDeliveryOrderIds.size&&!pendingV2DeliveryConfirmation(id),fixture.sourceId,{timeout:45000});
+  const firstRetry=calls.filter(row=>row.name==='confirmV2ShipmentDelivery');assert.equal(firstRetry.length,2);assert.deepEqual(firstRetry[1].data,firstDeliveryIntent);
+  assert.deepEqual(await facts(fixture),acknowledgedOne);assert.deepEqual(await stockFacts(),physicalBeforeDelivery);
+
+  await page.locator('#openPartialDeliveryBtn').click();
+  await page.locator('#deliveryShipmentId').selectOption(shipmentRecords[0].id);
+  await page.locator('#deliveryDate').fill('2026-10-21');await page.locator('#deliveryQty').fill('1');await page.locator('#deliveryNotes').fill('第一批其餘一件收到');
+  await deliverySave.click();
+  await page.waitForFunction(()=>!pendingDeliveryOrderIds.size&&document.getElementById('deliveryFormPanel').style.display==='none',null,{timeout:45000});
+  const acknowledgedFirst=await facts(fixture);assert.equal(acknowledgedFirst.source.deliveredQty,2);assert.equal(acknowledgedFirst.source.deliveryRecords.length,2);assert.deepEqual(await stockFacts(),physicalBeforeDelivery);
+  await page.locator('#openPartialDeliveryBtn').click();
+  assert.equal(await page.locator('#deliveryShipmentId option[value="'+shipmentRecords[0].id+'"]').count(),0);
+  await page.locator('#deliveryShipmentId').selectOption(shipmentRecords[1].id);
+  await page.locator('#deliveryDate').fill('2026-10-21');await page.locator('#deliveryQty').fill('2');await page.locator('#deliveryNotes').fill('第二批兩件收到');
+  loseDelivery=true;await deliverySave.click();
+  await page.waitForFunction(id=>!pendingDeliveryOrderIds.size&&!!pendingV2DeliveryConfirmation(id),fixture.sourceId,{timeout:45000});
+  const finalDeliveryIntent=calls.filter(row=>row.name==='confirmV2ShipmentDelivery').at(-1).data;
+  assert.notEqual(finalDeliveryIntent.operationId,firstDeliveryIntent.operationId);
+  const acknowledgedAllShipments=await facts(fixture);assert.equal(acknowledgedAllShipments.source.deliveredQty,4);assert.equal(acknowledgedAllShipments.source.items[0].deliveredQty,4);assert.equal(acknowledgedAllShipments.source.deliveryRecords.length,3);
+  assert.equal(acknowledgedAllShipments.source.isDelivered,false,'all shipped units acknowledged does not complete the twelve-unit order');
+  assert.equal(acknowledgedAllShipments.source.items[0].reservedQty,5);assert.equal(acknowledgedAllShipments.source.items[0].shortageQty,3);assert.equal(acknowledgedAllShipments.source.items[0].warehouseShippedQty,4);assert.equal(acknowledgedAllShipments.source.items[0].dispatchPreparedQty,9);
+  assert.deepEqual(await stockFacts(),physicalBeforeDelivery);assert.deepEqual(acknowledgedAllShipments.source.warehouseShipmentRecords,shipmentRecords);
+  await siteOpen(page,'sales');await openCustomerDelivery();
+  assert.equal(await page.locator('#deliveryShipmentId').inputValue(),shipmentRecords[1].id);assert.equal(await page.locator('#deliveryShipmentId').isDisabled(),true);
+  await deliverySave.click();
+  await page.waitForFunction(id=>!pendingDeliveryOrderIds.size&&!pendingV2DeliveryConfirmation(id),fixture.sourceId,{timeout:45000});
+  const deliveryCalls=calls.filter(row=>row.name==='confirmV2ShipmentDelivery');assert.equal(deliveryCalls.length,5);assert.deepEqual(deliveryCalls[4].data,finalDeliveryIntent);
+  assert.deepEqual(await facts(fixture),acknowledgedAllShipments);assert.deepEqual(await stockFacts(),physicalBeforeDelivery);
+  const deliveryProgress=require('../modules/fulfillment-core').projectShipmentDelivery({orderId:fixture.sourceId,itemId:'S',productKey:fixture.productKey,orderedQty:12,shipments:shipmentRecords,deliveries:acknowledgedAllShipments.source.deliveryRecords});
+  assert.equal(deliveryProgress.confirmedQty,4);assert.equal(deliveryProgress.pendingDeliveryQty,0);assert.equal(deliveryProgress.isDelivered,false);
+  assert.equal(acknowledgedAllShipments.source.deliveryHistory.filter(row=>row.source==='shipment_confirmation').length,3);
+  console.log('Full site '+width+'px: original owner acknowledged first shipment one plus one and second shipment two; first/final lost replies reloaded with identical intents, three confirmations total and zero stock/reservation/lot/movement changes; twelve-unit order remains incomplete.');
 
   console.log('Full site '+width+'px: seller restored five free units with seven shortages; lost-reply and stale-cancel retries are immutable.');
   for(const match of read('index.html').matchAll(/<script[^>]+src="([^"?]+)(?:\?[^\"]*)?"/g)){
