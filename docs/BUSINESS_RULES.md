@@ -480,3 +480,10 @@ Browser 發現的區域 SDK 入口修正只恢復既定後端連線方式，不�
 業務／工程沿原服務申請，申請不增加庫存；物流 admin／purchaser／warehouse 只能按有效 PENDING、同品項 CLOSE 申請實收，且須明確指定原 shipment、原 lot 與原出貨倉。實收數量不得超過申請未收量或原出貨批次已送達可退量；申請 receivedQty、狀態與待收旗標和實貨入庫在同一交易完成。部分實收保留待收，收齊才 RECEIVED；撤回後不得新增實收，撤回前已入庫部分不回滾。申請已收數量與 linked returnRecords 必須一致；不得用未連結退貨繞過同品項待收申請。
 
 相同 operationId 的原實收可在申請完成或撤回後只讀確認；不同操作者／角色／內容、缺失或不同的原 receipt 不能冒用。舊未連結入口權限不擴張。僅 RESTOCKABLE／SALEABLE 收回原倉；待檢、損壞、REPLACE、跨倉仍未開放，原 UI 暫維持阻擋，後續另接固定意圖及來源回讀。
+
+
+## 2026-10-21 申請實收的前端傳輸準備（UI 未開放）
+
+申請實收前明確指定原申請、出貨、批次及原倉；僅 RESTOCKABLE／SALEABLE／CLOSE。未知回覆須保留同一 operationId 與完整意圖，不能更換來源或重新實收。成功後確認原 receipt 與 orders 事件才解除 checkpoint；不自動補送。
+
+本機 Node 1642／1642 通過；新增真 Auth 整合與完整 CI 結果以本批 PR 為準。未部署 Firebase、未變更正式資料或角色；詳細契約與未驗收邊界見 transaction-ui-integration-20261018.md 同日章節。

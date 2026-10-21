@@ -1382,3 +1382,56 @@ test('real Auth withdrawal and request receipt serialize without resurrecting pe
  if(received)await receiver.receive(x.intent);
  assert.deepEqual(await snapshot(x),after);
 });
+
+// Original front-end receipt transport with real SDKs. Persistence survives VM
+// recreation; only the HTTP caller's successful reply is dropped, never forged.
+function originalReturnReceiptClient(receiver,role,storage,{loseReply=false}={}){
+ const live=clientFirestore(receiver.app);connectFirestoreEmulator(live,'127.0.0.1',8080);
+ const calls=[];let lose=loseReply;
+ const functions={app:receiver.app,useEmulator:(host,port)=>{assert.equal(host,'127.0.0.1');assert.equal(port,5001);},
+  httpsCallable:name=>async input=>{
+   assert.equal(name,'receiveV2CustomerReturn');calls.push(JSON.parse(JSON.stringify(input)));
+   const data=await receiver.receive(JSON.parse(JSON.stringify(input)));
+   if(lose){lose=false;throw Error('successful receipt reply lost');}return {data};
+  }};
+ const c=vm.createContext({YUSHIN_V2_RETURN_RECEIPT_EMULATOR:true,location:{hostname:'localhost'},
+  currentUser:{uid:receiver.uid},currentUserRole:role,YushinFulfillment:require('../modules/fulfillment-core'),
+  canReceiveInventoryCapability:()=>['admin','purchaser','warehouse'].includes(c.currentUserRole),
+  firebase:{auth:()=>receiver.auth,functions:()=>{throw Error('Use compat app regional API');},app:()=>({functions:region=>{assert.equal(region,'asia-east1');return functions;}})},
+  sessionStorage:{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},
+  db:{collection:name=>({doc:id=>({get:async options=>{
+   assert.equal(options.source,'server');const snap=await getDocFromServer(doc(live,name,id));return {exists:snap.exists(),data:()=>snap.data()};
+  }})})}});
+ vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/services/customer-return-transport.js'),'utf8'),c);
+ return {c,calls};
+}
+test('real Auth front-end receipt transport persists original source across lost reply and reload then reads Rules-protected proof',{timeout:120000},async()=>{
+ const x=await requestedReturnFixture('transport-reload',{qty:2}),receiver=await identity('transport-reload-receiver','warehouse'),storage=new Map(),before=await snapshot(x);
+ const first=originalReturnReceiptClient(receiver,'warehouse',storage,{loseReply:true});
+ await assert.rejects(first.c.receiveV2CustomerReturnEmulator(x.orderId,x.intent),/successful receipt reply lost/);
+ const applied=await snapshot(x);assertRequestedStockIncrease(before,applied,1);assert.equal(storage.size,1);
+ const raw=[...storage.values()][0];
+ const resumed=originalReturnReceiptClient(receiver,'warehouse',storage);
+ await assert.rejects(resumed.c.receiveV2CustomerReturnEmulator(x.orderId,{...x.intent,reason:'changed'}));
+ assert.equal(resumed.calls.length,0);assert.equal([...storage.values()][0],raw);
+ const order=await resumed.c.receiveV2CustomerReturnEmulator(x.orderId);
+ assert.equal(order.returnRequests[0].receivedQty,1);assert.equal(storage.size,0);
+ assert.deepEqual(resumed.calls[0],first.calls[0]);assert.deepEqual(await snapshot(x),applied);
+ const second={...x.intent,operationId:x.intent.operationId+'_second'};
+ await resumed.c.receiveV2CustomerReturnEmulator(x.orderId,second);
+ const complete=await snapshot(x);assertRequestedStockIncrease(before,complete,2);
+ assert.equal(complete.documents[0].returnRequests[0].status,'RECEIVED');assert.equal(complete.documents[0].returnPending,false);
+ assert.equal(complete.returnReceipts.length,2);assert.equal(storage.size,0);
+});
+test('real Auth front-end pending receipt checks current backend role before retry and preserves original intent on denial',{timeout:120000},async()=>{
+ const x=await requestedReturnFixture('transport-role'),receiver=await identity('transport-role-receiver','purchaser'),storage=new Map();
+ const first=originalReturnReceiptClient(receiver,'purchaser',storage,{loseReply:true});
+ await assert.rejects(first.c.receiveV2CustomerReturnEmulator(x.orderId,x.intent));const applied=await snapshot(x),raw=[...storage.values()][0];
+ await db.collection('users').doc(receiver.uid).update({disabled:true});
+ const resumed=originalReturnReceiptClient(receiver,'purchaser',storage);
+ await assert.rejects(resumed.c.receiveV2CustomerReturnEmulator(x.orderId),code('permission-denied'));
+ assert.equal([...storage.values()][0],raw);assert.deepEqual(await snapshot(x),applied);
+ await db.collection('users').doc(receiver.uid).update({disabled:false});
+ await resumed.c.receiveV2CustomerReturnEmulator(x.orderId);
+ assert.equal(storage.size,0);assert.deepEqual(await snapshot(x),applied);
+});

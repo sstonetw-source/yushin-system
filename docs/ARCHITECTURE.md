@@ -725,3 +725,10 @@ normalizedOrderItems 的 returnedQty 為既有顯示／補送用途，排除 CLO
 既有隔離 receiveV2CustomerReturn 仍只委派 commitLocationReturn，不新增 stock writer。可選 requestId 將倉管 admin／purchaser／warehouse 的有效申請實收與原 admin／本人 sales／engineer 未連結入口分開驗證。共用 fulfillment-core 的 canonical intent／歷史 proof 重建納入可選連結；舊 hash 保持不變。庫存及原批次規劃沿 planExplicitShipmentReturn、planReservationReturn、planLotRestoration；同一交易更新申請及原 customerReturnReceipts。所有讀取先於寫入，申請最多 30 筆、原批次／事件查詢上限沿既有 200 筆，額外只多讀一份固定 ID receipt，無新 listener／索引。
 
 目前僅後端隔離契約；原介面及未知回覆跨刷新恢復待接，不代表倉管 UI／Preview／正式實收已啟用。
+
+
+## 2026-10-21 申請實收的前端傳輸準備（UI 未開放）
+
+前端新增 customer-return-transport Service，以既有隔離 receiveV2CustomerReturn 呼叫唯一 commitLocationReturn；使用既有 Fulfillment Core 正規化意圖，不新增入庫或數量算法。實際 Auth／Functions 專案、本機 Emulator 與物流權限皆須核對。原 UI／legacy guard 不變，僅為後續接線準備。
+
+本機 Node 1642／1642 通過；新增真 Auth 整合與完整 CI 結果以本批 PR 為準。未部署 Firebase、未變更正式資料或角色；詳細契約與未驗收邊界見 transaction-ui-integration-20261018.md 同日章節。
