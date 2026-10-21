@@ -321,3 +321,6 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 本機建置一致性與語法檢查已通過；完整真 Auth／Chrome／Emulator／Rules 結果以本批 PR 最新 CI 為準。未部署 Firebase，未修改正式資料。
 
 首輪整站驗收發現：原 openPartialDeliveryForm 在 renderDeliveryModal 已回填原待確認意圖後，又清空 deliveryQty。現於本機 v2 入口重新呼叫同一 renderer 恢復原數量／來源，不改寫 intent、不另造交易。既有 desktop／phone delivery smoke 同步改走原開表單函式，覆蓋此重整恢復回歸；修 src 後已重建 app.js 並更新靜態版本。修正後全套 CI 仍待執行，不將首輪失敗當通過。
+
+
+- 採購 v2 出貨來源的退貨量必須沿原 itemDispatchState 的累計實收退貨快照進入 Workflow，不能使用 normalizedOrderItems 為補送顯示排除 CLOSE 後的 returnedQty。回歸須實際執行 normalize→dispatch→procurement，不能只 stub dispatch 且傳未正規化品項；保持 Core 對事件／投影一致性及未支援 REPLACE 的拒絕，並保留不同訂單共存的整站測試。

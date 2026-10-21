@@ -241,3 +241,25 @@ test('actual purchasing projection keeps CLOSE returns closed after receipt and 
  item.receivedQty=2;item.reservedQty=5;item.shortageQty=1;
  const next=c.procurementDemandForOrderItem(order,item);assert.equal(next.requestedQty,3);assert.equal(next.remainingToOrderQty,0);assert.equal(next.remainingToReceiveQty,1);
 });
+
+
+test('actual normalized CLOSE return and v2 dispatch feed total physical returns to purchasing without reopening demand',()=>{
+ const c=vm.createContext({YushinWorkflow:workflow,YushinProcurementDemand:demandCore,YushinFulfillment:fulfillment,
+  YUSHIN_V2_DISPATCH_EMULATOR:true,orderInventorySyncIncomplete:()=>false,
+  brandIdentityForRecord:item=>({brand:item.brand||'',brandId:item.brandId||''}),normalizeHistoryItemCode:x=>x,parseMoney:Number});c.window=c;
+ vm.runInContext(section('function normalizedOrderItems(', 'function ensureOrderItemCompatibility('),c);
+ vm.runInContext(section('function itemDispatchState(', 'function orderLifecycleActionButtons('),c);
+ vm.runInContext(section('function procurementDemandForOrderItem(', 'function purchasingLifecycleSnapshot('),c);
+ const item={itemId:'I',productId:'P',qty:12,reservedQty:5,shortageQty:3,supplyOrderedQty:4,receivedQty:4,
+  warehouseShippedQty:4,dispatchPreparedQty:9,deliveredQty:4,returnedQty:2};
+ const order={id:'O',items:[item],warehouseShipmentRecords:[{id:'S',orderId:'O',itemId:'I',productKey:'P',warehouseId:'A',date:'2026-10-21',qty:4,sourceType:'WAREHOUSE_CUSTOMER_SHIPMENT'}],
+  deliveryRecords:[{id:'D',shipmentId:'S',orderId:'O',itemId:'I',productKey:'P',warehouseId:'A',date:'2026-10-21',qty:4,sourceType:'WAREHOUSE_SHIPMENT_CONFIRMATION'}],
+  returnRecords:[{id:'R',shipmentId:'S',orderId:'O',itemId:'I',productKey:'P',warehouseId:'A',date:'2026-10-21',qty:2,sourceType:'WAREHOUSE_CUSTOMER_RETURN',condition:'RESTOCKABLE',settlement:'CLOSE'}]};
+ const normalized=c.normalizedOrderItems(order)[0];assert.equal(normalized.returnedQty,0);assert.equal(item.returnedQty,2);
+ assert.equal(c.itemDispatchState(order,normalized).returned,2);
+ const before=structuredClone(order),demand=c.procurementDemandForOrderItem(order,normalized);
+ assert.equal(demand.remainingToOrderQty,3);assert.equal(demand.remainingToReceiveQty,0);assert.deepEqual(order,before);
+ // The same projection guard must still reject stale stored totals and unsupported replacement returns.
+ item.returnedQty=1;assert.throws(()=>c.procurementDemandForOrderItem(order,normalized));item.returnedQty=2;
+ order.returnRecords[0].settlement='REPLACE';assert.throws(()=>c.procurementDemandForOrderItem(order,normalized));
+});
