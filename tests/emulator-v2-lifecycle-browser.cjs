@@ -455,6 +455,10 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   await page.locator('#poItemsBody input[onchange*="qty"]').blur();
   await page.locator('#poItemsBody input[onchange*="unitPrice"]').fill('20');
   await page.locator('#poItemsBody input[onchange*="unitPrice"]').blur();
+  // Editing a line re-renders the PO form and can clear an uncommitted vendor
+  // input. Set the supplier after line edits, immediately before submission.
+  await page.locator('#poVendorName').fill('測試供應商');
+  await page.locator('#poVendorName').blur();
   await page.locator('#printPurchaseOrderBtn').click();
   await page.waitForFunction(()=>!poSaveInProgress&&document.getElementById('poSaveStatus')?.textContent?.includes('採購結果尚未確認'),null,{timeout:45000});
   const firstPurchase=calls.filter(row=>row.name==='commitV2FormalPurchase');
@@ -933,7 +937,6 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
    if(!poListCache.some(row=>row.id===poNo))throw Error('PDF before remaining PO commit');
    window.poPdfOutputs.push({poNo,vendor});
   };});
-  await page.locator('#poVendorName').fill('測試供應商');
   await page.locator('#poDate').fill('2026-10-21');
   await page.locator('#poItemsBody input[onchange*="qty"]').fill('3');
   await page.locator('#poItemsBody input[onchange*="qty"]').blur();
