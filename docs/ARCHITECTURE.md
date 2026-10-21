@@ -739,3 +739,8 @@ normalizedOrderItems 的 returnedQty 為既有顯示／補送用途，排除 CLO
 原 customer-cancellations 的 receiveCustomerReturn 在明確本機退貨旗標下進入既有退貨收貨清單的表單，Feature 僅讀取來源／呈現選擇，沿 receiveV2CustomerReturnEmulator → 隔離 Callable → 唯一 commitLocationReturn。一般 legacy 路徑與其 v2 寫入 guard 不變。沒有新增交易核心或 writer。
 
 本機 Node 1648／1648 通過，零失敗／略過；新增6項UI行為測試。原站真Auth／Chrome與完整CI結果以本批PR為準。未部署Firebase，未修改正式資料或角色。
+
+
+## 2026-10-21 採購草稿非同步載入保護（已實作，待完整 CI）
+
+原採購草稿沿用既有 Feature／Service；背景供應商與成本載入期間，原表單暫停編輯與提交。關閉視窗與 session reset 使原 generation 失效，舊回覆不得改寫新草稿。沒有新增交易 writer。

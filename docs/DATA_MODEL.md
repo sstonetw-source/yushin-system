@@ -444,3 +444,8 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 無新集合、欄位、Query、Rules、Index 或 Listener。開表單定址讀原 orders，提交沿既有實收傳輸與憑證回讀。待確認列由原 UID 的 sessionStorage 意圖產生，不依賴 returnPending 查詢，因此最後一批已收齊仍能在重整後確認。讀取列表與開待確認表單均不提交。成功後依原產品／倉失效庫存及批次 cache、刷新原訂單與待收清單。
 
 本機 Node 1648／1648 通過，零失敗／略過；新增6項UI行為測試。原站真Auth／Chrome與完整CI結果以本批PR為準。未部署Firebase，未修改正式資料或角色。
+
+
+## 2026-10-21 採購草稿非同步載入保護（已實作，待完整 CI）
+
+本批草稿載入保護只有前端暫態旗標／既有視窗 generation，沒有新增 Firestore 欄位、Collection、Rules、Index、listener 或正式資料遷移。在途仍是既有採購後的獨立 checkpoint，沒有合併成新的交易。

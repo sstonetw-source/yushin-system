@@ -14,6 +14,15 @@ let poNoGeneration = 0;
 let poDirectStockOpenGeneration = 0;
 let poNoReady = false;
 let poNoLoading = false;
+let poDraftLoading = false;
+
+function setPoDraftLoading(loading) {
+    poDraftLoading = loading;
+    document.querySelectorAll('#poVendorName, #poDate, #poExpectedDate, #poLeadDays, #poItemsBody input, #poItemsBody button, #poModalOverlay .sub-tab').forEach(control => {
+        control.disabled = loading;
+    });
+    updatePoSaveButton();
+}
 
 function updatePoSaveStatus(message = '', isError = false) {
     const status = document.getElementById('poSaveStatus');
@@ -28,8 +37,8 @@ function updatePoSaveButton() {
     const waitingForNumber = !poEditingId && !poNoReady;
     const copyButton = document.getElementById('poCopyAsNewBtn');
     if (copyButton) copyButton.disabled = poSaveInProgress;
-    button.disabled = poSaveInProgress || waitingForNumber;
-    button.textContent = waitingForNumber
+    button.disabled = poSaveInProgress || waitingForNumber || poDraftLoading;
+    button.textContent = poDraftLoading ? '載入採購資料中…' : waitingForNumber
         ? (poNoLoading ? '產生單號中…' : '單號未就緒')
         : poEditingId ? '📄 下載 PDF' : '📄 建立採購單並下載 PDF';
 }
@@ -422,8 +431,9 @@ function poItemsWithScheduleDates(items = [], supplierId = '', orderDate = '', h
     });
 }
 
-async function autoFillPoSupplier(items) {
+async function autoFillPoSupplier(items, isCurrent = () => true) {
     await loadSupplierWarehouseMasters();
+    if (!isCurrent()) return '';
     const rows=items||[];
     const resolved = rows.map(item => supplierForProduct(
         item.brand,
@@ -475,11 +485,13 @@ window.closePurchaseOrderModal = function() {
     poNoGeneration++;
     poNoLoading = false;
     poNoReady = false;
+    setPoDraftLoading(false);
     document.getElementById('poModalOverlay').classList.remove('active');
 };
 
 // 切換採購單要用哪間公司的抬頭／單號代碼（又鑫 YS／辰星 MS／鼎新 DS），跟估價單的公司切換邏輯一致
 window.switchPoCompany = function(compKey, el, skipNoGen) {
+    if (poDraftLoading && !skipNoGen) return;
     poCurrentCompany = compKey;
     document.querySelectorAll('#poModalOverlay .sub-nav .sub-tab').forEach(t => t.classList.remove('active'));
     const targetTab = document.getElementById(`po-sub-${compKey}`);
@@ -592,6 +604,7 @@ function renderPoItemsTable() {
         tbody.appendChild(tr);
     });
     recalcPoTotals();
+    if (poDraftLoading) setPoDraftLoading(true);
 }
 
 window.updatePoItem = function(idx, field, value) {
@@ -828,7 +841,7 @@ async function printSavedPoDocument(poNo, vendorName) {
 }
 
 window.printPurchaseOrder = async function() {
-    if (poSaveInProgress) return;
+    if (poSaveInProgress || poDraftLoading) return;
     if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
     if (globalThis.YUSHIN_FORMAL_PURCHASE_EMULATOR === true) {
         try { if (pendingFormalPurchase()) { await recoverFormalPurchase(); return; } }

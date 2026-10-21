@@ -1337,6 +1337,11 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
 };
 window.openOrderPurchaseDraft = async function(orderId, itemId = '') {
     if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
+    const openingGeneration = ++poDirectStockOpenGeneration;
+    const openingUid = currentUser?.uid;
+    const openingRole = currentUserRole;
+    const isCurrent = () => openingGeneration === poDirectStockOpenGeneration
+        && currentUser?.uid === openingUid && currentUserRole === openingRole;
     const button = [...document.querySelectorAll('#purchasePendingBody button')].find(el => {
         const action = el.getAttribute('onclick') || '';
         return action.includes('openOrderPurchaseDraft(') && action.includes(`'${orderId}'`);
@@ -1352,6 +1357,7 @@ window.openOrderPurchaseDraft = async function(orderId, itemId = '') {
                 db.collection('orders').doc(orderId).get(),
                 '採購單來源訂單'
             );
+            if (!isCurrent()) return;
             if (!snapshot.exists) throw new Error('找不到來源訂單');
             order = { id:snapshot.id, ...snapshot.data() };
         }
@@ -1375,29 +1381,35 @@ window.openOrderPurchaseDraft = async function(orderId, itemId = '') {
         generatePoNo();
         renderPoItemsTable();
         updatePoModeUI();
+        setPoDraftLoading(true);
         updatePoSaveStatus('正在載入供應商與進貨成本…');
         document.getElementById('poModalOverlay').classList.add('active');
 
         // 視窗先出現，供應商／成本再補齊；只預載這次採購單真正選到的品項。
         await Promise.all([loadSupplierWarehouseMasters(), preloadPurchaseCostsForItems(items)]);
-        if (!document.getElementById('poModalOverlay')?.classList.contains('active')) return;
+        if (!isCurrent() || !document.getElementById('poModalOverlay')?.classList.contains('active')) return;
         pendingItems = pendingPurchaseLines(order);
         items = itemId ? pendingItems.filter(item => item.itemId === itemId) : pendingItems.slice(0, 1);
         if (!items.length) {
-            closePurchaseOrderModal();
             throw new Error('此品項已無待採購數量');
         }
         await preloadPurchaseCostsForItems(items);
+        if (!isCurrent()) return;
         poItems = items;
         poAllItems = items;
         document.getElementById('poVendorName').value = '';
-        await autoFillPoSupplier(items);
+        await autoFillPoSupplier(items, isCurrent);
+        if (!isCurrent()) return;
         switchPoCompany(bestPurchaseOrderCompany([order], items, order.company), null, true);
         renderPoItemsTable();
         updatePoModeUI();
         updatePoSaveStatus('這張採購單尚未建立。確認品項、供應商與單價後，即可列印 / 存為 PDF 並自動同步雲端。');
-    } catch (err) { alert('無法開啟採購單：' + err.message); }
-    finally { if (button) { button.disabled = false; button.textContent = '產生採購單'; } }
+    } catch (err) {
+        if (isCurrent()) { closePurchaseOrderModal(); alert('無法開啟採購單：' + err.message); }
+    } finally {
+        if (isCurrent()) setPoDraftLoading(false);
+        if (button?.isConnected) { button.disabled = false; button.textContent = '產生採購單'; }
+    }
 };
 
 window.openSelectedPurchaseDraft = async function() {

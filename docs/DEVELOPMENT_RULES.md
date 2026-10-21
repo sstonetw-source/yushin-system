@@ -352,3 +352,8 @@ receiveV2CustomerReturnEmulator 僅在明確 YUSHIN_V2_RETURN_RECEIPT_EMULATOR �
 本機 Node 1648／1648 通過，零失敗／略過；新增6項UI行為測試。原站真Auth／Chrome與完整CI結果以本批PR為準。未部署Firebase，未修改正式資料或角色。
 
 同分頁的待收清單同時載入時，使用 queue generation 拒絕較舊回覆；收貨後的新清單不能被前次慢查詢或舊錯誤覆蓋。
+
+
+## 2026-10-21 採購草稿非同步載入保護（已實作，待完整 CI）
+
+非同步草稿初始化須在資料準備期間停用會被回填的輸入與提交入口，並在每次 await 後核對原視窗 generation／UID／角色。關閉、失敗、session reset 與舊回覆不得污染新草稿；以延遲載入行為測試與原站雙尺寸驗收覆蓋。
