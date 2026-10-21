@@ -843,14 +843,6 @@ window.printPurchaseOrder = async function() {
         updatePoSaveStatus(poNoLoading ? '採購單號仍在產生中，完成後即可列印 / 存為 PDF。' : '採購單號尚未就緒，請切換公司或重新開啟後再試。', !poNoLoading);
         return;
     }
-    // Validate the supplier before the asynchronous PDF preparation stage.
-    // Otherwise a missing header silently looks like a download/commit stall.
-    // Keep the later validation as well: the form may change during prepare().
-    if (!poEditingId && !String(document.getElementById('poVendorName')?.value||'').trim()) {
-        updatePoSaveStatus('請先填寫供應商名稱，再建立採購單。', true);
-        document.getElementById('poVendorName')?.focus();
-        return;
-    }
     const actorUid=currentUser?.uid, actorRole=currentUserRole;
     poSaveInProgress = true;
     try { await window.DocumentDownloads.prepare('purchase'); }
