@@ -1025,7 +1025,8 @@ async function partialReceiptFixture(tag,{ownerRole=null}={}){
    reservation:await read('inventoryReservations',orderId+'__I'),supply:await read('supplyOrders',supplyId),view:await read('receivingSupplyOrders',supplyId),demand:await read('procurementDemands',encodeURIComponent(demandId)),
    receipts:(await db.collection('receipts').where('supplyOrderId','==',supplyId).get()).docs.map(doc=>({id:doc.id,...doc.data()})).sort((a,b)=>a.id.localeCompare(b.id)),...extra};
  };
- return {buyer,owner,key,orderId,warehouses,supplyId,input,receive,snap};
+ return {buyer,owner,key,orderId,warehouses,supplyId,input,receive,snap,
+  registerPo:async id=>c.registerPurchaseIncoming(id,(await db.collection('purchaseOrders').doc(id).get()).data())};
 }
 test('real Auth partial PO receipt uses the original Receiving Service, preserves two warehouses and same-ID retries',{timeout:120000},async()=>{
  for(const role of ['admin','purchaser','warehouse']){
@@ -1086,9 +1087,9 @@ test('real Auth same PO receives its final two once then dispatches and split-sh
  assert.deepEqual(shipped.order.deliveryRecords,[]);assert.equal(shipped.order.deliveredQty,0);assert.equal(shipped.order.isDelivered,false);
  for(const record of shipped.order.warehouseShipmentRecords){const proof=shipped.inventoryMovements.find(m=>m.id===record.movementId);require('../modules/fulfillment-core').validateShipmentMovement(record,proof,{orderId:x.orderId,itemId:'I',productKey:x.key});}
  // An old committed receipt may be reconciled after later shipment, whereas
- // a new receipt remains blocked by the existing transport pilot boundary.
+ // the same fully received supply still rejects any new excess receipt.
  await x.receive(x.input);await x.receive(final);assert.deepEqual(await x.snap(),shipped);
- await assert.rejects(x.receive({...final,operationId:final.operationId+'_after_ship',qty:1}),code('failed-precondition'));assert.deepEqual(await x.snap(),shipped);
+ await assert.rejects(x.receive({...final,operationId:final.operationId+'_after_ship',qty:1}));assert.deepEqual(await x.snap(),shipped);
 });
 test('real Auth two final-arrival IDs competing for the last two commit only one and reject altered retries',{timeout:120000},async()=>{
  const x=await partialReceiptFixture('final-race');await x.receive();
@@ -1435,4 +1436,59 @@ test('real Auth front-end pending receipt checks current backend role before ret
  await db.collection('users').doc(receiver.uid).update({disabled:false});
  await resumed.c.receiveV2CustomerReturnEmulator(x.orderId);
  assert.equal(storage.size,0);assert.deepEqual(await snapshot(x),applied);
+});
+
+async function remainingReceiptAfterCloseFixture(tag){
+ const x=await shippedReceiptDeliveryFixture(tag);
+ for(const [index,shipmentId] of x.shipments.entries())await x.owner.confirm({...x.delivery,shipmentId,quantity:2,operationId:'after_close_'+tag+'_ack_'+index});
+ const fulfilled=await x.snap(),shipment=fulfilled.order.warehouseShipmentRecords[0];
+ const returned={orderId:x.orderId,itemId:'I',shipmentId:shipment.id,syncAttemptId:x.syncAttemptId,
+  selections:[{lotId:shipment.lotAllocations[0].lotId,qty:1}],warehouseId:x.warehouses[0],
+  condition:'RESTOCKABLE',settlement:'CLOSE',date:'2026-10-21',reason:'訂錯貨結案退回',operationId:'after_close_'+tag+'_return'};
+ await x.owner.receive(returned);
+ const poNo='AFTER-CLOSE-PO-'+tag;
+ const reply=(await httpsCallable(x.buyer.functions,'commitV2FormalPurchase')({poNo,poDate:'2026-10-21',supplier:'供應商',items:[{orderId:x.orderId,itemId:'I',qty:3,unitCost:20}]})).data;
+ await x.registerPo(poNo);
+ const nextSupplyId=reply.supplyOrderIds[0],input={supplyId:nextSupplyId,qty:1,lotNo:'AFTER-CLOSE',expiryDate:'2028-06-01',operationId:'after_close_'+tag+'_receipt'};
+ const extra=async()=>({source:await x.snap(),supply:(await db.collection('supplyOrders').doc(nextSupplyId).get()).data(),
+  receipts:(await db.collection('receipts').where('supplyOrderId','==',nextSupplyId).get()).docs.map(doc=>({id:doc.id,...doc.data()})).sort((a,b)=>a.id.localeCompare(b.id))});
+ return {...x,nextSupplyId,nextInput:input,extra};
+}
+test('real Auth remaining PO receives 1+2 after shipment delivery and CLOSE return without reopening fulfillment',{timeout:180000},async()=>{
+ const x=await remainingReceiptAfterCloseFixture('continue'),warehouse=await identity('after-close-warehouse','warehouse'),before=await x.extra();
+ assert.equal(before.source.order.items[0].shortageQty,3);assert.equal(before.source.inventory.incoming,3);
+ const same=await Promise.all([x.receive(x.nextInput,warehouse),x.receive(x.nextInput,warehouse)]);assert.ok(same.every(r=>r.status==='confirmed'));
+ const partial=await x.extra();assert.equal(partial.source.inventory.onHand,before.source.inventory.onHand+1);assert.equal(partial.source.inventory.reserved,before.source.inventory.reserved+1);
+ assert.equal(partial.supply.receivedQty,1);assert.equal(partial.supply.incomingRegisteredQty,2);assert.equal(partial.receipts.length,1);
+ const final={...x.nextInput,qty:2,lotNo:'AFTER-CLOSE-FINAL',operationId:x.nextInput.operationId+'_final'};
+ const results=await Promise.allSettled([x.receive(final,warehouse),x.receive({...final,operationId:final.operationId+'_competitor'},warehouse)]);
+ assert.equal(results.filter(r=>r.status==='fulfilled').length,1);assert.equal(results.filter(r=>r.status==='rejected').length,1);
+ const after=await x.extra(),item=after.source.order.items[0];
+ assert.equal(item.receivedQty,7);assert.equal(item.reservedQty,8);assert.equal(item.shortageQty,0);assert.equal(item.supplyOrderedQty,7);
+ assert.equal(after.source.inventory.onHand,before.source.inventory.onHand+3);assert.equal(after.source.inventory.reserved,before.source.inventory.reserved+3);assert.equal(after.source.inventory.incoming,0);
+ assert.deepEqual(after.source.stocks[1],before.source.stocks[1]);assert.deepEqual(after.source.supply,before.source.supply);
+ for(const field of ['warehouseShipmentRecords','deliveryRecords','deliveryHistory','returnRecords','returnHistory','deliveredQty','returnedQty','isDelivered'])assert.deepEqual(after.source.order[field],before.source.order[field]);
+ assert.equal(after.supply.status,'RECEIVED');assert.equal(after.supply.receivedQty,3);assert.equal(after.supply.incomingRegisteredQty,0);assert.equal(after.receipts.length,2);
+ assert.equal(after.source.demand.receivedQty,7);assert.equal(after.source.demand.remainingToOrderQty,0);assert.equal(after.source.demand.remainingToReceiveQty,0);
+ await x.receive(x.nextInput,warehouse);assert.deepEqual(await x.extra(),after);
+ await assert.rejects(x.receive({...x.nextInput,qty:2},warehouse));assert.deepEqual(await x.extra(),after);
+});
+test('real Auth post-fulfillment receipt rejects corrupted evidence and current-role changes with zero writes',{timeout:180000},async()=>{
+ const x=await remainingReceiptAfterCloseFixture('proofs'),before=await x.extra();
+ for(const role of ['sales','engineer']){const denied=await identity('after-close-denied-'+role,role);await assert.rejects(x.receive(x.nextInput,denied),code('permission-denied'));assert.deepEqual(await x.extra(),before);}
+ const sourceRef=db.collection('orders').doc(x.orderId),original=before.source.order;
+ const shipment=original.warehouseShipmentRecords[0],shipRef=db.collection('inventoryMovements').doc(shipment.movementId),shipProof=(await shipRef.get()).data();
+
+ const returnQuery=await db.collection('inventoryMovements').where('sourceId','==',x.orderId).where('action','==','location_customer_return').get();
+ assert.equal(returnQuery.size,1);const returnDoc=returnQuery.docs[0],returnProof=returnDoc.data();
+ for(const damage of ['ship-proof','return-proof','return-cache','projection']){
+  if(damage==='ship-proof')await shipRef.delete();
+  if(damage==='return-proof')await returnDoc.ref.delete();
+  if(damage==='return-cache')await sourceRef.update({returnRecords:[]});
+  if(damage==='projection')await sourceRef.update({items:original.items.map(item=>({...item,warehouseShippedQty:3}))});
+  const damaged=await x.extra();await assert.rejects(x.receive(x.nextInput));assert.deepEqual(await x.extra(),damaged);
+  await shipRef.set(shipProof);await returnDoc.ref.set(returnProof);await sourceRef.set(original);
+ }
+ assert.deepEqual(await x.extra(),before);
+ await db.collection('users').doc(x.buyer.uid).update({disabled:true});await assert.rejects(x.receive(x.nextInput),code('permission-denied'));assert.deepEqual(await x.extra(),before);
 });

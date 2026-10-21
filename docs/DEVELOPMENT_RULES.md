@@ -365,3 +365,9 @@ receiveV2CustomerReturnEmulator 僅在明確 YUSHIN_V2_RETURN_RECEIPT_EMULATOR �
 本節取代先前「產生 PDF 即登記採購」的操作契約；正式 Firebase 尚未部署。
 
 補充：尚未確認的 DRAFT 文件可以編輯原單；同一 purchaseOrders 文件以 documentRevision 遞增、交易內比對預期版本，舊畫面不得覆蓋他人的修改或已確認單據。相同內容的未知回覆重試回原版本，不重複修改；確認意圖帶原版本，後端拒絕過期確認。載入視窗有未儲存內容時不能直接確認，須先儲存；只有已確認文件鎖定。此補充取代前述草稿一律鎖定／不可更新的描述。
+
+
+## 2026-10-21 履約後剩餘採購收貨（已實作，待本批完整 CI）
+
+不可僅移除登入試點的歷史事件限制就當驗收完成。須跑真 Auth→原 Receiving Service→Emulator，驗證履約後續收、同 ID 並行重送、不同 ID 競爭餘量、真角色停用，以及原出貨 proof、退貨 proof／快取與來源投影損壞時零寫入。整站須沿原倉管收貨表單，最後一批成功回覆遺失後刷新、用原工作重試，不換 operationId。
+僅 demo-yushin 隔離試點；未部署 Firebase，Preview／正式尚未驗收。
