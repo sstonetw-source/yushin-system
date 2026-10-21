@@ -1058,6 +1058,48 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   assert.deepEqual(await facts(fixture),afterRemaining);
   console.log('Full site '+width+'px: original purchaser reopened remaining 3/7 shortage after CLOSE returns; second PO and incoming registered once, same-ID replay and overpurchase blocked without extra stock, receipts or shipment.');
 
+  // SAME source after its four CLOSE returns: receive the second PO through
+  // the original warehouse UI, without changing prior fulfillment evidence.
+  await siteLogout(page);await siteLogin(page,fixture.accounts.warehouse,'warehouse');
+  await siteNav(page,'inventory');await page.locator('#inventoryReceivingTabBtn').click();
+  await page.locator('[data-inventory-receiving-kind="purchase"]').click();
+  async function openRemainingReceipt(qty,lot){
+   await page.locator('#inventoryReceivingBody button[data-receipt-supply="'+remainingSupplyId+'"]').first().click();
+   await page.locator('#poReceiptBatchBody .po-receive-qty').fill(String(qty));
+   await page.locator('#poReceiptBatchBody .po-receive-lot').fill(lot);
+   await page.locator('#poReceiptBatchBody .po-receive-expiry').fill('2028-06-01');
+  }
+  await openRemainingReceipt(1,'AFTER-CLOSE-FIRST-'+width);
+  await page.locator('#savePoReceiptBatchBtn').click();
+  await page.waitForFunction(id=>!receiptTaskJobs.has(receiptTaskKey(id))&&supplyReceivingCache.find(row=>row.id===id)?.receivedQty===1,remainingSupplyId,{timeout:45000});
+  const partialAfterClose=await facts(fixture);
+  assert.equal(partialAfterClose.source.items[0].receivedQty,5);assert.equal(partialAfterClose.source.items[0].reservedQty,6);assert.equal(partialAfterClose.source.items[0].shortageQty,2);
+  assert.equal(partialAfterClose.inventory.onHand,afterRemaining.inventory.onHand+1);assert.equal(partialAfterClose.inventory.reserved,afterRemaining.inventory.reserved+1);assert.equal(partialAfterClose.inventory.incoming,2);
+  assert.deepEqual(partialAfterClose.stocks[1],afterRemaining.stocks[1]);assert.deepEqual(partialAfterClose.targets,afterRemaining.targets);
+  await openRemainingReceipt(2,'AFTER-CLOSE-FINAL-'+width);
+  loseReceipt=true;await page.locator('#savePoReceiptBatchBtn').click();
+  await page.waitForFunction(id=>receiptTaskJobs.get(receiptTaskKey(id))?.state==='error',remainingSupplyId,{timeout:45000});
+  const finalAfterCloseIntent=calls.filter(row=>row.name==='receiveV2Supply'&&row.data.supplyId===remainingSupplyId).at(-1).data;
+  const fullyReceived=await facts(fixture),lastSupply=(await db.collection('supplyOrders').doc(remainingSupplyId).get()).data(),lastDemand=(await demandRef.get()).data();
+  assert.equal(fullyReceived.inventory.onHand,afterRemaining.inventory.onHand+3);assert.equal(fullyReceived.inventory.reserved,afterRemaining.inventory.reserved+3);assert.equal(fullyReceived.inventory.incoming,0);
+  assert.equal(fullyReceived.source.items[0].receivedQty,7);assert.equal(fullyReceived.source.items[0].reservedQty,8);assert.equal(fullyReceived.source.items[0].shortageQty,0);assert.equal(fullyReceived.source.items[0].dispatchPreparedQty,9);
+  assert.equal(lastSupply.status,'RECEIVED');assert.equal(lastSupply.receivedQty,3);assert.equal(lastSupply.incomingRegisteredQty,0);
+  assert.equal(lastDemand.orderedQty,7);assert.equal(lastDemand.receivedQty,7);assert.equal(lastDemand.remainingToOrderQty,0);assert.equal(lastDemand.remainingToReceiveQty,0);
+  assert.equal(fullyReceived.lots.length,afterRemaining.lots.length+2);assert.deepEqual(fullyReceived.stocks[1],afterRemaining.stocks[1]);assert.deepEqual(fullyReceived.targets,afterRemaining.targets);
+  for(const field of ['warehouseShipmentRecords','deliveryRecords','deliveryHistory','returnRecords','returnHistory','returnRequests','deliveredQty','returnedQty','isDelivered'])assert.deepEqual(fullyReceived.source[field],afterRemaining.source[field]);
+  assert.deepEqual((await db.collection('supplyOrders').doc(supplyId).get()).data(),uiAfterStock.supply);
+  const receiptProofs=(await db.collection('receipts').where('supplyOrderId','==',remainingSupplyId).get()).docs.map(doc=>doc.data());
+  assert.equal(receiptProofs.length,2);assert.deepEqual(receiptProofs.map(row=>row.qty).sort(),[1,2]);
+  for(const proof of receiptProofs){assert.equal(proof.reservationLocationSchemaVersion,2);assert.equal(proof.createdByUid,fixture.accounts.warehouse.uid);assert.equal(proof.createdByRole,'warehouse');}
+  await siteOpen(page,'warehouse');await siteNav(page,'inventory');
+  await page.locator('#receiptTaskStatus button').filter({hasText:'用原資料重試'}).click();
+  await page.waitForFunction(id=>!receiptTaskJobs.has(receiptTaskKey(id)),remainingSupplyId,{timeout:45000});
+  assert.deepEqual(calls.filter(row=>row.name==='receiveV2Supply'&&row.data.supplyId===remainingSupplyId).at(-1).data,finalAfterCloseIntent);
+  assert.deepEqual(await facts(fixture),fullyReceived);assert.deepEqual((await demandRef.get()).data(),lastDemand);
+  assert.deepEqual((await db.collection('supplyOrders').doc(remainingSupplyId).get()).data(),lastSupply);
+  assert.equal((await db.collection('receipts').where('supplyOrderId','==',remainingSupplyId).get()).size,2);
+  console.log('Full site '+width+'px: after shipment, delivery and four CLOSE returns, original warehouse received remaining PO 1+2; final successful reply lost, reload replay kept two receipts/lots and preserved all prior fulfillment and other warehouse.');
+
   console.log('Full site '+width+'px: seller restored five free units with seven shortages; lost-reply and stale-cancel retries are immutable.');
   for(const match of read('index.html').matchAll(/<script[^>]+src="([^"?]+)(?:\?[^\"]*)?"/g)){
    if(!match[1].startsWith('https:'))assert.ok(loaded.has('/'+match[1]),'original script loaded: '+match[1]);

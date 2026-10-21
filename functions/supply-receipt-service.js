@@ -40,13 +40,13 @@ async function receiveV2Supply(db,uid,input){
   const ledger=await get(db.collection('inventoryReservations').doc(supply.orderId+'__'+supply.itemId));
   if(!orderSnap.exists||!ledger.exists||ledger.data().locationSchemaVersion!==2)fail('failed-precondition','來源未完成 v2 預留');
   const order=orderSnap.data();
-  // First transport pilot: normal single-line PO, before dispatch/delivery/returns.
+  // Normal single-line PO. The existing Receiving Service validates every
+  // immutable shipment/return proof and current outstanding demand, including
+  // receipts after partial fulfillment. Cancelled/multi-line transport stays gated.
   // The existing Service remains authoritative for quantities and all writes.
   const previous=await get(db.collection('receipts').doc(intent.operationId));
   if(previous.exists&&previous.data().reservationLocationSchemaVersion!==2)fail('failed-precondition','原收貨憑證不是 v2 格式');
-  if(!previous.exists&&(!Array.isArray(order.items)||order.items.length!==1||order.status!=='active'||order.orderStatus!=='normal'
-   ||['warehouseShipmentRecords','deliveryRecords','returnRecords','returnHistory'].some(key=>(order[key]||[]).length)
-   ||Number(order.items[0].dispatchPreparedQty||0)!==0))fail('failed-precondition','收貨登入試點尚不支援取消、打單或後續履約來源');
+  if(!previous.exists&&(!Array.isArray(order.items)||order.items.length!==1||order.status!=='active'||order.orderStatus!=='normal'))fail('failed-precondition','收貨登入試點僅支援正常單品項來源；取消與多品項尚未開放');
   const adapter={get,update(reference,data){
    native.update(reference,data);
    if(reference.path===supplyRef.path)native.set(db.collection('receivingSupplyOrders').doc(intent.supplyId),stockPermissions.sanitizeSupply({...supply,...data}));
