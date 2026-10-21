@@ -773,6 +773,14 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   assert.equal(returnCalls.length,2);assert.deepEqual(returnCalls[0].data,returnCalls[1].data);
   console.log('Full site '+width+'px: same PO/shipment browser-SDK return transport restored two explicitly selected units to original lot, CLOSE/no replacement, first lost reply retried identically; no duplicate credit, other holds/incoming/cost/receipts unchanged. Original return UI remains unconnected.');
 
+  // Reopen the real purchasing list after each viewport's return without
+  // deleting the returned source. Both it and the next fixture must coexist.
+  await siteLogout(page);await siteLogin(page,fixture.accounts.purchaser,'purchaser');
+  await siteNav(page,'purchasing');
+  await page.waitForFunction(orderId=>document.getElementById('purchasePendingBody')?.textContent?.includes(orderId),fixture.sourceId);
+  assert.deepEqual(await stockFacts(),allReturned);assert.deepEqual(await facts(fixture),returned);
+  console.log('Full site '+width+'px: original purchasing list still renders the returned source with three units to procure; reopening it is read-only.');
+
   console.log('Full site '+width+'px: seller restored five free units with seven shortages; lost-reply and stale-cancel retries are immutable.');
   for(const match of read('index.html').matchAll(/<script[^>]+src="([^"?]+)(?:\?[^\"]*)?"/g)){
    if(!match[1].startsWith('https:'))assert.ok(loaded.has('/'+match[1]),'original script loaded: '+match[1]);
