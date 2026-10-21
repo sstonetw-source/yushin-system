@@ -84,13 +84,16 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
   await page.waitForFunction(()=>alerts.length===1);
   assert.match((await page.evaluate(()=>alerts))[0],/simulated lost delivery reply/);
   assert.equal(applied,1);assert.equal(order.deliveredQty,2);assert.equal(order.warehouseShipmentRecords.length,1);
+  for(const id of ['deliveryDate','deliveryQty','deliveryNotes'])assert.equal(await page.locator('#'+id).isDisabled(),true);
   await setup();
   await page.evaluate(()=>openPartialDeliveryForm());
   assert.equal(await page.locator('#deliveryShipmentId').inputValue(),'shipment_source_12345');
   assert.equal(await page.locator('#deliveryQty').inputValue(),'2');
+  for(const id of ['deliveryDate','deliveryQty','deliveryNotes'])assert.equal(await page.locator('#'+id).isDisabled(),true);
   await page.locator('[onclick="saveDeliveryRecord()"]').click();
   await page.waitForFunction(()=>!pendingV2DeliveryConfirmation('O'));
   assert.equal(calls,2);assert.equal(applied,1);assert.equal(order.deliveryRecords.length,1);
+  for(const id of ['deliveryDate','deliveryQty','deliveryNotes'])assert.equal(await page.locator('#'+id).isDisabled(),false);
   confirmedId=order.deliveryRecords[0].id;
   await page.evaluate(()=>{currentUserRole='purchaser';renderDeliveryModal();});
   assert.equal(await page.locator('#deliveryRecordsBody button').count(),0);

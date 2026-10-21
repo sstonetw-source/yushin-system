@@ -231,6 +231,8 @@ function renderDeliveryModal() {
         document.getElementById('deliveryFormHint').innerText=pendingError||(reversal?'前次撤銷結果待確認，請點選確認撤銷結果。':confirmation
             ? '前次送達結果未確認：使用原出貨批次及原操作識別碼重試。'
             : '只確認客戶實際收到的數量；不會再次扣除倉庫實貨。');
+    if(v2)for(const id of ['deliveryDate','deliveryQty','deliveryNotes'])
+        document.getElementById(id).disabled=!!confirmation||!!reversal||!!pendingError||syncing;
 }
 
 window.editDeliveryRecord = function(recordId) {
@@ -305,6 +307,7 @@ window.saveDeliveryRecord = async function() {
     } finally {
         pendingDeliveryOrderIds.delete(orderId);
         if (saveButton) { saveButton.disabled = false; saveButton.textContent = '💾 儲存送貨紀錄'; }
+        if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true&&currentDeliveryOrderId===orderId)renderDeliveryModal();
     }
 };
 
