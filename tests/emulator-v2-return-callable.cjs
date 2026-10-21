@@ -1386,7 +1386,8 @@ test('real Auth withdrawal and request receipt serialize without resurrecting pe
 // Original front-end receipt transport with real SDKs. Persistence survives VM
 // recreation; only the HTTP caller's successful reply is dropped, never forged.
 function originalReturnReceiptClient(receiver,role,storage,{loseReply=false}={}){
- const live=clientFirestore(receiver.app);connectFirestoreEmulator(live,'127.0.0.1',8080);
+ const live=receiver.returnReceiptFirestore||clientFirestore(receiver.app);
+ if(!receiver.returnReceiptFirestore){connectFirestoreEmulator(live,'127.0.0.1',8080);receiver.returnReceiptFirestore=live;}
  const calls=[];let lose=loseReply;
  const functions={app:receiver.app,useEmulator:(host,port)=>{assert.equal(host,'127.0.0.1');assert.equal(port,5001);},
   httpsCallable:name=>async input=>{
