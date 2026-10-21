@@ -336,3 +336,10 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 
 
 - v2 申請實收必須沿 commitLocationReturn 原交易，以可選 requestId 綁定原 operationId／hash；不可另寫一筆庫存交易後才回填申請。交易內讀真實物流角色及待收申請，核對已收量與原 linked events、申請餘量、出貨／lot／movement，原子建立 customerReturnReceipts。未帶 requestId 不得擴張原業務權限，有同品項待收時須走申請實收。舊 hash、完成後原 ID 重試、撤回／實收競爭與雙收貨人競爭須驗證。原 UI、固定意圖／未知回覆恢復、Preview／正式啟用在本契約批次仍未完成。
+
+
+## 2026-10-21 申請實收的前端傳輸準備（UI 未開放）
+
+receiveV2CustomerReturnEmulator 僅在明確 YUSHIN_V2_RETURN_RECEIPT_EMULATOR 與實際 demo-yushin 本機 Auth 9099／Functions 5001 開啟。所有 await 後核對 UID／role／capability；禁止 fallback legacy writer。固定意圖與刷新確認、並行衝突、當前後端停權和失敗回讀需有行為及真 Auth 測試。原 UI 尚未開放，下一階段必須補明確 shipment／lot 選擇、可見 pending 入口與 1280／390px 真 Browser 實收驗收後才能接按鈕。
+
+本機 Node 1642／1642 通過；新增真 Auth 整合與完整 CI 結果以本批 PR 為準。未部署 Firebase、未變更正式資料或角色；詳細契約與未驗收邊界見 transaction-ui-integration-20261018.md 同日章節。

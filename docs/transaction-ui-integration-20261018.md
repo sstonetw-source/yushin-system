@@ -157,3 +157,14 @@ PR #190 完整 CI 39347832242 通過 2097 項測試與九組桌機／手機 Chro
 首輪 CI 39355953092 的既有 31 項 Auth 通過，兩個 Browser 場景在取消送出前停止，揭露原區域連線錯把字串傳給全域 firebase.functions(app)。依官方 compat 介面改為 firebase.app().functions('asia-east1')，同步修正 grouped Preview、打單、出貨、送達／撤銷、取消及物流續傳的相同用法，重建 app.js。原 mock 補正 app.functions 形狀，新增兩項嚴格回歸：全域 functions 不接受區域時，原取消／續傳仍須成功選正確區域。未放寬任何環境或權限。
 
 本地 Node1593/1593、build／語法／diff 通過；修正後 Browser Auth 及完整 CI 待重跑。CI 同批保留原十組 scripted Chrome，另跑本組真 Browser Auth。正式／Preview 全站啟動與其餘履約場景仍待驗收。
+
+
+## 2026-10-21 申請實收的前端傳輸準備（UI 未開放）
+
+新增 `src/services/customer-return-transport.js`，由既有 app 建置清單載入；唯一入庫 writer 仍是 `receiveV2CustomerReturn` → `commitLocationReturn`，原倉管按鈕與 legacy guard 不變。只有明確 `YUSHIN_V2_RETURN_RECEIPT_EMULATOR`、localhost、實際 demo-yushin Auth／Functions 與 Auth 9099／Functions 5001 可使用。正式 Functions index 未匯出，未部署 Firebase。
+
+呼叫者明確提供原 requestId／shipmentId／lot selections／原倉／syncAttemptId／日期／原因／operationId。沿 Fulfillment Core 正規化及驗證，不新增退貨數量公式；前端新操作只讀原單確認來源，真正額度及權限由後端原交易重讀。每 UID／訂單最多一筆同分頁 sessionStorage 固定意圖，送出前確認已保存。未知回覆、損壞暫存、權限改變或回讀失敗均不換 ID、不改意圖、不走 legacy writer。刷新後呼叫同一 Service、不傳新內容即可明確確認；讀取暫存本身不提交。
+
+成功回覆後經 server 讀原 customerReturnReceipts 及 orders，核對原角色、原申請、批次、數量、日期、意圖及原事件，才清除 checkpoint。相同 ID 並行確認不重入庫；不同意圖並行不得覆蓋原 checkpoint。只使用原兩個集合定址讀取，沒有新集合、Query、Index、Listener、Rules 或正式資料變更。正常新操作多一次來源讀取、成功後兩次定址回讀。僅支援 SALEABLE／RESTOCKABLE／CLOSE，不含待檢／損壞。
+
+本機 1642 項 Node 測試通過、零失敗／略過，含 5 項新增異常回覆、刷新、並行及身份行為測試；另新增 2 項真 Auth SDK→此原前端 Service→隔離 Callable→Firestore／Client Rules 的部分實收、回覆遺失、刷新、收齊及即時停權測試，完整 CI 結果以本批 PR 為準。尚未驗收原倉管 UI 的明確來源選擇、可見 pending 確認入口與 1280／390px 真 Browser 實收；本批不宣稱 UI 已接線或 Preview／正式開放。

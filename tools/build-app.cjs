@@ -48,6 +48,7 @@ const parts = [
   "src/services/delivery-correction.js",
   "src/services/delivery-records.js",
   "src/services/customer-return.js",
+  "src/services/customer-return-transport.js",
   "src/services/warehouse-shipment.js",
   "src/services/warehouse-transfer.js",
   "src/services/main-transfer-request.js",

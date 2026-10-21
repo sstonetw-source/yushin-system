@@ -430,3 +430,10 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 帶 requestId 的角色限 admin／purchaser／warehouse，從交易內 users 真實角色驗證；未帶者沿 admin／本人 sales／engineer。申請撤回或完成後禁止新實收；已提交同 ID 可核對原操作者／角色／hash／receipt／原退貨紀錄後只讀回覆，不能再次入庫。兩個 ID 競爭最後餘量由同一 orders 交易序列化。RESTOCKABLE／SALEABLE 以外品質、REPLACE 與跨倉回收仍拒絕。
 
 本批只接既有隔離 Callable 與後端原交易；原倉管 UI 仍保留未開放訊息及 legacy source guard，尚未接上固定意圖、刷新恢復與真實 UI 實收。正式 index.js 未匯出；未部署 Firebase。測試結果見整站驗收紀錄。
+
+
+## 2026-10-21 申請實收的前端傳輸準備（UI 未開放）
+
+無新增 Firestore 集合、欄位、Query、Index、Rules 或 Listener。前端同分頁 sessionStorage 以 v2-return-receipt:{UID}:{orderId} 保存 actorUid／actorRole／完整 intent，每人每單一筆；不承諾跨裝置或關閉分頁恢復。新操作定址讀 orders；成功後讀原 customerReturnReceipts/{operationId} 及 orders，核對權威憑證才清除暫存。
+
+本機 Node 1642／1642 通過；新增真 Auth 整合與完整 CI 結果以本批 PR 為準。未部署 Firebase、未變更正式資料或角色；詳細契約與未驗收邊界見 transaction-ui-integration-20261018.md 同日章節。
