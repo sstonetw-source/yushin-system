@@ -3,6 +3,7 @@ function poIncomingKey(item) {
     return String(item.productId || (item.itemCode ? `code:${normalizeHistoryItemCode(item.itemCode)}` : '')).trim();
 }
 async function registerPurchaseIncoming(poId, poRecord, {actorUid=currentUser?.uid,actorRole=currentUserRole,onStockCommitted=null}={}) {
+    if (poRecord?.status==='DRAFT' || poRecord?.documentOnly===true) throw Error('採購文件尚未確認已採購，不能登記在途。');
     if (isPurchaseTerminalStatus(poRecord?.status)) return;
     const assertActor=()=>{
         if (!actorUid || currentUser?.uid!==actorUid || currentUserRole!==actorRole) throw new Error('登入身份已變更，請以原帳號重試在途同步。');
@@ -30,6 +31,7 @@ async function registerPurchaseIncoming(poId, poRecord, {actorUid=currentUser?.u
             assertActor();
             if (!poSnap.exists) throw new Error('找不到來源採購單，請先核對同步結果。');
             const livePo=poSnap.data();
+            if(livePo.status==='DRAFT'||livePo.documentOnly===true)throw Error('原採購文件尚未確認已採購。');
             if (!Array.isArray(livePo.supplyOrderIds)||!livePo.supplyOrderIds.includes(supplyId)) throw new Error('採購單供應連結已變更，請重新開啟原單。');
             if (isPurchaseTerminalStatus(livePo.status)) return;
             if (!supplySnap.exists) throw new Error(`找不到供應紀錄 ${supplyId}`);

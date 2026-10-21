@@ -357,3 +357,9 @@ receiveV2CustomerReturnEmulator 僅在明確 YUSHIN_V2_RETURN_RECEIPT_EMULATOR �
 ## 2026-10-21 採購草稿非同步載入保護（已實作，待完整 CI）
 
 非同步草稿初始化須在資料準備期間停用會被回填的輸入與提交入口，並在每次 await 後核對原視窗 generation／UID／角色。關閉、失敗、session reset 與舊回覆不得污染新草稿；以延遲載入行為測試與原站雙尺寸驗收覆蓋。
+
+
+## 2026-10-21 文件製作與採購確認分離（已實作，待完整 CI）
+
+文件輸出禁止呼叫採購承諾、在途修復或恢復交易。新增入口沿原 Service；確認前以原 UID／角色／單號及完整意圖保存 sessionStorage checkpoint，未知回覆保留原意圖，由獨立確認入口續傳。採購與 incoming 仍是既有可恢復分段流程，沒有宣稱跨所有品項已合為單一後端交易。欄位 change 只更新金額與缺價提示，禁止重建正在輸入的相鄰欄位；供應商 change 不重建品項表。
+本節取代先前「產生 PDF 即登記採購」的操作契約；正式 Firebase 尚未部署。

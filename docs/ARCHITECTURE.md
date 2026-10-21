@@ -744,3 +744,9 @@ normalizedOrderItems 的 returnedQty 為既有顯示／補送用途，排除 CLO
 ## 2026-10-21 採購草稿非同步載入保護（已實作，待完整 CI）
 
 原採購草稿沿用既有 Feature／Service；背景供應商與成本載入期間，原表單暫停編輯與提交。關閉視窗與 session reset 使原 generation 失效，舊回覆不得改寫新草稿。沒有新增交易 writer。
+
+
+## 2026-10-21 文件製作與採購確認分離（已實作，待完整 CI）
+
+原 saveFormalPurchaseDocument 僅保存 purchaseOrders 文件快照。printPurchaseOrder／重印只呼叫文件儲存與 PDF；confirmSavedPurchaseOrder 明確確認後，沿既有 commitFormalPurchaseOrder（隔離 gate 沿同一 commitV2FormalPurchase）和 registerPurchaseIncoming 執行交易。沒有第二套採購數量公式／stock writer。原快捷「已採購」仍沿既有 Quick Purchase Service。
+本節取代先前「產生 PDF 即登記採購」的操作契約；正式 Firebase 尚未部署。

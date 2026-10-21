@@ -60,7 +60,8 @@ test('purchase cancellation Feature delegates both write paths and editor owns i
   assert.doesNotMatch(feature,/db\.collection\([^\n]*\)\.(?:set|update|add|delete)\(/);
   const editor=read('src/features/purchasing/purchase-order-editor.js');
   assert.match(editor,/let poItems = \[\]/);assert.match(editor,/function updatePoSaveButton\(/);
-  assert.equal((editor.match(/registerPurchaseIncoming\([^\n]*onStockCommitted:invalidateWarehouseStockCache/g)||[]).length,2);
+  assert.doesNotMatch(editor,/registerPurchaseIncoming\(/);
+  assert.match(read('src/features/purchasing/formal-purchase-recovery.js'),/await registerPurchaseIncoming\(/);
 });
 test('one stock transaction wrapper is owned by Infrastructure',()=>{
   const sources=walk('src');

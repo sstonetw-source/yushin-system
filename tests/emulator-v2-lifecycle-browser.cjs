@@ -459,7 +459,20 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
    'editing PO quantity/price must preserve the supplier entered earlier');
   await page.locator('#poVendorName').blur();
   await page.locator('#printPurchaseOrderBtn').click();
-  await page.waitForFunction(()=>!poSaveInProgress&&document.getElementById('poSaveStatus')?.textContent?.includes('採購結果尚未確認'),null,{timeout:45000});
+  await page.waitForFunction(()=>!poSaveInProgress&&poEditingId&&window.poPdfOutputs.length===1);
+  const draftPoId=await page.evaluate(()=>poEditingId);
+  const preparedPo=(await db.collection('purchaseOrders').doc(draftPoId).get()).data();
+  assert.equal(preparedPo.status,'DRAFT');assert.equal(preparedPo.documentOnly,true);
+  assert.equal(calls.filter(row=>row.name==='commitV2FormalPurchase').length,0);
+  assert.equal((await db.collection('supplyOrders').get()).size,supplyCountBefore);
+  assert.deepEqual((await demandRef.get()).data(),demand);
+  assert.deepEqual(await facts(fixture),restored,'document/PDF cannot change stock or source order');
+  // Reprint, including a failed PDF, cannot purchase or register incoming.
+  await page.locator('#printPurchaseOrderBtn').click();
+  await page.waitForFunction(()=>!poSaveInProgress&&window.poPdfOutputs.length===2);
+  assert.equal(calls.filter(row=>row.name==='commitV2FormalPurchase').length,0);
+  await page.locator('#confirmPoOrderedBtn').click();
+  await page.waitForFunction(()=>!formalPurchaseRecoveryRunning&&document.getElementById('actionFeedback')?.textContent?.includes('採購結果尚未確認'),null,{timeout:45000});
   const firstPurchase=calls.filter(row=>row.name==='commitV2FormalPurchase');
   assert.equal(firstPurchase.length,1);
   const commitIntent=firstPurchase[0].data;
@@ -467,7 +480,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   const pendingKey='formal-po-pending:'+encodeURIComponent(fixture.accounts.purchaser.uid);
   const pendingRaw=await page.evaluate(key=>sessionStorage.getItem(key),pendingKey);
   assert.equal(JSON.parse(pendingRaw).poRecord.poNo,commitIntent.poNo);
-  assert.deepEqual(await page.evaluate(()=>window.poPdfOutputs),[],'unknown reply cannot print a formal document');
+  assert.equal(await page.evaluate(()=>window.poPdfOutputs.length),2,'confirmation does not produce another PDF');
   assert.equal((await facts(fixture)).inventory.incoming||0,0,'lost PO response has not registered incoming yet');
   // Reload the unchanged original app. The original purchaser must explicitly
   // resume the stored intent; navigation and reading alone cannot submit it.
@@ -968,6 +981,12 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   assert.equal(purchaseDiagnostic.pdf.length,1,JSON.stringify(purchaseDiagnostic));
   // The original UI explicitly syncs incoming stock in the background after PDF.
   // A transient pending flag is not a failed purchase; verify persisted facts below.
+  assert.equal(calls.filter(row=>row.name==='commitV2FormalPurchase').length,priorPurchaseCalls);
+  assert.equal((await db.collection('supplyOrders').get()).size,priorSupplyCount);
+  assert.deepEqual(await facts(fixture),uiAfter,'second document alone cannot change purchase or stock');
+  assert.deepEqual((await demandRef.get()).data(),remainingBefore);
+  await page.locator('#confirmPoOrderedBtn').click();
+  await page.waitForFunction(()=>!formalPurchaseRecoveryRunning&&!pendingFormalPurchase()&&poListCache.find(po=>po.id===poEditingId)?.status==='ORDERED',null,{timeout:45000});
   const nextPurchaseCalls=calls.filter(row=>row.name==='commitV2FormalPurchase');
   assert.equal(nextPurchaseCalls.length,priorPurchaseCalls+1);
   const remainingIntent=nextPurchaseCalls.at(-1).data;

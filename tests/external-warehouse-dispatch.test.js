@@ -4,7 +4,7 @@ test('removed external notice and supplier email have no UI or loaded runtime, w
  assert.doesNotMatch(html,/external-warehouse-dispatch.js|externalWarehousePanel|emailPurchaseOrderBtn|supplierSettingEmail/);
  assert.doesNotMatch(app,/window.emailPurchaseOrder|viewExternalWarehouseStatus\(|loadRecentExternalWarehouseNotices/);
  assert.doesNotMatch(app,/if \(isExternalWarehouseId\(warehouseId\)\) return/);
- assert.match(html,/autoFillPoExpectedDate\(\); renderPoItemsTable\(\)/);
+ assert.match(html,/autoFillPoExpectedDate\(\)/);
  assert.match(fs.readFileSync('functions/index.js','utf8'),/throw new HttpsError/);
  assert.doesNotMatch(fs.readFileSync('functions/index.js','utf8'),/nodemailer|smtpConfig/);
 });

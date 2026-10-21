@@ -1,3 +1,42 @@
+// Document preparation writes only the immutable PO snapshot, never supply/demand/stock.
+function formalPurchaseDocumentIntent(record) {
+    const ignored = new Set(['id','createdAt','updatedAt','lastOutputAt','lastOutputType','supplyOrderIds',
+        'status','documentOnly','confirmedAt','confirmedByUid']);
+    const canonical = value => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object'
+        ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
+    return JSON.stringify(canonical(Object.fromEntries(Object.entries(record).filter(([key]) => !ignored.has(key)))));
+}
+async function saveFormalPurchaseDocument(record, {actorUid=currentUser?.uid,actorRole=currentUserRole}={}) {
+    const check = () => {
+        if (!actorUid || actorUid!==currentUser?.uid || actorRole!==currentUserRole
+            || !canCreatePurchaseOrderCapability() || !canAccessPage('orders.po'))
+            throw Error('登入身分或採購權限已變更。');
+    };
+    check();
+    record=JSON.parse(JSON.stringify(record));
+    if (!record?.poNo || record.poNo.includes('/') || !record.vendorName?.trim()
+        || !Array.isArray(record.items) || !record.items.length
+        || record.items.some(item=>!Number.isFinite(Number(item.qty)) || Number(item.qty)<=0
+            || item.unitPrice===null || item.unitPrice==='' || !Number.isFinite(Number(item.unitPrice)) || Number(item.unitPrice)<0))
+        throw Error('採購文件的單號、供應商、數量或價格不完整。');
+    delete record.id; delete record.supplyOrderIds;
+    record={...record,status:'DRAFT',documentOnly:true,createdByUid:actorUid,createdByRole:actorRole};
+    let saved;
+    await runRoleTransaction(async tx=>{
+        check();
+        const ref=db.collection('purchaseOrders').doc(record.poNo),snapshot=await tx.get(ref);
+        check();
+        if (snapshot.exists) {
+            saved=snapshot.data();
+            if (saved.status!=='DRAFT' || saved.documentOnly!==true
+                || formalPurchaseDocumentIntent(saved)!==formalPurchaseDocumentIntent(record))
+                throw Error('這個單號已有不同內容或已確認採購，請開啟原單核對。');
+            return;
+        }
+        saved=record;tx.set(ref,record);
+    });
+    check();return {id:saved.poNo,...saved};
+}
 // Authoritative PO, supply commitments and source-order linkage. Incoming remains a separate checkpoint.
 async function commitFormalPurchaseEmulator(poRecord,actorUid,assertActor) {
     const local=host=>['localhost','127.0.0.1'].includes(host);
@@ -79,9 +118,15 @@ async function commitFormalPurchaseOrder(poRecord, {actorUid=currentUser?.uid,ac
             const poSnapshot = await transaction.get(poRef);
             const orderSnapshots = await Promise.all(orderRefs.map(ref => transaction.get(ref)));
             assertActor();
-            if (poSnapshot.exists) {
+            if (poSnapshot.exists && poSnapshot.data().status==='DRAFT' && poSnapshot.data().documentOnly===true) {
+                const draft=poSnapshot.data();
+                if (formalPurchaseDocumentIntent(draft)!==formalPurchaseDocumentIntent(poRecord))
+                    throw Error('採購文件與確認內容不同，請重新開啟原單。');
+                poRecord={...poRecord,status:'ORDERED',documentOnly:false,
+                    confirmedAt:now,confirmedByUid:actorUid};
+            } else if (poSnapshot.exists) {
                 const saved=poSnapshot.data();
-                const ignored=new Set(['createdAt','lastOutputAt','lastOutputType','supplyOrderIds']);
+                const ignored=new Set(['id','createdAt','updatedAt','lastOutputAt','lastOutputType','supplyOrderIds','status','documentOnly','confirmedAt','confirmedByUid']);
                 const intent=record=>Object.fromEntries(Object.keys(poRecord).filter(key=>!ignored.has(key)).map(key=>[key,record[key]]));
                 const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'
                     ?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;

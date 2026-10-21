@@ -4,7 +4,6 @@ function formalPurchasePendingKey() {
     return 'formal-po-pending:' + encodeURIComponent(currentUser?.uid || '');
 }
 function pendingFormalPurchase() {
-    if (globalThis.YUSHIN_FORMAL_PURCHASE_EMULATOR !== true) return null;
     const raw = sessionStorage.getItem(formalPurchasePendingKey());
     if (!raw) return null;
     try {
@@ -12,7 +11,7 @@ function pendingFormalPurchase() {
         if (pending.version !== 1 || pending.actorUid !== currentUser?.uid
             || pending.actorRole !== currentUserRole || !['admin','purchaser'].includes(pending.actorRole)
             || !po || typeof po.poNo !== 'string' || !po.poNo || po.poNo.includes('/')
-            || !Array.isArray(po.items) || !po.items.length || po.items.length > 5)
+            || !Array.isArray(po.items) || !po.items.length)
             throw Error('invalid checkpoint');
         return pending;
     } catch (_) {
@@ -20,13 +19,12 @@ function pendingFormalPurchase() {
     }
 }
 function rememberFormalPurchase(poRecord, actorUid, actorRole) {
-    if (globalThis.YUSHIN_FORMAL_PURCHASE_EMULATOR !== true) return;
     if (actorUid !== currentUser?.uid || actorRole !== currentUserRole)
         throw Error('登入身分已變更，無法儲存採購作業。');
-    if (!Array.isArray(poRecord?.items) || !poRecord.items.length || poRecord.items.length > 5
-        || poRecord.items.some(item => !item.orderId || !item.itemId
+    if (!Array.isArray(poRecord?.items) || !poRecord.items.length
+        || (globalThis.YUSHIN_FORMAL_PURCHASE_EMULATOR === true && (poRecord.items.length > 5 || poRecord.items.some(item => !item.orderId || !item.itemId
             || (item.sourceType && item.sourceType !== 'SALES_ORDER')
-            || (item.fulfillmentType || 'WAREHOUSE') !== 'WAREHOUSE'))
+            || (item.fulfillmentType || 'WAREHOUSE') !== 'WAREHOUSE'))))
         throw Error('採購後端試點目前只支援 1–5 個客戶訂單實體入庫品項。');
     if (pendingFormalPurchase()) throw Error('請先確認前次採購結果，勿另建採購單。');
     const pending = {version:1, actorUid, actorRole, poRecord};
@@ -35,7 +33,6 @@ function rememberFormalPurchase(poRecord, actorUid, actorRole) {
     renderFormalPurchaseRecovery();
 }
 function clearFormalPurchasePending(poNo, actorUid, actorRole) {
-    if (globalThis.YUSHIN_FORMAL_PURCHASE_EMULATOR !== true) return;
     if (currentUser?.uid !== actorUid || currentUserRole !== actorRole) return;
     const pending = pendingFormalPurchase();
     if (pending?.poRecord.poNo === poNo) sessionStorage.removeItem(formalPurchasePendingKey());
@@ -60,7 +57,7 @@ function renderFormalPurchaseRecovery() {
     const panel = document.getElementById('formalPurchaseRecoveryPanel');
     if (!panel) return;
     panel.hidden = true;
-    if (globalThis.YUSHIN_FORMAL_PURCHASE_EMULATOR !== true || !currentUser?.uid
+    if (!currentUser?.uid
         || !canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
     try {
         const pending = pendingFormalPurchase();
@@ -115,3 +112,23 @@ async function recoverFormalPurchase() {
     }
 }
 window.recoverFormalPurchase = recoverFormalPurchase;
+
+// Explicit business confirmation. PDF and document reads never enter this path.
+window.confirmSavedPurchaseOrder = async function(poId) {
+    if(formalPurchaseRecoveryRunning || poSaveInProgress || poDraftLoading
+        || !canCreatePurchaseOrderCapability() || !canAccessPage('orders.po'))return;
+    const uid=currentUser?.uid,role=currentUserRole,generation=sessionDataGeneration;
+    try {
+        if(pendingFormalPurchase())throw Error('請先使用「確認前次採購結果」核對未完成作業，再確認其他文件。');
+        const snap=await db.collection('purchaseOrders').doc(poId).get({source:'server'});
+        if(currentUser?.uid!==uid || currentUserRole!==role || sessionDataGeneration!==generation)return;
+        if(!snap.exists)throw Error('找不到原採購文件。');
+        const record=snap.data();
+        if(record.status!=='DRAFT' || record.documentOnly!==true)throw Error('此文件已確認或已停止，請更新清單並核對原採購紀錄。');
+        if(!confirm(`確認採購單 ${record.poNo} 已向供應商下單？本次將登記文件上的品項與數量，並列入待到貨。`))return;
+        rememberFormalPurchase(record,uid,role);
+        await recoverFormalPurchase();
+    } catch(error) {
+        if(currentUser?.uid===uid && currentUserRole===role)showActionFeedback(error.message,'warning');
+    }
+};

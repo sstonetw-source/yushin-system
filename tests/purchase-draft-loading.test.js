@@ -7,7 +7,7 @@ function fixture(){
  let release,reject;
  const loading=new Promise((resolve,fail)=>{release=resolve;reject=fail;});
  const nodes=new Map(),alerts=[];
- const node=id=>{if(!nodes.has(id))nodes.set(id,{style:{},value:'',textContent:'',innerText:'',disabled:false,classList:{active:false,add(){this.active=true;},remove(){this.active=false;},contains(){return this.active;}}});return nodes.get(id);};
+ const node=id=>{if(!nodes.has(id))nodes.set(id,{children:[],style:{},value:'',textContent:'',innerText:'',disabled:false,classList:{active:false,add(){this.active=true;},remove(){this.active=false;},contains(){return this.active;}}});return nodes.get(id);};
  const controls=['poVendorName','poDate','poExpectedDate','poLeadDays','qty','unitPrice'].map(node);
  const c=vm.createContext({console,Date,window:null,currentUser:{uid:'buyer'},currentUserRole:'purchaser',currentUserName:'Buyer',
   document:{getElementById:node,querySelectorAll:selector=>selector.includes('purchasePendingBody')?[]:controls},
@@ -21,7 +21,7 @@ function fixture(){
  vm.runInContext(draft,c);
  c.bestPurchaseOrderCompany=()=> 'yushin';c.populatePoVendorSuggestions=()=>{};c.clearPoExpectedDate=()=>{};
  c.switchPoCompany=()=>{};c.generatePoNo=()=>vm.runInContext('poNoReady=true;updatePoSaveButton()',c);
- c.renderPoItemsTable=()=>{};c.updatePoModeUI=()=>{};
+ c.renderPoItemsTable=()=>{};c.updatePoModeUI=()=>{};c.recalcPoTotals=()=>{};
  c.autoFillPoSupplier=async(items,isCurrent)=>{await loading;if(isCurrent())node('poVendorName').value='Default supplier';};
  return {c,node,controls,release,reject,alerts};
 }
@@ -68,4 +68,12 @@ test('late metadata after account switch cannot change supplier or lines',async(
  x.release();await opening;
  assert.equal(x.node('poVendorName').value,'Other account');
  assert.equal(x.alerts.length,0);
+});
+
+test('saving or printing temporarily blocks explicit confirmation then enables it again',()=>{
+ const x=fixture();
+ vm.runInContext("poEditingId='PO1';poSaveInProgress=true;updatePoSaveButton()",x.c);
+ assert.equal(x.node('confirmPoOrderedBtn').disabled,true);
+ vm.runInContext('poSaveInProgress=false;updatePoSaveButton()',x.c);
+ assert.equal(x.node('confirmPoOrderedBtn').disabled,false);
 });
