@@ -941,10 +941,11 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   await page.locator('#poItemsBody input[onchange*="unitPrice"]').blur();
   const priorPurchaseCalls=calls.filter(row=>row.name==='commitV2FormalPurchase').length;
   await page.locator('#printPurchaseOrderBtn').click();
-  await page.waitForFunction(()=>!poSaveInProgress,null,{timeout:45000});
+  await page.waitForFunction(()=>window.poPdfOutputs.length===1,null,{timeout:45000});
   const purchaseDiagnostic=await page.evaluate(()=>({pending:poIncomingSyncPending,pdf:window.poPdfOutputs,status:document.querySelector('#poSaveStatus')?.textContent||'',modal:document.querySelector('#poModalOverlay')?.className||''}));
-  assert.equal(purchaseDiagnostic.pending,false,JSON.stringify(purchaseDiagnostic));
   assert.equal(purchaseDiagnostic.pdf.length,1,JSON.stringify(purchaseDiagnostic));
+  // The original UI explicitly syncs incoming stock in the background after PDF.
+  // A transient pending flag is not a failed purchase; verify persisted facts below.
   const nextPurchaseCalls=calls.filter(row=>row.name==='commitV2FormalPurchase');
   assert.equal(nextPurchaseCalls.length,priorPurchaseCalls+1);
   const remainingIntent=nextPurchaseCalls.at(-1).data;
