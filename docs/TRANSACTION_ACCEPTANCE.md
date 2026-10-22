@@ -26,7 +26,7 @@
 | 部分採購／收貨／分批出貨 | 同一整站案例＋`emulator-v2-return-callable.cjs`、原 Receiving Service 與供應 checkpoint | 不新增另一種 4/7 或 1+2 排列；待相同部署契約的 Preview |
 | 同產品多倉預留／分配 | `emulator-order-location.cjs`、`emulator-single-item-location.cjs`、三品項兩倉原畫面 | v2 入口限 demo Emulator；單倉 UI 不代表 v2 初始化真傳輸 |
 | 取消／恢復 | 真 Auth Callable、原整站單品項與 #227 收貨後三品項取消恢復 | 保留競爭、回滾、舊 ID 重送與部署限制，不擴張排列 |
-| 退貨／重新下單 | #226 原多品項分倉實收、`emulator-location-shipment.cjs`；建單 Service 的 CLOSE 後乾淨新單 | 尚缺實收至新單的原畫面代表串接；不開放未完成 REPLACE 補送 |
+| 退貨／重新下單 | #226 原多品項分倉實收、`emulator-location-shipment.cjs`；建單 Service 的 CLOSE 後乾淨新單；原整站接續同一筆實收來源重新下單（本批待 CI） | 新單／獨立預留與舊帳不變須以本批最新 CI 判定；不開放未完成 REPLACE 補送 |
 | 原廠直送 | `receipt-service-integrity.test.js` 原收貨不建倉庫存、Rules 直送同交易檢查、`workflow-audit-browser-smoke.js` | 尚缺一條真 Auth 原畫面完整串接；不能用兩倉實貨案例替代 |
 | 服務型不入庫 | 既有型別檢查及多倉拒絕測試 | 拒絕 SERVICE 進實貨交易不等於正向履約完成；須一條服務完成且無 lot／實貨 movement／一般入庫的代表 |
 | 估價單／Forecast 轉單 | 建單 Service 共用入口、Forecast backlink 原子性／重試；Rules 真 Client 原 Service 驗證 Forecast 轉單及估價單來源同步恢復；`phase1.test.js` 來源同步失敗保留建單 | 尚缺原畫面真 Auth 代表轉單；兩種來源契約不可互相冒充，已存在的來源恢復測試不重做 |
