@@ -76,13 +76,15 @@
     const completed=events.length===required.length;
     let custody='NOT_RECEIVED';
     if(record.kind==='BIOPLEX_LAB'){
+      // Issuing the report does not prove specimen disposal or physical return.
       custody=events.length?'IN_HOUSE':'NOT_RECEIVED';
-      if(completed)custody='SAMPLE_CLOSED';
     }else if(record.kind==='PIPETTE_CALIBRATION'||record.kind==='TISSUE_SLICING'){
+      // Tissue deliverables can be sent while the specimen stays in custody.
+      // Only a pipette customer-return event transfers the device physically.
       custody=events.length===0?'NOT_RECEIVED':
         events.length===1?'IN_HOUSE':
         events.length===2?'AT_VENDOR':
-        completed?'RETURNED_TO_CUSTOMER':'IN_HOUSE';
+        completed&&record.kind==='PIPETTE_CALIBRATION'?'RETURNED_TO_CUSTOMER':'IN_HOUSE';
     }else custody='CUSTOMER_SITE';
     return {
       orderId:record.orderId,itemId:record.itemId,caseId:record.caseId,kind:record.kind,
