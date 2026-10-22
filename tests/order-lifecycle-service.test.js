@@ -103,3 +103,42 @@ test('invalid form state/date and failed reservation updates never commit form c
   assert.equal(broken.writes(),0);
   assert.equal(broken.state().orderLifecycleHistory.length,0);
 });
+
+test('multi-item cancellation and restoration preserve distinct item identities and do not replay stock transitions',async()=>{
+  const f=fixture();
+  f.state().items=[
+    {itemId:'I1',productKey:'P',warehouseId:'A',qty:3,deliveredQty:1},
+    {itemId:'I2',productKey:'P',warehouseId:'B',qty:2,deliveredQty:0},
+    {itemId:'I3',productKey:'Q',warehouseId:'A',qty:4,deliveredQty:2}
+  ];
+  const before=structuredClone(f.state().items);
+  await f.c.setOrderLifecycleStatus('O1','cancelled');
+  assert.deepEqual(f.state().items,before);
+  assert.equal(f.state().itemCount,3);
+  assert.equal(f.reservations(),1);
+  await f.c.setOrderLifecycleStatus('O1','cancelled');
+  assert.equal(f.reservations(),1);
+  await f.c.setOrderLifecycleStatus('O1','normal');
+  assert.deepEqual(f.state().items,before);
+  assert.equal(f.state().itemCount,3);
+  assert.equal(f.reservations(),2);
+  await f.c.setOrderLifecycleStatus('O1','normal');
+  assert.equal(f.reservations(),2);
+  assert.equal(f.writes(),2);
+  assert.deepEqual(f.state().orderLifecycleHistory.map(row=>row.action),['status_change','restore']);
+});
+test('multi-item reservation failure rolls back status and metadata without partial order writes',async()=>{
+  const f=fixture({throwOnAdjust:true});
+  f.state().items=[
+    {itemId:'I1',productKey:'P',warehouseId:'A',qty:3},
+    {itemId:'I2',productKey:'P',warehouseId:'B',qty:2},
+    {itemId:'I3',productKey:'Q',warehouseId:'A',qty:4}
+  ];
+  const before=structuredClone(f.state());
+  await assert.rejects(f.c.setOrderLifecycleStatus('O1','cancelled',{
+    date:'2026-10-22',reason:'multi-item rollback'
+  }),/inventory inconsistent/);
+  assert.deepEqual(f.state(),before);
+  assert.equal(f.writes(),0);
+  assert.equal(f.reservations(),1);
+});
