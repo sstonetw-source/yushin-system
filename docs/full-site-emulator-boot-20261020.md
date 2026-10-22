@@ -1,5 +1,16 @@
 # 完整首頁 Emulator 啟動驗收
 
+## 2026-10-22｜直送收貨憑證欄位契約修正（待本 head 完整 CI）
+
+PR #233 `bb5a4236` 的 CI 39749691079：採購確認已成功，但兩尺寸直送收貨在後端提交後被前端憑證核對擋住。查核唯一 Receiving Service 與 Receiving Core：DIRECT_SHIP 的 receipts 刻意省略 lotNo／expiryDate，傳輸層卻用嚴格空字串比對，誤判已提交事件；不是應換 ID 重收或增加庫存的情況。
+
+傳輸層現在按既有憑證契約分流：直送輸入必須為空批號／效期，憑證只接受欄位省略或空字串，warehouseId 必須為空；WAREHOUSE 保持原批號／效期精確核對和 v2 格式檢查。原 UID／角色／Supply／數量與 sessionStorage checkpoint 檢查全部保留；直送不通知實貨快取。未改 writer、資料模型、Rules、索引或正式 gate。
+
+既有 1280／390px 正向案例延伸首筆真 HTTP 成功後丟棄回覆：先讀真 receipts／orders 確認已提交，再重新載入原站按「用原資料重試」，核對同 intent、同一 receipt、同一交付與實貨全不變，再完成原 1+2 分批到貨。不另增數量排列。新增傳輸回歸確認省略欄位可讀，錯身份／數量／批號／倉庫仍拒絕並保留工作。
+
+本機應用回歸 1696／1696、零失敗／略過；建置一致性、語法與 diff 檢查通過。本次本機 Chrome 啟動遭執行環境拒絕 Unix socket（Operation not permitted），不能記為瀏覽器測試通過。GitHub 推送遭自動審查以外部寫入授權不足為由拒絕，遠端 PR 仍為 bb5a4236；完整 CI 尚未對本修正啟動。新增原站真 Auth 案例與完整 CI 仍待驗證。僅 demo-yushin 本機後端試點；未部署 Firebase，Preview／正式入口尚未驗收。
+
+
 ## 2026-10-22｜原廠直送採購後端試點修正（待 CI）
 
 PR #233 真實 Client 原入口在桌機／手機均遇到 Firestore Rules 1000 運算式上限，CI 39743049294 記錄兩例失敗。沿用原採購 Service 與僅限 demo-yushin 的 Functions 原子提交試點，加入 DIRECT_SHIP 型態與 Demand／來源一致性限制；直送不動實貨／分倉在途／批號／movement。測試只在本機明確開啟 YUSHIN_FORMAL_PURCHASE_EMULATOR，使用原按鈕、真 Auth 與後端 Transaction；不得將此結果視為正式前端已接線或 Preview 已完成。新 CI 未通過前原直送完整流程尚未完成驗收。

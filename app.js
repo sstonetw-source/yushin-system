@@ -16027,11 +16027,16 @@ async function receiveV2SupplyEmulator(supplyId,qty,lotNo,expiryDate,operationId
         throw Error('收貨回覆不明確，請使用原資料重試。');
     const receipt=await db.collection('receipts').doc(operationId).get({source:'server'});check();
     const proof=receipt.exists?receipt.data():null;
-    if(!proof||proof.supplyOrderId!==supplyId||proof.qty!==qty||proof.lotNo!==lotNo||proof.expiryDate!==expiryDate
+    // Direct receipts deliberately omit warehouse lot/expiry fields. Match that
+    // schema without weakening exact batch checks for physical warehouse receipts.
+    const direct=proof?.fulfillmentType==='DIRECT_SHIP';
+    const empty=value=>value===undefined||value==='';
+    const batchMatches=direct
+        ? lotNo===''&&expiryDate===''&&empty(proof.lotNo)&&empty(proof.expiryDate)&&proof.warehouseId===''
+        : proof?.lotNo===lotNo&&proof?.expiryDate===expiryDate;
+    if(!proof||proof.supplyOrderId!==supplyId||proof.qty!==qty||!batchMatches
         ||proof.createdByUid!==uid||proof.createdByRole!==role
-        ||(proof.fulfillmentType==='DIRECT_SHIP'
-          ? !!(proof.lotNo||proof.expiryDate||proof.warehouseId)
-          : proof.reservationLocationSchemaVersion!==2))
+        ||(!direct&&proof.reservationLocationSchemaVersion!==2))
         throw Error('收貨已可能提交，但憑證尚未確認，請使用原資料重試。');
     if(proof.fulfillmentType!=='DIRECT_SHIP')
         options.onStockCommitted?.(proof.productKey,proof.warehouseId);

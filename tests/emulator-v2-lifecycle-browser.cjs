@@ -1942,12 +1942,19 @@ for(const width of [1280,390])test('full site '+width+'px original UI gated PO p
   movements:(await db.collection('inventoryMovements').where('productKey','==',key).get()).docs.map(d=>({id:d.id,...d.data()})),
   reservations:(await db.collection('inventoryReservations').where('productKey','==',key).get()).docs.map(d=>({id:d.id,...d.data()}))});
  const before=await physical(),context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
- const errors=[],dialogs=[],external=[],functions=[];
+ const errors=[],dialogs=[],external=[],functions=[],receiptCalls=[];let loseArrival=true;
  await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_FORMAL_PURCHASE_EMULATOR=true;window.YUSHIN_V2_RECEIVING_EMULATOR=true;});
  page.on('pageerror',error=>errors.push(error.message));page.on('dialog',d=>{dialogs.push(d.message());return d.type()==='confirm'?d.accept():d.dismiss();});
  await context.route('**/*',async route=>{const url=new URL(route.request().url());
   if(!['localhost','127.0.0.1'].includes(url.hostname)){external.push(url.hostname);await route.abort();return;}
-  if(url.port==='5001')functions.push(url.pathname);await route.continue();});
+  if(url.port==='5001'){
+   functions.push(url.pathname);
+   if(url.pathname.endsWith('/receiveV2Supply')){
+    receiptCalls.push(route.request().postDataJSON().data);
+    if(loseArrival){loseArrival=false;const reply=await route.fetch();assert.equal(reply.status(),200);await route.abort('failed');return;}
+   }
+  }
+  await route.continue();});
  try{
   await siteOpen(page);await siteLogin(page,accounts.sales,'sales');await siteNav(page,'orders');
   const sourceRow=page.locator('#ordersBody > tr').filter({hasText:orderId});await sourceRow.waitFor({state:'visible'});
@@ -1981,6 +1988,20 @@ for(const width of [1280,390])test('full site '+width+'px original UI gated PO p
    assert.equal(await page.locator('#poReceiptBatchBody .po-receive-lot').isDisabled(),true);
    assert.equal(await page.locator('#poReceiptBatchBody .po-receive-expiry').isDisabled(),true);
    await page.locator('#poReceiptBatchBody .po-receive-qty').fill(String(qty));await page.locator('#savePoReceiptBatchBtn').click();
+   if(total===1){
+    await page.waitForFunction(id=>receiptTaskJobs.get(receiptTaskKey(id))?.state==='error',supplyId,{timeout:45000});
+    const partial=(await db.collection('orders').doc(orderId).get()).data(),intent=receiptCalls[0];
+    assert.equal(partial.items[0].receivedQty,1);assert.equal(partial.deliveryRecords.length,1);
+    const proof=(await db.collection('receipts').doc(intent.operationId).get()).data();
+    assert.equal(proof.fulfillmentType,'DIRECT_SHIP');assert.equal(proof.lotNo,undefined);assert.equal(proof.expiryDate,undefined);
+    assert.deepEqual(await physical(),before);
+    await siteOpen(page,'sales');await siteNav(page,'orders');
+    await page.locator('#receiptTaskStatus button').filter({hasText:'用原資料重試'}).click();
+    await page.waitForFunction(id=>!receiptTaskJobs.has(receiptTaskKey(id)),supplyId,{timeout:45000});
+    assert.deepEqual(receiptCalls[1],intent);
+    assert.deepEqual((await db.collection('orders').doc(orderId).get()).data(),partial);
+    assert.equal((await db.collection('receipts').where('supplyOrderId','==',supplyId).get()).size,1);
+   }
    await page.waitForFunction(({id,total,supplyId})=>ordersCache.some(o=>o.id===id&&o.items[0].receivedQty===total)
     &&!receiptTaskJobs.has(receiptTaskKey(supplyId)),{id:orderId,total,supplyId},{timeout:45000});
    assert.equal((await db.collection('supplyOrders').doc(supplyId).get()).data().receivedQty,total);
@@ -1997,9 +2018,9 @@ for(const width of [1280,390])test('full site '+width+'px original UI gated PO p
   await siteOpen(page,'sales');await siteNav(page,'orders');
   assert.deepEqual((await db.collection('orders').doc(orderId).get()).data(),done);assert.deepEqual(await physical(),before);
   assert.equal((await db.collection('receipts').where('supplyOrderId','==',supplyId).get()).size,2);
-  assert.equal(functions.length,3);assert.match(functions[0],/commitV2FormalPurchase/);assert.ok(functions.slice(1).every(path=>/receiveV2Supply/.test(path)));assert.deepEqual(external,[]);assert.deepEqual(errors,[]);
+  assert.equal(functions.length,4);assert.match(functions[0],/commitV2FormalPurchase/);assert.ok(functions.slice(1).every(path=>/receiveV2Supply/.test(path)));assert.deepEqual(external,[]);assert.deepEqual(errors,[]);
   assert.ok(dialogs.every(message=>message.startsWith('確認採購單 ')),JSON.stringify(dialogs));
-  console.log('Full site '+width+'px: original direct source sync, DRAFT/PDF, explicit demo-gated backend purchase and owner arrival 1+2 complete; company/warehouse/lot/movement/reservation unchanged, reload read-only, one gated PO and two gated receipt Functions calls. Source form input and physical PDF output remain explicit fixture boundaries.');
+  console.log('Full site '+width+'px: original direct source sync, DRAFT/PDF, explicit demo-gated backend purchase and owner arrival 1+2 complete; company/warehouse/lot/movement/reservation unchanged, reload read-only, one gated PO and three gated receipt Functions calls (lost first reply, original intent replay, final arrival). Source form input and physical PDF output remain explicit fixture boundaries.');
  }catch(error){
   console.log('Direct entry '+width+'px diagnostic:',JSON.stringify(await page.evaluate(()=>({role:typeof currentUserRole==='undefined'?'none':currentUserRole,
    feedback:document.getElementById('actionFeedback')?.textContent,po:document.getElementById('poSaveStatus')?.textContent,

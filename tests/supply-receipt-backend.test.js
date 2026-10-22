@@ -35,6 +35,34 @@ test('receipt transport leaves original work on unknown replies and account chan
   await assert.rejects(x.receive());assert.equal(JSON.stringify(x.jobs),original);
  }
 });
+function directTransport(){
+ const x=transport();
+ x.c.currentUserRole='sales';x.c.canReceiveInventoryCapability=()=>false;
+ x.input.lotNo='';x.input.expiryDate='';
+ Object.assign(x.jobs[0],{actorRole:'sales'});
+ Object.assign(x.jobs[0].entries[0],{lotNo:'',expiryDate:''});
+ Object.assign(x.proof,{createdByRole:'sales',fulfillmentType:'DIRECT_SHIP',warehouseId:''});
+ delete x.proof.lotNo;delete x.proof.expiryDate;delete x.proof.reservationLocationSchemaVersion;
+ x.receive=onStockCommitted=>x.c.receiveV2SupplyEmulator(x.input.supplyId,x.input.qty,x.input.lotNo,x.input.expiryDate,x.input.operationId,{actorUid:'buyer',actorRole:'sales',onStockCommitted});
+ return x;
+}
+test('direct receipt transport confirms the actual lot-free Core snapshot without invalidating stock',async()=>{
+ const x=directTransport();let notifications=0;
+ assert.deepEqual([...await x.receive(()=>notifications++)],['O']);
+ assert.equal(notifications,0);
+ Object.assign(x.proof,{lotNo:'',expiryDate:''});
+ assert.deepEqual([...await x.receive(()=>notifications++)],['O']);
+ assert.equal(notifications,0);
+});
+test('direct receipt proof still rejects wrong identity, quantities and any warehouse batch data, retaining original work',async()=>{
+ for(const patch of [{supplyOrderId:'OTHER'},{qty:3},{createdByUid:'other'},{createdByRole:'admin'},
+  {lotNo:'LOT'},{expiryDate:'2028-01-01'},{warehouseId:'W'},{lotNo:null},{expiryDate:0},{fulfillmentType:'WAREHOUSE'}]){
+  const x=directTransport(),original=JSON.stringify(x.jobs);Object.assign(x.proof,patch);
+  await assert.rejects(x.receive(),/憑證/);assert.equal(JSON.stringify(x.jobs),original);
+ }
+ const warehouse=transport();delete warehouse.proof.lotNo;
+ await assert.rejects(warehouse.receive(),/憑證/);
+});
 test('generated server receipt runtime stays identical to src and is not a runtime VM or second writer',()=>{
  require('node:child_process').execFileSync(process.execPath,['tools/build-receiving-runtime.cjs','--check']);
  const source=fs.readFileSync('functions/supply-receipt-service.js','utf8');assert.doesNotMatch(source,/node:vm|new Function|\.update\([^\n]*(receivedQty|onHand|reserved)/);
