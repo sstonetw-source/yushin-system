@@ -4,6 +4,14 @@
 
 ## 目標與現況
 
+### Service 案件真實 Auth／後端事件入口（2026-10-22，僅 demo Emulator）
+
+- `modules/service-work-core.js` 是四類 Service 事件順序／保管／必要憑證的唯一純 Core，透過 `tools/build-functions-core.cjs` 產生 `functions/shared/service-work-core.js`。
+- `functions/service-case-service.js` 是唯一 Service 事件 transaction writer；重新讀取 Auth 身份、停權／角色、訂單唯一來源品項與正式 Service 產品主檔，不建立實貨、批次、一般採購或送貨憑證。
+- `functions/index.js` 的 `commitServiceCaseEvent` 是**只限 demo-yushin 本機 Firestore＋Auth Emulator** 的 gated Callable；`ENABLE_SERVICE_CASE_EMULATOR=true` 也無法在 Preview／正式 project 開啟。Firestore Rules `serviceCases` 禁止 Client 直接讀寫。
+- 此階段新補真 Auth→Callable→Firestore Emulator 代表流程，不是正式啟用。服務 subtype 在主檔／UI 設定、受託物與數量、訂單品項完成量／核銷、Client 對案件的角色可見性、Preview 與正式部署仍未完成。**PR #234 應保持 Draft**。
+
+
 
 
 
