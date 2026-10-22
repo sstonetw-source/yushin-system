@@ -118,6 +118,16 @@ test('Service-only order initializes as a non-stock item without reservation, de
  await f.sync();assert.equal(f.controls.selfCalls,2);assert.equal(f.demand('I'),undefined);
 });
 
+test('Goods type cannot bypass a live Service product master and reserve physical stock',async()=>{
+ const f=fixture({items:[{itemId:'I',productId:'S',productType:'Goods',warehouseId:'W',qty:3}]});
+ f.put('products/S',{productType:'Service',active:true});
+ const before=JSON.stringify([...f.docs]);
+ await assert.rejects(f.sync(),/產品主檔為服務型/);
+ assert.equal(JSON.stringify([...f.docs]),before);
+ assert.equal(f.docs.get('inventory/P').reserved,0);
+ assert.equal(f.docs.has('inventoryReservations/O__I'),false);
+});
+
 test('Goods plus Service order reserves only the real Goods item and never creates Service supply',async()=>{
  const f=fixture({items:[
   {itemId:'SERVICE',productId:'S',productType:'Service',qty:2,fulfillmentType:'WAREHOUSE'},
