@@ -1362,7 +1362,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
 for(const width of [1280,390])test('full site '+width+'px original multi-item purchasing receipt dispatch shipment and delivery keep same-product lines separate',{timeout:300000},async()=>{
  const x=await multiReceiptSiteFixture(width),context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
  const errors=[],external=[],calls=[],purchaseCalls=[],dialogs=[],logisticsCalls=[],dropLogistics=new Set();let lose=false,losePurchase=true;
- await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_FORMAL_PURCHASE_EMULATOR=true;window.YUSHIN_V2_RECEIVING_EMULATOR=true;window.YUSHIN_V2_DISPATCH_EMULATOR=true;window.YUSHIN_V2_SHIPMENT_EMULATOR=true;window.YUSHIN_V2_DELIVERY_EMULATOR=true;});
+ await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_FORMAL_PURCHASE_EMULATOR=true;window.YUSHIN_V2_RECEIVING_EMULATOR=true;window.YUSHIN_V2_DISPATCH_EMULATOR=true;window.YUSHIN_V2_SHIPMENT_EMULATOR=true;window.YUSHIN_V2_DELIVERY_EMULATOR=true;window.YUSHIN_V2_RETURN_RECEIPT_EMULATOR=true;});
  page.on('pageerror',error=>errors.push(error.message));page.on('dialog',d=>{dialogs.push(d.message());return d.type()==='confirm'?d.accept():d.dismiss();});
  await context.route('**/*',async route=>{
   const request=route.request(),url=new URL(request.url());
@@ -1377,7 +1377,7 @@ for(const width of [1280,390])test('full site '+width+'px original multi-item pu
    assert.equal(data.actorUid,undefined);assert.equal(data.actorRole,undefined);calls.push(data);
    if(lose){lose=false;const reply=await route.fetch();assert.equal(reply.status(),200);await route.abort('failed');return;}
   }
-  if(url.port==='5001'&&request.method()==='POST'&&['prepareV2OrderDispatch','shipV2WarehouseItem','confirmV2ShipmentDelivery'].includes(url.pathname.split('/').at(-1))){
+  if(url.port==='5001'&&request.method()==='POST'&&['prepareV2OrderDispatch','shipV2WarehouseItem','confirmV2ShipmentDelivery','receiveV2CustomerReturn'].includes(url.pathname.split('/').at(-1))){
    const name=url.pathname.split('/').at(-1),data=request.postDataJSON().data;
    assert.ok((await request.allHeaders()).authorization?.startsWith('Bearer '));assert.equal(data.actorUid,undefined);assert.equal(data.actorRole,undefined);
    logisticsCalls.push({name,data});const key=name+':'+data.itemId;
@@ -1615,6 +1615,86 @@ for(const width of [1280,390])test('full site '+width+'px original multi-item pu
   assert.equal(logisticsCalls.filter(row=>row.name==='confirmV2ShipmentDelivery').length,5);
   assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
   console.log('Full site '+width+'px: original three-line paperwork, A/B shipment and per-item customer acknowledgement completed seven goods; same-product siblings preserved, intermediate and full-order lost replies reloaded exact intents, three dispatches/debits/confirmations and zero remaining stock or source holds.');
+
+  // Continue the SAME real order through commercial Client Rules and the
+  // original warehouse queue. Same product in A/B must remain item-scoped.
+  await page.locator('#deliveryModalOverlay button[onclick="closeDeliveryModal()"]').click();
+  await siteOrderAction(page,{sourceId:x.orderId},'退貨');
+  await page.locator('#returnFormPanel').waitFor({state:'visible'});
+  for(const [id,qty] of [['I1',1],['I2',2]]){
+   if(!await page.locator('#returnFormPanel').isVisible())await page.locator('#openReturnFormBtn').click();
+   await page.locator('#returnItemId').selectOption(id);
+   await page.locator('#returnDate').fill('2026-10-22');await page.locator('#returnQty').fill(String(qty));
+   await page.locator('#returnReason').fill('多品項原倉退貨 '+id);await page.locator('#returnSaveBtn').click();
+   await page.waitForFunction(({orderId,itemId})=>!customerReturnActionsPending.has(orderId)
+    &&ordersCache.find(o=>o.id===orderId)?.returnRequests?.some(r=>r.itemId===itemId),{orderId:x.orderId,itemId:id});
+  }
+  const requested=await x.snapshot(),requests=requested.order.returnRequests;
+  assert.deepEqual(requests.map(r=>[r.itemId,r.qty,r.receivedQty,r.settlement]),[['I1',1,0,'CLOSE'],['I2',2,0,'CLOSE']]);
+  assert.deepEqual(await physical(),shippedPhysical,'requests never credit physical stock');
+  assert.deepEqual(requested.order.items,done.order.items);
+  await page.locator('#deliveryModalOverlay button[onclick="closeDeliveryModal()"]').click();
+  await siteLogout(page);await siteLogin(page,x.accounts.warehouse,'warehouse');
+  async function returnQueue(){
+   await siteNav(page,'inventory');await page.locator('#inventoryReceivingTabBtn').click();
+   await page.locator('[data-inventory-receiving-kind="returns"]').click();
+   await page.waitForFunction(id=>document.getElementById('customerReturnQueue')?.innerHTML.includes(id),x.orderId);
+  }
+  await returnQueue();
+  const pendingKey='v2-return-receipt:'+encodeURIComponent(x.accounts.warehouse.uid)+':'+encodeURIComponent(x.orderId);
+  // Receive B twice before A: global pending must remain true after B closes.
+  for(const [id,received] of [['I2',1],['I2',2],['I1',1]]){
+   const request=requests.find(r=>r.itemId===id),shipment=shipped.order.warehouseShipmentRecords.find(r=>r.itemId===id);
+   const before=await x.snapshot(),lotId=shipment.lotAllocations[0].lotId;
+   await page.locator('#customerReturnQueue button[onclick*="'+request.id+'"]').click();
+   await page.locator('#customerReturnReceiptOverlay').waitFor({state:'visible'});
+   await page.locator('#customerReturnReceiptShipment').selectOption(shipment.id);
+   const selected=await page.evaluate(lotId=>customerReturnReceiptView.lots.findIndex(row=>row.lotId===lotId),lotId);
+   assert.ok(selected>=0);await page.locator('#customerReturnReceiptLot'+selected).fill('1');
+   await page.locator('#customerReturnReceiptDate').fill('2026-10-22');await page.locator('#customerReturnReceiptSaleable').check();
+   dropLogistics.add('receiveV2CustomerReturn:'+id);await page.locator('#customerReturnReceiptSave').click();
+   await page.waitForFunction(()=>!customerReturnReceiptView?.busy&&document.getElementById('customerReturnReceiptStatus').textContent.includes('結果尚未確認'),null,{timeout:45000});
+   const after=await x.snapshot(),intent=logisticsCalls.filter(r=>r.name==='receiveV2CustomerReturn').at(-1).data;
+   assert.equal(intent.itemId,id);assert.equal(intent.requestId,request.id);assert.equal(intent.shipmentId,shipment.id);
+   assert.equal(intent.warehouseId,shipment.warehouseId);assert.deepEqual(intent.selections,[{lotId,qty:1}]);
+   assert.equal(after.order.returnRequests.find(r=>r.id===request.id).receivedQty,received);
+   assert.deepEqual(after.order.returnRequests.filter(r=>r.id!==request.id),before.order.returnRequests.filter(r=>r.id!==request.id));
+   assert.deepEqual(after.order.items.filter(i=>i.itemId!==id),before.order.items.filter(i=>i.itemId!==id));
+   assert.equal(after.order.returnPending,id!=='I1');
+   assert.equal(after.inventory[0].onHand,before.inventory[0].onHand+1);assert.equal(after.inventory[0].reserved,0);
+   assert.deepEqual(after.inventory[1],before.inventory[1]);
+   const stockIndex=id==='I2'?1:0;
+   assert.equal(after.stocks[stockIndex].onHand,before.stocks[stockIndex].onHand+1);assert.equal(after.stocks[stockIndex].reserved,0);
+   assert.deepEqual(after.stocks.filter((_,i)=>i!==stockIndex),before.stocks.filter((_,i)=>i!==stockIndex));
+   const returnedLot=after.inventoryLots.find(l=>l.id===lotId),priorLot=before.inventoryLots.find(l=>l.id===lotId);
+   assert.equal(returnedLot.remainingQty,priorLot.remainingQty+1);
+   assert.deepEqual(after.inventoryLots.filter(l=>l.id!==lotId),before.inventoryLots.filter(l=>l.id!==lotId));
+   for(const field of ['po','supplies','views','demands','receipts','inventoryLotCosts'])assert.deepEqual(after[field],before[field]);
+   for(const field of ['warehouseShipmentRecords','deliveryRecords','deliveredQty'])assert.deepEqual(after.order[field],done.order[field]);
+   const count=logisticsCalls.filter(r=>r.name==='receiveV2CustomerReturn').length;
+   await siteOpen(page,'warehouse');await returnQueue();
+   assert.equal(logisticsCalls.filter(r=>r.name==='receiveV2CustomerReturn').length,count,'reload never resubmits');
+   await page.locator('#customerReturnQueue button[data-return-recovery="'+x.orderId+'"]').click();
+   await page.locator('#customerReturnReceiptOverlay').waitFor({state:'visible'});
+   assert.equal(await page.locator('#customerReturnReceiptShipment').count(),0);
+   await page.locator('#customerReturnReceiptSave').click();
+   await page.waitForFunction(key=>!sessionStorage.getItem(key),pendingKey,{timeout:45000});
+   await page.locator('#customerReturnReceiptOverlay').waitFor({state:'hidden'});
+   assert.deepEqual(logisticsCalls.filter(r=>r.name==='receiveV2CustomerReturn').at(-1).data,intent);
+   assert.deepEqual(await x.snapshot(),after,'same-ID confirmation cannot credit stock or a sibling twice');
+  }
+  const returned=await x.snapshot();
+  assert.equal(returned.order.returnedQty,3);assert.equal(returned.order.returnPending,false);
+  assert.deepEqual(returned.order.items.map(i=>i.returnedQty),[1,2,0]);
+  assert.deepEqual(returned.inventory.map(i=>[i.onHand,i.reserved,i.incoming]),[[3,0,0],[0,0,0]]);
+  assert.equal(returned.order.returnRecords.length,3);
+  const proofs=(await db.collection('customerReturnReceipts').where('orderId','==',x.orderId).get()).docs.map(d=>d.data());
+  assert.equal(proofs.length,3);
+  for(const proof of proofs){assert.equal(proof.receivedBy,x.accounts.warehouse.uid);assert.equal(proof.quality,'SALEABLE');
+   assert.equal(proof.warehouseId,x.warehouses[proof.itemId==='I2'?1:0]);assert.equal(proof.requestId,requests.find(r=>r.itemId===proof.itemId).id);}
+  assert.equal(logisticsCalls.filter(r=>r.name==='receiveV2CustomerReturn').length,6);
+  assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
+  console.log('Full site '+width+'px: same-product A/B original return requests and B 1+1 then A 1 physical receipts; all three successful replies lost, reload confirmed original IDs, final pending=false still recoverable, only original warehouse/lot credited once and third item/PO/costs unchanged.');
  }catch(error){
   console.log('Multi receipt '+width+'px diagnostic:',JSON.stringify(await page.evaluate(()=>({role:typeof currentUserRole==='undefined'?'none':currentUserRole,
    feedback:document.getElementById('actionFeedback')?.textContent,rows:document.getElementById('inventoryReceivingBody')?.textContent,
