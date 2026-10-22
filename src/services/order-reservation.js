@@ -70,6 +70,16 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex, actorUid 
                 inventoryProductKey:'',warehouseId:'',reservationStatus:'not_required'});
             return;
         }
+        // Verify the inverse case, too: a Service product must not be disguised
+        // as Goods and accidentally allocated company stock. Only live master
+        // data, re-read inside the transaction, can determine this boundary.
+        if(item.productId){
+            const productId=String(item.productId).trim();
+            if(!productId||productId.includes('/'))throw new Error('產品主檔識別碼不正確。');
+            const productSnap=await tx.get(db.collection('products').doc(productId));
+            if(productSnap.exists&&String(productSnap.data().productType||productSnap.data().type||'').trim().toUpperCase()==='SERVICE')
+                throw new Error('產品主檔為服務型，訂單品項不可冒充商品預留實貨；請修正產品類型後重試。');
+        }
         if(!productKey){publish({...item,orderedQty,reservedQty:0,shortageQty:requested,inventoryProductKey:'',reservationError:'missing_product_master'});return;}
         if((item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'){
             publish({...item,orderedQty,reservedQty:0,shortageQty:0,inventoryProductKey:productKey,warehouseId:'',reservationStatus:'not_required'});return;
