@@ -10,6 +10,7 @@ const {getFunctions,connectFunctionsEmulator,httpsCallable}=require('firebase/fu
 const {getFirestore:clientFirestore,connectFirestoreEmulator,doc,collection,getDoc,getDocFromServer,runTransaction,setDoc,updateDoc}=require('firebase/firestore');
 const procurementDemandCore=require('../modules/procurement-demand-core');
 const {synchronizeV2OrderFixture}=require('./fixtures/v2-order-initialization.cjs');
+const {registerV2PurchaseIncomingFixture}=require('./fixtures/v2-purchase-incoming.cjs');
 const {commitLocationDispatchPreparation}=require('../functions/location-dispatch-service');
 const {commitLocationShipment}=require('../functions/location-shipment-service');
 const {commitShipmentDelivery}=require('../functions/shipment-delivery-service');
@@ -1007,14 +1008,7 @@ async function partialReceiptFixture(tag,{ownerRole=null}={}){
  const poNo='RECEIPT-PO-'+tag;
  const committed=(await httpsCallable(buyer.functions,'commitV2FormalPurchase')({poNo,poDate:'2026-10-20',supplier:'供應商',items:[{orderId,itemId:'I',qty:4,unitCost:20}]})).data;
  // Same existing incoming Service, not hand-crafted inventory/demand counters.
- const c=vm.createContext({db,currentUser:{uid:buyer.uid},currentUserRole:'purchaser',currentUserName:'採購',
-  canCreatePurchaseOrderCapability:()=>true,canAccessPage:()=>true,YushinReceiving:require('../modules/receiving-core'),
-  isPurchaseTerminalStatus:status=>['CANCELLED','CLOSED'].includes(String(status||'').toUpperCase()),
-  supplyOrdersCollection:()=>db.collection('supplyOrders'),inventoryNumbers:require('../modules/inventory-core').normalizeStock,
-  warehouseStockDocId:(wh,p)=>encodeURIComponent(wh)+'__'+encodeURIComponent(p),resolveBrandName:value=>value,brandIdForName:()=>'',buildInventorySearchTokens:()=>[],
-  runRoleTransaction:callback=>require('../modules/stock-permissions').run(db,callback,buyer.uid,false,'purchaser')});
- vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/services/supply-order.js'),'utf8'),c);
- const po=(await db.collection('purchaseOrders').doc(poNo).get()).data();await c.registerPurchaseIncoming(poNo,po);
+ await registerV2PurchaseIncomingFixture(db,buyer.uid,poNo);
  const supplyId=committed.supplyOrderIds[0],input={supplyId,qty:2,lotNo:'PARTIAL',expiryDate:'2028-01-01',operationId:'receipt_partial_'+tag};
  const receive=(data=input,actor=buyer)=>httpsCallable(actor.functions,'receiveV2Supply',{timeout:30000})(data).then(reply=>reply.data);
  const snap=async()=>{
@@ -1026,7 +1020,7 @@ async function partialReceiptFixture(tag,{ownerRole=null}={}){
    receipts:(await db.collection('receipts').where('supplyOrderId','==',supplyId).get()).docs.map(doc=>({id:doc.id,...doc.data()})).sort((a,b)=>a.id.localeCompare(b.id)),...extra};
  };
  return {buyer,owner,key,orderId,warehouses,supplyId,input,receive,snap,
-  registerPo:async id=>c.registerPurchaseIncoming(id,(await db.collection('purchaseOrders').doc(id).get()).data())};
+  registerPo:async id=>registerV2PurchaseIncomingFixture(db,buyer.uid,id)};
 }
 test('real Auth partial PO receipt uses the original Receiving Service, preserves two warehouses and same-ID retries',{timeout:120000},async()=>{
  for(const role of ['admin','purchaser','warehouse']){
@@ -1491,4 +1485,83 @@ test('real Auth post-fulfillment receipt rejects corrupted evidence and current-
  }
  assert.deepEqual(await x.extra(),before);
  await db.collection('users').doc(x.buyer.uid).update({disabled:true});await assert.rejects(x.receive(x.nextInput),code('permission-denied'));assert.deepEqual(await x.extra(),before);
+});
+
+async function multiAuthReceiptFixture(tag){
+ const x=await mergedPurchaseFixture('receipt-'+tag),committed=await x.commit();
+ await registerV2PurchaseIncomingFixture(db,x.actor.uid,x.input.poNo);
+ const receiver=await identity('multi-receipt-'+tag,'warehouse');
+ const request=(index,qty,suffix)=>({supplyId:committed.supplyOrderIds[index],qty,lotNo:'MULTI-'+index,
+  expiryDate:'2028-01-01',operationId:'multi_receipt_'+tag+'_'+suffix});
+ const receive=(input,actor=receiver)=>httpsCallable(actor.functions,'receiveV2Supply',{timeout:60000})(input).then(r=>r.data);
+ const snap=async()=>{
+  const extra={};for(const name of ['inventoryReservations','inventoryLots','inventoryLotCosts','inventoryMovements'])
+   extra[name]=(await db.collection(name).where('productKey','in',x.keys).get()).docs
+    .map(doc=>({id:doc.id,...doc.data()})).sort((a,b)=>a.id.localeCompare(b.id));
+  const receipts=[],views=[];
+  for(const id of committed.supplyOrderIds){
+   receipts.push(...(await db.collection('receipts').where('supplyOrderId','==',id).get()).docs.map(doc=>({id:doc.id,...doc.data()})));
+   views.push([id,(await db.collection('receivingSupplyOrders').doc(id).get()).data()]);
+  }
+  return {documents:await x.snap(),...extra,receipts:receipts.sort((a,b)=>a.id.localeCompare(b.id)),views};
+ };
+ return {...x,committed,receiver,request,receive,receiptSnapshot:snap};
+}
+test('real Auth multi-item receipt serializes same-product sibling lines and final competitors without touching another order',{timeout:180000},async()=>{
+ const x=await multiAuthReceiptFixture('concurrent'),before=await x.receiptSnapshot();
+ const orderRef=db.collection('orders').doc(x.orderIds[0]),otherBefore=(await db.collection('orders').doc(x.orderIds[1]).get()).data();
+ const first=x.request(0,1,'first'),sibling=x.request(2,2,'sibling');
+ await Promise.all([x.receive(first),x.receive(first),x.receive(sibling)]);
+ const partial=(await orderRef.get()).data();
+ assert.deepEqual(partial.items.map(row=>[row.receivedQty??0,row.reservedQty,row.shortageQty]),[[1,1,6],[0,0,7],[2,2,5]]);
+ assert.deepEqual(partial.items[1],before.documents.find(([p])=>p==='orders/'+x.orderIds[0])[1].items[1]);
+ const company=(await db.collection('inventory').doc(x.keys[0]).get()).data();
+ assert.equal(company.onHand,3);assert.equal(company.reserved,3);assert.equal(company.incoming,18);
+ assert.deepEqual((await db.collection('orders').doc(x.orderIds[1]).get()).data(),otherBefore);
+ const final=x.request(0,6,'final'),results=await Promise.allSettled([x.receive(final),x.receive({...final,operationId:final.operationId+'_other'})]);
+ assert.equal(results.filter(r=>r.status==='fulfilled').length,1);assert.equal(results.filter(r=>r.status==='rejected').length,1);
+ const after=await x.receiptSnapshot(),done=(await orderRef.get()).data();
+ assert.equal(done.items[0].receivedQty,7);assert.equal(done.items[0].reservedQty,7);assert.equal(done.items[0].shortageQty,0);
+ assert.deepEqual(done.items.slice(1),partial.items.slice(1));assert.equal(after.receipts.length,3);
+ assert.equal(after.inventoryLots.length,3);assert.equal(after.inventoryLotCosts.length,3);
+ for(const [id,view] of after.views){
+  const supply=(await db.collection('supplyOrders').doc(id).get()).data();
+  assert.deepEqual(view,require('../modules/stock-permissions').sanitizeSupply(supply));assert.equal(view.unitCost,undefined);
+ }
+ assert.deepEqual((await db.collection('orders').doc(x.orderIds[1]).get()).data(),otherBefore);
+ await x.receive(first);assert.deepEqual(await x.receiptSnapshot(),after);
+ await assert.rejects(x.receive({...first,qty:2}));assert.deepEqual(await x.receiptSnapshot(),after);
+ await assert.rejects(x.receive(first,x.actor));assert.deepEqual(await x.receiptSnapshot(),after);
+});
+test('real Auth multi-item receipt preserves fulfilled siblings and refuses corrupted whole-source proofs and current-role changes',{timeout:180000},async()=>{
+ const x=await multiAuthReceiptFixture('proofs'),orderId=x.orderIds[0],ref=db.collection('orders').doc(orderId);
+ for(const [index,qty] of [[0,2],[1,1]]){
+  await x.receive(x.request(index,qty,'prepare_'+index));const order=(await ref.get()).data(),item=order.items[index];
+  await x.actor.dispatch({orderId,itemId:item.itemId,quantity:qty,operationId:'multi_auth_prepare_'+index,
+   syncAttemptId:order.inventoryReservationAttemptId,expectedPreparedQty:0});
+  await x.actor.ship({orderId,itemId:item.itemId,warehouseId:item.warehouseId,quantity:qty,date:'2026-10-22',notes:'',
+   operationId:'multi_auth_ship_'+index,syncAttemptId:order.inventoryReservationAttemptId,expectedPlan:item.deliveryPlan});
+ }
+ const admin=await identity('multi-receipt-confirm','admin'),shipped=(await ref.get()).data();
+ for(const shipment of shipped.warehouseShipmentRecords)await admin.confirm({orderId,itemId:shipment.itemId,shipmentId:shipment.id,
+  quantity:shipment.qty,date:'2026-10-22',notes:'',operationId:'multi_auth_confirm_'+shipment.itemId,syncAttemptId:shipped.inventoryReservationAttemptId});
+ const before=(await ref.get()).data(),input=x.request(2,1,'after_siblings');
+ await x.receive(input);const applied=await x.receiptSnapshot(),after=(await ref.get()).data();
+ assert.deepEqual(after.items.slice(0,2),before.items.slice(0,2));
+ assert.deepEqual(after.warehouseShipmentRecords,before.warehouseShipmentRecords);assert.deepEqual(after.deliveryRecords,before.deliveryRecords);
+ assert.equal(after.deliveredQty,3);assert.equal(after.items[2].receivedQty,1);assert.equal(after.items[2].reservedQty,1);
+ for(const role of ['sales','engineer']){const denied=await identity('multi-receipt-denied-'+role,role);
+  await assert.rejects(x.receive(x.request(2,1,'denied_'+role),denied),code('permission-denied'));assert.deepEqual(await x.receiptSnapshot(),applied);}
+ const proofRef=db.collection('inventoryMovements').doc(after.warehouseShipmentRecords[1].movementId),proof=(await proofRef.get()).data();
+ await proofRef.update({qty:999});const damaged=await x.receiptSnapshot();
+ await assert.rejects(x.receive(x.request(2,1,'bad_proof')));assert.deepEqual(await x.receiptSnapshot(),damaged);await proofRef.set(proof);
+ const original=(await ref.get()).data();
+ for(const patch of [{items:[...original.items,...[3,4,5].map(i=>({...original.items[0],itemId:'EXTRA'+i}))]},
+  {status:'cancelled',orderStatus:'cancelled'},{items:original.items.map((row,i)=>i===1?{...row,reservedQty:99}:row)}]){
+  await ref.update(patch);const invalid=await x.receiptSnapshot();
+  await assert.rejects(x.receive(x.request(2,1,'bad_source')));assert.deepEqual(await x.receiptSnapshot(),invalid);await ref.set(original);
+ }
+ assert.deepEqual(await x.receiptSnapshot(),applied);
+ await db.collection('users').doc(x.receiver.uid).update({disabled:true});
+ await assert.rejects(x.receive(input),code('permission-denied'));assert.deepEqual(await x.receiptSnapshot(),applied);
 });
