@@ -89,11 +89,13 @@ async function commitServiceCaseEvent(db,actorUid,input){
       fail('服務品項產品主檔無效或型別衝突。');
     const itemKind=String(item.serviceKind||'').trim().toUpperCase();
     const masterKind=String(product.serviceKind||'').trim().toUpperCase();
-    if(itemKind&&masterKind&&itemKind!==masterKind)
+    // The trusted product master, not an editable commercial item snapshot,
+    // chooses the required custody and completion evidence workflow.
+    if(!Object.prototype.hasOwnProperty.call(core.STEPS,masterKind))
+      fail('正式服務主檔尚未指定四種有效服務類型。');
+    if(itemKind&&itemKind!==masterKind)
       fail('訂單與產品主檔的服務類型不一致。');
-    const kind=itemKind||masterKind;
-    if(!Object.prototype.hasOwnProperty.call(core.STEPS,kind))
-      fail('服務主檔尚未指定四種有效服務類型。');
+    const kind=masterKind;
     const saved=caseSnap.exists?caseSnap.data():null;
     if(saved&&(saved.orderId!==intent.orderId||saved.itemId!==intent.itemId
       ||saved.caseId!==intent.caseId||saved.kind!==kind))
