@@ -463,3 +463,10 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 
 本批無 Collection／欄位／Rules／Index／Listener 或正式資料遷移。沿原 receipts.operationId、Supply 收貨／incoming checkpoint、inventoryLots／Costs、inventoryMovements、公司／分倉與 inventoryReservations，同一收貨交易保存現有事實。原 Fulfillment 紀錄與其他倉／其他訂單預留不變，實收不可重複入庫。
 僅 demo-yushin 隔離試點；未部署 Firebase，Preview／正式尚未驗收。
+
+
+### 服務案件資料責任（2026-10-22：設計／純 Core，尚非 Firestore 集合）
+
+純計算契約 `YushinServiceWork.projectServiceCase` 以 `{orderId, itemId, caseId, kind, events[]}` 接收一個可追溯案件；每個 `events[]` 元素包含不可變操作 `id`、`type`、`occurredAt`、`actorUid` 及該階段必要證據。相同訂單品項可有多個不同 `caseId`（例如多支 pipette 或多個檢體）。事件次序推導案件狀態與受託物位置，不能由商品 `deliveryRecords` 推定服務完成；Bio-Plex 的共用試劑及維修實際零件仍遵循既有 `inventory`、`inventoryLots`、`purchaseOrders` 和實際領用憑證。
+
+**尚未建置／驗收：** 服務案件 Firestore 權威集合、案件建立及操作 writer、Rules／Cloud Functions 身分權限、事件與商業訂單品項的完成量關係、客戶交付與核銷整合及 Preview。此處是契約文件，不能當成新集合已可使用。
