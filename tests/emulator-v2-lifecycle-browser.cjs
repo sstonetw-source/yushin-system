@@ -1355,10 +1355,10 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
  }finally{await context.close();}
 });
 
-for(const width of [1280,390])test('full site '+width+'px original multi-item receiving keeps same-product lines separate across warehouses',{timeout:180000},async()=>{
+for(const width of [1280,390])test('full site '+width+'px original multi-item receipt dispatch shipment and delivery keep same-product lines separate',{timeout:240000},async()=>{
  const x=await multiReceiptSiteFixture(width),context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
- const errors=[],external=[],calls=[];let lose=false;
- await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_V2_RECEIVING_EMULATOR=true;window.YUSHIN_V2_DISPATCH_EMULATOR=true;});
+ const errors=[],external=[],calls=[],logisticsCalls=[],dropLogistics=new Set();let lose=false;
+ await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_V2_RECEIVING_EMULATOR=true;window.YUSHIN_V2_DISPATCH_EMULATOR=true;window.YUSHIN_V2_SHIPMENT_EMULATOR=true;window.YUSHIN_V2_DELIVERY_EMULATOR=true;});
  page.on('pageerror',error=>errors.push(error.message));page.on('dialog',d=>d.type()==='confirm'?d.accept():d.dismiss());
  await context.route('**/*',async route=>{
   const request=route.request(),url=new URL(request.url());
@@ -1367,6 +1367,12 @@ for(const width of [1280,390])test('full site '+width+'px original multi-item re
    const data=request.postDataJSON().data;assert.ok((await request.allHeaders()).authorization?.startsWith('Bearer '));
    assert.equal(data.actorUid,undefined);assert.equal(data.actorRole,undefined);calls.push(data);
    if(lose){lose=false;const reply=await route.fetch();assert.equal(reply.status(),200);await route.abort('failed');return;}
+  }
+  if(url.port==='5001'&&request.method()==='POST'&&['prepareV2OrderDispatch','shipV2WarehouseItem','confirmV2ShipmentDelivery'].includes(url.pathname.split('/').at(-1))){
+   const name=url.pathname.split('/').at(-1),data=request.postDataJSON().data;
+   assert.ok((await request.allHeaders()).authorization?.startsWith('Bearer '));assert.equal(data.actorUid,undefined);assert.equal(data.actorRole,undefined);
+   logisticsCalls.push({name,data});const key=name+':'+data.itemId;
+   if(dropLogistics.has(key)){dropLogistics.delete(key);const reply=await route.fetch();assert.equal(reply.status(),200);await route.abort('failed');return;}
   }
   await route.continue();
  });
@@ -1418,6 +1424,114 @@ for(const width of [1280,390])test('full site '+width+'px original multi-item re
   for(const id of x.supplyIds)assert.equal(await page.locator('#inventoryReceivingBody button[data-receipt-supply="'+id+'"]').count(),0);
   assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
   console.log('Full site '+width+'px: original warehouse received three lines (same product in A/B and another product), first/final successful replies lost and reloaded identical receipt IDs; four receipts/lots, no sibling overwrite, zero incoming and no dispatch/shipment/delivery.');
+
+  const physical=async()=>{const {order,...rest}=await x.snapshot();return rest;};
+  const receivedPhysical=await physical(),ids=['I1','I2','I3'],quantities=[3,2,2];
+  await siteLogout(page);await siteLogin(page,x.accounts.purchaser,'purchaser');
+  await siteNav(page,'purchasing');await page.locator('#purchase-card-dispatch').click();
+  const dispatchButton=id=>page.locator('#purchaseDispatchBody button[onclick*="'+x.orderId+'"][onclick*="'+id+'"]');
+  dropLogistics.add('prepareV2OrderDispatch:I2');
+  for(const id of ids){
+   await dispatchButton(id).click();
+   await page.waitForFunction(({orderId,itemId})=>!pendingDispatchOrderIds.size
+    &&(itemId==='I2'?!!pendingDispatchPreparation(orderId,itemId):!pendingDispatchPreparation(orderId,itemId)),{orderId:x.orderId,itemId:id},{timeout:45000});
+   if(id==='I2'){
+    const intent=logisticsCalls.filter(row=>row.name==='prepareV2OrderDispatch').at(-1).data,before=await x.snapshot();
+    assert.equal(intent.itemId,id);assert.equal(intent.quantity,2);
+    await siteOpen(page,'purchaser');await siteNav(page,'purchasing');await page.locator('#purchase-card-dispatch').click();
+    await dispatchButton(id).filter({hasText:'確認打單結果'}).click();
+    await page.waitForFunction(orderId=>!pendingDispatchOrderIds.size&&!pendingDispatchPreparation(orderId,'I2'),x.orderId,{timeout:45000});
+    assert.deepEqual(logisticsCalls.filter(row=>row.name==='prepareV2OrderDispatch').at(-1).data,intent);
+    assert.deepEqual(await x.snapshot(),before);
+   }
+  }
+  const prepared=await x.snapshot();assert.deepEqual(prepared.order.items.map(i=>i.dispatchPreparedQty),quantities);
+  assert.deepEqual(await physical(),receivedPhysical);
+  assert.equal((await db.collection('dispatchRecords').where('orderId','==',x.orderId).get()).size,3);
+
+  await siteLogout(page);await siteLogin(page,x.accounts.warehouse,'warehouse');
+  async function openShipment(id,warehouseId){
+   await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();
+   await page.waitForFunction(()=>orderWorkQueueReady&&!orderWorkQueueError&&warehouseMasterCache.length>0,null,{timeout:45000});
+   const main=await page.evaluate(()=>defaultWarehouse()?.id||'');
+   await page.locator(main===warehouseId?'#inventoryShippingMainBtn':'#inventoryShippingBranchBtn').click();
+   const rows=page.locator('#inventoryShippingBody tr[data-shipping-warehouse="'+warehouseId+'"]').filter({hasText:x.orderId});
+   await rows.locator('input[onchange*="'+id+'"]').check();await page.locator('#warehouseShippingBatchBtn').click();
+   await page.locator('#warehouseShippingBatchConfirm').waitFor({state:'visible'});
+  }
+  dropLogistics.add('shipV2WarehouseItem:I2');
+  for(const [index,id] of ids.entries()){
+   const warehouseIndex=index===1?1:0,warehouseId=x.warehouses[warehouseIndex],productIndex=index===2?1:0,before=await x.snapshot();
+   await openShipment(id,warehouseId);assert.equal(await page.locator('[data-batch-qty="0"]').inputValue(),String(quantities[index]));
+   await page.locator('#warehouseShippingBatchDate').fill('2026-10-22');await page.locator('#warehouseShippingBatchConfirm').click();
+   if(id==='I2')await page.waitForFunction(()=>document.getElementById('warehouseShippingBatchConfirm')?.textContent==='重試未完成品項',null,{timeout:45000});
+   else await page.locator('#warehouseLogisticsOverlay.active').waitFor({state:'hidden'});
+   const after=await x.snapshot();
+   assert.deepEqual(after.order.items.filter(i=>i.itemId!==id),before.order.items.filter(i=>i.itemId!==id));
+   assert.equal(after.inventory[productIndex].onHand,before.inventory[productIndex].onHand-quantities[index]);
+   assert.equal(after.inventory[productIndex].reserved,before.inventory[productIndex].reserved-quantities[index]);
+   assert.deepEqual(after.inventory[1-productIndex],before.inventory[1-productIndex]);
+   const changed=productIndex*2+warehouseIndex;
+   assert.equal(after.stocks[changed].onHand,before.stocks[changed].onHand-quantities[index]);
+   assert.deepEqual(after.stocks.filter((_,i)=>i!==changed),before.stocks.filter((_,i)=>i!==changed));
+   assert.equal(after.order.deliveredQty,0);assert.deepEqual(after.order.deliveryRecords,[]);
+   if(id==='I2'){
+    const intent=logisticsCalls.filter(row=>row.name==='shipV2WarehouseItem').at(-1).data;
+    assert.equal(intent.warehouseId,warehouseId);assert.equal(intent.itemId,id);
+    await siteOpen(page,'warehouse');await openShipment(id,warehouseId);
+    assert.equal(await page.locator('[data-batch-qty="0"]').inputValue(),'2');
+    await page.locator('#warehouseShippingBatchConfirm').click();await page.locator('#warehouseLogisticsOverlay.active').waitFor({state:'hidden'});
+    assert.deepEqual(logisticsCalls.filter(row=>row.name==='shipV2WarehouseItem').at(-1).data,intent);
+    assert.deepEqual(await x.snapshot(),after);
+   }
+  }
+  const shipped=await x.snapshot();assert.equal(shipped.order.warehouseShipmentRecords.length,3);
+  assert.deepEqual(shipped.order.items.map(i=>[i.warehouseShippedQty,i.reservedQty,i.shortageQty]),[[3,0,0],[2,0,0],[2,0,0]]);
+  assert.ok(shipped.inventory.every(i=>i.onHand===0&&i.reserved===0&&i.incoming===0));
+  assert.ok(shipped.inventoryLots.every(lot=>lot.remainingQty===0));
+  for(const field of ['po','supplies','views','demands','receipts'])assert.deepEqual(shipped[field],complete[field]);
+  const shippedPhysical=await physical();
+  await siteLogout(page);await siteLogin(page,x.accounts.sales,'sales');
+  async function openDelivery(){
+   await siteOrderAction(page,{sourceId:x.orderId},'分批交貨');
+   await page.locator('#deliveryModalOverlay.active').waitFor({state:'visible'});await page.locator('#deliveryFormPanel').waitFor({state:'visible'});
+  }
+  await openDelivery();dropLogistics.add('confirmV2ShipmentDelivery:I2');dropLogistics.add('confirmV2ShipmentDelivery:I3');
+  const save=page.locator('#deliveryFormPanel button[onclick="saveDeliveryRecord()"]');
+  for(const [index,id] of ids.entries()){
+   if(index)await page.locator('#openPartialDeliveryBtn').click();
+   await page.locator('#deliveryItemId').selectOption(id);
+   const shipment=shipped.order.warehouseShipmentRecords.find(row=>row.itemId===id),before=await x.snapshot();
+   await page.locator('#deliveryShipmentId').selectOption(shipment.id);
+   await page.locator('#deliveryDate').fill('2026-10-22');await page.locator('#deliveryQty').fill(String(quantities[index]));
+   await page.locator('#deliveryNotes').fill('多品項 '+id+' 已送達');await save.click();
+   await page.waitForFunction(({orderId,lost})=>!pendingDeliveryOrderIds.size
+    &&(lost?!!pendingV2DeliveryConfirmation(orderId):!pendingV2DeliveryConfirmation(orderId)),{orderId:x.orderId,lost:index>0},{timeout:45000});
+   const after=await x.snapshot();
+   assert.deepEqual(after.order.items.filter(i=>i.itemId!==id),before.order.items.filter(i=>i.itemId!==id));
+   assert.equal(after.order.items[index].deliveredQty,quantities[index]);
+   assert.deepEqual(await physical(),shippedPhysical);
+   if(index){
+    const intent=logisticsCalls.filter(row=>row.name==='confirmV2ShipmentDelivery').at(-1).data;
+    assert.equal(intent.itemId,id);assert.equal(intent.shipmentId,shipment.id);
+    await siteOpen(page,'sales');await openDelivery();
+    assert.equal(await page.locator('#deliveryItemId').inputValue(),id);assert.equal(await page.locator('#deliveryItemId').isDisabled(),true);
+    assert.equal(await page.locator('#deliveryShipmentId').inputValue(),shipment.id);
+    assert.equal(await page.locator('#deliveryQty').inputValue(),String(quantities[index]));
+    await save.click();
+    await page.waitForFunction(orderId=>!pendingDeliveryOrderIds.size&&!pendingV2DeliveryConfirmation(orderId),x.orderId,{timeout:45000});
+    assert.deepEqual(logisticsCalls.filter(row=>row.name==='confirmV2ShipmentDelivery').at(-1).data,intent);
+    assert.deepEqual(await x.snapshot(),after);assert.deepEqual(await physical(),shippedPhysical);
+   }
+  }
+  const done=await x.snapshot();assert.equal(done.order.deliveredQty,7);assert.equal(done.order.isDelivered,true);
+  assert.equal(done.order.deliveryRecords.length,3);assert.deepEqual(done.order.items.map(i=>i.deliveredQty),quantities);
+  assert.equal(await page.locator('#openPartialDeliveryBtn').isVisible(),false);
+  assert.equal(logisticsCalls.filter(row=>row.name==='prepareV2OrderDispatch').length,4);
+  assert.equal(logisticsCalls.filter(row=>row.name==='shipV2WarehouseItem').length,4);
+  assert.equal(logisticsCalls.filter(row=>row.name==='confirmV2ShipmentDelivery').length,5);
+  assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
+  console.log('Full site '+width+'px: original three-line paperwork, A/B shipment and per-item customer acknowledgement completed seven goods; same-product siblings preserved, intermediate and full-order lost replies reloaded exact intents, three dispatches/debits/confirmations and zero remaining stock or source holds.');
  }catch(error){
   console.log('Multi receipt '+width+'px diagnostic:',JSON.stringify(await page.evaluate(()=>({role:typeof currentUserRole==='undefined'?'none':currentUserRole,
    feedback:document.getElementById('actionFeedback')?.textContent,rows:document.getElementById('inventoryReceivingBody')?.textContent,

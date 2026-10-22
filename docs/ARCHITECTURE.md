@@ -758,3 +758,8 @@ normalizedOrderItems 的 returnedQty 為既有顯示／補送用途，排除 CLO
 
 receiveV2Supply 隔離登入入口延伸正常單品項來源的履約後收貨；所有數量／原子寫入仍執行原 src/services/receiving.js 生成的 receiving-runtime。由既有 validateV2ReceiptSource 在同一交易內重讀真角色、原來源／Supply／Demand／預留，以及出貨扣帳與 CLOSE 退貨的權威憑證；沒有第二個收貨 writer。
 僅 demo-yushin 隔離試點；未部署 Firebase，Preview／正式尚未驗收。
+
+
+## 多品項出貨後的採購顯示修正（2026-10-22）
+
+已實作、完整 Emulator／原站驗收待本批 CI：`procurementDemandForOrderItem` 以原 `projectOrderShipmentReturns` 驗證整單履約事件後，依 itemId 傳入原 Workflow 單品項核心。實體需求使用原始 items 的預留／缺口；不得把 normalizedOrderItems 的待送達顯示當成庫存需求。此 helper 同由既有 receiving runtime 建置引用，需同步重建 app 及 Functions 生成檔。無新增 writer、讀取或資料模型。

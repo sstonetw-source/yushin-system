@@ -216,7 +216,7 @@ test('same product receipt allocation leaves another warehouse stock and reserva
 });
 
 test('actual purchasing projection excludes warehouse shipments awaiting acknowledgement',()=>{
- const c=vm.createContext({YushinWorkflow:workflow,YushinProcurementDemand:demandCore,
+ const c=vm.createContext({YushinWorkflow:workflow,YushinProcurementDemand:demandCore,YushinFulfillment:fulfillment,
   itemDispatchState:()=>({grossDelivered:0,delivered:0,returned:0})});
  vm.runInContext(section('function procurementDemandForOrderItem(', 'function purchasingLifecycleSnapshot('),c);
  const item={itemId:'I',productId:'P',qty:10,reservedQty:4,shortageQty:6,supplyOrderedQty:3,receivedQty:1,warehouseShippedQty:4};
@@ -229,7 +229,7 @@ test('actual purchasing projection excludes warehouse shipments awaiting acknowl
 });
 
 test('actual purchasing projection keeps CLOSE returns closed after receipt and pending acknowledgement',()=>{
- const c=vm.createContext({YushinWorkflow:workflow,YushinProcurementDemand:demandCore,
+ const c=vm.createContext({YushinWorkflow:workflow,YushinProcurementDemand:demandCore,YushinFulfillment:fulfillment,
   itemDispatchState:()=>({grossDelivered:2,delivered:2,returned:1})});
  vm.runInContext(section('function procurementDemandForOrderItem(', 'function purchasingLifecycleSnapshot('),c);
  const item={itemId:'I',productId:'P',qty:10,reservedQty:4,shortageQty:2,supplyOrderedQty:3,receivedQty:1,warehouseShippedQty:4,returnedQty:1};

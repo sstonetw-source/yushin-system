@@ -231,16 +231,27 @@ function procurementDemandForOrderItem(order, item, dispatchOverride = null) {
     const fulfillmentType = item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE';
     const directShip = fulfillmentType === 'DIRECT_SHIP';
     const hasWarehouseShipments = Array.isArray(order.warehouseShipmentRecords) && order.warehouseShipmentRecords.length > 0;
+    let source=item,warehouseShipmentContext;
+    if(hasWarehouseShipments){
+        // Validate every line before partitioning: a sibling's corrupt event
+        // must not disappear when this page renders only the selected item.
+        const projected=globalThis.YushinFulfillment.projectOrderShipmentReturns({orderId:order.id,items:order.items,
+            shipments:order.warehouseShipmentRecords,deliveries:order.deliveryRecords??[],returns:order.returnRecords??[]});
+        source=order.items.find(row=>row.itemId===item.itemId);
+        if(!source||!projected.items.some(row=>row.itemId===item.itemId))throw Error('找不到原始採購需求品項。');
+        // Presentation normalization measures pending acknowledgement. Physical
+        // demand must retain the raw reservation/shortage after warehouse debit.
+        warehouseShipmentContext={orderId:order.id,itemId:source.itemId,productKey:source.inventoryProductKey||source.productId,
+            shipments:order.warehouseShipmentRecords.filter(row=>row.itemId===source.itemId),
+            deliveries:(order.deliveryRecords??[]).filter(row=>row.itemId===source.itemId),
+            returns:(order.returnRecords??[]).filter(row=>row.itemId===source.itemId)};
+    }
     const quantities = globalThis.YushinWorkflow?.procurementQuantities({
-        orderedQty:item.orderedQty ?? item.qty,
+        orderedQty:source.orderedQty ?? source.qty,
         fulfillmentType,
-        ...(hasWarehouseShipments?{
-            warehouseShipmentContext:{orderId:order.id,itemId:item.itemId,productKey:item.inventoryProductKey||item.productId,
-                shipments:order.warehouseShipmentRecords,deliveries:order.deliveryRecords??[],returns:order.returnRecords??[]},
-            warehouseShippedQty:item.warehouseShippedQty
-        }:{}),
-        reservedQty:item.reservedQty,
-        shortageQty:item.shortageQty,
+        ...(hasWarehouseShipments?{warehouseShipmentContext,warehouseShippedQty:source.warehouseShippedQty}:{}),
+        reservedQty:source.reservedQty,
+        shortageQty:source.shortageQty,
         supplyOrderedQty:item.supplyOrderedQty,
         receivedQty:item.receivedQty,
         deliveredQty:dispatch.grossDelivered,
