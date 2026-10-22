@@ -54,7 +54,7 @@ for(const scenario of scenarios){
     const replay=core.applyServiceEvent(record,scenario.steps.at(-1));
     assert.equal(replay.status,'already-applied');
     assert.deepEqual(replay.record,record);
-    assert.throws(()=>core.applyServiceEvent(record,event('extra',scenario.steps[0].type,9)),/服務動作/);
+    assert.throws(()=>core.applyServiceEvent(record,{...scenario.steps[0],id:'extra',occurredAt:at(9)}),/服務動作/);
   });
 }
 test('Pipette and tissue cases cannot claim vendor return before sending out',()=>{
