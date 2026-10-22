@@ -55,6 +55,8 @@ async function commitServiceCaseEvent(db,actorUid,input){
   const ref=db.collection('serviceCases').doc(caseDocId(intent.orderId,intent.itemId,intent.caseId));
   const orderRef=db.collection('orders').doc(intent.orderId);
   const userRef=db.collection('users').doc(actorUid);
+  // A user-provided occurredAt describes work time, not the authoritative write time.
+  const recordedAt=new Date().toISOString();
   let result;
   await db.runTransaction(async tx=>{
     result=undefined;
@@ -98,7 +100,7 @@ async function commitServiceCaseEvent(db,actorUid,input){
       fail('既有服務案件來源不一致，不能覆寫。');
     const record=saved||{
       orderId:intent.orderId,itemId:intent.itemId,caseId:intent.caseId,kind,
-      createdByUid:actorUid,createdAt:intent.event.occurredAt,events:[]
+      createdByUid:actorUid,createdAt:recordedAt,events:[]
     };
     let next;
     try {next=core.applyServiceEvent(record,intent.event);}
@@ -111,7 +113,7 @@ async function commitServiceCaseEvent(db,actorUid,input){
     tx.set(ref,{
       ...record,events:next.record.events,status:projection.status,
       custody:projection.custody,completedAt:projection.completedAt,
-      updatedAt:intent.event.occurredAt
+      updatedAt:recordedAt
     });
   });
   return result;
