@@ -2,7 +2,25 @@
 'use strict';
 // Creates an isolated Emulator configuration; never changes the deployment entry.
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{spawnSync}=require('node:child_process');
-const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tmpdir(),'yushin-return-auth-'));
+const root=path.resolve(__dirname,'..');
+// Local iteration may select a layer. CI deliberately calls with no arguments.
+const suites={
+ all:['tests/emulator-v2-return-callable.cjs','tests/emulator-v2-lifecycle-browser.cjs'],
+ callable:['tests/emulator-v2-return-callable.cjs'],
+ browser:['tests/emulator-v2-lifecycle-browser.cjs']
+};
+const args=process.argv.slice(2),selection=args.filter(arg=>arg.startsWith('--suite='));
+const suite=selection[0]?.slice('--suite='.length)||'all';
+if(selection.length>1||!Object.hasOwn(suites,suite)
+ ||args.some(arg=>arg!=='--list'&&!arg.startsWith('--suite='))
+ ||selection.some(arg=>arg==='--suite=')){
+ console.error('Usage: node tools/run-v2-return-auth-emulator.cjs [--suite=all|callable|browser] [--list]');
+ process.exit(2);
+}
+const testFiles=suites[suite].map(file=>path.join(root,file));
+if(args.includes('--list')){console.log(testFiles.join('\n'));process.exit(0);}
+if(suite!=='all')console.log('Development subset only: '+suite+'; full CI is still required before merge.');
+const temporary=fs.mkdtempSync(path.join(os.tmpdir(),'yushin-return-auth-'));
 const source=path.join(temporary,'functions');
 try{
  fs.mkdirSync(source);
@@ -18,7 +36,6 @@ try{
  fs.writeFileSync(config,JSON.stringify({functions:{source:'functions',runtime:'nodejs22'},
   firestore:{rules:path.join(root,'firestore.rules'),indexes:path.join(root,'firestore.indexes.json')},
   emulators:{firestore:{port:8080},auth:{port:9099},functions:{port:5001},ui:{enabled:false}}}));
- const testFiles=['tests/emulator-v2-return-callable.cjs','tests/emulator-v2-lifecycle-browser.cjs'].map(file=>path.join(root,file));
  const shellQuote=value=>"'"+value.split("'").join("'"+String.fromCharCode(92)+"''")+"'";
  const result=spawnSync('npx',['--yes','firebase-tools@15','emulators:exec','--config',config,
   '--only','firestore,auth,functions','--project','demo-yushin',
