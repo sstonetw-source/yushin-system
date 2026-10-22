@@ -2391,6 +2391,12 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Service work events are written only by the gated Admin SDK Service.
+    // No client access until per-role reads and Service UI are accepted.
+    match /serviceCases/{id} {
+      allow read, write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
