@@ -289,3 +289,19 @@
 接續原三品項實際採購與四筆分批收貨，在打單前由原業務使用原訂單選單取消、恢復。兩次真 Callable 成功後均中斷回覆，重整原操作確認；核對全部 itemIds、固定 operationId、來源版本及兩倉意圖不變。取消應釋放 P 五件／Q 兩件預留，恢復依既有 Core 重新配置原七件；實貨、原批次、成本、兩張 PO、三筆供應及四筆實收憑證保持不變。取消後三筆需求為 CANCELLED，恢復後無待採購與待收數量。
 
 原取消 ID 在稍後恢復完成後重送，只確認既有憑證，不再次取消或釋放；其後沿同一原畫面案例完成逐品項打單、分倉出貨、送達及分倉退貨，驗證跨階段影響。沿現有 setV2OrderLifecycle 與 commitOrderLocationLifecycleAndRecover，沒有另造 writer 或數量公式，僅改測試及文件。此階段仍待最新完整 CI 通過，未部署 Firebase，未更動正式資料或角色；手動建單與 Preview／正式啟用邊界保留。
+
+## 2026-10-22 — 三品項完整履約的真 Client 建單來源（待本批完整 CI）
+
+原三品項整站案例不再由 Admin fixture 寫入 orders：改以真 Auth 業務登入，經原 commitOrderCreation、Client Transaction 及真 Rules 建立同一來源，然後接續原 Service 初始化與原畫面的採購、分批收貨、取消恢復、打單、分倉出貨、送達及退貨。新增檢查第三品項夾帶 unitCost 必須零寫入拒絕；正常首次建單僅提交來源，庫存仍未預留；初始化後相同建單 ID 搭配過期客戶／數量重試，須回傳原保存事實，不覆蓋已完成的同步及多品項資料。
+
+原真 Auth 單品項建單測試與新整站來源共用小型 Client SDK adapter，讀取並執行原 src/services/order-creation.js，沒有複製建單商業邏輯或新增 writer。每個來源使用獨立登入 Client，完成後釋放。僅 demo-yushin Emulator 可使用此測試 adapter。初始三品項資料仍由測試組成，尚不代表原手動建單表單／v2 初始化真傳輸已驗收；初始化仍沿既有 Service fixture。PDF 實體輸出隔離、Preview／正式未啟用的邊界保留。
+
+本機 Node 1691 項通過、零失敗／略過，語法、app／Functions 生成一致性及 diff 通過。新增真 Auth／Chrome 整合與全部 Rules 須以本批最新完整 CI 判定，通過前不合併。無新 Collection／Rules／Index／Listener／正式 Functions 匯出，未部署 Firebase，未修改正式資料或角色。
+
+## 2026-10-22 — 原空白手動建單畫面與單倉 Client 預留（待本批完整 CI）
+
+新增 1280／390px 原整站案例：真業務登入原訂單頁，按原新增訂單、輸入實際主檔貨號及客戶、數量與售價，再按原建立按鈕。查核只有一張本人訂單、正確商品與金額、原單倉預留及公司／分倉保留兩件，三件實貨與原批次不變，未產生供應或交付。重整原訂單清單後只讀且仍一張，來源與實體帳完全不變。
+
+此案例不開啟任何 v2 功能旗標，也不替換 handler／建單 Service／初始化；禁止 Functions 呼叫，驗證原正式程式的 Client Rules 建單及單倉預留路徑。產品、庫存、倉庫與測試帳號是 Emulator fixture，訂單由使用者原介面建立；不能將此結果擴張為 v2 初始化傳輸或多品項手動建單已完成。
+
+只新增整站驗收與紀錄，沒有新 writer／Core／資料模型／Rules／索引／監聽或部署。語法與 diff 通過；新增原站真 Auth、Chrome 及完整 CI 仍待最新 head 執行，通過前不合併。未操作正式資料或正式角色，Preview／正式部署仍未驗收。

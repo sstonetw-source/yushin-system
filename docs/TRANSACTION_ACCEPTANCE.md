@@ -1,6 +1,6 @@
 # 核心交易驗收：風險、證據與結束標準
 
-更新：2026-10-22。核對基準：main `e6119ef`（#227）。本文件取代歷史交接中不斷增加數量排列的施工順序；原商業契約、安全測試及環境限制仍保留。合併後以最新 main／CI 為準，不以測試總數判定完成。
+更新：2026-10-22。核對基準：main `bbfc025`（#229，已含 #228）。本文件取代歷史交接中不斷增加數量排列的施工順序；原商業契約、安全測試及環境限制仍保留。合併後以最新 main／CI 為準，不以測試總數判定完成。
 
 ## 客觀評估
 
@@ -22,14 +22,14 @@
 
 | 流程 | 已有證據／入口 | 必要缺口或限制 |
 | --- | --- | --- |
-| 正常訂單完整履約 | `emulator-v2-lifecycle-browser.cjs` 單品項／三品項原畫面採購至送達；`order-creation-service.test.js` | v2 初始化仍為 Service fixture；#228／#229 建單須最新 CI 通過並合併才算 main 成果；Preview 未驗收 |
+| 正常訂單完整履約 | `emulator-v2-lifecycle-browser.cjs` 單品項／三品項原畫面採購至送達；#228 真 Client 建單來源、#229 原手動單倉建單已全 CI 合併 | v2 初始化仍為 Service fixture；單倉 UI 不代表多品項 v2 手動建單；Preview 未驗收 |
 | 部分採購／收貨／分批出貨 | 同一整站案例＋`emulator-v2-return-callable.cjs`、原 Receiving Service 與供應 checkpoint | 不新增另一種 4/7 或 1+2 排列；待相同部署契約的 Preview |
 | 同產品多倉預留／分配 | `emulator-order-location.cjs`、`emulator-single-item-location.cjs`、三品項兩倉原畫面 | v2 入口限 demo Emulator；單倉 UI 不代表 v2 初始化真傳輸 |
 | 取消／恢復 | 真 Auth Callable、原整站單品項與 #227 收貨後三品項取消恢復 | 保留競爭、回滾、舊 ID 重送與部署限制，不擴張排列 |
 | 退貨／重新下單 | #226 原多品項分倉實收、`emulator-location-shipment.cjs`；建單 Service 的 CLOSE 後乾淨新單 | 尚缺實收至新單的原畫面代表串接；不開放未完成 REPLACE 補送 |
 | 原廠直送 | `receipt-service-integrity.test.js` 原收貨不建倉庫存、Rules 直送同交易檢查、`workflow-audit-browser-smoke.js` | 尚缺一條真 Auth 原畫面完整串接；不能用兩倉實貨案例替代 |
 | 服務型不入庫 | 既有型別檢查及多倉拒絕測試 | 拒絕 SERVICE 進實貨交易不等於正向履約完成；須一條服務完成且無 lot／實貨 movement／一般入庫的代表 |
-| 估價單／Forecast 轉單 | 建單 Service 共用入口、Forecast backlink 原子性／重試；`phase1.test.js` 來源同步失敗保留建單 | 尚缺原入口真 Auth 代表轉單及來源同步恢復；兩種來源契約不可互相冒充 |
+| 估價單／Forecast 轉單 | 建單 Service 共用入口、Forecast backlink 原子性／重試；Rules 真 Client 原 Service 驗證 Forecast 轉單及估價單來源同步恢復；`phase1.test.js` 來源同步失敗保留建單 | 尚缺原畫面真 Auth 代表轉單；兩種來源契約不可互相冒充，已存在的來源恢復測試不重做 |
 
 ## 開發期間的最小必要測試
 
@@ -55,7 +55,7 @@ CI 保留 Node、10 組 Chrome smoke、分組預留、真 Auth／Functions／整
 
 ## 固定剩餘工作與後續順序
 
-1. 收斂 #228／#229：審查、最新完整 CI 成功才依序合併；不重寫建單。#226／#227 已合併。
+1. 已收斂：#228／#229 全 CI 成功並合併，#226／#227 亦已合併。不再重寫建單或重做此批驗收。#228 CI `39733007540`：2239 項；#229 CI `39733010048`：2241 項，皆零失敗／略過，另 10 組 Chrome smoke。
 2. 整批補上表缺少的正向代表：CLOSE 至新單、直送、服務、估價單／Forecast。只補入口與資料契約缺口，不擴張數量排列。
 3. 解決發布／可用性阻擋：#198 原 Client PO 的 Rules 上限仍與 #199 追蹤。main 後端採購受 `YUSHIN_FORMAL_PURCHASE_EMULATOR` 本機 gate 保護，`functions/index.js` 未匯出新版 PO／履約 Callables；Emulator 成功不代表正式入口修復。不可合併舊失敗 PR 冒充解決。#131 舊 CI 曾失敗，須比較現行實作後決定採用或淘汰，不直接合併。
 4. 沿同一 Service 完成受控 Preview 接線／必要驗收。不另造 writer，不順便遷移、刪除正式資料或變更敏感角色。

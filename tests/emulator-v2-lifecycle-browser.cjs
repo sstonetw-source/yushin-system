@@ -6,6 +6,9 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const {spawnSync}=require('node:child_process'),{build}=require('esbuild'),{chromium}=require('playwright-core');
 const admin=require('firebase-admin'),{getFirestore}=require('firebase-admin/firestore'),{getAuth}=require('firebase-admin/auth');
 const {synchronizeV2OrderFixture}=require('./fixtures/v2-order-initialization.cjs');
+const {orderCreationClient}=require('./fixtures/order-creation-client.cjs');
+const {initializeApp:clientApp,deleteApp:deleteClientApp}=require('firebase/app');
+const {getAuth:clientAuth,connectAuthEmulator,signInWithEmailAndPassword}=require('firebase/auth');
 const {commitV2FormalPurchase}=require('../functions/formal-purchase-commit-service');
 const root=path.resolve(__dirname,'..'),read=file=>fs.readFileSync(path.join(root,file),'utf8');
 const section=(source,a,b)=>{const i=source.indexOf(a),j=source.indexOf(b,i);assert.ok(i>=0&&j>i,'original source boundaries');return source.slice(i,j);};
@@ -275,11 +278,30 @@ async function multiReceiptSiteFixture(width){
   {itemId:'I3',productId:keys[1],qty:2,warehouseId:warehouses[0]}].map(row=>({...row,itemCode:row.productId,itemName:row.productId,brand:'Roche',productLine:tag,
    unitPrice:100,fulfillmentType:'WAREHOUSE',reservedQty:0,deliveredQty:0,returnedQty:0,dispatchPreparedQty:0,warehouseShippedQty:0,
    deliveryPlan:{mode:'CUSTOMER_SHIP',contact:'測試客戶',phone:'02-12345678',address:'測試地址'}}));
- put('orders',orderId,{orderNo:orderId,customerName:'多品項收貨驗收',ownerUid:accounts.sales.uid,salesCode:'B',status:'active',orderStatus:'normal',
-  orderDate:'2026-10-22',inventoryReservationStatus:'pending',inventoryReservationAttemptId:'sync_'+tag,
-  deliveryRecords:[],returnRecords:[],deliveryHistory:[],deliveredQty:0,isDelivered:false,items});
- await batch.commit();await synchronizeV2OrderFixture(db,accounts.purchaser.uid,{orderId,warehouseIds:warehouses});
- // Source creation/initialization remains the explicit fixture boundary.
+ await batch.commit();
+ const source={orderNo:orderId,customerName:'多品項收貨驗收',ownerUid:accounts.sales.uid,salesCode:'B',status:'active',orderStatus:'normal',
+  createdByUid:accounts.sales.uid,createdByRole:'sales',createdAt:new Date().toISOString(),productId:keys[0],productMasterMatched:true,
+  itemCount:items.length,orderSchemaVersion:2,orderDate:'2026-10-22',inventoryReservationStatus:'pending',inventoryReservationAttemptId:'sync_'+tag,
+  deliveryRecords:[],returnRecords:[],deliveryHistory:[],deliveredQty:0,isDelivered:false,items};
+ const creatorApp=clientApp({apiKey:'fake-api-key',authDomain:'demo-yushin.firebaseapp.com',projectId:'demo-yushin',appId:tag+'-creation'},tag+'-creation');
+ try{
+  const session=clientAuth(creatorApp);connectAuthEmulator(session,'http://127.0.0.1:9099',{disableWarnings:true});
+  await signInWithEmailAndPassword(session,accounts.sales.email,password);
+  const creator=orderCreationClient(creatorApp,accounts.sales.uid,'sales');
+  const rejected=await creator.create(orderId+'-cost',{...source,items:items.map((item,index)=>index===2?{...item,unitCost:999}:item)})
+   .then(()=>null,error=>error.code);
+  assert.equal(rejected,'permission-denied');assert.equal((await db.collection('orders').doc(orderId+'-cost').get()).exists,false);
+  await creator.create(orderId,source);
+  assert.deepEqual((await db.collection('orders').doc(orderId).get()).data(),source);
+  for(const key of keys)assert.equal((await db.collection('inventory').doc(key).get()).data().reserved,0,'creation alone does not reserve');
+  await synchronizeV2OrderFixture(db,accounts.purchaser.uid,{orderId,warehouseIds:warehouses});
+  const initialized=(await db.collection('orders').doc(orderId).get()).data();
+  assert.equal(initialized.inventoryReservationStatus,'completed');assert.equal(initialized.items.length,3);
+  await creator.create(orderId,{...source,customerName:'stale retry',items:[{...items[0],qty:999}]});
+  assert.deepEqual((await db.collection('orders').doc(orderId).get()).data(),initialized,'same-ID create resumes saved facts without overwriting initialization');
+ }finally{await deleteClientApp(creatorApp);}
+ // Source creation now uses real Auth/Client Rules and the existing Service.
+ // v2 initialization remains the explicit Service-adapter fixture boundary.
  // PO documents, commitments and incoming must now come from the original UI.
  const supplyIds=[];
  const snapshot=async()=>{
@@ -1460,7 +1482,7 @@ for(const width of [1280,390])test('full site '+width+'px original multi-item pu
   assert.ok(initial.demands.every(d=>d.remainingToOrderQty===0));
   assert.deepEqual(initial.inventory.map(i=>[i.onHand,i.reserved]),[[0,0],[0,0]]);
   x.supplyIds.push(...initial.supplyIds);
-  console.log('Full site '+width+'px: original purchase UI rejects mixed warehouses without writes, groups A I1/I3 and separately buys B I2; document/PDF stays read-only for demand/stock, lost multi-line purchase reply reloads identical intent, two POs/three supplies and incoming 5/2 exactly once. Source creation/initialization remains a fixture.');
+  console.log('Full site '+width+'px: original purchase UI rejects mixed warehouses without writes, groups A I1/I3 and separately buys B I2; document/PDF stays read-only for demand/stock, lost multi-line purchase reply reloads identical intent, two POs/three supplies and incoming 5/2 exactly once. Source creation uses real Auth/Client Rules; v2 initialization remains a Service fixture.');
   await siteLogout(page);await siteLogin(page,x.accounts.warehouse,'warehouse');await siteNav(page,'inventory');
   await page.locator('#inventoryReceivingTabBtn').click();
   async function submit(index,qty,drop){
@@ -1730,5 +1752,67 @@ for(const width of [1280,390])test('full site '+width+'px original multi-item pu
    tasks:typeof receiptTaskJobs==='undefined'?[]:[...receiptTaskJobs.values()],
    purchasing:{rows:document.getElementById('purchasePendingBody')?.textContent,status:document.getElementById('poSaveStatus')?.textContent,
     items:typeof poItems==='undefined'?[]:poItems,editing:typeof poEditingId==='undefined'?null:poEditingId}}))),JSON.stringify({errors,dialogs}));throw error;
+ }finally{await context.close();}
+});
+
+// Exercise the existing production-path manual form and initialization too.
+// This is the single-warehouse legacy contract, not the v2 transport fixture.
+for(const width of [1280,390])test('full site '+width+'px original manual order form creates and reserves through real Client Rules',{timeout:120000},async()=>{
+ const tag='manual-entry-'+width,uid=tag+'-sales',email=uid+'@example.test',key=tag+'-product',warehouseId='MANUAL-ENTRY';
+ await auth.createUser({uid,email,password});await db.collection('users').doc(uid).set({role:'sales',active:true,name:'手動建單業務',email,code:'B'});
+ const batch=db.batch(),put=(name,id,data)=>batch.set(db.collection(name).doc(id),data);
+ put('warehouses',warehouseId,{warehouseName:'手動建單驗收倉',active:true,isDefault:true});
+ put('products',key,{productId:key,manufacturerPartNo:'MANUAL'+width,normalizedPartNo:'manual'+width,
+  productName:'原表單建單試劑',brand:'Roche',brandName:'Roche',productType:'Goods',active:true,status:'ACTIVE',listPrice:100});
+ put('inventory',key,{productKey:key,onHand:3,reserved:0,incoming:0,transferFreeInTransit:0});
+ put('warehouseStocks',warehouseId+'__'+key,{warehouseId,productKey:key,onHand:3,reserved:0,incoming:0,transferFreeInTransit:0});
+ const lot={productKey:key,warehouseId,receivedQty:3,remainingQty:3,lotNo:tag,expiryDate:'2028-01-01'};
+ put('inventoryLots',tag+'-lot',lot);await batch.commit();
+ const context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage(),errors=[],dialogs=[],external=[],functions=[];
+ await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;});
+ page.on('pageerror',error=>errors.push(error.message));page.on('dialog',dialog=>{dialogs.push(dialog.message());return dialog.type()==='confirm'?dialog.accept():dialog.dismiss();});
+ await context.route('**/*',async route=>{
+  const url=new URL(route.request().url());
+  if(!['localhost','127.0.0.1'].includes(url.hostname)){external.push(url.hostname);await route.abort();return;}
+  if(url.port==='5001')functions.push(url.pathname);
+  await route.continue();
+ });
+ try{
+  await siteOpen(page);await siteLogin(page,{uid,email},'sales');await siteNav(page,'orders');
+  await page.locator('button[onclick="openOrderModal()"]').click();await page.locator('#orderModalOverlay.active').waitFor({state:'visible'});
+  await page.waitForFunction(id=>warehouseMasterCache.some(w=>w.id===id)&&document.getElementById('orderWarehouse').value===id,warehouseId);
+  await page.locator('#orderCustomer').fill(tag+'客戶');await page.locator('#orderItemCode').fill('MANUAL'+width);await page.locator('#orderItemCode').blur();
+  await page.waitForFunction(()=>document.getElementById('orderItemCode').dataset.productCheckStatus==='matched');
+  await page.locator('#orderQty').fill('2');await page.locator('#orderUnitPrice').fill('100');
+  assert.equal(await page.locator('#orderProcurementType').inputValue(),'PURCHASING_PO');
+  assert.equal(await page.locator('#orderDeliveryChoice').inputValue(),'BUSINESS');
+  await page.locator('#saveNewOrderBtn').click();await page.locator('#orderModalOverlay.active').waitFor({state:'hidden'});
+  await page.waitForFunction(uid=>ordersCache.some(o=>o.createdByUid===uid&&o.inventoryReservationStatus==='completed'),uid,{timeout:45000});
+  const snapshot=await db.collection('orders').where('createdByUid','==',uid).get();assert.equal(snapshot.size,1);
+  const orderId=snapshot.docs[0].id,order=snapshot.docs[0].data(),item=order.items[0];
+  assert.equal(order.ownerUid,uid);assert.equal(order.salesCode,'B');assert.equal(order.customerName,tag+'客戶');
+  assert.equal(order.itemCount,1);assert.equal(order.items.length,1);assert.equal(item.productId,key);assert.equal(item.qty,2);
+  assert.equal(item.unitPrice,100);assert.equal(order.totalPrice,200);assert.equal(item.warehouseId,warehouseId);
+  assert.equal(item.reservedQty,2);assert.equal(item.shortageQty,0);assert.equal(order.inventoryReservationStatus,'completed');
+  const ledger=(await db.collection('inventoryReservations').doc(orderId+'__'+item.itemId).get()).data();
+  assert.equal(ledger.quantity,2);assert.equal(ledger.warehouseId,warehouseId);assert.equal(ledger.productKey,key);
+  const physical=async()=>({inventory:(await db.collection('inventory').doc(key).get()).data(),
+   stock:(await db.collection('warehouseStocks').doc(warehouseId+'__'+key).get()).data(),
+   lot:(await db.collection('inventoryLots').doc(tag+'-lot').get()).data()});
+  const held=await physical();assert.equal(held.inventory.onHand,3);assert.equal(held.inventory.reserved,2);
+  assert.equal(held.stock.onHand,3);assert.equal(held.stock.reserved,2);assert.deepEqual(held.lot,lot);
+  assert.equal((await db.collection('supplyOrders').where('sourceId','==',orderId).get()).size,0);
+  assert.deepEqual(order.deliveryRecords||[],[]);assert.deepEqual(order.returnRecords||[],[]);assert.equal(order.isDelivered,false);
+  await siteOpen(page,'sales');await siteNav(page,'orders');
+  await page.locator('#ordersBody > tr').filter({hasText:tag+'客戶'}).waitFor({state:'visible'});
+  assert.equal((await db.collection('orders').where('createdByUid','==',uid).get()).size,1);
+  assert.deepEqual((await db.collection('orders').doc(orderId).get()).data(),order);assert.deepEqual(await physical(),held);
+  assert.deepEqual(functions,[],'manual production path does not use isolated v2 callables');
+  assert.deepEqual(dialogs,[]);assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
+  console.log('Full site '+width+'px: actual manual blank form/product lookup created one owned order and initialized one warehouse hold through Client Rules; physical stock/lots unchanged, reload read-only, no v2 initialization fixture or Callable.');
+ }catch(error){
+  console.log('Manual entry '+width+'px diagnostic:',JSON.stringify(await page.evaluate(()=>({feedback:document.getElementById('actionFeedback')?.textContent,
+   check:document.getElementById('orderProductCheckStatus')?.textContent,warehouse:document.getElementById('orderWarehouse')?.value,
+   orders:typeof ordersCache==='undefined'?[]:ordersCache.filter(o=>o.customerName?.includes('manual-entry'))}))),JSON.stringify({errors,dialogs,functions}));throw error;
  }finally{await context.close();}
 });
