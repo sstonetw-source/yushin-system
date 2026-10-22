@@ -16010,7 +16010,8 @@ async function receiveV2SupplyEmulator(supplyId,qty,lotNo,expiryDate,operationId
     const uid=options.actorUid??currentUser?.uid,role=options.actorRole??currentUserRole;
     const check=()=>{
         if(!uid||auth.currentUser?.uid!==uid||currentUser?.uid!==uid||currentUserRole!==role
-            ||!['admin','purchaser','warehouse'].includes(role)||!canReceiveInventoryCapability())
+            ||!(['admin','purchaser','warehouse'].includes(role)&&canReceiveInventoryCapability()
+                 ||['sales','engineer'].includes(role)))
             throw Error('收貨身分已變更，請以原帳號核對。');
     };
     check();
@@ -16027,9 +16028,13 @@ async function receiveV2SupplyEmulator(supplyId,qty,lotNo,expiryDate,operationId
     const receipt=await db.collection('receipts').doc(operationId).get({source:'server'});check();
     const proof=receipt.exists?receipt.data():null;
     if(!proof||proof.supplyOrderId!==supplyId||proof.qty!==qty||proof.lotNo!==lotNo||proof.expiryDate!==expiryDate
-        ||proof.createdByUid!==uid||proof.createdByRole!==role||proof.reservationLocationSchemaVersion!==2)
+        ||proof.createdByUid!==uid||proof.createdByRole!==role
+        ||(proof.fulfillmentType==='DIRECT_SHIP'
+          ? !!(proof.lotNo||proof.expiryDate||proof.warehouseId)
+          : proof.reservationLocationSchemaVersion!==2))
         throw Error('收貨已可能提交，但憑證尚未確認，請使用原資料重試。');
-    options.onStockCommitted?.(proof.productKey,proof.warehouseId);
+    if(proof.fulfillmentType!=='DIRECT_SHIP')
+        options.onStockCommitted?.(proof.productKey,proof.warehouseId);
     check();return result.affectedOrderIds;
 }
 // Transaction layer only. Optional synchronous observers report committed locations;
