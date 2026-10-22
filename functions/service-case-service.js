@@ -67,15 +67,18 @@ async function commitServiceCaseEvent(db,actorUid,input){
       fail('目前使用者沒有服務作業權限。','permission-denied');
     if(!orderSnap.exists)fail('來源訂單不存在。','not-found');
     const order=orderSnap.data();
-    if(order.status==='cancelled'||order.status==='voided'
-      ||order.orderStatus==='cancelled'||order.orderStatus==='voided'
+    const forbiddenStatus=new Set(['cancelled','canceled','void','voided','deleted','closed','已取消','作廢','已結案']);
+    if([order.status,order.orderStatus].some(s=>forbiddenStatus.has(String(s||'').trim().toLowerCase()))
       ||order.inventoryReservationStatus!=='completed')
-      fail('來源訂單已取消，或尚未完成訂單初始化。');
+      fail('來源訂單已取消或結案，或尚未完成訂單初始化。');
     if(!allowedActor(profile.role,actorUid,order,intent.event.type))
       fail('目前角色或負責人沒有執行此服務動作的權限。','permission-denied');
     const items=Array.isArray(order.items)?order.items:[];
-    const item=items.find(x=>x?.itemId===intent.itemId);
-    if(!item||String(item.productType||'').trim().toUpperCase()!=='SERVICE')
+    const matched=items.filter(x=>x?.itemId===intent.itemId);
+    if(matched.length!==1)
+      fail('服務案件來源訂單品項不存在或識別碼重複。');
+    const item=matched[0];
+    if(String(item.productType||'').trim().toUpperCase()!=='SERVICE')
       fail('服務案件必須關聯正式的 Service 訂單品項。');
     if(!item.productId||item.productId.includes('/'))
       fail('服務品項缺少可核對的正式產品主檔。');
