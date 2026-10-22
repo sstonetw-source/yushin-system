@@ -409,7 +409,10 @@ test('direct shipment server purchase is atomic and never changes warehouse inve
  assert.equal(po.items[0].fulfillmentType,'DIRECT_SHIP');assert.equal(po.items[0].warehouseId,'');
  assert.equal(x.records.get('procurementDemands/'+encodeURIComponent(x.demandId)).remainingToOrderQty,3);
  assert.equal(x.records.get('orders/ORDER-1').items[0].supplyOrderedQty,4);
- assert.equal(x.history.length,4);assert.equal(x.history.some(c=>/inventory|warehouseStocks|inventoryLots|Movements/.test(c.path)),false);
+ assert.equal(x.history.length,5);assert.equal(x.history.some(c=>/inventory|warehouseStocks|inventoryLots|Movements/.test(c.path)),false);
+ const view=x.records.get('receivingSupplyOrders/'+result.supplyOrderIds[0]);
+ assert.equal(view.fulfillmentType,'DIRECT_SHIP');assert.equal(view.ownerUid,'seller');
+ assert.equal(view.unitCost,undefined);assert.equal(view.cost,undefined);
  const committed=structuredClone([...x.records]);
  assert.equal((await commitV2FormalPurchase(x.db,'buyer',x.data)).status,'already-applied');
  assert.deepEqual([...x.records],committed);assert.equal(x.history.length,4);
