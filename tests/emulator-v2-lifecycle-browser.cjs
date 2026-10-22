@@ -1362,7 +1362,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
 for(const width of [1280,390])test('full site '+width+'px original multi-item purchasing receipt dispatch shipment and delivery keep same-product lines separate',{timeout:300000},async()=>{
  const x=await multiReceiptSiteFixture(width),context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
  const errors=[],external=[],calls=[],purchaseCalls=[],dialogs=[],logisticsCalls=[],dropLogistics=new Set();let lose=false,losePurchase=true;
- await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_FORMAL_PURCHASE_EMULATOR=true;window.YUSHIN_V2_RECEIVING_EMULATOR=true;window.YUSHIN_V2_DISPATCH_EMULATOR=true;window.YUSHIN_V2_SHIPMENT_EMULATOR=true;window.YUSHIN_V2_DELIVERY_EMULATOR=true;window.YUSHIN_V2_RETURN_RECEIPT_EMULATOR=true;});
+ await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_FORMAL_PURCHASE_EMULATOR=true;window.YUSHIN_V2_RECEIVING_EMULATOR=true;window.YUSHIN_V2_DISPATCH_EMULATOR=true;window.YUSHIN_V2_SHIPMENT_EMULATOR=true;window.YUSHIN_V2_DELIVERY_EMULATOR=true;window.YUSHIN_V2_RETURN_RECEIPT_EMULATOR=true;window.YUSHIN_V2_LIFECYCLE_EMULATOR=true;});
  page.on('pageerror',error=>errors.push(error.message));page.on('dialog',d=>{dialogs.push(d.message());return d.type()==='confirm'?d.accept():d.dismiss();});
  await context.route('**/*',async route=>{
   const request=route.request(),url=new URL(request.url());
@@ -1377,10 +1377,10 @@ for(const width of [1280,390])test('full site '+width+'px original multi-item pu
    assert.equal(data.actorUid,undefined);assert.equal(data.actorRole,undefined);calls.push(data);
    if(lose){lose=false;const reply=await route.fetch();assert.equal(reply.status(),200);await route.abort('failed');return;}
   }
-  if(url.port==='5001'&&request.method()==='POST'&&['prepareV2OrderDispatch','shipV2WarehouseItem','confirmV2ShipmentDelivery','receiveV2CustomerReturn'].includes(url.pathname.split('/').at(-1))){
+  if(url.port==='5001'&&request.method()==='POST'&&['prepareV2OrderDispatch','shipV2WarehouseItem','confirmV2ShipmentDelivery','receiveV2CustomerReturn','setV2OrderLifecycle'].includes(url.pathname.split('/').at(-1))){
    const name=url.pathname.split('/').at(-1),data=request.postDataJSON().data;
    assert.ok((await request.allHeaders()).authorization?.startsWith('Bearer '));assert.equal(data.actorUid,undefined);assert.equal(data.actorRole,undefined);
-   logisticsCalls.push({name,data});const key=name+':'+data.itemId;
+   logisticsCalls.push({name,data});const key=name+':'+(name==='setV2OrderLifecycle'?data.nextStatus:data.itemId);
    if(dropLogistics.has(key)){dropLogistics.delete(key);const reply=await route.fetch();assert.equal(reply.status(),200);await route.abort('failed');return;}
   }
   await route.continue();
@@ -1508,6 +1508,34 @@ for(const width of [1280,390])test('full site '+width+'px original multi-item pu
   assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
   console.log('Full site '+width+'px: original warehouse received three lines (same product in A/B and another product), first/final successful replies lost and reloaded identical receipt IDs; four receipts/lots, no sibling overwrite, zero incoming and no dispatch/shipment/delivery.');
 
+  // All three lines have real PO/receipt proofs and holds. Cancel/restore via
+  // the original owner UI before dispatch: release/reclaim holds, never goods.
+  await siteLogout(page);await siteLogin(page,x.accounts.sales,'sales');
+  for(const [nextStatus,label] of [['cancelled','取消訂單'],['normal','恢復訂單']]){
+   dropLogistics.add('setV2OrderLifecycle:'+nextStatus);
+   await siteOrderAction(page,{sourceId:x.orderId},label);
+   await page.waitForFunction(id=>!pendingLifecycleOrderIds.size&&!!pendingV2OrderLifecycle(id),x.orderId,{timeout:45000});
+   const after=await x.snapshot(),cancelled=nextStatus==='cancelled';
+   assert.equal(after.order.orderStatus,nextStatus);assert.equal(after.order.itemCount,3);
+   assert.deepEqual(after.order.items.map(i=>i.reservedQty),cancelled?[0,0,0]:[3,2,2]);
+   assert.deepEqual(after.order.items.map(i=>i.shortageQty),[0,0,0]);
+   assert.deepEqual(after.inventory.map(i=>[i.onHand,i.reserved,i.incoming]),cancelled?[[5,0,0],[2,0,0]]:[[5,5,0],[2,2,0]]);
+   assert.deepEqual(after.stocks.map(i=>i.reserved),cancelled?[0,0,0,0]:[3,2,2,0]);
+   for(const field of ['inventoryLots','inventoryLotCosts','po','supplies','views','receipts'])assert.deepEqual(after[field],complete[field]);
+   assert.ok(after.demands.every(d=>cancelled?d.status==='CANCELLED':d.remainingToOrderQty===0&&d.remainingToReceiveQty===0));
+   const intent=logisticsCalls.filter(r=>r.name==='setV2OrderLifecycle').at(-1).data;
+   assert.deepEqual(intent.itemIds,['I1','I2','I3']);assert.equal(intent.nextStatus,nextStatus);
+   await siteOpen(page,'sales');await siteOrderAction(page,{sourceId:x.orderId},'確認前次取消／恢復結果');
+   await page.waitForFunction(id=>!pendingV2OrderLifecycle(id),x.orderId,{timeout:45000});
+   assert.deepEqual(logisticsCalls.filter(r=>r.name==='setV2OrderLifecycle').at(-1).data,intent);
+   assert.deepEqual(await x.snapshot(),after,'lifecycle confirmation cannot release or reclaim holds twice');
+  }
+  const beforeDispatch=await x.snapshot();assert.equal(beforeDispatch.order.orderLifecycleHistory.length,2);
+  const oldCancel=logisticsCalls.find(r=>r.name==='setV2OrderLifecycle'&&r.data.nextStatus==='cancelled').data;
+  const replay=await page.evaluate(async intent=>(await firebase.app().functions('asia-east1').httpsCallable('setV2OrderLifecycle')(intent)).data,oldCancel);
+  assert.equal(replay.status,'already-applied');assert.deepEqual(await x.snapshot(),beforeDispatch,'old cancellation cannot undo later restore');
+  console.log('Full site '+width+'px: original owner canceled/restored three received lines across A/B, both successful replies lost and reloaded; all seven holds released/reclaimed once, goods/lots/POs unchanged, old cancellation replay preserved later restore.');
+
   const physical=async()=>{const {order,...rest}=await x.snapshot();return rest;};
   const receivedPhysical=await physical(),ids=['I1','I2','I3'],quantities=[3,2,2];
   await siteLogout(page);await siteLogin(page,x.accounts.purchaser,'purchaser');
@@ -1572,7 +1600,7 @@ for(const width of [1280,390])test('full site '+width+'px original multi-item pu
   assert.deepEqual(shipped.order.items.map(i=>[i.warehouseShippedQty,i.reservedQty,i.shortageQty]),[[3,0,0],[2,0,0],[2,0,0]]);
   assert.ok(shipped.inventory.every(i=>i.onHand===0&&i.reserved===0&&i.incoming===0));
   assert.ok(shipped.inventoryLots.every(lot=>lot.remainingQty===0));
-  for(const field of ['po','supplies','views','demands','receipts'])assert.deepEqual(shipped[field],complete[field]);
+  for(const field of ['po','supplies','views','demands','receipts'])assert.deepEqual(shipped[field],beforeDispatch[field]);
   const shippedPhysical=await physical();
   await siteLogout(page);await siteLogin(page,x.accounts.sales,'sales');
   async function openDelivery(){
