@@ -81,6 +81,7 @@ function setOrderModalItem(item={}) {
     const codeInput=document.getElementById('orderItemCode');
     codeInput.dataset.productLine=normalized.productLine||'';
     codeInput.dataset.productType=normalized.productType||'';
+    codeInput.dataset.serviceKind=normalized.serviceKind||'';
     codeInput.dataset.productMasterMatched=normalized.productMasterMatched===true?'1':'0';
     delete codeInput.dataset.autofillBrand;
     codeInput.dataset.matchedProductCode=normalizeItemCodeLoose(normalized.itemCode);
@@ -200,12 +201,15 @@ function normalizeNewOrderItem(item = {}) {
     const unitPrice=item.unitPrice===null || item.unitPrice===undefined || String(item.unitPrice).trim()==='' ? null : Number(item.unitPrice);
     const productId=String(item.productId||match?.productId||'').trim();
     const productType=match?.productType||item.productType||'';
+    // Service kind is a snapshot only; the Service writer rechecks live Product Master.
+    const serviceKind=String(productType).trim().toUpperCase()==='SERVICE'
+        ? (match?.serviceKind||item.serviceKind||'') : '';
     const brand=resolveBrandName(match?.brand||item.brand||'');
     return {
         ...item,itemId:item.itemId||`item-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
         itemCode:String(item.itemCode||'').trim(),itemCodeKey:normalizeHistoryItemCode(item.itemCode||''),itemName:String(item.itemName||'').trim(),
         brand,brandId:match?.brandId||item.brandId||brandIdForName(brand),qty,orderedQty:qty,unitPrice,totalPrice:qty*unitPrice,
-        productId,productLine:match?.productLine||item.productLine||'',productType,
+        productId,productLine:match?.productLine||item.productLine||'',productType,serviceKind,
         productMasterMatched:!!productId && (!!match || item.productMasterMatched === true),
         supplier:item.supplier||match?.supplier||'',spec:match?.spec||item.spec||'',
         procurementType:item.procurementType||'PURCHASING_PO', fulfillmentType:item.fulfillmentType||'WAREHOUSE',
@@ -215,7 +219,7 @@ function normalizeNewOrderItem(item = {}) {
 
 function currentOrderModalItem() {
     const codeInput=document.getElementById('orderItemCode');
-    const item={supplier:document.getElementById('orderSelfSupplier')?.value.trim()||'',itemCode:codeInput.value,itemName:document.getElementById('orderItemName').value,itemNameEn:document.getElementById('orderItemNameEn')?.value||'',productLine:codeInput.dataset.productLine||document.getElementById('orderProductLine')?.value||'',productType:codeInput.dataset.productType||'',productMasterMatched:codeInput.dataset.productMasterMatched==='1',productCheckStatus:codeInput.dataset.productCheckStatus||'',spec:document.getElementById('orderSpec')?.value||'',brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:document.getElementById('orderQty').value,unitPrice:document.getElementById('orderUnitPrice').value,procurementType:document.getElementById('orderProcurementType')?.value||'PURCHASING_PO',fulfillmentType:document.getElementById('orderFulfillmentType')?.value||'WAREHOUSE',warehouseId:document.getElementById('orderWarehouse')?.value||'',productId:window._orderModalProductId||''};
+    const item={supplier:document.getElementById('orderSelfSupplier')?.value.trim()||'',itemCode:codeInput.value,itemName:document.getElementById('orderItemName').value,itemNameEn:document.getElementById('orderItemNameEn')?.value||'',productLine:codeInput.dataset.productLine||document.getElementById('orderProductLine')?.value||'',productType:codeInput.dataset.productType||'',serviceKind:codeInput.dataset.serviceKind||'',productMasterMatched:codeInput.dataset.productMasterMatched==='1',productCheckStatus:codeInput.dataset.productCheckStatus||'',spec:document.getElementById('orderSpec')?.value||'',brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:document.getElementById('orderQty').value,unitPrice:document.getElementById('orderUnitPrice').value,procurementType:document.getElementById('orderProcurementType')?.value||'PURCHASING_PO',fulfillmentType:document.getElementById('orderFulfillmentType')?.value||'WAREHOUSE',warehouseId:document.getElementById('orderWarehouse')?.value||'',productId:window._orderModalProductId||''};
     item.selfOrderConfirmed=document.getElementById('orderSelfOrderConfirmed')?.value==='confirmed';
     item.deliveryPlan=window.orderShippingInstructions?.()||{};
     item.deliveryCustomerName=document.getElementById('orderCustomer')?.value.trim()||'';
@@ -267,7 +271,7 @@ async function checkNewOrderDraftProducts() {
             if(!newOrderDraftItems.includes(item)||item.itemCode!==code||item.brand!==brand) continue;
             const match=selectProductCodeMatch(matches,brand);
             if(match) Object.assign(item,{productId:match.productId||stableProductId(match),productMasterMatched:true,
-                brandId:match.brandId||item.brandId,productLine:match.productLine||item.productLine,productType:match.productType||item.productType,productCheckStatus:'matched'});
+                brandId:match.brandId||item.brandId,productLine:match.productLine||item.productLine,productType:match.productType||item.productType,serviceKind:match.serviceKind||'',productCheckStatus:'matched'});
             else Object.assign(item,{productId:'',productMasterMatched:false,productCheckStatus:!brand&&matches.length>1?'ambiguous':'missing'});
         } catch(err) {
             if(opening!==orderModalOpenGeneration||generation!==orderDraftProductCheckGeneration) return;
@@ -313,7 +317,7 @@ window.addCurrentOrderItemToDraft=function(){
     const nextSelfStatus=document.getElementById('orderSelfOrderConfirmed');if(nextSelfStatus)nextSelfStatus.value='pending';
     for(const id of ['orderSelfSupplier','orderCostPrice']){const field=document.getElementById(id);if(field){field.value='';delete field.dataset.autofillCost;}}
     window.syncOrderEntrySelfStatus?.();
-    delete nextCodeInput.dataset.productLine;delete nextCodeInput.dataset.productType;delete nextCodeInput.dataset.productMasterMatched;delete nextCodeInput.dataset.productCheckStatus;delete nextCodeInput.dataset.preserveOrderPriceCode;delete nextCodeInput.dataset.matchedProductCode;delete nextCodeInput.dataset.autofillBrand;
+    delete nextCodeInput.dataset.productLine;delete nextCodeInput.dataset.productType;delete nextCodeInput.dataset.serviceKind;delete nextCodeInput.dataset.productMasterMatched;delete nextCodeInput.dataset.productCheckStatus;delete nextCodeInput.dataset.preserveOrderPriceCode;delete nextCodeInput.dataset.matchedProductCode;delete nextCodeInput.dataset.autofillBrand;
     clearQuickProductButton(nextCodeInput);clearProductMatchChoices(nextCodeInput);
     renderNewOrderDraftItems();
     document.getElementById('orderQty').value=1;document.getElementById('orderUnitPrice').value='';document.getElementById('orderTotalPrice').value=0;window._orderModalProductId='';
@@ -375,6 +379,7 @@ window.openOrderModal = function(source = null) {
         codeInput.value = source.itemCode || '';
         codeInput.dataset.productLine = source.productLine || '';
         codeInput.dataset.productType = source.productType || '';
+        codeInput.dataset.serviceKind = source.serviceKind || '';
         codeInput.dataset.matchedProductCode=normalizeItemCodeLoose(source.itemCode||'');
         if (source.productId) codeInput.dataset.autofillBrand=normalizeBrandLookupKey(resolveBrandName(source.brand||''));
         codeInput.dataset.preserveOrderPriceCode=normalizeItemCodeLoose(source.itemCode||'');
