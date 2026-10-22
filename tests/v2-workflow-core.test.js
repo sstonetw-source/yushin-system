@@ -39,6 +39,19 @@ test('item workflow treats stock-covered items as delivery and direct ship as or
   assert.equal(w.itemWorkCategory({orderedQty:3,fulfillmentType:'DIRECT_SHIP',supplyOrderedQty:3}),'arrival');
 });
 
+test('Service work projection is not a physical shortage, even without warehouse reservation',()=>{
+ const pending=w.projectItem({productType:'Service',orderedQty:3,qty:3,fulfillmentType:'WAREHOUSE',reservedQty:0,shortageQty:3});
+ assert.equal(pending.requiredSupplyQty,0);
+ assert.equal(pending.remainingToOrderQty,0);
+ assert.equal(pending.inTransitQty,0);
+ assert.equal(pending.shortageQty,0);
+ assert.equal(pending.workCategory,'delivery');
+ const delivered=w.projectItem({productType:'Service',orderedQty:3,deliveredQty:3,isBilled:true});
+ assert.equal(delivered.workCategory,'complete');
+ assert.throws(()=>w.projectItem({productType:'Service',orderedQty:3,reservedQty:1}),/服務品項/);
+ assert.throws(()=>w.projectItem({productType:'Service',orderedQty:3,supplyOrderedQty:1}),/服務品項/);
+});
+
 test('item workflow moves delivered items through billing and complete',()=>{
   assert.equal(w.itemWorkCategory({orderedQty:2,deliveredQty:2,isBilled:false}),'billing');
   assert.equal(w.itemWorkCategory({orderedQty:2,deliveredQty:2,isBilled:true}),'complete');
