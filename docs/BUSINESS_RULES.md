@@ -4,6 +4,13 @@
 
 ## 名詞與公式
 
+### Service 案件真實身分傳輸驗收（2026-10-22，demo Emulator gate）
+
+本批只接線同一 `commitServiceCaseEvent` 後端 Service 的 Callable 傳輸，不建立第二套事件 writer；必須在 `demo-yushin`、本機 Auth＋Firestore Emulator 同時存在且 `ENABLE_SERVICE_CASE_EMULATOR=true` 才能呼叫，正式與 Preview 均不可開啟。Client 不能直接讀寫 `serviceCases`；Cloud Functions Admin SDK 在同一 transaction 重讀真實登入角色、來源訂單、權威產品主檔及案件事件，固定 ID 重送不重複追加；服務完成不等於庫存入庫、商品交付或帳務核銷。
+
+四類服務需在真實 Auth／Callable／Firestore Emulator 通過角色、保管流轉、委外返件、完工證據、非本人拒絕、停權、異意圖重試及 Client Rules deny 後，才可評估服務主檔類型輸入、受託物／計價單位與訂單履約量、角色可讀投影與原站畫面接線。此批**不部署、不修改正式資料、不新增一般商品庫存／採購／出貨資料**。
+
+
 
 
 
