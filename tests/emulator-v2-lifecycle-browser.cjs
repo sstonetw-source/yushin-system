@@ -1746,6 +1746,52 @@ for(const width of [1280,390])test('full site '+width+'px original multi-item pu
   assert.equal(logisticsCalls.filter(r=>r.name==='receiveV2CustomerReturn').length,6);
   assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
   console.log('Full site '+width+'px: same-product A/B original return requests and B 1+1 then A 1 physical receipts; all three successful replies lost, reload confirmed original IDs, final pending=false still recoverable, only original warehouse/lot credited once and third item/PO/costs unchanged.');
+
+  // Distinct business entry: the actual CLOSE source opens a clean ordinary order.
+  const correctKey='reorder-'+width+'-correct',correctCode='REORDER'+width;
+  const correctLot={productKey:correctKey,warehouseId:x.warehouses[0],receivedQty:3,remainingQty:3,lotNo:correctCode};
+  const setup=db.batch();
+  setup.set(db.collection('products').doc(correctKey),{productId:correctKey,manufacturerPartNo:correctCode,
+   normalizedPartNo:correctCode.toLowerCase(),productName:'重新確認的正確商品',brand:'Roche',brandName:'Roche',productType:'Goods',active:true,status:'ACTIVE',listPrice:175});
+  setup.set(db.collection('inventory').doc(correctKey),{productKey:correctKey,onHand:3,reserved:0,incoming:0,transferFreeInTransit:0});
+  setup.set(db.collection('warehouseStocks').doc(x.warehouses[0]+'__'+correctKey),
+   {warehouseId:x.warehouses[0],productKey:correctKey,onHand:3,reserved:0,incoming:0,transferFreeInTransit:0});
+  setup.set(db.collection('inventoryLots').doc(correctKey+'-lot'),correctLot);await setup.commit();
+  await siteLogout(page);await siteLogin(page,x.accounts.sales,'sales');
+  await siteOrderAction(page,{sourceId:x.orderId},'退貨');
+  await page.locator('#reorderAfterReturnBtn').waitFor({state:'visible'});await page.locator('#reorderAfterReturnBtn').click();
+  await page.locator('#orderModalOverlay.active').waitFor({state:'visible'});
+  assert.equal(await page.locator('#orderModalTitle').textContent(),'退貨後重新下單');
+  assert.equal(await page.locator('#orderCustomer').inputValue(),returned.order.customerName);
+  assert.equal(await page.locator('#orderItemCode').inputValue(),'');assert.equal(await page.locator('#orderUnitPrice').inputValue(),'');
+  assert.deepEqual(await page.evaluate(()=>newOrderDraftItems),[],'wrong original items must not be copied');
+  await page.waitForFunction(id=>warehouseMasterCache.some(w=>w.id===id)&&document.getElementById('orderWarehouse').value,x.warehouses[0]);
+  await page.locator('#orderItemCode').fill(correctCode);await page.locator('#orderItemCode').blur();
+  await page.waitForFunction(()=>document.getElementById('orderItemCode').dataset.productCheckStatus==='matched');
+  await page.locator('#orderQty').fill('1');await page.locator('#orderUnitPrice').fill('275');
+  await page.locator('#saveNewOrderBtn').click();await page.locator('#orderModalOverlay.active').waitFor({state:'hidden'});
+  await page.waitForFunction(source=>ordersCache.some(o=>o.returnReorderSource?.orderId===source&&o.inventoryReservationStatus==='completed'),x.orderId,{timeout:45000});
+  const owned=await db.collection('orders').where('createdByUid','==',x.accounts.sales.uid).get();
+  const reordered=owned.docs.filter(d=>d.data().returnReorderSource?.orderId===x.orderId);
+  assert.equal(reordered.length,1);const newId=reordered[0].id,newOrder=reordered[0].data();
+  assert.notEqual(newId,x.orderId);assert.deepEqual(newOrder.returnReorderSource,{orderId:x.orderId});
+  assert.equal(newOrder.ownerUid,x.accounts.sales.uid);assert.equal(newOrder.customerName,returned.order.customerName);
+  assert.equal(newOrder.items.length,1);assert.equal(newOrder.items[0].productId,correctKey);
+  assert.equal(newOrder.items[0].qty,1);assert.equal(newOrder.items[0].unitPrice,275);assert.equal(newOrder.totalPrice,275);
+  assert.equal(newOrder.items[0].reservedQty,1);assert.equal(newOrder.isDelivered,false);
+  assert.deepEqual(newOrder.deliveryRecords||[],[]);assert.deepEqual(newOrder.returnRecords||[],[]);
+  for(const ref of [db.collection('inventory').doc(correctKey),db.collection('warehouseStocks').doc(x.warehouses[0]+'__'+correctKey)]){
+   const held=(await ref.get()).data();assert.equal(held.onHand,3);assert.equal(held.reserved,1);
+  }
+  assert.deepEqual((await db.collection('inventoryLots').doc(correctKey+'-lot').get()).data(),correctLot);
+  assert.equal((await db.collection('supplyOrders').where('sourceId','==',newId).get()).size,0);
+  assert.deepEqual(await x.snapshot(),returned,'new order never changes the returned source or its physical stock');
+  await siteOpen(page,'sales');await siteNav(page,'orders');
+  const reloaded=await db.collection('orders').where('createdByUid','==',x.accounts.sales.uid).get();
+  assert.equal(reloaded.docs.filter(d=>d.data().returnReorderSource?.orderId===x.orderId).length,1);
+  assert.deepEqual((await db.collection('orders').doc(newId).get()).data(),newOrder);
+  assert.deepEqual(await x.snapshot(),returned);assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
+  console.log('Full site '+width+'px: actual CLOSE source opened a clean original reorder form; explicitly selected different product and price, one ordinary Client order and independent hold, original source/returns/stock unchanged, reload did not recreate.');
  }catch(error){
   console.log('Multi receipt '+width+'px diagnostic:',JSON.stringify(await page.evaluate(()=>({role:typeof currentUserRole==='undefined'?'none':currentUserRole,
    feedback:document.getElementById('actionFeedback')?.textContent,rows:document.getElementById('inventoryReceivingBody')?.textContent,
