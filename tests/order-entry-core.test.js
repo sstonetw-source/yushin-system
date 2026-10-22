@@ -79,6 +79,22 @@ test('Goods plus Service validates only real shipment; rejects direct-ship Servi
  assert.match(f.alerts[0],/服務型/);
 });
 
+test('adding a Service draft skips physical delivery fields; Goods and direct-ship safeguards remain',()=>{
+ const start=source.indexOf('window.addCurrentOrderItemToDraft=function()'),end=source.indexOf('window.openOrderModal',start);
+ for(const productType of ['Service','Goods'])for(const fulfillmentType of ['WAREHOUSE','DIRECT_SHIP']){
+  const row={...item,productType,fulfillmentType,deliveryPlan:{mode:'CUSTOMER_SHIP'},warehouseId:'STALE'};
+  const nodes={},drafts=[],alerts=[];
+  const c=vm.createContext({window:{},document:{getElementById:id=>nodes[id]||(nodes[id]={dataset:{},value:''})},
+   currentOrderModalItem:()=>({...row}),newOrderDraftItems:drafts,YushinOrderEntry:core,YushinWarehouseLogistics:logistics,
+   orderItemProductStatus:()=> 'matched',alert:message=>alerts.push(message),renderNewOrderDraftItems(){},
+   clearQuickProductButton(){},clearProductMatchChoices(){}});
+  vm.runInContext(source.slice(start,end),c);c.window.addCurrentOrderItemToDraft();
+  if(productType==='Service'&&fulfillmentType==='WAREHOUSE'){
+   assert.equal(drafts.length,1);assert.equal(drafts[0].warehouseId,'');assert.equal(Object.keys(drafts[0].deliveryPlan).length,0);assert.deepEqual(alerts,[]);
+  }else{assert.equal(drafts.length,0);assert.equal(alerts.length,1);}
+ }
+});
+
 test('normalized order fields retain missing price as null before save validation',()=>{
  const c=vm.createContext({findPriceItemForOrder:()=>null,normalizeHistoryItemCode:x=>x,resolveBrandName:x=>x,brandIdForName:x=>x});
  const a=source.indexOf('function normalizeNewOrderItem('),b=source.indexOf('function currentOrderModalItem()',a);vm.runInContext(source.slice(a,b),c);

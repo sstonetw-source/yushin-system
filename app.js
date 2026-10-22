@@ -21410,7 +21410,12 @@ window.addCurrentOrderItemToDraft=function(){
     const item=currentOrderModalItem();
     const validation=globalThis.YushinOrderEntry.validateItem(item);
     if(!validation.valid){alert(validation.message);document.getElementById(validation.field)?.focus();return;}
-    try { globalThis.YushinWarehouseLogistics.validatePlan(item.deliveryPlan,true); } catch(err) { alert(err.message); const details=document.getElementById('orderRecipientDetails');if(details)details.open=true;return; }
+    if(String(item.productType||'').trim().toUpperCase()==='SERVICE'){
+        if(item.fulfillmentType!=='WAREHOUSE'){alert('服務型品項尚不支援原廠直送或實貨履約入口。');return;}
+        item.deliveryPlan={};item.warehouseId='';
+    }else{
+        try { globalThis.YushinWarehouseLogistics.validatePlan(item.deliveryPlan,true); } catch(err) { alert(err.message); const details=document.getElementById('orderRecipientDetails');if(details)details.open=true;return; }
+    }
     if(!item.itemName||item.qty<=0){alert('請先完成目前品項的品名與數量。');return;}
     if(item.productMasterMatched!==true||!item.productId||orderItemProductStatus(item)!=='matched'){alert('正式訂單品項必須先對應產品主檔。請輸入既有貨號，或使用「快速新增產品」完成基本產品資料。');return;}
     const duplicateIndex=newOrderDraftItems.findIndex(existing=>globalThis.YushinOrderEntry.sameDraftItem(existing,item));

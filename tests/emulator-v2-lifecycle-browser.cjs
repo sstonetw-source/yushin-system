@@ -1941,6 +1941,8 @@ for(const mixed of [false,true])for(const width of [1280,390])test('full site '+
   };
   await selectProduct(code,2,100);
   assert.equal(await page.locator('#orderItemCode').getAttribute('data-product-type'),'Service');
+  // Deliberately incomplete physical instructions must not block Service entry.
+  await page.locator('#orderDeliveryChoice').selectOption('CUSTOMER');
   if(mixed){
    await page.locator('button[onclick="addCurrentOrderItemToDraft()"]').click();await page.waitForFunction(()=>newOrderDraftItems.length===1);
    await selectProduct(code+'G',1,150);
