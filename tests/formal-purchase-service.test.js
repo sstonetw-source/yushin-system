@@ -351,3 +351,23 @@ test('unconfirmed documents allow versioned edits and reject stale concurrent ch
  await assert.rejects(x.c.commitFormalPurchaseOrder(original),/不同/);assert.deepEqual([...x.records],before);
  assert.equal([...x.records.keys()].some(key=>key.startsWith('supplyOrders/')),false);
 });
+
+test('formal PO recovery refreshes the visible demand queue once after committing, but not hidden views',async()=>{
+  for(const view of ['ordering','history']){
+    const x=recoverySetup(),refreshes=[];
+    x.c.document={getElementById:id=>id==='purchasing-system'?{classList:{contains:name=>name==='active'}}:null};
+    x.c.purchasingView=view;
+    x.c.purchasingViewLoaded=new Set();
+    x.c.procurementDemandLoaded=false;
+    x.c.pendingPurchaseError='';
+    x.c.loadPendingPurchaseOrders=async reset=>{refreshes.push(reset);x.c.procurementDemandLoaded=true;};
+    x.c.rememberFormalPurchase(x.po,'buyer','purchaser');
+    await x.c.recoverFormalPurchase();
+    assert.deepEqual(refreshes,view==='ordering'?[true]:[]);
+    assert.equal(x.c.purchasingViewLoaded.has('ordering'),view==='ordering');
+    assert.equal(x.storage.size,0);
+    await x.c.recoverFormalPurchase();
+    assert.equal(refreshes.length,view==='ordering'?1:0);
+    assert.equal(x.incoming.size,1);
+  }
+});

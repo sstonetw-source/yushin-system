@@ -6,7 +6,6 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const {spawnSync}=require('node:child_process'),{build}=require('esbuild'),{chromium}=require('playwright-core');
 const admin=require('firebase-admin'),{getFirestore}=require('firebase-admin/firestore'),{getAuth}=require('firebase-admin/auth');
 const {synchronizeV2OrderFixture}=require('./fixtures/v2-order-initialization.cjs');
-const {registerV2PurchaseIncomingFixture}=require('./fixtures/v2-purchase-incoming.cjs');
 const {commitV2FormalPurchase}=require('../functions/formal-purchase-commit-service');
 const root=path.resolve(__dirname,'..'),read=file=>fs.readFileSync(path.join(root,file),'utf8');
 const section=(source,a,b)=>{const i=source.indexOf(a),j=source.indexOf(b,i);assert.ok(i>=0&&j>i,'original source boundaries');return source.slice(i,j);};
@@ -262,6 +261,9 @@ async function multiReceiptSiteFixture(width){
   await db.collection('users').doc(uid).set({role,active:true,name:role,email,code:role==='sales'?'B':role});accounts[role]={uid,email};
  }
  const batch=db.batch(),put=(name,id,data)=>batch.set(db.collection(name).doc(id),data);
+ const supplierId=tag+'-supplier',supplierName=tag+'供應商';
+ put('suppliers',supplierId,{active:true,supplierId,supplierName,purchaseHeaderName:supplierName,email:'',leadTimeDays:0});
+ put('brandSupplierMappings',tag+'-mapping',{active:true,brandName:'Roche',productLine:tag,supplierId,isDefault:false});
  for(const warehouseId of warehouses)put('warehouses',warehouseId,{active:true,warehouseName:warehouseId});
  for(const key of keys){
   put('products',key,{productType:'Goods',active:true,productId:key,itemCode:key,model:key,brand:'Roche',nameCn:key});
@@ -270,33 +272,35 @@ async function multiReceiptSiteFixture(width){
  }
  const items=[{itemId:'I1',productId:keys[0],qty:3,warehouseId:warehouses[0]},
   {itemId:'I2',productId:keys[0],qty:2,warehouseId:warehouses[1]},
-  {itemId:'I3',productId:keys[1],qty:2,warehouseId:warehouses[0]}].map(row=>({...row,itemCode:row.productId,itemName:row.productId,brand:'Roche',
+  {itemId:'I3',productId:keys[1],qty:2,warehouseId:warehouses[0]}].map(row=>({...row,itemCode:row.productId,itemName:row.productId,brand:'Roche',productLine:tag,
    unitPrice:100,fulfillmentType:'WAREHOUSE',reservedQty:0,deliveredQty:0,returnedQty:0,dispatchPreparedQty:0,warehouseShippedQty:0,
    deliveryPlan:{mode:'CUSTOMER_SHIP',contact:'測試客戶',phone:'02-12345678',address:'測試地址'}}));
  put('orders',orderId,{orderNo:orderId,customerName:'多品項收貨驗收',ownerUid:accounts.sales.uid,salesCode:'B',status:'active',orderStatus:'normal',
   orderDate:'2026-10-22',inventoryReservationStatus:'pending',inventoryReservationAttemptId:'sync_'+tag,
   deliveryRecords:[],returnRecords:[],deliveryHistory:[],deliveredQty:0,isDelivered:false,items});
  await batch.commit();await synchronizeV2OrderFixture(db,accounts.purchaser.uid,{orderId,warehouseIds:warehouses});
- // PO/incoming are prepared by the existing Services, not by stock fixtures.
- // This case accepts receiving UI, not merged purchase-UI warehouse admission.
- const poNo='MULTI-RECEIPT-'+width;
- const po=await commitV2FormalPurchase(db,accounts.purchaser.uid,{poNo,poDate:'2026-10-22',supplier:'多品項測試供應商',
-  items:items.map(row=>({orderId,itemId:row.itemId,qty:row.qty,unitCost:20}))});
- await registerV2PurchaseIncomingFixture(db,accounts.purchaser.uid,poNo);
+ // Source creation/initialization remains the explicit fixture boundary.
+ // PO documents, commitments and incoming must now come from the original UI.
+ const supplyIds=[];
  const snapshot=async()=>{
   const read=async(name,id)=>(await db.collection(name).doc(id).get()).data();
+  const supplyRows=(await db.collection('supplyOrders').where('sourceId','==',orderId).get()).docs
+   .map(doc=>({id:doc.id,data:doc.data()})).sort((a,b)=>a.data.itemId.localeCompare(b.data.itemId));
+  const supplies=supplyRows.map(row=>row.data),liveSupplyIds=supplyRows.map(row=>row.id);
+  const po=(await db.collection('purchaseOrders').where('orderIds','array-contains',orderId).get()).docs
+   .map(doc=>({id:doc.id,...doc.data()})).sort((a,b)=>a.id.localeCompare(b.id));
   const extra={};for(const name of ['inventoryLots','inventoryLotCosts','inventoryMovements','inventoryReservations'])
    extra[name]=(await db.collection(name).where('productKey','in',keys).get()).docs.map(doc=>({id:doc.id,...doc.data()})).sort((a,b)=>a.id.localeCompare(b.id));
-  return {order:await read('orders',orderId),po:await read('purchaseOrders',poNo),
+  return {order:await read('orders',orderId),po,
    inventory:await Promise.all(keys.map(key=>read('inventory',key))),
    stocks:await Promise.all(keys.flatMap(key=>warehouses.map(id=>read('warehouseStocks',id+'__'+key)))),
-   supplies:await Promise.all(po.supplyOrderIds.map(id=>read('supplyOrders',id))),
-   views:await Promise.all(po.supplyOrderIds.map(id=>read('receivingSupplyOrders',id))),
+   supplies,supplyIds:liveSupplyIds,
+   views:await Promise.all(liveSupplyIds.map(id=>read('receivingSupplyOrders',id))),
    demands:await Promise.all(items.map(row=>read('procurementDemands',encodeURIComponent('SALES_ORDER:'+orderId+':'+row.itemId)))),
-   receipts:await Promise.all(po.supplyOrderIds.map(async id=>(await db.collection('receipts').where('supplyOrderId','==',id).get()).docs
+   receipts:await Promise.all(liveSupplyIds.map(async id=>(await db.collection('receipts').where('supplyOrderId','==',id).get()).docs
     .map(doc=>({id:doc.id,...doc.data()})).sort((a,b)=>a.id.localeCompare(b.id)))),...extra};
  };
- return {accounts,orderId,keys,warehouses,supplyIds:po.supplyOrderIds,snapshot};
+ return {accounts,orderId,keys,warehouses,supplyIds,supplierName,snapshot};
 }
 async function siteOrderAction(page,fixture,label){
  await siteNav(page,'orders');
@@ -1355,14 +1359,19 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
  }finally{await context.close();}
 });
 
-for(const width of [1280,390])test('full site '+width+'px original multi-item receipt dispatch shipment and delivery keep same-product lines separate',{timeout:240000},async()=>{
+for(const width of [1280,390])test('full site '+width+'px original multi-item purchasing receipt dispatch shipment and delivery keep same-product lines separate',{timeout:300000},async()=>{
  const x=await multiReceiptSiteFixture(width),context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
- const errors=[],external=[],calls=[],logisticsCalls=[],dropLogistics=new Set();let lose=false;
- await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_V2_RECEIVING_EMULATOR=true;window.YUSHIN_V2_DISPATCH_EMULATOR=true;window.YUSHIN_V2_SHIPMENT_EMULATOR=true;window.YUSHIN_V2_DELIVERY_EMULATOR=true;});
- page.on('pageerror',error=>errors.push(error.message));page.on('dialog',d=>d.type()==='confirm'?d.accept():d.dismiss());
+ const errors=[],external=[],calls=[],purchaseCalls=[],dialogs=[],logisticsCalls=[],dropLogistics=new Set();let lose=false,losePurchase=true;
+ await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_FORMAL_PURCHASE_EMULATOR=true;window.YUSHIN_V2_RECEIVING_EMULATOR=true;window.YUSHIN_V2_DISPATCH_EMULATOR=true;window.YUSHIN_V2_SHIPMENT_EMULATOR=true;window.YUSHIN_V2_DELIVERY_EMULATOR=true;});
+ page.on('pageerror',error=>errors.push(error.message));page.on('dialog',d=>{dialogs.push(d.message());return d.type()==='confirm'?d.accept():d.dismiss();});
  await context.route('**/*',async route=>{
   const request=route.request(),url=new URL(request.url());
   if(!['localhost','127.0.0.1'].includes(url.hostname)){external.push(url.hostname);await route.abort();return;}
+  if(url.port==='5001'&&request.method()==='POST'&&url.pathname.endsWith('/commitV2FormalPurchase')){
+   const data=request.postDataJSON().data;assert.ok((await request.allHeaders()).authorization?.startsWith('Bearer '));
+   assert.equal(data.actorUid,undefined);assert.equal(data.actorRole,undefined);purchaseCalls.push(data);
+   if(losePurchase){losePurchase=false;const reply=await route.fetch();assert.equal(reply.status(),200);await route.abort('failed');return;}
+  }
   if(url.port==='5001'&&request.method()==='POST'&&url.pathname.endsWith('/receiveV2Supply')){
    const data=request.postDataJSON().data;assert.ok((await request.allHeaders()).authorization?.startsWith('Bearer '));
    assert.equal(data.actorUid,undefined);assert.equal(data.actorRole,undefined);calls.push(data);
@@ -1377,8 +1386,82 @@ for(const width of [1280,390])test('full site '+width+'px original multi-item re
   await route.continue();
  });
  try{
+  const beforePurchase=await x.snapshot();assert.deepEqual(beforePurchase.po,[]);assert.deepEqual(beforePurchase.supplies,[]);
+  assert.deepEqual(beforePurchase.inventory.map(i=>i.incoming),[0,0]);
+  await siteOpen(page);await siteLogin(page,x.accounts.purchaser,'purchaser');await siteNav(page,'purchasing');
+  const pendingRow=id=>page.locator('#purchasePendingBody tr').filter({hasText:x.orderId})
+   .filter({has:page.locator('button[onclick*="'+id+'"]')});
+  await pendingRow('I3').waitFor({state:'visible'});
+  // The existing warehouse rule must reject a mixed-warehouse selection
+  // before any document, supply, demand or stock change.
+  for(const id of ['I1','I2'])await pendingRow(id).locator('.pending-purchase-batch-select').check();
+  await page.locator('#purchasePendingBatchPoBtn').click();
+  await page.waitForFunction(()=>!document.getElementById('purchasePendingBatchPoBtn')?.disabled);
+  assert.ok(dialogs.some(message=>message.includes('不同入庫倉庫')));assert.equal(purchaseCalls.length,0);
+  assert.equal(await page.locator('#poModalOverlay.active').count(),0);assert.deepEqual(await x.snapshot(),beforePurchase);
+  await pendingRow('I2').locator('.pending-purchase-batch-select').uncheck();
+  await pendingRow('I3').locator('.pending-purchase-batch-select').check();
+  await page.locator('#purchasePendingBatchPoBtn').click();
+  await page.locator('#poModalOverlay.active').waitFor({state:'visible'});
+  async function purchaseCurrentDraft(itemIds,drop){
+   await page.waitForFunction(()=>poNoReady&&!poNoLoading&&!poDraftLoading);
+   const proposed=await page.evaluate(()=>poItems.map(item=>({itemId:item.itemId,qty:item.qty,warehouseId:item.warehouseId})));
+   assert.deepEqual(proposed.map(i=>i.itemId).sort(),itemIds.slice().sort());
+   const before=await x.snapshot();
+   await page.evaluate(()=>{window.poPdfOutputs=[];printSavedPoDocument=async(poNo,vendor)=>{
+    if(!poListCache.some(row=>row.id===poNo))throw Error('PDF before document commit');
+    window.poPdfOutputs.push({poNo,vendor});
+   };});
+   assert.equal(await page.locator('#poVendorName').inputValue(),x.supplierName);
+   await page.locator('#poDate').fill('2026-10-22');
+   for(let i=0;i<itemIds.length;i++){
+    const input=page.locator('#poItemsBody input[onchange*="unitPrice"]').nth(i);
+    await input.fill('20');await input.blur();
+   }
+   await page.locator('#printPurchaseOrderBtn').click();
+   await page.waitForFunction(()=>!poSaveInProgress&&poEditingId&&window.poPdfOutputs.length===1);
+   const poNo=await page.evaluate(()=>poEditingId),draft=(await db.collection('purchaseOrders').doc(poNo).get()).data();
+   assert.equal(draft.status,'DRAFT');assert.equal(draft.documentOnly,true);assert.equal(draft.items.length,itemIds.length);
+   assert.deepEqual(await x.snapshot(),before,'document/PDF does not purchase or register incoming');
+   await page.locator('#confirmPoOrderedBtn').click();
+   const pendingKey='formal-po-pending:'+encodeURIComponent(x.accounts.purchaser.uid);
+   await page.waitForFunction(({key,drop})=>!formalPurchaseRecoveryRunning&&(drop?!!sessionStorage.getItem(key):!sessionStorage.getItem(key)),{key:pendingKey,drop},{timeout:45000});
+   if(drop){
+    const intent=purchaseCalls.at(-1),committed=await x.snapshot();
+    assert.deepEqual(committed.inventory,before.inventory,'lost response has not yet registered incoming');
+    assert.equal(committed.supplies.length,itemIds.length);assert.ok(committed.supplies.every(s=>s.incomingRegisteredQty===0));
+    const pending=await page.evaluate(key=>sessionStorage.getItem(key),pendingKey);
+    await siteOpen(page,'purchaser');await siteNav(page,'purchasing');
+    await page.locator('#confirmFormalPurchasePendingBtn').waitFor({state:'visible'});
+    assert.equal(await page.evaluate(key=>sessionStorage.getItem(key),pendingKey),pending);
+    assert.deepEqual(await x.snapshot(),committed,'navigation does not automatically confirm procurement');
+    await page.locator('#confirmFormalPurchasePendingBtn').click();
+    await page.waitForFunction(key=>!sessionStorage.getItem(key),pendingKey,{timeout:45000});
+    assert.deepEqual(purchaseCalls.at(-1),intent,'reload retries the original multi-line intent');
+   }else await page.locator('#poModalOverlay.active').waitFor({state:'hidden'});
+   const saved=(await db.collection('purchaseOrders').doc(poNo).get()).data();
+   assert.equal(saved.status,'ORDERED');assert.equal(saved.documentOnly,false);assert.equal(saved.supplyOrderIds.length,itemIds.length);
+   return poNo;
+  }
+  const firstPo=await purchaseCurrentDraft(['I1','I3'],true),firstOrdered=await x.snapshot();
+  assert.deepEqual(firstOrdered.order.items[1],beforePurchase.order.items[1],'same-product B line is not purchased with A lines');
+  assert.deepEqual(firstOrdered.demands[1],beforePurchase.demands[1]);
+  assert.deepEqual(firstOrdered.inventory.map(i=>i.incoming),[3,2]);
+  assert.deepEqual(firstOrdered.stocks.map(i=>i.incoming),[3,0,2,0]);
+  await pendingRow('I2').waitFor({state:'visible'});
+  await pendingRow('I2').getByRole('button',{name:'產生採購單'}).click();
+  await page.locator('#poModalOverlay.active').waitFor({state:'visible'});
+  await page.waitForFunction(()=>document.getElementById('poSaveStatus')?.textContent?.includes('尚未建立'));
+  const secondPo=await purchaseCurrentDraft(['I2'],false);assert.notEqual(secondPo,firstPo);
   const initial=await x.snapshot();
-  await siteOpen(page);await siteLogin(page,x.accounts.warehouse,'warehouse');await siteNav(page,'inventory');
+  assert.equal(initial.po.length,2);assert.equal(initial.supplies.length,3);assert.equal(purchaseCalls.length,3);
+  assert.deepEqual(initial.inventory.map(i=>i.incoming),[5,2]);assert.deepEqual(initial.stocks.map(i=>i.incoming),[3,2,2,0]);
+  assert.deepEqual(initial.order.items.map(i=>i.supplyOrderedQty),[3,2,2]);
+  assert.ok(initial.demands.every(d=>d.remainingToOrderQty===0));
+  assert.deepEqual(initial.inventory.map(i=>[i.onHand,i.reserved]),[[0,0],[0,0]]);
+  x.supplyIds.push(...initial.supplyIds);
+  console.log('Full site '+width+'px: original purchase UI rejects mixed warehouses without writes, groups A I1/I3 and separately buys B I2; document/PDF stays read-only for demand/stock, lost multi-line purchase reply reloads identical intent, two POs/three supplies and incoming 5/2 exactly once. Source creation/initialization remains a fixture.');
+  await siteLogout(page);await siteLogin(page,x.accounts.warehouse,'warehouse');await siteNav(page,'inventory');
   await page.locator('#inventoryReceivingTabBtn').click();
   async function submit(index,qty,drop){
    const supplyId=x.supplyIds[index];
@@ -1535,6 +1618,8 @@ for(const width of [1280,390])test('full site '+width+'px original multi-item re
  }catch(error){
   console.log('Multi receipt '+width+'px diagnostic:',JSON.stringify(await page.evaluate(()=>({role:typeof currentUserRole==='undefined'?'none':currentUserRole,
    feedback:document.getElementById('actionFeedback')?.textContent,rows:document.getElementById('inventoryReceivingBody')?.textContent,
-   tasks:typeof receiptTaskJobs==='undefined'?[]:[...receiptTaskJobs.values()]}))),JSON.stringify(errors));throw error;
+   tasks:typeof receiptTaskJobs==='undefined'?[]:[...receiptTaskJobs.values()],
+   purchasing:{rows:document.getElementById('purchasePendingBody')?.textContent,status:document.getElementById('poSaveStatus')?.textContent,
+    items:typeof poItems==='undefined'?[]:poItems,editing:typeof poEditingId==='undefined'?null:poEditingId}}))),JSON.stringify({errors,dialogs}));throw error;
  }finally{await context.close();}
 });
