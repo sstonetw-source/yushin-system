@@ -166,6 +166,7 @@ function orderItemWorkCategory(order, item, lifecycleOverride = null, dispatchOv
         deliveredQty:dispatch.grossDelivered,
         isBilled:!!order.isBilled,
         fulfillmentType:item.fulfillmentType||order.fulfillmentType||'WAREHOUSE',
+        productType:item.productType||order.productType||'',
         reservedQty:item.reservedQty,
         shortageQty:item.shortageQty,
         supplyOrderedQty:item.supplyOrderedQty,
@@ -180,7 +181,8 @@ function orderWorkCategories(order) {
     const items=normalizedOrderItems(order);
     const categories=[...new Set(items.flatMap(item=>{
         const category=orderItemWorkCategory(order,item);
-        const warehouse=(item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP';
+        const warehouse=(item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'
+            &&String(item.productType||'').trim().toUpperCase()!=='SERVICE';
         return warehouse && ['ordering','arrival','delivery'].includes(category) && itemDispatchState(order,item).pending>0
             ? [category,'dispatch'] : [category];
     }))];
