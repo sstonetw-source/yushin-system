@@ -125,7 +125,7 @@ test('multi-item cancellation and restoration preserve distinct item identities 
   await f.c.setOrderLifecycleStatus('O1','normal');
   assert.equal(f.reservations(),2);
   assert.equal(f.writes(),2);
-  assert.deepEqual(f.state().orderLifecycleHistory.map(row=>row.action),['status_change','restore']);
+  assert.deepEqual(Array.from(f.state().orderLifecycleHistory,row=>row.action),['status_change','restore']);
 });
 test('multi-item reservation failure rolls back status and metadata without partial order writes',async()=>{
   const f=fixture({throwOnAdjust:true});
