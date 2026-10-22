@@ -46,8 +46,19 @@ test('Service work projection is not a physical shortage, even without warehouse
  assert.equal(pending.inTransitQty,0);
  assert.equal(pending.shortageQty,0);
  assert.equal(pending.workCategory,'delivery');
+ // A past physical delivery or a billing toggle is not proof of service completion.
  const delivered=w.projectItem({productType:'Service',orderedQty:3,deliveredQty:3,isBilled:true});
- assert.equal(delivered.workCategory,'complete');
+ assert.equal(delivered.workCategory,'delivery');
+ assert.equal(delivered.effectiveDeliveredQty,0);
+ assert.equal(delivered.outstandingQty,3);
+ const forged=w.projectItem({productType:'Service',orderedQty:3,
+   grossDeliveredQty:3,effectiveDeliveredQty:3,isBilled:true});
+ assert.equal(forged.workCategory,'delivery');
+ assert.equal(forged.outstandingQty,3);
+ for(const serviceKind of ['BIOPLEX_LAB','PIPETTE_CALIBRATION','TISSUE_SLICING','ONSITE_REPAIR']){
+   assert.equal(w.itemWorkCategory({productType:'Service',serviceKind,orderedQty:1,
+     deliveredQty:1,isBilled:true}),'delivery');
+ }
  assert.throws(()=>w.projectItem({productType:'Service',orderedQty:3,reservedQty:1}),/服務品項/);
  assert.throws(()=>w.projectItem({productType:'Service',orderedQty:3,supplyOrderedQty:1}),/服務品項/);
 });
