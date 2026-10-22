@@ -24,8 +24,17 @@
     return value;
   }
   function timestamp(value){
-    if(typeof value!=='string'||!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,3})?(?:Z|[+-]\d\d:\d\d)$/.test(value)
-      ||!Number.isFinite(Date.parse(value)))fault('服務事件時間必須包含有效時區。');
+    const parts=typeof value==='string'
+      ? /^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)(?:\.\d{1,3})?(?:Z|[+-]\d\d:\d\d)$/.exec(value)
+      : null;
+    if(!parts||!Number.isFinite(Date.parse(value)))fault('服務事件時間必須包含有效日期與時區。');
+    // Date.parse silently normalizes e.g. February 30 to March 2; reject it.
+    const year=Number(parts[1]),month=Number(parts[2]),day=Number(parts[3]);
+    const leap=year%4===0&&(year%100!==0||year%400===0);
+    const days=[31,leap?29:28,31,30,31,30,31,31,30,31,30,31];
+    if(month<1||month>12||day<1||day>days[month-1]
+      ||Number(parts[4])>23||Number(parts[5])>59||Number(parts[6])>59)
+      fault('服務事件時間必須包含有效日期與時區。');
     return value;
   }
   function normalizedEvent(raw){
