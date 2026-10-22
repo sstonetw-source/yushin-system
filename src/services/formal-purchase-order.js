@@ -56,8 +56,8 @@ async function commitFormalPurchaseEmulator(poRecord,actorUid,assertActor) {
     check();
     if(poRecord.items.length>5||poRecord.items.some(item=>!item.orderId||!item.itemId
         ||(item.sourceType&&item.sourceType!=='SALES_ORDER')
-        ||(item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'))
-        throw new Error('採購後端試點目前只支援 1–5 個客戶訂單實體入庫品項。');
+        ||!['WAREHOUSE','DIRECT_SHIP'].includes(item.fulfillmentType||'WAREHOUSE')))
+        throw new Error('採購後端試點目前只支援 1–5 個客戶訂單實體入庫或直送品項。');
     const request={poNo:poRecord.poNo,poDate:poRecord.poDate,
         supplier:poRecord.supplierName||poRecord.vendorName,
         items:poRecord.items.map(item=>({orderId:item.orderId,itemId:item.itemId,
