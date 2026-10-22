@@ -767,4 +767,4 @@ receiveV2Supply 隔離登入入口延伸正常單品項來源的履約後收貨�
 
 ### 四類服務的共同事件核心（2026-10-22，純計算已實作，未接 UI／Firestore）
 
-`modules/service-work-core.js` 提供 `projectServiceCase` 與 `applyServiceEvent`：一案一受託物或一次現場工作，採 ID 冪等、時序與必要憑證驗證，計算 Bio-Plex、Pipette、切片、現場維修的進度和保管位置。它不接管 `YushinWorkflow` 的商品庫存投影、不取代 `YushinFulfillment` 真實出貨，也不建立第二套採購或耗材扣帳。事件寫入及訂單品項的正向完成投影尚未實作；本次未修改 `src`、`app.js`、Firestore Rules／索引／正式資料。
+`modules/service-work-core.js` 提供 `projectServiceCase` 與 `applyServiceEvent`：一案一受託物或一次現場工作，採 ID 冪等、時序與必要憑證驗證，計算 Bio-Plex、Pipette、切片、現場維修的進度和保管位置。它不接管 `YushinWorkflow` 的商品庫存投影、不取代 `YushinFulfillment` 真實出貨，也不建立第二套採購或耗材扣帳。`functions/service-case-service.js` 已提供**未匯出的** Admin SDK 交易 writer，重讀權限／訂單／主檔後對服務案件追加不可變事件，並以固定事件 ID 防止重送，未連到實際 UI 或 Functions `index.js`。Service 事件不修改商品庫存、採購、送貨、核銷。訂單品項完成量投影、角色真 Emulator、Rules 讀取及 Preview 尚未實作；本次未修改 `src`、`app.js`、Firestore Rules／索引／正式資料。
