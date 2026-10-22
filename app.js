@@ -15689,8 +15689,8 @@ async function commitFormalPurchaseEmulator(poRecord,actorUid,assertActor) {
     check();
     if(poRecord.items.length>5||poRecord.items.some(item=>!item.orderId||!item.itemId
         ||(item.sourceType&&item.sourceType!=='SALES_ORDER')
-        ||(item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'))
-        throw new Error('採購後端試點目前只支援 1–5 個客戶訂單實體入庫品項。');
+        ||!['WAREHOUSE','DIRECT_SHIP'].includes(item.fulfillmentType||'WAREHOUSE')))
+        throw new Error('採購後端試點目前只支援 1–5 個客戶訂單實體入庫或直送品項。');
     const request={poNo:poRecord.poNo,poDate:poRecord.poDate,
         supplier:poRecord.supplierName||poRecord.vendorName,
         items:poRecord.items.map(item=>({orderId:item.orderId,itemId:item.itemId,
@@ -18098,8 +18098,8 @@ function rememberFormalPurchase(poRecord, actorUid, actorRole) {
     if (!Array.isArray(poRecord?.items) || !poRecord.items.length
         || (globalThis.YUSHIN_FORMAL_PURCHASE_EMULATOR === true && (poRecord.items.length > 5 || poRecord.items.some(item => !item.orderId || !item.itemId
             || (item.sourceType && item.sourceType !== 'SALES_ORDER')
-            || (item.fulfillmentType || 'WAREHOUSE') !== 'WAREHOUSE'))))
-        throw Error('採購後端試點目前只支援 1–5 個客戶訂單實體入庫品項。');
+            || !['WAREHOUSE','DIRECT_SHIP'].includes(item.fulfillmentType || 'WAREHOUSE')))))
+        throw Error('採購後端試點目前只支援 1–5 個客戶訂單實體入庫或直送品項。');
     if (pendingFormalPurchase()) throw Error('請先確認前次採購結果，勿另建採購單。');
     const pending = {version:1, actorUid, actorRole, poRecord};
     // A failed storage write stops the operation BEFORE the server is called.
