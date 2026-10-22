@@ -2,6 +2,7 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const w=require('../modules/workflow-core.js');
 const fulfillment=require('../modules/fulfillment-core.js');
+const procurementDemand=require('../modules/procurement-demand-core.js');
 const reservation=require('../modules/reservation-core.js');
 const receiving=require('../modules/receiving-core.js');
 const supply=require('../modules/supply-core.js');
@@ -61,6 +62,28 @@ test('Service work projection is not a physical shortage, even without warehouse
  }
  assert.throws(()=>w.projectItem({productType:'Service',orderedQty:3,reservedQty:1}),/服務品項/);
  assert.throws(()=>w.projectItem({productType:'Service',orderedQty:3,supplyOrderedQty:1}),/服務品項/);
+});
+
+test('two Bio-Plex service sales do not produce two kits of demand; shared reagent uses independent real replenishment',()=>{
+ const jobs=['BIO-A','BIO-B'];
+ for(const sourceId of jobs){
+   const work=w.procurementQuantities({productType:'Service',sourceId,orderedQty:1,shortageQty:1});
+   assert.equal(work.requiredSupplyQty,0);
+   assert.equal(work.remainingToOrderQty,0);
+ }
+ // Material stock is its own demand and may serve multiple customer experiments.
+ const reagent=procurementDemand.fromStockReplenishment({
+   sourceId:'BIOPLEX-REAGENT-01',safetyStock:8,availableQty:3,incomingQty:0
+ });
+ assert.equal(reagent.demandId,'STOCK_REPLENISHMENT:BIOPLEX-REAGENT-01');
+ assert.equal(reagent.remainingToOrderQty,5);
+ const ordered=procurementDemand.applyOrder(reagent,5);
+ assert.equal(ordered.appliedQty,5);
+ const received=procurementDemand.applyReceipt(ordered.demand,5);
+ assert.equal(received.appliedQty,5);
+ assert.equal(received.demand.status,'RECEIVED');
+ // A real material receipt is not a service-completion event.
+ assert.equal(w.itemWorkCategory({productType:'Service',orderedQty:1,isBilled:true}),'delivery');
 });
 
 test('item workflow moves delivered items through billing and complete',()=>{
