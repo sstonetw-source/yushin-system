@@ -17,6 +17,8 @@
 
 ## 每批提交驗收
 
+自 2026-10-22 起依 [風險導向驗收與結束標準](TRANSACTION_ACCEPTANCE.md) 選擇開發期間的測試層級。下列完整回歸是合併閘門，不要求每次局部編輯都重跑。P0、不同入口／權限／寫入及重要故障不可省略；不為相似數量排列反覆新增完整流程或獨立 PR。
+
 - `node tools/build-app.cjs --check`
 - `node --test $(find tests -maxdepth 1 -name '*.test.js' ! -name 'firestore-rules.test.js' | sort)`
 - GitHub CI Desktop/Phone Chrome smoke + Firestore Emulator；失敗不能合併。

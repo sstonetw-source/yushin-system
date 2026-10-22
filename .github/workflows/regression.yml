@@ -52,8 +52,8 @@ jobs:
           node --check functions/index.js
       - name: All application regression tests
         run: node --test $(find tests -maxdepth 1 -name '*.test.js' ! -name 'firestore-rules.test.js' | sort)
-      - name: Install headless Chrome viewport driver
-        run: npm install --no-save --no-package-lock playwright-core@1.56.0
+      - name: Install shared browser and Firestore integration dependencies once
+        run: npm install --no-save --no-package-lock @firebase/rules-unit-testing firebase firebase-admin@14.2.0 playwright-core@1.56.0 esbuild@0.25.0 html2canvas@1.4.1 jspdf@2.5.2
       - name: Check shared buttons in desktop and mobile Chrome
         run: node tests/ui-control-browser-smoke.js
       - name: Check order entry in desktop and mobile Chrome
@@ -74,8 +74,6 @@ jobs:
         run: node tests/lifecycle-browser-smoke.js
       - name: Check customer return receiving Service in desktop and mobile Chrome
         run: node tests/customer-return-browser-smoke.js
-      - name: Install Firestore rules and real browser integration dependencies
-        run: npm install --no-save @firebase/rules-unit-testing firebase firebase-admin@14.2.0 playwright-core@1.56.0 esbuild@0.25.0 html2canvas@1.4.1 jspdf@2.5.2
       - name: Set up Java 21 for Firestore emulator
         uses: actions/setup-java@v4
         with:
