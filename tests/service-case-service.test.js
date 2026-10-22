@@ -141,3 +141,15 @@ test('live Service product master selects mandatory workflow, not a caller-edita
   await assert.rejects(commit(noMasterKind,intent('SAMPLE_RECEIVED')),/正式服務主檔/);
   assert.equal(noMasterKind.written.length,0);
 });
+
+test('historic cancellation aliases and duplicate Service item IDs reject atomically',async()=>{
+ for(const state of ['cancelled','canceled','void','voided','deleted','closed','已取消','作廢','已結案']){
+   const f=fixture({orderStatus:state});
+   await assert.rejects(commit(f,intent('SAMPLE_RECEIVED')),/取消|結案/);
+   assert.equal(f.written.length,0);
+ }
+ const f=fixture();
+ f.docs.get('orders/O').items.push({itemId:'I',productId:'P',productType:'SERVICE',serviceKind:'BIOPLEX_LAB',qty:1});
+ await assert.rejects(commit(f,intent('SAMPLE_RECEIVED')),/重複/);
+ assert.equal(f.written.length,0);
+});
