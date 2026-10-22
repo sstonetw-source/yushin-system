@@ -1905,6 +1905,75 @@ for(const multi of [false,true])for(const width of [1280,390])test('full site '+
  }finally{await context.close();}
 });
 
+// Service sales use the original Client creation/sync path, without fake stock.
+for(const mixed of [false,true])for(const width of [1280,390])test('full site '+width+'px original '+(mixed?'Goods plus Service':'Service-only')+' entry has no virtual stock',{timeout:120000},async()=>{
+ const tag='service-entry-'+width+'-'+mixed,uid=tag+'-sales',email=uid+'@example.test',serviceKey=tag+'-service',goodsKey=tag+'-goods',warehouseId='SERVICE-ENTRY',code='SVC'+width+(mixed?'M':'S');
+ await auth.createUser({uid,email,password});
+ await db.collection('users').doc(uid).set({role:'sales',active:true,name:'服務驗收業務',email,code:'B'});
+ const batch=db.batch(),put=(name,id,data)=>batch.set(db.collection(name).doc(id),data);
+ put('products',serviceKey,{productId:serviceKey,manufacturerPartNo:code,normalizedPartNo:code.toLowerCase(),productName:'服務驗收項目',brand:'Roche',brandName:'Roche',productType:'Service',active:true,status:'ACTIVE',listPrice:100});
+ if(mixed){
+  put('warehouses',warehouseId,{warehouseName:'服務混合單商品倉',active:true,isDefault:true});
+  put('products',goodsKey,{productId:goodsKey,manufacturerPartNo:code+'G',normalizedPartNo:(code+'G').toLowerCase(),productName:'混合單實體商品',brand:'Roche',brandName:'Roche',productType:'Goods',active:true,status:'ACTIVE',listPrice:150});
+  put('inventory',goodsKey,{productKey:goodsKey,onHand:3,reserved:0,incoming:0,transferFreeInTransit:0});
+  put('warehouseStocks',warehouseId+'__'+goodsKey,{warehouseId,productKey:goodsKey,onHand:3,reserved:0,incoming:0,transferFreeInTransit:0});
+  put('inventoryLots',tag+'-lot',{productKey:goodsKey,warehouseId,receivedQty:3,remainingQty:3,lotNo:tag,expiryDate:'2028-01-01'});
+ }
+ await batch.commit();
+ const context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage(),dialogs=[],errors=[],functions=[];
+ await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;});
+ page.on('pageerror',error=>errors.push(error.message));
+ page.on('dialog',dialog=>{dialogs.push(dialog.message());return dialog.dismiss();});
+ await context.route('**/*',async route=>{
+  const url=new URL(route.request().url());
+  if(!['localhost','127.0.0.1'].includes(url.hostname)){await route.abort();return;}
+  if(url.port==='5001')functions.push(url.pathname);
+  await route.continue();
+ });
+ try{
+  await siteOpen(page);await siteLogin(page,{uid,email},'sales');await siteNav(page,'orders');
+  await page.locator('button[onclick="openOrderModal()"]').click();await page.locator('#orderModalOverlay.active').waitFor({state:'visible'});
+  await page.locator('#orderCustomer').fill(tag+'客戶');
+  const selectProduct=async(part,qty,price)=>{
+   await page.locator('#orderItemCode').fill(part);await page.locator('#orderItemCode').blur();
+   await page.waitForFunction(()=>document.getElementById('orderItemCode').dataset.productCheckStatus==='matched');
+   await page.locator('#orderQty').fill(String(qty));await page.locator('#orderUnitPrice').fill(String(price));
+  };
+  await selectProduct(code,2,100);
+  assert.equal(await page.locator('#orderItemCode').getAttribute('data-product-type'),'Service');
+  if(mixed){
+   await page.locator('button[onclick="addCurrentOrderItemToDraft()"]').click();await page.waitForFunction(()=>newOrderDraftItems.length===1);
+   await selectProduct(code+'G',1,150);await page.locator('#orderWarehouse').selectOption(warehouseId);
+   await page.locator('#orderDeliveryChoice').selectOption('BUSINESS');
+  }
+  await page.locator('#saveNewOrderBtn').click();await page.locator('#orderModalOverlay.active').waitFor({state:'hidden'});
+  await page.waitForFunction(uid=>ordersCache.some(o=>o.createdByUid===uid&&o.inventoryReservationStatus==='completed'),uid,{timeout:45000});
+  const snapshot=await db.collection('orders').where('createdByUid','==',uid).get();assert.equal(snapshot.size,1);
+  const orderId=snapshot.docs[0].id,order=snapshot.docs[0].data(),service=order.items.find(i=>i.productId===serviceKey);
+  assert.equal(order.items.length,mixed?2:1);assert.equal(order.totalPrice,mixed?350:200);
+  assert.equal(service.reservedQty,0);assert.equal(service.shortageQty,0);assert.equal(service.warehouseId,'');assert.equal(service.reservationStatus,'not_required');
+  assert.deepEqual(service.deliveryPlan,{});assert.equal(order.isDelivered,false);assert.deepEqual(order.deliveryRecords||[],[]);
+  for(const name of ['inventory','inventoryReservations'])assert.equal((await db.collection(name).doc(name==='inventory'?serviceKey:orderId+'__'+service.itemId).get()).exists,false);
+  for(const name of ['warehouseStocks','inventoryLots','inventoryMovements'])assert.equal((await db.collection(name).where('productKey','==',serviceKey).get()).size,0);
+  assert.equal((await db.collection('procurementDemands').where('sourceId','==',orderId).get()).size,0);
+  assert.equal((await db.collection('supplyOrders').where('sourceId','==',orderId).get()).size,0);
+  if(mixed){
+   const goods=order.items.find(i=>i.productId===goodsKey);
+   assert.equal(goods.reservedQty,1);assert.equal(goods.warehouseId,warehouseId);
+   assert.equal((await db.collection('inventoryReservations').doc(orderId+'__'+goods.itemId).get()).data().quantity,1);
+   const stock=(await db.collection('inventory').doc(goodsKey).get()).data();assert.equal(stock.onHand,3);assert.equal(stock.reserved,1);
+   assert.equal((await db.collection('warehouseStocks').doc(warehouseId+'__'+goodsKey).get()).data().reserved,1);
+   assert.equal((await db.collection('inventoryLots').doc(tag+'-lot').get()).data().remainingQty,3);
+  }
+  await siteOpen(page,'sales');await siteNav(page,'orders');
+  await page.locator('#ordersBody > tr').filter({hasText:tag+'客戶'}).waitFor({state:'visible'});
+  assert.deepEqual((await db.collection('orders').doc(orderId).get()).data(),order);
+  assert.equal((await db.collection('orders').where('createdByUid','==',uid).get()).size,1);
+  assert.deepEqual(dialogs,[]);assert.deepEqual(errors,[]);assert.deepEqual(functions,[]);
+ }catch(error){console.log('Service entry diagnostic',JSON.stringify({tag,dialogs,errors,functions}));throw error;}
+ finally{await context.close();}
+});
+
 // A different writer/permission contract from warehouse fulfillment: the
 // original UI with explicit local backend pilot must complete direct ship.
 for(const width of [1280,390])test('full site '+width+'px original UI gated PO purchase and owner direct arrival never touch physical stock',{timeout:180000},async()=>{
