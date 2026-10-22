@@ -104,6 +104,8 @@ async function commitV2FormalPurchase(db,uid,data){
       ||supply.createdByUid!==uid||supply.qty!==line.qty||supply.unitCost!==line.unitCost
       ||supply.sourceId!==line.orderId||supply.sourceItemId!==line.itemId
       ||supply.supplier!==intent.supplier
+      ||supply.fulfillmentType!==(saved.items[index]?.fulfillmentType||'WAREHOUSE')
+      ||supply.warehouseId!==(saved.items[index]?.warehouseId||'')
       ||supply.demandId!==demandCore.demandIdForSource({sourceType:'SALES_ORDER',sourceId:line.orderId,sourceItemId:line.itemId})
       ||saved.items[index]?.orderId!==line.orderId
       ||saved.items[index].itemId!==line.itemId||saved.items[index].qty!==line.qty
@@ -129,8 +131,8 @@ async function commitV2FormalPurchase(db,uid,data){
      lineScheduleDates:draft.items.map(item=>item.scheduleDate||'')}}); }
    catch(_){fail('failed-precondition','原採購文件不完整，不能確認採購');}
    if(draft.items.some((item,index)=>item.productId!==details[index].sourceItem.productId
-     || (item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
-     || item.warehouseId!==details[index].plan.warehouseId))
+     || (item.fulfillmentType||'WAREHOUSE')!==(details[index].sourceItem.fulfillmentType||'WAREHOUSE')
+     || (item.warehouseId||'')!==details[index].plan.warehouseId))
     fail('failed-precondition','採購文件產品或入庫倉庫與來源不同');
    if(signature(draftIntent)!==fingerprint || !draft.createdByUid || draft.supplyOrderIds?.length)
     fail('failed-precondition','確認內容與原採購文件不同');
@@ -151,7 +153,7 @@ async function commitV2FormalPurchase(db,uid,data){
     itemCode:String(sourceItem.itemCode||''),itemName:String(sourceItem.itemName||''),
     brand:String(sourceItem.brand||''),brandId:String(sourceItem.brandId||''),
     qty:lineIntent.qty,unitPrice:lineIntent.unitCost,warehouseId:plan.warehouseId,
-    fulfillmentType:'WAREHOUSE',
+    fulfillmentType:sourceItem.fulfillmentType||'WAREHOUSE',
     ...(intent.document?{scheduleDate:intent.document.lineScheduleDates[index]}:{})
    };
    poLines.push(line);
@@ -168,7 +170,7 @@ async function commitV2FormalPurchase(db,uid,data){
     supplierEmail:intent.document?.supplierSnapshot.email||'',unitCost:lineIntent.unitCost,
     orderDate:intent.poDate,expectedDate:intent.document?.lineScheduleDates[index]||'',
     scheduleDate:intent.document?intent.document.lineScheduleDates[index]:(demandBefore.scheduleDate||''),
-    fulfillmentType:'WAREHOUSE',warehouseId:plan.warehouseId,
+    fulfillmentType:sourceItem.fulfillmentType||'WAREHOUSE',warehouseId:plan.warehouseId,
     createdAt:now,updatedAt:now,createdByUid:uid,createdBy:actorName,createdByRole:actorRole
    });
    demands.push({ref:ref('procurementDemands',encodeURIComponent(plan.demandId)),
