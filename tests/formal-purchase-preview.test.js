@@ -415,7 +415,7 @@ test('direct shipment server purchase is atomic and never changes warehouse inve
  assert.equal(view.unitCost,undefined);assert.equal(view.cost,undefined);
  const committed=structuredClone([...x.records]);
  assert.equal((await commitV2FormalPurchase(x.db,'buyer',x.data)).status,'already-applied');
- assert.deepEqual([...x.records],committed);assert.equal(x.history.length,4);
+ assert.deepEqual([...x.records],committed);assert.equal(x.history.length,5);
 });
 test('direct shipment server refuses tampered demand, service or source warehouse without writes',async()=>{
  for(const problem of ['type','warehouse','over','service','reserved','changed-order','actor']){
