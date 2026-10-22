@@ -283,3 +283,9 @@
 原倉管從原待收清單，明確選擇來源出貨與批次，先將 B 倉 I2 分兩次實收，再收 A 倉 I1。三次均在真 Callable 成功後丟棄回覆，重整後只以原 requestId／operationId／itemId／倉／lot 確認；最後 returnPending=false 時仍須保留原結果確認入口。逐步核對同產品另一品項、其他倉及第三品項不變；只增加原倉／原 lot 實貨，不重開 CLOSE 預留、不更動 PO／供應／需求／成本及已出貨送達紀錄。最終三筆退貨與三份實收憑證、P 實貨三件／預留零，原供應在途零。
 
 沿既有 Client Service、commitLocationReturn 與 Core，沒有新增 writer／公式／Collection／Rules／Index／Listener／正式 Functions 匯出。本機 Node 1688 項通過，語法、生成一致性及 diff 通過；新增原站真 Auth／Chrome 必須以本批最新完整 CI 判定，通過前不合併。初始建單／預留仍是 Service fixture，PDF 實體輸出隔離；手動建單 UI、未履約多品項原畫面取消恢復、Preview／正式部署仍未全面驗收。未部署 Firebase，未改正式資料或角色。
+
+## 2026-10-22 — 多品項原畫面收齊後取消與恢復（待本批完整 CI）
+
+接續原三品項實際採購與四筆分批收貨，在打單前由原業務使用原訂單選單取消、恢復。兩次真 Callable 成功後均中斷回覆，重整原操作確認；核對全部 itemIds、固定 operationId、來源版本及兩倉意圖不變。取消應釋放 P 五件／Q 兩件預留，恢復依既有 Core 重新配置原七件；實貨、原批次、成本、兩張 PO、三筆供應及四筆實收憑證保持不變。取消後三筆需求為 CANCELLED，恢復後無待採購與待收數量。
+
+原取消 ID 在稍後恢復完成後重送，只確認既有憑證，不再次取消或釋放；其後沿同一原畫面案例完成逐品項打單、分倉出貨、送達及分倉退貨，驗證跨階段影響。沿現有 setV2OrderLifecycle 與 commitOrderLocationLifecycleAndRecover，沒有另造 writer 或數量公式，僅改測試及文件。此階段仍待最新完整 CI 通過，未部署 Firebase，未更動正式資料或角色；手動建單與 Preview／正式啟用邊界保留。
