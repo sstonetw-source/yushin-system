@@ -463,3 +463,12 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 
 本批無 Collection／欄位／Rules／Index／Listener 或正式資料遷移。沿原 receipts.operationId、Supply 收貨／incoming checkpoint、inventoryLots／Costs、inventoryMovements、公司／分倉與 inventoryReservations，同一收貨交易保存現有事實。原 Fulfillment 紀錄與其他倉／其他訂單預留不變，實收不可重複入庫。
 僅 demo-yushin 隔離試點；未部署 Firebase，Preview／正式尚未驗收。
+
+
+### 服務案件資料責任（2026-10-22：設計／純 Core，尚非 Firestore 集合）
+
+純計算契約 `YushinServiceWork.projectServiceCase` 以 `{orderId, itemId, caseId, kind, events[]}` 接收一個可追溯案件；每個 `events[]` 元素包含不可變操作 `id`、`type`、`occurredAt`、`actorUid` 及該階段必要證據。相同訂單品項可有多個不同 `caseId`（例如多支 pipette 或多個檢體）。事件次序推導案件狀態與受託物位置，不能由商品 `deliveryRecords` 推定服務完成；Bio-Plex 的共用試劑及維修實際零件仍遵循既有 `inventory`、`inventoryLots`、`purchaseOrders` 和實際領用憑證。
+
+**已寫但尚未接線：** `functions/service-case-service.js` 在單一 Admin SDK transaction 讀取授權帳號、來源訂單、Service 主檔及案件，僅對預定的 `serviceCases/{encode(orderId)|encode(itemId)|encode(caseId)}` 寫入事件與衍生狀態；固定 ID 重試保護、真角色與所有權查核；`occurredAt` 是實際作業時間，`createdAt/updatedAt` 是伺服器寫入時間。只有未匯出的寫入函式，**尚未建立正式可用的 Cloud Functions 入口，也未開放 Rules 讀取或部署**，所以此 Collection 不是目前正式 Firestore 中已存在的集合。
+
+**仍未完成／驗收：** 服務類型主檔 UI、Role + Auth Callable 真 Emulator、案件與訂單品項完成量關係、個別案件的委外費用與物料領用關聯、客戶交付／核銷整合及 Preview。
