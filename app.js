@@ -15689,8 +15689,8 @@ async function commitFormalPurchaseEmulator(poRecord,actorUid,assertActor) {
     check();
     if(poRecord.items.length>5||poRecord.items.some(item=>!item.orderId||!item.itemId
         ||(item.sourceType&&item.sourceType!=='SALES_ORDER')
-        ||(item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'))
-        throw new Error('採購後端試點目前只支援 1–5 個客戶訂單實體入庫品項。');
+        ||!['WAREHOUSE','DIRECT_SHIP'].includes(item.fulfillmentType||'WAREHOUSE')))
+        throw new Error('採購後端試點目前只支援 1–5 個客戶訂單實體入庫或直送品項。');
     const request={poNo:poRecord.poNo,poDate:poRecord.poDate,
         supplier:poRecord.supplierName||poRecord.vendorName,
         items:poRecord.items.map(item=>({orderId:item.orderId,itemId:item.itemId,
@@ -16010,7 +16010,8 @@ async function receiveV2SupplyEmulator(supplyId,qty,lotNo,expiryDate,operationId
     const uid=options.actorUid??currentUser?.uid,role=options.actorRole??currentUserRole;
     const check=()=>{
         if(!uid||auth.currentUser?.uid!==uid||currentUser?.uid!==uid||currentUserRole!==role
-            ||!['admin','purchaser','warehouse'].includes(role)||!canReceiveInventoryCapability())
+            ||!(['admin','purchaser','warehouse'].includes(role)&&canReceiveInventoryCapability()
+                 ||['sales','engineer'].includes(role)))
             throw Error('收貨身分已變更，請以原帳號核對。');
     };
     check();
@@ -16026,10 +16027,19 @@ async function receiveV2SupplyEmulator(supplyId,qty,lotNo,expiryDate,operationId
         throw Error('收貨回覆不明確，請使用原資料重試。');
     const receipt=await db.collection('receipts').doc(operationId).get({source:'server'});check();
     const proof=receipt.exists?receipt.data():null;
-    if(!proof||proof.supplyOrderId!==supplyId||proof.qty!==qty||proof.lotNo!==lotNo||proof.expiryDate!==expiryDate
-        ||proof.createdByUid!==uid||proof.createdByRole!==role||proof.reservationLocationSchemaVersion!==2)
+    // Direct receipts deliberately omit warehouse lot/expiry fields. Match that
+    // schema without weakening exact batch checks for physical warehouse receipts.
+    const direct=proof?.fulfillmentType==='DIRECT_SHIP';
+    const empty=value=>value===undefined||value==='';
+    const batchMatches=direct
+        ? lotNo===''&&expiryDate===''&&empty(proof.lotNo)&&empty(proof.expiryDate)&&proof.warehouseId===''
+        : proof?.lotNo===lotNo&&proof?.expiryDate===expiryDate;
+    if(!proof||proof.supplyOrderId!==supplyId||proof.qty!==qty||!batchMatches
+        ||proof.createdByUid!==uid||proof.createdByRole!==role
+        ||(!direct&&proof.reservationLocationSchemaVersion!==2))
         throw Error('收貨已可能提交，但憑證尚未確認，請使用原資料重試。');
-    options.onStockCommitted?.(proof.productKey,proof.warehouseId);
+    if(proof.fulfillmentType!=='DIRECT_SHIP')
+        options.onStockCommitted?.(proof.productKey,proof.warehouseId);
     check();return result.affectedOrderIds;
 }
 // Transaction layer only. Optional synchronous observers report committed locations;
@@ -18098,8 +18108,8 @@ function rememberFormalPurchase(poRecord, actorUid, actorRole) {
     if (!Array.isArray(poRecord?.items) || !poRecord.items.length
         || (globalThis.YUSHIN_FORMAL_PURCHASE_EMULATOR === true && (poRecord.items.length > 5 || poRecord.items.some(item => !item.orderId || !item.itemId
             || (item.sourceType && item.sourceType !== 'SALES_ORDER')
-            || (item.fulfillmentType || 'WAREHOUSE') !== 'WAREHOUSE'))))
-        throw Error('採購後端試點目前只支援 1–5 個客戶訂單實體入庫品項。');
+            || !['WAREHOUSE','DIRECT_SHIP'].includes(item.fulfillmentType || 'WAREHOUSE')))))
+        throw Error('採購後端試點目前只支援 1–5 個客戶訂單實體入庫或直送品項。');
     if (pendingFormalPurchase()) throw Error('請先確認前次採購結果，勿另建採購單。');
     const pending = {version:1, actorUid, actorRole, poRecord};
     // A failed storage write stops the operation BEFORE the server is called.

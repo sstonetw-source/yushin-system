@@ -8,6 +8,7 @@ const {createHash}=require('node:crypto');
 const demandCore=require('./shared/procurement-demand-core.js');
 const {strictRequest,validateV2FormalPurchaseTx}=require('./formal-purchase-preview-service.js');
 const {normalizePurchaseDocument,purchaseDocumentFields}=require('./formal-purchase-document');
+const {sanitizeSupply}=require('./shared/stock-permissions');
 function fail(code,message){const e=new Error(message);e.code=code;throw e;}
 function text(value,label,max=200){
  if(typeof value!=='string'||!value.trim()||value!==value.trim()
@@ -104,6 +105,8 @@ async function commitV2FormalPurchase(db,uid,data){
       ||supply.createdByUid!==uid||supply.qty!==line.qty||supply.unitCost!==line.unitCost
       ||supply.sourceId!==line.orderId||supply.sourceItemId!==line.itemId
       ||supply.supplier!==intent.supplier
+      ||supply.fulfillmentType!==(saved.items[index]?.fulfillmentType||'WAREHOUSE')
+      ||supply.warehouseId!==(saved.items[index]?.warehouseId||'')
       ||supply.demandId!==demandCore.demandIdForSource({sourceType:'SALES_ORDER',sourceId:line.orderId,sourceItemId:line.itemId})
       ||saved.items[index]?.orderId!==line.orderId
       ||saved.items[index].itemId!==line.itemId||saved.items[index].qty!==line.qty
@@ -129,8 +132,8 @@ async function commitV2FormalPurchase(db,uid,data){
      lineScheduleDates:draft.items.map(item=>item.scheduleDate||'')}}); }
    catch(_){fail('failed-precondition','原採購文件不完整，不能確認採購');}
    if(draft.items.some((item,index)=>item.productId!==details[index].sourceItem.productId
-     || (item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
-     || item.warehouseId!==details[index].plan.warehouseId))
+     || (item.fulfillmentType||'WAREHOUSE')!==(details[index].sourceItem.fulfillmentType||'WAREHOUSE')
+     || (item.warehouseId||'')!==details[index].plan.warehouseId))
     fail('failed-precondition','採購文件產品或入庫倉庫與來源不同');
    if(signature(draftIntent)!==fingerprint || !draft.createdByUid || draft.supplyOrderIds?.length)
     fail('failed-precondition','確認內容與原採購文件不同');
@@ -151,7 +154,7 @@ async function commitV2FormalPurchase(db,uid,data){
     itemCode:String(sourceItem.itemCode||''),itemName:String(sourceItem.itemName||''),
     brand:String(sourceItem.brand||''),brandId:String(sourceItem.brandId||''),
     qty:lineIntent.qty,unitPrice:lineIntent.unitCost,warehouseId:plan.warehouseId,
-    fulfillmentType:'WAREHOUSE',
+    fulfillmentType:sourceItem.fulfillmentType||'WAREHOUSE',
     ...(intent.document?{scheduleDate:intent.document.lineScheduleDates[index]}:{})
    };
    poLines.push(line);
@@ -168,7 +171,7 @@ async function commitV2FormalPurchase(db,uid,data){
     supplierEmail:intent.document?.supplierSnapshot.email||'',unitCost:lineIntent.unitCost,
     orderDate:intent.poDate,expectedDate:intent.document?.lineScheduleDates[index]||'',
     scheduleDate:intent.document?intent.document.lineScheduleDates[index]:(demandBefore.scheduleDate||''),
-    fulfillmentType:'WAREHOUSE',warehouseId:plan.warehouseId,
+    fulfillmentType:sourceItem.fulfillmentType||'WAREHOUSE',warehouseId:plan.warehouseId,
     createdAt:now,updatedAt:now,createdByUid:uid,createdBy:actorName,createdByRole:actorRole
    });
    demands.push({ref:ref('procurementDemands',encodeURIComponent(plan.demandId)),
@@ -201,7 +204,13 @@ async function commitV2FormalPurchase(db,uid,data){
   // No writes are staged until EVERY line passes and all deterministic supply
   // IDs have been read. A bad final row rejects the whole PO, never a prefix.
   if(draft)tx.set(poRef,savedPo);else tx.create(poRef,savedPo);
-  supplies.forEach((supply,index)=>tx.create(supplyRefs[index],supply));
+  supplies.forEach((supply,index)=>{
+   tx.create(supplyRefs[index],supply);
+   // The owner's direct-arrival UI reads a cost-redacted operational view.
+   // Create it in the SAME transaction as the authoritative supply record.
+   if(supply.fulfillmentType==='DIRECT_SHIP')
+    tx.create(ref('receivingSupplyOrders',supplyIds[index]),sanitizeSupply(supply));
+  });
   demands.forEach(demand=>tx.set(demand.ref,demand.data));
   for(const [orderId,{source,items}] of sourceUpdates){
    // Preserve other queues. One purchased line must not hide an unpurchased

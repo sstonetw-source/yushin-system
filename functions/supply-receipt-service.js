@@ -21,7 +21,7 @@ async function receiveV2Supply(db,uid,input){
  if(!process.env.FIRESTORE_EMULATOR_HOST||db.projectId!=='demo-yushin')fail('failed-precondition','收貨後端僅允許 demo-yushin Emulator');
  if(typeof uid!=='string'||!uid||uid.includes('/'))fail('permission-denied','登入身分不正確');
  const userRef=db.collection('users').doc(uid),profile=await userRef.get();
- const allowed=data=>data&&data.active!==false&&data.disabled!==true&&['admin','purchaser','warehouse'].includes(data.role);
+ const allowed=data=>data&&data.active!==false&&data.disabled!==true&&['admin','purchaser','warehouse','sales','engineer'].includes(data.role);
  if(!profile.exists||!allowed(profile.data()))fail('permission-denied','目前沒有收貨權限');
  const role=profile.data().role,actor=String(profile.data().name||uid);
  const runRoleTransaction=callback=>db.runTransaction(async native=>{
@@ -35,18 +35,31 @@ async function receiveV2Supply(db,uid,input){
   const supplyRef=db.collection('supplyOrders').doc(intent.supplyId),supplySnap=await get(supplyRef);
   if(!supplySnap.exists)fail('not-found','找不到供應紀錄');
   const supply=supplySnap.data();
-  if(supply.type!=='PURCHASING_PO'||supply.fulfillmentType!=='WAREHOUSE'||!supply.orderId||!supply.itemId)fail('failed-precondition','試點只支援客戶訂單的實體採購收貨');
+  const directShip=supply.fulfillmentType==='DIRECT_SHIP';
+  if(supply.type!=='PURCHASING_PO'||!['WAREHOUSE','DIRECT_SHIP'].includes(supply.fulfillmentType)
+    ||!supply.orderId||!supply.itemId)fail('failed-precondition','試點只支援客戶訂單的實體採購／原廠直送');
+  if(directShip&&(intent.lotNo||intent.expiryDate||Number(supply.incomingRegisteredQty||0)!==0))
+   fail('failed-precondition','原廠直送不得登記倉庫在途、批號或效期');
   const orderSnap=await get(db.collection('orders').doc(supply.orderId));
-  const ledger=await get(db.collection('inventoryReservations').doc(supply.orderId+'__'+supply.itemId));
-  if(!orderSnap.exists||!ledger.exists||ledger.data().locationSchemaVersion!==2)fail('failed-precondition','來源未完成 v2 預留');
+  if(!orderSnap.exists)fail('failed-precondition','找不到來源訂單');
   const order=orderSnap.data();
+  if(directShip){
+   if(role!=='admin'&&(!['sales','engineer'].includes(role)||order.ownerUid!==uid
+      ||supply.ownerUid!==uid))fail('permission-denied','僅原負責業務可確認直送到貨');
+  }else{
+   if(!['admin','purchaser','warehouse'].includes(role))fail('permission-denied','目前沒有實體入庫權限');
+   const ledger=await get(db.collection('inventoryReservations').doc(supply.orderId+'__'+supply.itemId));
+   if(!ledger.exists||ledger.data().locationSchemaVersion!==2)fail('failed-precondition','來源未完成 v2 預留');
+  }
   // Normal 1–5-item source. The existing Receiving Service validates every
   // immutable shipment/return proof and current outstanding demand, including
   // sibling reservation and receipts after partial fulfillment. Cancellation stays gated.
   // The existing Service remains authoritative for quantities and all writes.
   const previous=await get(db.collection('receipts').doc(intent.operationId));
-  if(previous.exists&&previous.data().reservationLocationSchemaVersion!==2)fail('failed-precondition','原收貨憑證不是 v2 格式');
-  if(!previous.exists&&(!Array.isArray(order.items)||order.items.length<1||order.items.length>5||order.status!=='active'||order.orderStatus!=='normal'))fail('failed-precondition','收貨登入試點僅支援正常 1–5 品項來源；取消尚未開放');
+  if(previous.exists&&!directShip&&previous.data().reservationLocationSchemaVersion!==2)
+   fail('failed-precondition','原收貨憑證不是 v2 格式');
+  if(!previous.exists&&(!Array.isArray(order.items)||order.items.length<1||order.items.length>5||order.status!=='active'||order.orderStatus!=='normal'))
+   fail('failed-precondition','收貨登入試點僅支援正常 1–5 品項來源；取消尚未開放');
   const adapter={get,update(reference,data){
    native.update(reference,data);
    if(reference.path===supplyRef.path)native.set(db.collection('receivingSupplyOrders').doc(intent.supplyId),stockPermissions.sanitizeSupply({...supply,...data}));
