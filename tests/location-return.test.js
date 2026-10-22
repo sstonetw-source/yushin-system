@@ -142,3 +142,26 @@ test('shared return proof reconstructs linked intent and detects request-link ta
  await assert.rejects(core.validateLocationReturnProofs({returnRecords:[tampered]},intent,'P',
   [{...proof,data:{...proof.data,returnRecord:tampered}}],{hashIntent}),/憑證/);
 });
+
+test('multi-item return receipt settles only the linked item and preserves other pending requests',()=>{
+ const first=pendingRequest({id:'R-A',itemId:'I1',qty:2});
+ const second=pendingRequest({id:'R-B',itemId:'I2',qty:3});
+ const third=pendingRequest({id:'R-C',itemId:'I3',qty:1});
+ const order={returnRequests:[first,second,third],returnPending:true,returnRecords:[]};
+ const receipt=planLocationReturnRequest(order,{itemId:'I2',requestId:'R-B'},2);
+ assert.equal(receipt.requests.length,3);
+ assert.deepEqual(receipt.requests[0],first);
+ assert.deepEqual(receipt.requests[2],third);
+ assert.equal(receipt.requests[1].receivedQty,2);
+ assert.equal(receipt.requests[1].status,'PENDING');
+ assert.equal(receipt.returnPending,true);
+ assert.deepEqual(order.returnRequests,[first,second,third]);
+ const after={...order,returnRequests:receipt.requests,returnRecords:[{requestId:'R-B',itemId:'I2',qty:2,settlement:'CLOSE'}]};
+ const complete=planLocationReturnRequest(after,{itemId:'I2',requestId:'R-B'},1);
+ assert.equal(complete.requests[1].status,'RECEIVED');
+ assert.equal(complete.requests[1].receivedQty,3);
+ assert.deepEqual(complete.requests[0],first);
+ assert.deepEqual(complete.requests[2],third);
+ assert.equal(complete.returnPending,true);
+ assert.throws(()=>planLocationReturnRequest(after,{itemId:'I1',requestId:'R-B'},1));
+});
