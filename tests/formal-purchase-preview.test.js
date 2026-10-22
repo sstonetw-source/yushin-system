@@ -388,3 +388,53 @@ test('server confirmation rejects stale document revision even when quantities a
  data.documentRevision=2;
  assert.equal((await commitV2FormalPurchase(x.db,'buyer',data)).status,'committed');
 });
+
+
+// Direct shipment commits a supplier obligation and customer demand, never stock.
+function directSourceFixture(){
+ const x=writeFixture(),order=x.records.get('orders/ORDER-1'),item=order.items[0];
+ Object.assign(item,{qty:7,fulfillmentType:'DIRECT_SHIP',warehouseId:'',
+  reservedQty:0,shortageQty:0,receivedQty:0,supplyOrderedQty:0});
+ const demand=x.records.get('procurementDemands/'+encodeURIComponent(x.demandId));
+ Object.assign(demand,{fulfillmentType:'DIRECT_SHIP',warehouseId:'',
+  requestedQty:7,orderedQty:0,receivedQty:0,remainingToOrderQty:7,remainingToReceiveQty:0,status:'PENDING'});
+ return x;
+}
+test('direct shipment server purchase is atomic and never changes warehouse inventory',async()=>{
+ const x=directSourceFixture(),result=await commitV2FormalPurchase(x.db,'buyer',x.data);
+ assert.equal(result.status,'committed');
+ const supply=x.records.get('supplyOrders/'+result.supplyOrderIds[0]),po=x.records.get('purchaseOrders/'+x.data.poNo);
+ assert.equal(supply.fulfillmentType,'DIRECT_SHIP');assert.equal(supply.warehouseId,'');
+ assert.equal(supply.incomingRegisteredQty,0);assert.equal(supply.receivedQty,0);
+ assert.equal(po.items[0].fulfillmentType,'DIRECT_SHIP');assert.equal(po.items[0].warehouseId,'');
+ assert.equal(x.records.get('procurementDemands/'+encodeURIComponent(x.demandId)).remainingToOrderQty,3);
+ assert.equal(x.records.get('orders/ORDER-1').items[0].supplyOrderedQty,4);
+ assert.equal(x.history.length,4);assert.equal(x.history.some(c=>/inventory|warehouseStocks|inventoryLots|Movements/.test(c.path)),false);
+ const committed=structuredClone([...x.records]);
+ assert.equal((await commitV2FormalPurchase(x.db,'buyer',x.data)).status,'already-applied');
+ assert.deepEqual([...x.records],committed);assert.equal(x.history.length,4);
+});
+test('direct shipment server refuses tampered demand, service or source warehouse without writes',async()=>{
+ for(const problem of ['type','warehouse','over','service','reserved','changed-order','actor']){
+  const x=directSourceFixture(),order=x.records.get('orders/ORDER-1'),
+   demand=x.records.get('procurementDemands/'+encodeURIComponent(x.demandId));
+  if(problem==='type')demand.fulfillmentType='WAREHOUSE';
+  if(problem==='warehouse')order.items[0].warehouseId='W';
+  if(problem==='over')x.data.qty=8;
+  if(problem==='service')order.items[0].productType='SERVICE';
+  if(problem==='reserved')order.items[0].reservedQty=1;
+  if(problem==='changed-order')demand.requestedQty=99;
+  const before=structuredClone([...x.records]);
+  await assert.rejects(commitV2FormalPurchase(x.db,problem==='actor'?'seller':'buyer',x.data));
+  assert.equal(x.history.length,0);assert.deepEqual([...x.records],before);
+ }
+});
+test('direct shipment document upgrade checks original fulfillment mode before writes',async()=>{
+ const x=directSourceFixture(),one=savedDocumentFixture(x);
+ one.draft.items[0].warehouseId='';one.draft.items[0].fulfillmentType='DIRECT_SHIP';
+ assert.equal((await commitV2FormalPurchase(x.db,'buyer',one.data)).status,'committed');
+ const y=directSourceFixture(),two=savedDocumentFixture(y);
+ two.draft.items[0].warehouseId='W';two.draft.items[0].fulfillmentType='WAREHOUSE';
+ await assert.rejects(commitV2FormalPurchase(y.db,'buyer',two.data),{code:'failed-precondition'});
+ assert.equal(y.history.length,0);
+});
