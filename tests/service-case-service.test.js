@@ -129,3 +129,15 @@ test('Each service case has a distinct deterministic key even if IDs include sep
   assert.notEqual(caseDocId('a','b|c','d'),caseDocId('a','b','c|d'));
   assert.throws(()=>caseDocId('O','I','../unsafe'),/識別碼/);
 });
+
+test('live Service product master selects mandatory workflow, not a caller-editable order type',async()=>{
+  const mismatch=fixture({kind:'BIOPLEX_LAB'});
+  mismatch.docs.get('orders/O').items[0].serviceKind='ONSITE_REPAIR';
+  await assert.rejects(commit(mismatch,intent('SAMPLE_RECEIVED')),/不一致/);
+  assert.equal(mismatch.written.length,0);
+
+  const noMasterKind=fixture({kind:'BIOPLEX_LAB'});
+  delete noMasterKind.docs.get('products/P').serviceKind;
+  await assert.rejects(commit(noMasterKind,intent('SAMPLE_RECEIVED')),/正式服務主檔/);
+  assert.equal(noMasterKind.written.length,0);
+});
