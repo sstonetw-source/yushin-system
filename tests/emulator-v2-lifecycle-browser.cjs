@@ -1904,3 +1904,105 @@ for(const multi of [false,true])for(const width of [1280,390])test('full site '+
    orders:typeof ordersCache==='undefined'?[]:ordersCache.filter(o=>o.customerName?.startsWith('manual-'))}))),JSON.stringify({errors,dialogs,functions}));throw error;
  }finally{await context.close();}
 });
+
+// A different writer/permission contract from warehouse fulfillment: the
+// original Client path, with no v2 adapter or callable, must complete direct ship.
+for(const width of [1280,390])test('full site '+width+'px original direct shipment initialization purchase and owner arrival never touch physical stock',{timeout:180000},async()=>{
+ const tag='direct-entry-'+width,orderId=tag+'-order',key=tag+'-product',warehouseId=tag+'-warehouse',accounts={};
+ for(const role of ['sales','purchaser']){
+  const uid=tag+'-'+role,email=uid+'@example.test';await auth.createUser({uid,email,password});
+  await db.collection('users').doc(uid).set({role,active:true,name:role,email,code:role==='sales'?'B':role});accounts[role]={uid,email};
+ }
+ const setup=db.batch(),put=(name,id,data)=>setup.set(db.collection(name).doc(id),data);
+ put('products',key,{productId:key,manufacturerPartNo:tag,normalizedPartNo:tag,productName:'原廠直送試劑',
+  brand:'Roche',brandName:'Roche',productType:'Goods',productLine:tag,active:true,status:'ACTIVE',listPrice:100});
+ put('warehouses',warehouseId,{warehouseName:tag,active:true});
+ put('suppliers',tag+'-supplier',{supplierId:tag+'-supplier',supplierName:tag+'供應商',purchaseHeaderName:tag+'供應商',active:true});
+ put('brandSupplierMappings',tag+'-mapping',{brandName:'Roche',productLine:tag,supplierId:tag+'-supplier',active:true,isDefault:false});
+ put('inventory',key,{productKey:key,onHand:5,reserved:1,incoming:0,transferFreeInTransit:0});
+ put('warehouseStocks',warehouseId+'__'+key,{productKey:key,warehouseId,onHand:5,reserved:1,incoming:0,transferFreeInTransit:0});
+ put('inventoryLots',tag+'-lot',{productKey:key,warehouseId,lotNo:tag,receivedQty:5,remainingQty:5});
+ await setup.commit();
+ const source={orderNo:orderId,customerName:tag+'客戶',ownerUid:accounts.sales.uid,salesCode:'B',status:'active',orderStatus:'normal',
+  createdByUid:accounts.sales.uid,createdByRole:'sales',createdAt:new Date().toISOString(),productId:key,productMasterMatched:true,
+  itemCount:1,orderSchemaVersion:2,orderDate:'2026-10-22',inventoryReservationStatus:'pending',inventoryReservationAttemptId:tag+'-sync',
+  deliveryRecords:[],returnRecords:[],deliveredQty:0,isDelivered:false,totalPrice:300,
+  items:[{itemId:'I',productId:key,itemCode:tag,itemName:'原廠直送試劑',brand:'Roche',productLine:tag,productType:'Goods',
+   qty:3,orderedQty:3,unitPrice:100,reservedQty:0,shortageQty:0,receivedQty:0,supplyOrderedQty:0,deliveredQty:0,returnedQty:0,
+   fulfillmentType:'DIRECT_SHIP',warehouseId:'',deliveryPlan:{mode:'CUSTOMER_SHIP',contact:'直送收件人',phone:'02-12345678',address:'台北市直送驗收地址'}}]};
+ const creatorApp=clientApp({apiKey:'fake-api-key',authDomain:'demo-yushin.firebaseapp.com',projectId:'demo-yushin',appId:tag},tag);
+ try{
+  const session=clientAuth(creatorApp);connectAuthEmulator(session,'http://127.0.0.1:9099',{disableWarnings:true});
+  await signInWithEmailAndPassword(session,accounts.sales.email,password);
+  await orderCreationClient(creatorApp,accounts.sales.uid,'sales').create(orderId,source);
+ }finally{await deleteClientApp(creatorApp);}
+ const physical=async()=>({inventory:(await db.collection('inventory').doc(key).get()).data(),
+  stock:(await db.collection('warehouseStocks').doc(warehouseId+'__'+key).get()).data(),
+  lots:(await db.collection('inventoryLots').where('productKey','==',key).get()).docs.map(d=>({id:d.id,...d.data()})),
+  movements:(await db.collection('inventoryMovements').where('productKey','==',key).get()).docs.map(d=>({id:d.id,...d.data()})),
+  reservations:(await db.collection('inventoryReservations').where('productKey','==',key).get()).docs.map(d=>({id:d.id,...d.data()}))});
+ const before=await physical(),context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
+ const errors=[],dialogs=[],external=[],functions=[];
+ await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;});
+ page.on('pageerror',error=>errors.push(error.message));page.on('dialog',d=>{dialogs.push(d.message());return d.type()==='confirm'?d.accept():d.dismiss();});
+ await context.route('**/*',async route=>{const url=new URL(route.request().url());
+  if(!['localhost','127.0.0.1'].includes(url.hostname)){external.push(url.hostname);await route.abort();return;}
+  if(url.port==='5001')functions.push(url.pathname);await route.continue();});
+ try{
+  await siteOpen(page);await siteLogin(page,accounts.sales,'sales');await siteNav(page,'orders');
+  const sourceRow=page.locator('#ordersBody > tr').filter({hasText:orderId});await sourceRow.waitFor({state:'visible'});
+  await sourceRow.locator('button[onclick^="retryOrderInventoryReservation("]').click();
+  await page.waitForFunction(id=>ordersCache.some(o=>o.id===id&&o.inventoryReservationStatus==='completed')&&!pendingOrderReservationIds.has(id),orderId,{timeout:45000});
+  assert.deepEqual(await physical(),before);
+  const demandId=encodeURIComponent('SALES_ORDER:'+orderId+':I');
+  assert.equal((await db.collection('procurementDemands').doc(demandId).get()).data().remainingToOrderQty,3);
+  await siteLogout(page);await siteLogin(page,accounts.purchaser,'purchaser');await siteNav(page,'purchasing');
+  const pending=page.locator('#purchasePendingBody tr').filter({hasText:orderId});await pending.waitFor({state:'visible'});
+  await pending.getByRole('button',{name:'產生採購單'}).click();await page.locator('#poModalOverlay.active').waitFor({state:'visible'});
+  await page.waitForFunction(()=>poNoReady&&!poNoLoading&&!poDraftLoading);
+  await page.evaluate(()=>{window.directPdfOutputs=[];printSavedPoDocument=async(poNo,vendor)=>window.directPdfOutputs.push({poNo,vendor});});
+  await page.locator('#poVendorName').fill(tag+'供應商');await page.locator('#poVendorName').blur();
+  await page.locator('#poItemsBody input[onchange*="unitPrice"]').fill('20');await page.locator('#poItemsBody input[onchange*="unitPrice"]').blur();
+  await page.locator('#printPurchaseOrderBtn').click();await page.waitForFunction(()=>!poSaveInProgress&&poEditingId&&window.directPdfOutputs.length===1);
+  const poId=await page.evaluate(()=>poEditingId);
+  assert.equal((await db.collection('purchaseOrders').doc(poId).get()).data().status,'DRAFT');
+  assert.equal((await db.collection('supplyOrders').where('sourceId','==',orderId).get()).size,0);assert.deepEqual(await physical(),before);
+  await page.locator('#confirmPoOrderedBtn').click();
+  await page.waitForFunction(id=>!formalPurchaseRecoveryRunning&&poListCache.some(p=>p.id===id&&p.status==='ORDERED'),poId,{timeout:45000});
+  const po=(await db.collection('purchaseOrders').doc(poId).get()).data();assert.equal(po.supplyOrderIds.length,1);
+  const supplyId=po.supplyOrderIds[0],committed=(await db.collection('supplyOrders').doc(supplyId).get()).data();
+  assert.equal(committed.fulfillmentType,'DIRECT_SHIP');assert.equal(committed.qty,3);assert.equal(committed.incomingRegisteredQty||0,0);
+  assert.deepEqual(await physical(),before);
+  await siteLogout(page);await siteLogin(page,accounts.sales,'sales');await siteNav(page,'orders');
+  for(const [qty,total] of [[1,1],[2,3]]){
+   const row=page.locator('#ordersBody > tr').filter({hasText:orderId});
+   await row.locator('button[onclick^="openOrderDirectShipReceipt("]').click();
+   await page.locator('#poReceiptBatchOverlay.active').waitFor({state:'visible'});
+   assert.equal(await page.locator('#poReceiptBatchBody .po-receive-lot').isDisabled(),true);
+   assert.equal(await page.locator('#poReceiptBatchBody .po-receive-expiry').isDisabled(),true);
+   await page.locator('#poReceiptBatchBody .po-receive-qty').fill(String(qty));await page.locator('#savePoReceiptBatchBtn').click();
+   await page.waitForFunction(({id,total,supplyId})=>ordersCache.some(o=>o.id===id&&o.items[0].receivedQty===total)
+    &&!receiptTaskJobs.has(receiptTaskKey(supplyId)),{id:orderId,total,supplyId},{timeout:45000});
+   assert.equal((await db.collection('supplyOrders').doc(supplyId).get()).data().receivedQty,total);
+   assert.deepEqual(await physical(),before);
+  }
+  const done=(await db.collection('orders').doc(orderId).get()).data();
+  assert.equal(done.deliveredQty,3);assert.equal(done.isDelivered,true);assert.equal(done.items[0].receivedQty,3);
+  assert.equal(done.deliveryRecords.length,2);assert.ok(done.deliveryRecords.every(r=>r.sourceType==='DIRECT_SHIP_RECEIPT'&&r.sourceId===supplyId));
+  assert.equal((done.warehouseShipmentRecords||[]).length,0);assert.equal(done.items[0].reservedQty,0);
+  const demand=(await db.collection('procurementDemands').doc(demandId).get()).data();
+  assert.equal(demand.receivedQty,3);assert.equal(demand.remainingToOrderQty,0);assert.equal(demand.remainingToReceiveQty,0);
+  const receipts=(await db.collection('receipts').where('supplyOrderId','==',supplyId).get()).docs.map(d=>({id:d.id,...d.data()}));
+  assert.equal(receipts.length,2);assert.ok(receipts.every(r=>r.fulfillmentType==='DIRECT_SHIP'&&!r.lotNo&&!r.warehouseId));
+  await siteOpen(page,'sales');await siteNav(page,'orders');
+  assert.deepEqual((await db.collection('orders').doc(orderId).get()).data(),done);assert.deepEqual(await physical(),before);
+  assert.equal((await db.collection('receipts').where('supplyOrderId','==',supplyId).get()).size,2);
+  assert.deepEqual(functions,[]);assert.deepEqual(external,[]);assert.deepEqual(errors,[]);
+  assert.ok(dialogs.every(message=>message.startsWith('確認採購單 ')),JSON.stringify(dialogs));
+  console.log('Full site '+width+'px: original direct source sync, DRAFT/PDF, explicit Client purchase and owner arrival 1+2 complete; company/warehouse/lot/movement/reservation unchanged, reload read-only, zero Functions calls. Source form input and physical PDF output remain explicit fixture boundaries.');
+ }catch(error){
+  console.log('Direct entry '+width+'px diagnostic:',JSON.stringify(await page.evaluate(()=>({role:typeof currentUserRole==='undefined'?'none':currentUserRole,
+   feedback:document.getElementById('actionFeedback')?.textContent,po:document.getElementById('poSaveStatus')?.textContent,
+   tasks:typeof receiptTaskJobs==='undefined'?[]:[...receiptTaskJobs.values()],orders:typeof ordersCache==='undefined'?[]:ordersCache.filter(o=>o.id.includes('direct-entry'))}))),JSON.stringify({errors,dialogs,functions}));throw error;
+ }finally{await context.close();}
+});
