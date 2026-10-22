@@ -8,6 +8,7 @@ const {createHash}=require('node:crypto');
 const demandCore=require('./shared/procurement-demand-core.js');
 const {strictRequest,validateV2FormalPurchaseTx}=require('./formal-purchase-preview-service.js');
 const {normalizePurchaseDocument,purchaseDocumentFields}=require('./formal-purchase-document');
+const {sanitizeSupply}=require('./shared/stock-permissions');
 function fail(code,message){const e=new Error(message);e.code=code;throw e;}
 function text(value,label,max=200){
  if(typeof value!=='string'||!value.trim()||value!==value.trim()
@@ -203,7 +204,13 @@ async function commitV2FormalPurchase(db,uid,data){
   // No writes are staged until EVERY line passes and all deterministic supply
   // IDs have been read. A bad final row rejects the whole PO, never a prefix.
   if(draft)tx.set(poRef,savedPo);else tx.create(poRef,savedPo);
-  supplies.forEach((supply,index)=>tx.create(supplyRefs[index],supply));
+  supplies.forEach((supply,index)=>{
+   tx.create(supplyRefs[index],supply);
+   // The owner's direct-arrival UI reads a cost-redacted operational view.
+   // Create it in the SAME transaction as the authoritative supply record.
+   if(supply.fulfillmentType==='DIRECT_SHIP')
+    tx.create(ref('receivingSupplyOrders',supplyIds[index]),sanitizeSupply(supply));
+  });
   demands.forEach(demand=>tx.set(demand.ref,demand.data));
   for(const [orderId,{source,items}] of sourceUpdates){
    // Preserve other queues. One purchased line must not hide an unpurchased
