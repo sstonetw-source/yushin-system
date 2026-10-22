@@ -97,3 +97,15 @@ test('Bio-Plex cases stay separate from pooled reagent stock and repair material
   assert.equal('inventoryLots' in caseA,false);
   assert.equal(core.projectServiceCase(base('ONSITE_REPAIR')).nextEvent,'REPAIR_COMPLETED');
 });
+
+test('service timestamps reject impossible calendar dates rather than normalizing them',()=>{
+  for(const impossible of ['2026-02-30T12:00:00Z','2026-04-31T01:30:00+08:00',
+    '2026-13-01T00:00:00Z','2026-10-22T24:00:00Z']){
+    assert.throws(()=>core.normalizedEvent({
+      ...event('bad-date','SAMPLE_RECEIVED'),occurredAt:impossible
+    }),/有效日期/);
+  }
+  assert.equal(core.normalizedEvent({
+    ...event('leap','SAMPLE_RECEIVED'),occurredAt:'2028-02-29T08:00:00+08:00'
+  }).occurredAt,'2028-02-29T08:00:00+08:00');
+});
