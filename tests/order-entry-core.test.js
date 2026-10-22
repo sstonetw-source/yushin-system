@@ -53,6 +53,32 @@ test('mixed order retains delivery instructions for every line and blocks a miss
  assert.equal(result.items[0].deliveryPlan.address,'台北');assert.equal(result.items[1].deliveryPlan.mode,'PICKUP');
  f=validationFixture(item,[{...customer,deliveryPlan:{mode:'CUSTOMER_SHIP',contact:'客戶'}}]);assert.equal(f.c.window.saveNewOrder(),undefined);
 });
+test('Service-only orders do not demand a warehouse or fake physical delivery instructions',()=>{
+ const service={...item,productType:'Service',productId:'BIOPLEX',
+   warehouseId:'',deliveryPlan:{mode:'CUSTOMER_SHIP'}};
+ const f=validationFixture(service);
+ const result=f.c.window.saveNewOrder();
+ assert.equal(f.alerts.length,0);
+ assert.equal(result.items[0].warehouseId,'');
+ assert.equal(Object.keys(result.items[0].deliveryPlan).length,0);
+ assert.equal(Object.keys(result.shippingInstructions).length,0);
+});
+
+test('Goods plus Service validates only real shipment; rejects direct-ship Service',()=>{
+ const service={...item,itemId:'SERVICE',productId:'BIOPLEX',
+   productType:'Service',warehouseId:'',deliveryPlan:{mode:'CUSTOMER_SHIP'}};
+ let f=validationFixture({...item,itemId:'GOODS',warehouseId:'MAIN',deliveryPlan:{mode:'PICKUP'}},[service]);
+ const result=f.c.window.saveNewOrder();
+ assert.equal(f.alerts.length,0);
+ assert.equal(result.items[0].productType,'Service');
+ assert.equal(result.items[0].warehouseId,'');
+ assert.equal(result.items[1].warehouseId,'MAIN');
+ assert.equal(result.shippingInstructions.mode,'PICKUP');
+ f=validationFixture({...service,fulfillmentType:'DIRECT_SHIP'});
+ assert.equal(f.c.window.saveNewOrder(),undefined);
+ assert.match(f.alerts[0],/服務型/);
+});
+
 test('normalized order fields retain missing price as null before save validation',()=>{
  const c=vm.createContext({findPriceItemForOrder:()=>null,normalizeHistoryItemCode:x=>x,resolveBrandName:x=>x,brandIdForName:x=>x});
  const a=source.indexOf('function normalizeNewOrderItem('),b=source.indexOf('function currentOrderModalItem()',a);vm.runInContext(source.slice(a,b),c);
