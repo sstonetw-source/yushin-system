@@ -300,7 +300,7 @@ test('formal corrupt checkpoint, changed role, unsupported input or unavailable 
  assert.throws(()=>x.c.pendingFormalPurchase(),/前次採購/);await x.c.recoverFormalPurchase();
  assert.equal(x.calls.filter(row=>row.name).length,0);assert.equal(x.storage.size,1);
  x.storage.clear();
- assert.throws(()=>x.c.rememberFormalPurchase({...x.po,items:[{...x.po.items[0],fulfillmentType:'DIRECT_SHIP'}]},'buyer','purchaser'),/1–5/);
+ assert.throws(()=>x.c.rememberFormalPurchase({...x.po,items:[{...x.po.items[0],fulfillmentType:'SERVICE'}]},'buyer','purchaser'),/1–5/);
  assert.equal(x.storage.size,0);
  x.c.sessionStorage.setItem=()=>{throw Error('storage disabled');};
  assert.throws(()=>x.c.rememberFormalPurchase(x.po,'buyer','purchaser'),/storage disabled/);
