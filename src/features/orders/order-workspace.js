@@ -525,7 +525,8 @@ function orderItemWorkCategory(order, item, lifecycleOverride = null, dispatchOv
 function orderItemDisplayCategory(order, item, lifecycleOverride = null, dispatchOverride = null) {
     const dispatch = dispatchOverride || itemDispatchState(order, item);
     const category = orderItemWorkCategory(order, item, lifecycleOverride, dispatch);
-    if (category !== 'delivery' || String(item.productType||'').trim().toUpperCase()==='SERVICE') return category;
+    if (category !== 'delivery') return category;
+    if (String(item.productType||'').trim().toUpperCase()==='SERVICE') return category;
     if ((item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return 'shipping';
     return dispatch.pending > 0 ? 'dispatch' : 'shipping';
 }
