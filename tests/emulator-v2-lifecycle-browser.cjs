@@ -1516,7 +1516,8 @@ for(const width of [1280,390])test('full site '+width+'px original multi-item pu
    await siteOrderAction(page,{sourceId:x.orderId},label);
    await page.waitForFunction(id=>!pendingLifecycleOrderIds.size&&!!pendingV2OrderLifecycle(id),x.orderId,{timeout:45000});
    const after=await x.snapshot(),cancelled=nextStatus==='cancelled';
-   assert.equal(after.order.orderStatus,nextStatus);assert.equal(after.order.itemCount,3);
+   assert.equal(after.order.orderStatus,nextStatus);assert.equal(after.order.items.length,3);
+   assert.equal(after.order.itemCount,complete.order.itemCount,'lifecycle preserves the source item-count projection');
    assert.deepEqual(after.order.items.map(i=>i.reservedQty),cancelled?[0,0,0]:[3,2,2]);
    assert.deepEqual(after.order.items.map(i=>i.shortageQty),[0,0,0]);
    assert.deepEqual(after.inventory.map(i=>[i.onHand,i.reserved,i.incoming]),cancelled?[[5,0,0],[2,0,0]]:[[5,5,0],[2,2,0]]);
