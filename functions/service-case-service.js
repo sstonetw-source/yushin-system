@@ -3,7 +3,7 @@
 // The only server-side write contract for entrusted customer samples, equipment
 // and service completion events. Not exported as a Callable before Auth/Rules/UI
 // acceptance. Service work NEVER creates inventory, lots, purchasing or deliveries.
-const core=require('../modules/service-work-core.js');
+const core=require('./shared/service-work-core.js');
 
 const EVENT_ROLES=Object.freeze({
   SAMPLE_RECEIVED:['sales','warehouse'],
