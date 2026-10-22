@@ -10,6 +10,7 @@ const {getFunctions,connectFunctionsEmulator,httpsCallable}=require('firebase/fu
 const {getFirestore:clientFirestore,connectFirestoreEmulator,doc,collection,getDoc,getDocFromServer,runTransaction,setDoc,updateDoc}=require('firebase/firestore');
 const procurementDemandCore=require('../modules/procurement-demand-core');
 const {synchronizeV2OrderFixture}=require('./fixtures/v2-order-initialization.cjs');
+const {orderCreationClient}=require('./fixtures/order-creation-client.cjs');
 const {registerV2PurchaseIncomingFixture}=require('./fixtures/v2-purchase-incoming.cjs');
 const {commitLocationDispatchPreparation}=require('../functions/location-dispatch-service');
 const {commitLocationShipment}=require('../functions/location-shipment-service');
@@ -98,27 +99,14 @@ test('real signed-in client creates an order through the existing Order Creation
   put('warehouseStocks',id+'__'+key,{warehouseId:id,productKey:key,onHand:quantity,reserved:0,transferFreeInTransit:0});
  }
  await setup.commit();
- const liveDb=clientFirestore(actor.app);connectFirestoreEmulator(liveDb,'127.0.0.1',8080);
- const transport={
-  currentUser:{uid:actor.uid},currentUserRole:'sales',BUSINESS_STATUS:{ACTIVE:'active'},
-  db:{collection:name=>({doc:id=>doc(liveDb,name,id)})},
-  runRoleTransaction:callback=>runTransaction(liveDb,async transaction=>callback({
-   get:async ref=>{const snapshot=await transaction.get(ref);return {exists:snapshot.exists(),data:()=>snapshot.data()};},
-   set:(ref,value,options)=>options
-    ?transaction.set(ref,JSON.parse(JSON.stringify(value)),options)
-    :transaction.set(ref,JSON.parse(JSON.stringify(value))),
-   update:(ref,value)=>transaction.update(ref,JSON.parse(JSON.stringify(value)))
-  }))
- };
- const context=vm.createContext(transport);
- vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/services/order-creation.js'),'utf8'),context);
+ const creator=orderCreationClient(actor.app,actor.uid,'sales');
  const order={status:'active',orderStatus:'normal',createdByUid:actor.uid,createdByRole:'sales',
   ownerUid:actor.uid,salesCode:'R',customerName:'真實登入建單測試',productId:key,productMasterMatched:true,
   inventoryReservationStatus:'pending',inventoryReservationAttemptId:'auth_client_initial',
   deliveryRecords:[],returnRecords:[],deliveredQty:0,isDelivered:false,
   items:[{itemId:'I',productId:key,qty:10,warehouseId:'CLIENT-A',reservedQty:0,
    deliveredQty:0,returnedQty:0,fulfillmentType:'WAREHOUSE'}]};
- const create=(id,data)=>context.commitOrderCreation(id,data,{actorUid:actor.uid,actorRole:'sales'});
+ const create=(id,data)=>creator.create(id,data);
  await assert.rejects(create(orderId+'-cost',{...order,items:[{...order.items[0],unitCost:100}]}),error=>error.code==='permission-denied');
  assert.equal((await db.collection('orders').doc(orderId+'-cost').get()).exists,false);
  const warehouseDb=clientFirestore(unauthorized.app);connectFirestoreEmulator(warehouseDb,'127.0.0.1',8080);

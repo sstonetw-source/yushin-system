@@ -6,6 +6,9 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const {spawnSync}=require('node:child_process'),{build}=require('esbuild'),{chromium}=require('playwright-core');
 const admin=require('firebase-admin'),{getFirestore}=require('firebase-admin/firestore'),{getAuth}=require('firebase-admin/auth');
 const {synchronizeV2OrderFixture}=require('./fixtures/v2-order-initialization.cjs');
+const {orderCreationClient}=require('./fixtures/order-creation-client.cjs');
+const {initializeApp:clientApp,deleteApp:deleteClientApp}=require('firebase/app');
+const {getAuth:clientAuth,connectAuthEmulator,signInWithEmailAndPassword}=require('firebase/auth');
 const {commitV2FormalPurchase}=require('../functions/formal-purchase-commit-service');
 const root=path.resolve(__dirname,'..'),read=file=>fs.readFileSync(path.join(root,file),'utf8');
 const section=(source,a,b)=>{const i=source.indexOf(a),j=source.indexOf(b,i);assert.ok(i>=0&&j>i,'original source boundaries');return source.slice(i,j);};
@@ -275,11 +278,30 @@ async function multiReceiptSiteFixture(width){
   {itemId:'I3',productId:keys[1],qty:2,warehouseId:warehouses[0]}].map(row=>({...row,itemCode:row.productId,itemName:row.productId,brand:'Roche',productLine:tag,
    unitPrice:100,fulfillmentType:'WAREHOUSE',reservedQty:0,deliveredQty:0,returnedQty:0,dispatchPreparedQty:0,warehouseShippedQty:0,
    deliveryPlan:{mode:'CUSTOMER_SHIP',contact:'測試客戶',phone:'02-12345678',address:'測試地址'}}));
- put('orders',orderId,{orderNo:orderId,customerName:'多品項收貨驗收',ownerUid:accounts.sales.uid,salesCode:'B',status:'active',orderStatus:'normal',
-  orderDate:'2026-10-22',inventoryReservationStatus:'pending',inventoryReservationAttemptId:'sync_'+tag,
-  deliveryRecords:[],returnRecords:[],deliveryHistory:[],deliveredQty:0,isDelivered:false,items});
- await batch.commit();await synchronizeV2OrderFixture(db,accounts.purchaser.uid,{orderId,warehouseIds:warehouses});
- // Source creation/initialization remains the explicit fixture boundary.
+ await batch.commit();
+ const source={orderNo:orderId,customerName:'多品項收貨驗收',ownerUid:accounts.sales.uid,salesCode:'B',status:'active',orderStatus:'normal',
+  createdByUid:accounts.sales.uid,createdByRole:'sales',createdAt:new Date().toISOString(),productId:keys[0],productMasterMatched:true,
+  itemCount:items.length,orderSchemaVersion:2,orderDate:'2026-10-22',inventoryReservationStatus:'pending',inventoryReservationAttemptId:'sync_'+tag,
+  deliveryRecords:[],returnRecords:[],deliveryHistory:[],deliveredQty:0,isDelivered:false,items};
+ const creatorApp=clientApp({apiKey:'fake-api-key',authDomain:'demo-yushin.firebaseapp.com',projectId:'demo-yushin',appId:tag+'-creation'},tag+'-creation');
+ try{
+  const session=clientAuth(creatorApp);connectAuthEmulator(session,'http://127.0.0.1:9099',{disableWarnings:true});
+  await signInWithEmailAndPassword(session,accounts.sales.email,password);
+  const creator=orderCreationClient(creatorApp,accounts.sales.uid,'sales');
+  const rejected=await creator.create(orderId+'-cost',{...source,items:items.map((item,index)=>index===2?{...item,unitCost:999}:item)})
+   .then(()=>null,error=>error.code);
+  assert.equal(rejected,'permission-denied');assert.equal((await db.collection('orders').doc(orderId+'-cost').get()).exists,false);
+  await creator.create(orderId,source);
+  assert.deepEqual((await db.collection('orders').doc(orderId).get()).data(),source);
+  for(const key of keys)assert.equal((await db.collection('inventory').doc(key).get()).data().reserved,0,'creation alone does not reserve');
+  await synchronizeV2OrderFixture(db,accounts.purchaser.uid,{orderId,warehouseIds:warehouses});
+  const initialized=(await db.collection('orders').doc(orderId).get()).data();
+  assert.equal(initialized.inventoryReservationStatus,'completed');assert.equal(initialized.items.length,3);
+  await creator.create(orderId,{...source,customerName:'stale retry',items:[{...items[0],qty:999}]});
+  assert.deepEqual((await db.collection('orders').doc(orderId).get()).data(),initialized,'same-ID create resumes saved facts without overwriting initialization');
+ }finally{await deleteClientApp(creatorApp);}
+ // Source creation now uses real Auth/Client Rules and the existing Service.
+ // v2 initialization remains the explicit Service-adapter fixture boundary.
  // PO documents, commitments and incoming must now come from the original UI.
  const supplyIds=[];
  const snapshot=async()=>{
@@ -1460,7 +1482,7 @@ for(const width of [1280,390])test('full site '+width+'px original multi-item pu
   assert.ok(initial.demands.every(d=>d.remainingToOrderQty===0));
   assert.deepEqual(initial.inventory.map(i=>[i.onHand,i.reserved]),[[0,0],[0,0]]);
   x.supplyIds.push(...initial.supplyIds);
-  console.log('Full site '+width+'px: original purchase UI rejects mixed warehouses without writes, groups A I1/I3 and separately buys B I2; document/PDF stays read-only for demand/stock, lost multi-line purchase reply reloads identical intent, two POs/three supplies and incoming 5/2 exactly once. Source creation/initialization remains a fixture.');
+  console.log('Full site '+width+'px: original purchase UI rejects mixed warehouses without writes, groups A I1/I3 and separately buys B I2; document/PDF stays read-only for demand/stock, lost multi-line purchase reply reloads identical intent, two POs/three supplies and incoming 5/2 exactly once. Source creation uses real Auth/Client Rules; v2 initialization remains a Service fixture.');
   await siteLogout(page);await siteLogin(page,x.accounts.warehouse,'warehouse');await siteNav(page,'inventory');
   await page.locator('#inventoryReceivingTabBtn').click();
   async function submit(index,qty,drop){
