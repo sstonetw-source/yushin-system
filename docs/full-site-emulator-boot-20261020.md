@@ -1,5 +1,10 @@
 # 完整首頁 Emulator 啟動驗收
 
+## 2026-10-22｜原廠直送採購後端試點修正（待 CI）
+
+PR #233 真實 Client 原入口在桌機／手機均遇到 Firestore Rules 1000 運算式上限，CI 39743049294 記錄兩例失敗。沿用原採購 Service 與僅限 demo-yushin 的 Functions 原子提交試點，加入 DIRECT_SHIP 型態與 Demand／來源一致性限制；直送不動實貨／分倉在途／批號／movement。測試只在本機明確開啟 YUSHIN_FORMAL_PURCHASE_EMULATOR，使用原按鈕、真 Auth 與後端 Transaction；不得將此結果視為正式前端已接線或 Preview 已完成。新 CI 未通過前原直送完整流程尚未完成驗收。
+
+
 ## 2026-10-22 — 原廠直送的原 Client 路徑（本批待 CI）
 
 新增一條 1280／390px 代表流程：來源使用真 Auth 與既有建單 Service／Client Rules 建立，原業務從訂單列「重試同步」執行直送初始化；採購由原待採購列建立 DRAFT 文件，另按「確認已採購」，原業務從原訂單「確認直送到貨」表單分批確認 1＋2。全程不開 v2 gate、不替換交易 handler、不使用 Functions；來源表單輸入與實體 PDF 輸出保留明確 fixture 邊界。
