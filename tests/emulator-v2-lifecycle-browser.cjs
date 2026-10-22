@@ -1947,8 +1947,8 @@ for(const mixed of [false,true])for(const width of [1280,390])test('full site '+
    await page.locator('button[onclick="addCurrentOrderItemToDraft()"]').click();await page.waitForFunction(()=>newOrderDraftItems.length===1);
    await selectProduct(code+'G',1,150);
    await page.locator('#orderDeliveryChoice').selectOption('BUSINESS');
-   // The original order warehouse field is a hidden input, not a select.
-   await page.locator('#orderWarehouse').evaluate((input,id)=>{input.value=id;},warehouseId);
+   // Keep the original hidden warehouse default. The real reservation Service
+   // must discover the warehouse holding this Goods product itself.
   }
   await page.locator('#saveNewOrderBtn').click();await page.locator('#orderModalOverlay.active').waitFor({state:'hidden'});
   await page.waitForFunction(uid=>ordersCache.some(o=>o.createdByUid===uid&&o.inventoryReservationStatus==='completed'),uid,{timeout:45000});
