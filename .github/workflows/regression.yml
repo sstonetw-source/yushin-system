@@ -86,7 +86,8 @@ jobs:
       - name: Preview Callable Auth + Functions + Firestore Emulator integration
         env:
           ENABLE_GROUPED_RESERVATION: "true"
-        run: npx --yes firebase-tools@15 emulators:exec --only firestore,auth,functions --project demo-yushin "node --test tests/emulator-grouped-reservation-callable.cjs"
+          ENABLE_SERVICE_CASE_EMULATOR: "true"
+        run: npx --yes firebase-tools@15 emulators:exec --only firestore,auth,functions --project demo-yushin "node --test --test-concurrency=1 tests/emulator-grouped-reservation-callable.cjs tests/emulator-service-case-callable.cjs"
       - name: Verify v2 Auth Callables and real browser lifecycle handoff in isolated demo Emulator
         run: node tools/run-v2-return-auth-emulator.cjs
       - name: Verify single-item and whole-order dual-warehouse atomic reservation in Emulator
