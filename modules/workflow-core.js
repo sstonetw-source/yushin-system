@@ -51,7 +51,11 @@
     // Explicit cumulative input uses the same projection as dispatch. Legacy
     // deliveredQty-only input remains effective quantity at this boundary.
     const delivery=fulfillment.deliveryQuantities({deliveredQty:grossDeliveredQty,returnedQty});
-    const effectiveDeliveredQty=Math.min(orderedQty,hasExplicitEffective
+    // SERVICE fulfillment needs a separate, verified service-completion event.
+    // Legacy product deliveryRecords, their cached totals, and billing flags
+    // must never close a customer service order (including mixed orders).
+    // Until that writer/ledger is integrated, pending service work stays open.
+    const effectiveDeliveredQty=serviceItem?0:Math.min(orderedQty,hasExplicitEffective
       ? n(input.effectiveDeliveredQty)
       : hasNumber(input.grossDeliveredQty)?delivery.effectiveDeliveredQty:n(input.deliveredQty));
     const outstandingQty=Math.max(0,orderedQty-effectiveDeliveredQty);
