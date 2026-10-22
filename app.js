@@ -18169,6 +18169,15 @@ async function recoverFormalPurchase() {
         check();
         confirmedPoNo = savedPo.poNo;
         clearFormalPurchasePending(savedPo.poNo, uid, role);
+        // Clearing the demand cache does not automatically reload the current
+        // ordering view. Refresh once after a confirmed PO so an unpurchased
+        // sibling line (including one at another warehouse) remains actionable.
+        if (document.getElementById('purchasing-system')?.classList.contains('active')
+            && purchasingView === 'ordering') {
+            await loadPendingPurchaseOrders(true);
+            if (procurementDemandLoaded && !pendingPurchaseError)
+                purchasingViewLoaded.add('ordering');
+        }
         if (poEditingId === savedPo.id) poIncomingSyncPending = false;
         if (document.getElementById('poModalOverlay')?.classList.contains('active')
             && document.getElementById('poNo')?.textContent?.trim() === savedPo.poNo)
