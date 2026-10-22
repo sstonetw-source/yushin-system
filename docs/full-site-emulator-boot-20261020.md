@@ -297,3 +297,11 @@
 原真 Auth 單品項建單測試與新整站來源共用小型 Client SDK adapter，讀取並執行原 src/services/order-creation.js，沒有複製建單商業邏輯或新增 writer。每個來源使用獨立登入 Client，完成後釋放。僅 demo-yushin Emulator 可使用此測試 adapter。初始三品項資料仍由測試組成，尚不代表原手動建單表單／v2 初始化真傳輸已驗收；初始化仍沿既有 Service fixture。PDF 實體輸出隔離、Preview／正式未啟用的邊界保留。
 
 本機 Node 1691 項通過、零失敗／略過，語法、app／Functions 生成一致性及 diff 通過。新增真 Auth／Chrome 整合與全部 Rules 須以本批最新完整 CI 判定，通過前不合併。無新 Collection／Rules／Index／Listener／正式 Functions 匯出，未部署 Firebase，未修改正式資料或角色。
+
+## 2026-10-22 — 原空白手動建單畫面與單倉 Client 預留（待本批完整 CI）
+
+新增 1280／390px 原整站案例：真業務登入原訂單頁，按原新增訂單、輸入實際主檔貨號及客戶、數量與售價，再按原建立按鈕。查核只有一張本人訂單、正確商品與金額、原單倉預留及公司／分倉保留兩件，三件實貨與原批次不變，未產生供應或交付。重整原訂單清單後只讀且仍一張，來源與實體帳完全不變。
+
+此案例不開啟任何 v2 功能旗標，也不替換 handler／建單 Service／初始化；禁止 Functions 呼叫，驗證原正式程式的 Client Rules 建單及單倉預留路徑。產品、庫存、倉庫與測試帳號是 Emulator fixture，訂單由使用者原介面建立；不能將此結果擴張為 v2 初始化傳輸或多品項手動建單已完成。
+
+只新增整站驗收與紀錄，沒有新 writer／Core／資料模型／Rules／索引／監聽或部署。語法與 diff 通過；新增原站真 Auth、Chrome 及完整 CI 仍待最新 head 執行，通過前不合併。未操作正式資料或正式角色，Preview／正式部署仍未驗收。
