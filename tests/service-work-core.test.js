@@ -10,7 +10,7 @@ const scenarios=[
       event('s','SAMPLE_RECEIVED',0),
       event('x','EXPERIMENT_COMPLETED',1),
       event('r','REPORT_SENT',2,{reportRef:'report/R-1'})
-    ],finalCustody:'SAMPLE_CLOSED'
+    ],finalCustody:'IN_HOUSE'
   },
   {
     kind:'PIPETTE_CALIBRATION',steps:[
@@ -26,7 +26,7 @@ const scenarios=[
       event('v','VENDOR_SENT',1,{partyName:'Histology vendor'}),
       event('b','VENDOR_RETURNED',2),
       event('c','CUSTOMER_DELIVERED',3,{deliveryRef:'proof/T-1'})
-    ],finalCustody:'RETURNED_TO_CUSTOMER'
+    ],finalCustody:'IN_HOUSE'
   },
   {
     kind:'ONSITE_REPAIR',steps:[
