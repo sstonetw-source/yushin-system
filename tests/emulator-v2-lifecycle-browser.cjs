@@ -6,6 +6,7 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const {spawnSync}=require('node:child_process'),{build}=require('esbuild'),{chromium}=require('playwright-core');
 const admin=require('firebase-admin'),{getFirestore}=require('firebase-admin/firestore'),{getAuth}=require('firebase-admin/auth');
 const {synchronizeV2OrderFixture}=require('./fixtures/v2-order-initialization.cjs');
+const {registerV2PurchaseIncomingFixture}=require('./fixtures/v2-purchase-incoming.cjs');
 const {commitV2FormalPurchase}=require('../functions/formal-purchase-commit-service');
 const root=path.resolve(__dirname,'..'),read=file=>fs.readFileSync(path.join(root,file),'utf8');
 const section=(source,a,b)=>{const i=source.indexOf(a),j=source.indexOf(b,i);assert.ok(i>=0&&j>i,'original source boundaries');return source.slice(i,j);};
@@ -253,6 +254,49 @@ async function siteMenu(page){
 async function siteNav(page,key){
  await siteMenu(page);
  await page.locator('.nav-tab[data-main-nav="'+key+'"]').click();
+}
+async function multiReceiptSiteFixture(width){
+ const tag='multi-receipt-'+width,orderId=tag+'-order',keys=[tag+'-P',tag+'-Q'],warehouses=[tag+'-A',tag+'-B'],accounts={};
+ for(const role of ['purchaser','warehouse','sales']){
+  const uid=tag+'-'+role,email=uid+'@example.test';await auth.createUser({uid,email,password});
+  await db.collection('users').doc(uid).set({role,active:true,name:role,email,code:role==='sales'?'B':role});accounts[role]={uid,email};
+ }
+ const batch=db.batch(),put=(name,id,data)=>batch.set(db.collection(name).doc(id),data);
+ for(const warehouseId of warehouses)put('warehouses',warehouseId,{active:true,warehouseName:warehouseId});
+ for(const key of keys){
+  put('products',key,{productType:'Goods',active:true,productId:key,itemCode:key,model:key,brand:'Roche',nameCn:key});
+  put('inventory',key,{productKey:key,onHand:0,reserved:0,incoming:0,transferFreeInTransit:0});
+  for(const warehouseId of warehouses)put('warehouseStocks',warehouseId+'__'+key,{warehouseId,productKey:key,onHand:0,reserved:0,incoming:0,transferFreeInTransit:0});
+ }
+ const items=[{itemId:'I1',productId:keys[0],qty:3,warehouseId:warehouses[0]},
+  {itemId:'I2',productId:keys[0],qty:2,warehouseId:warehouses[1]},
+  {itemId:'I3',productId:keys[1],qty:2,warehouseId:warehouses[0]}].map(row=>({...row,itemCode:row.productId,itemName:row.productId,brand:'Roche',
+   unitPrice:100,fulfillmentType:'WAREHOUSE',reservedQty:0,deliveredQty:0,returnedQty:0,dispatchPreparedQty:0,warehouseShippedQty:0,
+   deliveryPlan:{mode:'CUSTOMER_SHIP',contact:'測試客戶',phone:'02-12345678',address:'測試地址'}}));
+ put('orders',orderId,{orderNo:orderId,customerName:'多品項收貨驗收',ownerUid:accounts.sales.uid,salesCode:'B',status:'active',orderStatus:'normal',
+  orderDate:'2026-10-22',inventoryReservationStatus:'pending',inventoryReservationAttemptId:'sync_'+tag,
+  deliveryRecords:[],returnRecords:[],deliveryHistory:[],deliveredQty:0,isDelivered:false,items});
+ await batch.commit();await synchronizeV2OrderFixture(db,accounts.purchaser.uid,{orderId,warehouseIds:warehouses});
+ // PO/incoming are prepared by the existing Services, not by stock fixtures.
+ // This case accepts receiving UI, not merged purchase-UI warehouse admission.
+ const poNo='MULTI-RECEIPT-'+width;
+ const po=await commitV2FormalPurchase(db,accounts.purchaser.uid,{poNo,poDate:'2026-10-22',supplier:'多品項測試供應商',
+  items:items.map(row=>({orderId,itemId:row.itemId,qty:row.qty,unitCost:20}))});
+ await registerV2PurchaseIncomingFixture(db,accounts.purchaser.uid,poNo);
+ const snapshot=async()=>{
+  const read=async(name,id)=>(await db.collection(name).doc(id).get()).data();
+  const extra={};for(const name of ['inventoryLots','inventoryLotCosts','inventoryMovements','inventoryReservations'])
+   extra[name]=(await db.collection(name).where('productKey','in',keys).get()).docs.map(doc=>({id:doc.id,...doc.data()})).sort((a,b)=>a.id.localeCompare(b.id));
+  return {order:await read('orders',orderId),po:await read('purchaseOrders',poNo),
+   inventory:await Promise.all(keys.map(key=>read('inventory',key))),
+   stocks:await Promise.all(keys.flatMap(key=>warehouses.map(id=>read('warehouseStocks',id+'__'+key)))),
+   supplies:await Promise.all(po.supplyOrderIds.map(id=>read('supplyOrders',id))),
+   views:await Promise.all(po.supplyOrderIds.map(id=>read('receivingSupplyOrders',id))),
+   demands:await Promise.all(items.map(row=>read('procurementDemands',encodeURIComponent('SALES_ORDER:'+orderId+':'+row.itemId)))),
+   receipts:await Promise.all(po.supplyOrderIds.map(async id=>(await db.collection('receipts').where('supplyOrderId','==',id).get()).docs
+    .map(doc=>({id:doc.id,...doc.data()})).sort((a,b)=>a.id.localeCompare(b.id)))),...extra};
+ };
+ return {accounts,orderId,keys,warehouses,supplyIds:po.supplyOrderIds,snapshot};
 }
 async function siteOrderAction(page,fixture,label){
  await siteNav(page,'orders');
@@ -1308,5 +1352,75 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
    locations:typeof v2ShipmentLocationContext==='undefined'?null:{context:v2ShipmentLocationContext,values:[...v2ShipmentLocationCache]},
    shipmentOrders:orderWorkQueueCache.map(o=>({id:o.id,attempt:o.inventoryReservationAttemptId,items:normalizedOrderItems(o)})),warehouses:warehouseMasterCache}))),JSON.stringify(errors));
   throw error;
+ }finally{await context.close();}
+});
+
+for(const width of [1280,390])test('full site '+width+'px original multi-item receiving keeps same-product lines separate across warehouses',{timeout:180000},async()=>{
+ const x=await multiReceiptSiteFixture(width),context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
+ const errors=[],external=[],calls=[];let lose=false;
+ await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_V2_RECEIVING_EMULATOR=true;window.YUSHIN_V2_DISPATCH_EMULATOR=true;});
+ page.on('pageerror',error=>errors.push(error.message));page.on('dialog',d=>d.type()==='confirm'?d.accept():d.dismiss());
+ await context.route('**/*',async route=>{
+  const request=route.request(),url=new URL(request.url());
+  if(!['localhost','127.0.0.1'].includes(url.hostname)){external.push(url.hostname);await route.abort();return;}
+  if(url.port==='5001'&&request.method()==='POST'&&url.pathname.endsWith('/receiveV2Supply')){
+   const data=request.postDataJSON().data;assert.ok((await request.allHeaders()).authorization?.startsWith('Bearer '));
+   assert.equal(data.actorUid,undefined);assert.equal(data.actorRole,undefined);calls.push(data);
+   if(lose){lose=false;const reply=await route.fetch();assert.equal(reply.status(),200);await route.abort('failed');return;}
+  }
+  await route.continue();
+ });
+ try{
+  const initial=await x.snapshot();
+  await siteOpen(page);await siteLogin(page,x.accounts.warehouse,'warehouse');await siteNav(page,'inventory');
+  await page.locator('#inventoryReceivingTabBtn').click();
+  async function submit(index,qty,drop){
+   const supplyId=x.supplyIds[index];
+   await page.locator('#inventoryReceivingBody button[data-receipt-supply="'+supplyId+'"]').click();
+   await page.locator('#poReceiptBatchBody .po-receive-qty').fill(String(qty));
+   await page.locator('#poReceiptBatchBody .po-receive-lot').fill('MULTI-'+width+'-'+index+'-'+qty);
+   await page.locator('#poReceiptBatchBody .po-receive-expiry').fill('2028-01-01');
+   lose=drop;await page.locator('#savePoReceiptBatchBtn').click();
+   await page.waitForFunction(({id,drop})=>drop?receiptTaskJobs.get(receiptTaskKey(id))?.state==='error':!receiptTaskJobs.has(receiptTaskKey(id)),{id:supplyId,drop},{timeout:45000});
+   return calls.at(-1);
+  }
+  async function retry(index,intent,before){
+   await siteOpen(page,'warehouse');await siteNav(page,'inventory');
+   await page.locator('#receiptTaskStatus button').filter({hasText:'用原資料重試'}).click();
+   await page.waitForFunction(id=>!receiptTaskJobs.has(receiptTaskKey(id)),x.supplyIds[index],{timeout:45000});
+   assert.deepEqual(calls.at(-1),intent);assert.deepEqual(await x.snapshot(),before);
+   await page.locator('#inventoryReceivingTabBtn').click();
+  }
+  const first=await submit(0,1,true),partial=await x.snapshot();
+  assert.deepEqual(partial.order.items.map(i=>[i.receivedQty??0,i.reservedQty,i.shortageQty]),[[1,1,2],[0,0,2],[0,0,2]]);
+  assert.deepEqual(partial.order.items.slice(1),initial.order.items.slice(1));
+  assert.deepEqual(partial.stocks.slice(1),initial.stocks.slice(1));assert.deepEqual(partial.inventory[1],initial.inventory[1]);
+  assert.equal(partial.inventory[0].onHand,1);assert.equal(partial.inventory[0].reserved,1);assert.equal(partial.inventory[0].incoming,4);
+  await retry(0,first,partial);
+  await submit(1,2,false);const second=await x.snapshot();
+  assert.deepEqual(second.order.items[0],partial.order.items[0]);assert.deepEqual(second.order.items[2],partial.order.items[2]);
+  assert.equal(second.stocks[1].onHand,2);assert.equal(second.stocks[1].reserved,2);assert.equal(second.stocks[1].incoming,0);
+  assert.deepEqual(second.stocks[0],partial.stocks[0]);assert.deepEqual(second.inventory[1],partial.inventory[1]);
+  await submit(2,2,false);const third=await x.snapshot();assert.deepEqual(third.order.items.slice(0,2),second.order.items.slice(0,2));
+  const last=await submit(0,2,true),complete=await x.snapshot();
+  assert.notEqual(last.operationId,first.operationId);
+  assert.deepEqual(complete.order.items.map(i=>[i.receivedQty,i.reservedQty,i.shortageQty]),[[3,3,0],[2,2,0],[2,2,0]]);
+  assert.deepEqual(complete.order.items.slice(1),third.order.items.slice(1));
+  assert.deepEqual(complete.inventory.map(i=>[i.onHand,i.reserved,i.incoming]),[[5,5,0],[2,2,0]]);
+  assert.deepEqual(complete.receipts.map(rows=>rows.length),[2,1,1]);assert.equal(complete.inventoryLots.length,4);assert.equal(complete.inventoryLotCosts.length,4);
+  assert.ok(complete.demands.every(d=>d.remainingToOrderQty===0&&d.remainingToReceiveQty===0));
+  assert.equal(complete.order.deliveredQty,0);assert.equal(complete.order.isDelivered,false);
+  assert.deepEqual(complete.order.deliveryRecords,[]);assert.deepEqual(complete.order.returnRecords,[]);
+  assert.ok(complete.order.items.every(i=>i.dispatchPreparedQty===0&&i.warehouseShippedQty===0));
+  for(let i=0;i<3;i++){assert.equal(complete.supplies[i].status,'RECEIVED');
+   assert.deepEqual(complete.views[i],require('../modules/stock-permissions').sanitizeSupply(complete.supplies[i]));assert.equal(complete.views[i].unitCost,undefined);}
+  await retry(0,last,complete);assert.equal(calls.length,6);
+  for(const id of x.supplyIds)assert.equal(await page.locator('#inventoryReceivingBody button[data-receipt-supply="'+id+'"]').count(),0);
+  assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
+  console.log('Full site '+width+'px: original warehouse received three lines (same product in A/B and another product), first/final successful replies lost and reloaded identical receipt IDs; four receipts/lots, no sibling overwrite, zero incoming and no dispatch/shipment/delivery.');
+ }catch(error){
+  console.log('Multi receipt '+width+'px diagnostic:',JSON.stringify(await page.evaluate(()=>({role:typeof currentUserRole==='undefined'?'none':currentUserRole,
+   feedback:document.getElementById('actionFeedback')?.textContent,rows:document.getElementById('inventoryReceivingBody')?.textContent,
+   tasks:typeof receiptTaskJobs==='undefined'?[]:[...receiptTaskJobs.values()]}))),JSON.stringify(errors));throw error;
  }finally{await context.close();}
 });
