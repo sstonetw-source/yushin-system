@@ -63,7 +63,9 @@ async function validateV2FormalPurchaseTx(tx,db,uid,intent,{allowExistingPo=fals
    .filter(({row})=>row?.itemId===intent.itemId);
   if(matching.length!==1)reject('failed-precondition','來源品項不存在或重複');
   const {row,index}=matching[0];
-  if((row.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
+  const fulfillmentType=row.fulfillmentType||'WAREHOUSE';
+  const directShip=fulfillmentType==='DIRECT_SHIP';
+  if(!['WAREHOUSE','DIRECT_SHIP'].includes(fulfillmentType)
     ||String(row.productType||row.type||'').toUpperCase()==='SERVICE'
     ||row.transferPendingId||row.custodyTransferId)
    reject('failed-precondition','此品項不是可採購的實體商品');
@@ -75,15 +77,18 @@ async function validateV2FormalPurchaseTx(tx,db,uid,intent,{allowExistingPo=fals
   if(orderQty===0||reserved>orderQty||shortage>orderQty||ordered<received)
    reject('failed-precondition','來源品項數量不一致');
   const masterId=identifier(row.productId,'來源產品',1500);
-  const warehouseId=identifier(row.warehouseId||source.warehouseId,'來源倉庫',200);
+  const warehouseId=directShip?'':identifier(row.warehouseId||source.warehouseId,'來源倉庫',200);
+  if(directShip&&(reserved!==0||shortage!==0||row.warehouseId
+      ||orderQty<ordered||orderQty<received))
+   reject('failed-precondition','直送訂單數量或倉庫資料不一致');
   if(warehouseId.startsWith('custody-'))reject('failed-precondition','業務保管位置不可直接採購入庫');
   const product=await tx.get(ref('products',masterId));
-  const warehouse=await tx.get(ref('warehouses',warehouseId));
+  const warehouse=directShip?null:await tx.get(ref('warehouses',warehouseId));
   if(!product.exists||product.data().active===false
     ||String(product.data().productType||product.data().type||'').toUpperCase()==='SERVICE')
    reject('failed-precondition','產品主檔無效');
-  if(!warehouse.exists||warehouse.data().active===false
-    ||warehouse.data().systemCustody===true)
+  if(!directShip&&(!warehouse.exists||warehouse.data().active===false
+    ||warehouse.data().systemCustody===true))
    reject('failed-precondition','來源倉庫無效');
   const demand=await tx.get(ref('procurementDemands',encodeURIComponent(demandId)));
   if(!demand.exists)reject('failed-precondition','權威採購需求不存在');
@@ -94,12 +99,15 @@ async function validateV2FormalPurchaseTx(tx,db,uid,intent,{allowExistingPo=fals
     ||doc.salesCode!==source.salesCode
     ||doc.productKey!==String(row.inventoryProductKey||row.productId)
     ||doc.productId!==masterId||doc.status==='CANCELLED'
-    ||doc.orderedQty!==ordered||doc.receivedQty!==received)
+    ||doc.fulfillmentType!==fulfillmentType||doc.warehouseId!==warehouseId
+    ||doc.orderedQty!==ordered||doc.receivedQty!==received
+    ||(directShip&&doc.requestedQty!==orderQty))
    reject('failed-precondition','採購需求與來源訂單不一致');
   const expected=demandCore.fromSalesOrder({
    ...doc,sourceId:intent.orderId,sourceItemId:intent.itemId,
    shortageQty:shortage,supplyOrderedQty:ordered,receivedQty:received,
-   fulfillmentType:row.fulfillmentType||'WAREHOUSE'
+   requiredSupplyQty:directShip?orderQty:undefined,
+   fulfillmentType
   });
   if(doc.requestedQty!==expected.requestedQty
     ||doc.remainingToOrderQty!==expected.remainingToOrderQty
