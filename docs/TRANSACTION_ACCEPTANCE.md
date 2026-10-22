@@ -66,3 +66,10 @@ CI 保留 Node、10 組 Chrome smoke、分組預留、真 Auth／Functions／整
 ## 2026-10-22｜直送失敗與隔離後端試點（待最新 CI）
 
 PR #233 原 Client 的 1280／390px「確認已採購」在 CI 39743049294 遭 Firestore Rules 1000 上限阻擋（整站 64 通過、2 失敗，後續部分步驟略過）。本批沿用唯一原採購 Service 與僅限 demo-yushin 的 Functions 試點擴充 DIRECT_SHIP，原網站經本機明確啟用的後端通道驗收；不得將此視為 #199 正式路徑已修復，不能跳過權限或勾選 Preview。正式 Firebase 資料與部署皆不動。
+
+
+## 2026-10-22｜Service 與 Goods 混合訂單的初始庫存隔離（PR 待 CI）
+
+實作範圍：既有 `reserveSingleOrderItem` 在交易內重新讀取 Service 產品主檔、來源訂單、既有需求及預留紀錄；確認產品主檔為啟用的 Service 才跳過倉庫、實貨預留、一般商品採購需求與庫存異動。初始化不產生虛擬庫存、批號或 movement；原訂單 Service 品項保留待履約數量，`reservedQty/shortageQty=0`、`reservationStatus=not_required`，Goods 品項仍沿原權威預留。舊實貨預留、已下採購或入庫的 Service 來源、異常主檔及 Service 直送模式均拒絕，不會自動清帳。
+
+新增 Node 代表案例：純 Service、Goods＋Service、固定來源重送以及主檔／預留／供應衝突回滾。仍缺真正的服務完成紀錄、原畫面真 Auth／Rules、開票及混合單完整履約的端對端測試；此批不能把「初始不入庫」當作「服務型流程全部完成」。未部署 Firebase，無正式資料異動或主檔修正。CI 成績與合併狀態須以本 PR 最新 head 實際結果更新。
