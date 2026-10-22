@@ -37,6 +37,7 @@
   function projectItem(input={}){
     const orderedQty=n(input.orderedQty??input.qty);
     const fulfillmentType=input.fulfillmentType||'WAREHOUSE';
+    const serviceItem=String(input.productType||'').trim().toUpperCase()==='SERVICE';
     const returnedQty=n(input.returnedQty);
     // itemWorkCategory 的 deliveredQty 歷來代表「退貨扣除後的有效送貨量」。
     // app 若同時掌握 gross/effective 會明確傳 effectiveDeliveredQty；
@@ -67,10 +68,10 @@
     const stockOutstandingQty=shipment?shipment.outstandingQty:outstandingQty;
     let reservedQty=0;
     let shortageQty=0;
-    if(hasNumber(input.reservedQty)){
+    if(!serviceItem&&hasNumber(input.reservedQty)){
       reservedQty=Math.min(stockOutstandingQty,n(input.reservedQty));
       shortageQty=Math.max(0,stockOutstandingQty-reservedQty);
-    }else if(hasNumber(input.shortageQty)){
+    }else if(!serviceItem&&hasNumber(input.shortageQty)){
       shortageQty=Math.min(stockOutstandingQty,n(input.shortageQty));
       reservedQty=Math.max(0,stockOutstandingQty-shortageQty);
     }
@@ -80,11 +81,13 @@
 
     const supplyOrderedQty=n(input.supplyOrderedQty);
     const receivedQty=n(input.receivedQty);
-    const inTransitQty=Math.max(0,supplyOrderedQty-receivedQty);
-    const requiredSupplyQty=fulfillmentType==='DIRECT_SHIP'
+    if(serviceItem&&(supplyOrderedQty>0||receivedQty>0||n(input.reservedQty)>0))
+      throw Error('服務品項已有供應或實貨預留，須先稽核，不能偽裝為一般實貨需求。');
+    const inTransitQty=serviceItem?0:Math.max(0,supplyOrderedQty-receivedQty);
+    const requiredSupplyQty=serviceItem?0:fulfillmentType==='DIRECT_SHIP'
       ? orderedQty+returnedQty
       : shortageQty;
-    const remainingToOrderQty=fulfillmentType==='DIRECT_SHIP'
+    const remainingToOrderQty=serviceItem?0:fulfillmentType==='DIRECT_SHIP'
       ? Math.max(0,requiredSupplyQty-supplyOrderedQty)
       : Math.max(0,shortageQty-inTransitQty);
 
@@ -93,6 +96,9 @@
       workCategory=ITEM_WORK_CATEGORIES.CLOSED;
     }else if(orderedQty>0&&effectiveDeliveredQty>=orderedQty){
       workCategory=input.isBilled?ITEM_WORK_CATEGORIES.COMPLETE:ITEM_WORK_CATEGORIES.BILLING;
+    }else if(serviceItem){
+      // A service awaits its own completion evidence, not warehouse procurement.
+      workCategory=ITEM_WORK_CATEGORIES.DELIVERY;
     }else if(fulfillmentType==='DIRECT_SHIP'){
       if(remainingToOrderQty>0)workCategory=ITEM_WORK_CATEGORIES.ORDERING;
       else if(receivedQty<requiredSupplyQty)workCategory=ITEM_WORK_CATEGORIES.ARRIVAL;
