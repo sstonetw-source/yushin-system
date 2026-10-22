@@ -1765,8 +1765,7 @@ for(const width of [1280,390])test('full site '+width+'px original multi-item pu
   assert.equal(await page.locator('#orderCustomer').inputValue(),returned.order.customerName);
   assert.equal(await page.locator('#orderItemCode').inputValue(),'');assert.equal(await page.locator('#orderUnitPrice').inputValue(),'');
   assert.deepEqual(await page.evaluate(()=>newOrderDraftItems),[],'wrong original items must not be copied');
-  await page.waitForFunction(id=>warehouseMasterCache.some(w=>w.id===id),x.warehouses[0]);
-  await page.locator('#orderWarehouse').selectOption(x.warehouses[0]);
+  await page.waitForFunction(id=>warehouseMasterCache.some(w=>w.id===id)&&document.getElementById('orderWarehouse').value,x.warehouses[0]);
   await page.locator('#orderItemCode').fill(correctCode);await page.locator('#orderItemCode').blur();
   await page.waitForFunction(()=>document.getElementById('orderItemCode').dataset.productCheckStatus==='matched');
   await page.locator('#orderQty').fill('1');await page.locator('#orderUnitPrice').fill('275');
