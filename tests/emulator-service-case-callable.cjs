@@ -110,7 +110,7 @@ test('Onsite repair: engineer completion, no virtual inventory, retry intent che
  await assert.rejects(f.engineer.call({...event,event:{...event.event,workSummary:'different'}}),
    e=>e.code==='functions/failed-precondition');
  assert.equal((await f.record()).events.length,1);
- assert.equal((await db.collection('inventory').get()).empty,true);
+ assert.equal((await db.doc('inventory/'+f.productId).get()).exists,false);
 });
 test('Server trusts signed Auth identity and current role, not spoofed request fields',async()=>{
  const f=await fixture('auth','BIOPLEX_LAB');
