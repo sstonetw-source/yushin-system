@@ -114,8 +114,11 @@ function renderDeliveryModal() {
     if(v2)try{confirmation=pendingV2DeliveryConfirmation(order.id);reversal=pendingV2DeliveryReversal(order.id);}
     catch(error){pendingError=error.message;}
     const editable = canManageOrderLifecycleCapability() && canEditPage('orders.list') && !pendingError;
+    const deliveryItems=normalizedOrderItems(order);
+    const physicalDeliveryItems=deliveryItems.filter(item=>String(item.productType||'').trim().toUpperCase()!=='SERVICE');
     const isEditing = !!document.getElementById('deliveryEditId').value;
-    document.getElementById('deliveryFormPanel').style.display = editable && (normalizedOrderStatus(order) === 'normal' || isEditing) && (deliveryPartialFormOpen || isEditing) ? '' : 'none';
+    document.getElementById('deliveryFormPanel').style.display = editable && physicalDeliveryItems.length>0
+        && (normalizedOrderStatus(order) === 'normal' || isEditing) && (deliveryPartialFormOpen || isEditing) ? '' : 'none';
     const progress = deliveryProgressInfo(order);
     const lifecycle = orderLifecycleInfo(order);
     const locked = lifecycle.status !== 'normal';
@@ -123,8 +126,6 @@ function renderDeliveryModal() {
     const editableSteps = editable && !locked && !syncing;
     const purchase=purchaseProgressInfo(order);
     const fulfillment=fulfillmentProgressInfo(order);
-    const deliveryItems=normalizedOrderItems(order);
-    const physicalDeliveryItems=deliveryItems.filter(item=>String(item.productType||'').trim().toUpperCase()!=='SERVICE');
     document.getElementById('orderWorkflowSteps').innerHTML = `
         <button type="button" class="workflow-step ${['ordered','not_required','direct'].includes(purchase.state)?'done':purchase.state==='partial'?'partial':''}" disabled><span>1</span>${escapeHtml(purchase.label)}</button>
         <button type="button" class="workflow-step ${['ready','direct','complete'].includes(fulfillment.state)?'done':fulfillment.state==='partial'?'partial':''}" disabled><span>2</span>${escapeHtml(fulfillment.label)}</button>
@@ -141,7 +142,9 @@ function renderDeliveryModal() {
         const delivered=Math.max(0,grossDelivered-returned);
         return `<div><strong>${escapeHtml(item.itemName||'未命名品項')}</strong>（${escapeHtml(item.itemCode||'無貨號')}）<br>訂單數量 ${Number(item.qty||0)}｜已送 ${grossDelivered}｜退貨 ${returned}｜有效已送 ${delivered}</div>`;
     }).join('');
-    document.getElementById('deliveryOrderSummary').innerHTML = itemSummary + `
+    const serviceNotice=deliveryItems.some(item=>String(item.productType||'').trim().toUpperCase()==='SERVICE')
+        ? '<div style="margin-top:8px;padding:8px;background:#f4f2ed;border-radius:5px;">此訂單含服務品項：檢體、委外器材、維修與報告均不算商品送貨；目前的送貨數量僅供實體商品作業參考。服務完工及交付須另有憑證，不能在這裡標記完成。</div>' : '';
+    document.getElementById('deliveryOrderSummary').innerHTML = itemSummary + serviceNotice + `
         <div style="margin-top:6px;">目前狀態：${escapeHtml(lifecycle.label)}｜已送 ${progress.delivered}/${progress.total}｜未送 ${progress.remaining}</div>
         ${progress.isLegacyEstimated ? '<br><span class="delivery-estimated">這是舊版「已送貨」資料，日期暫以訂單日期推估。</span>' : ''}`;
     const deliveryForm=document.getElementById('deliveryFormPanel');
