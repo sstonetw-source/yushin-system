@@ -1757,17 +1757,27 @@ for(const width of [1280,390])test('full site '+width+'px original multi-item pu
 
 // Exercise the existing production-path manual form and initialization too.
 // This is the single-warehouse legacy contract, not the v2 transport fixture.
-for(const width of [1280,390])test('full site '+width+'px original manual order form creates and reserves through real Client Rules',{timeout:120000},async()=>{
- const tag='manual-entry-'+width,uid=tag+'-sales',email=uid+'@example.test',key=tag+'-product',warehouseId='MANUAL-ENTRY';
+for(const multi of [false,true])for(const width of [1280,390])test('full site '+width+'px original '+(multi?'multi-item ':'')+'manual order form creates and reserves through real Client Rules',{timeout:120000},async()=>{
+ const tag=(multi?'manual-multi-':'manual-entry-')+width,uid=tag+'-sales',email=uid+'@example.test',key=tag+'-product',warehouseId='MANUAL-ENTRY',otherWarehouse='MANUAL-ENTRY-B',code=(multi?'MULTI':'MANUAL')+width;
  await auth.createUser({uid,email,password});await db.collection('users').doc(uid).set({role:'sales',active:true,name:'手動建單業務',email,code:'B'});
  const batch=db.batch(),put=(name,id,data)=>batch.set(db.collection(name).doc(id),data);
  put('warehouses',warehouseId,{warehouseName:'手動建單驗收倉',active:true,isDefault:true});
- put('products',key,{productId:key,manufacturerPartNo:'MANUAL'+width,normalizedPartNo:'manual'+width,
+ put('products',key,{productId:key,manufacturerPartNo:code,normalizedPartNo:code.toLowerCase(),
   productName:'原表單建單試劑',brand:'Roche',brandName:'Roche',productType:'Goods',active:true,status:'ACTIVE',listPrice:100});
  put('inventory',key,{productKey:key,onHand:3,reserved:0,incoming:0,transferFreeInTransit:0});
- put('warehouseStocks',warehouseId+'__'+key,{warehouseId,productKey:key,onHand:3,reserved:0,incoming:0,transferFreeInTransit:0});
- const lot={productKey:key,warehouseId,receivedQty:3,remainingQty:3,lotNo:tag,expiryDate:'2028-01-01'};
- put('inventoryLots',tag+'-lot',lot);await batch.commit();
+ put('warehouseStocks',warehouseId+'__'+key,{warehouseId,productKey:key,onHand:multi?2:3,reserved:0,incoming:0,transferFreeInTransit:0});
+ const lot={productKey:key,warehouseId,receivedQty:multi?2:3,remainingQty:multi?2:3,lotNo:tag,expiryDate:'2028-01-01'};
+ put('inventoryLots',tag+'-lot',lot);
+ if(multi){
+  put('warehouses',otherWarehouse,{warehouseName:'手動建單驗收分倉',active:true});
+  put('warehouseStocks',otherWarehouse+'__'+key,{warehouseId:otherWarehouse,productKey:key,onHand:1,reserved:0,incoming:0,transferFreeInTransit:0});
+  put('inventoryLots',tag+'-other-lot',{productKey:key,warehouseId:otherWarehouse,receivedQty:1,remainingQty:1,lotNo:tag+'-B',expiryDate:'2028-01-01'});
+  put('products',key+'-Q',{productId:key+'-Q',manufacturerPartNo:code+'Q',normalizedPartNo:(code+'Q').toLowerCase(),productName:'另一建單試劑',brand:'Roche',brandName:'Roche',productType:'Goods',active:true,status:'ACTIVE',listPrice:150});
+  put('inventory',key+'-Q',{productKey:key+'-Q',onHand:2,reserved:0,incoming:0,transferFreeInTransit:0});
+  put('warehouseStocks',warehouseId+'__'+key+'-Q',{warehouseId,productKey:key+'-Q',onHand:2,reserved:0,incoming:0,transferFreeInTransit:0});
+  put('inventoryLots',tag+'-q-lot',{productKey:key+'-Q',warehouseId,receivedQty:2,remainingQty:2,lotNo:tag+'-Q',expiryDate:'2028-01-01'});
+ }
+ await batch.commit();
  const context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage(),errors=[],dialogs=[],external=[],functions=[];
  await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;});
  page.on('pageerror',error=>errors.push(error.message));page.on('dialog',dialog=>{dialogs.push(dialog.message());return dialog.type()==='confirm'?dialog.accept():dialog.dismiss();});
@@ -1781,26 +1791,58 @@ for(const width of [1280,390])test('full site '+width+'px original manual order 
   await siteOpen(page);await siteLogin(page,{uid,email},'sales');await siteNav(page,'orders');
   await page.locator('button[onclick="openOrderModal()"]').click();await page.locator('#orderModalOverlay.active').waitFor({state:'visible'});
   await page.waitForFunction(id=>warehouseMasterCache.some(w=>w.id===id)&&document.getElementById('orderWarehouse').value===id,warehouseId);
-  await page.locator('#orderCustomer').fill(tag+'客戶');await page.locator('#orderItemCode').fill('MANUAL'+width);await page.locator('#orderItemCode').blur();
+  await page.locator('#orderCustomer').fill(tag+'客戶');await page.locator('#orderItemCode').fill(code);await page.locator('#orderItemCode').blur();
   await page.waitForFunction(()=>document.getElementById('orderItemCode').dataset.productCheckStatus==='matched');
   await page.locator('#orderQty').fill('2');await page.locator('#orderUnitPrice').fill('100');
   assert.equal(await page.locator('#orderProcurementType').inputValue(),'PURCHASING_PO');
   assert.equal(await page.locator('#orderDeliveryChoice').inputValue(),'BUSINESS');
+  if(multi){
+   await page.locator('button[onclick="addCurrentOrderItemToDraft()"]').click();
+   await page.waitForFunction(()=>newOrderDraftItems.length===1);
+   await page.locator('#orderItemCode').fill(code);await page.locator('#orderItemCode').blur();
+   await page.waitForFunction(()=>document.getElementById('orderItemCode').dataset.productCheckStatus==='matched');
+   await page.locator('#orderQty').fill('1');await page.locator('#orderUnitPrice').fill('100');
+   // Distinct actual destinations keep the same product as separate lines;
+   // identical destination/price entries intentionally merge in the original UI.
+   await page.locator('#orderDeliveryChoice').selectOption('CUSTOMER');
+   const details=page.locator('#orderRecipientDetails');if(!await details.evaluate(node=>node.open))await details.locator('summary').click();
+   await page.waitForFunction(()=>document.getElementById('orderAddressStatus')?.textContent!=='讀取常用地址…');
+   await page.locator('#orderShippingContact').fill('原表單收件人');await page.locator('#orderShippingPhone').fill('02-12345678');
+   await page.locator('#orderShippingAddress').fill('台北市手動多品項驗收地址');
+   await page.locator('button[onclick="addCurrentOrderItemToDraft()"]').click();await page.waitForFunction(()=>newOrderDraftItems.length===2);
+   await page.locator('#orderItemCode').fill(code+'Q');await page.locator('#orderItemCode').blur();
+   await page.waitForFunction(()=>document.getElementById('orderItemCode').dataset.productCheckStatus==='matched');
+   await page.locator('#orderQty').fill('2');await page.locator('#orderUnitPrice').fill('150');
+   await page.locator('#orderDeliveryChoice').selectOption('BUSINESS');
+  }
   await page.locator('#saveNewOrderBtn').click();await page.locator('#orderModalOverlay.active').waitFor({state:'hidden'});
   await page.waitForFunction(uid=>ordersCache.some(o=>o.createdByUid===uid&&o.inventoryReservationStatus==='completed'),uid,{timeout:45000});
   const snapshot=await db.collection('orders').where('createdByUid','==',uid).get();assert.equal(snapshot.size,1);
   const orderId=snapshot.docs[0].id,order=snapshot.docs[0].data(),item=order.items[0];
   assert.equal(order.ownerUid,uid);assert.equal(order.salesCode,'B');assert.equal(order.customerName,tag+'客戶');
-  assert.equal(order.itemCount,1);assert.equal(order.items.length,1);assert.equal(item.productId,key);assert.equal(item.qty,2);
-  assert.equal(item.unitPrice,100);assert.equal(order.totalPrice,200);assert.equal(item.warehouseId,warehouseId);
+  assert.equal(order.itemCount,multi?3:1);assert.equal(order.items.length,multi?3:1);assert.equal(item.productId,key);assert.equal(item.qty,2);
+  assert.equal(item.unitPrice,100);assert.equal(order.totalPrice,multi?600:200);assert.equal(item.warehouseId,warehouseId);
   assert.equal(item.reservedQty,2);assert.equal(item.shortageQty,0);assert.equal(order.inventoryReservationStatus,'completed');
   const ledger=(await db.collection('inventoryReservations').doc(orderId+'__'+item.itemId).get()).data();
   assert.equal(ledger.quantity,2);assert.equal(ledger.warehouseId,warehouseId);assert.equal(ledger.productKey,key);
   const physical=async()=>({inventory:(await db.collection('inventory').doc(key).get()).data(),
    stock:(await db.collection('warehouseStocks').doc(warehouseId+'__'+key).get()).data(),
-   lot:(await db.collection('inventoryLots').doc(tag+'-lot').get()).data()});
-  const held=await physical();assert.equal(held.inventory.onHand,3);assert.equal(held.inventory.reserved,2);
-  assert.equal(held.stock.onHand,3);assert.equal(held.stock.reserved,2);assert.deepEqual(held.lot,lot);
+   lot:(await db.collection('inventoryLots').doc(tag+'-lot').get()).data(),
+   ...(multi?{otherStock:(await db.collection('warehouseStocks').doc(otherWarehouse+'__'+key).get()).data(),
+    otherLot:(await db.collection('inventoryLots').doc(tag+'-other-lot').get()).data(),
+    qInventory:(await db.collection('inventory').doc(key+'-Q').get()).data(),qStock:(await db.collection('warehouseStocks').doc(warehouseId+'__'+key+'-Q').get()).data(),
+    qLot:(await db.collection('inventoryLots').doc(tag+'-q-lot').get()).data()}:{} )});
+  const held=await physical();assert.equal(held.inventory.onHand,3);assert.equal(held.inventory.reserved,multi?3:2);
+  assert.equal(held.stock.onHand,multi?2:3);assert.equal(held.stock.reserved,2);assert.deepEqual(held.lot,lot);
+  if(multi){
+   assert.deepEqual(order.items.map(i=>[i.productId,i.qty,i.reservedQty,i.shortageQty,i.warehouseId]),[[key,2,2,0,warehouseId],[key,1,1,0,otherWarehouse],[key+'-Q',2,2,0,warehouseId]]);
+   assert.equal(new Set(order.items.map(i=>i.itemId)).size,3);assert.equal(order.items[1].deliveryPlan.mode,'CUSTOMER_SHIP');
+   assert.equal(order.items[1].deliveryPlan.address,'台北市手動多品項驗收地址');assert.equal(order.items[2].deliveryPlan.mode,'PICKUP');
+   for(const row of order.items){const hold=(await db.collection('inventoryReservations').doc(orderId+'__'+row.itemId).get()).data();
+    assert.equal(hold.quantity,row.qty);assert.equal(hold.productKey,row.productId);assert.equal(hold.warehouseId,row.warehouseId);}
+   assert.equal(held.otherStock.onHand,1);assert.equal(held.otherStock.reserved,1);assert.equal(held.otherLot.remainingQty,1);
+   assert.equal(held.qInventory.onHand,2);assert.equal(held.qInventory.reserved,2);assert.equal(held.qStock.onHand,2);assert.equal(held.qStock.reserved,2);assert.equal(held.qLot.remainingQty,2);
+  }
   assert.equal((await db.collection('supplyOrders').where('sourceId','==',orderId).get()).size,0);
   assert.deepEqual(order.deliveryRecords||[],[]);assert.deepEqual(order.returnRecords||[],[]);assert.equal(order.isDelivered,false);
   await siteOpen(page,'sales');await siteNav(page,'orders');
@@ -1809,10 +1851,10 @@ for(const width of [1280,390])test('full site '+width+'px original manual order 
   assert.deepEqual((await db.collection('orders').doc(orderId).get()).data(),order);assert.deepEqual(await physical(),held);
   assert.deepEqual(functions,[],'manual production path does not use isolated v2 callables');
   assert.deepEqual(dialogs,[]);assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
-  console.log('Full site '+width+'px: actual manual blank form/product lookup created one owned order and initialized one warehouse hold through Client Rules; physical stock/lots unchanged, reload read-only, no v2 initialization fixture or Callable.');
+  console.log('Full site '+width+'px '+(multi?'three lines/two products/two warehouses':'single line')+': actual manual blank form/product lookup created one owned order and initialized the original per-item warehouse holds through Client Rules; physical stock/lots unchanged, reload read-only, no v2 initialization fixture or Callable.');
  }catch(error){
   console.log('Manual entry '+width+'px diagnostic:',JSON.stringify(await page.evaluate(()=>({feedback:document.getElementById('actionFeedback')?.textContent,
    check:document.getElementById('orderProductCheckStatus')?.textContent,warehouse:document.getElementById('orderWarehouse')?.value,
-   orders:typeof ordersCache==='undefined'?[]:ordersCache.filter(o=>o.customerName?.includes('manual-entry'))}))),JSON.stringify({errors,dialogs,functions}));throw error;
+   orders:typeof ordersCache==='undefined'?[]:ordersCache.filter(o=>o.customerName?.startsWith('manual-'))}))),JSON.stringify({errors,dialogs,functions}));throw error;
  }finally{await context.close();}
 });
