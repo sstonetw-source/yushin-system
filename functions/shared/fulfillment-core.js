@@ -49,7 +49,10 @@
     const fulfilledQty = clamp(delivery.effectiveDeliveredQty, 0, orderedQty);
     const outstandingQty = Math.max(0, orderedQty - fulfilledQty);
     const reservedQty = clamp(item.reservedQty, 0, outstandingQty);
-    const shortageQty = Math.max(0, outstandingQty - reservedQty);
+    // Service work remaining is not a physical stock shortage. Keep recorded
+    // stock/supplier quantities visible so their validators can reject conflicts.
+    const shortageQty = String(item.productType||'').trim().toUpperCase()==='SERVICE'
+      ? 0 : Math.max(0, outstandingQty - reservedQty);
     return {
       ...item,
       itemId: String(item.itemId || `item-${index + 1}`),

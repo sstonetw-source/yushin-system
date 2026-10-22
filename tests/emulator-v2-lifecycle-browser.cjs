@@ -1957,6 +1957,11 @@ for(const mixed of [false,true])for(const width of [1280,390])test('full site '+
   assert.equal(order.items.length,mixed?2:1);assert.equal(order.totalPrice,mixed?350:200);
   assert.equal(service.reservedQty,0);assert.equal(service.shortageQty,0);assert.equal(service.warehouseId,'');assert.equal(service.reservationStatus,'not_required');
   assert.deepEqual(service.deliveryPlan,{});assert.equal(order.isDelivered,false);assert.deepEqual(order.deliveryRecords||[],[]);
+  const projection=await page.evaluate(({order,serviceKey})=>{
+   const item=normalizedOrderItems(order).find(row=>row.productId===serviceKey);
+   return {shortage:item.shortageQty,purchase:purchaseProgressInfo(order).state,physicalTotal:fulfillmentProgressInfo(order).total};
+  },{order,serviceKey});
+  assert.deepEqual(projection,{shortage:0,purchase:'not_required',physicalTotal:mixed?1:0});
   for(const name of ['inventory','inventoryReservations'])assert.equal((await db.collection(name).doc(name==='inventory'?serviceKey:orderId+'__'+service.itemId).get()).exists,false);
   for(const name of ['warehouseStocks','inventoryLots','inventoryMovements'])assert.equal((await db.collection(name).where('productKey','==',serviceKey).get()).size,0);
   assert.equal((await db.collection('procurementDemands').where('sourceId','==',orderId).get()).size,0);

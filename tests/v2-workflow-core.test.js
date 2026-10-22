@@ -4,6 +4,7 @@ const w=require('../modules/workflow-core.js');
 const fulfillment=require('../modules/fulfillment-core.js');
 const procurementDemand=require('../modules/procurement-demand-core.js');
 const reservation=require('../modules/reservation-core.js');
+const vm=require('node:vm'),fs=require('node:fs');
 const receiving=require('../modules/receiving-core.js');
 const supply=require('../modules/supply-core.js');
 
@@ -62,6 +63,33 @@ test('Service work projection is not a physical shortage, even without warehouse
  }
  assert.throws(()=>w.projectItem({productType:'Service',orderedQty:3,reservedQty:1}),/服務品項/);
  assert.throws(()=>w.projectItem({productType:'Service',orderedQty:3,supplyOrderedQty:1}),/服務品項/);
+});
+
+test('Service normalization never recreates physical shortage on mixed-order updates',()=>{
+ const row={itemId:'SERVICE',productType:'Service',orderedQty:3,reservedQty:0,shortageQty:3};
+ const normalized=fulfillment.normalizeItem(row);
+ assert.equal(normalized.shortageQty,0);assert.equal(normalized.orderedQty,3);
+ assert.deepEqual(fulfillment.normalizeItem(normalized),normalized);
+ const goods=fulfillment.normalizeItem({...row,productType:'Goods',reservedQty:1});
+ assert.equal(goods.shortageQty,2);
+ const conflict=fulfillment.normalizeItem({...row,reservedQty:1});
+ assert.equal(conflict.reservedQty,1);assert.throws(()=>w.projectItem(conflict),/服務品項/);
+});
+
+test('original order purchase and shipping summaries exclude service work from physical quantities',()=>{
+ const source=fs.readFileSync('src/features/orders/order-workspace.js','utf8');
+ const start=source.indexOf('function purchaseProgressInfo('),end=source.indexOf('const pendingDispatchOrderIds',start);
+ const service={productType:'Service',qty:3,reservedQty:0,shortageQty:3,fulfillmentType:'WAREHOUSE'};
+ const c=vm.createContext({normalizedOrderItems:order=>order.items,YushinWorkflow:w,
+  itemDispatchState:(_order,item)=>fulfillment.dispatchState(item),defaultWarehouse:()=>({id:'W'})});
+ vm.runInContext(source.slice(start,end),c);
+ assert.equal(c.purchaseProgressInfo({items:[service]}).state,'not_required');
+ assert.equal(c.fulfillmentProgressInfo({items:[service]}).state,'not_required');
+ const goods={qty:2,reservedQty:2,shortageQty:0,fulfillmentType:'WAREHOUSE'};
+ const mixed=c.fulfillmentProgressInfo({items:[service,goods]});
+ assert.equal(mixed.total,2);assert.equal(mixed.ready,2);assert.equal(mixed.pendingDispatch,2);
+ assert.equal(c.purchaseProgressInfo({items:[service,{...goods,reservedQty:0,shortageQty:2}]}).label,'待採購 2');
+ assert.equal(c.fulfillmentProgressInfo({items:[{qty:1,fulfillmentType:'DIRECT_SHIP'}]}).state,'direct');
 });
 
 test('two Bio-Plex service sales do not produce two kits of demand; shared reagent uses independent real replenishment',()=>{

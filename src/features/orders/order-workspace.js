@@ -154,6 +154,7 @@ function purchaseProgressInfo(order) {
         const quantities=globalThis.YushinWorkflow.procurementQuantities({
             orderedQty:item.orderedQty??item.qty,
             fulfillmentType:item.fulfillmentType||order.fulfillmentType||'WAREHOUSE',
+            productType:item.productType||order.productType||'',
             reservedQty:item.reservedQty,
             shortageQty:item.shortageQty,
             supplyOrderedQty:item.supplyOrderedQty,
@@ -175,7 +176,9 @@ function purchaseProgressInfo(order) {
 }
 
 function fulfillmentProgressInfo(order, normalizedItems = null, dispatchStateByItem = null) {
-    const items=(normalizedItems || normalizedOrderItems(order)).filter(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP');
+    const allItems=normalizedItems || normalizedOrderItems(order);
+    const items=allItems.filter(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'
+        &&String(item.productType||'').trim().toUpperCase()!=='SERVICE');
     const total=items.reduce((s,item)=>s+Number(item.orderedQty||item.qty||0),0);
     const states=items.map(item=>{const state=dispatchStateByItem?.get(item) || itemDispatchState(order,item);return globalThis.YushinWarehouseLogistics?.businessDeliveryState?globalThis.YushinWarehouseLogistics.businessDeliveryState(order,item,state,defaultWarehouse()?.id||''):state;});
     const ready=states.reduce((s,state)=>s+state.reserved,0);
@@ -183,7 +186,9 @@ function fulfillmentProgressInfo(order, normalizedItems = null, dispatchStateByI
     const delivered=states.reduce((s,state)=>s+state.delivered,0);
     const shippable=states.reduce((s,state)=>s+state.shippable,0);
     const pendingDispatch=states.reduce((s,state)=>s+state.pending,0);
-    if(!items.length)return {state:'direct',label:'原廠直送',total:0,ready:0,prepared:0,delivered:0,shippable:0,pendingDispatch:0};
+    if(!items.length)return allItems.some(item=>String(item.productType||'').trim().toUpperCase()==='SERVICE')
+        ? {state:'not_required',label:'無需實貨出貨',total:0,ready:0,prepared:0,delivered:0,shippable:0,pendingDispatch:0}
+        : {state:'direct',label:'原廠直送',total:0,ready:0,prepared:0,delivered:0,shippable:0,pendingDispatch:0};
     if(total>0 && delivered>=total)return {state:'complete',label:'出貨完成',total,ready,prepared,delivered,shippable:0,pendingDispatch:0};
     if(shippable>0)return {state:'shippable',label:`可出貨 ${shippable}/${total}`,total,ready,prepared,delivered,shippable,pendingDispatch};
     if(pendingDispatch>0)return {state:ready>=Math.max(0,total-delivered)?'pending_dispatch':'partial_dispatch',label:`待打單 ${pendingDispatch}/${total}`,total,ready,prepared,delivered,shippable,pendingDispatch};
