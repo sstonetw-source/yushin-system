@@ -12229,7 +12229,7 @@ window.renderOrdersList = function() {
             <td class="order-date-cell" data-th="訂單日期">${escapeHtml(o.orderDate || '')}</td>
             <td class="order-customer-cell" data-th="客戶名稱"><div class="record-reference">客戶訂單${o.orderNo ? `・${escapeHtml(o.orderNo)}` : o.quoteNo ? `・來源估價單 ${escapeHtml(o.quoteNo)}` : ''}</div>${o.customerName ? `<button type="button" class="btn-small btn-secondary" onclick="showCustomerOrderHistory(${inlineJsValue(o.customerName)})">${escapeHtml(o.customerName)}</button>` : ''}</td>
             <td class="order-sales-cell" data-th="負責業務">${escapeHtml(stripPhoneSuffix(o.salesName))}</td>
-            <td data-th="產品資訊" class="order-product-cell">${orderItems.map((item,index)=>{const displayCategories=displayCategoriesByItem.get(item)||[];const primaryStatus=displayCategories[0]||'ordering';const itemStatus=['dispatch','shipping'].includes(activeOrderWorkFilter)&&displayCategories.includes(activeOrderWorkFilter)?activeOrderWorkFilter:primaryStatus;const itemStatusMap={ordering:'待採購',arrival:'待到貨',dispatch:'待打單',shipping:'已打單',billing:'待核銷',complete:'已完成',closed:lifecycle.label};const waiting=primaryStatus==='arrival'?waitingDaysFromDate(item.orderedAt):'';const state=dispatchStateByItem.get(item)||itemDispatchState(o,item);const parallelDispatch=primaryStatus!=='dispatch'&&state.pending>0;return `<div style="${index?'margin-top:5px;padding-top:5px;border-top:1px solid #eee;':''}"><strong>${escapeHtml(item.itemName || '－')}</strong><small>${escapeHtml(item.brand || '未分類')}${item.itemCode ? `・${escapeHtml(item.itemCode)}` : ''}・${activeOrderWorkFilter==='shipping'?`已打單 ${state.shippable}／訂單數量 ${Number(item.orderedQty||item.qty||0)}`:activeOrderWorkFilter==='dispatch'?`待打單 ${state.pending}／訂單數量 ${Number(item.orderedQty||item.qty||0)}`:Number(item.orderedQty||item.qty||0)}</small><small class="order-item-work-status">訂單狀態：<span class="order-progress-badge">${escapeHtml(((lifecycle.status==='normal'&&orderInventorySyncIncomplete(o)) ? (o.inventoryReservationStatus==='failed'?'庫存同步未完成':'庫存同步中…') : ((lifecycle.status==='normal'&&globalThis.YushinWarehouseLogistics?.shippingStatus(o,item,state))||itemStatusMap[itemStatus]||'待採購')))}</span>${waiting?`・已等 ${escapeHtml(waiting)}`:''}${parallelDispatch&&itemStatus!=='dispatch'?`・另有 ${escapeHtml(state.pending)} 待打單`:''}${state.shippable>0?`・已有 ${escapeHtml(state.shippable)} 可出貨`:''}</small></div>`}).join('')}</td>
+            <td data-th="產品資訊" class="order-product-cell">${orderItems.map((item,index)=>{const displayCategories=displayCategoriesByItem.get(item)||[];const primaryStatus=displayCategories[0]||'ordering';const itemStatus=['dispatch','shipping'].includes(activeOrderWorkFilter)&&displayCategories.includes(activeOrderWorkFilter)?activeOrderWorkFilter:primaryStatus;const itemStatusMap={ordering:'待採購',arrival:'待到貨',dispatch:'待打單',shipping:'已打單',billing:'待核銷',complete:'已完成',closed:lifecycle.label};const waiting=primaryStatus==='arrival'?waitingDaysFromDate(item.orderedAt):'';const state=dispatchStateByItem.get(item)||itemDispatchState(o,item);const parallelDispatch=primaryStatus!=='dispatch'&&state.pending>0;return `<div style="${index?'margin-top:5px;padding-top:5px;border-top:1px solid #eee;':''}"><strong>${escapeHtml(item.itemName || '－')}</strong><small>${escapeHtml(item.brand || '未分類')}${item.itemCode ? `・${escapeHtml(item.itemCode)}` : ''}・${activeOrderWorkFilter==='shipping'?`已打單 ${state.shippable}／訂單數量 ${Number(item.orderedQty||item.qty||0)}`:activeOrderWorkFilter==='dispatch'?`待打單 ${state.pending}／訂單數量 ${Number(item.orderedQty||item.qty||0)}`:Number(item.orderedQty||item.qty||0)}</small><small class="order-item-work-status">訂單狀態：<span class="order-progress-badge">${escapeHtml(((lifecycle.status==='normal'&&orderInventorySyncIncomplete(o)) ? (o.inventoryReservationStatus==='failed'?'庫存同步未完成':'庫存同步中…') : ((String(item.productType||'').trim().toUpperCase()==='SERVICE'&&lifecycle.status==='normal'&&primaryStatus==='delivery'?'待服務處理':(lifecycle.status==='normal'&&globalThis.YushinWarehouseLogistics?.shippingStatus(o,item,state)))||itemStatusMap[itemStatus]||'待採購')))}</span>${waiting?`・已等 ${escapeHtml(waiting)}`:''}${parallelDispatch&&itemStatus!=='dispatch'?`・另有 ${escapeHtml(state.pending)} 待打單`:''}${state.shippable>0?`・已有 ${escapeHtml(state.shippable)} 可出貨`:''}</small></div>`}).join('')}</td>
             <td data-th="訂單總額" class="order-money-cell"><strong>NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice ?? '').replace(/,/g, '')) || 0).toLocaleString())}</strong><small>${o.isBilled ? '已核銷' : '未核銷'}</small></td>
             <td class="order-details-cell">
                 <div class="order-text-summary">${escapeHtml([o.transactionType ? `交易：${o.transactionType}` : '', o.invoiceTitle || '', o.isBilled && orderBillingDate(o) ? `核銷日期：${orderBillingDate(o)}` : '', o.remarks || ''].filter(Boolean).join('・'))}</div>
@@ -19197,6 +19197,8 @@ function renderOrderStatusHistory(order) {
 }
 
 async function applyInventoryDeliveryDeltaInTransaction(transaction, order, deltaQty, actor, sourceId, reversalRecords) {
+    // Customer service is not company-owned stock, including parts bought for the job.
+    if(String(order.productType||order.type||'').trim().toUpperCase()==='SERVICE')throw new Error('服務型品項不得走一般商品出貨或庫存還原；請先完成服務作業流程。');
     if(order.transferPendingId)throw new Error('此品項尚在倉庫調撥途中，請目的倉先確認收貨。');
     const deliveryPlan=globalThis.YushinWarehouseLogistics?.plan(order.deliveryPlan||order.shippingInstructions||{});
     if(deltaQty>0&&(order.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'&&deliveryPlan?.mode==='PICKUP'&&order.warehouseId&&order.warehouseId!==defaultWarehouse()?.id&&!String(order.warehouseId).startsWith('custody-'))throw new Error('主倉自領品項仍在分倉，請先完成調回主倉與收貨。');
@@ -19282,6 +19284,7 @@ function applyInventoryDeliveryInTransaction(transaction, orderRef, order, deliv
 }
 
 async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQty, actor, sourceId, previousReturnRecord) {
+    if(String(order.productType||order.type||'').trim().toUpperCase()==='SERVICE')throw new Error('服務型品項不得走一般商品退貨入庫；客戶器材與檢體不是公司庫存。');
     if (!deltaQty || (order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return {lotAllocations:[],cogs:0};
     const productKey = inventoryProductKey(order);
     const warehouseId = order.warehouseId || defaultWarehouse()?.id || '';
@@ -19495,6 +19498,8 @@ async function reverseV2ShipmentDeliveryEmulator(orderId,deliveryRecordId,{date,
 
 // Order delivery mutations. UI owns input/feedback; this service owns protected writes.
 function assertOrderDeliveryIncrease(order,item,qty) {
+    if(String(item?.productType||item?.type||'').trim().toUpperCase()==='SERVICE')
+        throw new Error('服務型品項不能使用商品送貨紀錄；須另有服務完成及客戶交付憑證。');
     if(qty<=0)return;
     if(orderInventorySyncIncomplete(order))throw new Error('訂單庫存尚未同步完成');
     if((item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP')return;
@@ -19587,6 +19592,7 @@ async function cancelOrderDeliveries(orderId) {
         const history = { action: 'cancel_all', source: 'quick_toggle', before, after: { records: [], deliveredQty: 0 }, by: actor, at: now };
         const currentItems=normalizedOrderItems(order);
         const deliveryItem=currentItems[0];
+        assertOrderDeliveryIncrease(order,deliveryItem,0);
         const itemOrder={...order,...deliveryItem,deliveryRecords:savedDeliveryRecords(order),isDelivered:false};
         const inventoryResult=await applyInventoryDeliveryDeltaInTransaction(transaction, itemOrder, -progress.delivered, actor, orderId, savedDeliveryRecords(order));
         const nextItems=currentItems.map((item,index)=>index===0?{...item,reservedQty:Number(inventoryResult?.newReservedQty??item.reservedQty??0)}:item);
@@ -19716,6 +19722,7 @@ async function correctOrderDeliveryRecord(orderId,recordId,correctionReason) {
         const orderItems=normalizedOrderItems(order);
         const targetItem=orderItems.find(item=>item.itemId===removed.itemId) || (orderItems.length===1?orderItems[0]:null);
         if(!targetItem)throw new Error('找不到原送貨品項，無法安全還原庫存。');
+        assertOrderDeliveryIncrease(order,targetItem,0);
         const itemRecords=records.filter(r=>((!r.itemId&&orderItems.length===1)||r.itemId===targetItem.itemId));
         const itemGrossAfter=itemRecords.filter(r=>r.id!==recordId).reduce((sum,row)=>sum+Number(row.qty||0),0);
         const itemReturned=savedReturnRecords(order)
@@ -20594,12 +20601,13 @@ function renderDeliveryModal() {
     const editableSteps = editable && !locked && !syncing;
     const purchase=purchaseProgressInfo(order);
     const fulfillment=fulfillmentProgressInfo(order);
+    const deliveryItems=normalizedOrderItems(order);
+    const physicalDeliveryItems=deliveryItems.filter(item=>String(item.productType||'').trim().toUpperCase()!=='SERVICE');
     document.getElementById('orderWorkflowSteps').innerHTML = `
         <button type="button" class="workflow-step ${['ordered','not_required','direct'].includes(purchase.state)?'done':purchase.state==='partial'?'partial':''}" disabled><span>1</span>${escapeHtml(purchase.label)}</button>
         <button type="button" class="workflow-step ${['ready','direct','complete'].includes(fulfillment.state)?'done':fulfillment.state==='partial'?'partial':''}" disabled><span>2</span>${escapeHtml(fulfillment.label)}</button>
-        <button type="button" class="workflow-step ${progress.state==='complete'?'done':progress.state==='partial'?'partial':''}" ${editableSteps&&progress.remaining>0?'onclick="openPartialDeliveryForm()"':'disabled'}><span>3</span>${escapeHtml(progress.label)}</button>
+        <button type="button" class="workflow-step ${progress.state==='complete'?'done':progress.state==='partial'?'partial':''}" ${editableSteps&&progress.remaining>0&&physicalDeliveryItems.length?'onclick="openPartialDeliveryForm()"':'disabled'}><span>3</span>${escapeHtml(progress.label)}</button>
         <button type="button" class="workflow-step ${order.isBilled?'done':''}" ${editableSteps?`onclick="toggleOrderProgressStatus('isBilled', ${!order.isBilled})"`:'disabled'}><span>4</span>${order.isBilled?'已核銷':'未核銷'}</button>`;
-    const deliveryItems=normalizedOrderItems(order);
     const deliveryItemNameById=new Map(deliveryItems.map(item=>[item.itemId,item.itemName||item.itemId||'']));
     const itemSummary=deliveryItems.map(item=>{
         const grossDelivered=savedDeliveryRecords(order)
@@ -20622,8 +20630,8 @@ function renderDeliveryModal() {
             deliveryForm.insertBefore(select,deliveryForm.firstChild);
         }
         const current=select.value;
-        select.innerHTML=deliveryItems.map(item=>`<option value="${escapeAttr(item.itemId)}">${escapeHtml(item.itemCode||'')} ${escapeHtml(item.itemName||'')}</option>`).join('');
-        if(deliveryItems.some(item=>item.itemId===current))select.value=current;
+        select.innerHTML=physicalDeliveryItems.map(item=>`<option value="${escapeAttr(item.itemId)}">${escapeHtml(item.itemCode||'')} ${escapeHtml(item.itemName||'')}</option>`).join('');
+        if(physicalDeliveryItems.some(item=>item.itemId===current))select.value=current;
         select.style.display='';
     }else{
         const select=document.getElementById('deliveryItemId');if(select)select.style.display='none';
@@ -20675,7 +20683,7 @@ function renderDeliveryModal() {
     }else document.getElementById('deliveryShipmentSelection')?.remove();
     const tbody = document.getElementById('deliveryRecordsBody');
     const partialButton = document.getElementById('openPartialDeliveryBtn');
-    if (partialButton) partialButton.style.display = editable && !locked && progress.remaining > 0 ? '' : 'none';
+    if (partialButton) partialButton.style.display = editable && !locked && progress.remaining > 0 && physicalDeliveryItems.length ? '' : 'none';
     const records = savedDeliveryRecords(order).slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
     if (records.length) {
         tbody.innerHTML = records.map(record => `<tr>

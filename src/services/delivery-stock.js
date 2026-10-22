@@ -1,4 +1,6 @@
 async function applyInventoryDeliveryDeltaInTransaction(transaction, order, deltaQty, actor, sourceId, reversalRecords) {
+    // Customer service is not company-owned stock, including parts bought for the job.
+    if(String(order.productType||order.type||'').trim().toUpperCase()==='SERVICE')throw new Error('服務型品項不得走一般商品出貨或庫存還原；請先完成服務作業流程。');
     if(order.transferPendingId)throw new Error('此品項尚在倉庫調撥途中，請目的倉先確認收貨。');
     const deliveryPlan=globalThis.YushinWarehouseLogistics?.plan(order.deliveryPlan||order.shippingInstructions||{});
     if(deltaQty>0&&(order.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'&&deliveryPlan?.mode==='PICKUP'&&order.warehouseId&&order.warehouseId!==defaultWarehouse()?.id&&!String(order.warehouseId).startsWith('custody-'))throw new Error('主倉自領品項仍在分倉，請先完成調回主倉與收貨。');
@@ -84,6 +86,7 @@ function applyInventoryDeliveryInTransaction(transaction, orderRef, order, deliv
 }
 
 async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQty, actor, sourceId, previousReturnRecord) {
+    if(String(order.productType||order.type||'').trim().toUpperCase()==='SERVICE')throw new Error('服務型品項不得走一般商品退貨入庫；客戶器材與檢體不是公司庫存。');
     if (!deltaQty || (order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return {lotAllocations:[],cogs:0};
     const productKey = inventoryProductKey(order);
     const warehouseId = order.warehouseId || defaultWarehouse()?.id || '';

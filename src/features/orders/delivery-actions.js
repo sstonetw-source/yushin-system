@@ -123,12 +123,13 @@ function renderDeliveryModal() {
     const editableSteps = editable && !locked && !syncing;
     const purchase=purchaseProgressInfo(order);
     const fulfillment=fulfillmentProgressInfo(order);
+    const deliveryItems=normalizedOrderItems(order);
+    const physicalDeliveryItems=deliveryItems.filter(item=>String(item.productType||'').trim().toUpperCase()!=='SERVICE');
     document.getElementById('orderWorkflowSteps').innerHTML = `
         <button type="button" class="workflow-step ${['ordered','not_required','direct'].includes(purchase.state)?'done':purchase.state==='partial'?'partial':''}" disabled><span>1</span>${escapeHtml(purchase.label)}</button>
         <button type="button" class="workflow-step ${['ready','direct','complete'].includes(fulfillment.state)?'done':fulfillment.state==='partial'?'partial':''}" disabled><span>2</span>${escapeHtml(fulfillment.label)}</button>
-        <button type="button" class="workflow-step ${progress.state==='complete'?'done':progress.state==='partial'?'partial':''}" ${editableSteps&&progress.remaining>0?'onclick="openPartialDeliveryForm()"':'disabled'}><span>3</span>${escapeHtml(progress.label)}</button>
+        <button type="button" class="workflow-step ${progress.state==='complete'?'done':progress.state==='partial'?'partial':''}" ${editableSteps&&progress.remaining>0&&physicalDeliveryItems.length?'onclick="openPartialDeliveryForm()"':'disabled'}><span>3</span>${escapeHtml(progress.label)}</button>
         <button type="button" class="workflow-step ${order.isBilled?'done':''}" ${editableSteps?`onclick="toggleOrderProgressStatus('isBilled', ${!order.isBilled})"`:'disabled'}><span>4</span>${order.isBilled?'已核銷':'未核銷'}</button>`;
-    const deliveryItems=normalizedOrderItems(order);
     const deliveryItemNameById=new Map(deliveryItems.map(item=>[item.itemId,item.itemName||item.itemId||'']));
     const itemSummary=deliveryItems.map(item=>{
         const grossDelivered=savedDeliveryRecords(order)
@@ -151,8 +152,8 @@ function renderDeliveryModal() {
             deliveryForm.insertBefore(select,deliveryForm.firstChild);
         }
         const current=select.value;
-        select.innerHTML=deliveryItems.map(item=>`<option value="${escapeAttr(item.itemId)}">${escapeHtml(item.itemCode||'')} ${escapeHtml(item.itemName||'')}</option>`).join('');
-        if(deliveryItems.some(item=>item.itemId===current))select.value=current;
+        select.innerHTML=physicalDeliveryItems.map(item=>`<option value="${escapeAttr(item.itemId)}">${escapeHtml(item.itemCode||'')} ${escapeHtml(item.itemName||'')}</option>`).join('');
+        if(physicalDeliveryItems.some(item=>item.itemId===current))select.value=current;
         select.style.display='';
     }else{
         const select=document.getElementById('deliveryItemId');if(select)select.style.display='none';
@@ -204,7 +205,7 @@ function renderDeliveryModal() {
     }else document.getElementById('deliveryShipmentSelection')?.remove();
     const tbody = document.getElementById('deliveryRecordsBody');
     const partialButton = document.getElementById('openPartialDeliveryBtn');
-    if (partialButton) partialButton.style.display = editable && !locked && progress.remaining > 0 ? '' : 'none';
+    if (partialButton) partialButton.style.display = editable && !locked && progress.remaining > 0 && physicalDeliveryItems.length ? '' : 'none';
     const records = savedDeliveryRecords(order).slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
     if (records.length) {
         tbody.innerHTML = records.map(record => `<tr>
