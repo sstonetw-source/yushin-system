@@ -1943,7 +1943,7 @@ for(const width of [1280,390])test('full site '+width+'px original UI gated PO p
   reservations:(await db.collection('inventoryReservations').where('productKey','==',key).get()).docs.map(d=>({id:d.id,...d.data()}))});
  const before=await physical(),context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
  const errors=[],dialogs=[],external=[],functions=[];
- await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_FORMAL_PURCHASE_EMULATOR=true;});
+ await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_FORMAL_PURCHASE_EMULATOR=true;window.YUSHIN_V2_RECEIVING_EMULATOR=true;});
  page.on('pageerror',error=>errors.push(error.message));page.on('dialog',d=>{dialogs.push(d.message());return d.type()==='confirm'?d.accept():d.dismiss();});
  await context.route('**/*',async route=>{const url=new URL(route.request().url());
   if(!['localhost','127.0.0.1'].includes(url.hostname)){external.push(url.hostname);await route.abort();return;}
@@ -1997,9 +1997,9 @@ for(const width of [1280,390])test('full site '+width+'px original UI gated PO p
   await siteOpen(page,'sales');await siteNav(page,'orders');
   assert.deepEqual((await db.collection('orders').doc(orderId).get()).data(),done);assert.deepEqual(await physical(),before);
   assert.equal((await db.collection('receipts').where('supplyOrderId','==',supplyId).get()).size,2);
-  assert.equal(functions.length,1);assert.match(functions[0],/commitV2FormalPurchase/);assert.deepEqual(external,[]);assert.deepEqual(errors,[]);
+  assert.equal(functions.length,3);assert.match(functions[0],/commitV2FormalPurchase/);assert.ok(functions.slice(1).every(path=>/receiveV2Supply/.test(path)));assert.deepEqual(external,[]);assert.deepEqual(errors,[]);
   assert.ok(dialogs.every(message=>message.startsWith('確認採購單 ')),JSON.stringify(dialogs));
-  console.log('Full site '+width+'px: original direct source sync, DRAFT/PDF, explicit demo-gated backend purchase and owner arrival 1+2 complete; company/warehouse/lot/movement/reservation unchanged, reload read-only, one gated Functions call. Source form input and physical PDF output remain explicit fixture boundaries.');
+  console.log('Full site '+width+'px: original direct source sync, DRAFT/PDF, explicit demo-gated backend purchase and owner arrival 1+2 complete; company/warehouse/lot/movement/reservation unchanged, reload read-only, one gated PO and two gated receipt Functions calls. Source form input and physical PDF output remain explicit fixture boundaries.');
  }catch(error){
   console.log('Direct entry '+width+'px diagnostic:',JSON.stringify(await page.evaluate(()=>({role:typeof currentUserRole==='undefined'?'none':currentUserRole,
    feedback:document.getElementById('actionFeedback')?.textContent,po:document.getElementById('poSaveStatus')?.textContent,
