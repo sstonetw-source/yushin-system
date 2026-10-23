@@ -277,12 +277,16 @@ for(const width of [1280,390])test('original service case UI '+width+'px: four k
   deliveryRecords:[],returnRecords:[],deliveredQty:0,isDelivered:false,isBilled:false};
  await db.doc('orders/'+orderId).set(order);
  const context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
- const calls=[],errors=[],external=[],serviceDialogs=[];let lose=true;
+ const calls=[],errors=[],external=[],serviceDialogs=[];let lose=true,lookupGate=null;
  await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_SERVICE_CASE_EMULATOR=true;});
  page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>{serviceDialogs.push(d.message());return d.dismiss();});
  await context.route('**/*',async route=>{
   const request=route.request(),url=new URL(request.url());
   if(!['localhost','127.0.0.1'].includes(url.hostname)){external.push(url.hostname);await route.abort();return;}
+  if(lookupGate&&url.port==='5001'&&request.method()==='POST'&&url.pathname.endsWith('/getServiceCaseStatus')
+    &&request.postDataJSON().data.orderNo){
+   const gate=lookupGate;lookupGate=null;gate.arrived();await gate.released;
+  }
   if(url.port==='5001'&&request.method()==='POST'&&url.pathname.endsWith('/commitServiceCaseEvent')){
    assert.ok((await request.allHeaders()).authorization?.startsWith('Bearer '));
    calls.push(request.postDataJSON().data);
@@ -318,6 +322,21 @@ for(const width of [1280,390])test('original service case UI '+width+'px: four k
   await siteOpen(page);await siteLogin(page,accounts.sales,'sales');await siteNav(page,'orders');
   const row=page.locator('#ordersBody > tr').filter({hasText:tag+'客戶'});await row.waitFor({state:'visible'});
   await row.getByRole('button',{name:'服務案件',exact:true}).click();
+  await page.locator('#serviceNewCaseId').waitFor({state:'visible'});
+  // Delay the real authorized HTTP lookup, leaving the original handlers intact.
+  await page.locator('#serviceNewCaseId').fill('OLD-CASE');await page.locator('#serviceNewQty').fill('1');
+  let arrived,release;const requested=new Promise(resolve=>arrived=resolve),released=new Promise(resolve=>release=resolve);
+  lookupGate={arrived,released};
+  try{
+   await page.locator('#serviceOrderNo').fill('MISSING-'+tag);
+   await page.locator('button[onclick="findServiceCaseOrder()"]').click();await requested;
+   assert.equal(await page.locator('#serviceCaseSave').count(),0);
+   assert.equal(await page.locator('#serviceItemChoice').isDisabled(),true);
+   await page.evaluate(()=>saveServiceCaseAction());assert.equal(calls.length,0);
+  }finally{release();}
+  await page.waitForFunction(()=>!serviceCaseView?.orderLookup&&document.getElementById('serviceCaseMessage')?.textContent.includes('不存在'));
+  await page.evaluate(()=>saveServiceCaseAction());assert.equal(calls.length,0);
+  await page.locator('#serviceOrderNo').fill(orderNo);await page.locator('button[onclick="findServiceCaseOrder()"]').click();
   await page.locator('#serviceNewCaseId').waitFor({state:'visible'});await start('PIP-001');
   await page.locator('#serviceCaseRetry').waitFor({state:'visible'});
   const first=calls[0];assert.ok(first.event.id);assert.equal(first.serviceQty,1);

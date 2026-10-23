@@ -10974,15 +10974,23 @@ window.findServiceCaseOrder=async function(){
     const view=serviceCaseView;if(!view||view.busy)return;
     let seq;
     try{
-        serviceCaseCurrent(view);seq=++view.request;
+        serviceCaseCurrent(view);seq=++view.request;view.orderLookup=seq;
+        // Invalidate the previous order's actions before awaiting a new lookup.
+        // A failed lookup must not leave an actionable form for the old order.
+        view.data=null;view.selected=null;
+        const body=document.getElementById('serviceItemBody');if(body)body.textContent='查詢訂單中…';
+        const choice=document.getElementById('serviceItemChoice');if(choice)choice.disabled=true;
         const order=await readServiceCases({orderNo:document.getElementById('serviceOrderNo').value.trim()});
         serviceCaseCurrent(view);if(seq!==view.request)return;
-        view.order=order;renderServiceCaseOrder(view);await loadServiceCaseItem(order.items[0].itemId);
+        view.orderLookup=null;view.order=order;renderServiceCaseOrder(view);await loadServiceCaseItem(order.items[0].itemId);
     }catch(error){if(serviceCaseView===view&&seq===view.request&&view.uid===currentUser?.uid&&view.role===currentUserRole
-        &&view.generation===sessionDataGeneration)serviceCaseMessage(view,error.message);}
+        &&view.generation===sessionDataGeneration){
+        const body=document.getElementById('serviceItemBody');if(body)body.textContent='訂單查詢失敗，請重新查詢。';
+        serviceCaseMessage(view,error.message);
+    }}finally{if(serviceCaseView===view&&view.orderLookup===seq)view.orderLookup=null;}
 };
 window.loadServiceCaseItem=async function(itemId){
-    const view=serviceCaseView;if(!view||view.busy)return;
+    const view=serviceCaseView;if(!view||view.busy||view.orderLookup)return;
     serviceCaseCurrent(view);const seq=++view.request;
     document.getElementById('serviceItemBody').textContent='讀取案件中…';view.data=null;view.itemId=itemId;
     try{
@@ -11026,11 +11034,12 @@ function renderServiceCasePending(view,saved){
     document.getElementById('serviceCaseBody').innerHTML=`<p>前次服務操作結果待確認，請以原資料確認。</p><p>案件：${escapeHtml(saved.intent.caseId)}｜數量：${saved.intent.serviceQty}｜${escapeHtml(SERVICE_EVENT_LABELS[saved.intent.event.type]||saved.intent.event.type)}</p><button type="button" id="serviceCaseRetry" onclick="saveServiceCaseAction()">確認前次服務操作結果</button>`;
 }
 window.saveServiceCaseAction=async function(){
-    const view=serviceCaseView;if(!view||view.busy||view.needsReload)return;
+    const view=serviceCaseView;if(!view||view.busy||view.needsReload||view.orderLookup)return;
     let confirmed=false;
     try{
         serviceCaseCurrent(view);let intent;
         if(!pendingServiceCaseIntent()){
+            if(!view.data)throw Error('請先完成服務訂單與案件查詢。');
             const at=new Date(document.getElementById('serviceOccurredAt').value);
             if(!Number.isFinite(at.getTime()))throw Error('請填寫有效的實際作業時間。');
             const event={id:crypto.randomUUID(),type:view.eventType,occurredAt:at.toISOString(),notes:document.getElementById('serviceNotes').value};

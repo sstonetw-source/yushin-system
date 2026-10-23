@@ -42,6 +42,35 @@ test('server role hints control actions and customer data is escaped before disp
  assert.match(f.node('serviceItemBody').innerHTML,/&lt;img>/);assert.doesNotMatch(f.node('serviceCaseAction').innerHTML,/serviceCaseSave/);
  assert.equal(f.calls.length,0);
 });
+test('order lookup invalidates old actions; a failed query cannot submit the previous case',async()=>{
+ const f=fixture();await f.c.openServiceCases('O');
+ f.node('serviceOccurredAt').value='2026-10-23T10:00:00';f.node('serviceNewCaseId').value='old-case';f.node('serviceNewQty').value='1';
+ let reject;const reads=[];
+ f.setRead(input=>{reads.push(input);return new Promise((_,r)=>reject=r);});
+ f.node('serviceOrderNo').value='YS-OTHER';const lookup=f.c.findServiceCaseOrder();
+ await f.c.saveServiceCaseAction();await f.c.loadServiceCaseItem('I');
+ assert.equal(f.calls.length,0);assert.equal(reads.length,1);assert.equal(f.node('serviceItemChoice').disabled,true);
+ reject(Error('order not found'));await lookup;await f.c.saveServiceCaseAction();
+ assert.equal(f.calls.length,0);assert.match(f.node('serviceCaseMessage').textContent,/查詢/);
+});
+test('new order lookup supersedes an old item read and keeps the new order bound through submission',async()=>{
+ const f=fixture();await f.c.openServiceCases('O');
+ let resolveOld,resolveOrder;const reads=[];
+ f.setRead(input=>{
+  reads.push(input);
+  if(input.orderNo)return new Promise(resolve=>resolveOrder=resolve);
+  if(input.orderId==='O')return new Promise(resolve=>resolveOld=resolve);
+  return {...f.data,orderId:'NEW',itemId:'NEW-I'};
+ });
+ const old=f.c.loadServiceCaseItem('I');f.node('serviceOrderNo').value='YS-NEW';
+ const lookup=f.c.findServiceCaseOrder();resolveOld(f.data);await old;
+ assert.equal(f.node('serviceItemBody').textContent,'查詢訂單中…');
+ resolveOrder({orderId:'NEW',orderNo:'YS-NEW',items:[{itemId:'NEW-I',itemName:'新服務'}]});await lookup;
+ f.node('serviceOccurredAt').value='2026-10-23T10:00:00';f.node('serviceNewCaseId').value='new-case';f.node('serviceNewQty').value='1';
+ f.setSend(async input=>({orderId:input.orderId,itemId:input.itemId}));await f.c.saveServiceCaseAction();
+ assert.equal(f.calls.length,1);assert.equal(f.calls[0].orderId,'NEW');assert.equal(f.calls[0].itemId,'NEW-I');
+ assert.equal(reads[2].orderId,'NEW');
+});
 test('read-only order guard allows only the gated service entry while order mutations remain blocked',()=>{
  const bootstrap=fs.readFileSync('src/app/bootstrap.js','utf8');
  const block=bootstrap.slice(bootstrap.indexOf('    const blockReadonlyEdit = event => {'),bootstrap.indexOf("    document.addEventListener('click', blockReadonlyEdit"));
