@@ -63,9 +63,29 @@ test('engineer closes Bio-Plex only after sample receipt and actual report evide
   assert.equal(done.completed,true);
   assert.equal(done.workStatus,'COMPLETED');
   assert.equal(done.nextEvent,null);
+  assert.equal(done.itemWorkCategory,'billing');
   assert.equal(f.written.length,4);
   assert.equal(f.docs.get('orders/O').isDelivered,undefined);
   assert.equal(f.docs.get('orders/O').isBilled,undefined);
+});
+test('service workflow reads use registered events and the live billing and lifecycle state, with no order writes',async()=>{
+  const f=fixture({role:'admin',kind:'ONSITE_REPAIR'}),order=f.docs.get('orders/O');
+  order.items[0].qty=2;
+  order.items.push({itemId:'G',productId:'GOODS',productType:'Goods',qty:1,reservedQty:1});
+  const query={orderId:'O',itemId:'I'};
+  assert.equal((await getServiceCaseStatus(f.db,'U',query)).itemWorkCategory,'delivery');
+  const first=intent('REPAIR_COMPLETED',0,{workSummary:'修復'},'first');
+  assert.equal((await commit(f,first)).itemWorkCategory,'delivery');
+  assert.equal((await getServiceCaseStatus(f.db,'U',query)).itemProgress.completedQty,1);
+  assert.equal((await commit(f,intent('REPAIR_COMPLETED',1,{workSummary:'修復'},'second'))).itemWorkCategory,'billing');
+  assert.equal((await getServiceCaseStatus(f.db,'U',query)).itemWorkCategory,'billing');
+  order.isBilled=true;
+  assert.equal((await getServiceCaseStatus(f.db,'U',query)).itemWorkCategory,'complete');
+  assert.equal((await getServiceCaseStatus(f.db,'U',{...query,caseId:'first'})).itemWorkCategory,'complete');
+  order.orderStatus='cancelled';
+  assert.equal((await getServiceCaseStatus(f.db,'U',query)).itemWorkCategory,'closed');
+  assert.ok(f.written.every(path=>path.startsWith('serviceCases/')));
+  assert.equal(order.items[1].reservedQty,1);assert.equal(order.isDelivered,undefined);
 });
 test('pipette warehouse must ship out, receive back, then return physical device to customer',async()=>{
   const f=fixture({role:'warehouse',kind:'PIPETTE_CALIBRATION'});

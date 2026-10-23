@@ -127,7 +127,7 @@
       fault('服務數量必須來自 Service 訂單品項。');
     const orderedQty=serviceQuantity(item.orderedQty??item.qty);
     if(!Array.isArray(records)||records.length>MAX_ITEM_CASES)fault('服務品項案件數超過處理上限。');
-    const ids=new Set();let allocatedQty=0,completedQty=0;
+    const ids=new Set();let allocatedQty=0,completedQty=0,allCompleted=true;
     for(const record of records){
       const state=projectServiceCase(record);
       if(record.itemId!==item.itemId||record.productId!==item.productId
@@ -136,12 +136,14 @@
       ids.add(record.caseId);
       const qty=serviceQuantity(record.serviceQty);
       allocatedQty+=qty;if(state.completed)completedQty+=qty;
+      if(!state.completed)allCompleted=false;
     }
     // Permit only floating-point representation noise, including tiny quantities.
     const tolerance=Math.min(1e-9,Number.EPSILON*Math.max(orderedQty,allocatedQty)*8);
     if(!Number.isFinite(allocatedQty)||allocatedQty-orderedQty>tolerance)
       fault('服務案件對應數量超過訂單數量。');
-    if(allocatedQty>orderedQty)allocatedQty=orderedQty;
+    if(Math.abs(allocatedQty-orderedQty)<=tolerance)allocatedQty=orderedQty;
+    if(allCompleted)completedQty=allocatedQty;
     if(completedQty>allocatedQty)completedQty=allocatedQty;
     return {orderedQty,allocatedQty,completedQty,
       unassignedQty:Math.max(0,orderedQty-allocatedQty),

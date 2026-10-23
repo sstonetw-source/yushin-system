@@ -298,8 +298,8 @@ for(const width of [1280,390])test('original service case UI '+width+'px: four k
   await page.locator('#serviceItemChoice').selectOption(key);
   await page.waitForFunction(key=>serviceCaseView?.data?.itemId===key,key);
  };
- const start=async(caseId)=>{
-  await page.locator('#serviceNewCaseId').fill(caseId);await page.locator('#serviceNewQty').fill('1');
+ const start=async(caseId,qty=1)=>{
+  await page.locator('#serviceNewCaseId').fill(caseId);await page.locator('#serviceNewQty').fill(String(qty));
   await page.locator('#serviceCaseSave').click();
  };
  const confirmed=()=>page.waitForFunction(()=>!serviceCaseView?.busy&&document.getElementById('serviceCaseMessage')?.textContent==='服務操作已確認。',null,{timeout:45000});
@@ -337,9 +337,9 @@ for(const width of [1280,390])test('original service case UI '+width+'px: four k
   await page.waitForFunction(()=>!serviceCaseView?.orderLookup&&document.getElementById('serviceCaseMessage')?.textContent.includes('不存在'));
   await page.evaluate(()=>saveServiceCaseAction());assert.equal(calls.length,0);
   await page.locator('#serviceOrderNo').fill(orderNo);await page.locator('button[onclick="findServiceCaseOrder()"]').click();
-  await page.locator('#serviceNewCaseId').waitFor({state:'visible'});await start('PIP-001');
+  await page.locator('#serviceNewCaseId').waitFor({state:'visible'});await start('PIP-001',2);
   await page.locator('#serviceCaseRetry').waitFor({state:'visible'});
-  const first=calls[0];assert.ok(first.event.id);assert.equal(first.serviceQty,1);
+  const first=calls[0];assert.ok(first.event.id);assert.equal(first.serviceQty,2);
   await siteOpen(page,'sales');await siteNav(page,'orders');await page.locator('#serviceCaseEntry').click();
   await page.locator('#serviceCaseRetry').waitFor({state:'visible'});assert.equal(calls.length,1,'reload never resubmits');
   await page.locator('#serviceCaseRetry').click();await confirmed();
@@ -349,20 +349,23 @@ for(const width of [1280,390])test('original service case UI '+width+'px: four k
   // Recovery shows the original item; select the next service using original controls.
   await page.locator('button[onclick="closeServiceCases()"]').click();await openByNumber();
   await item('BIOPLEX_LAB');await start('BIO-001');await confirmed();
-  await item('TISSUE_SLICING');await start('TIS-001');await confirmed();
+  await item('TISSUE_SLICING');await start('TIS-001',2);await confirmed();
   await switchRole('warehouse');await openByNumber();
   await advance('PIP-001','委外校正公司');await advance('PIP-001');
   await item('TISSUE_SLICING');await advance('TIS-001','組織代工公司');await advance('TIS-001');
   await switchRole('engineer');await openByNumber();
   await item('BIOPLEX_LAB');await advance('BIO-001');await advance('BIO-001','REPORT-001');
-  await item('ONSITE_REPAIR');await page.locator('#serviceEvidence').fill('設備校正完成');await start('FIX-001');await confirmed();
+  await item('ONSITE_REPAIR');await page.locator('#serviceEvidence').fill('設備校正完成');await start('FIX-001',2);await confirmed();
   await switchRole('sales');await openByNumber();await advance('PIP-001','客戶王先生');
   await item('TISSUE_SLICING');await advance('TIS-001','DELIVERY-001');
   const bounds=await page.locator('#serviceCaseOverlay .modal').boundingBox();assert.ok(bounds.x>=0&&bounds.width<=width);
   assert.equal(await page.locator('#serviceCaseOverlay .modal').evaluate(el=>el.scrollWidth<=el.clientWidth),true);
   for(const [kind,id] of [[kinds[0],'PIP-001'],[kinds[1],'BIO-001'],[kinds[2],'TIS-001'],[kinds[3],'FIX-001']]){
    const saved=(await db.doc('serviceCases/'+caseDocId(orderId,kind,id)).get()).data();
-   assert.equal(saved.status,'COMPLETED');assert.equal(saved.serviceQty,1);
+   assert.equal(saved.status,'COMPLETED');assert.equal(saved.serviceQty,kind==='BIOPLEX_LAB'?1:2);
+   await item(kind);
+   const summary=await page.locator('#serviceItemBody').textContent();
+   assert.ok(summary.includes(kind==='BIOPLEX_LAB'?'待服務處理':'服務完成・待核銷'));
   }
   assert.deepEqual((await db.doc('orders/'+orderId).get()).data(),order,'case UI never mutates stock/delivery/billing order facts');
   for(const entry of items)assert.equal((await db.doc('inventory/'+entry.productId).get()).exists,false);

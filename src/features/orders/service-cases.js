@@ -5,6 +5,7 @@ const SERVICE_EVENT_LABELS={SAMPLE_RECEIVED:'收取檢體',DEVICE_RECEIVED:'收�
     CUSTOMER_DELIVERED:'成果交付客戶',REPAIR_COMPLETED:'維修完成'};
 const SERVICE_CUSTODY_LABELS={NOT_RECEIVED:'尚未收件',IN_HOUSE:'公司保管',AT_VENDOR:'委外單位保管',
     RETURNED_TO_CUSTOMER:'已交還客戶',CUSTOMER_SITE:'客戶現場'};
+const SERVICE_WORK_LABELS={delivery:'待服務處理',billing:'服務完成・待核銷',complete:'服務完成・已核銷',closed:'訂單已停止履約'};
 function serviceCaseEntryEnabled(){
     return globalThis.YUSHIN_SERVICE_CASE_EMULATOR===true
         &&['admin','sales','warehouse','engineer'].includes(currentUserRole);
@@ -96,7 +97,7 @@ window.loadServiceCaseItem=async function(itemId){
 };
 function renderServiceCaseItem(view){
     serviceCaseCurrent(view);const data=view.data,p=data.itemProgress;
-    document.getElementById('serviceItemBody').innerHTML=`<p>訂單數量 ${p.orderedQty}｜已開案 ${p.allocatedQty}｜完成 ${p.completedQty}｜待完成 ${p.remainingQty}</p>`
+    document.getElementById('serviceItemBody').innerHTML=`<p>服務品項狀態：${escapeHtml(SERVICE_WORK_LABELS[data.itemWorkCategory]||'待查核')}</p><p>訂單數量 ${p.orderedQty}｜已開案 ${p.allocatedQty}｜完成 ${p.completedQty}｜待完成 ${p.remainingQty}</p>`
         +data.cases.map(row=>`<details><summary>${escapeHtml(row.caseId)}｜數量 ${row.serviceQty}｜${row.completed?'流程完成':escapeHtml(SERVICE_EVENT_LABELS[row.nextEvent]||'待處理')}｜${escapeHtml(SERVICE_CUSTODY_LABELS[row.custody]||row.custody)}</summary><ol>${row.events.map(e=>`<li>${escapeHtml(SERVICE_EVENT_LABELS[e.type]||e.type)} ${escapeHtml(e.occurredAt)}${e.partyName?'｜'+escapeHtml(e.partyName):''}${e.receivedBy?'｜'+escapeHtml(e.receivedBy):''}${e.reportRef?'｜'+escapeHtml(e.reportRef):''}${e.deliveryRef?'｜'+escapeHtml(e.deliveryRef):''}${e.workSummary?'｜'+escapeHtml(e.workSummary):''}${e.notes?'｜'+escapeHtml(e.notes):''}</li>`).join('')}</ol></details>`).join('')
         +`<label for="serviceCaseChoice">作業案件</label><select id="serviceCaseChoice" onchange="renderServiceCaseAction()"><option value="">${data.canStart?'新增服務案件':'請選擇可執行的案件'}</option>${data.cases.filter(c=>c.canAdvance).map(c=>`<option value="${escapeAttr(c.caseId)}">${escapeHtml(c.caseId)}｜${escapeHtml(SERVICE_EVENT_LABELS[c.nextEvent])}</option>`).join('')}</select><div id="serviceCaseAction"></div>`;
     renderServiceCaseAction();

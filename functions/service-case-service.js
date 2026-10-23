@@ -4,6 +4,16 @@
 // and service completion events. Not exported as a Callable before Auth/Rules/UI
 // acceptance. Service work NEVER creates inventory, lots, purchasing or deliveries.
 const core=require('./shared/service-work-core.js');
+const workflow=require('./shared/workflow-core.js');
+
+function serviceItemWorkflow(orderId,order,item,kind,cases){
+  const closed=['cancelled','canceled','void','voided','deleted','closed','已取消','作廢','已結案'];
+  const lifecycleStatus=[order.status,order.orderStatus].some(s=>closed.includes(String(s||'').trim().toLowerCase()))
+    ?'cancelled':'normal';
+  try{return workflow.projectItem({...item,orderId,serviceKind:kind,
+    lifecycleStatus,isBilled:order.isBilled===true},cases);}
+  catch(error){fail(error.message);}
+}
 
 const EVENT_ROLES=Object.freeze({
   SAMPLE_RECEIVED:['sales','warehouse'],
@@ -151,7 +161,7 @@ async function commitServiceCaseEvent(db,actorUid,input){
     const index=await readItemCases(db,tx,intent.orderId,intent.itemId,item,kind);
     if(!!saved!==index.record.caseIds.includes(intent.caseId))
       fail('服務案件與數量索引不一致。');
-    let itemProgress;
+    let itemProgress,itemWorkflow;
     try {core.projectServiceItem(item,index.cases);}
     catch(err){fail(err.message);}
     const record=saved||{
@@ -163,13 +173,13 @@ async function commitServiceCaseEvent(db,actorUid,input){
     try {next=core.applyServiceEvent(record,intent.event);}
     catch(err){fail(err.message);}
     const cases=[...index.cases.filter(row=>row.caseId!==intent.caseId),next.record];
-    try {itemProgress=core.projectServiceItem(item,cases);}
-    catch(err){fail(err.message);}
+    itemWorkflow=serviceItemWorkflow(intent.orderId,order,item,kind,cases);
+    itemProgress=itemWorkflow.serviceProgress;
     const projection=next.projection;
     result={status:next.status,orderId:intent.orderId,itemId:intent.itemId,
       caseId:intent.caseId,kind,workStatus:projection.status,completed:projection.completed,
       nextEvent:projection.nextEvent,custody:projection.custody,
-      serviceQty:record.serviceQty,itemProgress};
+      serviceQty:record.serviceQty,itemProgress,itemWorkCategory:itemWorkflow.workCategory};
     if(next.status==='already-applied')return;
     if(!saved)tx.set(index.ref,{...index.record,
       caseIds:[...index.record.caseIds,intent.caseId]});
@@ -242,8 +252,8 @@ async function getServiceCaseStatus(db,actorUid,input){
       }
       if(!Object.prototype.hasOwnProperty.call(core.STEPS,kind))fail('正式服務主檔尚未指定四種有效服務類型。');
       const index=await readItemCases(db,tx,orderId,itemId,item,kind,indexSnap);
-      let itemProgress;
-      try{itemProgress=core.projectServiceItem(item,index.cases);}catch(err){fail(err.message);}
+      const itemWorkflow=serviceItemWorkflow(orderId,order,item,kind,index.cases);
+      const itemProgress=itemWorkflow.serviceProgress;
       const forbidden=['cancelled','canceled','void','voided','deleted','closed','已取消','作廢','已結案'];
       const open=order.inventoryReservationStatus==='completed'
         &&![order.status,order.orderStatus].some(s=>forbidden.includes(String(s||'').trim().toLowerCase()));
@@ -255,6 +265,7 @@ async function getServiceCaseStatus(db,actorUid,input){
       const items=order.items.filter(i=>String(i.productType||'').trim().toUpperCase()==='SERVICE')
         .map(i=>({itemId:i.itemId,itemName:i.itemName||i.itemCode||'服務品項'}));
       return {orderId,itemId,orderNo:order.orderNo||orderId,customerName:order.customerName||'',items,kind,itemProgress,cases,
+        itemWorkCategory:itemWorkflow.workCategory,
         canStart:open&&allowedActor(profile.role,actorUid,order,core.STEPS[kind][0])};
     }
     const caseRef=db.collection('serviceCases').doc(caseDocId(orderId,itemId,caseId));
@@ -269,15 +280,15 @@ async function getServiceCaseStatus(db,actorUid,input){
     try {projection=core.projectServiceCase(record);}
     catch(err){fail(err.message);}
     // Old demo histories remain readable, but are never counted as bound work.
-    let itemProgress=null;
+    let itemProgress=null,itemWorkCategory=null;
     if(record.serviceQty!==undefined){
       const index=await readItemCases(db,tx,orderId,itemId,matched[0],record.kind);
       if(!index.record.caseIds.includes(caseId))fail('服務案件與數量索引不一致。');
-      try {itemProgress=core.projectServiceItem(matched[0],index.cases);}
-      catch(err){fail(err.message);}
+      const itemWorkflow=serviceItemWorkflow(orderId,order,matched[0],record.kind,index.cases);
+      itemProgress=itemWorkflow.serviceProgress;itemWorkCategory=itemWorkflow.workCategory;
     }
     return {...projection,exists:true,workStatus:projection.status,
-      serviceQty:record.serviceQty??null,itemProgress};
+      serviceQty:record.serviceQty??null,itemProgress,itemWorkCategory};
   });
 }
 

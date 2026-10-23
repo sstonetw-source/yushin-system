@@ -67,6 +67,7 @@ test('Bio-Plex: sales receives specimen, engineer experiments and sends verified
    e=>e.code==='functions/invalid-argument');
  const done=await f.engineer.call(f.intent('REPORT_SENT',2,{reportRef:'report/proof'}));
  assert.equal(done.completed,true);
+ assert.equal(done.itemWorkCategory,'billing');
  assert.equal(done.custody,'IN_HOUSE'); // report delivery does not prove sample disposal
  const saved=await f.record();
  assert.equal(saved.events.length,3);
@@ -233,9 +234,17 @@ test('real Callable returns partial item completion and refuses reduced or corru
  const report={...f.intent('REPORT_SENT',2,{reportRef:'report/partial'}),serviceQty:2};
  const done=await f.engineer.call(report);
  assert.equal(done.itemProgress.completedQty,2);assert.equal(done.itemProgress.remainingQty,1);
+ assert.equal(done.itemWorkCategory,'delivery');
  const locate={orderId:f.orderId,itemId:f.itemId,caseId:f.caseId};
  const read=()=>httpsCallable(getFunctions(f.sales.app,'asia-east1'),'getServiceCaseStatus')(locate).then(r=>r.data);
  assert.equal((await read()).itemProgress.inProgressQty,1);
+ const secondEvent=(type,index,details={})=>f.intent(type,index,details,'second');
+ await f.engineer.call(secondEvent('EXPERIMENT_COMPLETED',1));
+ const complete=await f.engineer.call(secondEvent('REPORT_SENT',2,{reportRef:'report/last'}));
+ assert.equal(complete.itemWorkCategory,'billing');assert.equal(complete.itemProgress.completedQty,3);
+ await orderRef.update({isBilled:true}); // Explicit fixture: billing writer integration is a later phase.
+ assert.equal((await read()).itemWorkCategory,'complete');
+ await orderRef.update({isBilled:false});
  const original=await f.record();
  await orderRef.update({items:order.items.map(item=>({...item,qty:2}))});
  await assert.rejects(f.engineer.call(report),e=>e.code==='functions/failed-precondition');
