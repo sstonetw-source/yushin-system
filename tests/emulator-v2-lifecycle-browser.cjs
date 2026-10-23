@@ -257,6 +257,106 @@ async function siteNav(page,key){
  await siteMenu(page);
  await page.locator('.nav-tab[data-main-nav="'+key+'"]').click();
 }
+
+for(const width of [1280,390])test('original service case UI '+width+'px: four kinds, role handoff and immutable lost-reply recovery',async()=>{
+ const tag='service-ui-'+width,orderId=tag+'-order',orderNo='YS-'+tag,accounts={};
+ const kinds=['PIPETTE_CALIBRATION','BIOPLEX_LAB','TISSUE_SLICING','ONSITE_REPAIR'];
+ for(const role of ['sales','warehouse','engineer','other']){
+  const uid=tag+'-'+role,email=uid+'@example.test';await auth.createUser({uid,email,password});
+  await db.doc('users/'+uid).set({role:role==='other'?'sales':role,active:true,name:role,email,code:uid});accounts[role]={uid,email};
+ }
+ const items=kinds.map(kind=>({itemId:kind,productId:tag+'-'+kind,productType:'Service',serviceKind:kind,
+  itemName:kind,qty:2,unitPrice:100,reservedQty:0,shortageQty:0,deliveredQty:0,returnedQty:0,
+  fulfillmentType:'WAREHOUSE',warehouseId:'',deliveryPlan:{},reservationStatus:'not_required'}));
+ for(const item of items)await db.doc('products/'+item.productId).set({active:true,productType:'Service',serviceKind:item.serviceKind});
+ // Existing initialized source fixture; original creation/initialization is covered separately.
+ const order={orderNo,customerName:tag+'客戶',ownerUid:accounts.sales.uid,salesCode:accounts.sales.uid,
+  salesName:'sales',status:'active',orderStatus:'normal',orderDate:new Date().toISOString().slice(0,10),
+  inventoryReservationStatus:'completed',inventoryReservationAttemptId:tag+'-sync',
+  orderSchemaVersion:2,itemCount:items.length,items,totalPrice:800,productIds:items.map(i=>i.productId),
+  deliveryRecords:[],returnRecords:[],deliveredQty:0,isDelivered:false,isBilled:false};
+ await db.doc('orders/'+orderId).set(order);
+ const context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
+ const calls=[],errors=[],external=[],serviceDialogs=[];let lose=true;
+ await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_SERVICE_CASE_EMULATOR=true;});
+ page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>{serviceDialogs.push(d.message());return d.dismiss();});
+ await context.route('**/*',async route=>{
+  const request=route.request(),url=new URL(request.url());
+  if(!['localhost','127.0.0.1'].includes(url.hostname)){external.push(url.hostname);await route.abort();return;}
+  if(url.port==='5001'&&request.method()==='POST'&&url.pathname.endsWith('/commitServiceCaseEvent')){
+   assert.ok((await request.allHeaders()).authorization?.startsWith('Bearer '));
+   calls.push(request.postDataJSON().data);
+   if(lose){lose=false;const reply=await route.fetch();assert.equal(reply.status(),200);await route.abort('failed');return;}
+  }
+  await route.continue();
+ });
+ const item=async key=>{
+  await page.locator('#serviceItemChoice').selectOption(key);
+  await page.waitForFunction(key=>serviceCaseView?.data?.itemId===key,key);
+ };
+ const start=async(caseId)=>{
+  await page.locator('#serviceNewCaseId').fill(caseId);await page.locator('#serviceNewQty').fill('1');
+  await page.locator('#serviceCaseSave').click();
+ };
+ const confirmed=()=>page.waitForFunction(()=>!serviceCaseView?.busy&&document.getElementById('serviceCaseMessage')?.textContent==='服務操作已確認。',null,{timeout:45000});
+ const advance=async(caseId,evidence)=>{
+  await page.locator('#serviceCaseChoice').selectOption(caseId);
+  if(evidence)await page.locator('#serviceEvidence').fill(evidence);
+  await page.locator('#serviceCaseSave').click();await confirmed();
+ };
+ const openByNumber=async()=>{
+  await siteNav(page,'orders');await page.locator('#serviceCaseEntry').click();
+  await page.locator('#serviceOrderNo').fill(orderNo);
+  await page.locator('button[onclick="findServiceCaseOrder()"]').click();
+  await page.waitForFunction(()=>!!serviceCaseView?.data,null,{timeout:45000});
+ };
+ const switchRole=async role=>{
+  await page.locator('button[onclick="closeServiceCases()"]').click();await siteLogout(page);
+  await siteLogin(page,accounts[role],role==='other'?'sales':role);
+ };
+ try{
+  await siteOpen(page);await siteLogin(page,accounts.sales,'sales');await siteNav(page,'orders');
+  const row=page.locator('#ordersBody > tr').filter({hasText:tag+'客戶'});await row.waitFor({state:'visible'});
+  await row.getByRole('button',{name:'服務案件',exact:true}).click();
+  await page.locator('#serviceNewCaseId').waitFor({state:'visible'});await start('PIP-001');
+  await page.locator('#serviceCaseRetry').waitFor({state:'visible'});
+  const first=calls[0];assert.ok(first.event.id);assert.equal(first.serviceQty,1);
+  await siteOpen(page,'sales');await siteNav(page,'orders');await page.locator('#serviceCaseEntry').click();
+  await page.locator('#serviceCaseRetry').waitFor({state:'visible'});assert.equal(calls.length,1,'reload never resubmits');
+  await page.locator('#serviceCaseRetry').click();await confirmed();
+  assert.deepEqual(calls[1],first);
+  const {caseDocId}=require('../functions/service-case-service');
+  assert.equal((await db.doc('serviceCases/'+caseDocId(orderId,kinds[0],'PIP-001')).get()).data().events.length,1);
+  // Recovery shows the original item; select the next service using original controls.
+  await page.locator('button[onclick="closeServiceCases()"]').click();await openByNumber();
+  await item('BIOPLEX_LAB');await start('BIO-001');await confirmed();
+  await item('TISSUE_SLICING');await start('TIS-001');await confirmed();
+  await switchRole('warehouse');await openByNumber();
+  await advance('PIP-001','委外校正公司');await advance('PIP-001');
+  await item('TISSUE_SLICING');await advance('TIS-001','組織代工公司');await advance('TIS-001');
+  await switchRole('engineer');await openByNumber();
+  await item('BIOPLEX_LAB');await advance('BIO-001');await advance('BIO-001','REPORT-001');
+  await item('ONSITE_REPAIR');await page.locator('#serviceEvidence').fill('設備校正完成');await start('FIX-001');await confirmed();
+  await switchRole('sales');await openByNumber();await advance('PIP-001','客戶王先生');
+  await item('TISSUE_SLICING');await advance('TIS-001','DELIVERY-001');
+  const bounds=await page.locator('#serviceCaseOverlay .modal').boundingBox();assert.ok(bounds.x>=0&&bounds.width<=width);
+  assert.equal(await page.locator('#serviceCaseOverlay .modal').evaluate(el=>el.scrollWidth<=el.clientWidth),true);
+  for(const [kind,id] of [[kinds[0],'PIP-001'],[kinds[1],'BIO-001'],[kinds[2],'TIS-001'],[kinds[3],'FIX-001']]){
+   const saved=(await db.doc('serviceCases/'+caseDocId(orderId,kind,id)).get()).data();
+   assert.equal(saved.status,'COMPLETED');assert.equal(saved.serviceQty,1);
+  }
+  assert.deepEqual((await db.doc('orders/'+orderId).get()).data(),order,'case UI never mutates stock/delivery/billing order facts');
+  for(const entry of items)assert.equal((await db.doc('inventory/'+entry.productId).get()).exists,false);
+  assert.equal((await db.collection('supplyOrders').where('sourceId','==',orderId).get()).size,0);
+  await switchRole('other');await siteNav(page,'orders');await page.locator('#serviceCaseEntry').click();
+  await page.locator('#serviceOrderNo').fill(orderNo);await page.locator('button[onclick="findServiceCaseOrder()"]').click();
+  await page.waitForFunction(()=>document.getElementById('serviceCaseMessage').textContent.includes('權限'));
+  assert.equal(await page.locator('#serviceItemChoice').count(),0);
+  assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
+  console.log('Original service UI '+width+'px: actual Auth, four service kinds, sales/warehouse/engineer handoff, minimal authorized order-number lookup, committed lost HTTP reply/reload/same-event proof and zero physical/billing writes passed. Initialized order remains an explicit fixture boundary.');
+ }catch(error){console.log('Service UI diagnostic',JSON.stringify(await page.evaluate(()=>({role:currentUserRole,message:document.getElementById('serviceCaseMessage')?.textContent,body:document.getElementById('serviceCaseBody')?.textContent}))),JSON.stringify({errors,dialogs:serviceDialogs}));throw error;}
+ finally{await context.close();}
+});
 async function multiReceiptSiteFixture(width){
  const tag='multi-receipt-'+width,orderId=tag+'-order',keys=[tag+'-P',tag+'-Q'],warehouses=[tag+'-A',tag+'-B'],accounts={};
  for(const role of ['purchaser','warehouse','sales']){

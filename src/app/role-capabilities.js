@@ -146,7 +146,9 @@ function updateReadonlyNotice() {
     const notice = document.createElement('div');
     notice.className = 'readonly-notice no-print';
     notice.style.display = 'block';
-    if (pageKey === 'orders.po' && currentUserRole === 'warehouse' && canReceiveInventoryCapability()) {
+    if(pageKey==='orders.list'&&currentUserRole==='warehouse'&&globalThis.serviceCaseEntryEnabled?.()){
+        notice.innerText='倉管模式：訂單資料僅供查看；服務案件可依作業權限收件、委外寄送及返件。';
+    } else if (pageKey === 'orders.po' && currentUserRole === 'warehouse' && canReceiveInventoryCapability()) {
         notice.innerText = '倉管模式：可收貨、出貨、調撥點收及盤點；採購、成本維護與打單由採購／管理員處理。';
     } else if (pageKey === 'products' && currentUserRole === 'purchaser') {
         notice.innerText = '產品主檔權限：採購可新增、編輯與停用產品主檔；永久刪除僅限管理員。';

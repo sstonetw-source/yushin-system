@@ -33,9 +33,9 @@ function itemCaseIndexId(orderId,itemId){
   // Four encoded segments cannot collide with a three-segment case key.
   return ['item-index',orderId,itemId,'v1'].map(encodeURIComponent).join('|');
 }
-async function readItemCases(db,tx,orderId,itemId,item,kind){
+async function readItemCases(db,tx,orderId,itemId,item,kind,knownSnap){
   const ref=db.collection('serviceCases').doc(itemCaseIndexId(orderId,itemId));
-  const snap=await tx.get(ref);
+  const snap=knownSnap||await tx.get(ref);
   if(!snap.exists){
     // Never silently adopt pre-quantity pilot cases or release their allocation.
     const old=await tx.get(db.collection('serviceCases')
@@ -190,14 +190,29 @@ async function commitServiceCaseEvent(db,actorUid,input){
 async function getServiceCaseStatus(db,actorUid,input){
   if(!db||typeof db.runTransaction!=='function')throw Error('缺少有效資料庫交易。');
   if(typeof actorUid!=='string'||!actorUid)fail('未登入使用者。','unauthenticated');
+  if(input&&typeof input==='object'&&!Array.isArray(input)&&Object.keys(input).length===1
+    &&typeof input.orderNo==='string'&&input.orderNo.trim()===input.orderNo&&input.orderNo.length>0&&input.orderNo.length<=160){
+    return db.runTransaction(async tx=>{
+      const user=await tx.get(db.collection('users').doc(actorUid)),profile=user.exists?user.data():null;
+      if(!profile||profile.active===false||profile.disabled===true||!['admin','sales','engineer','warehouse'].includes(profile.role))
+        fail('目前使用者沒有查看服務案件的權限。','permission-denied');
+      const rows=await tx.get(db.collection('orders').where('orderNo','==',input.orderNo).limit(2));
+      if(rows.size!==1)fail('訂單編號不存在或重複，請核對。','not-found');
+      const doc=rows.docs[0],order=doc.data();
+      if(profile.role==='sales'&&order.ownerUid!==actorUid)fail('只有訂單負責業務有權限查看服務案件。','permission-denied');
+      const items=(Array.isArray(order.items)?order.items:[]).filter(i=>String(i.productType||'').trim().toUpperCase()==='SERVICE')
+        .map(i=>({itemId:i.itemId,itemName:i.itemName||i.itemCode||'服務品項'}));
+      if(!items.length)fail('此訂單沒有服務品項。');
+      return {orderId:doc.id,orderNo:order.orderNo,customerName:order.customerName||'',items};
+    });
+  }
   if(!input||typeof input!=='object'||Array.isArray(input)
     ||Object.keys(input).some(key=>!['orderId','itemId','caseId'].includes(key)))
     fail('服務案件查詢格式不正確。','invalid-argument');
   const {orderId,itemId,caseId}=input;
-  caseDocId(orderId,itemId,caseId);
+  caseDocId(orderId,itemId,caseId===undefined?'validate':caseId);
   const orderRef=db.collection('orders').doc(orderId);
   const userRef=db.collection('users').doc(actorUid);
-  const caseRef=db.collection('serviceCases').doc(caseDocId(orderId,itemId,caseId));
   return db.runTransaction(async tx=>{
     const [userSnap,orderSnap]=await Promise.all([tx.get(userRef),tx.get(orderRef)]);
     const profile=userSnap.exists?userSnap.data():null;
@@ -212,6 +227,37 @@ async function getServiceCaseStatus(db,actorUid,input){
     if(matched.length!==1
       ||String(matched[0].productType||'').trim().toUpperCase()!=='SERVICE')
       fail('服務案件來源訂單品項不存在或型別不符。','failed-precondition');
+    if(caseId===undefined){
+      const item=matched[0];
+      if(typeof item.productId!=='string'||!item.productId||item.productId.includes('/'))
+        fail('服務品項缺少可核對的正式產品主檔。');
+      const indexSnap=await tx.get(db.collection('serviceCases').doc(itemCaseIndexId(orderId,itemId)));
+      let kind=indexSnap.exists?indexSnap.data().kind:null;
+      if(!indexSnap.exists){
+        const productSnap=await tx.get(db.collection('products').doc(item.productId));
+        const product=productSnap.exists?productSnap.data():null;
+        if(!product||product.active===false||String(product.productType||product.type||'').trim().toUpperCase()!=='SERVICE')
+          fail('服務品項產品主檔無效或型別衝突。');
+        kind=String(product.serviceKind||'').trim().toUpperCase();
+      }
+      if(!Object.prototype.hasOwnProperty.call(core.STEPS,kind))fail('正式服務主檔尚未指定四種有效服務類型。');
+      const index=await readItemCases(db,tx,orderId,itemId,item,kind,indexSnap);
+      let itemProgress;
+      try{itemProgress=core.projectServiceItem(item,index.cases);}catch(err){fail(err.message);}
+      const forbidden=['cancelled','canceled','void','voided','deleted','closed','已取消','作廢','已結案'];
+      const open=order.inventoryReservationStatus==='completed'
+        &&![order.status,order.orderStatus].some(s=>forbidden.includes(String(s||'').trim().toLowerCase()));
+      const cases=index.cases.map(record=>{
+        const projection=core.projectServiceCase(record);
+        return {...projection,serviceQty:record.serviceQty,
+          canAdvance:open&&!!projection.nextEvent&&allowedActor(profile.role,actorUid,order,projection.nextEvent)};
+      });
+      const items=order.items.filter(i=>String(i.productType||'').trim().toUpperCase()==='SERVICE')
+        .map(i=>({itemId:i.itemId,itemName:i.itemName||i.itemCode||'服務品項'}));
+      return {orderId,itemId,orderNo:order.orderNo||orderId,customerName:order.customerName||'',items,kind,itemProgress,cases,
+        canStart:open&&allowedActor(profile.role,actorUid,order,core.STEPS[kind][0])};
+    }
+    const caseRef=db.collection('serviceCases').doc(caseDocId(orderId,itemId,caseId));
     const snap=await tx.get(caseRef);
     if(!snap.exists)return {exists:false,orderId,itemId,caseId,workStatus:'NOT_STARTED',
       completed:false,nextEvent:null,custody:null,events:[]};

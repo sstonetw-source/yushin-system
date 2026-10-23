@@ -1,5 +1,11 @@
 # DATA_MODEL — Firestore 集合與資料責任地圖
 
+## 2026-10-23 服務視窗讀取及恢復契約（本機試點）
+
+沿既有 getServiceCaseStatus：`{orderNo}` 在同一授權交易以 orderNo 等值查詢至多兩筆，必須唯一；只回 orderId、orderNo、customerName 及 Service 的 itemId／itemName，不回價格、成本或一般商品。`{orderId,itemId}` 由原固定品項索引讀取至多 100 案，回案件歷程、唯一 itemProgress 與角色動作提示；沒有索引時額外核對即時 Service 主檔與舊案，純讀取不建立索引。原 `{orderId,itemId,caseId}` 逐案查詢維持。
+
+無新 Collection、Rules、索引或 Listener。原 `serviceCases` Client 全拒絕仍有效，所有讀寫由 demo gate Callable 授權。每分頁、每 UID 的 `service-case-pending:{uid}` 保存 actor role 與固定 orderId／itemId／caseId／serviceQty／event；不保存價格或客戶資料，未確認前不覆蓋；同分頁刷新可恢復，不承諾跨裝置／關閉分頁恢復。正式資料未操作或遷移。
+
 版本：2026-10-15。來源：`firestore.rules` 實際 match、`firestore.indexes.json` 與程式引用；不是資料庫內容或正式環境實際部署狀態。對應 `docs/BUSINESS_RULES.md` 與 `docs/system-architecture-20260923.md`。
 
 ## Firestore 集合（規則中實際宣告）
