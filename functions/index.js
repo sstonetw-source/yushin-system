@@ -29,7 +29,7 @@ exports.commitGroupedWarehouseReservation=onCall({region:'asia-east1'},async req
 // Safe transport-only trial. This callable cannot be enabled outside the
 // isolated demo Auth + Firestore Emulator, even by environment flag alone.
 // Service writer does not touch stock, delivery, purchase, billing or order qty.
-const {commitServiceCaseEvent}=require('./service-case-service');
+const {commitServiceCaseEvent,getServiceCaseStatus}=require('./service-case-service');
 const {allowServiceCaseEmulator}=require('./service-case-gate');
 exports.commitServiceCaseEvent=onCall({region:'asia-east1'},async request=>{
   if(!allowServiceCaseEmulator())
@@ -42,5 +42,21 @@ exports.commitServiceCaseEvent=onCall({region:'asia-east1'},async request=>{
     if(allowed.includes(error.code))throw new HttpsError(error.code,error.message);
     console.error('Service case event transaction failed',error);
     throw new HttpsError('internal','服務案件交易失敗');
+  }
+});
+
+// Read-only history/status transport. Explicitly isolated to demo-yushin;
+// no direct Firestore client reads and no production feature activation.
+exports.getServiceCaseStatus=onCall({region:'asia-east1'},async request=>{
+  if(!allowServiceCaseEmulator())
+    throw new HttpsError('failed-precondition','服務案件查詢尚未完成 Preview 驗收');
+  if(!request.auth?.uid)
+    throw new HttpsError('unauthenticated','請先登入');
+  try{return await getServiceCaseStatus(getFirestore(),request.auth.uid,request.data);}
+  catch(error){
+    const allowed=['invalid-argument','permission-denied','failed-precondition','not-found'];
+    if(allowed.includes(error.code))throw new HttpsError(error.code,error.message);
+    console.error('Service case status read failed',error);
+    throw new HttpsError('internal','服務案件查詢失敗');
   }
 });
