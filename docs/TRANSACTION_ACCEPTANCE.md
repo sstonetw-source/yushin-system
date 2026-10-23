@@ -105,3 +105,12 @@ Workflow Core 也不再使用一般送貨紀錄、舊 deliveredQty 投影或單�
 沿用唯一 `serviceCases` 事件及 `YushinServiceWork.projectServiceCase` 投影，不額外建立狀態帳或快取。新增 `getServiceCaseStatus` 後端讀取契約，僅在 `demo-yushin` 真 Auth／Firestore／Functions Emulator 明確啟用；正式環境 gate 預設拒絕。讀取交易重驗登入者的 users 角色與停權狀態、來源訂單及 Service 品項；業務僅能查看自己的訂單，倉管／工程師／管理員沿既有服務作業角色規則。既有案件回傳受驗證的事件、保管位置與下一步；不存在的 case ID 明確回報 `exists:false`，不建立虛構案件。已取消訂單可唯讀歷史，不能繼續寫入事件。
 
 新增 Node 授權／壞資料／無副作用測試及 Emulator 原 Auth→Callable 的不存在、建立、委外寄送、他人拒絕、取消後歷史可讀、停權拒絕案例。這**不是**案件搜尋／建立操作介面或可用服務模組：仍需案件與訂單數量綁定、正式授權入口、原站桌機／手機、客戶交付／核銷與 Preview 驗收。未部署或修改正式 Firestore。
+
+
+### 2026-10-23｜服務案件的原產品綁定（demo Emulator）
+
+新案件由唯一 `commitServiceCaseEvent` 在交易內保存 `productId`，後續寫入、同事件重送與 `getServiceCaseStatus` 均核對來源訂單品項的產品識別及服務類型；相同 itemId 換成另一個服務產品也不得接續或套用原歷程。未保存 productId 的既有試點案件明確拒絕，不從目前品項猜測補綁、不遷移正式資料。歷史查詢仍驗證當前登入權限與來源品項，保留取消後唯讀；產品主檔停用、刪除或分類變更不抹除已綁定的歷史保管證據，新增事件仍需有效主檔。
+
+不增加 Collection、索引、Listener、查詢或資料庫讀取；唯一既有案件文件增加 productId。案件數與訂單數量、原頁面操作、客戶交付與核銷及 Preview 仍待完成，PR #234 維持 Draft，正式功能未啟用。
+
+驗證：Node 與真 Auth／Callable Emulator 新增原產品換檔後讀取、接續及同 ID 重送拒絕，以及取消後原主檔不存在仍可唯讀歷史。完整 CI 以本 PR 最新 head 結果為準。

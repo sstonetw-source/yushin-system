@@ -174,3 +174,25 @@ test('real Auth read-only case history distinguishes missing ID and existing cus
  await db.doc('users/'+f.sales.uid).update({disabled:true});
  await assert.rejects(read(f.sales),e=>e.code==='functions/permission-denied');
 });
+
+test('real Callable keeps original product binding across replacement and replay',async()=>{
+ const f=await fixture('product-binding','BIOPLEX_LAB');
+ const first=f.intent('SAMPLE_RECEIVED');
+ await f.sales.call(first);
+ const original=await f.record();
+ assert.equal(original.productId,f.productId);
+ const replacement=f.productId+'-replacement';
+ await db.doc('products/'+replacement).set({active:true,productType:'Service',serviceKind:'BIOPLEX_LAB'});
+ const orderRef=db.doc('orders/'+f.orderId),order=(await orderRef.get()).data();
+ await orderRef.update({items:order.items.map(item=>({...item,productId:replacement}))});
+ const locate={orderId:f.orderId,itemId:f.itemId,caseId:f.caseId};
+ const read=()=>httpsCallable(getFunctions(f.sales.app,'asia-east1'),'getServiceCaseStatus')(locate);
+ await assert.rejects(read(),e=>e.code==='functions/failed-precondition');
+ await assert.rejects(f.sales.call(first),e=>e.code==='functions/failed-precondition');
+ await assert.rejects(f.engineer.call(f.intent('EXPERIMENT_COMPLETED',1)),
+   e=>e.code==='functions/failed-precondition');
+ assert.deepEqual(await f.record(),original);
+ await orderRef.update({items:order.items,orderStatus:'cancelled'});
+ await db.doc('products/'+f.productId).delete();
+ assert.equal((await read()).data.custody,'IN_HOUSE');
+});

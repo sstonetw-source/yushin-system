@@ -783,3 +783,10 @@ receiveV2Supply 隔離登入入口延伸正常單品項來源的履約後收貨�
 ### 四類服務的共同事件核心（2026-10-22，純計算已實作，未接 UI／Firestore）
 
 `modules/service-work-core.js` 提供 `projectServiceCase` 與 `applyServiceEvent`：一案一受託物或一次現場工作，採 ID 冪等、時序與必要憑證驗證，計算 Bio-Plex、Pipette、切片、現場維修的進度和保管位置。它不接管 `YushinWorkflow` 的商品庫存投影、不取代 `YushinFulfillment` 真實出貨，也不建立第二套採購或耗材扣帳。`functions/service-case-service.js` 已提供**未匯出的** Admin SDK 交易 writer，重讀權限／訂單／主檔後對服務案件追加不可變事件，並以固定事件 ID 防止重送，未連到實際 UI 或 Functions `index.js`。Service 事件不修改商品庫存、採購、送貨、核銷。訂單品項完成量投影、角色真 Emulator、Rules 讀取及 Preview 尚未實作；本次未修改 `src`、`app.js`、Firestore Rules／索引／正式資料。
+
+
+### 2026-10-23｜服務案件的原產品綁定（demo Emulator）
+
+新案件由唯一 `commitServiceCaseEvent` 在交易內保存 `productId`，後續寫入、同事件重送與 `getServiceCaseStatus` 均核對來源訂單品項的產品識別及服務類型；相同 itemId 換成另一個服務產品也不得接續或套用原歷程。未保存 productId 的既有試點案件明確拒絕，不從目前品項猜測補綁、不遷移正式資料。歷史查詢仍驗證當前登入權限與來源品項，保留取消後唯讀；產品主檔停用、刪除或分類變更不抹除已綁定的歷史保管證據，新增事件仍需有效主檔。
+
+不增加 Collection、索引、Listener、查詢或資料庫讀取；唯一既有案件文件增加 productId。案件數與訂單數量、原頁面操作、客戶交付與核銷及 Preview 仍待完成，PR #234 維持 Draft，正式功能未啟用。

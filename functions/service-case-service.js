@@ -49,6 +49,14 @@ function allowedActor(role,uid,order,eventType){
   if(role==='sales')return order.ownerUid===uid;
   return role==='warehouse'||role==='engineer';
 }
+function assertCaseProduct(record,item){
+  if(typeof item.productId!=='string'||!item.productId||item.productId.includes('/')
+    ||record.productId!==item.productId)
+    fail('服務案件與原產品識別不一致或尚未綁定，不能接續或套用歷程。');
+  const itemKind=String(item.serviceKind||'').trim().toUpperCase();
+  if(itemKind&&itemKind!==record.kind)
+    fail('服務案件與訂單品項的服務類型不一致。');
+}
 async function commitServiceCaseEvent(db,actorUid,input){
   if(!db||typeof db.runTransaction!=='function')throw Error('缺少有效資料庫交易。');
   const intent=assertRequest(input,actorUid);
@@ -80,7 +88,7 @@ async function commitServiceCaseEvent(db,actorUid,input){
     const item=matched[0];
     if(String(item.productType||'').trim().toUpperCase()!=='SERVICE')
       fail('服務案件必須關聯正式的 Service 訂單品項。');
-    if(!item.productId||item.productId.includes('/'))
+    if(typeof item.productId!=='string'||!item.productId||item.productId.includes('/'))
       fail('服務品項缺少可核對的正式產品主檔。');
     const [productSnap,caseSnap]=await Promise.all([
       tx.get(db.collection('products').doc(item.productId)),
@@ -103,8 +111,10 @@ async function commitServiceCaseEvent(db,actorUid,input){
     if(saved&&(saved.orderId!==intent.orderId||saved.itemId!==intent.itemId
       ||saved.caseId!==intent.caseId||saved.kind!==kind))
       fail('既有服務案件來源不一致，不能覆寫。');
+    if(saved)assertCaseProduct(saved,item);
     const record=saved||{
       orderId:intent.orderId,itemId:intent.itemId,caseId:intent.caseId,kind,
+      productId:item.productId,
       createdByUid:actorUid,createdAt:recordedAt,events:[]
     };
     let next;
@@ -160,6 +170,7 @@ async function getServiceCaseStatus(db,actorUid,input){
     const record=snap.data();
     if(record?.orderId!==orderId||record?.itemId!==itemId||record?.caseId!==caseId)
       fail('服務案件來源識別不一致，不能讀取。');
+    assertCaseProduct(record,matched[0]);
     let projection;
     try {projection=core.projectServiceCase(record);}
     catch(err){fail(err.message);}
