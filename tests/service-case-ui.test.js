@@ -2,7 +2,8 @@
 const test=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
 const source=fs.readFileSync('src/features/orders/service-cases.js','utf8'),core=require('../modules/service-work-core');
 function fixture(){
- const nodes=new Map(),calls=[];let saved=null,send=async()=>({orderId:'O',itemId:'I'}),read=async()=>data;
+ const nodes=new Map(),calls=[];let saved=null,send=async()=>({orderId:'O',itemId:'I'}),read=async()=>data,
+  readOrder=async()=>({orderId:'O',orderedQty:2,completedQty:1,mixedOrder:false,items:[{itemId:'I',itemName:'檢測',orderedQty:2,completedQty:1,workCategory:'delivery'}]});
  const node=id=>{if(!nodes.has(id))nodes.set(id,{value:'',innerHTML:'',textContent:'',classList:{add(){},remove(){}},setAttribute(){},removeAttribute(){}});return nodes.get(id);};
  const data={orderId:'O',itemId:'I',kind:'BIOPLEX_LAB',canStart:true,cases:[],
   itemProgress:{orderedQty:2,allocatedQty:0,completedQty:0,remainingQty:2,unassignedQty:2}};
@@ -12,9 +13,10 @@ function fixture(){
   document:{getElementById:node,createElement:()=>node('serviceCaseOverlay'),body:{appendChild(){}}},
   escapeHtml:x=>String(x??'').replaceAll('<','&lt;'),escapeAttr:x=>String(x??'').replaceAll('"','&quot;'),inlineJsValue:JSON.stringify,
   alert:()=>{},serviceCaseTransport:()=>({uid:'U',role:'sales'}),pendingServiceCaseIntent:()=>saved,
-  readServiceCases:async input=>read(input),commitServiceCaseIntent:async input=>{calls.push(input);return send(input);}});
+  readServiceCases:async input=>read(input),readServiceOrderProgress:async orderId=>readOrder(orderId),
+  commitServiceCaseIntent:async input=>{calls.push(input);return send(input);}});
  c.globalThis=c;c.window=c;vm.runInContext(source,c);
- return {c,node,calls,data,setPending:v=>saved=v,setSend:f=>send=f,setRead:f=>read=f};
+ return {c,node,calls,data,setPending:v=>saved=v,setSend:f=>send=f,setRead:f=>read=f,setReadOrder:f=>readOrder=f};
 }
 test('service form double taps send once; unknown result exposes immutable recovery and reload never submits',async()=>{
  const f=fixture();await f.c.openServiceCases('O');
@@ -126,4 +128,27 @@ test('a mismatched or unknown backend result cannot become a verified original-l
  f.setRead(async()=>({...f.data,orderId:'O',itemWorkCategory:'unverified'}));
  await f.c.openServiceCases('O');
  assert.equal(f.c.serviceCaseVerifiedOrderHints('O',[{itemId:'I',productType:'SERVICE'}]),'');
+});
+
+test('explicit whole-service-order progress read populates original order hints without writes',async()=>{
+ const f=fixture();await f.c.openServiceCases('O');
+ const before=f.calls.length;await f.c.verifyServiceOrderProgress();
+ assert.equal(f.calls.length,before);
+ assert.match(f.node('serviceOrderSummaryBody').innerHTML,/已完成 1／2/);
+ assert.match(f.node('serviceOrderSummaryBody').innerHTML,/不影響核銷/);
+ assert.match(f.c.serviceCaseVerifiedOrderHints('O',[{itemId:'I',productType:'SERVICE'}]),/1\/2/);
+});
+test('whole-order verification rejects foreign item injection and stale selection replies',async()=>{
+ const f=fixture();await f.c.openServiceCases('O');
+ f.setReadOrder(async()=>({orderId:'O',items:[{itemId:'OTHER',orderedQty:2,completedQty:2,workCategory:'complete'}]}));
+ await f.c.verifyServiceOrderProgress();
+ assert.match(f.node('serviceOrderSummaryBody').textContent,/不一致/);
+ assert.doesNotMatch(f.c.serviceCaseVerifiedOrderHints('O',[{itemId:'I',productType:'SERVICE'}]),/2\/2/);
+ let resolve;
+ f.setReadOrder(()=>new Promise(r=>resolve=r));
+ const old=f.c.verifyServiceOrderProgress();
+ await f.c.loadServiceCaseItem('I');
+ resolve({orderId:'O',items:[{itemId:'I',orderedQty:2,completedQty:2,workCategory:'complete'}]});
+ await old;
+ assert.doesNotMatch(f.c.serviceCaseVerifiedOrderHints('O',[{itemId:'I',productType:'SERVICE'}]),/2\/2/);
 });
