@@ -187,6 +187,16 @@ async function commitServiceCaseEvent(db,actorUid,input){
       nextEvent:projection.nextEvent,custody:projection.custody,
       serviceQty:record.serviceQty,itemProgress,itemWorkCategory:itemWorkflow.workCategory};
     if(next.status==='already-applied')return;
+    // The case event is authoritative only for this Service item. Updating an
+    // order-wide index is safe without another scan only for a single-line
+    // pure-Service order; mixed/multiple lines need all sibling proofs first.
+    if(items.length===1){
+      const category=itemWorkflow.workCategory;
+      if(!Array.isArray(order.workCategories)||order.workCategories.length!==1
+        ||order.workCategories[0]!==category){
+        tx.update(orderRef,{workCategories:[category],workCategoryUpdatedAt:recordedAt});
+      }
+    }
     if(!saved)tx.set(index.ref,{...index.record,
       caseIds:[...index.record.caseIds,intent.caseId]});
     tx.set(ref,{
