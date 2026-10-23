@@ -304,4 +304,89 @@ async function getServiceCaseStatus(db,actorUid,input){
   });
 }
 
-module.exports={commitServiceCaseEvent,getServiceCaseStatus,caseDocId,itemCaseIndexId};
+// Read all Service lines from one authoritative order snapshot. Explicit action,
+// never a table-wide poll. Goods remain outside this completion calculation.
+// Bound Firestore reads: up to 30 lines and at most 100 registered cases/order.
+async function getServiceOrderProgress(db,actorUid,input){
+  if(!db||typeof db.runTransaction!=='function')throw Error('缺少有效資料庫交易。');
+  if(!actorUid)fail('未登入使用者。','unauthenticated');
+  if(!input||typeof input!=='object'||Array.isArray(input)
+    ||Object.keys(input).length!==1||typeof input.orderId!=='string')
+    fail('整單服務查核格式不正確。','invalid-argument');
+  caseDocId(input.orderId,'validate','validate');
+  const orderId=input.orderId;
+  return db.runTransaction(async tx=>{
+    const [userSnap,orderSnap]=await Promise.all([
+      tx.get(db.collection('users').doc(actorUid)),
+      tx.get(db.collection('orders').doc(orderId))
+    ]);
+    const profile=userSnap.exists?userSnap.data():null;
+    if(!profile||profile.active===false||profile.disabled===true
+      ||!['admin','sales','engineer','warehouse'].includes(profile.role))
+      fail('目前使用者沒有查看服務案件的權限。','permission-denied');
+    if(!orderSnap.exists)fail('來源訂單不存在。','not-found');
+    const order=orderSnap.data();
+    if(profile.role==='sales'&&order.ownerUid!==actorUid)
+      fail('只有訂單負責業務有權限查看服務案件。','permission-denied');
+    const all=order.items;
+    if(!Array.isArray(all)||all.length<1||all.length>30)
+      fail('訂單品項數量不符合整單查核限制。');
+    const serviceItems=all.filter(i=>String(i?.productType||'').trim().toUpperCase()==='SERVICE');
+    if(!serviceItems.length)fail('這筆訂單沒有服務品項。');
+    const ids=new Set();
+    for(const item of serviceItems){
+      caseDocId(orderId,item?.itemId,'validate');
+      if(ids.has(item.itemId))fail('服務品項識別碼重複。');
+      ids.add(item.itemId);
+      if(typeof item.productId!=='string'||!item.productId||item.productId.includes('/'))
+        fail('服務品項缺少可核對的正式產品主檔。');
+    }
+    const refs=serviceItems.map(item=>({
+      index:db.collection('serviceCases').doc(itemCaseIndexId(orderId,item.itemId)),
+      product:db.collection('products').doc(item.productId)
+    }));
+    const snapshots=await Promise.all(refs.map(async refs=>{
+      const [index,product]=await Promise.all([tx.get(refs.index),tx.get(refs.product)]);
+      return {index,product};
+    }));
+    let registered=0;
+    for(const {index} of snapshots){
+      if(!index.exists)continue;
+      const list=index.data()?.caseIds;
+      if(!Array.isArray(list)||list.length>core.MAX_ITEM_CASES)
+        fail('服務案件索引數量不正確。');
+      registered+=list.length;
+    }
+    if(registered>100)fail('整單服務案件超過單次查核上限，請分品項查詢。');
+    const summaries=[];
+    for(let i=0;i<serviceItems.length;i++){
+      const item=serviceItems[i],snap=snapshots[i];
+      const master=snap.product.exists?snap.product.data():null;
+      const kind=snap.index.exists?snap.index.data().kind:activeServiceMasterKind(master);
+      if(!snap.index.exists&&!activeServiceMasterKind(master))
+        fail('正式服務主檔無效或尚未指定服務類型。');
+      if(!Object.prototype.hasOwnProperty.call(core.STEPS,kind))
+        fail('服務案件索引的服務類型不正確。');
+      assertCaseProduct({productId:item.productId,kind},item);
+      const index=await readItemCases(db,tx,orderId,item.itemId,item,kind,snap.index);
+      const projected=serviceItemWorkflow(orderId,order,item,kind,index.cases);
+      summaries.push({itemId:item.itemId,itemName:item.itemName||item.itemCode||'服務品項',
+        serviceKind:kind,workCategory:projected.workCategory,
+        orderedQty:projected.serviceProgress.orderedQty,
+        allocatedQty:projected.serviceProgress.allocatedQty,
+        completedQty:projected.serviceProgress.completedQty,
+        outstandingQty:projected.outstandingQty,
+        caseCount:index.cases.length});
+    }
+    const completedQty=summaries.reduce((sum,item)=>sum+item.completedQty,0);
+    const orderedQty=summaries.reduce((sum,item)=>sum+item.orderedQty,0);
+    return {orderId,orderNo:order.orderNo||orderId,
+      serviceItemCount:summaries.length,mixedOrder:serviceItems.length!==all.length,
+      billingRecorded:order.isBilled===true,
+      serviceCompleted:summaries.every(item=>item.outstandingQty===0),
+      orderedQty,completedQty,outstandingQty:Math.max(0,orderedQty-completedQty),
+      items:summaries};
+  });
+}
+
+module.exports={commitServiceCaseEvent,getServiceCaseStatus,getServiceOrderProgress,caseDocId,itemCaseIndexId};
