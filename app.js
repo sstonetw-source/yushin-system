@@ -10879,6 +10879,10 @@ function pendingServiceCaseIntent(){
 async function readServiceCases(input){
     const transport=serviceCaseTransport();return transport.call('getServiceCaseStatus',input);
 }
+// Explicit whole-order verification; never invoked by list rendering or billing.
+async function readServiceOrderProgress(orderId){
+    const transport=serviceCaseTransport();return transport.call('getServiceOrderProgress',{orderId});
+}
 async function commitServiceCaseIntent(input){
     const t=serviceCaseTransport(),key=serviceCasePendingKey(t.uid);
     let saved=pendingServiceCaseIntent();
@@ -10933,6 +10937,17 @@ function serviceCaseVerifiedOrderHints(orderId,items){
             return `<small class="service-case-verified-hint">${escapeHtml(item.itemName||item.itemCode||'服務品項')}：上次查核完成 ${escapeHtml(saved.completedQty)}/${escapeHtml(saved.orderedQty)}（${escapeHtml(SERVICE_WORK_LABELS[saved.category])}；僅供畫面參考）</small>`;
         }).join('');
 }
+function rememberVerifiedServiceItem(view,orderId,itemId,progress,category){
+    if(!Object.prototype.hasOwnProperty.call(SERVICE_WORK_LABELS,category)
+        ||!progress||!Number.isFinite(progress.orderedQty)
+        ||!Number.isFinite(progress.completedQty)||progress.orderedQty<=0
+        ||progress.completedQty<0||progress.completedQty>progress.orderedQty)return false;
+    const key=JSON.stringify([view.uid,view.role,view.generation,orderId,itemId]);
+    if(verifiedServiceListHints.size>=100)verifiedServiceListHints.clear();
+    verifiedServiceListHints.set(key,{readAt:Date.now(),category,
+        orderedQty:progress.orderedQty,completedQty:progress.completedQty});
+    return true;
+}
 function serviceCaseEntryEnabled(){
     return globalThis.YUSHIN_SERVICE_CASE_EMULATOR===true
         &&['admin','sales','warehouse','engineer'].includes(currentUserRole);
@@ -10986,7 +11001,7 @@ function renderServiceCaseOrder(view){
         '<label for="serviceOrderNo">訂單編號</label><input id="serviceOrderNo" maxlength="160">'
         +'<button type="button" onclick="findServiceCaseOrder()">查詢服務訂單</button>'
         +(view.order?`<p>${escapeHtml(view.order.customerName||'')}｜${escapeHtml(view.order.orderNo||'')}</p>`
-        +`<label for="serviceItemChoice">服務品項</label><select id="serviceItemChoice" onchange="loadServiceCaseItem(this.value)">${view.order.items.map(i=>`<option value="${escapeAttr(i.itemId)}">${escapeHtml(i.itemName||'服務品項')}</option>`).join('')}</select><div id="serviceItemBody"></div>`:'');
+        +`<button type="button" id="verifyServiceOrderButton" onclick="verifyServiceOrderProgress()">查核整張服務單進度</button><div id="serviceOrderSummaryBody"></div><label for="serviceItemChoice">服務品項</label><select id="serviceItemChoice" onchange="loadServiceCaseItem(this.value)">${view.order.items.map(i=>`<option value="${escapeAttr(i.itemId)}">${escapeHtml(i.itemName||'服務品項')}</option>`).join('')}</select><div id="serviceItemBody"></div>`:'');
     if(view.order)document.getElementById('serviceOrderNo').value=view.order.orderNo||'';
 }
 window.findServiceCaseOrder=async function(){
@@ -10996,7 +11011,7 @@ window.findServiceCaseOrder=async function(){
         serviceCaseCurrent(view);seq=++view.request;view.orderLookup=seq;
         // Invalidate the previous order's actions before awaiting a new lookup.
         // A failed lookup must not leave an actionable form for the old order.
-        view.data=null;view.selected=null;
+        view.data=null;view.selected=null;view.summary=null;
         const body=document.getElementById('serviceItemBody');if(body)body.textContent='查詢訂單中…';
         const choice=document.getElementById('serviceItemChoice');if(choice)choice.disabled=true;
         const order=await readServiceCases({orderNo:document.getElementById('serviceOrderNo').value.trim()});
@@ -11017,16 +11032,8 @@ window.loadServiceCaseItem=async function(itemId){
         if(seq!==view.request)return;view.data=data;view.needsReload=false;
         // The item/status/quantities are returned by the authorized backend
         // after reading the registered cases. Never reconstruct them from order flags.
-        const p=data.itemProgress;
-        if(data.orderId===view.order.orderId&&data.itemId===itemId
-            &&Object.prototype.hasOwnProperty.call(SERVICE_WORK_LABELS,data.itemWorkCategory)
-            &&p&&Number.isFinite(p.orderedQty)&&Number.isFinite(p.completedQty)
-            &&p.orderedQty>=0&&p.completedQty>=0&&p.completedQty<=p.orderedQty){
-            const key=JSON.stringify([view.uid,view.role,view.generation,data.orderId,itemId]);
-            if(verifiedServiceListHints.size>=100)verifiedServiceListHints.clear();
-            verifiedServiceListHints.set(key,{readAt:Date.now(),category:data.itemWorkCategory,
-                orderedQty:p.orderedQty,completedQty:p.completedQty});
-        }
+        if(data.orderId===view.order.orderId&&data.itemId===itemId)
+            rememberVerifiedServiceItem(view,data.orderId,itemId,data.itemProgress,data.itemWorkCategory);
         if(document.getElementById('order-system')?.classList?.contains?.('active'))window.renderOrdersList?.();
         if(data.items)Object.assign(view.order,{items:data.items,orderNo:data.orderNo,customerName:data.customerName});
         renderServiceCaseItem(view);
@@ -11034,6 +11041,46 @@ window.loadServiceCaseItem=async function(itemId){
     }catch(error){if(serviceCaseView===view&&seq===view.request&&view.uid===currentUser?.uid&&view.role===currentUserRole&&view.generation===sessionDataGeneration){
         document.getElementById('serviceItemBody').textContent='無法載入案件，請重新選擇品項。';serviceCaseMessage(view,error.message);
     }}
+};
+// Explicit whole-order verification, never invoked by list rendering.
+// The verified view does not authorize billing or modify Firestore indexes.
+window.verifyServiceOrderProgress=async function(){
+    const view=serviceCaseView;if(!view||view.busy||view.orderLookup||!view.order?.orderId)return;
+    serviceCaseCurrent(view);
+    const orderId=view.order.orderId,seq=view.request;
+    const body=document.getElementById('serviceOrderSummaryBody');
+    if(body)body.textContent='正在核對整張服務訂單的案件事件…';
+    try{
+        const data=await readServiceOrderProgress(orderId);
+        serviceCaseCurrent(view);
+        if(view.request!==seq||view.orderLookup||view.order?.orderId!==orderId)return;
+        const allowedIds=new Set(view.order.items.map(item=>item.itemId));
+        if(data.orderId!==orderId||!Array.isArray(data.items)
+            ||data.items.length!==allowedIds.size
+            ||new Set(data.items.map(item=>item.itemId)).size!==allowedIds.size
+            ||data.items.some(item=>!allowedIds.has(item.itemId)))
+            throw Error('整單查核來源品項不一致，請重新查詢。');
+        for(const item of data.items){
+            if(!rememberVerifiedServiceItem(view,orderId,item.itemId,
+                {orderedQty:item.orderedQty,completedQty:item.completedQty},item.workCategory))
+                throw Error('服務完成量或狀態未通過驗證。');
+        }
+        view.summary=data;
+        if(body)body.innerHTML='<p>服務案件整單查核：已完成 '
+            +escapeHtml(data.completedQty)+'／'+escapeHtml(data.orderedQty)
+            +(data.mixedOrder?'（此訂單另有一般商品，未包含在服務進度中）':'')+'</p><ul>'
+            +data.items.map(item=>'<li>'+escapeHtml(item.itemName)+'：'
+                +escapeHtml(item.completedQty)+'／'+escapeHtml(item.orderedQty)
+                +'・'+escapeHtml(SERVICE_WORK_LABELS[item.workCategory])+'</li>').join('')+'</ul>'
+            +'<small>僅供最近一次查核參考，不影響核銷及原訂單工作分類。</small>';
+        if(document.getElementById('order-system')?.classList?.contains?.('active'))window.renderOrdersList?.();
+    }catch(error){
+        if(serviceCaseView===view&&view.uid===currentUser?.uid
+            &&view.role===currentUserRole&&view.generation===sessionDataGeneration
+            &&view.request===seq&&view.order?.orderId===orderId){
+            if(body)body.textContent='整張服務單查核未完成：'+error.message;
+        }
+    }
 };
 function renderServiceCaseItem(view){
     serviceCaseCurrent(view);const data=view.data,p=data.itemProgress;
