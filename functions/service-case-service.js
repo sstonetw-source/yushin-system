@@ -123,4 +123,48 @@ async function commitServiceCaseEvent(db,actorUid,input){
   });
   return result;
 }
-module.exports={commitServiceCaseEvent,caseDocId};
+
+/**
+ * Read an existing service case without inventing a case for an unregistered ID.
+ * Used by the demo-only Callable until real UI/Preview authorization is accepted.
+ * A cancelled order remains readable for historical custody/audit purposes.
+ */
+async function getServiceCaseStatus(db,actorUid,input){
+  if(!db||typeof db.runTransaction!=='function')throw Error('缺少有效資料庫交易。');
+  if(typeof actorUid!=='string'||!actorUid)fail('未登入使用者。','unauthenticated');
+  if(!input||typeof input!=='object'||Array.isArray(input)
+    ||Object.keys(input).some(key=>!['orderId','itemId','caseId'].includes(key)))
+    fail('服務案件查詢格式不正確。','invalid-argument');
+  const {orderId,itemId,caseId}=input;
+  caseDocId(orderId,itemId,caseId);
+  const orderRef=db.collection('orders').doc(orderId);
+  const userRef=db.collection('users').doc(actorUid);
+  const caseRef=db.collection('serviceCases').doc(caseDocId(orderId,itemId,caseId));
+  return db.runTransaction(async tx=>{
+    const [userSnap,orderSnap]=await Promise.all([tx.get(userRef),tx.get(orderRef)]);
+    const profile=userSnap.exists?userSnap.data():null;
+    if(!profile||profile.active===false||profile.disabled===true
+      ||!['admin','sales','engineer','warehouse'].includes(profile.role))
+      fail('目前使用者沒有查看服務案件的權限。','permission-denied');
+    if(!orderSnap.exists)fail('來源訂單不存在。','not-found');
+    const order=orderSnap.data();
+    if(profile.role==='sales'&&order.ownerUid!==actorUid)
+      fail('只有訂單負責業務能查看服務案件。','permission-denied');
+    const matched=(Array.isArray(order.items)?order.items:[]).filter(item=>item?.itemId===itemId);
+    if(matched.length!==1
+      ||String(matched[0].productType||'').trim().toUpperCase()!=='SERVICE')
+      fail('服務案件來源訂單品項不存在或型別不符。','failed-precondition');
+    const snap=await tx.get(caseRef);
+    if(!snap.exists)return {exists:false,orderId,itemId,caseId,workStatus:'NOT_STARTED',
+      completed:false,nextEvent:null,custody:null,events:[]};
+    const record=snap.data();
+    if(record?.orderId!==orderId||record?.itemId!==itemId||record?.caseId!==caseId)
+      fail('服務案件來源識別不一致，不能讀取。');
+    let projection;
+    try {projection=core.projectServiceCase(record);}
+    catch(err){fail(err.message);}
+    return {...projection,exists:true,workStatus:projection.status};
+  });
+}
+
+module.exports={commitServiceCaseEvent,getServiceCaseStatus,caseDocId};
