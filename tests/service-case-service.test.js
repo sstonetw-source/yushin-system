@@ -1,6 +1,6 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
-const {commitServiceCaseEvent,getServiceCaseStatus,caseDocId,itemCaseIndexId}=require('../functions/service-case-service.js');
+const {commitServiceCaseEvent,getServiceCaseStatus,getServiceOrderProgress,caseDocId,itemCaseIndexId}=require('../functions/service-case-service.js');
 
 function fixture({role='sales',ownerUid='U',kind='BIOPLEX_LAB',productType='SERVICE',
   productMasterType='SERVICE',orderStatus='normal',initialized=true,disabled=false,retry=false}={}){
@@ -393,5 +393,73 @@ test('item summary rejects mismatched order service type before a case exists',a
  f.docs.get('orders/O').items[0].serviceKind='ONSITE_REPAIR';
  await assert.rejects(getServiceCaseStatus(f.db,'U',query),/類型不一致/);
  await assert.rejects(commit(f,intent('SAMPLE_RECEIVED')),/不一致/);
+ assert.equal(f.written.length,0);
+});
+
+test('bounded whole-order read verifies partial/full Service work and never uses physical delivery flags',async()=>{
+ const f=fixture({role:'admin',kind:'ONSITE_REPAIR'});
+ const order=f.docs.get('orders/O');order.items[0].qty=2;
+ order.items[0].deliveredQty=500;order.isDelivered=true;
+ let p=await getServiceOrderProgress(f.db,'U',{orderId:'O'});
+ assert.equal(p.completedQty,0);assert.equal(p.outstandingQty,2);
+ assert.equal(p.items[0].workCategory,'delivery');assert.equal(p.serviceCompleted,false);
+ await commit(f,intent('REPAIR_COMPLETED',0,{workSummary:'固定'},'case1'));
+ p=await getServiceOrderProgress(f.db,'U',{orderId:'O'});
+ assert.equal(p.completedQty,1);assert.equal(p.outstandingQty,1);
+ await commit(f,intent('REPAIR_COMPLETED',1,{workSummary:'完成'},'case2'));
+ p=await getServiceOrderProgress(f.db,'U',{orderId:'O'});
+ assert.equal(p.completedQty,2);assert.equal(p.serviceCompleted,true);
+ assert.equal(p.items[0].workCategory,'billing');
+ order.isBilled=true;p=await getServiceOrderProgress(f.db,'U',{orderId:'O'});
+ assert.equal(p.items[0].workCategory,'complete');
+ order.orderStatus='cancelled';p=await getServiceOrderProgress(f.db,'U',{orderId:'O'});
+ assert.equal(p.items[0].workCategory,'closed');
+ assert.ok(f.written.every(path=>path.startsWith('serviceCases/')));
+});
+test('whole-order summary handles two Service lines and mixed Goods without inventing goods completion',async()=>{
+ const f=fixture({role:'admin',kind:'ONSITE_REPAIR'});
+ const order=f.docs.get('orders/O');
+ order.items.push({itemId:'J',productId:'PJ',productType:'SERVICE',serviceKind:'ONSITE_REPAIR',qty:1});
+ order.items.push({itemId:'G',productId:'PG',productType:'Goods',qty:4,deliveredQty:4});
+ f.docs.set('products/PJ',{active:true,productType:'SERVICE',serviceKind:'ONSITE_REPAIR'});
+ await commit(f,intent('REPAIR_COMPLETED',0,{workSummary:'完成第一項'}));
+ let p=await getServiceOrderProgress(f.db,'U',{orderId:'O'});
+ assert.equal(p.serviceItemCount,2);
+ assert.equal(p.mixedOrder,true);
+ assert.equal(p.orderedQty,2);
+ assert.equal(p.completedQty,1);
+ assert.equal(p.serviceCompleted,false);
+ assert.deepEqual(p.items.map(i=>i.itemId),['I','J']);
+ assert.equal(p.items[1].workCategory,'delivery');
+ assert.equal(order.items[2].deliveredQty,4);
+ assert.equal(f.docs.get('orders/O').workCategories,undefined);
+});
+test('whole-order read requires actor authorization, stable identifiers, consistent case indexes',async()=>{
+ for(const opt of [{role:'purchaser'},{role:'sales',ownerUid:'OTHER'},{role:'sales',disabled:true}]){
+   const f=fixture(opt);
+   await assert.rejects(getServiceOrderProgress(f.db,'U',{orderId:'O'}),/權限/);
+   assert.equal(f.written.length,0);
+ }
+ const f=fixture();
+ for(const q of [{orderId:'O',itemId:'I'},{orderId:'../O'},{orderId:'O',isBilled:true},{}])
+   await assert.rejects(getServiceOrderProgress(f.db,'U',q),/格式|識別碼/);
+ f.docs.get('orders/O').items.push({...f.docs.get('orders/O').items[0]});
+ await assert.rejects(getServiceOrderProgress(f.db,'U',{orderId:'O'}),/重複/);
+ f.docs.get('orders/O').items.pop();
+ await commit(f,intent('SAMPLE_RECEIVED'));
+ f.docs.get('serviceCases/'+itemCaseIndexId('O','I')).caseIds.push('missing');
+ await assert.rejects(getServiceOrderProgress(f.db,'U',{orderId:'O'}),/不存在/);
+ assert.equal(f.docs.get('orders/O').isBilled,undefined);
+});
+test('whole-order summary caps total index fanout before case document reads',async()=>{
+ const f=fixture({role:'admin',kind:'ONSITE_REPAIR'});
+ f.docs.get('orders/O').items.push({itemId:'J',productId:'PJ',productType:'SERVICE',serviceKind:'ONSITE_REPAIR',qty:1});
+ f.docs.set('products/PJ',{active:true,productType:'SERVICE',serviceKind:'ONSITE_REPAIR'});
+ for(const [itemId,productId] of [['I','P'],['J','PJ']]){
+   f.docs.set('serviceCases/'+itemCaseIndexId('O',itemId),{
+     recordType:'ITEM_CASE_INDEX',orderId:'O',itemId,productId,kind:'ONSITE_REPAIR',
+     caseIds:Array.from({length:51},(_,i)=>itemId+i)});
+ }
+ await assert.rejects(getServiceOrderProgress(f.db,'U',{orderId:'O'}),/查核上限/);
  assert.equal(f.written.length,0);
 });

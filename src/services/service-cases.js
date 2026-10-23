@@ -41,6 +41,10 @@ function pendingServiceCaseIntent(){
 async function readServiceCases(input){
     const transport=serviceCaseTransport();return transport.call('getServiceCaseStatus',input);
 }
+// Explicit whole-order verification; never invoked by list rendering or billing.
+async function readServiceOrderProgress(orderId){
+    const transport=serviceCaseTransport();return transport.call('getServiceOrderProgress',{orderId});
+}
 async function commitServiceCaseIntent(input){
     const t=serviceCaseTransport(),key=serviceCasePendingKey(t.uid);
     let saved=pendingServiceCaseIntent();
