@@ -149,7 +149,7 @@ async function getServiceCaseStatus(db,actorUid,input){
     if(!orderSnap.exists)fail('來源訂單不存在。','not-found');
     const order=orderSnap.data();
     if(profile.role==='sales'&&order.ownerUid!==actorUid)
-      fail('只有訂單負責業務能查看服務案件。','permission-denied');
+      fail('只有訂單負責業務有權限查看服務案件。','permission-denied');
     const matched=(Array.isArray(order.items)?order.items:[]).filter(item=>item?.itemId===itemId);
     if(matched.length!==1
       ||String(matched[0].productType||'').trim().toUpperCase()!=='SERVICE')
