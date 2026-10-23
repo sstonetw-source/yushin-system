@@ -57,7 +57,7 @@ CI 保留 Node、10 組 Chrome smoke、分組預留、真 Auth／Functions／整
 
 1. 已收斂：#228／#229 全 CI 成功並合併，#226／#227 亦已合併。不再重寫建單或重做此批驗收。#228 CI `39733007540`：2239 項；#229 CI `39733010048`：2241 項，皆零失敗／略過，另 10 組 Chrome smoke。
 2. CLOSE 至新單已由 #232 完成。繼續補直送、服務、估價單／Forecast 的正向代表；直送原站案例已納入本批，結果仍待 CI。只補入口與資料契約缺口，不擴張數量排列。
-3. 解決發布／可用性阻擋：#198 原 Client PO 的 Rules 上限仍與 #199 追蹤。main 後端採購受 `YUSHIN_FORMAL_PURCHASE_EMULATOR` 本機 gate 保護，`functions/index.js` 未匯出新版 PO／履約 Callables；Emulator 成功不代表正式入口修復。不可合併舊失敗 PR 冒充解決。#131 舊 CI 曾失敗，須比較現行實作後決定採用或淘汰，不直接合併。
+3. 解決發布／可用性阻擋：#198 原 Client PO 的 Rules 上限仍與 #199 追蹤。main 後端採購受 `YUSHIN_FORMAL_PURCHASE_EMULATOR` 本機 gate 保護，`functions/index.js` **截至 2026-10-22** 未匯出新版 PO／履約 Callables；Emulator 成功不代表正式入口修復。後續獨立的受控 Preview PO Callable PR 須有最新 CI 和實際部署證據才可更新此結論。不可合併舊失敗 PR 冒充解決。#131 舊 CI 曾失敗，須比較現行實作後決定採用或淘汰，不直接合併。
 4. 沿同一 Service 完成受控 Preview 接線／必要驗收。不另造 writer，不順便遷移、刪除正式資料或變更敏感角色。
 5. 七項結案後依序：產品識別／重複主檔、價格匯入續傳、Firebase 讀取效能、資訊複製、桌機手機介面、過時邏輯清理。主檔先唯讀稽核，正式去重／遷移另行授權。
 
@@ -66,3 +66,12 @@ CI 保留 Node、10 組 Chrome smoke、分組預留、真 Auth／Functions／整
 ## 2026-10-22｜直送失敗與隔離後端試點（待最新 CI）
 
 PR #233 原 Client 的 1280／390px「確認已採購」在 CI 39743049294 遭 Firestore Rules 1000 上限阻擋（整站 64 通過、2 失敗，後續部分步驟略過）。本批沿用唯一原採購 Service 與僅限 demo-yushin 的 Functions 試點擴充 DIRECT_SHIP，原網站經本機明確啟用的後端通道驗收；不得將此視為 #199 正式路徑已修復，不能跳過權限或勾選 Preview。正式 Firebase 資料與部署皆不動。
+
+## 2026-10-23｜正式採購 Preview Callable 接線（待 CI 與實際 Preview 驗收）
+
+- 唯一交易仍是 `functions/formal-purchase-commit-service.js` 的 `commitV2FormalPurchase`：同一 transaction 讀取真 Auth 使用者、訂單、產品、倉庫、採購需求，再提交 PO、Supply、需求、來源訂單；沒有第二套 writer 或新增庫存帳。
+- `functions/index.js` 匯出經 `formal-purchase-preview-callable.js` 保護的 `commitV2FormalPurchase`。後端必須 `ENABLE_PREVIEW_FORMAL_PURCHASE=true` 且實際專案、Firestore 同為 `preview-20135`；正式 `yu-shing-company` 即使有同名開關亦拒絕。完整本機 Auth／Firestore／Functions demo Emulator 才可用 `demo-yushin`。**預設關閉，合併 GitHub 不等於已在 Preview 部署或啟用**。
+- Preview 網站需在已載入畫面的同一 session 明確設定 `window.YUSHIN_PREVIEW_FORMAL_PURCHASE=true`；原「確認已採購」才轉接後端。網站限定 `preview-20135.web.app` 或 `preview-20135.firebaseapp.com`，核對真登入專案與 UID，拒絕把 Preview Auth 指向本機 Emulator。任何 Callable 失敗／未知回覆都**不回退**舊 Client writer，保持原 PO 編號與核對憑證。
+- 已有客戶訂單實體品項的 1–5 列、倉庫入庫或原廠直送可參與試點；手動補貨、服務品項、超過五列及混合不符合者維持明確拒絕，不得臨時放寬後端驗證。產生文件與確認已採購仍是兩個動作。
+- 真 Auth demo Emulator 持續透過 `node tools/run-v2-return-auth-emulator.cjs` 測試同一 Preview adapter；本機 Node gate 測試包含正式專案拒絕、匿名／不同專案拒絕、原畫面接線及未知回覆。**仍須在實際 Preview 專案**取得登入角色、4/7 部分採購、重複提交、拒絕／回滾及來源／Supply／需求回讀證據，才可標記 Preview 已驗收。
+- 本批不得直接部署 `yu-shing-company`、啟動正式後端，或修改正式資料；#199 維持開啟直到正式切換另行授權且正式環境驗證成功。

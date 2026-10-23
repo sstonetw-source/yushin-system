@@ -10,6 +10,10 @@ exports.sendPurchaseOrderEmail=onCall({region:'asia-east1'},()=>{
 const {getApps,initializeApp}=require('firebase-admin/app');
 if(!getApps().length)initializeApp();
 const {getFirestore}=require('firebase-admin/firestore');
+const {createPreviewFormalPurchaseCallable}=require('./formal-purchase-preview-callable');
+// Production receives the same export but ALWAYS rejects; only preview-20135
+// with the explicit backend flag can execute the authoritative PO transaction.
+exports.commitV2FormalPurchase=createPreviewFormalPurchaseCallable({onCall,HttpsError,getDatabase:getFirestore});
 const {commitGroupedWarehouseReservation}=require('./grouped-reservation-service');
 const {allowGroupedReservation}=require('./grouped-reservation-gate');
 exports.commitGroupedWarehouseReservation=onCall({region:'asia-east1'},async request=>{
