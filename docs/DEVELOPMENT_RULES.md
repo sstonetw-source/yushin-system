@@ -4,7 +4,7 @@
 
 服務原頁面接線須驗原訂單入口及最小訂單編號查詢、四類事件、真 Auth 的業務／倉管／工程師交接，以及實際 HTTP 已提交後遺失回覆、重新整理不自送、原 ID 重試與事件回讀。不得替換 handler、假造 Callable 成功或用 UI 旗標替代後端權限。初始化來源訂單在本批新案例仍為明列 fixture，原建單與初始化已有獨立案例；不可稱本批已完成 Preview 或服務核銷全流程。
 
-本機 Node 1759/1759、建置一致性已通過；真 Chrome／Auth／Emulator 與完整 CI 以本批最新 head 為準。測試隔離入口引用原 functions/index 的兩個 demo-gated Service exports，不建立測試專用服務 writer。PR #234 保持 Draft，正式部署未執行。
+本機 Node 1760/1760、建置一致性已通過；真 Chrome／Auth／Emulator 與完整 CI 以本批最新 head 為準。首輪原站驗收揭露倉管的 orders.list 唯讀攔截器擋住無參數的服務視窗入口，現僅在明確服務 gate 與合格角色下允許該精確入口；訂單寫入仍被攔截，服務動作仍經後端權限查核。新增行為回歸，不停用整頁唯讀保護。測試隔離入口引用原 functions/index 的兩個 demo-gated Service exports，不建立測試專用服務 writer。PR #234 保持 Draft，正式部署未執行。
 
 **唯一原始碼**：`app.js` 是由 `src/` 生成的相容部署包，**禁止直接手工修改**。修改各 feature 源碼後執行 `node tools/build-app.cjs`，生成檔與來源需一起提交；`--check` 是 CI 必跑項。
 

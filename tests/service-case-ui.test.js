@@ -42,3 +42,17 @@ test('server role hints control actions and customer data is escaped before disp
  assert.match(f.node('serviceItemBody').innerHTML,/&lt;img>/);assert.doesNotMatch(f.node('serviceCaseAction').innerHTML,/serviceCaseSave/);
  assert.equal(f.calls.length,0);
 });
+test('read-only order guard allows only the gated service entry while order mutations remain blocked',()=>{
+ const bootstrap=fs.readFileSync('src/app/bootstrap.js','utf8');
+ const block=bootstrap.slice(bootstrap.indexOf('    const blockReadonlyEdit = event => {'),bootstrap.indexOf("    document.addEventListener('click', blockReadonlyEdit"));
+ let enabled=true,handler='openServiceCases()',blocked=0;
+ const section={classList:{contains:()=>true}},button={type:'button',tagName:'BUTTON',getAttribute:()=>handler,closest:()=>null};
+ const event={type:'click',target:{closest:selector=>selector==='.content-section'?section:button},
+  preventDefault:()=>blocked++,stopImmediatePropagation(){}};
+ const c=vm.createContext({getActivePermissionPage:()=> 'orders.list',canEditPage:()=>false,
+  serviceCaseEntryEnabled:()=>enabled,alert(){}});c.globalThis=c;
+ vm.runInContext(block+'\nglobalThis.guard=blockReadonlyEdit;',c);
+ c.guard(event);assert.equal(blocked,0);
+ handler='saveNewOrder()';c.guard(event);assert.equal(blocked,1);
+ handler='openServiceCases()';enabled=false;c.guard(event);assert.equal(blocked,2);
+});

@@ -277,9 +277,9 @@ for(const width of [1280,390])test('original service case UI '+width+'px: four k
   deliveryRecords:[],returnRecords:[],deliveredQty:0,isDelivered:false,isBilled:false};
  await db.doc('orders/'+orderId).set(order);
  const context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
- const calls=[],errors=[],external=[];let lose=true;
+ const calls=[],errors=[],external=[],serviceDialogs=[];let lose=true;
  await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_SERVICE_CASE_EMULATOR=true;});
- page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.dismiss());
+ page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>{serviceDialogs.push(d.message());return d.dismiss();});
  await context.route('**/*',async route=>{
   const request=route.request(),url=new URL(request.url());
   if(!['localhost','127.0.0.1'].includes(url.hostname)){external.push(url.hostname);await route.abort();return;}
@@ -354,7 +354,7 @@ for(const width of [1280,390])test('original service case UI '+width+'px: four k
   assert.equal(await page.locator('#serviceItemChoice').count(),0);
   assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
   console.log('Original service UI '+width+'px: actual Auth, four service kinds, sales/warehouse/engineer handoff, minimal authorized order-number lookup, committed lost HTTP reply/reload/same-event proof and zero physical/billing writes passed. Initialized order remains an explicit fixture boundary.');
- }catch(error){console.log('Service UI diagnostic',JSON.stringify(await page.evaluate(()=>({role:currentUserRole,message:document.getElementById('serviceCaseMessage')?.textContent,body:document.getElementById('serviceCaseBody')?.textContent}))),JSON.stringify(errors));throw error;}
+ }catch(error){console.log('Service UI diagnostic',JSON.stringify(await page.evaluate(()=>({role:currentUserRole,message:document.getElementById('serviceCaseMessage')?.textContent,body:document.getElementById('serviceCaseBody')?.textContent}))),JSON.stringify({errors,dialogs:serviceDialogs}));throw error;}
  finally{await context.close();}
 });
 async function multiReceiptSiteFixture(width){
