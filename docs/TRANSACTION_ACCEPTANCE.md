@@ -114,3 +114,10 @@ Workflow Core 也不再使用一般送貨紀錄、舊 deliveredQty 投影或單�
 不增加 Collection、索引、Listener、查詢或資料庫讀取；唯一既有案件文件增加 productId。案件數與訂單數量、原頁面操作、客戶交付與核銷及 Preview 仍待完成，PR #234 維持 Draft，正式功能未啟用。
 
 驗證：Node 與真 Auth／Callable Emulator 新增原產品換檔後讀取、接續及同 ID 重送拒絕，以及取消後原主檔不存在仍可唯讀歷史。完整 CI 以本 PR 最新 head 結果為準。
+
+
+### 2026-10-23｜原訂單列表的受控服務進度提示（PR 相依，唯讀）
+
+原訂單的「服務案件」視窗在使用者**主動查詢單一服務品項**後，會將後端已依註冊案件索引與 Workflow Core 驗證的 `completedQty / orderedQty`、`itemWorkCategory` 顯示在該訂單的列表金額欄下方。僅限 `demo-yushin` Emulator 閘門、同一登入 UID／角色／session、同一訂單／品項，記憶體提示最多保留 120 秒；資料來源不一致或回覆延遲被廢棄，不能從訂單 `deliveredQty`、`isDelivered` 或 `isBilled` 反推服務完工。未主動查核不會觸發每列 Callable，也不新增 Firestore 讀寫、collection、索引或 listener。
+
+這是**最近查核的畫面提示，不是權威持久履約分類**：不修改訂單 `workCategories`、工作圖卡數量、核銷按鈕與 `setOrderBillingStatus`。另一人更新服務案件後，需再點「服務案件」重查；原訂單列表／工作卡的完整分類與核銷 writer 仍需在後端接上全部服務案件證據，混合單與 Preview 尚未驗收。正式 Firebase 未啟用。
