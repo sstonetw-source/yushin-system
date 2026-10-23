@@ -42,6 +42,13 @@ test('server role hints control actions and customer data is escaped before disp
  assert.match(f.node('serviceItemBody').innerHTML,/&lt;img>/);assert.doesNotMatch(f.node('serviceCaseAction').innerHTML,/serviceCaseSave/);
  assert.equal(f.calls.length,0);
 });
+test('service item status displays the server workflow and never infers fulfillment from UI counts',async()=>{
+ const f=fixture();f.data.itemProgress.completedQty=2;
+ for(const [category,label] of [['delivery','待服務處理'],['billing','服務完成・待核銷'],['complete','服務完成・已核銷'],['closed','訂單已停止履約']]){
+  f.data.itemWorkCategory=category;await f.c.openServiceCases('O');
+  assert.ok(f.node('serviceItemBody').innerHTML.includes(label));
+ }
+});
 test('order lookup invalidates old actions; a failed query cannot submit the previous case',async()=>{
  const f=fixture();await f.c.openServiceCases('O');
  f.node('serviceOccurredAt').value='2026-10-23T10:00:00';f.node('serviceNewCaseId').value='old-case';f.node('serviceNewQty').value='1';

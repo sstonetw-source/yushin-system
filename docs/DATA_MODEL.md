@@ -1,5 +1,12 @@
 # DATA_MODEL — Firestore 集合與資料責任地圖
 
+## 2026-10-23 服務履約分類回傳（無持久資料變更）
+
+原服務 writer 及案件／品項查詢新增回傳 itemWorkCategory，由完整註冊案件事件加上同一交易讀取的 orders.isBilled／生命週期產生。舊未綁量試點案件仍可唯讀，itemProgress 與 itemWorkCategory 均為 null，不猜測完成量。案件、品項索引與訂單均無新增欄位，orders 的 deliveredQty、isDelivered、isBilled、workCategories 不由本批寫入；商品／服務混合單仍各自維持原帳。
+
+讀取次數與原本的有界索引查詢相同，沒有新增 Collection、Index、Rules、Query 或 Listener。訂單列表索引、核銷 writer 及 Preview 仍待整合，不可把服務視窗分類視為整單持久狀態。
+
+
 ## 2026-10-23 服務視窗讀取及恢復契約（本機試點）
 
 沿既有 getServiceCaseStatus：`{orderNo}` 在同一授權交易以 orderNo 等值查詢至多兩筆，必須唯一；只回 orderId、orderNo、customerName 及 Service 的 itemId／itemName，不回價格、成本或一般商品。`{orderId,itemId}` 由原固定品項索引讀取至多 100 案，回案件歷程、唯一 itemProgress 與角色動作提示；沒有索引時額外核對即時 Service 主檔與舊案，純讀取不建立索引。原 `{orderId,itemId,caseId}` 逐案查詢維持。

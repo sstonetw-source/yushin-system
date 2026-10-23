@@ -1,5 +1,12 @@
 # ARCHITECTURE — 又鑫系統程式碼責任地圖
 
+## 2026-10-23 服務案件與共用履約投影（已實作，待本批 CI）
+
+`YushinWorkflow.projectItem(input, registeredCases)` 接受後端從完整品項索引讀取且核對來源的案件事件，沿唯一 `YushinServiceWork.projectServiceItem` 取得商務完成量，並共用既有工作分類：未全數完成為 delivery、完成未核銷為 billing、完成且已核銷為 complete、取消為 closed。未提供第二參數時保留原本的服務未履約保護；不採用 input 的完成量快取或一般送貨事件。服務 effectiveDeliveredQty 仍為 0，outstandingQty 表示尚未完成的服務需求。
+
+原 `commitServiceCaseEvent` 與 `getServiceCaseStatus` 使用同一投影回傳 itemWorkCategory；原服務視窗僅顯示後端分類。沒有新增 writer、集合、查詢、Listener、資料庫讀寫或持久快取。原訂單列表／workCategories 索引仍沒有案件證據，維持服務待處理，尚須後續整合；本批不是整張訂單完成、核銷 writer 或 Preview 上線。PR #234 保持 Draft。
+
+
 ## 2026-10-23 服務案件原畫面接線（已實作，真瀏覽器待本批 CI）
 
 `src/features/orders/service-cases.js` 在原訂單列及頁首提供同一服務視窗；`src/services/service-cases.js` 僅傳送既有 Callable，不寫 Firestore。業務從原訂單開案，倉管／工程師可用訂單編號查詢最小服務資料並接手；讀取授權與可執行動作由原後端 Service 依真實使用者決定。案件數量仍由唯一 Service Work Core 計算，沒有第二個交易 writer。整合分支 `aa0eef6` 完整 CI 已通過。
