@@ -28,10 +28,43 @@ function caseDocId(orderId,itemId,caseId){
   }
   return [orderId,itemId,caseId].map(encodeURIComponent).join('|');
 }
+function itemCaseIndexId(orderId,itemId){
+  caseDocId(orderId,itemId,'validate');
+  // Four encoded segments cannot collide with a three-segment case key.
+  return ['item-index',orderId,itemId,'v1'].map(encodeURIComponent).join('|');
+}
+async function readItemCases(db,tx,orderId,itemId,item,kind){
+  const ref=db.collection('serviceCases').doc(itemCaseIndexId(orderId,itemId));
+  const snap=await tx.get(ref);
+  if(!snap.exists){
+    // Never silently adopt pre-quantity pilot cases or release their allocation.
+    const old=await tx.get(db.collection('serviceCases')
+      .where('orderId','==',orderId).where('itemId','==',itemId).limit(1));
+    if(!old.empty)fail('既有服務案件尚未綁定數量索引，不能自動補綁。');
+    return {ref,record:{recordType:'ITEM_CASE_INDEX',orderId,itemId,
+      productId:item.productId,kind,caseIds:[]},cases:[]};
+  }
+  const record=snap.data();
+  if(record.recordType!=='ITEM_CASE_INDEX'||record.orderId!==orderId||record.itemId!==itemId
+    ||record.productId!==item.productId||record.kind!==kind
+    ||!Array.isArray(record.caseIds)||record.caseIds.length>core.MAX_ITEM_CASES
+    ||new Set(record.caseIds).size!==record.caseIds.length)
+    fail('服務案件數量索引來源或內容不一致。');
+  const cases=await Promise.all(record.caseIds.map(async id=>{
+    const saved=await tx.get(db.collection('serviceCases').doc(caseDocId(orderId,itemId,id)));
+    if(!saved.exists)fail('服務案件數量索引的案件不存在。');
+    const row=saved.data();
+    if(row.orderId!==orderId||row.itemId!==itemId||row.caseId!==id||row.kind!==kind)
+      fail('服務案件數量索引的案件來源不一致。');
+    assertCaseProduct(row,item);
+    return row;
+  }));
+  return {ref,record,cases};
+}
 function assertRequest(input,uid){
   if(typeof uid!=='string'||!uid)fail('未登入使用者。','unauthenticated');
   if(!input||typeof input!=='object'||Array.isArray(input)
-    ||Object.keys(input).some(key=>!['orderId','itemId','caseId','event'].includes(key)))
+    ||Object.keys(input).some(key=>!['orderId','itemId','caseId','serviceQty','event'].includes(key)))
     fail('服務作業請求格式不正確。','invalid-argument');
   const {orderId,itemId,caseId,event}=input;
   caseDocId(orderId,itemId,caseId);
@@ -40,7 +73,8 @@ function assertRequest(input,uid){
   if(event.actorUid!==undefined&&event.actorUid!==uid)
     fail('服務事件操作人員與登入身分不符。','permission-denied');
   try {
-    return {orderId,itemId,caseId,event:core.normalizedEvent({...event,actorUid:uid})};
+    return {orderId,itemId,caseId,serviceQty:core.serviceQuantity(input.serviceQty),
+      event:core.normalizedEvent({...event,actorUid:uid})};
   }catch(err){fail(err.message,'invalid-argument');}
 }
 function allowedActor(role,uid,order,eventType){
@@ -112,19 +146,33 @@ async function commitServiceCaseEvent(db,actorUid,input){
       ||saved.caseId!==intent.caseId||saved.kind!==kind))
       fail('既有服務案件來源不一致，不能覆寫。');
     if(saved)assertCaseProduct(saved,item);
+    if(saved&&saved.serviceQty!==intent.serviceQty)
+      fail('服務案件對應數量已固定或尚未綁定，不能改量重送。');
+    const index=await readItemCases(db,tx,intent.orderId,intent.itemId,item,kind);
+    if(!!saved!==index.record.caseIds.includes(intent.caseId))
+      fail('服務案件與數量索引不一致。');
+    let itemProgress;
+    try {core.projectServiceItem(item,index.cases);}
+    catch(err){fail(err.message);}
     const record=saved||{
       orderId:intent.orderId,itemId:intent.itemId,caseId:intent.caseId,kind,
-      productId:item.productId,
+      productId:item.productId,serviceQty:intent.serviceQty,
       createdByUid:actorUid,createdAt:recordedAt,events:[]
     };
     let next;
     try {next=core.applyServiceEvent(record,intent.event);}
     catch(err){fail(err.message);}
+    const cases=[...index.cases.filter(row=>row.caseId!==intent.caseId),next.record];
+    try {itemProgress=core.projectServiceItem(item,cases);}
+    catch(err){fail(err.message);}
     const projection=next.projection;
     result={status:next.status,orderId:intent.orderId,itemId:intent.itemId,
       caseId:intent.caseId,kind,workStatus:projection.status,completed:projection.completed,
-      nextEvent:projection.nextEvent,custody:projection.custody};
+      nextEvent:projection.nextEvent,custody:projection.custody,
+      serviceQty:record.serviceQty,itemProgress};
     if(next.status==='already-applied')return;
+    if(!saved)tx.set(index.ref,{...index.record,
+      caseIds:[...index.record.caseIds,intent.caseId]});
     tx.set(ref,{
       ...record,events:next.record.events,status:projection.status,
       custody:projection.custody,completedAt:projection.completedAt,
@@ -174,8 +222,17 @@ async function getServiceCaseStatus(db,actorUid,input){
     let projection;
     try {projection=core.projectServiceCase(record);}
     catch(err){fail(err.message);}
-    return {...projection,exists:true,workStatus:projection.status};
+    // Old demo histories remain readable, but are never counted as bound work.
+    let itemProgress=null;
+    if(record.serviceQty!==undefined){
+      const index=await readItemCases(db,tx,orderId,itemId,matched[0],record.kind);
+      if(!index.record.caseIds.includes(caseId))fail('服務案件與數量索引不一致。');
+      try {itemProgress=core.projectServiceItem(matched[0],index.cases);}
+      catch(err){fail(err.message);}
+    }
+    return {...projection,exists:true,workStatus:projection.status,
+      serviceQty:record.serviceQty??null,itemProgress};
   });
 }
 
-module.exports={commitServiceCaseEvent,getServiceCaseStatus,caseDocId};
+module.exports={commitServiceCaseEvent,getServiceCaseStatus,caseDocId,itemCaseIndexId};

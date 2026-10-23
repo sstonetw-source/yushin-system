@@ -341,3 +341,14 @@ PR #233 真實 Client 原入口在桌機／手機均遇到 Firestore Rules 1000 
 預期原 Client 建單與初始化後只有一張三品項訂單，金額六百元；P 分屬主倉兩件及分倉一件，Q 主倉兩件，公司與分倉預留合計五件，三筆權威 ledger／各 itemId／交付地址一致，實貨與原批次完全不動。重整原清單後訂單、品項與所有實體帳保持一致，沒有 Supply、送達或 Functions 呼叫。原單品項案例完整保留。
 
 這是現有每品項單一倉的正式 Client 程式路徑，不是單品項 v2 多位置／初始化真傳輸或 Preview／正式部署驗收。僅擴充測試與紀錄，沒有新 writer／Core／Collection／Rules／Index／Listener，未操作正式資料或角色。語法／diff 通過，新增真 Auth／Chrome 與完整 CI 待最新 head，全數通過才合併。
+
+
+### 2026-10-23｜服務案件與訂單數量對應（demo Emulator，尚未正式啟用）
+
+已實作：原 `commitServiceCaseEvent` 要求明確正數 `serviceQty`，代表案件對應的商務訂購量，不從檢體件數、試劑盒數或器材數自行推算。首次事件固定數量，接續與重送不得改量；來源 item 的 `orderedQty ?? qty` 是上限。`YushinServiceWork.projectServiceItem` 是唯一案件量投影，從已註冊案件及事件計算 allocatedQty、completedQty、unassignedQty、inProgressQty、remainingQty；不保存另一份完成量快取，不更新商品 deliveredQty、庫存、採購或核銷。浮點比較只容許相對機器精度誤差，不以固定容差放行極小數量的超額。
+
+同一 `serviceCases` 集合新增每品項一份 `ITEM_CASE_INDEX` 文件，固定 ID 為四段 `item-index|encode(orderId)|encode(itemId)|v1`，和原三段案件 ID 不衝突。文件只保存來源 orderId／itemId／productId／kind 與 caseIds，不保存數量。唯一 writer 同交易讀索引及全部已註冊案件，首次事件原子寫索引與案件；共同索引讓並行不同 caseId 競爭餘量也會重新驗證。每品項最多 100 案，超過明確拒絕，不截斷當作全部。平常不新增 Query／Listener／Collection／複合索引；首次缺索引額外查相同 orderId＋itemId 至多一案，發現舊案件即拒絕自動補綁，不把既存保管紀錄當成零數量。
+
+新案首次交易多讀一份索引並寫入它，後續事件及已綁定查詢最多再讀 100 份已註冊案件；這是有界的權威核對成本。歷史查詢回傳 serviceQty 與 itemProgress；未綁數量的舊試點案件仍可依原授權唯讀，itemProgress=null，不推定完成量。索引失聯、來源不符、缺少案件或訂單縮量小於已綁量均拒絕，不自動刪索引或釋放額度。Client 對該集合原有全面拒絕 Rules 不變，Callable 仍限 demo-yushin Emulator。
+
+本機完整 Node 1751/1751 通過，零失敗／略過；建置一致性及 diff 通過。新增真 Auth／Callable 的不同案件搶最後餘量、同案並行重送、分批完成、改量／縮單／索引損壞零寫入與 Client 索引讀寫拒絕驗收，結果須以本批最新 head 完整 CI 為準。尚未完成：原 UI 開案與數量輸入、既有主檔分類、服務交付／核銷、混合單與 Preview 完整驗收。PR #234 仍為整合 Draft，未合併 main、未部署 Firebase、未操作正式資料。

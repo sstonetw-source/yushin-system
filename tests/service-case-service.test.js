@@ -1,6 +1,6 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
-const {commitServiceCaseEvent,getServiceCaseStatus,caseDocId}=require('../functions/service-case-service.js');
+const {commitServiceCaseEvent,getServiceCaseStatus,caseDocId,itemCaseIndexId}=require('../functions/service-case-service.js');
 
 function fixture({role='sales',ownerUid='U',kind='BIOPLEX_LAB',productType='SERVICE',
   productMasterType='SERVICE',orderStatus='normal',initialized=true,disabled=false,retry=false}={}){
@@ -12,12 +12,15 @@ function fixture({role='sales',ownerUid='U',kind='BIOPLEX_LAB',productType='SERV
     ['products/P',{active:true,productType:productMasterType,serviceKind:kind}]
   ]);
   const ids=[],written=[];
-  const db={collection:name=>({doc:id=>({path:name+'/'+id})}),
+  const db={collection:name=>({doc:id=>({path:name+'/'+id}),
+    where:(field,op,value)=>({where:(field2,op2,value2)=>({limit:()=>({query:name,field,value,field2,value2})})})}),
     runTransaction:async callback=>{
       const apply=async()=>{
         const writes=[];
         const tx={
-          get:async ref=>({exists:docs.has(ref.path),data:()=>clone(docs.get(ref.path))}),
+          get:async ref=>ref.query
+            ? {empty:![...docs].some(([path,row])=>path.startsWith(ref.query+'/')&&row[ref.field]===ref.value&&row[ref.field2]===ref.value2)}
+            : {exists:docs.has(ref.path),data:()=>clone(docs.get(ref.path))},
           set:(ref,value)=>writes.push([ref.path,clone(value)])
         };
         const value=await callback(tx);
@@ -32,7 +35,7 @@ function fixture({role='sales',ownerUid='U',kind='BIOPLEX_LAB',productType='SERV
   return {db,docs,written,ids};
 }
 const now=i=>new Date(Date.UTC(2026,9,22,9,i)).toISOString();
-const intent=(type,i=0,extra={},caseId='case1')=>({orderId:'O',itemId:'I',caseId,
+const intent=(type,i=0,extra={},caseId='case1')=>({orderId:'O',itemId:'I',caseId,serviceQty:1,
   event:{id:'op'+i,type,occurredAt:now(i),...extra}});
 const commit=(f,data)=>commitServiceCaseEvent(f.db,'U',data);
 test('sales can log customer Bio-Plex sample custody but not fake experiment or report',async()=>{
@@ -40,9 +43,9 @@ test('sales can log customer Bio-Plex sample custody but not fake experiment or 
   const sent=await commit(f,intent('SAMPLE_RECEIVED'));
   assert.equal(sent.workStatus,'IN_PROGRESS');
   assert.equal(sent.custody,'IN_HOUSE');
-  assert.equal(f.written.length,1);
+  assert.equal(f.written.length,2);
   await assert.rejects(commit(f,intent('EXPERIMENT_COMPLETED',1)),/權限/);
-  assert.equal(f.written.length,1);
+  assert.equal(f.written.length,2);
   assert.deepEqual([...f.docs.keys()].filter(x=>/^(inventory|inventoryLots|inventoryMovements|supplyOrders|receipts|deliveryRecords)\//.test(x)),[]);
   assert.equal(f.docs.get('orders/O').items[0].deliveredQty,undefined);
 });
@@ -57,7 +60,7 @@ test('engineer closes Bio-Plex only after sample receipt and actual report evide
   assert.equal(done.completed,true);
   assert.equal(done.workStatus,'COMPLETED');
   assert.equal(done.nextEvent,null);
-  assert.equal(f.written.length,3);
+  assert.equal(f.written.length,4);
   assert.equal(f.docs.get('orders/O').isDelivered,undefined);
   assert.equal(f.docs.get('orders/O').isBilled,undefined);
 });
@@ -71,7 +74,7 @@ test('pipette warehouse must ship out, receive back, then return physical device
   const done=await commit(f,intent('CUSTOMER_RETURNED',3,{receivedBy:'Customer A'}));
   assert.equal(done.custody,'RETURNED_TO_CUSTOMER');
   assert.equal(done.completed,true);
-  assert.equal(f.written.length,4);
+  assert.equal(f.written.length,5);
 });
 test('tissue outsourcer returns specimen and actual result before case completion',async()=>{
   const f=fixture({role:'warehouse',kind:'TISSUE_SLICING'});
@@ -87,7 +90,7 @@ test('onsite repair engineer closes with work summary and never creates virtual 
   const f=fixture({role:'engineer',kind:'ONSITE_REPAIR'});
   await assert.rejects(commit(f,intent('REPAIR_COMPLETED',0)),/維修內容/);
   const done=await commit(f,intent('REPAIR_COMPLETED',0,{workSummary:'Adjusted optical alignment'}));
-  assert.equal(done.completed,true);assert.equal(f.written.length,1);
+  assert.equal(done.completed,true);assert.equal(f.written.length,2);
   assert.equal([...f.docs.keys()].filter(k=>k.startsWith('inventory/')).length,0);
 });
 test('fixed operation retries are idempotent; changing evidence with same ID is rejected',async()=>{
@@ -95,9 +98,9 @@ test('fixed operation retries are idempotent; changing evidence with same ID is 
   const data=intent('SAMPLE_RECEIVED');
   assert.equal((await commit(f,data)).status,'committed');
   assert.equal((await commit(f,data)).status,'already-applied');
-  assert.equal(f.written.length,1);
+  assert.equal(f.written.length,2);
   await assert.rejects(commit(f,intent('SAMPLE_RECEIVED',0,{notes:'new'})),/不同內容/);
-  assert.equal(f.written.length,1);
+  assert.equal(f.written.length,2);
 });
 test('Role, ownership, cancellation and live product type are validated inside transaction',async()=>{
   const variants=[
@@ -169,7 +172,7 @@ test('authorized case query reads actual custody without fabricating an unregist
   assert.equal(progress.custody,'IN_HOUSE');
   assert.equal(progress.nextEvent,'EXPERIMENT_COMPLETED');
   assert.equal(progress.events[0].actorUid,'U');
-  assert.equal(f.written.length,1); // no write on read
+  assert.equal(f.written.length,2); // no write on read
   f.docs.get('orders/O').orderStatus='cancelled';
   assert.equal((await getServiceCaseStatus(f.db,'U',locator)).events.length,1);
 });
@@ -222,7 +225,7 @@ test('case product binding rejects replacement products on reads, continuation a
   f.docs.set('users/U',{role:'engineer',active:true});
   await assert.rejects(commit(f,intent('EXPERIMENT_COMPLETED',1)),/原產品識別/);
   assert.deepEqual(f.docs.get(key),original);
-  assert.equal(f.written.length,1);
+  assert.equal(f.written.length,2);
 });
 
 test('historical custody survives inactive master but rejects unbound cases and changed item workflow',async()=>{
@@ -236,5 +239,54 @@ test('historical custody survives inactive master but rejects unbound cases and 
   f.docs.get('orders/O').items[0].serviceKind='BIOPLEX_LAB';
   delete f.docs.get('serviceCases/'+caseDocId('O','I','case1')).productId;
   await assert.rejects(getServiceCaseStatus(f.db,'U',locator),/尚未綁定/);
-  assert.equal(f.written.length,1);
+  assert.equal(f.written.length,2);
+});
+
+test('item index bounds case quantities and same case retries cannot change allocation',async()=>{
+  const f=fixture();f.docs.get('orders/O').items[0].qty=3;
+  const a={...intent('SAMPLE_RECEIVED'),serviceQty:2};
+  const first=await commit(f,a);
+  assert.equal(first.itemProgress.unassignedQty,1);
+  const b=intent('SAMPLE_RECEIVED',0,{},'case2');
+  const second=await commit(f,b);
+  assert.equal(second.itemProgress.allocatedQty,3);
+  const before=structuredClone([...f.docs]);
+  await assert.rejects(commit(f,intent('SAMPLE_RECEIVED',0,{},'excess')),/超過訂單數量/);
+  await assert.rejects(commit(f,{...a,serviceQty:1}),/數量已固定/);
+  assert.equal((await commit(f,a)).status,'already-applied');
+  assert.deepEqual([...f.docs],before);
+  f.docs.set('users/U',{role:'engineer',active:true});
+  await commit(f,{...intent('EXPERIMENT_COMPLETED',1),serviceQty:2});
+  const done=await commit(f,{...intent('REPORT_SENT',2,{reportRef:'R'}),serviceQty:2});
+  assert.equal(done.itemProgress.completedQty,2);
+  const history=await getServiceCaseStatus(f.db,'U',{orderId:'O',itemId:'I',caseId:'case2'});
+  assert.equal(history.serviceQty,1);assert.equal(history.itemProgress.remainingQty,1);
+  assert.equal(f.docs.get('orders/O').isDelivered,undefined);
+});
+test('corrupt index, missing linked cases and reduced order quantity reject without writes',async()=>{
+  for(const damage of ['missing-case','wrong-product','duplicate','reduced-qty']){
+    const f=fixture();await commit(f,intent('SAMPLE_RECEIVED'));
+    const index=f.docs.get('serviceCases/'+itemCaseIndexId('O','I'));
+    if(damage==='missing-case')f.docs.delete('serviceCases/'+caseDocId('O','I','case1'));
+    if(damage==='wrong-product')index.productId='Q';
+    if(damage==='duplicate')index.caseIds.push('case1');
+    if(damage==='reduced-qty')f.docs.get('orders/O').items[0].qty=0.5;
+    f.docs.set('users/U',{role:'engineer',active:true});
+    const before=structuredClone([...f.docs]),writes=f.written.length;
+    await assert.rejects(commit(f,intent('EXPERIMENT_COMPLETED',1)),/索引|超過/);
+    assert.equal(f.written.length,writes);assert.deepEqual([...f.docs],before);
+  }
+});
+test('old pilot history stays readable but new allocation never guesses its missing quantity',async()=>{
+  const f=fixture();await commit(f,intent('SAMPLE_RECEIVED'));
+  delete f.docs.get('serviceCases/'+caseDocId('O','I','case1')).serviceQty;
+  f.docs.delete('serviceCases/'+itemCaseIndexId('O','I'));
+  const old=await getServiceCaseStatus(f.db,'U',{orderId:'O',itemId:'I',caseId:'case1'});
+  assert.equal(old.itemProgress,null);assert.equal(old.custody,'IN_HOUSE');
+  const writes=f.written.length;
+  await assert.rejects(commit(f,intent('SAMPLE_RECEIVED',0,{},'new')),/不能自動補綁/);
+  assert.equal(f.written.length,writes);
+});
+test('index namespace cannot collide with externally supplied case identifiers',()=>{
+  assert.notEqual(itemCaseIndexId('O','I'),caseDocId('item-index','O','I|v1'));
 });
