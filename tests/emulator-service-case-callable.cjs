@@ -283,3 +283,26 @@ test('real item query advertises only writable service actions and preserves his
  assert.equal((await read(f.engineer)).cases[0].canAdvance,true);
  assert.equal((await f.engineer.call(f.intent('EXPERIMENT_COMPLETED',1))).nextEvent,'REPORT_SENT');
 });
+
+test('real Auth whole-order progress is verified from service events without Goods or billing writes',async()=>{
+ const f=await fixture('whole-summary','ONSITE_REPAIR');
+ const summary=who=>httpsCallable(getFunctions(who.app,'asia-east1'),'getServiceOrderProgress',{timeout:30000})
+   ({orderId:f.orderId}).then(r=>r.data);
+ await assert.rejects(summary(f.other),e=>e.code==='functions/permission-denied');
+ const empty=await summary(f.sales);
+ assert.equal(empty.serviceCompleted,false);
+ assert.equal(empty.completedQty,0);
+ assert.equal(empty.items[0].workCategory,'delivery');
+ await f.engineer.call(f.intent('REPAIR_COMPLETED',0,{workSummary:'已完成校正'}));
+ const done=await summary(f.sales);
+ assert.equal(done.serviceCompleted,true);
+ assert.equal(done.items[0].workCategory,'billing');
+ assert.equal(done.completedQty,1);
+ await db.doc('orders/'+f.orderId).update({isBilled:true});
+ assert.equal((await summary(f.sales)).items[0].workCategory,'complete');
+ await db.doc('orders/'+f.orderId).update({orderStatus:'cancelled'});
+ assert.equal((await summary(f.sales)).items[0].workCategory,'closed');
+ await db.doc('users/'+f.sales.uid).update({active:false});
+ await assert.rejects(summary(f.sales),e=>e.code==='functions/permission-denied');
+ assert.equal((await db.doc('orders/'+f.orderId).get()).data().workCategories,undefined);
+});
