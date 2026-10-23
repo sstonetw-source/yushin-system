@@ -6,7 +6,7 @@ const {
   assertSucceeds,
   assertFails
 } = require('@firebase/rules-unit-testing');
-const { arrayUnion, collection, deleteDoc, doc, getDoc, getDocs, limit, orderBy, query, setDoc, startAfter, updateDoc, where, writeBatch } = require('firebase/firestore');
+const { arrayUnion, collection, deleteDoc, deleteField, doc, getDoc, getDocs, limit, orderBy, query, setDoc, startAfter, updateDoc, where, writeBatch } = require('firebase/firestore');
 
 let env;
 
@@ -2978,5 +2978,48 @@ test('actual return Service cannot grant sales or engineer receipt permission th
   await assert.rejects(f.context.commitCustomerReturnReceipt({orderId:f.id,requestId:'REQUEST',receiptId:'forged-'+uid,qty:1,quality:'INSPECTION',warehouseId:'W1'}));
   assert.deepEqual((await getDoc(doc(db('admin'),'orders/'+f.id))).data(),before);
   assert.equal((await getDoc(doc(db('admin'),'customerReturnReceipts/forged-'+uid))).exists(),false);
+ }
+});
+
+// Service financial evidence is server-only, including admin client SDKs.
+test('service billing and dates cannot be forged through client create/update/delete fields or type stripping',async()=>{
+ const service={itemId:'S',productId:'service-master',productType:'Service',serviceKind:'ONSITE_REPAIR',qty:1};
+ for(const uid of ['admin','sales1','eng1','buyer1','wh1']){
+  const owner=uid==='eng1'?'eng1':'sales1',code=uid==='eng1'?'E01':'S01';
+  const client=db(uid),ref=doc(client,'orders/service-finance-'+uid);
+  for(const items of [[service],[{itemId:'G',productId:'p-order',qty:1}, {...service,productType:' service '}],
+   Array.from({length:30},(_,i)=>i===29?service:{itemId:'G'+i,productId:'p-order',qty:1})]){
+   await seed('orders/'+ref.id,{ownerUid:owner,salesCode:code,status:'active',isBilled:false,billingDate:'',items});
+   for(const patch of [{isBilled:true},{billingDate:'2026-10-23'},
+     {isBilled:true,items:items.filter(i=>i.itemId!=='S')},
+     {items:items.map(i=>({...i,productType:'Goods'}))},
+     {items:items.map(i=>i.itemId==='S'?{...i,productId:'different'}:i)}])
+    await assertFails(updateDoc(ref,patch));
+   await seed('orders/'+ref.id,{ownerUid:owner,salesCode:code,status:'active',isBilled:true,billingDate:'2026-10-23',items});
+   for(const patch of [{isBilled:false},{billingDate:'2026-10-24'},{isBilled:deleteField(),billingDate:deleteField()}])
+    await assertFails(updateDoc(ref,patch));
+  }
+ }
+ // A client cannot start a new order already billed, even with real master data.
+ for(const uid of ['admin','sales1','eng1']){
+  const code={admin:'ADM',sales1:'S01',eng1:'E01'}[uid];
+  await assertFails(setDoc(doc(db(uid),'orders/created-billed-'+uid),{...validOrderProduct,
+   ownerUid:uid,salesCode:code,isBilled:true,billingDate:'2026-10-23'}));
+ }
+});
+test('service non-financial updates and ordinary Goods billing retain existing access',async()=>{
+ for(const uid of ['admin','sales1','eng1']){
+  const code={admin:'ADM',sales1:'S01',eng1:'E01'}[uid];
+  const base={ownerUid:uid,salesCode:code,status:'active',isBilled:false,billingDate:''};
+  const goods=Array.from({length:30},(_,i)=>({itemId:'I'+i,productId:'p-order',productType:'Goods',qty:1}));
+  const ref=doc(db(uid),'orders/finance-compat-'+uid);
+  await seed('orders/'+ref.id,{...base,items:goods});
+  await assertSucceeds(updateDoc(ref,{isBilled:true,billingDate:'2026-10-23'}));
+  await assertSucceeds(updateDoc(ref,{billingDate:'2026-10-24'}));
+  await assertSucceeds(updateDoc(ref,{isBilled:false,billingDate:''}));
+  const service={itemId:'S',productId:'P',productType:'Service',serviceKind:'ONSITE_REPAIR',qty:1};
+  await seed('orders/'+ref.id,{...base,items:[service]});
+  await assertSucceeds(updateDoc(ref,{remarks:'追蹤服務案件'}));
+  await assertSucceeds(updateDoc(ref,{items:[{...service,remarks:'保留原服務綁定'}]}));
  }
 });

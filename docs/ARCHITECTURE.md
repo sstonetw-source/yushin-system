@@ -1,5 +1,11 @@
 # ARCHITECTURE — 又鑫系統程式碼責任地圖
 
+## 2026-10-23｜原核銷接線與 Client 財務防護（demo 試點，待本批完整 CI）
+
+原訂單 `toggleOrderStatus` 對 Service 轉入原核銷 Callable adapter；不樂觀改寫財務狀態、不另建核銷核心。adapter 使用原 demo Auth／Functions gate，並核對 session generation；送出前保存固定意圖，同操作重送後另讀一次 server orders，避免將歷史憑證覆蓋後續撤銷。畫面只套用目前訂單。Rules 在所有角色（含 admin client）前共同限制服務財務欄位，並保護服務品項綁定免於先改類型／刪除再核銷。核銷日期後端修改仍未實作，原日期 Service 對服務單拒絕。
+
+尚未完成：核銷日期後端、其他 writer 對 workCategories 的維護、混合單商品交付證據、材料耗用與 Preview。此節更新先前「原 UI 未接線」的歷史狀態；PR #234 保持 Draft，未合併 main 或部署 Firebase。
+
 ## 2026-10-23｜純服務後端核銷試點（未正式啟用）
 
 純服務核銷試點由 `commitServiceOrderBilling` 負責，同一 transaction 呼叫從既有整單查詢抽出的 `readServiceOrderProgress`；共同 `Workflow.projectItem`／註冊案件仍是唯一完成量及工作分類來源。角色限 admin 或本人 sales／engineer，重新讀取 users、orders、索引、產品與案件，核銷只在全數服務完成及商務文件齊備時可提交。混合單拒絕，不以商品快取當交付憑證。原 Client `setOrderBillingStatus` 對含 Service 品項明確拒絕，尚未將原 UI 接到新後端。

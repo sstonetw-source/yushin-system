@@ -5,8 +5,10 @@ function serviceCaseTransport(){
         throw Error('服務案件目前僅限本機 Emulator。');
     const auth=firebase.auth(),functions=firebase.app().functions('asia-east1');
     const uid=currentUser?.uid,role=currentUserRole;
+    const generation=typeof sessionDataGeneration==='undefined'?null:sessionDataGeneration;
     const check=()=>{
-        if(!uid||auth.currentUser?.uid!==uid||currentUser?.uid!==uid||currentUserRole!==role
+        if((typeof sessionDataGeneration==='undefined'?null:sessionDataGeneration)!==generation
+            ||!uid||auth.currentUser?.uid!==uid||currentUser?.uid!==uid||currentUserRole!==role
             ||!['admin','sales','warehouse','engineer'].includes(role))throw Error('登入身分或服務作業權限已變更。');
     };
     if(auth.app?.options?.projectId!=='demo-yushin'||functions.app?.options?.projectId!=='demo-yushin'

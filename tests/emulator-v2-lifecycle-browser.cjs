@@ -277,7 +277,7 @@ for(const width of [1280,390])test('original service case UI '+width+'px: four k
   deliveryRecords:[],returnRecords:[],deliveredQty:0,isDelivered:false,isBilled:false};
  await db.doc('orders/'+orderId).set(order);
  const context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
- const calls=[],errors=[],external=[],serviceDialogs=[];let lose=true,lookupGate=null;
+ const calls=[],errors=[],external=[],serviceDialogs=[];let lose=true,lookupGate=null,billingLose=false;const billingCalls=[];
  await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_SERVICE_CASE_EMULATOR=true;});
  page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>{serviceDialogs.push(d.message());return d.dismiss();});
  await context.route('**/*',async route=>{
@@ -286,6 +286,11 @@ for(const width of [1280,390])test('original service case UI '+width+'px: four k
   if(lookupGate&&url.port==='5001'&&request.method()==='POST'&&url.pathname.endsWith('/getServiceCaseStatus')
     &&request.postDataJSON().data.orderNo){
    const gate=lookupGate;lookupGate=null;gate.arrived();await gate.released;
+  }
+  if(url.port==='5001'&&request.method()==='POST'&&url.pathname.endsWith('/commitServiceOrderBilling')){
+   assert.ok((await request.allHeaders()).authorization?.startsWith('Bearer '));
+   billingCalls.push(request.postDataJSON().data);
+   if(billingLose){billingLose=false;const reply=await route.fetch();assert.equal(reply.status(),200);await route.abort('failed');return;}
   }
   if(url.port==='5001'&&request.method()==='POST'&&url.pathname.endsWith('/commitServiceCaseEvent')){
    assert.ok((await request.allHeaders()).authorization?.startsWith('Bearer '));
@@ -370,12 +375,45 @@ for(const width of [1280,390])test('original service case UI '+width+'px: four k
   assert.deepEqual((await db.doc('orders/'+orderId).get()).data(),order,'case UI never mutates stock/delivery/billing order facts');
   for(const entry of items)assert.equal((await db.doc('inventory/'+entry.productId).get()).exists,false);
   assert.equal((await db.collection('supplyOrders').where('sourceId','==',orderId).get()).size,0);
+  // The original billing button must reject the still-partial Bio-Plex work.
+  await page.locator('button[onclick="closeServiceCases()"]').click();
+  await row.getByRole('button',{name:'核銷',exact:true}).click();
+  await page.waitForFunction(()=>!pendingOrderStatusKeys.size);
+  assert.equal((await db.doc('orders/'+orderId).get()).data().isBilled,false);
+  assert.ok(serviceDialogs.some(message=>message.includes('尚未全數完成')));
+  // Finish the remaining commercial quantity through the original case UI.
+  await openByNumber();await item('BIOPLEX_LAB');await start('BIO-002');await confirmed();
+  await switchRole('engineer');await openByNumber();await item('BIOPLEX_LAB');
+  await advance('BIO-002');await advance('BIO-002','REPORT-002');
+  await switchRole('sales');await openByNumber();
+  await page.locator('button[onclick="closeServiceCases()"]').click();
+  billingLose=true;
+  await row.getByRole('button',{name:'核銷',exact:true}).click();
+  await page.waitForFunction(()=>!pendingOrderStatusKeys.size&&!!pendingServiceBillingIntent());
+  const billingFirst=billingCalls.at(-1);
+  assert.equal((await db.doc('orders/'+orderId).get()).data().isBilled,true);
+  await siteOpen(page,'sales');await siteNav(page,'orders');
+  assert.equal(billingCalls.length,2,'reload does not send the pending billing operation');
+  await row.getByRole('button',{name:/^(核銷|已核銷)$/}).click();
+  await page.waitForFunction(()=>!pendingOrderStatusKeys.size&&!pendingServiceBillingIntent());
+  assert.deepEqual(billingCalls.at(-1),billingFirst);
+  let billed=(await db.doc('orders/'+orderId).get()).data();
+  assert.equal(billed.statusHistory.filter(e=>e.field==='isBilled').length,1);
+  assert.deepEqual(billed.workCategories,['complete']);
+  // A new click after confirmation is a distinct undo, with no inventory effect.
+  await row.getByRole('button',{name:'已核銷',exact:true}).click();
+  await page.waitForFunction(id=>!pendingOrderStatusKeys.size&&ordersCache.find(o=>o.id===id)?.isBilled===false,orderId);
+  billed=(await db.doc('orders/'+orderId).get()).data();
+  assert.equal(billed.isBilled,false);assert.equal(billed.statusHistory.length,2);
+  assert.deepEqual(billed.workCategories,['billing']);
+  assert.deepEqual(billed.items,order.items);assert.deepEqual(billed.deliveryRecords,[]);
+  await page.locator('#serviceCaseEntry').click();
   await switchRole('other');await siteNav(page,'orders');await page.locator('#serviceCaseEntry').click();
   await page.locator('#serviceOrderNo').fill(orderNo);await page.locator('button[onclick="findServiceCaseOrder()"]').click();
   await page.waitForFunction(()=>document.getElementById('serviceCaseMessage').textContent.includes('權限'));
   assert.equal(await page.locator('#serviceItemChoice').count(),0);
   assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
-  console.log('Original service UI '+width+'px: actual Auth, four service kinds, sales/warehouse/engineer handoff, minimal authorized order-number lookup, committed lost HTTP reply/reload/same-event proof and zero physical/billing writes passed. Initialized order remains an explicit fixture boundary.');
+  console.log('Original service UI '+width+'px: actual Auth, four service kinds, sales/warehouse/engineer handoff, minimal authorized order-number lookup, committed lost HTTP reply/reload/same-event proof and original billing refusal/full completion/lost reply/reload/same-ID receipt/undo with zero physical writes passed. Initialized order remains an explicit fixture boundary.');
  }catch(error){console.log('Service UI diagnostic',JSON.stringify(await page.evaluate(()=>({role:currentUserRole,message:document.getElementById('serviceCaseMessage')?.textContent,body:document.getElementById('serviceCaseBody')?.textContent}))),JSON.stringify({errors,dialogs:serviceDialogs}));throw error;}
  finally{await context.close();}
 });

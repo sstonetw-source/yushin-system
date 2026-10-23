@@ -14,3 +14,5 @@ module.exports=require(path.join(root,'functions/v2-return-callable-adapter')).c
 const service=require(path.join(root,'functions/index'));
 module.exports.commitServiceCaseEvent=service.commitServiceCaseEvent;
 module.exports.getServiceCaseStatus=service.getServiceCaseStatus;
+module.exports.getServiceOrderProgress=service.getServiceOrderProgress;
+module.exports.commitServiceOrderBilling=service.commitServiceOrderBilling;

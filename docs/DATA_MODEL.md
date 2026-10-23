@@ -1,5 +1,11 @@
 # DATA_MODEL — Firestore 集合與資料責任地圖
 
+## 2026-10-23｜原核銷接線與 Client 財務防護（demo 試點，待本批完整 CI）
+
+無新集合、索引、監聽或持久欄位。sessionStorage 的 `service-billing-pending:{uid}` 只保存原角色與核銷意圖（訂單 ID、操作 ID、預期狀態、日期），不保存客戶或價格；僅同分頁刷新可恢復，不承諾跨裝置。核銷 Callable 回覆是歷史操作憑證，畫面再以原角色 server get 讀一次 orders 取得現況，失敗保留原意圖。Rules 檢查最多 30 品項；一般 metadata 更新不掃描品項，無額外 get／getAfter。服務案件事件與完成量的權威不變。
+
+尚未完成：核銷日期後端、其他 writer 對 workCategories 的維護、混合單商品交付證據、材料耗用與 Preview。此節更新先前「原 UI 未接線」的歷史狀態；PR #234 保持 Draft，未合併 main 或部署 Firebase。
+
 ## 2026-10-23｜純服務後端核銷試點（未正式啟用）
 
 同一交易更新 orders 的 isBilled、billingDate、updatedAt、statusHistory、workCategories 及 workCategoryUpdatedAt，並在既有 serviceCases 建立 SERVICE_BILLING_OPERATION 憑證。ID 為四段 `billing-operation|encode(orderId)|encode(operationId)|v1`，不與三段案件及 item-index 命名空間衝突；無 itemId，不參與品項案件舊資料查詢。憑證保存 actorUid／actorRole、意圖雜湊與原結果，不保存第二份完成量帳。無新集合、索引、listener 或商品／庫存／物流寫入；沿既有 serviceCases 全面 Client 拒絕 Rules。
