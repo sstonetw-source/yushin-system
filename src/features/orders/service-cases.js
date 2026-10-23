@@ -118,7 +118,7 @@ window.loadServiceCaseItem=async function(itemId){
             verifiedServiceListHints.set(key,{readAt:Date.now(),category:data.itemWorkCategory,
                 orderedQty:p.orderedQty,completedQty:p.completedQty});
         }
-        if(document.getElementById('order-system')?.classList.contains('active'))window.renderOrdersList?.();
+        if(document.getElementById('order-system')?.classList?.contains?.('active'))window.renderOrdersList?.();
         if(data.items)Object.assign(view.order,{items:data.items,orderNo:data.orderNo,customerName:data.customerName});
         renderServiceCaseItem(view);
         serviceCaseMessage(view,'');
