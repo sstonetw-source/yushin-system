@@ -1,6 +1,6 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
-const {commitServiceCaseEvent,caseDocId}=require('../functions/service-case-service.js');
+const {commitServiceCaseEvent,getServiceCaseStatus,caseDocId}=require('../functions/service-case-service.js');
 
 function fixture({role='sales',ownerUid='U',kind='BIOPLEX_LAB',productType='SERVICE',
   productMasterType='SERVICE',orderStatus='normal',initialized=true,disabled=false,retry=false}={}){
@@ -152,4 +152,57 @@ test('historic cancellation aliases and duplicate Service item IDs reject atomic
  f.docs.get('orders/O').items.push({itemId:'I',productId:'P',productType:'SERVICE',serviceKind:'BIOPLEX_LAB',qty:1});
  await assert.rejects(commit(f,intent('SAMPLE_RECEIVED')),/重複/);
  assert.equal(f.written.length,0);
+});
+
+test('authorized case query reads actual custody without fabricating an unregistered case',async()=>{
+  const f=fixture();
+  const locator={orderId:'O',itemId:'I',caseId:'case1'};
+  const missing=await getServiceCaseStatus(f.db,'U',locator);
+  assert.equal(missing.exists,false);
+  assert.equal(missing.workStatus,'NOT_STARTED');
+  assert.equal(missing.nextEvent,null);
+  assert.equal(f.written.length,0);
+  await commit(f,intent('SAMPLE_RECEIVED'));
+  const progress=await getServiceCaseStatus(f.db,'U',locator);
+  assert.equal(progress.exists,true);
+  assert.equal(progress.workStatus,'IN_PROGRESS');
+  assert.equal(progress.custody,'IN_HOUSE');
+  assert.equal(progress.nextEvent,'EXPERIMENT_COMPLETED');
+  assert.equal(progress.events[0].actorUid,'U');
+  assert.equal(f.written.length,1); // no write on read
+  f.docs.get('orders/O').orderStatus='cancelled';
+  assert.equal((await getServiceCaseStatus(f.db,'U',locator)).events.length,1);
+});
+test('case status lookup denies foreign sales, disabled roles, forged item, or extra fields',async()=>{
+  const locator={orderId:'O',itemId:'I',caseId:'case1'};
+  const denied=[
+    {role:'sales',ownerUid:'Other'},
+    {role:'purchaser'},
+    {role:'sales',disabled:true}
+  ];
+  for(const options of denied){
+    const f=fixture(options);
+    await assert.rejects(getServiceCaseStatus(f.db,'U',locator),/權限/);
+    assert.equal(f.written.length,0);
+  }
+  const f=fixture();
+  await assert.rejects(getServiceCaseStatus(f.db,'U',{...locator,actorUid:'U'}),/格式/);
+  await assert.rejects(getServiceCaseStatus(f.db,'U',{...locator,itemId:'Other'}),/來源/);
+  f.docs.get('orders/O').items[0].productType='GOODS';
+  await assert.rejects(getServiceCaseStatus(f.db,'U',locator),/型別/);
+  assert.equal(f.written.length,0);
+});
+test('case status lookup does not trust corrupt storage snapshots',async()=>{
+  const f=fixture();
+  const locator={orderId:'O',itemId:'I',caseId:'case1'};
+  f.docs.set('serviceCases/'+caseDocId('O','I','case1'),{
+    orderId:'O',itemId:'OTHER',caseId:'case1',kind:'BIOPLEX_LAB',events:[]
+  });
+  await assert.rejects(getServiceCaseStatus(f.db,'U',locator),/不一致/);
+  f.docs.get('serviceCases/'+caseDocId('O','I','case1')).itemId='I';
+  f.docs.get('serviceCases/'+caseDocId('O','I','case1')).events=[
+    {id:'op1',type:'REPORT_SENT',actorUid:'U',occurredAt:now(0),reportRef:'x'}
+  ];
+  await assert.rejects(getServiceCaseStatus(f.db,'U',locator),/順序/);
+  assert.equal(f.written.length,0);
 });
