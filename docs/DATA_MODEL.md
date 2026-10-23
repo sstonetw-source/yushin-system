@@ -1,5 +1,10 @@
 # DATA_MODEL — Firestore 集合與資料責任地圖
 
+## 2026-10-23｜純服務後端核銷試點（未正式啟用）
+
+同一交易更新 orders 的 isBilled、billingDate、updatedAt、statusHistory、workCategories 及 workCategoryUpdatedAt，並在既有 serviceCases 建立 SERVICE_BILLING_OPERATION 憑證。ID 為四段 `billing-operation|encode(orderId)|encode(operationId)|v1`，不與三段案件及 item-index 命名空間衝突；無 itemId，不參與品項案件舊資料查詢。憑證保存 actorUid／actorRole、意圖雜湊與原結果，不保存第二份完成量帳。無新集合、索引、listener 或商品／庫存／物流寫入；沿既有 serviceCases 全面 Client 拒絕 Rules。
+
+
 ## 2026-10-23 服務操作資格讀取
 
 已實作：服務品項查詢仍以 `serviceCases` 的品項索引和已註冊案件事件為完成量權威；即時 `products/{productId}` 只決定可操作資格，不取代歷史索引。已有索引的品項查詢新增一次固定產品文件讀取，與索引平行讀取；無索引時沿用原有產品讀取。沒有新集合、欄位、索引、listener、快取或持久投影，不增加寫入。

@@ -75,3 +75,18 @@ exports.getServiceOrderProgress=onCall({region:'asia-east1'},async request=>{
     throw new HttpsError('internal','服務整單進度查核失敗');
   }
 });
+
+// Pure-Service billing trial; same demo-only Auth/Firestore gate as cases.
+const {commitServiceOrderBilling}=require('./service-billing-service');
+exports.commitServiceOrderBilling=onCall({region:'asia-east1'},async request=>{
+  if(!allowServiceCaseEmulator())
+    throw new HttpsError('failed-precondition','服務核銷尚未完成 Preview 驗收');
+  if(!request.auth?.uid)throw new HttpsError('unauthenticated','請先登入');
+  try{return await commitServiceOrderBilling(getFirestore(),request.auth.uid,request.data);}
+  catch(error){
+    if(['invalid-argument','permission-denied','failed-precondition','not-found','already-exists'].includes(error.code))
+      throw new HttpsError(error.code,error.message);
+    console.error('Service billing transaction failed',error);
+    throw new HttpsError('internal','服務核銷交易失敗');
+  }
+});
