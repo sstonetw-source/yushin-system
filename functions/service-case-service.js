@@ -30,6 +30,12 @@ const EVENT_ROLES=Object.freeze({
 function fail(message,code='failed-precondition'){
   const err=new Error(message);err.code=code;throw err;
 }
+function activeServiceMasterKind(product){
+  if(!product||product.active===false
+    ||String(product.productType||product.type||'').trim().toUpperCase()!=='SERVICE')return null;
+  const kind=String(product.serviceKind||'').trim().toUpperCase();
+  return Object.prototype.hasOwnProperty.call(core.STEPS,kind)?kind:null;
+}
 function caseDocId(orderId,itemId,caseId){
   for(const field of [orderId,itemId,caseId]){
     if(typeof field!=='string'||!field||field!==field.trim()
@@ -143,10 +149,10 @@ async function commitServiceCaseEvent(db,actorUid,input){
       ||String(product.productType||product.type||'').trim().toUpperCase()!=='SERVICE')
       fail('服務品項產品主檔無效或型別衝突。');
     const itemKind=String(item.serviceKind||'').trim().toUpperCase();
-    const masterKind=String(product.serviceKind||'').trim().toUpperCase();
+    const masterKind=activeServiceMasterKind(product);
     // The trusted product master, not an editable commercial item snapshot,
     // chooses the required custody and completion evidence workflow.
-    if(!Object.prototype.hasOwnProperty.call(core.STEPS,masterKind))
+    if(!masterKind)
       fail('正式服務主檔尚未指定四種有效服務類型。');
     if(itemKind&&itemKind!==masterKind)
       fail('訂單與產品主檔的服務類型不一致。');
@@ -241,21 +247,26 @@ async function getServiceCaseStatus(db,actorUid,input){
       const item=matched[0];
       if(typeof item.productId!=='string'||!item.productId||item.productId.includes('/'))
         fail('服務品項缺少可核對的正式產品主檔。');
-      const indexSnap=await tx.get(db.collection('serviceCases').doc(itemCaseIndexId(orderId,itemId)));
-      let kind=indexSnap.exists?indexSnap.data().kind:null;
+      const [indexSnap,productSnap]=await Promise.all([
+        tx.get(db.collection('serviceCases').doc(itemCaseIndexId(orderId,itemId))),
+        tx.get(db.collection('products').doc(item.productId))
+      ]);
+      const product=productSnap.exists?productSnap.data():null;
+      const masterKind=activeServiceMasterKind(product);
+      const kind=indexSnap.exists?indexSnap.data().kind:masterKind;
       if(!indexSnap.exists){
-        const productSnap=await tx.get(db.collection('products').doc(item.productId));
-        const product=productSnap.exists?productSnap.data():null;
         if(!product||product.active===false||String(product.productType||product.type||'').trim().toUpperCase()!=='SERVICE')
           fail('服務品項產品主檔無效或型別衝突。');
-        kind=String(product.serviceKind||'').trim().toUpperCase();
       }
       if(!Object.prototype.hasOwnProperty.call(core.STEPS,kind))fail('正式服務主檔尚未指定四種有效服務類型。');
+      assertCaseProduct({productId:item.productId,kind},item);
       const index=await readItemCases(db,tx,orderId,itemId,item,kind,indexSnap);
       const itemWorkflow=serviceItemWorkflow(orderId,order,item,kind,index.cases);
       const itemProgress=itemWorkflow.serviceProgress;
       const forbidden=['cancelled','canceled','void','voided','deleted','closed','已取消','作廢','已結案'];
-      const open=order.inventoryReservationStatus==='completed'
+      // History remains tied to the original index even if the catalogue changes.
+      // Only a currently writable master may advertise a new/next operation.
+      const open=masterKind===kind&&order.inventoryReservationStatus==='completed'
         &&![order.status,order.orderStatus].some(s=>forbidden.includes(String(s||'').trim().toLowerCase()));
       const cases=index.cases.map(record=>{
         const projection=core.projectServiceCase(record);
@@ -266,7 +277,8 @@ async function getServiceCaseStatus(db,actorUid,input){
         .map(i=>({itemId:i.itemId,itemName:i.itemName||i.itemCode||'服務品項'}));
       return {orderId,itemId,orderNo:order.orderNo||orderId,customerName:order.customerName||'',items,kind,itemProgress,cases,
         itemWorkCategory:itemWorkflow.workCategory,
-        canStart:open&&allowedActor(profile.role,actorUid,order,core.STEPS[kind][0])};
+        canStart:open&&itemProgress.unassignedQty>0&&index.cases.length<core.MAX_ITEM_CASES
+          &&allowedActor(profile.role,actorUid,order,core.STEPS[kind][0])};
     }
     const caseRef=db.collection('serviceCases').doc(caseDocId(orderId,itemId,caseId));
     const snap=await tx.get(caseRef);

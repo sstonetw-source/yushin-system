@@ -1,5 +1,9 @@
 # ARCHITECTURE — 又鑫系統程式碼責任地圖
 
+## 2026-10-23 服務查詢與操作資格一致性
+
+已實作：`service-case-service.js` 的 writer 與品項查詢共用 `activeServiceMasterKind`。查詢從既有完整案件索引投影歷程，另以即時主檔決定是否可新增／接續；不以畫面操作提示取代提交時的交易驗證。原訂單列表索引與核銷 writer 整合仍未完成。
+
 ## 2026-10-23 服務案件與共用履約投影（已實作，待本批 CI）
 
 `YushinWorkflow.projectItem(input, registeredCases)` 接受後端從完整品項索引讀取且核對來源的案件事件，沿唯一 `YushinServiceWork.projectServiceItem` 取得商務完成量，並共用既有工作分類：未全數完成為 delivery、完成未核銷為 billing、完成且已核銷為 complete、取消為 closed。未提供第二參數時保留原本的服務未履約保護；不採用 input 的完成量快取或一般送貨事件。服務 effectiveDeliveredQty 仍為 0，outstandingQty 表示尚未完成的服務需求。
