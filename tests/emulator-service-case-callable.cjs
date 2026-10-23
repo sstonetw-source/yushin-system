@@ -304,7 +304,7 @@ test('real Auth whole-order progress is verified from service events without Goo
  assert.equal((await summary(f.sales)).items[0].workCategory,'closed');
  await db.doc('users/'+f.sales.uid).update({active:false});
  await assert.rejects(summary(f.sales),e=>e.code==='functions/permission-denied');
- assert.equal((await db.doc('orders/'+f.orderId).get()).data().workCategories,undefined);
+ assert.deepEqual((await db.doc('orders/'+f.orderId).get()).data().workCategories,['billing']);
 });
 
 test('real Auth pure-Service billing verifies events, rejects mixed/foreign actors and atomically retries',async()=>{
