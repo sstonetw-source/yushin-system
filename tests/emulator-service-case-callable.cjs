@@ -257,3 +257,29 @@ test('real Callable returns partial item completion and refuses reduced or corru
  assert.deepEqual(await f.record(),original);
  assert.equal((await orderRef.get()).data().isDelivered,undefined);
 });
+
+test('real item query advertises only writable service actions and preserves history after master changes',async()=>{
+ const f=await fixture('read-eligibility','BIOPLEX_LAB');
+ const itemQuery={orderId:f.orderId,itemId:f.itemId};
+ const read=who=>httpsCallable(getFunctions(who.app,'asia-east1'),'getServiceCaseStatus')(itemQuery).then(r=>r.data);
+ assert.equal((await read(f.sales)).canStart,true);
+ await f.sales.call(f.intent('SAMPLE_RECEIVED'));
+ assert.equal((await read(f.sales)).canStart,false);
+ assert.equal((await read(f.engineer)).cases[0].canAdvance,true);
+ const productRef=db.doc('products/'+f.productId),original=(await productRef.get()).data();
+ const saved=await f.record();
+ for(const patch of [{active:false},{serviceKind:'ONSITE_REPAIR'},null]){
+   if(patch===null)await productRef.delete();
+   else await productRef.set({...original,...patch});
+   const history=await read(f.engineer);
+   assert.equal(history.kind,'BIOPLEX_LAB');assert.equal(history.canStart,false);
+   assert.equal(history.cases[0].canAdvance,false);
+   assert.equal(history.cases[0].custody,'IN_HOUSE');
+   await assert.rejects(f.engineer.call(f.intent('EXPERIMENT_COMPLETED',1)),
+     e=>e.code==='functions/failed-precondition');
+ }
+ assert.deepEqual(await f.record(),saved);
+ await productRef.set(original);
+ assert.equal((await read(f.engineer)).cases[0].canAdvance,true);
+ assert.equal((await f.engineer.call(f.intent('EXPERIMENT_COMPLETED',1))).nextEvent,'REPORT_SENT');
+});

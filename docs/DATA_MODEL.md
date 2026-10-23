@@ -1,5 +1,9 @@
 # DATA_MODEL — Firestore 集合與資料責任地圖
 
+## 2026-10-23 服務操作資格讀取
+
+已實作：服務品項查詢仍以 `serviceCases` 的品項索引和已註冊案件事件為完成量權威；即時 `products/{productId}` 只決定可操作資格，不取代歷史索引。已有索引的品項查詢新增一次固定產品文件讀取，與索引平行讀取；無索引時沿用原有產品讀取。沒有新集合、欄位、索引、listener、快取或持久投影，不增加寫入。
+
 ## 2026-10-23 服務履約分類回傳（無持久資料變更）
 
 原服務 writer 及案件／品項查詢新增回傳 itemWorkCategory，由完整註冊案件事件加上同一交易讀取的 orders.isBilled／生命週期產生。舊未綁量試點案件仍可唯讀，itemProgress 與 itemWorkCategory 均為 null，不猜測完成量。案件、品項索引與訂單均無新增欄位，orders 的 deliveredQty、isDelivered、isBilled、workCategories 不由本批寫入；商品／服務混合單仍各自維持原帳。

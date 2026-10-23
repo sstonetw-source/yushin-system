@@ -341,3 +341,57 @@ test('order-number service lookup enforces owner, current role and unique refere
   await assert.rejects(getServiceCaseStatus(f.db,'U',{orderNo:'YS-1'}),/權限/);
   assert.equal(f.written.length,0);
 });
+
+test('item action hints respect remaining allocation while allowing existing cases to advance',async()=>{
+ const f=fixture({role:'admin'}),query={orderId:'O',itemId:'I'};
+ assert.equal((await getServiceCaseStatus(f.db,'U',query)).canStart,true);
+ await commit(f,intent('SAMPLE_RECEIVED'));
+ const allocated=await getServiceCaseStatus(f.db,'U',query);
+ assert.equal(allocated.canStart,false);
+ assert.equal(allocated.cases[0].canAdvance,true);
+ f.docs.get('orders/O').items[0].qty=2;
+ assert.equal((await getServiceCaseStatus(f.db,'U',query)).canStart,true);
+ const index=f.docs.get('serviceCases/'+itemCaseIndexId('O','I'));
+ const original=f.docs.get('serviceCases/'+caseDocId('O','I','case1'));
+ for(let i=1;i<100;i++){
+   const caseId='bounded-'+i;
+   index.caseIds.push(caseId);
+   f.docs.set('serviceCases/'+caseDocId('O','I',caseId),{...structuredClone(original),caseId,serviceQty:0.001});
+ }
+ const bounded=await getServiceCaseStatus(f.db,'U',query);
+ assert.ok(bounded.itemProgress.unassignedQty>0);
+ assert.equal(bounded.canStart,false);
+ assert.ok(bounded.cases.every(c=>c.canAdvance));
+ assert.equal(f.written.length,2);
+});
+test('changed or removed live master keeps bound history readable but offers no rejected actions',async()=>{
+ const f=fixture({role:'admin'}),query={orderId:'O',itemId:'I'};
+ f.docs.get('orders/O').items[0].qty=2;
+ await commit(f,intent('SAMPLE_RECEIVED'));
+ const original=structuredClone(f.docs.get('products/P'));
+ const before=structuredClone(f.docs.get('serviceCases/'+caseDocId('O','I','case1')));
+ for(const patch of [{active:false},{productType:'Goods'},{serviceKind:'ONSITE_REPAIR'},
+   {serviceKind:'UNKNOWN'},null]){
+   if(patch===null)f.docs.delete('products/P');
+   else f.docs.set('products/P',{...original,...patch});
+   const history=await getServiceCaseStatus(f.db,'U',query);
+   assert.equal(history.kind,'BIOPLEX_LAB');
+   assert.equal(history.canStart,false);
+   assert.equal(history.cases[0].canAdvance,false);
+   assert.equal(history.cases[0].events.length,1);
+   assert.equal(history.cases[0].custody,'IN_HOUSE');
+   await assert.rejects(commit(f,intent('EXPERIMENT_COMPLETED',1)));
+ }
+ f.docs.set('products/P',original);
+ const restored=await getServiceCaseStatus(f.db,'U',query);
+ assert.equal(restored.canStart,true);assert.equal(restored.cases[0].canAdvance,true);
+ assert.deepEqual(f.docs.get('serviceCases/'+caseDocId('O','I','case1')),before);
+ assert.equal(f.written.length,2);
+});
+test('item summary rejects mismatched order service type before a case exists',async()=>{
+ const f=fixture(),query={orderId:'O',itemId:'I'};
+ f.docs.get('orders/O').items[0].serviceKind='ONSITE_REPAIR';
+ await assert.rejects(getServiceCaseStatus(f.db,'U',query),/類型不一致/);
+ await assert.rejects(commit(f,intent('SAMPLE_RECEIVED')),/不一致/);
+ assert.equal(f.written.length,0);
+});
