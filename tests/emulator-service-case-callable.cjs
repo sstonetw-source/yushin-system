@@ -147,3 +147,30 @@ test('Direct Firestore serviceCases read/write is denied even for valid client A
    e=>e.code==='permission-denied');
  assert.equal((await f.record()).events.length,1);
 });
+
+test('real Auth read-only case history distinguishes missing ID and existing custody',async()=>{
+ const f=await fixture('history','PIPETTE_CALIBRATION');
+ const locate={orderId:f.orderId,itemId:f.itemId,caseId:f.caseId};
+ const read=who=>httpsCallable(getFunctions(who.app,'asia-east1'),'getServiceCaseStatus',{timeout:30000})(locate).then(r=>r.data);
+ await assert.rejects(read(f.other),e=>e.code==='functions/permission-denied');
+ const none=await read(f.sales);
+ assert.equal(none.exists,false);
+ assert.equal(none.workStatus,'NOT_STARTED');
+ assert.equal((await db.doc('serviceCases/'+caseDocId(f.orderId,f.itemId,f.caseId)).get()).exists,false);
+ await f.sales.call(f.intent('DEVICE_RECEIVED'));
+ const pending=await read(f.sales);
+ assert.equal(pending.exists,true);
+ assert.equal(pending.nextEvent,'VENDOR_SENT');
+ assert.equal(pending.custody,'IN_HOUSE');
+ assert.equal(pending.events.length,1);
+ await f.warehouse.call(f.intent('VENDOR_SENT',1,{partyName:'Calibrator'}));
+ const shipped=await read(f.engineer);
+ assert.equal(shipped.custody,'AT_VENDOR');
+ assert.equal(shipped.events.length,2);
+ await db.doc('orders/'+f.orderId).update({orderStatus:'cancelled'});
+ assert.equal((await read(f.sales)).events.length,2); // audit remains readable
+ await assert.rejects(f.sales.call(f.intent('VENDOR_RETURNED',2)),
+   e=>e.code==='functions/permission-denied'||e.code==='functions/failed-precondition');
+ await db.doc('users/'+f.sales.uid).update({disabled:true});
+ await assert.rejects(read(f.sales),e=>e.code==='functions/permission-denied');
+});
