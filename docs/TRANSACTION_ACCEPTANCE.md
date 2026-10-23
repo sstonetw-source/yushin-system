@@ -99,3 +99,9 @@ Workflow Core 也不再使用一般送貨紀錄、舊 deliveredQty 投影或單�
 ### 正規化與摘要的共同缺口修正（待最新完整 CI）
 
 審查混合單後續更新發現，Fulfillment Core 的 normalizeItem 仍把服務未完成量重新投影成實貨缺口；已在此唯一正規化來源將 Service shortageQty 維持 0，保留既有實貨／供應數字供驗證器拒絕，不自動清帳。訂單採購摘要補傳 productType；實貨出貨摘要只計 Goods，純服務標示無需實貨出貨，既有純直送標籤保留。來源、app.js 與 Functions Core 同步建置。新增正規化冪等／衝突保留及原摘要行為回歸；原站四案例也核對正規化後的服務零缺口、無需採購與正確實貨總量。最新完整 CI 是合併閘門，尚不代表服務完工或 Preview 已驗收。
+
+## 2026-10-23｜服務案件進度的受控唯讀查詢（相依 PR，未啟用正式環境）
+
+沿用唯一 `serviceCases` 事件及 `YushinServiceWork.projectServiceCase` 投影，不額外建立狀態帳或快取。新增 `getServiceCaseStatus` 後端讀取契約，僅在 `demo-yushin` 真 Auth／Firestore／Functions Emulator 明確啟用；正式環境 gate 預設拒絕。讀取交易重驗登入者的 users 角色與停權狀態、來源訂單及 Service 品項；業務僅能查看自己的訂單，倉管／工程師／管理員沿既有服務作業角色規則。既有案件回傳受驗證的事件、保管位置與下一步；不存在的 case ID 明確回報 `exists:false`，不建立虛構案件。已取消訂單可唯讀歷史，不能繼續寫入事件。
+
+新增 Node 授權／壞資料／無副作用測試及 Emulator 原 Auth→Callable 的不存在、建立、委外寄送、他人拒絕、取消後歷史可讀、停權拒絕案例。這**不是**案件搜尋／建立操作介面或可用服務模組：仍需案件與訂單數量綁定、正式授權入口、原站桌機／手機、客戶交付／核銷與 Preview 驗收。未部署或修改正式 Firestore。
