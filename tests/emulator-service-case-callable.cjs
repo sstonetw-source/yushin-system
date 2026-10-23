@@ -169,8 +169,8 @@ test('real Auth read-only case history distinguishes missing ID and existing cus
  assert.equal(shipped.events.length,2);
  await db.doc('orders/'+f.orderId).update({orderStatus:'cancelled'});
  assert.equal((await read(f.sales)).events.length,2); // audit remains readable
- await assert.rejects(f.sales.call(f.intent('VENDOR_RETURNED',2)),
-   e=>e.code==='functions/permission-denied'||e.code==='functions/failed-precondition');
+ await assert.rejects(f.warehouse.call(f.intent('VENDOR_RETURNED',2)),
+   e=>e.code==='functions/failed-precondition');
  await db.doc('users/'+f.sales.uid).update({disabled:true});
  await assert.rejects(read(f.sales),e=>e.code==='functions/permission-denied');
 });
