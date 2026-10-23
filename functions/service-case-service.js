@@ -200,7 +200,7 @@ async function getServiceCaseStatus(db,actorUid,input){
       if(rows.size!==1)fail('訂單編號不存在或重複，請核對。','not-found');
       const doc=rows.docs[0],order=doc.data();
       if(profile.role==='sales'&&order.ownerUid!==actorUid)fail('只有訂單負責業務有權限查看服務案件。','permission-denied');
-      const items=(Array.isArray(order.items)?order.items:[]).filter(i=>String(i.productType||'').toUpperCase()==='SERVICE')
+      const items=(Array.isArray(order.items)?order.items:[]).filter(i=>String(i.productType||'').trim().toUpperCase()==='SERVICE')
         .map(i=>({itemId:i.itemId,itemName:i.itemName||i.itemCode||'服務品項'}));
       if(!items.length)fail('此訂單沒有服務品項。');
       return {orderId:doc.id,orderNo:order.orderNo,customerName:order.customerName||'',items};
@@ -236,9 +236,9 @@ async function getServiceCaseStatus(db,actorUid,input){
       if(!indexSnap.exists){
         const productSnap=await tx.get(db.collection('products').doc(item.productId));
         const product=productSnap.exists?productSnap.data():null;
-        if(!product||product.active===false||String(product.productType||product.type||'').toUpperCase()!=='SERVICE')
+        if(!product||product.active===false||String(product.productType||product.type||'').trim().toUpperCase()!=='SERVICE')
           fail('服務品項產品主檔無效或型別衝突。');
-        kind=product.serviceKind;
+        kind=String(product.serviceKind||'').trim().toUpperCase();
       }
       if(!Object.prototype.hasOwnProperty.call(core.STEPS,kind))fail('正式服務主檔尚未指定四種有效服務類型。');
       const index=await readItemCases(db,tx,orderId,itemId,item,kind,indexSnap);
@@ -252,7 +252,7 @@ async function getServiceCaseStatus(db,actorUid,input){
         return {...projection,serviceQty:record.serviceQty,
           canAdvance:open&&!!projection.nextEvent&&allowedActor(profile.role,actorUid,order,projection.nextEvent)};
       });
-      const items=order.items.filter(i=>String(i.productType||'').toUpperCase()==='SERVICE')
+      const items=order.items.filter(i=>String(i.productType||'').trim().toUpperCase()==='SERVICE')
         .map(i=>({itemId:i.itemId,itemName:i.itemName||i.itemCode||'服務品項'}));
       return {orderId,itemId,orderNo:order.orderNo||orderId,customerName:order.customerName||'',items,kind,itemProgress,cases,
         canStart:open&&allowedActor(profile.role,actorUid,order,core.STEPS[kind][0])};

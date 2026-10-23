@@ -295,6 +295,7 @@ test('index namespace cannot collide with externally supplied case identifiers',
 });
 test('item lookup returns bounded cases and server role hints without writes or price fields',async()=>{
   const f=fixture();f.docs.get('orders/O').orderNo='YS-1';f.docs.get('orders/O').totalPrice=999;
+  f.docs.get('products/P').serviceKind=' bioplex_lab ';
   const summary=await getServiceCaseStatus(f.db,'U',{orderNo:'YS-1'});
   assert.equal(summary.orderId,'O');assert.equal(summary.totalPrice,undefined);
   const empty=await getServiceCaseStatus(f.db,'U',{orderId:'O',itemId:'I'});

@@ -10913,7 +10913,7 @@ function serviceCaseEntryEnabled(){
         &&['admin','sales','warehouse','engineer'].includes(currentUserRole);
 }
 function serviceCaseActionHtml(order){
-    return serviceCaseEntryEnabled()&&(order.items||[]).some(i=>String(i.productType||'').toUpperCase()==='SERVICE')
+    return serviceCaseEntryEnabled()&&(order.items||[]).some(i=>String(i.productType||'').trim().toUpperCase()==='SERVICE')
         ?`<button type="button" class="btn-small btn-secondary" onclick="openServiceCases(${inlineJsValue(order.id)})">服務案件</button>`:'';
 }
 function renderServiceCaseEntry(){
@@ -10947,7 +10947,7 @@ window.openServiceCases=async function(orderId){
         if(pending){renderServiceCasePending(view,pending);return;}
         const order=orderId?(ordersCache||[]).find(o=>o.id===orderId):null;
         if(order){view.order={orderId:order.id,orderNo:order.orderNo,customerName:order.customerName,
-            items:(order.items||[]).filter(i=>String(i.productType||'').toUpperCase()==='SERVICE')};}
+            items:(order.items||[]).filter(i=>String(i.productType||'').trim().toUpperCase()==='SERVICE')};}
         renderServiceCaseOrder(view);
         if(view.order?.items.length)await loadServiceCaseItem(view.order.items[0].itemId);
     }catch(error){if(view&&serviceCaseView===view)serviceCaseMessage(view,error.message);else if(!view)alert(error.message);}
