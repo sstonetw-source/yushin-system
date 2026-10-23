@@ -56,10 +56,57 @@ function emulatorSetup(){
  x.records.set('purchaseOrders/PO1',{...x.po,buyerName:'Server Buyer'});
  x.records.set('supplyOrders/PO1-0',{purchaseDocumentId:'PO1',qty:1,unitCost:0});
  x.c.YUSHIN_FORMAL_PURCHASE_EMULATOR=true;x.c.APP_ENVIRONMENT='emulator';x.c.location={hostname:'localhost'};
- x.c.firebase={auth:()=>auth,functions:()=>functions,app:()=>({functions:()=>functions})};
+ x.c.firebase={auth:()=>auth,functions:()=>functions,app:()=>({options,functions:()=>functions})};
  x.c.db={collection:name=>({doc:id=>({get:async()=>({exists:x.records.has(name+'/'+id),data:()=>structuredClone(x.records.get(name+'/'+id))})})})};
  return {...x,auth,functions,calls};
 }
+function previewSetup(){
+ const x=emulatorSetup(),options={projectId:'preview-20135'};
+ x.c.YUSHIN_FORMAL_PURCHASE_EMULATOR=false;
+ x.c.YUSHIN_PREVIEW_FORMAL_PURCHASE=true;
+ x.c.APP_ENVIRONMENT='preview';x.c.location.hostname='preview-20135.web.app';
+ x.auth.app.options=options;x.auth.emulatorConfig=null;x.functions.app.options=options;
+ x.c.firebase.app=()=>({options,functions:()=>x.functions});
+ return x;
+}
+test('preview original confirm action uses the same backend, re-reads records and never uses legacy writer',async()=>{
+ const x=previewSetup(),result=await x.c.commitFormalPurchaseOrder(x.po);
+ assert.equal(result.poRecord.buyerName,'Server Buyer');
+ assert.equal(result.committedSupplyOrders.length,1);
+ assert.equal(x.writes.length,0);
+ assert.equal(x.calls.filter(call=>call.name==='commitV2FormalPurchase').length,1);
+ assert.equal(x.calls.filter(call=>call.emulator).length,0,'Preview must never connect to local Emulator');
+});
+test('preview lazily loads missing Functions Compat SDK before submitting and remains fail-closed on load error',async()=>{
+ const x=previewSetup(),scripts=[];
+ x.c.firebase.functions=undefined;
+ x.c.document={createElement:()=>({}),head:{appendChild:script=>{
+  scripts.push(script.src);x.c.firebase.functions=()=>x.functions;script.onload();
+ }}};
+ await x.c.commitFormalPurchaseOrder(x.po);
+ assert.equal(scripts.length,1);
+ assert.match(scripts[0],/firebase-functions-compat\.js$/);
+ assert.equal(x.writes.length,0);
+ const failed=previewSetup();failed.c.firebase.functions=undefined;
+ failed.c.document={createElement:()=>({}),head:{appendChild:script=>script.onerror()}};
+ await assert.rejects(failed.c.commitFormalPurchaseOrder(failed.po),/無法載入 Firebase Functions/);
+ assert.equal(failed.writes.length,0);
+});
+test('preview purchase rejects wrong host, project, Auth emulator or changed login without legacy fallback',async()=>{
+ for(const mutate of [x=>x.c.location.hostname='yu-shing-company.web.app',
+  x=>x.c.APP_ENVIRONMENT='production',x=>x.auth.app.options.projectId='yu-shing-company',
+  x=>x.auth.emulatorConfig={host:'127.0.0.1',port:9099},x=>x.auth.currentUser.uid='other']){
+  const x=previewSetup();mutate(x);
+  await assert.rejects(x.c.commitFormalPurchaseOrder(x.po));
+  assert.equal(x.writes.length,0);
+  assert.equal(x.calls.some(call=>call.name),false);
+ }
+});
+test('unknown Preview Callable response never retries through old Firestore writer',async()=>{
+ const x=previewSetup();x.functions.httpsCallable=()=>async()=>{throw Error('lost response');};
+ await assert.rejects(x.c.commitFormalPurchaseOrder(x.po),/lost response/);
+ assert.equal(x.writes.length,0);
+});
 test('formal PO original Service calls scoped backend and re-reads authoritative records without legacy writes',async()=>{
  const x=emulatorSetup(),result=await x.c.commitFormalPurchaseOrder(x.po);
  assert.equal(result.poRecord.buyerName,'Server Buyer');assert.equal(result.committedSourceOrders.length,1);

@@ -8,5 +8,10 @@ const {onCall,HttpsError}=runtime('firebase-functions/v2/https');
 const {getApps,initializeApp}=runtime('firebase-admin/app');
 const {getFirestore}=runtime('firebase-admin/firestore');
 if(!getApps().length)initializeApp();
-module.exports=require(path.join(root,'functions/v2-return-callable-adapter')).createV2ReturnCallables({
+const standard=require(path.join(root,'functions/v2-return-callable-adapter')).createV2ReturnCallables({
  onCall,HttpsError,getDatabase:getFirestore});
+// Exercise the same guarded endpoint that functions/index.js exports for
+// Preview, instead of silently testing the older Emulator-only PO wrapper.
+const previewPurchase=require(path.join(root,'functions/formal-purchase-preview-callable'))
+ .createPreviewFormalPurchaseCallable({onCall,HttpsError,getDatabase:getFirestore});
+module.exports={...standard,commitV2FormalPurchase:previewPurchase};

@@ -50,6 +50,8 @@
 
 - 後端雙倉 Callable 的執行閘門必須同時核對 `ENABLE_GROUPED_RESERVATION=true` 和實際專案 ID 為 `preview-20135`；僅完整的 Auth + Firestore Emulator 下允許 `demo-yushin`。不可把示範開關或來源 JS 旗標當成正式部署授權。重大角色／身份改動須跑 `tests/emulator-grouped-reservation-callable.cjs` 的真實登入 SDK 測試。
 
+- 正式採購後端 `commitV2FormalPurchase` 的受控 Preview 入口須同時驗證後端 `ENABLE_PREVIEW_FORMAL_PURCHASE=true`、可信任專案 ID 與 Firestore 來源均為 `preview-20135`，再讀取真實 Auth UID、使用者角色與交易資料；不得信任 Client 角色／預算／庫存計算。正式專案即使誤設開關也必須拒絕。前端只在 `APP_ENVIRONMENT==='preview'` 且明確設定 `YUSHIN_PREVIEW_FORMAL_PURCHASE=true` 時呼叫，未知回覆不退回 Client writer。`demo-yushin` 只可在完整三套 Emulator 執行。同一 PO ID 必須維持重試憑證，Preview 驗收前不宣布 #199 正式消除，勿修改正式 Rules 或放行正式服務。
+
 - 單品項雙倉 v2 提交目前僅供 demo-yushin Firestore Emulator，`commitSingleItemTwoWarehouse` 不可匯出 Callable 或接線前端。先完成所有履約寫入與位置讀取的相容契約及 Preview 驗收，才可另案修改執行閘門。變更須跑 `tests/emulator-single-item-location.cjs` 的五角色、併發、回滾與重送測試；不得以 Node 靜態檢查取代實際交易驗證。
 
 - 指定倉分批寄送使用 `commitLocationShipment`，目前僅 demo-yushin Emulator；不匯出 Callable／接前端。倉庫寄出與客戶送達必須分開，不能為了沿用舊 UI 把新倉庫事件寫成 deliveryRecords。不得另寫 FEFO、預留扣量或打單可用量公式；共用 Core 的部署副本一律建置產生。改動須跑 emulator-location-shipment.cjs 的多倉分批、五角色、併發、原子回滾與重送；Preview 啟用前補全部投影／簽收不重扣及其他履約入口。

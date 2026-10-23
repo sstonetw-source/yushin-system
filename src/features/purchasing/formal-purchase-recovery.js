@@ -22,7 +22,7 @@ function rememberFormalPurchase(poRecord, actorUid, actorRole) {
     if (actorUid !== currentUser?.uid || actorRole !== currentUserRole)
         throw Error('登入身分已變更，無法儲存採購作業。');
     if (!Array.isArray(poRecord?.items) || !poRecord.items.length
-        || (globalThis.YUSHIN_FORMAL_PURCHASE_EMULATOR === true && (poRecord.items.length > 5 || poRecord.items.some(item => !item.orderId || !item.itemId
+        || (formalPurchaseBackendPilotEnabled() && (poRecord.items.length > 5 || poRecord.items.some(item => !item.orderId || !item.itemId
             || (item.sourceType && item.sourceType !== 'SALES_ORDER')
             || !['WAREHOUSE','DIRECT_SHIP'].includes(item.fulfillmentType || 'WAREHOUSE')))))
         throw Error('採購後端試點目前只支援 1–5 個客戶訂單實體入庫或直送品項。');
