@@ -92,3 +92,38 @@ test('read-only order guard allows only the gated service entry while order muta
  handler='saveNewOrder()';c.guard(event);assert.equal(blocked,1);
  handler='openServiceCases()';enabled=false;c.guard(event);assert.equal(blocked,2);
 });
+
+test('original order hint uses only authorized case projection, never stored shipment flags, and scopes user session',async()=>{
+ const f=fixture();
+ const items=[{itemId:'I',itemName:'<檢測>',productType:'SERVICE',deliveredQty:500,isDelivered:true}];
+ assert.equal(f.c.serviceCaseVerifiedOrderHints('O',items),'');
+ let reads=0;
+ f.data.itemProgress.completedQty=1;
+ f.data.itemWorkCategory='delivery';
+ f.setRead(async()=>{reads++;return f.data;});
+ await f.c.openServiceCases('O');
+ const hint=f.c.serviceCaseVerifiedOrderHints('O',items);
+ assert.match(hint,/上次查核完成 1\/2/);
+ assert.match(hint,/待服務處理/);
+ assert.match(hint,/&lt;檢測>/);
+ assert.doesNotMatch(hint,/500|已核銷/);
+ assert.equal(reads,1,'rendering an order hint must not issue extra Firestore/Callable reads');
+ assert.equal(f.c.serviceCaseVerifiedOrderHints('OTHER',items),'');
+ f.c.currentUserRole='engineer';
+ assert.equal(f.c.serviceCaseVerifiedOrderHints('O',items),'');
+ f.c.currentUserRole='sales';
+ f.c.sessionDataGeneration=2;
+ assert.equal(f.c.serviceCaseVerifiedOrderHints('O',items),'');
+});
+test('a mismatched or unknown backend result cannot become a verified original-list status',async()=>{
+ const f=fixture();
+ f.data.itemProgress.completedQty=2;
+ f.data.itemWorkCategory='billing';
+ f.setRead(async()=>({...f.data,orderId:'OTHER'}));
+ await f.c.openServiceCases('O');
+ assert.equal(f.c.serviceCaseVerifiedOrderHints('O',[{itemId:'I',productType:'SERVICE'}]),'');
+ f.c.resetServiceCaseView();
+ f.setRead(async()=>({...f.data,orderId:'O',itemWorkCategory:'unverified'}));
+ await f.c.openServiceCases('O');
+ assert.equal(f.c.serviceCaseVerifiedOrderHints('O',[{itemId:'I',productType:'SERVICE'}]),'');
+});
