@@ -6,6 +6,24 @@ const SERVICE_EVENT_LABELS={SAMPLE_RECEIVED:'收取檢體',DEVICE_RECEIVED:'收�
 const SERVICE_CUSTODY_LABELS={NOT_RECEIVED:'尚未收件',IN_HOUSE:'公司保管',AT_VENDOR:'委外單位保管',
     RETURNED_TO_CUSTOMER:'已交還客戶',CUSTOMER_SITE:'客戶現場'};
 const SERVICE_WORK_LABELS={delivery:'待服務處理',billing:'服務完成・待核銷',complete:'服務完成・已核銷',closed:'訂單已停止履約'};
+// Read-only, short-lived UI hint sourced only from the server-verified case index.
+// This must never be used for workCategories, billing writes or fulfillment decisions.
+const verifiedServiceListHints=new Map();
+const SERVICE_LIST_HINT_TTL_MS=120000;
+function serviceCaseVerifiedOrderHints(orderId,items){
+    if(!serviceCaseEntryEnabled()||!currentUser?.uid)return '';
+    const now=Date.now();
+    return (items||[]).filter(item=>String(item.productType||'').trim().toUpperCase()==='SERVICE')
+        .map(item=>{
+            const key=JSON.stringify([currentUser.uid,currentUserRole,sessionDataGeneration,orderId,item.itemId]);
+            const saved=verifiedServiceListHints.get(key);
+            if(!saved)return '';
+            if(saved.readAt>now||now-saved.readAt>SERVICE_LIST_HINT_TTL_MS){
+                verifiedServiceListHints.delete(key);return '';
+            }
+            return `<small class="service-case-verified-hint">${escapeHtml(item.itemName||item.itemCode||'服務品項')}：上次查核完成 ${escapeHtml(saved.completedQty)}/${escapeHtml(saved.orderedQty)}（${escapeHtml(SERVICE_WORK_LABELS[saved.category])}；僅供畫面參考）</small>`;
+        }).join('');
+}
 function serviceCaseEntryEnabled(){
     return globalThis.YUSHIN_SERVICE_CASE_EMULATOR===true
         &&['admin','sales','warehouse','engineer'].includes(currentUserRole);
@@ -88,6 +106,19 @@ window.loadServiceCaseItem=async function(itemId){
     try{
         const data=await readServiceCases({orderId:view.order.orderId,itemId});serviceCaseCurrent(view);
         if(seq!==view.request)return;view.data=data;view.needsReload=false;
+        // The item/status/quantities are returned by the authorized backend
+        // after reading the registered cases. Never reconstruct them from order flags.
+        const p=data.itemProgress;
+        if(data.orderId===view.order.orderId&&data.itemId===itemId
+            &&Object.prototype.hasOwnProperty.call(SERVICE_WORK_LABELS,data.itemWorkCategory)
+            &&p&&Number.isFinite(p.orderedQty)&&Number.isFinite(p.completedQty)
+            &&p.orderedQty>=0&&p.completedQty>=0&&p.completedQty<=p.orderedQty){
+            const key=JSON.stringify([view.uid,view.role,view.generation,data.orderId,itemId]);
+            if(verifiedServiceListHints.size>=100)verifiedServiceListHints.clear();
+            verifiedServiceListHints.set(key,{readAt:Date.now(),category:data.itemWorkCategory,
+                orderedQty:p.orderedQty,completedQty:p.completedQty});
+        }
+        if(document.getElementById('order-system')?.classList?.contains?.('active'))window.renderOrdersList?.();
         if(data.items)Object.assign(view.order,{items:data.items,orderNo:data.orderNo,customerName:data.customerName});
         renderServiceCaseItem(view);
         serviceCaseMessage(view,'');
