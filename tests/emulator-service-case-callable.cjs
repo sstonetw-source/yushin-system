@@ -325,6 +325,20 @@ test('real Auth pure-Service billing verifies events, rejects mixed/foreign acto
  assert.equal(order.statusHistory[0].by,f.sales.uid);assert.equal(order.isDelivered,undefined);
  assert.equal(order.items[0].deliveredQty,undefined);
  await assert.rejects(billing(f.sales,{...intent,billingDate:'2026-10-24'}),e=>e.code==='functions/already-exists');
+ const date={...intent,operationId:'service-billing-date-auth-001',action:'CHANGE_DATE',expectedIsBilled:true,
+  expectedBillingDate:'2026-10-23',billingDate:'2026-10-24'};
+ for(const who of [f.warehouse,f.other,f.engineer])
+  await assert.rejects(billing(who,date),e=>e.code==='functions/permission-denied');
+ const dates=await Promise.all([billing(f.sales,date),billing(f.sales,date)]);
+ assert.deepEqual(dates.map(r=>r.status).sort(),['already-applied','committed']);
+ const date2={...date,operationId:'service-billing-date-auth-002',expectedBillingDate:'2026-10-24',billingDate:'2026-10-25'};
+ const dated=await Promise.allSettled([billing(f.sales,date2),billing(f.sales,{...date2,operationId:'service-billing-date-auth-003',billingDate:'2026-10-26'})]);
+ assert.equal(dated.filter(r=>r.status==='fulfilled').length,1);
+ const currentDate=(await ref.get()).data().billingDate;
+ assert.equal((await billing(f.sales,date)).status,'already-applied');
+ const afterDate=(await ref.get()).data();assert.equal(afterDate.billingDate,currentDate);
+ assert.equal(afterDate.fieldEditHistory.length,2);assert.equal(afterDate.statusHistory.length,1);
+ await assert.rejects(billing(f.sales,{...date,operationId:'service-billing-date-auth-004'}),e=>e.code==='functions/failed-precondition');
  const undo={...intent,operationId:'service-billing-auth-002',isBilled:false,billingDate:'',expectedIsBilled:true};
  const competing=await Promise.allSettled([billing(f.sales,undo),billing(f.sales,{...undo,operationId:'service-billing-auth-003'})]);
  assert.equal(competing.filter(r=>r.status==='fulfilled').length,1);

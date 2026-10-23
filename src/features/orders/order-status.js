@@ -1,5 +1,11 @@
 // Service billing keeps the original order visible until the server confirms.
-async function toggleServiceOrderBilling(order,newValue){
+window.serviceBillingDateEnabled=function(order){
+    return globalThis.YUSHIN_SERVICE_CASE_EMULATOR===true
+        &&canManageOrderLifecycleCapability()&&canEditPage('orders.list')&&canBusinessSelfOrder(order)
+        &&Array.isArray(order.items)&&order.items.length>0
+        &&order.items.every(i=>String(i?.productType||'').trim().toUpperCase()==='SERVICE');
+};
+async function toggleServiceOrderBilling(order,newValue,dateValue){
     const key=order.id+':isBilled',pendingSet=pendingOrderStatusKeys;
     if(pendingSet.has(key))return;
     const uid=currentUser?.uid,role=currentUserRole,generation=sessionDataGeneration;
@@ -10,7 +16,8 @@ async function toggleServiceOrderBilling(order,newValue){
         if(saved&&saved.intent.orderId!==order.id)throw Error('請先確認訂單 '+saved.intent.orderId+' 的前次服務核銷結果。');
         const intent=saved?.intent||{orderId:order.id,operationId:'service-bill-'+crypto.randomUUID(),
             isBilled:newValue,expectedIsBilled:order.isBilled===true,
-            billingDate:newValue?(orderBillingDate(order)||localDateString()):''};
+            billingDate:dateValue!==undefined?dateValue:newValue?(orderBillingDate(order)||localDateString()):'',
+            ...(dateValue!==undefined?{action:'CHANGE_DATE',expectedBillingDate:order.billingDate}: {})};
         pendingSet.add(key);renderOrdersList();
         const committed=await commitServiceBillingIntent(intent);
         if(!current())return;
@@ -23,6 +30,8 @@ async function toggleServiceOrderBilling(order,newValue){
     }catch(error){
         if(current()){
             pendingSet.delete(key);
+            // Re-enable the original controls; the transport retains unknown intents.
+            renderOrdersList();
             if(confirmed)alert('服務核銷已確認，畫面更新失敗，請重新載入：'+error.message);
             else alert('服務核銷尚未確認：'+error.message+' 若回覆不明，請再按原核銷按鈕確認前次結果。');
         }
@@ -88,10 +97,11 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
 window.updateOrderBillingDate = function(orderId, value) {
     const order = ordersCache.find(item => item.id === orderId);
     if (!order || !order.isBilled || !canEditPage('orders.list')) return;
-    if((order.items||[]).some(item=>String(item?.productType||'').trim().toUpperCase()==='SERVICE')) {
-        alert('服務核銷日期修改尚未開放。');renderOrdersList();return;
-    }
     if (!isValidOrderBillingDate(value)) { alert('請選擇正確的核銷日期。'); renderOrdersList(); return; }
+    if((order.items||[]).some(item=>String(item?.productType||'').trim().toUpperCase()==='SERVICE')) {
+        if(!window.serviceBillingDateEnabled(order)){alert('這筆服務訂單尚未開放日期修改。');renderOrdersList();return;}
+        return toggleServiceOrderBilling(order,true,value);
+    }
     const pendingKey=`${orderId}:billingDate`;
     if(pendingOrderStatusKeys.has(pendingKey))return;
     const previous = order.billingDate || '';

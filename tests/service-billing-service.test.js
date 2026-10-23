@@ -76,3 +76,46 @@ test('receipt write failure rolls back both order billing and work index',async(
  const f=fixture();f.fail();await assert.rejects(bill(f.db,'U',input()),/receipt failure/);
  assert.equal(f.count(),0);assert.equal(f.order().isBilled,undefined);assert.equal(f.order().workCategories,undefined);
 });
+
+const dateInput=(extra={})=>input({operationId:'billing-date-operation-001',action:'CHANGE_DATE',
+ expectedIsBilled:true,isBilled:true,expectedBillingDate:'2026-10-23',billingDate:'2026-10-24',...extra});
+test('date edit uses the same atomic writer, preserves billing history and replays without overwriting a later date',async()=>{
+ const f=fixture();await bill(f.db,'U',input());
+ const history=structuredClone(f.order().statusHistory),items=structuredClone(f.order().items);
+ const changed=await bill(f.db,'U',dateInput());
+ assert.equal(changed.action,'CHANGE_DATE');assert.equal(changed.changed,true);
+ assert.equal(f.order().billingDate,'2026-10-24');assert.equal(f.order().isBilled,true);
+ assert.deepEqual(f.order().statusHistory,history);assert.deepEqual(f.order().items,items);
+ assert.deepEqual(f.order().workCategories,['complete']);
+ assert.equal(f.order().fieldEditHistory[0].before,'2026-10-23');
+ assert.equal(f.order().fieldEditHistory[0].after,'2026-10-24');assert.equal(f.order().fieldEditHistory[0].by,'U');
+ await bill(f.db,'U',dateInput({operationId:'billing-date-operation-002',expectedBillingDate:'2026-10-24',billingDate:'2026-10-25'}));
+ assert.equal((await bill(f.db,'U',dateInput())).status,'already-applied');
+ assert.equal(f.order().billingDate,'2026-10-25');assert.equal(f.order().fieldEditHistory.length,2);
+ const count=f.count();
+ await assert.rejects(bill(f.db,'U',dateInput({operationId:'billing-date-operation-003'})),/日期已變更/);
+ await assert.rejects(bill(f.db,'U',dateInput({billingDate:'2026-10-26'})),/不同意圖/);
+ assert.equal(f.count(),count);
+});
+test('date edit rejects malformed, unauthorized, unfinished, mixed and unbilled sources without writes',async()=>{
+ for(const patch of [{action:'UNKNOWN'},{expectedBillingDate:'2026-02-30'},{expectedBillingDate:''},
+  {expectedIsBilled:false},{isBilled:false,billingDate:''},{billingDate:'2026-02-30'}]){
+  const f=fixture();await assert.rejects(bill(f.db,'U',dateInput(patch)));assert.equal(f.count(),0);
+ }
+ for(const change of [f=>{f.order().isBilled=false;},f=>{f.order().status='cancelled';},
+  f=>{f.docs.get('users/U').role='warehouse';},f=>{f.docs.get('users/U').disabled=true;},
+  f=>{f.order().ownerUid='OTHER';},f=>{f.record().events=[];},
+  f=>{f.order().items.push({productType:'Goods',qty:1});}]){
+  const f=fixture();Object.assign(f.order(),{isBilled:true,billingDate:'2026-10-23'});change(f);
+  await assert.rejects(bill(f.db,'U',dateInput()));assert.equal(f.count(),0);
+ }
+});
+test('date edit no-op records only a receipt and a failed receipt rolls back date, audit and index',async()=>{
+ const f=fixture();Object.assign(f.order(),{isBilled:true,billingDate:'2026-10-23'});
+ assert.equal((await bill(f.db,'U',dateInput({billingDate:'2026-10-23'}))).changed,false);
+ assert.equal(f.count(),1);assert.equal(f.order().fieldEditHistory,undefined);
+ const g=fixture();Object.assign(g.order(),{isBilled:true,billingDate:'2026-10-23',workCategories:['complete']});g.fail();
+ await assert.rejects(bill(g.db,'U',dateInput()),/receipt failure/);
+ assert.equal(g.count(),0);assert.equal(g.order().billingDate,'2026-10-23');
+ assert.equal(g.order().fieldEditHistory,undefined);assert.deepEqual(g.order().workCategories,['complete']);
+});

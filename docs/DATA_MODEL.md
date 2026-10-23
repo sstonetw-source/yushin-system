@@ -1,5 +1,11 @@
 # DATA_MODEL — Firestore 集合與資料責任地圖
 
+## 2026-10-23｜服務核銷日期與工作分類原子同步（demo 試點，待本批 CI）
+
+原 SERVICE_BILLING_OPERATION 憑證的日期修改意圖增加 action=CHANGE_DATE、expectedBillingDate，結果帶 action；原核銷／撤銷沒有新增 action，意圖與 hash 格式保持完全相同，舊憑證和暫存可重試。日期改動寫 orders.billingDate／fieldEditHistory／updatedAt／workCategories／workCategoryUpdatedAt，加原 serviceCases 操作憑證；不增加 Collection、Rules、Query、Index、Listener 或另一份完成量。讀取沿原有界整單證據，確認後仍只多讀一次目前 orders。
+
+此節更新先前日期尚未接線的狀態；其他 writer 對 workCategories 的持續維護、混合單商品憑證、材料耗用與 Preview 仍未完成，PR #234 保持 Draft，未合併 main 或部署 Firebase。
+
 ## 2026-10-23｜原核銷接線與 Client 財務防護（demo 試點，待本批完整 CI）
 
 無新集合、索引、監聽或持久欄位。sessionStorage 的 `service-billing-pending:{uid}` 只保存原角色與核銷意圖（訂單 ID、操作 ID、預期狀態、日期），不保存客戶或價格；僅同分頁刷新可恢復，不承諾跨裝置。核銷 Callable 回覆是歷史操作憑證，畫面再以原角色 server get 讀一次 orders 取得現況，失敗保留原意圖。Rules 檢查最多 30 品項；一般 metadata 更新不掃描品項，無額外 get／getAfter。服務案件事件與完成量的權威不變。

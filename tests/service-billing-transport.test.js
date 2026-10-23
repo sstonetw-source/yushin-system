@@ -71,3 +71,28 @@ test('service billing UI keeps authoritative state and prevents old session repl
   assert.equal(c.ordersCache[0].isBilled,!changedSession);assert.equal(cacheWrites.length,changedSession?0:1);assert.equal(alerts.length,0);
  }
 });
+
+test('date edit shares the status checkpoint across reload, blocks replacement, and uses the current order after undo',async()=>{
+ const f=fixture(),date={...f.input,action:'CHANGE_DATE',expectedIsBilled:true,expectedBillingDate:'2026-10-22'};
+ const c=f.open();f.lose(true);await assert.rejects(c.commitServiceBillingIntent(date),/reply lost/);
+ await assert.rejects(c.commitServiceBillingIntent(f.input),/前次/);
+ f.reverse();f.lose(false);const next=f.open();
+ const result=await next.commitServiceBillingIntent();
+ assert.equal(f.calls[0].input.action,'CHANGE_DATE');assert.deepEqual(f.calls[0],f.calls[1]);
+ assert.equal(result.order.isBilled,false);assert.equal(f.storage.size,0);
+ for(const patch of [{action:'UNKNOWN'},{expectedBillingDate:'2026-02-30'},{expectedIsBilled:false}])
+  assert.throws(()=>next.normalizeServiceBillingIntent({...date,...patch}));
+});
+
+test('unknown date reply re-enables original controls without changing cached financial facts',async()=>{
+ const ui=fs.readFileSync('src/features/orders/order-status.js','utf8').split('window.toggleOrderStatus =')[0];
+ let renders=0;const alerts=[],order={id:'O',isBilled:true,billingDate:'2026-10-23'};
+ const c=vm.createContext({window:{},currentUser:{uid:'U'},currentUserRole:'sales',sessionDataGeneration:1,
+  ordersCache:[order],pendingOrderStatusKeys:new Set(),crypto:{randomUUID:()=> 'a-valid-stable-id'},
+  pendingServiceBillingIntent:()=>null,renderOrdersList:()=>renders++,alert:x=>alerts.push(x),
+  commitServiceBillingIntent:async()=>{throw Error('reply lost');}});
+ vm.runInContext(ui,c);await c.toggleServiceOrderBilling(order,true,'2026-10-24');
+ assert.equal(renders,2);assert.equal(c.pendingOrderStatusKeys.size,0);
+ assert.equal(order.billingDate,'2026-10-23');assert.equal(order.isBilled,true);
+ assert.match(alerts[0],/尚未確認/);
+});

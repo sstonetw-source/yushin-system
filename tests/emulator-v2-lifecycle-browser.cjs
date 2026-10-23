@@ -400,6 +400,25 @@ for(const width of [1280,390])test('original service case UI '+width+'px: four k
   let billed=(await db.doc('orders/'+orderId).get()).data();
   assert.equal(billed.statusHistory.filter(e=>e.field==='isBilled').length,1);
   assert.deepEqual(billed.workCategories,['complete']);
+  // The original date editor is inside a collapsed details panel. Open it as a user would.
+  // Date correction still uses the same Callable and recovery checkpoint; no new writer.
+  await row.locator('details.order-detail-panel > summary').click();
+  const dateEdit=row.locator('input[aria-label="核銷日期"]');assert.equal(await dateEdit.isDisabled(),false);
+  billingLose=true;await dateEdit.fill('2026-10-24');
+  await page.waitForFunction(()=>!pendingOrderStatusKeys.size&&pendingServiceBillingIntent()?.intent.action==='CHANGE_DATE');
+  assert.equal(await row.getByRole('button',{name:'已核銷',exact:true}).isDisabled(),false);
+  const dateFirst=billingCalls.at(-1);assert.equal(dateFirst.expectedIsBilled,true);
+  assert.equal((await db.doc('orders/'+orderId).get()).data().billingDate,'2026-10-24');
+  const beforeReloadCalls=billingCalls.length;
+  await siteOpen(page,'sales');await siteNav(page,'orders');assert.equal(billingCalls.length,beforeReloadCalls);
+  // The original billing button confirms the pending date, never changes its intent.
+  await row.getByRole('button',{name:'已核銷',exact:true}).click();
+  await page.waitForFunction(()=>!pendingOrderStatusKeys.size&&!pendingServiceBillingIntent());
+  assert.deepEqual(billingCalls.at(-1),dateFirst);
+  const dateOrder=(await db.doc('orders/'+orderId).get()).data();
+  assert.equal(dateOrder.fieldEditHistory.length,1);assert.equal(dateOrder.statusHistory.length,1);
+  assert.equal(dateOrder.billingDate,'2026-10-24');assert.equal(dateOrder.isBilled,true);
+  assert.deepEqual(dateOrder.workCategories,['complete']);
   // A new click after confirmation is a distinct undo, with no inventory effect.
   await row.getByRole('button',{name:'已核銷',exact:true}).click();
   await page.waitForFunction(id=>!pendingOrderStatusKeys.size&&ordersCache.find(o=>o.id===id)?.isBilled===false,orderId);
@@ -413,7 +432,7 @@ for(const width of [1280,390])test('original service case UI '+width+'px: four k
   await page.waitForFunction(()=>document.getElementById('serviceCaseMessage').textContent.includes('權限'));
   assert.equal(await page.locator('#serviceItemChoice').count(),0);
   assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
-  console.log('Original service UI '+width+'px: actual Auth, four service kinds, sales/warehouse/engineer handoff, minimal authorized order-number lookup, committed lost HTTP reply/reload/same-event proof and original billing refusal/full completion/lost reply/reload/same-ID receipt/undo with zero physical writes passed. Initialized order remains an explicit fixture boundary.');
+  console.log('Original service UI '+width+'px: actual Auth, four service kinds, sales/warehouse/engineer handoff, minimal authorized order-number lookup, committed lost HTTP reply/reload/same-event proof and original billing refusal/full completion/lost reply/reload/same-ID receipt/date correction/undo with zero physical writes passed. Initialized order remains an explicit fixture boundary.');
  }catch(error){console.log('Service UI diagnostic',JSON.stringify(await page.evaluate(()=>({role:currentUserRole,message:document.getElementById('serviceCaseMessage')?.textContent,body:document.getElementById('serviceCaseBody')?.textContent}))),JSON.stringify({errors,dialogs:serviceDialogs}));throw error;}
  finally{await context.close();}
 });
