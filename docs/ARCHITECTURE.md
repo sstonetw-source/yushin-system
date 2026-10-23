@@ -1,5 +1,11 @@
 # ARCHITECTURE — 又鑫系統程式碼責任地圖
 
+## 2026-10-23｜服務核銷日期與工作分類原子同步（demo 試點，待本批 CI）
+
+核銷日期修改沿既有 commitServiceOrderBilling 與 readServiceOrderProgress，不新增 writer／Callable／Core。可選 action=CHANGE_DATE 在同一交易核對已核銷狀態、預期原日期、真實角色／所有權、來源與全量服務完工證據；日期、歷程、工作分類和原操作憑證原子更新。原日期欄位在純服務 demo gate 下接線，與核銷共用 pending checkpoint、未知回覆確認與現況回讀；Goods 沿用原 Service，混合單不開放。
+
+此節更新先前日期尚未接線的狀態；其他 writer 對 workCategories 的持續維護、混合單商品憑證、材料耗用與 Preview 仍未完成，PR #234 保持 Draft，未合併 main 或部署 Firebase。
+
 ## 2026-10-23｜原核銷接線與 Client 財務防護（demo 試點，待本批完整 CI）
 
 原訂單 `toggleOrderStatus` 對 Service 轉入原核銷 Callable adapter；不樂觀改寫財務狀態、不另建核銷核心。adapter 使用原 demo Auth／Functions gate，並核對 session generation；送出前保存固定意圖，同操作重送後另讀一次 server orders，避免將歷史憑證覆蓋後續撤銷。畫面只套用目前訂單。Rules 在所有角色（含 admin client）前共同限制服務財務欄位，並保護服務品項綁定免於先改類型／刪除再核銷。核銷日期後端修改仍未實作，原日期 Service 對服務單拒絕。

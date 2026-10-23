@@ -71,3 +71,15 @@ test('service billing UI keeps authoritative state and prevents old session repl
   assert.equal(c.ordersCache[0].isBilled,!changedSession);assert.equal(cacheWrites.length,changedSession?0:1);assert.equal(alerts.length,0);
  }
 });
+
+test('date edit shares the status checkpoint across reload, blocks replacement, and uses the current order after undo',async()=>{
+ const f=fixture(),date={...f.input,action:'CHANGE_DATE',expectedIsBilled:true,expectedBillingDate:'2026-10-22'};
+ const c=f.open();f.lose(true);await assert.rejects(c.commitServiceBillingIntent(date),/reply lost/);
+ await assert.rejects(c.commitServiceBillingIntent(f.input),/前次/);
+ f.reverse();f.lose(false);const next=f.open();
+ const result=await next.commitServiceBillingIntent();
+ assert.equal(f.calls[0].input.action,'CHANGE_DATE');assert.deepEqual(f.calls[0],f.calls[1]);
+ assert.equal(result.order.isBilled,false);assert.equal(f.storage.size,0);
+ for(const patch of [{action:'UNKNOWN'},{expectedBillingDate:'2026-02-30'},{expectedIsBilled:false}])
+  assert.throws(()=>next.normalizeServiceBillingIntent({...date,...patch}));
+});

@@ -12614,7 +12614,7 @@ window.renderOrdersList = function() {
                     <option value="扣" ${o.transactionType === '扣' ? 'selected' : ''}>扣</option>
                 </select>
                 ${o.transactionType === '直' ? `<input type="text" aria-label="發票抬頭" placeholder="發票抬頭" value="${escapeAttr(o.invoiceTitle || '')}" onchange="updateOrderField('${o.id}','invoiceTitle',this.value)">` : ''}
-                ${o.isBilled ? `<label class="order-invoice-date-label">核銷日期<input type="date" aria-label="核銷日期" ${allOrderItems.some(item=>String(item.productType||'').trim().toUpperCase()==='SERVICE')?'disabled title="服務核銷日期修改尚未開放"':''} value="${escapeAttr(orderBillingDate(o))}" onchange="updateOrderBillingDate('${o.id}',this.value)"></label>` : ''}
+                ${o.isBilled ? `<label class="order-invoice-date-label">核銷日期<input type="date" aria-label="核銷日期" ${allOrderItems.some(item=>String(item.productType||'').trim().toUpperCase()==='SERVICE')&&(!window.serviceBillingDateEnabled?.(o)||billingPending)?'disabled title="目前無法修改服務核銷日期"':''} value="${escapeAttr(orderBillingDate(o))}" onchange="updateOrderBillingDate('${o.id}',this.value)"></label>` : ''}
             </div>
             <label class="order-remarks-editor">備註<input type="text" value="${escapeAttr(o.remarks || '')}" placeholder="備註" onchange="updateOrderField('${o.id}','remarks',this.value)"></label>
                     </div>
@@ -18724,15 +18724,24 @@ async function changeOrderBillingDate(orderId,value,history) {
 // Callable adapter only. Financial decisions remain in commitServiceOrderBilling.
 function serviceBillingPendingKey(uid){return 'service-billing-pending:'+encodeURIComponent(uid);}
 function normalizeServiceBillingIntent(input){
-    if(!input||Object.keys(input).some(k=>!['orderId','operationId','isBilled','billingDate','expectedIsBilled'].includes(k))
+    const dateChange=input?.action==='CHANGE_DATE';
+    if(!input||Object.keys(input).some(k=>!(dateChange
+        ? ['orderId','operationId','isBilled','billingDate','expectedIsBilled','action','expectedBillingDate']
+        : ['orderId','operationId','isBilled','billingDate','expectedIsBilled']).includes(k))
         ||typeof input.orderId!=='string'||!input.orderId||input.orderId!==input.orderId.trim()
         ||input.orderId.includes('/')||input.orderId.length>160
         ||typeof input.operationId!=='string'||!/^[a-zA-Z0-9_-]{12,96}$/.test(input.operationId)
         ||typeof input.isBilled!=='boolean'||typeof input.expectedIsBilled!=='boolean'
         ||(input.isBilled?!isValidOrderBillingDate(input.billingDate):input.billingDate!==''))
         throw Error('服務核銷操作資料不正確。');
-    return {orderId:input.orderId,operationId:input.operationId,isBilled:input.isBilled,
+    const intent={orderId:input.orderId,operationId:input.operationId,isBilled:input.isBilled,
         billingDate:input.billingDate,expectedIsBilled:input.expectedIsBilled};
+    if(dateChange){
+        if(input.isBilled!==true||input.expectedIsBilled!==true||!isValidOrderBillingDate(input.expectedBillingDate))
+            throw Error('核銷日期修改須提供已核銷狀態及原日期。');
+        Object.assign(intent,{action:'CHANGE_DATE',expectedBillingDate:input.expectedBillingDate});
+    }
+    return intent;
 }
 function pendingServiceBillingIntent(){
     const raw=sessionStorage.getItem(serviceBillingPendingKey(currentUser?.uid||''));
@@ -18770,6 +18779,7 @@ async function commitServiceBillingIntent(input){
     }
     if(!['committed','already-applied'].includes(reply?.status)||reply.orderId!==intent.orderId
         ||reply.operationId!==intent.operationId||reply.isBilled!==intent.isBilled
+        ||reply.action!==intent.action
         ||(intent.isBilled&&reply.billingDate!==intent.billingDate))
         throw Error('核銷回覆無法核對，請保留原操作重試。');
     // A replay receipt is historical: read the current order rather than applying
@@ -18784,7 +18794,13 @@ async function commitServiceBillingIntent(input){
     return {receipt:reply,order:{...order,id:intent.orderId}};
 }
 // Service billing keeps the original order visible until the server confirms.
-async function toggleServiceOrderBilling(order,newValue){
+window.serviceBillingDateEnabled=function(order){
+    return globalThis.YUSHIN_SERVICE_CASE_EMULATOR===true
+        &&canManageOrderLifecycleCapability()&&canEditPage('orders.list')&&canBusinessSelfOrder(order)
+        &&Array.isArray(order.items)&&order.items.length>0
+        &&order.items.every(i=>String(i?.productType||'').trim().toUpperCase()==='SERVICE');
+};
+async function toggleServiceOrderBilling(order,newValue,dateValue){
     const key=order.id+':isBilled',pendingSet=pendingOrderStatusKeys;
     if(pendingSet.has(key))return;
     const uid=currentUser?.uid,role=currentUserRole,generation=sessionDataGeneration;
@@ -18795,7 +18811,8 @@ async function toggleServiceOrderBilling(order,newValue){
         if(saved&&saved.intent.orderId!==order.id)throw Error('請先確認訂單 '+saved.intent.orderId+' 的前次服務核銷結果。');
         const intent=saved?.intent||{orderId:order.id,operationId:'service-bill-'+crypto.randomUUID(),
             isBilled:newValue,expectedIsBilled:order.isBilled===true,
-            billingDate:newValue?(orderBillingDate(order)||localDateString()):''};
+            billingDate:dateValue!==undefined?dateValue:newValue?(orderBillingDate(order)||localDateString()):'',
+            ...(dateValue!==undefined?{action:'CHANGE_DATE',expectedBillingDate:order.billingDate}: {})};
         pendingSet.add(key);renderOrdersList();
         const committed=await commitServiceBillingIntent(intent);
         if(!current())return;
@@ -18873,10 +18890,11 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
 window.updateOrderBillingDate = function(orderId, value) {
     const order = ordersCache.find(item => item.id === orderId);
     if (!order || !order.isBilled || !canEditPage('orders.list')) return;
-    if((order.items||[]).some(item=>String(item?.productType||'').trim().toUpperCase()==='SERVICE')) {
-        alert('服務核銷日期修改尚未開放。');renderOrdersList();return;
-    }
     if (!isValidOrderBillingDate(value)) { alert('請選擇正確的核銷日期。'); renderOrdersList(); return; }
+    if((order.items||[]).some(item=>String(item?.productType||'').trim().toUpperCase()==='SERVICE')) {
+        if(!window.serviceBillingDateEnabled(order)){alert('這筆服務訂單尚未開放日期修改。');renderOrdersList();return;}
+        return toggleServiceOrderBilling(order,true,value);
+    }
     const pendingKey=`${orderId}:billingDate`;
     if(pendingOrderStatusKeys.has(pendingKey))return;
     const previous = order.billingDate || '';

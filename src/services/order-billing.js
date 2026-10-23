@@ -62,15 +62,24 @@ async function changeOrderBillingDate(orderId,value,history) {
 // Callable adapter only. Financial decisions remain in commitServiceOrderBilling.
 function serviceBillingPendingKey(uid){return 'service-billing-pending:'+encodeURIComponent(uid);}
 function normalizeServiceBillingIntent(input){
-    if(!input||Object.keys(input).some(k=>!['orderId','operationId','isBilled','billingDate','expectedIsBilled'].includes(k))
+    const dateChange=input?.action==='CHANGE_DATE';
+    if(!input||Object.keys(input).some(k=>!(dateChange
+        ? ['orderId','operationId','isBilled','billingDate','expectedIsBilled','action','expectedBillingDate']
+        : ['orderId','operationId','isBilled','billingDate','expectedIsBilled']).includes(k))
         ||typeof input.orderId!=='string'||!input.orderId||input.orderId!==input.orderId.trim()
         ||input.orderId.includes('/')||input.orderId.length>160
         ||typeof input.operationId!=='string'||!/^[a-zA-Z0-9_-]{12,96}$/.test(input.operationId)
         ||typeof input.isBilled!=='boolean'||typeof input.expectedIsBilled!=='boolean'
         ||(input.isBilled?!isValidOrderBillingDate(input.billingDate):input.billingDate!==''))
         throw Error('服務核銷操作資料不正確。');
-    return {orderId:input.orderId,operationId:input.operationId,isBilled:input.isBilled,
+    const intent={orderId:input.orderId,operationId:input.operationId,isBilled:input.isBilled,
         billingDate:input.billingDate,expectedIsBilled:input.expectedIsBilled};
+    if(dateChange){
+        if(input.isBilled!==true||input.expectedIsBilled!==true||!isValidOrderBillingDate(input.expectedBillingDate))
+            throw Error('核銷日期修改須提供已核銷狀態及原日期。');
+        Object.assign(intent,{action:'CHANGE_DATE',expectedBillingDate:input.expectedBillingDate});
+    }
+    return intent;
 }
 function pendingServiceBillingIntent(){
     const raw=sessionStorage.getItem(serviceBillingPendingKey(currentUser?.uid||''));
@@ -108,6 +117,7 @@ async function commitServiceBillingIntent(input){
     }
     if(!['committed','already-applied'].includes(reply?.status)||reply.orderId!==intent.orderId
         ||reply.operationId!==intent.operationId||reply.isBilled!==intent.isBilled
+        ||reply.action!==intent.action
         ||(intent.isBilled&&reply.billingDate!==intent.billingDate))
         throw Error('核銷回覆無法核對，請保留原操作重試。');
     // A replay receipt is historical: read the current order rather than applying
