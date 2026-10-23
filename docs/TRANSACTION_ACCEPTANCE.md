@@ -121,3 +121,12 @@ Workflow Core 也不再使用一般送貨紀錄、舊 deliveredQty 投影或單�
 原訂單的「服務案件」視窗在使用者**主動查詢單一服務品項**後，會將後端已依註冊案件索引與 Workflow Core 驗證的 `completedQty / orderedQty`、`itemWorkCategory` 顯示在該訂單的列表金額欄下方。僅限 `demo-yushin` Emulator 閘門、同一登入 UID／角色／session、同一訂單／品項，記憶體提示最多保留 120 秒；資料來源不一致或回覆延遲被廢棄，不能從訂單 `deliveredQty`、`isDelivered` 或 `isBilled` 反推服務完工。未主動查核不會觸發每列 Callable，也不新增 Firestore 讀寫、collection、索引或 listener。
 
 這是**最近查核的畫面提示，不是權威持久履約分類**：不修改訂單 `workCategories`、工作圖卡數量、核銷按鈕與 `setOrderBillingStatus`。另一人更新服務案件後，需再點「服務案件」重查；原訂單列表／工作卡的完整分類與核銷 writer 仍需在後端接上全部服務案件證據，混合單與 Preview 尚未驗收。正式 Firebase 未啟用。
+
+
+### 2026-10-23｜整張服務訂單的單次權威查核（本 PR，未整合核銷 writer）
+
+在原「服務案件」視窗新增使用者明確觸發的「查核整張服務單進度」。原 `service-work-core`、`workflow-core` 與 `serviceCases` 案件索引仍是唯一計算／事件來源；`getServiceOrderProgress` 只在同一後端 Firestore Transaction 中重讀登入者角色、來源訂單、所有 Service 品項、產品與案件索引，合計各品項已核實完成數量及待完成量。Goods 同單時標記 `mixedOrder`，不將 Goods 送貨、訂單 `isBilled` 或前端緩存當成服務完工證據。
+
+查核可讀範圍：最多 30 品項、最多 100 個已註冊服務案件／整單；超過上限明確拒絕整單查核並保留各品項獨立讀取，不暗自截斷案件。只在使用者點查核時發生，原訂單列表 render 不增加 Callable、collection、索引、Firestore 寫入或 listener。業務只能查負責訂單，停權或未授權角色不得讀取。已取消訂單仍可查核歷史，但該服務品項狀態為停止履約。畫面顯示服務完成量與上次核實工作分類；既有僅供參考的列表提示可沿用該次回覆。
+
+**明確未完成：**此時不會改寫 `orders.workCategories`，不啟用服務核銷 writer，也不宣稱整張混合訂單可核銷；`billingRecorded` 僅反映訂單現有財務旗標，與服務完成證據分離。仍限 `demo-yushin` Auth／Functions／Firestore Emulator 閘門，正式部署與 Preview 驗收尚未開始。
