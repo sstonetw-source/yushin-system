@@ -1,3 +1,34 @@
+// Service billing keeps the original order visible until the server confirms.
+async function toggleServiceOrderBilling(order,newValue){
+    const key=order.id+':isBilled',pendingSet=pendingOrderStatusKeys;
+    if(pendingSet.has(key))return;
+    const uid=currentUser?.uid,role=currentUserRole,generation=sessionDataGeneration;
+    const current=()=>uid===currentUser?.uid&&role===currentUserRole&&generation===sessionDataGeneration;
+    let confirmed=false;
+    try{
+        const saved=pendingServiceBillingIntent();
+        if(saved&&saved.intent.orderId!==order.id)throw Error('請先確認訂單 '+saved.intent.orderId+' 的前次服務核銷結果。');
+        const intent=saved?.intent||{orderId:order.id,operationId:'service-bill-'+crypto.randomUUID(),
+            isBilled:newValue,expectedIsBilled:order.isBilled===true,
+            billingDate:newValue?(orderBillingDate(order)||localDateString()):''};
+        pendingSet.add(key);renderOrdersList();
+        const committed=await commitServiceBillingIntent(intent);
+        if(!current())return;
+        confirmed=true;
+        const latest=ordersCache.find(o=>o.id===order.id);
+        if(latest)Object.assign(latest,committed.order);
+        pendingSet.delete(key);
+        writeAppDataCache('orders',ordersCache);renderOrdersList();
+        if(currentDeliveryOrderId===order.id){renderDeliveryModal();renderOrderLifecycleModal();}
+    }catch(error){
+        if(current()){
+            pendingSet.delete(key);
+            if(confirmed)alert('服務核銷已確認，畫面更新失敗，請重新載入：'+error.message);
+            else alert('服務核銷尚未確認：'+error.message+' 若回覆不明，請再按原核銷按鈕確認前次結果。');
+        }
+    }finally{if(current())pendingSet.delete(key);}
+}
+
 window.toggleOrderStatus = function(orderId, field, newValue) {
     if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) return;
     if (field !== 'isBilled') {
@@ -6,6 +37,9 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
     }
     const o = ordersCache.find(x => x.id === orderId);
     if (!o || !canEditPage('orders.list')) return;
+    if((o.items||[]).some(item=>String(item?.productType||'').trim().toUpperCase()==='SERVICE')) {
+        return toggleServiceOrderBilling(o,newValue);
+    }
     const pendingKey = `${orderId}:isBilled`;
     if (pendingOrderStatusKeys.has(pendingKey)) return;
     if (normalizedOrderStatus(o) !== 'normal') { alert('已取消的訂單不能更改進度。'); return; }
@@ -54,6 +88,9 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
 window.updateOrderBillingDate = function(orderId, value) {
     const order = ordersCache.find(item => item.id === orderId);
     if (!order || !order.isBilled || !canEditPage('orders.list')) return;
+    if((order.items||[]).some(item=>String(item?.productType||'').trim().toUpperCase()==='SERVICE')) {
+        alert('服務核銷日期修改尚未開放。');renderOrdersList();return;
+    }
     if (!isValidOrderBillingDate(value)) { alert('請選擇正確的核銷日期。'); renderOrdersList(); return; }
     const pendingKey=`${orderId}:billingDate`;
     if(pendingOrderStatusKeys.has(pendingKey))return;

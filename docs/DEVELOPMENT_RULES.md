@@ -1,5 +1,11 @@
 # DEVELOPMENT_RULES — 修改規範與驗收閘門
 
+## 2026-10-23｜原核銷接線與 Client 財務防護（demo 試點，待本批完整 CI）
+
+本批修改需驗證全部角色的 Client create／update／刪除欄位、混合單最後品項、服務快照降級／移除、普通 Goods 30 品項核銷與無關更新相容性，並跑完整 Rules 編譯與既有交易測試確保運算上限。真 Auth 原站沿原四類案例延伸未完工拒絕、全量完成、已提交遺失 HTTP 回覆／刷新／原 ID 重送及撤銷，不替換 handler 或假造 Callable。Node 已 1796/1796；完整 Emulator／雙尺寸 Chrome 以本批結果為準。規則為待驗證原型、未部署，不宣稱安全切換已正式完成。
+
+尚未完成：核銷日期後端、其他 writer 對 workCategories 的維護、混合單商品交付證據、材料耗用與 Preview。此節更新先前「原 UI 未接線」的歷史狀態；PR #234 保持 Draft，未合併 main 或部署 Firebase。
+
 ## 2026-10-23｜純服務後端核銷試點（未正式啟用）
 
 本批為純服務後端核銷試點：服務整單查詢與核銷共用同 transaction reader，不可先查核後在另一交易盲寫核銷。固定操作憑證、過期狀態、跨人／停權重送、未完工與混合單拒絕、末端失敗回滾必須驗證。Callable 與 Service 本身雙重限制 demo-yushin 真 Auth／Firestore Emulator；原 UI／未知回覆恢復、核銷日期後端整合、混合單商品憑證、其他寫入對 workCategories 的維護與 Preview 尚未完成，不宣稱全面核銷可用。PR #234 保持 Draft。

@@ -83,3 +83,11 @@ test('legacy client billing cannot bypass registered service proof for pure or m
     }
   }
 });
+
+test('legacy service billing date cannot write around the server boundary',async()=>{
+  for(const items of [[{productType:'Service'}],[{productType:'Goods'},{productType:' service '}]]){
+    const f=fixture({items,isBilled:true,billingDate:'2026-10-22'});
+    await assert.rejects(f.sandbox.changeOrderBillingDate('O1','2026-10-23',{at:'now'}),/須由後端修改/);
+    assert.equal(f.count(),0);
+  }
+});
