@@ -1132,6 +1132,7 @@ function populatePurchaserOrderFilters() {
 
 
 window.renderOrdersList = function() {
+    window.renderServiceCaseEntry?.();
     const tbody = document.getElementById('ordersBody');
     const searchInput = document.getElementById('orderSearch');
     if (!tbody || !searchInput) return;
@@ -1249,6 +1250,7 @@ window.renderOrdersList = function() {
             <td class="no-print" data-th="操作">
                 ${orderInventorySyncStatusHtml(o)}
                 <div class="order-compact-actions">
+                    ${window.serviceCaseActionHtml?.(o)||''}
                     ${selfOrderActionHtml(o, allOrderItems, dispatchStateByItem)}
                     ${directShipReceiptActionHtml(o, allOrderItems)}
                     

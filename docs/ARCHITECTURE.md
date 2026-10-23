@@ -1,5 +1,11 @@
 # ARCHITECTURE — 又鑫系統程式碼責任地圖
 
+## 2026-10-23 服務案件原畫面接線（已實作，真瀏覽器待本批 CI）
+
+`src/features/orders/service-cases.js` 在原訂單列及頁首提供同一服務視窗；`src/services/service-cases.js` 僅傳送既有 Callable，不寫 Firestore。業務從原訂單開案，倉管／工程師可用訂單編號查詢最小服務資料並接手；讀取授權與可執行動作由原後端 Service 依真實使用者決定。案件數量仍由唯一 Service Work Core 計算，沒有第二個交易 writer。整合分支 `aa0eef6` 完整 CI 已通過。
+
+僅明確 `YUSHIN_SERVICE_CASE_EMULATOR`、本機 demo Auth／Functions gate 啟用；sessionStorage 固定原事件意圖，重送後經原查詢核對事件證據再解除。非同步讀取核對視窗、UID、角色、session generation 及請求代次；resetSessionData 清畫面、保留未確認意圖。來源改動後已重建 app.js。本機 Node 1759/1759；新增 1280／390px 原站真 Auth 四類服務及交接／遺失回覆案例，完整結果以本批最新 head CI 為準。尚未完成訂單服務交付／核銷、耗材領用、混合單與 Preview；未合併 main、未部署 Firebase。
+
 版本：2026-10-16｜以 PR #92 為重整起點，持續依已實作的 Service 邊界更新。**不代表交易核心或資料模型已完成全面驗收。**
 
 ## 目標與現況

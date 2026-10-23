@@ -10,3 +10,7 @@ const {getFirestore}=runtime('firebase-admin/firestore');
 if(!getApps().length)initializeApp();
 module.exports=require(path.join(root,'functions/v2-return-callable-adapter')).createV2ReturnCallables({
  onCall,HttpsError,getDatabase:getFirestore});
+// Use the real, demo-gated service endpoints for original full-site UI acceptance.
+const service=require(path.join(root,'functions/index'));
+module.exports.commitServiceCaseEvent=service.commitServiceCaseEvent;
+module.exports.getServiceCaseStatus=service.getServiceCaseStatus;

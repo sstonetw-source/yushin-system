@@ -12,15 +12,18 @@ function fixture({role='sales',ownerUid='U',kind='BIOPLEX_LAB',productType='SERV
     ['products/P',{active:true,productType:productMasterType,serviceKind:kind}]
   ]);
   const ids=[],written=[];
-  const db={collection:name=>({doc:id=>({path:name+'/'+id}),
-    where:(field,op,value)=>({where:(field2,op2,value2)=>({limit:()=>({query:name,field,value,field2,value2})})})}),
+  const query=(name,filters=[])=>({query:name,filters,
+    where:(field,op,value)=>query(name,[...filters,[field,value]]),limit:()=>query(name,filters)});
+  const db={collection:name=>({...query(name),doc:id=>({path:name+'/'+id})}),
     runTransaction:async callback=>{
       const apply=async()=>{
         const writes=[];
         const tx={
-          get:async ref=>ref.query
-            ? {empty:![...docs].some(([path,row])=>path.startsWith(ref.query+'/')&&row[ref.field]===ref.value&&row[ref.field2]===ref.value2)}
-            : {exists:docs.has(ref.path),data:()=>clone(docs.get(ref.path))},
+          get:async ref=>{
+            if(!ref.query)return {exists:docs.has(ref.path),data:()=>clone(docs.get(ref.path))};
+            const rows=[...docs].filter(([path,row])=>path.startsWith(ref.query+'/')&&ref.filters.every(([key,value])=>row[key]===value));
+            return {empty:!rows.length,size:rows.length,docs:rows.map(([path,row])=>({id:path.split('/')[1],data:()=>clone(row)}))};
+          },
           set:(ref,value)=>writes.push([ref.path,clone(value)])
         };
         const value=await callback(tx);
@@ -289,4 +292,31 @@ test('old pilot history stays readable but new allocation never guesses its miss
 });
 test('index namespace cannot collide with externally supplied case identifiers',()=>{
   assert.notEqual(itemCaseIndexId('O','I'),caseDocId('item-index','O','I|v1'));
+});
+test('item lookup returns bounded cases and server role hints without writes or price fields',async()=>{
+  const f=fixture();f.docs.get('orders/O').orderNo='YS-1';f.docs.get('orders/O').totalPrice=999;
+  const summary=await getServiceCaseStatus(f.db,'U',{orderNo:'YS-1'});
+  assert.equal(summary.orderId,'O');assert.equal(summary.totalPrice,undefined);
+  const empty=await getServiceCaseStatus(f.db,'U',{orderId:'O',itemId:'I'});
+  assert.equal(empty.canStart,true);assert.equal(empty.cases.length,0);assert.equal(f.written.length,0);
+  await commit(f,intent('SAMPLE_RECEIVED'));
+  const sales=await getServiceCaseStatus(f.db,'U',{orderId:'O',itemId:'I'});
+  assert.equal(sales.cases[0].canAdvance,false);
+  f.docs.set('users/U',{role:'engineer',active:true});
+  const engineer=await getServiceCaseStatus(f.db,'U',{orderId:'O',itemId:'I'});
+  assert.equal(engineer.canStart,false);assert.equal(engineer.cases[0].canAdvance,true);
+  f.docs.get('orders/O').orderStatus='cancelled';
+  assert.equal((await getServiceCaseStatus(f.db,'U',{orderId:'O',itemId:'I'})).cases[0].canAdvance,false);
+  assert.equal(f.written.length,2);
+});
+test('order-number service lookup enforces owner, current role and unique references',async()=>{
+  const f=fixture({ownerUid:'Other'});f.docs.get('orders/O').orderNo='YS-1';
+  await assert.rejects(getServiceCaseStatus(f.db,'U',{orderNo:'YS-1'}),/權限/);
+  f.docs.set('users/U',{role:'engineer',active:true});
+  assert.equal((await getServiceCaseStatus(f.db,'U',{orderNo:'YS-1'})).orderId,'O');
+  f.docs.set('orders/duplicate',{...f.docs.get('orders/O')});
+  await assert.rejects(getServiceCaseStatus(f.db,'U',{orderNo:'YS-1'}),/重複/);
+  f.docs.set('users/U',{role:'engineer',active:false});
+  await assert.rejects(getServiceCaseStatus(f.db,'U',{orderNo:'YS-1'}),/權限/);
+  assert.equal(f.written.length,0);
 });
