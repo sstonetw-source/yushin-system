@@ -83,3 +83,16 @@ test('date edit shares the status checkpoint across reload, blocks replacement, 
  for(const patch of [{action:'UNKNOWN'},{expectedBillingDate:'2026-02-30'},{expectedIsBilled:false}])
   assert.throws(()=>next.normalizeServiceBillingIntent({...date,...patch}));
 });
+
+test('unknown date reply re-enables original controls without changing cached financial facts',async()=>{
+ const ui=fs.readFileSync('src/features/orders/order-status.js','utf8').split('window.toggleOrderStatus =')[0];
+ let renders=0;const alerts=[],order={id:'O',isBilled:true,billingDate:'2026-10-23'};
+ const c=vm.createContext({window:{},currentUser:{uid:'U'},currentUserRole:'sales',sessionDataGeneration:1,
+  ordersCache:[order],pendingOrderStatusKeys:new Set(),crypto:{randomUUID:()=> 'a-valid-stable-id'},
+  pendingServiceBillingIntent:()=>null,renderOrdersList:()=>renders++,alert:x=>alerts.push(x),
+  commitServiceBillingIntent:async()=>{throw Error('reply lost');}});
+ vm.runInContext(ui,c);await c.toggleServiceOrderBilling(order,true,'2026-10-24');
+ assert.equal(renders,2);assert.equal(c.pendingOrderStatusKeys.size,0);
+ assert.equal(order.billingDate,'2026-10-23');assert.equal(order.isBilled,true);
+ assert.match(alerts[0],/尚未確認/);
+});

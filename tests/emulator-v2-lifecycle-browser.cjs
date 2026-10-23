@@ -404,6 +404,7 @@ for(const width of [1280,390])test('original service case UI '+width+'px: four k
   const dateEdit=row.locator('input[aria-label="核銷日期"]');assert.equal(await dateEdit.isDisabled(),false);
   billingLose=true;await dateEdit.fill('2026-10-24');
   await page.waitForFunction(()=>!pendingOrderStatusKeys.size&&pendingServiceBillingIntent()?.intent.action==='CHANGE_DATE');
+  assert.equal(await row.getByRole('button',{name:'已核銷',exact:true}).isDisabled(),false);
   const dateFirst=billingCalls.at(-1);assert.equal(dateFirst.expectedIsBilled,true);
   assert.equal((await db.doc('orders/'+orderId).get()).data().billingDate,'2026-10-24');
   const beforeReloadCalls=billingCalls.length;

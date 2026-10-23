@@ -18825,6 +18825,8 @@ async function toggleServiceOrderBilling(order,newValue,dateValue){
     }catch(error){
         if(current()){
             pendingSet.delete(key);
+            // Re-enable the original controls; the transport retains unknown intents.
+            renderOrdersList();
             if(confirmed)alert('服務核銷已確認，畫面更新失敗，請重新載入：'+error.message);
             else alert('服務核銷尚未確認：'+error.message+' 若回覆不明，請再按原核銷按鈕確認前次結果。');
         }
