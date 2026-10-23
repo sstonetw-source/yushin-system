@@ -4,6 +4,13 @@
 
 ## 名詞與公式
 
+### 服務型主檔的四類作業識別（2026-10-23）
+
+產品主檔編輯入口對 `productType='Service'` 強制選取服務子類型 `serviceKind`。選項僅由既有 `YushinServiceWork.STEPS` 的四種權威 Key 產生；服務型主檔儲存時 `inventoryTracked`、`lotTracked`、`expiryTracked` 均為 false，不能因介面留有舊勾選而假裝實體庫存。非服務類型儲存時清空殘留 `serviceKind`，避免使用過期的工作流程。
+
+產品主檔搜尋的原有快取會攜帶 `serviceKind`；由估價單／Forecast／手動建立訂單的表單，只保存這份主檔子類型作為訂單品項快照，重新載入草稿與編輯時保留。Service 交易 writer 仍以交易內的正式產品主檔為唯一判準，拒絕後續主檔與訂單快照不一致；Goods 草稿不繼承舊 Service 類型。\n\n此階段只新增主檔輸入與安全防呆，未對歷史產品批次補分類、未改商品進出貨或正式庫存。已存在但未設定 `serviceKind` 的 Service 主檔仍須人工分類才能開案；不能由訂單自行猜測。服務完工≠訂單履約完成或自動核銷，後續仍需案件數量與受託物關聯及原站 Auth／Preview 驗收。
+
+
 ### Service 案件真實身分傳輸驗收（2026-10-22，demo Emulator gate）
 
 本批只接線同一 `commitServiceCaseEvent` 後端 Service 的 Callable 傳輸，不建立第二套事件 writer；必須在 `demo-yushin`、本機 Auth＋Firestore Emulator 同時存在且 `ENABLE_SERVICE_CASE_EMULATOR=true` 才能呼叫，正式與 Preview 均不可開啟。Client 不能直接讀寫 `serviceCases`；Cloud Functions Admin SDK 在同一 transaction 重讀真實登入角色、來源訂單、權威產品主檔及案件事件，固定 ID 重送不重複追加；服務完成不等於庫存入庫、商品交付或帳務核銷。

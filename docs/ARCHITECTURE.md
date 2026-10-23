@@ -4,6 +4,13 @@
 
 ## 目標與現況
 
+### 服務型產品主檔 UI 的權威分類（2026-10-23）
+
+`src/features/products/product-management.js` 沿用既有主檔視窗，只在選擇 `Service` 時顯示四種服務子類型，來自已載入的 `modules/service-work-core.js` 的 `STEPS` Key，而非新增獨立 Business Core。`serviceKind` 存在原有 `products/{id}`；既有產品查詢經 `productMasterDocToPriceItem` 傳進共用快取，再沿 `normalizeNewOrderItem`／`order-entry-core.copyItem` 保留在估價／Forecast／手動建單的品項快照，但後端仍以即時產品主檔判斷作業類型。不新增 Collection／Index／查詢／Listener。`app.js` 由 `tools/build-app.cjs` 固定的 55 個 `src` 來源依序生成。正式主檔需要管理員／採購角色既有 Rules 授權。
+
+後端 `functions/service-case-service.js` 在同一 Transaction 讀取產品主檔的 `serviceKind`，並拒絕與訂單快照、既存案件類型衝突。主檔可選類型不代表服務操作 UI、受託物保管與訂單完成量串接已上線；PR #234 保留 Draft，Preview 與正式部署未執行。
+
+
 ### Service 案件真實 Auth／後端事件入口（2026-10-22，僅 demo Emulator）
 
 - `modules/service-work-core.js` 是四類 Service 事件順序／保管／必要憑證的唯一純 Core，透過 `tools/build-functions-core.cjs` 產生 `functions/shared/service-work-core.js`。
