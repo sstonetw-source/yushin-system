@@ -400,7 +400,9 @@ for(const width of [1280,390])test('original service case UI '+width+'px: four k
   let billed=(await db.doc('orders/'+orderId).get()).data();
   assert.equal(billed.statusHistory.filter(e=>e.field==='isBilled').length,1);
   assert.deepEqual(billed.workCategories,['complete']);
-  // Original date input, same Callable and recovery checkpoint; no new writer.
+  // The original date editor is inside a collapsed details panel. Open it as a user would.
+  // Date correction still uses the same Callable and recovery checkpoint; no new writer.
+  await row.locator('details.order-detail-panel > summary').click();
   const dateEdit=row.locator('input[aria-label="核銷日期"]');assert.equal(await dateEdit.isDisabled(),false);
   billingLose=true;await dateEdit.fill('2026-10-24');
   await page.waitForFunction(()=>!pendingOrderStatusKeys.size&&pendingServiceBillingIntent()?.intent.action==='CHANGE_DATE');
