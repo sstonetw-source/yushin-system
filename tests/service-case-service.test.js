@@ -114,6 +114,9 @@ test('Service work index initializes missing status without altering Goods or gu
     order.items.push(sibling==='GOODS'
       ?{itemId:'G',productId:'PG',productType:'GOODS',qty:2}
       :{itemId:'J',productId:'PJ',productType:'SERVICE',serviceKind:'ONSITE_REPAIR',qty:2});
+    if(sibling==='SERVICE')f.docs.set('products/PJ',{
+      active:true,productType:'SERVICE',serviceKind:'ONSITE_REPAIR'
+    });
     await commit(f,intent('REPAIR_COMPLETED',0,{workSummary:'完成第一項'}));
     assert.deepEqual(order.workCategories,sibling==='GOODS'?['delivery','ordering']:['billing','delivery']);
     assert.deepEqual(f.orderWrites,sibling==='GOODS'?[]:['orders/O']);
