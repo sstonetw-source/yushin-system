@@ -473,3 +473,10 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 **已寫但尚未接線：** `functions/service-case-service.js` 在單一 Admin SDK transaction 讀取授權帳號、來源訂單、Service 主檔及案件，僅對預定的 `serviceCases/{encode(orderId)|encode(itemId)|encode(caseId)}` 寫入事件與衍生狀態；固定 ID 重試保護、真角色與所有權查核；`occurredAt` 是實際作業時間，`createdAt/updatedAt` 是伺服器寫入時間。只有未匯出的寫入函式，**尚未建立正式可用的 Cloud Functions 入口，也未開放 Rules 讀取或部署**，所以此 Collection 不是目前正式 Firestore 中已存在的集合。
 
 **仍未完成／驗收：** 服務類型主檔 UI、Role + Auth Callable 真 Emulator、案件與訂單品項完成量關係、個別案件的委外費用與物料領用關聯、客戶交付／核銷整合及 Preview。
+
+
+### 2026-10-23｜服務案件的原產品綁定（demo Emulator）
+
+新案件由唯一 `commitServiceCaseEvent` 在交易內保存 `productId`，後續寫入、同事件重送與 `getServiceCaseStatus` 均核對來源訂單品項的產品識別及服務類型；相同 itemId 換成另一個服務產品也不得接續或套用原歷程。未保存 productId 的既有試點案件明確拒絕，不從目前品項猜測補綁、不遷移正式資料。歷史查詢仍驗證當前登入權限與來源品項，保留取消後唯讀；產品主檔停用、刪除或分類變更不抹除已綁定的歷史保管證據，新增事件仍需有效主檔。
+
+不增加 Collection、索引、Listener、查詢或資料庫讀取；唯一既有案件文件增加 productId。案件數與訂單數量、原頁面操作、客戶交付與核銷及 Preview 仍待完成，PR #234 維持 Draft，正式功能未啟用。

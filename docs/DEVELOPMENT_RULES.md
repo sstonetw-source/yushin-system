@@ -373,3 +373,10 @@ receiveV2CustomerReturnEmulator 僅在明確 YUSHIN_V2_RETURN_RECEIPT_EMULATOR �
 
 不可僅移除登入試點的歷史事件限制就當驗收完成。須跑真 Auth→原 Receiving Service→Emulator，驗證履約後續收、同 ID 並行重送、不同 ID 競爭餘量、真角色停用，以及原出貨 proof、退貨 proof／快取與來源投影損壞時零寫入。整站須沿原倉管收貨表單，最後一批成功回覆遺失後刷新、用原工作重試，不換 operationId。
 僅 demo-yushin 隔離試點；未部署 Firebase，Preview／正式尚未驗收。
+
+
+### 2026-10-23｜服務案件的原產品綁定（demo Emulator）
+
+新案件由唯一 `commitServiceCaseEvent` 在交易內保存 `productId`，後續寫入、同事件重送與 `getServiceCaseStatus` 均核對來源訂單品項的產品識別及服務類型；相同 itemId 換成另一個服務產品也不得接續或套用原歷程。未保存 productId 的既有試點案件明確拒絕，不從目前品項猜測補綁、不遷移正式資料。歷史查詢仍驗證當前登入權限與來源品項，保留取消後唯讀；產品主檔停用、刪除或分類變更不抹除已綁定的歷史保管證據，新增事件仍需有效主檔。
+
+不增加 Collection、索引、Listener、查詢或資料庫讀取；唯一既有案件文件增加 productId。案件數與訂單數量、原頁面操作、客戶交付與核銷及 Preview 仍待完成，PR #234 維持 Draft，正式功能未啟用。

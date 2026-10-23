@@ -196,7 +196,7 @@ test('case status lookup does not trust corrupt storage snapshots',async()=>{
   const f=fixture();
   const locator={orderId:'O',itemId:'I',caseId:'case1'};
   f.docs.set('serviceCases/'+caseDocId('O','I','case1'),{
-    orderId:'O',itemId:'OTHER',caseId:'case1',kind:'BIOPLEX_LAB',events:[]
+    orderId:'O',itemId:'OTHER',caseId:'case1',productId:'P',kind:'BIOPLEX_LAB',events:[]
   });
   await assert.rejects(getServiceCaseStatus(f.db,'U',locator),/不一致/);
   f.docs.get('serviceCases/'+caseDocId('O','I','case1')).itemId='I';
@@ -205,4 +205,36 @@ test('case status lookup does not trust corrupt storage snapshots',async()=>{
   ];
   await assert.rejects(getServiceCaseStatus(f.db,'U',locator),/順序/);
   assert.equal(f.written.length,0);
+});
+
+test('case product binding rejects replacement products on reads, continuation and replay',async()=>{
+  const f=fixture();
+  const first=intent('SAMPLE_RECEIVED');
+  const locator={orderId:'O',itemId:'I',caseId:'case1'};
+  await commit(f,first);
+  const key='serviceCases/'+caseDocId('O','I','case1');
+  assert.equal(f.docs.get(key).productId,'P');
+  const original=structuredClone(f.docs.get(key));
+  f.docs.set('products/Q',{active:true,productType:'SERVICE',serviceKind:'BIOPLEX_LAB'});
+  f.docs.get('orders/O').items[0].productId='Q';
+  await assert.rejects(getServiceCaseStatus(f.db,'U',locator),/原產品識別/);
+  await assert.rejects(commit(f,first),/原產品識別/);
+  f.docs.set('users/U',{role:'engineer',active:true});
+  await assert.rejects(commit(f,intent('EXPERIMENT_COMPLETED',1)),/原產品識別/);
+  assert.deepEqual(f.docs.get(key),original);
+  assert.equal(f.written.length,1);
+});
+
+test('historical custody survives inactive master but rejects unbound cases and changed item workflow',async()=>{
+  const f=fixture(),locator={orderId:'O',itemId:'I',caseId:'case1'};
+  await commit(f,intent('SAMPLE_RECEIVED'));
+  f.docs.delete('products/P'); // audit history is not controlled by the live catalogue
+  f.docs.get('orders/O').orderStatus='cancelled';
+  assert.equal((await getServiceCaseStatus(f.db,'U',locator)).custody,'IN_HOUSE');
+  f.docs.get('orders/O').items[0].serviceKind='ONSITE_REPAIR';
+  await assert.rejects(getServiceCaseStatus(f.db,'U',locator),/類型不一致/);
+  f.docs.get('orders/O').items[0].serviceKind='BIOPLEX_LAB';
+  delete f.docs.get('serviceCases/'+caseDocId('O','I','case1')).productId;
+  await assert.rejects(getServiceCaseStatus(f.db,'U',locator),/尚未綁定/);
+  assert.equal(f.written.length,1);
 });
