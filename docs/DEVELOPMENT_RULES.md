@@ -380,3 +380,14 @@ receiveV2CustomerReturnEmulator 僅在明確 YUSHIN_V2_RETURN_RECEIPT_EMULATOR �
 新案件由唯一 `commitServiceCaseEvent` 在交易內保存 `productId`，後續寫入、同事件重送與 `getServiceCaseStatus` 均核對來源訂單品項的產品識別及服務類型；相同 itemId 換成另一個服務產品也不得接續或套用原歷程。未保存 productId 的既有試點案件明確拒絕，不從目前品項猜測補綁、不遷移正式資料。歷史查詢仍驗證當前登入權限與來源品項，保留取消後唯讀；產品主檔停用、刪除或分類變更不抹除已綁定的歷史保管證據，新增事件仍需有效主檔。
 
 不增加 Collection、索引、Listener、查詢或資料庫讀取；唯一既有案件文件增加 productId。案件數與訂單數量、原頁面操作、客戶交付與核銷及 Preview 仍待完成，PR #234 維持 Draft，正式功能未啟用。
+
+
+### 2026-10-23｜服務案件與訂單數量對應（demo Emulator，尚未正式啟用）
+
+已實作：原 `commitServiceCaseEvent` 要求明確正數 `serviceQty`，代表案件對應的商務訂購量，不從檢體件數、試劑盒數或器材數自行推算。首次事件固定數量，接續與重送不得改量；來源 item 的 `orderedQty ?? qty` 是上限。`YushinServiceWork.projectServiceItem` 是唯一案件量投影，從已註冊案件及事件計算 allocatedQty、completedQty、unassignedQty、inProgressQty、remainingQty；不保存另一份完成量快取，不更新商品 deliveredQty、庫存、採購或核銷。浮點比較只容許相對機器精度誤差，不以固定容差放行極小數量的超額。
+
+同一 `serviceCases` 集合新增每品項一份 `ITEM_CASE_INDEX` 文件，固定 ID 為四段 `item-index|encode(orderId)|encode(itemId)|v1`，和原三段案件 ID 不衝突。文件只保存來源 orderId／itemId／productId／kind 與 caseIds，不保存數量。唯一 writer 同交易讀索引及全部已註冊案件，首次事件原子寫索引與案件；共同索引讓並行不同 caseId 競爭餘量也會重新驗證。每品項最多 100 案，超過明確拒絕，不截斷當作全部。平常不新增 Query／Listener／Collection／複合索引；首次缺索引額外查相同 orderId＋itemId 至多一案，發現舊案件即拒絕自動補綁，不把既存保管紀錄當成零數量。
+
+新案首次交易多讀一份索引並寫入它，後續事件及已綁定查詢最多再讀 100 份已註冊案件；這是有界的權威核對成本。歷史查詢回傳 serviceQty 與 itemProgress；未綁數量的舊試點案件仍可依原授權唯讀，itemProgress=null，不推定完成量。索引失聯、來源不符、缺少案件或訂單縮量小於已綁量均拒絕，不自動刪索引或釋放額度。Client 對該集合原有全面拒絕 Rules 不變，Callable 仍限 demo-yushin Emulator。
+
+本機完整 Node 1751/1751 通過，零失敗／略過；建置一致性及 diff 通過。新增真 Auth／Callable 的不同案件搶最後餘量、同案並行重送、分批完成、改量／縮單／索引損壞零寫入與 Client 索引讀寫拒絕驗收，結果須以本批最新 head 完整 CI 為準。尚未完成：原 UI 開案與數量輸入、既有主檔分類、服務交付／核銷、混合單與 Preview 完整驗收。PR #234 仍為整合 Draft，未合併 main、未部署 Firebase、未操作正式資料。

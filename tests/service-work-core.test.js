@@ -109,3 +109,26 @@ test('service timestamps reject impossible calendar dates rather than normalizin
     ...event('leap','SAMPLE_RECEIVED'),occurredAt:'2028-02-29T08:00:00+08:00'
   }).occurredAt,'2028-02-29T08:00:00+08:00');
 });
+
+test('commercial service quantity projects partial work without using specimen counts or stock',()=>{
+  const item={itemId:'S',productId:'P',productType:'SERVICE',serviceKind:'BIOPLEX_LAB',qty:3};
+  let done={...base('BIOPLEX_LAB','A'),productId:'P',serviceQty:2};
+  for(const step of scenarios[0].steps)done=core.applyServiceEvent(done,step).record;
+  const pending={...base('BIOPLEX_LAB','B'),productId:'P',serviceQty:1};
+  assert.deepEqual(core.projectServiceItem(item,[done,pending]),{
+    orderedQty:3,allocatedQty:3,completedQty:2,unassignedQty:0,inProgressQty:1,remainingQty:1,caseCount:2
+  });
+  assert.throws(()=>core.projectServiceItem({...item,qty:2},[done,pending]),/超過訂單數量/);
+  assert.throws(()=>core.projectServiceItem(item,[done,done]),/重複/);
+  assert.throws(()=>core.projectServiceItem(item,[{...done,productId:'Q'}]),/來源/);
+});
+test('service quantity validates numbers, fractional totals and sub-nanounit over-allocation',()=>{
+  for(const value of [undefined,null,true,'1',0,-1,NaN,Infinity,Number.MAX_VALUE])
+    assert.throws(()=>core.serviceQuantity(value),/有效的正數/);
+  const item={itemId:'S',productId:'P',productType:'SERVICE',qty:0.3};
+  const record=qty=>({...base('BIOPLEX_LAB'),productId:'P',serviceQty:qty});
+  assert.equal(core.projectServiceItem(item,[record(0.1),{...record(0.2),caseId:'D'}]).unassignedQty,0);
+  assert.throws(()=>core.projectServiceItem({...item,qty:1e-12},[record(2e-12)]),/超過/);
+  assert.throws(()=>core.projectServiceItem({...item,qty:1e15},[record(1e15+0.5)]),/超過/);
+  assert.throws(()=>core.projectServiceItem(item,Array(core.MAX_ITEM_CASES+1).fill(record(1))),/上限/);
+});

@@ -6,7 +6,7 @@
   'use strict';
 
   // One case represents one piece of customer equipment, sample, or service job.
-  // A sales line can be linked to multiple cases: quantity is not inferred here.
+  // serviceQty is commercial order quantity, never inferred from specimen count.
   // Materials and outside-vendor bills use their own purchasing/stock ledgers.
   const STEPS=Object.freeze({
     BIOPLEX_LAB:Object.freeze(['SAMPLE_RECEIVED','EXPERIMENT_COMPLETED','REPORT_SENT']),
@@ -116,5 +116,38 @@
     const projection=projectServiceCase({...record,events:[...state.events,event]});
     return {status:'committed',record:{...record,events:projection.events},projection};
   }
-  return {STEPS,normalizedEvent,projectServiceCase,applyServiceEvent};
+  const MAX_ITEM_CASES=100;
+  function serviceQuantity(value){
+    if(typeof value!=='number'||!Number.isFinite(value)||value<=0||value>Number.MAX_SAFE_INTEGER)
+      fault('服務對應數量必須是有效的正數。');
+    return value;
+  }
+  function projectServiceItem(item,records){
+    if(!item||String(item.productType||'').trim().toUpperCase()!=='SERVICE')
+      fault('服務數量必須來自 Service 訂單品項。');
+    const orderedQty=serviceQuantity(item.orderedQty??item.qty);
+    if(!Array.isArray(records)||records.length>MAX_ITEM_CASES)fault('服務品項案件數超過處理上限。');
+    const ids=new Set();let allocatedQty=0,completedQty=0;
+    for(const record of records){
+      const state=projectServiceCase(record);
+      if(record.itemId!==item.itemId||record.productId!==item.productId
+        ||(item.serviceKind&&record.kind!==String(item.serviceKind).trim().toUpperCase())
+        ||ids.has(record.caseId))fault('服務數量的案件來源不一致或重複。');
+      ids.add(record.caseId);
+      const qty=serviceQuantity(record.serviceQty);
+      allocatedQty+=qty;if(state.completed)completedQty+=qty;
+    }
+    // Permit only floating-point representation noise, including tiny quantities.
+    const tolerance=Math.min(1e-9,Number.EPSILON*Math.max(orderedQty,allocatedQty)*8);
+    if(!Number.isFinite(allocatedQty)||allocatedQty-orderedQty>tolerance)
+      fault('服務案件對應數量超過訂單數量。');
+    if(allocatedQty>orderedQty)allocatedQty=orderedQty;
+    if(completedQty>allocatedQty)completedQty=allocatedQty;
+    return {orderedQty,allocatedQty,completedQty,
+      unassignedQty:Math.max(0,orderedQty-allocatedQty),
+      inProgressQty:Math.max(0,allocatedQty-completedQty),
+      remainingQty:Math.max(0,orderedQty-completedQty),caseCount:records.length};
+  }
+  return {STEPS,MAX_ITEM_CASES,serviceQuantity,projectServiceItem,
+    normalizedEvent,projectServiceCase,applyServiceEvent};
 });

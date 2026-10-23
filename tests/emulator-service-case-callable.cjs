@@ -8,7 +8,7 @@ const {initializeApp,deleteApp}=require('firebase/app');
 const {getAuth,connectAuthEmulator,signInWithEmailAndPassword}=require('firebase/auth');
 const {getFunctions,connectFunctionsEmulator,httpsCallable}=require('firebase/functions');
 const {getFirestore:clientDb,connectFirestoreEmulator,doc,getDoc,setDoc}=require('firebase/firestore');
-const {caseDocId}=require('../functions/service-case-service');
+const {caseDocId,itemCaseIndexId}=require('../functions/service-case-service');
 const project='demo-yushin',clients=[];let server,db,accounts;
 test.before(()=>{
  for(const name of ['FIRESTORE_EMULATOR_HOST','FIREBASE_AUTH_EMULATOR_HOST'])
@@ -49,7 +49,7 @@ async function fixture(tag,kind){
    inventoryReservationStatus:'completed',items:[{itemId,productId,productType:'Service',
      serviceKind:kind,qty:1}]});
  await batch.commit();
- const intent=(type,index=0,details={},cid=caseId)=>({orderId,itemId,caseId:cid,
+ const intent=(type,index=0,details={},cid=caseId)=>({orderId,itemId,caseId:cid,serviceQty:1,
    event:{id:'event-'+index,type,occurredAt:new Date(Date.UTC(2026,9,22,9,index)).toISOString(),
      ...details}});
  const record=async()=> (await db.doc('serviceCases/'+caseDocId(orderId,itemId,caseId)).get()).data();
@@ -195,4 +195,56 @@ test('real Callable keeps original product binding across replacement and replay
  await orderRef.update({items:order.items,orderStatus:'cancelled'});
  await db.doc('products/'+f.productId).delete();
  assert.equal((await read()).data.custody,'IN_HOUSE');
+});
+
+test('real Auth concurrent case creation serializes the last service quantity and replays once',async()=>{
+ const sameCase=await fixture('quantity-same','BIOPLEX_LAB');
+ const sameIntent=sameCase.intent('SAMPLE_RECEIVED');
+ const firstPair=await Promise.all([sameCase.sales.call(sameIntent),sameCase.sales.call(sameIntent)]);
+ assert.deepEqual(firstPair.map(r=>r.status).sort(),['already-applied','committed']);
+ assert.equal((await sameCase.record()).events.length,1);
+ const f=await fixture('quantity-race','BIOPLEX_LAB');
+ const a=f.intent('SAMPLE_RECEIVED',0,{},'race-A');
+ const b=f.intent('SAMPLE_RECEIVED',0,{},'race-B');
+ const race=await Promise.allSettled([f.sales.call(a),f.sales.call(b)]);
+ assert.equal(race.filter(r=>r.status==='fulfilled').length,1);
+ assert.equal(race.filter(r=>r.status==='rejected'&&r.reason.code==='functions/failed-precondition').length,1);
+ const winner=race[0].status==='fulfilled'?a:b;
+ const key=db.doc('serviceCases/'+itemCaseIndexId(f.orderId,f.itemId));
+ const index=(await key.get()).data();
+ assert.deepEqual(index.caseIds,[winner.caseId]);
+ const same=await Promise.all([f.sales.call(winner),f.sales.call(winner)]);
+ assert.ok(same.every(r=>r.status==='already-applied'));
+ await assert.rejects(f.sales.call({...winner,serviceQty:0.5}),e=>e.code==='functions/failed-precondition');
+ const row=(await db.doc('serviceCases/'+caseDocId(f.orderId,f.itemId,winner.caseId)).get()).data();
+ assert.equal(row.events.length,1);assert.equal(row.serviceQty,1);
+ await assert.rejects(getDoc(doc(f.sales.firestore,'serviceCases',key.id)),e=>e.code==='permission-denied');
+ await assert.rejects(setDoc(doc(f.sales.firestore,'serviceCases',key.id),{caseIds:[]}),e=>e.code==='permission-denied');
+});
+test('real Callable returns partial item completion and refuses reduced or corrupt allocations atomically',async()=>{
+ const f=await fixture('quantity-partial','BIOPLEX_LAB');
+ const orderRef=db.doc('orders/'+f.orderId),order=(await orderRef.get()).data();
+ await orderRef.update({items:order.items.map(item=>({...item,qty:3}))});
+ const first={...f.intent('SAMPLE_RECEIVED'),serviceQty:2};
+ await f.sales.call(first);
+ const second=f.intent('SAMPLE_RECEIVED',0,{},'second');
+ await f.sales.call(second);
+ await f.engineer.call({...f.intent('EXPERIMENT_COMPLETED',1),serviceQty:2});
+ const report={...f.intent('REPORT_SENT',2,{reportRef:'report/partial'}),serviceQty:2};
+ const done=await f.engineer.call(report);
+ assert.equal(done.itemProgress.completedQty,2);assert.equal(done.itemProgress.remainingQty,1);
+ const locate={orderId:f.orderId,itemId:f.itemId,caseId:f.caseId};
+ const read=()=>httpsCallable(getFunctions(f.sales.app,'asia-east1'),'getServiceCaseStatus')(locate).then(r=>r.data);
+ assert.equal((await read()).itemProgress.inProgressQty,1);
+ const original=await f.record();
+ await orderRef.update({items:order.items.map(item=>({...item,qty:2}))});
+ await assert.rejects(f.engineer.call(report),e=>e.code==='functions/failed-precondition');
+ assert.deepEqual(await f.record(),original);
+ await orderRef.update({items:order.items.map(item=>({...item,qty:3}))});
+ const linked=db.doc('serviceCases/'+caseDocId(f.orderId,f.itemId,'second'));
+ await linked.delete(); // deliberate isolated fixture corruption
+ await assert.rejects(read(),e=>e.code==='functions/failed-precondition');
+ await assert.rejects(f.engineer.call(report),e=>e.code==='functions/failed-precondition');
+ assert.deepEqual(await f.record(),original);
+ assert.equal((await orderRef.get()).data().isDelivered,undefined);
 });
