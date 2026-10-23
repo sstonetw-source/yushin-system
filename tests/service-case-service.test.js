@@ -3,7 +3,7 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const {commitServiceCaseEvent,getServiceCaseStatus,getServiceOrderProgress,caseDocId,itemCaseIndexId}=require('../functions/service-case-service.js');
 
 function fixture({role='sales',ownerUid='U',kind='BIOPLEX_LAB',productType='SERVICE',
-  productMasterType='SERVICE',orderStatus='normal',initialized=true,disabled=false,retry=false}={}){
+  productMasterType='SERVICE',orderStatus='normal',initialized=true,disabled=false,retry=false,rejectOrderUpdate=false}={}){
   const clone=x=>x===undefined?undefined:structuredClone(x);
   const docs=new Map([
     ['users/U',{role,active:!disabled,disabled}],
@@ -11,7 +11,7 @@ function fixture({role='sales',ownerUid='U',kind='BIOPLEX_LAB',productType='SERV
       items:[{itemId:'I',productId:'P',productType,serviceKind:kind,qty:1}]}],
     ['products/P',{active:true,productType:productMasterType,serviceKind:kind}]
   ]);
-  const ids=[],written=[];
+  const ids=[],written=[],orderWrites=[];
   const query=(name,filters=[])=>({query:name,filters,
     where:(field,op,value)=>query(name,[...filters,[field,value]]),limit:()=>query(name,filters)});
   const db={collection:name=>({...query(name),doc:id=>({path:name+'/'+id})}),
@@ -24,18 +24,29 @@ function fixture({role='sales',ownerUid='U',kind='BIOPLEX_LAB',productType='SERV
             const rows=[...docs].filter(([path,row])=>path.startsWith(ref.query+'/')&&ref.filters.every(([key,value])=>row[key]===value));
             return {empty:!rows.length,size:rows.length,docs:rows.map(([path,row])=>({id:path.split('/')[1],data:()=>clone(row)}))};
           },
-          set:(ref,value)=>writes.push([ref.path,clone(value)])
+          set:(ref,value)=>writes.push([ref.path,clone(value),'set']),
+          update:(ref,value)=>{
+            if(rejectOrderUpdate&&ref.path.startsWith('orders/'))throw Error('simulated order index write failure');
+            writes.push([ref.path,clone(value),'update']);
+          }
         };
         const value=await callback(tx);
         return {value,writes};
       };
       if(retry)await apply(); // Firestore may re-run this callback before commit.
       const {value,writes}=await apply();
-      for(const [path,value] of writes){docs.set(path,value);written.push(path);}
+      for(const [path,value,method] of writes){
+        if(method==='update'){
+          if(!docs.has(path))throw Error('Cannot update missing document');
+          Object.assign(docs.get(path),value);
+        }else docs.set(path,value);
+        if(path.startsWith('serviceCases/'))written.push(path);
+        else orderWrites.push(path);
+      }
       return value;
     }
   };
-  return {db,docs,written,ids};
+  return {db,docs,written,orderWrites,ids};
 }
 const now=i=>new Date(Date.UTC(2026,9,22,9,i)).toISOString();
 const intent=(type,i=0,extra={},caseId='case1')=>({orderId:'O',itemId:'I',caseId,serviceQty:1,
@@ -67,6 +78,57 @@ test('engineer closes Bio-Plex only after sample receipt and actual report evide
   assert.equal(f.written.length,4);
   assert.equal(f.docs.get('orders/O').isDelivered,undefined);
   assert.equal(f.docs.get('orders/O').isBilled,undefined);
+});
+test('single-line Service index advances from real completion evidence in the same transaction',async()=>{
+  const f=fixture({role:'engineer',kind:'ONSITE_REPAIR'});
+  const order=f.docs.get('orders/O');
+  order.workCategories=['delivery'];
+  const done=intent('REPAIR_COMPLETED',0,{workSummary:'完工證明'});
+  const first=await commit(f,done);
+  assert.equal(first.status,'committed');
+  assert.equal(first.itemWorkCategory,'billing');
+  assert.deepEqual(order.workCategories,['billing']);
+  assert.ok(/^2026-|^20/.test(order.workCategoryUpdatedAt));
+  assert.deepEqual(f.orderWrites,['orders/O']);
+  assert.equal(f.written.length,2);
+  const previousIndexTime=order.workCategoryUpdatedAt;
+  const retry=await commit(f,done);
+  assert.equal(retry.status,'already-applied');
+  assert.equal(order.workCategoryUpdatedAt,previousIndexTime);
+  assert.deepEqual(f.orderWrites,['orders/O']);
+  assert.equal(f.written.length,2);
+  assert.equal(order.items[0].deliveredQty,undefined);
+  assert.equal(order.isBilled,undefined);
+});
+test('Service work index initializes missing status without altering Goods or guessing other Service lines',async()=>{
+  const missing=fixture();
+  const first=await commit(missing,intent('SAMPLE_RECEIVED'));
+  assert.equal(first.itemWorkCategory,'delivery');
+  assert.deepEqual(missing.docs.get('orders/O').workCategories,['delivery']);
+  assert.deepEqual(missing.orderWrites,['orders/O']);
+
+  for(const sibling of ['GOODS','SERVICE']){
+    const f=fixture({role:'engineer',kind:'ONSITE_REPAIR'});
+    const order=f.docs.get('orders/O');
+    order.workCategories=['delivery','ordering'];
+    order.items.push(sibling==='GOODS'
+      ?{itemId:'G',productId:'PG',productType:'GOODS',qty:2}
+      :{itemId:'J',productId:'PJ',productType:'SERVICE',serviceKind:'ONSITE_REPAIR',qty:2});
+    await commit(f,intent('REPAIR_COMPLETED',0,{workSummary:'完成第一項'}));
+    assert.deepEqual(order.workCategories,['delivery','ordering']);
+    assert.deepEqual(f.orderWrites,[]);
+    assert.equal(f.written.length,2);
+  }
+});
+test('failure updating the single-line work index aborts Service case and case-index writes',async()=>{
+  const f=fixture({role:'engineer',kind:'ONSITE_REPAIR',rejectOrderUpdate:true});
+  f.docs.get('orders/O').workCategories=['delivery'];
+  await assert.rejects(commit(f,intent('REPAIR_COMPLETED',0,{workSummary:'已完成'})),/simulated order index write failure/);
+  assert.equal(f.docs.has('serviceCases/'+caseDocId('O','I','case1')),false);
+  assert.equal(f.docs.has('serviceCases/'+itemCaseIndexId('O','I')),false);
+  assert.deepEqual(f.docs.get('orders/O').workCategories,['delivery']);
+  assert.deepEqual(f.written,[]);
+  assert.deepEqual(f.orderWrites,[]);
 });
 test('service workflow reads use registered events and the live billing and lifecycle state, with no order writes',async()=>{
   const f=fixture({role:'admin',kind:'ONSITE_REPAIR'}),order=f.docs.get('orders/O');
