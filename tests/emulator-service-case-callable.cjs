@@ -306,3 +306,41 @@ test('real Auth whole-order progress is verified from service events without Goo
  await assert.rejects(summary(f.sales),e=>e.code==='functions/permission-denied');
  assert.equal((await db.doc('orders/'+f.orderId).get()).data().workCategories,undefined);
 });
+
+test('real Auth pure-Service billing verifies events, rejects mixed/foreign actors and atomically retries',async()=>{
+ const f=await fixture('billing','ONSITE_REPAIR');
+ const billing=(who,payload)=>httpsCallable(getFunctions(who.app,'asia-east1'),'commitServiceOrderBilling',{timeout:30000})(payload).then(r=>r.data);
+ const intent={orderId:f.orderId,operationId:'service-billing-auth-001',expectedIsBilled:false,isBilled:true,billingDate:'2026-10-23'};
+ const ref=db.doc('orders/'+f.orderId);
+ await assert.rejects(billing(f.sales,intent),e=>e.code==='functions/failed-precondition');
+ assert.equal((await ref.get()).data().isBilled,undefined);
+ await f.engineer.call(f.intent('REPAIR_COMPLETED',0,{workSummary:'更換開關'}));
+ for(const who of [f.warehouse,f.other,f.engineer])
+  await assert.rejects(billing(who,intent),e=>e.code==='functions/permission-denied');
+ const same=await Promise.all([billing(f.sales,intent),billing(f.sales,intent)]);
+ assert.deepEqual(same.map(r=>r.status).sort(),['already-applied','committed']);
+ let order=(await ref.get()).data();
+ assert.equal(order.isBilled,true);assert.equal(order.billingDate,'2026-10-23');
+ assert.deepEqual(order.workCategories,['complete']);assert.equal(order.statusHistory.length,1);
+ assert.equal(order.statusHistory[0].by,f.sales.uid);assert.equal(order.isDelivered,undefined);
+ assert.equal(order.items[0].deliveredQty,undefined);
+ await assert.rejects(billing(f.sales,{...intent,billingDate:'2026-10-24'}),e=>e.code==='functions/already-exists');
+ const undo={...intent,operationId:'service-billing-auth-002',isBilled:false,billingDate:'',expectedIsBilled:true};
+ const competing=await Promise.allSettled([billing(f.sales,undo),billing(f.sales,{...undo,operationId:'service-billing-auth-003'})]);
+ assert.equal(competing.filter(r=>r.status==='fulfilled').length,1);
+ assert.equal(competing.filter(r=>r.status==='rejected')[0].reason.code,'functions/failed-precondition');
+ assert.equal((await billing(f.sales,intent)).status,'already-applied');
+ order=(await ref.get()).data();assert.equal(order.isBilled,false);assert.equal(order.statusHistory.length,2);
+ assert.deepEqual(order.workCategories,['billing']);
+ // Current role is rechecked before returning any old receipt.
+ await db.doc('users/'+f.sales.uid).update({disabled:true});
+ await assert.rejects(billing(f.sales,intent),e=>e.code==='functions/permission-denied');
+ await db.doc('users/'+f.sales.uid).update({disabled:false});
+ await ref.update({items:[...order.items,{itemId:'G',productId:'GOODS',productType:'Goods',qty:1,deliveredQty:1}]});
+ await assert.rejects(billing(f.sales,{...intent,operationId:'service-billing-auth-004'}),e=>e.code==='functions/failed-precondition');
+ assert.equal((await ref.get()).data().isBilled,false);
+ const receiptId=['billing-operation',f.orderId,intent.operationId,'v1'].map(encodeURIComponent).join('|');
+ await assert.rejects(getDoc(doc(f.sales.firestore,'serviceCases',receiptId)),e=>e.code==='permission-denied');
+ await assert.rejects(setDoc(doc(f.sales.firestore,'serviceCases',receiptId),{isBilled:true}),e=>e.code==='permission-denied');
+ assert.equal((await db.collection('inventoryMovements').where('sourceId','==',f.orderId).get()).size,0);
+});

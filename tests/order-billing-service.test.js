@@ -73,3 +73,13 @@ test('invalid dates never write or trigger transactions',async()=>{
   }
   assert.equal(called,0);
 });
+
+test('legacy client billing cannot bypass registered service proof for pure or mixed orders',async()=>{
+  for(const items of [[{productType:'Service'}],[{productType:'Goods'},{productType:'SERVICE'}]]){
+    for(const isBilled of [true,false]){
+      const f=fixture({items,isBilled:!isBilled});
+      await assert.rejects(f.sandbox.setOrderBillingStatus('O1',isBilled,'2026-10-23',{},'now'),/後端核對完工憑證/);
+      assert.equal(f.count(),0);
+    }
+  }
+});

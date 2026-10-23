@@ -1,5 +1,10 @@
 # ARCHITECTURE — 又鑫系統程式碼責任地圖
 
+## 2026-10-23｜純服務後端核銷試點（未正式啟用）
+
+純服務核銷試點由 `commitServiceOrderBilling` 負責，同一 transaction 呼叫從既有整單查詢抽出的 `readServiceOrderProgress`；共同 `Workflow.projectItem`／註冊案件仍是唯一完成量及工作分類來源。角色限 admin 或本人 sales／engineer，重新讀取 users、orders、索引、產品與案件，核銷只在全數服務完成及商務文件齊備時可提交。混合單拒絕，不以商品快取當交付憑證。原 Client `setOrderBillingStatus` 對含 Service 品項明確拒絕，尚未將原 UI 接到新後端。
+
+
 ## 2026-10-23 服務查詢與操作資格一致性
 
 已實作：`service-case-service.js` 的 writer 與品項查詢共用 `activeServiceMasterKind`。查詢從既有完整案件索引投影歷程，另以即時主檔決定是否可新增／接續；不以畫面操作提示取代提交時的交易驗證。原訂單列表索引與核銷 writer 整合仍未完成。

@@ -328,6 +328,12 @@ async function getServiceOrderProgress(db,actorUid,input){
     const order=orderSnap.data();
     if(profile.role==='sales'&&order.ownerUid!==actorUid)
       fail('只有訂單負責業務有權限查看服務案件。','permission-denied');
+    return readServiceOrderProgress(db,tx,orderId,order);
+  });
+}
+
+// Shared transaction reader: callers supply an already-authorized live order.
+async function readServiceOrderProgress(db,tx,orderId,order){
     const all=order.items;
     if(!Array.isArray(all)||all.length<1||all.length>30)
       fail('訂單品項數量不符合整單查核限制。');
@@ -386,7 +392,6 @@ async function getServiceOrderProgress(db,actorUid,input){
       serviceCompleted:summaries.every(item=>item.outstandingQty===0),
       orderedQty,completedQty,outstandingQty:Math.max(0,orderedQty-completedQty),
       items:summaries};
-  });
 }
 
-module.exports={commitServiceCaseEvent,getServiceCaseStatus,getServiceOrderProgress,caseDocId,itemCaseIndexId};
+module.exports={commitServiceCaseEvent,getServiceCaseStatus,getServiceOrderProgress,readServiceOrderProgress,caseDocId,itemCaseIndexId};

@@ -7,6 +7,8 @@ async function setOrderBillingStatus(orderId,newValue,billingDate,logEntry,times
         const snapshot=await transaction.get(ref);
         if(!snapshot.exists)throw new Error('找不到這筆訂單。');
         const order=snapshot.data();
+        if((order.items||[]).some(item=>String(item?.productType||'').trim().toUpperCase()==='SERVICE'))
+            throw new Error('服務訂單須由後端核對完工憑證後核銷；目前原核銷入口尚未開放。');
         if(normalizedOrderStatus(order)!=='normal')throw new Error('這筆訂單已取消。');
         if(!!order.isBilled===newValue)return {
             isBilled:newValue,billingDate:order.billingDate||'',
