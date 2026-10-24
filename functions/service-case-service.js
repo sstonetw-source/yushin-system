@@ -187,14 +187,19 @@ async function commitServiceCaseEvent(db,actorUid,input){
       nextEvent:projection.nextEvent,custody:projection.custody,
       serviceQty:record.serviceQty,itemProgress,itemWorkCategory:itemWorkflow.workCategory};
     if(next.status==='already-applied')return;
-    // The case event is authoritative only for this Service item. Updating an
-    // order-wide index is safe without another scan only for a single-line
-    // pure-Service order; mixed/multiple lines need all sibling proofs first.
-    if(items.length===1){
-      const category=itemWorkflow.workCategory;
-      if(!Array.isArray(order.workCategories)||order.workCategories.length!==1
-        ||order.workCategories[0]!==category){
-        tx.update(orderRef,{workCategories:[category],workCategoryUpdatedAt:recordedAt});
+    // Service events cannot infer Goods delivery. Pure-Service orders may
+    // refresh their query index only from the full registered case history.
+    // A single Service line already has all its proofs above; for multiple
+    // lines use the existing bounded reader before any transaction writes.
+    if(items.every(row=>String(row?.productType||'').trim().toUpperCase()==='SERVICE')){
+      const categories=items.length===1?[itemWorkflow.workCategory]
+        :(await readServiceOrderProgress(db,tx,intent.orderId,order)).items
+          .map(row=>row.itemId===intent.itemId?itemWorkflow.workCategory:row.workCategory);
+      const unique=[...new Set(categories)];
+      if(!Array.isArray(order.workCategories)
+        ||unique.length!==order.workCategories.length
+        ||unique.some((category,i)=>category!==order.workCategories[i])){
+        tx.update(orderRef,{workCategories:unique,workCategoryUpdatedAt:recordedAt});
       }
     }
     if(!saved)tx.set(index.ref,{...index.record,

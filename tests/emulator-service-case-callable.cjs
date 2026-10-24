@@ -113,6 +113,27 @@ test('Onsite repair: engineer completion, no virtual inventory, retry intent che
  assert.equal((await f.record()).events.length,1);
  assert.equal((await db.doc('inventory/'+f.productId).get()).exists,false);
 });
+test('real Auth multi-Service completion keeps uncompleted sibling visible until verified',async()=>{
+ const f=await fixture('multi-index','ONSITE_REPAIR');
+ const orderRef=db.doc('orders/'+f.orderId),original=(await orderRef.get()).data();
+ const nextItem='SECOND',nextProduct=f.productId+'-second';
+ await db.doc('products/'+nextProduct).set({active:true,productType:'Service',serviceKind:'ONSITE_REPAIR'});
+ await orderRef.update({items:[...original.items,{
+   itemId:nextItem,productId:nextProduct,productType:'Service',serviceKind:'ONSITE_REPAIR',qty:1
+ }],workCategories:['delivery']});
+ const first=f.intent('REPAIR_COMPLETED',0,{workSummary:'第一項完成'});
+ assert.equal((await f.engineer.call(first)).itemWorkCategory,'billing');
+ assert.deepEqual((await orderRef.get()).data().workCategories,['billing','delivery']);
+ assert.equal((await f.engineer.call(first)).status,'already-applied');
+ assert.deepEqual((await orderRef.get()).data().workCategories,['billing','delivery']);
+ const second={...f.intent('REPAIR_COMPLETED',1,{workSummary:'第二項完成'},'second-case'),
+   itemId:nextItem};
+ assert.equal((await f.engineer.call(second)).itemWorkCategory,'billing');
+ const done=(await orderRef.get()).data();
+ assert.deepEqual(done.workCategories,['billing']);
+ assert.equal(done.isBilled,undefined);assert.equal(done.isDelivered,undefined);
+ assert.equal((await db.collection('inventoryMovements').where('sourceId','==',f.orderId).get()).empty,true);
+});
 test('Server trusts signed Auth identity and current role, not spoofed request fields',async()=>{
  const f=await fixture('auth','BIOPLEX_LAB');
  await assert.rejects(f.other.call(f.intent('SAMPLE_RECEIVED')),

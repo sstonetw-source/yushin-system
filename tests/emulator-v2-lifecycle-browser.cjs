@@ -372,7 +372,11 @@ for(const width of [1280,390])test('original service case UI '+width+'px: four k
    const summary=await page.locator('#serviceItemBody').textContent();
    assert.ok(summary.includes(kind==='BIOPLEX_LAB'?'待服務處理':'服務完成・待核銷'));
   }
-  assert.deepEqual((await db.doc('orders/'+orderId).get()).data(),order,'case UI never mutates stock/delivery/billing order facts');
+  const {workCategories:partialCategories,workCategoryUpdatedAt:partialUpdatedAt,...partialFacts}=
+   (await db.doc('orders/'+orderId).get()).data();
+  assert.deepEqual(partialCategories,['billing','delivery'],'completed siblings coexist with outstanding Bio-Plex work');
+  assert.ok(Number.isFinite(Date.parse(partialUpdatedAt)),'verified event timestamps the work index');
+  assert.deepEqual(partialFacts,order,'case UI only updates the work index, never stock/delivery/billing order facts');
   for(const entry of items)assert.equal((await db.doc('inventory/'+entry.productId).get()).exists,false);
   assert.equal((await db.collection('supplyOrders').where('sourceId','==',orderId).get()).size,0);
   // The original billing button must reject the still-partial Bio-Plex work.
@@ -385,6 +389,11 @@ for(const width of [1280,390])test('original service case UI '+width+'px: four k
   await openByNumber();await item('BIOPLEX_LAB');await start('BIO-002');await confirmed();
   await switchRole('engineer');await openByNumber();await item('BIOPLEX_LAB');
   await advance('BIO-002');await advance('BIO-002','REPORT-002');
+  const {workCategories:completedCategories,workCategoryUpdatedAt:completedUpdatedAt,...completedFacts}=
+   (await db.doc('orders/'+orderId).get()).data();
+  assert.deepEqual(completedCategories,['billing'],'all commercial service quantity completed before billing');
+  assert.ok(Number.isFinite(Date.parse(completedUpdatedAt)));
+  assert.deepEqual(completedFacts,order,'completion classification does not perform delivery or billing');
   await switchRole('sales');await openByNumber();
   await page.locator('button[onclick="closeServiceCases()"]').click();
   billingLose=true;
@@ -404,11 +413,12 @@ for(const width of [1280,390])test('original service case UI '+width+'px: four k
   // Date correction still uses the same Callable and recovery checkpoint; no new writer.
   await row.locator('details.order-detail-panel > summary').click();
   const dateEdit=row.locator('input[aria-label="核銷日期"]');assert.equal(await dateEdit.isDisabled(),false);
-  billingLose=true;await dateEdit.fill('2026-10-24');
+  const correctedBillingDate=new Date(Date.parse(billed.billingDate+'T00:00:00Z')-86400000).toISOString().slice(0,10);
+  billingLose=true;await dateEdit.fill(correctedBillingDate);
   await page.waitForFunction(()=>!pendingOrderStatusKeys.size&&pendingServiceBillingIntent()?.intent.action==='CHANGE_DATE');
   assert.equal(await row.getByRole('button',{name:'已核銷',exact:true}).isDisabled(),false);
   const dateFirst=billingCalls.at(-1);assert.equal(dateFirst.expectedIsBilled,true);
-  assert.equal((await db.doc('orders/'+orderId).get()).data().billingDate,'2026-10-24');
+  assert.equal((await db.doc('orders/'+orderId).get()).data().billingDate,correctedBillingDate);
   const beforeReloadCalls=billingCalls.length;
   await siteOpen(page,'sales');await siteNav(page,'orders');assert.equal(billingCalls.length,beforeReloadCalls);
   // The original billing button confirms the pending date, never changes its intent.
@@ -417,7 +427,7 @@ for(const width of [1280,390])test('original service case UI '+width+'px: four k
   assert.deepEqual(billingCalls.at(-1),dateFirst);
   const dateOrder=(await db.doc('orders/'+orderId).get()).data();
   assert.equal(dateOrder.fieldEditHistory.length,1);assert.equal(dateOrder.statusHistory.length,1);
-  assert.equal(dateOrder.billingDate,'2026-10-24');assert.equal(dateOrder.isBilled,true);
+  assert.equal(dateOrder.billingDate,correctedBillingDate);assert.equal(dateOrder.isBilled,true);
   assert.deepEqual(dateOrder.workCategories,['complete']);
   // A new click after confirmation is a distinct undo, with no inventory effect.
   await row.getByRole('button',{name:'已核銷',exact:true}).click();

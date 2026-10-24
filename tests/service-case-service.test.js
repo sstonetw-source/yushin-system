@@ -114,11 +114,52 @@ test('Service work index initializes missing status without altering Goods or gu
     order.items.push(sibling==='GOODS'
       ?{itemId:'G',productId:'PG',productType:'GOODS',qty:2}
       :{itemId:'J',productId:'PJ',productType:'SERVICE',serviceKind:'ONSITE_REPAIR',qty:2});
+    if(sibling==='SERVICE')f.docs.set('products/PJ',{
+      active:true,productType:'SERVICE',serviceKind:'ONSITE_REPAIR'
+    });
     await commit(f,intent('REPAIR_COMPLETED',0,{workSummary:'完成第一項'}));
-    assert.deepEqual(order.workCategories,['delivery','ordering']);
-    assert.deepEqual(f.orderWrites,[]);
+    assert.deepEqual(order.workCategories,sibling==='GOODS'?['delivery','ordering']:['billing','delivery']);
+    assert.deepEqual(f.orderWrites,sibling==='GOODS'?[]:['orders/O']);
     assert.equal(f.written.length,2);
   }
+});
+test('multiple Service lines derive one order index from all registered sibling cases',async()=>{
+  const f=fixture({role:'engineer',kind:'ONSITE_REPAIR'});
+  const order=f.docs.get('orders/O');
+  order.items.push({itemId:'J',productId:'PJ',productType:'SERVICE',serviceKind:'ONSITE_REPAIR',qty:1});
+  f.docs.set('products/PJ',{active:true,productType:'SERVICE',serviceKind:'ONSITE_REPAIR'});
+  order.workCategories=['delivery'];
+  const first=intent('REPAIR_COMPLETED',0,{workSummary:'第一項完成'});
+  assert.equal((await commit(f,first)).itemWorkCategory,'billing');
+  assert.deepEqual(order.workCategories,['billing','delivery']);
+  assert.deepEqual(f.orderWrites,['orders/O']);
+  assert.equal((await commit(f,first)).status,'already-applied');
+  assert.deepEqual(f.orderWrites,['orders/O'],'same operation cannot rewrite work index');
+
+  const second={...intent('REPAIR_COMPLETED',1,{workSummary:'第二項完成'}),itemId:'J'};
+  assert.equal((await commit(f,second)).itemWorkCategory,'billing');
+  assert.deepEqual(order.workCategories,['billing']);
+  assert.deepEqual(f.orderWrites,['orders/O','orders/O']);
+  assert.equal(f.written.length,4,'each case and index recorded exactly once');
+  assert.equal((await getServiceOrderProgress(f.db,'U',{orderId:'O'})).serviceCompleted,true);
+  assert.equal(order.isBilled,undefined);
+  assert.equal(order.isDelivered,undefined);
+});
+test('multi-Service sibling tampering fails atomically without changing the query index',async()=>{
+  const f=fixture({role:'engineer',kind:'ONSITE_REPAIR'});
+  const order=f.docs.get('orders/O');
+  order.items.push({itemId:'J',productId:'PJ',productType:'SERVICE',serviceKind:'ONSITE_REPAIR',qty:1});
+  f.docs.set('products/PJ',{active:true,productType:'SERVICE',serviceKind:'ONSITE_REPAIR'});
+  f.docs.set('serviceCases/'+itemCaseIndexId('O','J'),{
+    recordType:'ITEM_CASE_INDEX',orderId:'O',itemId:'J',productId:'PJ',kind:'ONSITE_REPAIR',
+    caseIds:['missing-case']
+  });
+  order.workCategories=['delivery'];
+  await assert.rejects(commit(f,intent('REPAIR_COMPLETED',0,{workSummary:'已完成'})),/不存在/);
+  assert.deepEqual(order.workCategories,['delivery']);
+  assert.deepEqual(f.orderWrites,[]);
+  assert.deepEqual(f.written,[]);
+  assert.equal(f.docs.has('serviceCases/'+caseDocId('O','I','case1')),false);
 });
 test('failure updating the single-line work index aborts Service case and case-index writes',async()=>{
   const f=fixture({role:'engineer',kind:'ONSITE_REPAIR',rejectOrderUpdate:true});
