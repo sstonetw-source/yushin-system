@@ -1778,7 +1778,8 @@ button:focus-visible { outline: 2px solid var(--ys-primary); outline-offset: 2px
 .preview-environment-banner {
     position: sticky;
     top: 0;
-    z-index: 10000;
+    /* Above navigation (1200), below dialogs (3000): never cover dialog actions. */
+    z-index: 1500;
     width: 100%;
     box-sizing: border-box;
     padding: 8px 12px;

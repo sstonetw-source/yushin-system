@@ -134,6 +134,15 @@ async function checkControls() {
                 }
             }
             console.log(`UI browser smoke ${label} ${report.width}px: ${Object.keys(report.checks).length} control types passed`);
+            // A sticky environment notice must not intercept dialog actions,
+            // even when a mobile dialog is scrolled against the top edge.
+            await page.evaluate(()=>{
+                document.body.innerHTML='<div class="preview-environment-banner">本機 Emulator｜隔離測試資料，未連接正式 Firebase</div>'
+                    +'<div class="eq-modal-overlay active" style="padding:0"><div class="eq-modal-box">'
+                    +'<button id="dialog-close-probe" onclick="this.dataset.clicked=1">關閉視窗</button></div></div>';
+            });
+            await page.locator('#dialog-close-probe').click();
+            assert.equal(await page.locator('#dialog-close-probe').getAttribute('data-clicked'),'1',label+': environment notice cannot cover dialog actions');
             await page.close();
         }
     } finally {
