@@ -1,17 +1,32 @@
 # 核心交易驗收：風險、證據與結束標準
 
+## 2026-10-24｜服務整合分支同步最新 main（待本整合 head CI）
+
+- 從 #234 服務分支 `0d7cd726` 建立獨立整合分支，併入 main `38c53daf`（#250 Preview 採購 Callable、#251 Hosting 排除、#256 採購在途 Rules 成本修正）。#256 自身的完整 CI `40062418497` 首次及重跑均成功，不能用它冒充本整合 head 的 CI。
+- 只解決四個交集衝突：保留服務與採購各自的 Rules 測試；真 Auth Emulator fixture 同時輸出受控服務與 Preview 採購 Callable；啟動器僅在 `demo-yushin` Emulator 同時啟用必要的兩組旗標；驗收文件保留兩批獨立歷程。`firestore.rules`、Functions 入口與 `app.js` 由 Git 正常合併，未放寬安全檢查、重寫交易 Service 或新增集合。
+- 本機來源／生成檔一致性及語法檢查通過，相關 Node 421/421、完整 Node 1,816/1,816 通過，零失敗／略過；此主機 Java 17 且沒有安裝 Functions Emulator 依賴，真 Rules／Auth／Chrome 必須以新 PR head CI 為準。
+- #255 的逐品項唯讀顯示尚未整合；本分支需先在 CI 完整通過，才能評估與 #255 的相依順序。#234 持續 Draft，不合併 main、未部署 Firebase／Preview、未操作正式資料。#199 與混合服務、其他分類 writer、材料耗用及 Preview 端對端缺口仍保留。
+
+## 2026-10-24｜在途同步 Rules 評估成本（獨立修正，待完整 CI）
+
+- 基準 main `49b8742b`；在途 Service／Stock Permissions 與服務整合分支相同。#255 第一輪 CI `40056066066` 在第二張 PO 成功後的 Client 在途 checkpoint 失敗，log 明示 supplyOrders update 1,000 expressions；同 head 重跑成功不代表已修復。
+- 本批只重排 supplyOrders update 的角色分流：從已啟用 users profile 取得一次角色，先選擇購買／收貨／本人直送的合法分支，再保留原識別、數量、來源、取消處理、鏡像及成本限制。管理員仍沿既有允許分支；不增加角色、欄位或資料存取能力，不變更 transaction writer。
+- 新增真 Client Rules 的原 registerPurchaseIncoming → Stock Permissions 代表：已有部分收貨的第二張 PO，兩個並行原意圖只增在途一次；鏡像遭拒全部回滾，修正後原 PO 安全重試；偽造 UI 採購角色及停權者不得提交。沿完整 Rules suite 驗證其他身分、更新繞過、來源／數量篡改、直送、取消及重放，無新增低風險數量排列。
+- 本機來源一致性、語法、差異檢查與相關 Node 44/44 通過；完整 Node 1,704/1,704 通過；CI 以本批實際結果補記。此主機只有 Java 17，未本機啟動要求 Java 21 的 Emulator；Rules 編譯與上述真 Client 測試尚待 GitHub CI，不能列為已通過。
+- 這是待 Emulator／完整 CI 驗證的 Rules 修正版；不能僅憑角色計算減少就宣稱已根除間歇超限。#199 正式 Client 採購入口／Preview 邊界、#234／#255 的有限缺口仍保留。未部署 Firebase、未改正式資料；不以本批關閉整輪核心驗收。
+
 ## 2026-10-24 版本與驗收現況（目前判定入口）
 
 以下為目前版本對照，後文保留原代表流程與結案標準。測試通過、合併整合分支、合併 main、部署、正式實測分別記錄；不得互相代替。
 
 | 範圍 | 核對版本／證據 | 判定與下一步 |
 | --- | --- | --- |
-| GitHub main | `49b8742bb3ea0a27fb2f6796f13ce4c76950395a`（#251） | 已核對最新 main；本次不變更 main 或部署 |
-| 服務整合 #234 | `0d7cd7268ba0cca70635ef0b3b4a57cb2cc7d8d1` | Draft；#252／#253／#254 已整合，仍未正式啟用 |
+| GitHub main | `38c53dafe9aed45fe0479b102eed317039fcea54`（#256，已含 #250／#251） | 最新主線；不變更 main 或部署 |
+| 服務整合 #234 | 原 head `0d7cd7268ba0cca70635ef0b3b4a57cb2cc7d8d1`；同步 PR #257 待 CI | Draft；#252／#253／#254 已整合，#257 尚未合併，未正式啟用 |
 | #254 子 PR | head `cab6e68a`；CI `40052066596` 成功 | 只證明該子 PR head，不冒充整合分支完整 CI |
 | 本次逐品項顯示 | 分支 `fix/service-item-progress-acceptance-20261024`，父版 `0d7cd726` | 沿既有整單查核，結果置於對應品項下方；只讀提示，不用於工作分類、篩選金額、核銷或庫存寫入 |
 | GitHub 合併保護 | main API `protected:false`；repository rulesets 回傳空清單 | 本批只核對，未修改倉庫管理設定；建議後續要求 PR 與完整 CI 才可合併 |
-| 版本整合 | 服務分支尚未含 main #250／#251 | 發布前需整合最新 main 的 Preview 採購與 Hosting 排除設定，解衝突後以最終整合 head 完整 CI 驗證；不能部署目前較舊 Hosting 設定 |
+| 版本整合 | #257 head `aa7b8802` 已含 main #250／#251／#256 | 四個衝突已解決，需 #257 完整 CI 通過並合併至服務分支；#255 的 UI 另以最終 head 驗證 |
 | 正式環境 | 另次部署紀錄回報 Rules 與 main 一致、49 索引 READY | 本次未重新查正式 Firebase，不視為本次正式操作驗收 |
 
 ### 有限剩餘工作（不再新增數量排列）
@@ -29,7 +44,7 @@
 - Node：1,811／1,811 通過，零失敗／略過。
 - Chrome：1280／390px 原列表 renderer 與服務視窗，逐品項結果、列表重畫不額外讀取；使用受控後端回覆，非 Firebase 真傳輸。
 - Firebase Emulator：Auth／Functions／Firestore 與原整站 Chrome 的 1280／390px 兩個代表案例均通過；涵蓋原四服務案件與角色接手、遺失回覆恢復、部分完成後逐品項顯示及原核銷限制。無略過。來源訂單仍沿原案例的明列 fixture，非 Preview 端對端。
-- GitHub 完整 CI：待本批 commit 的新 run；未用先前子 PR 成績代替。
+- GitHub 完整 CI：#255 head `32070f5a` 的第二輪 CI `40056066066` 全成功，首輪曾遇在途 Rules 1,000 expressions；本次將沿已併入 #256 的最終整合 head 重新驗證，不以重跑通過視為正式問題消失。
 - Preview／正式帳號：本批未執行。Rules／Index／Functions 無修改需求；未合併 main、未部署。
 
 
@@ -90,7 +105,7 @@ CI 保留 Node、10 組 Chrome smoke、分組預留、真 Auth／Functions／整
 
 1. 已收斂：#228／#229 全 CI 成功並合併，#226／#227 亦已合併。不再重寫建單或重做此批驗收。#228 CI `39733007540`：2239 項；#229 CI `39733010048`：2241 項，皆零失敗／略過，另 10 組 Chrome smoke。
 2. CLOSE 至新單已由 #232 完成。繼續補直送、服務、估價單／Forecast 的正向代表；直送原站案例已納入本批，結果仍待 CI。只補入口與資料契約缺口，不擴張數量排列。
-3. 解決發布／可用性阻擋：#198 原 Client PO 的 Rules 上限仍與 #199 追蹤。main 後端採購受 `YUSHIN_FORMAL_PURCHASE_EMULATOR` 本機 gate 保護，`functions/index.js` 未匯出新版 PO／履約 Callables；Emulator 成功不代表正式入口修復。不可合併舊失敗 PR 冒充解決。#131 舊 CI 曾失敗，須比較現行實作後決定採用或淘汰，不直接合併。
+3. 解決發布／可用性阻擋：#198 原 Client PO 的 Rules 上限仍與 #199 追蹤。main 後端採購受 `YUSHIN_FORMAL_PURCHASE_EMULATOR` 本機 gate 保護，`functions/index.js` **截至 2026-10-22** 未匯出新版 PO／履約 Callables；Emulator 成功不代表正式入口修復。後續獨立的受控 Preview PO Callable PR 須有最新 CI 和實際部署證據才可更新此結論。不可合併舊失敗 PR 冒充解決。#131 舊 CI 曾失敗，須比較現行實作後決定採用或淘汰，不直接合併。
 4. 沿同一 Service 完成受控 Preview 接線／必要驗收。不另造 writer，不順便遷移、刪除正式資料或變更敏感角色。
 5. 七項結案後依序：產品識別／重複主檔、價格匯入續傳、Firebase 讀取效能、資訊複製、桌機手機介面、過時邏輯清理。主檔先唯讀稽核，正式去重／遷移另行授權。
 
@@ -99,7 +114,6 @@ CI 保留 Node、10 組 Chrome smoke、分組預留、真 Auth／Functions／整
 ## 2026-10-22｜直送失敗與隔離後端試點（待最新 CI）
 
 PR #233 原 Client 的 1280／390px「確認已採購」在 CI 39743049294 遭 Firestore Rules 1000 上限阻擋（整站 64 通過、2 失敗，後續部分步驟略過）。本批沿用唯一原採購 Service 與僅限 demo-yushin 的 Functions 試點擴充 DIRECT_SHIP，原網站經本機明確啟用的後端通道驗收；不得將此視為 #199 正式路徑已修復，不能跳過權限或勾選 Preview。正式 Firebase 資料與部署皆不動。
-
 
 ## 2026-10-22｜Service 與 Goods 混合訂單的初始庫存隔離（PR 待 CI）
 
@@ -163,3 +177,12 @@ Workflow Core 也不再使用一般送貨紀錄、舊 deliveredQty 投影或單�
 查核可讀範圍：最多 30 品項、最多 100 個已註冊服務案件／整單；超過上限明確拒絕整單查核並保留各品項獨立讀取，不暗自截斷案件。只在使用者點查核時發生，原訂單列表 render 不增加 Callable、collection、索引、Firestore 寫入或 listener。業務只能查負責訂單，停權或未授權角色不得讀取。已取消訂單仍可查核歷史，但該服務品項狀態為停止履約。畫面顯示服務完成量與上次核實工作分類；既有僅供參考的列表提示可沿用該次回覆。
 
 **明確未完成：**此時不會改寫 `orders.workCategories`，不啟用服務核銷 writer，也不宣稱整張混合訂單可核銷；`billingRecorded` 僅反映訂單現有財務旗標，與服務完成證據分離。仍限 `demo-yushin` Auth／Functions／Firestore Emulator 閘門，正式部署與 Preview 驗收尚未開始。
+
+## 2026-10-23｜正式採購 Preview Callable 接線（待 CI 與實際 Preview 驗收）
+
+- 唯一交易仍是 `functions/formal-purchase-commit-service.js` 的 `commitV2FormalPurchase`：同一 transaction 讀取真 Auth 使用者、訂單、產品、倉庫、採購需求，再提交 PO、Supply、需求、來源訂單；沒有第二套 writer 或新增庫存帳。
+- `functions/index.js` 匯出經 `formal-purchase-preview-callable.js` 保護的 `commitV2FormalPurchase`。後端必須 `ENABLE_PREVIEW_FORMAL_PURCHASE=true` 且實際專案、Firestore 同為 `preview-20135`；正式 `yu-shing-company` 即使有同名開關亦拒絕。完整本機 Auth／Firestore／Functions demo Emulator 才可用 `demo-yushin`。**預設關閉，合併 GitHub 不等於已在 Preview 部署或啟用**。
+- Preview 網站需在已載入畫面的同一 session 明確設定 `window.YUSHIN_PREVIEW_FORMAL_PURCHASE=true`；原「確認已採購」才轉接後端。網站限定 `preview-20135.web.app` 或 `preview-20135.firebaseapp.com`，核對真登入專案與 UID，拒絕把 Preview Auth 指向本機 Emulator。任何 Callable 失敗／未知回覆都**不回退**舊 Client writer，保持原 PO 編號與核對憑證。
+- 已有客戶訂單實體品項的 1–5 列、倉庫入庫或原廠直送可參與試點；手動補貨、服務品項、超過五列及混合不符合者維持明確拒絕，不得臨時放寬後端驗證。產生文件與確認已採購仍是兩個動作。
+- 真 Auth demo Emulator 持續透過 `node tools/run-v2-return-auth-emulator.cjs` 測試同一 Preview adapter；本機 Node gate 測試包含正式專案拒絕、匿名／不同專案拒絕、原畫面接線及未知回覆。**仍須在實際 Preview 專案**取得登入角色、4/7 部分採購、重複提交、拒絕／回滾及來源／Supply／需求回讀證據，才可標記 Preview 已驗收。
+- 本批不得直接部署 `yu-shing-company`、啟動正式後端，或修改正式資料；#199 維持開啟直到正式切換另行授權且正式環境驗證成功。

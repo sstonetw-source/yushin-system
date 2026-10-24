@@ -25,7 +25,8 @@ const source=path.join(temporary,'functions');
 try{
  fs.mkdirSync(source);
  fs.writeFileSync(path.join(source,'checkout.json'),JSON.stringify({root}));
- fs.writeFileSync(path.join(source,'.env.local'),'ENABLE_V2_RETURN_AUTH_EMULATOR=true\nENABLE_SERVICE_CASE_EMULATOR=true\n');
+ fs.writeFileSync(path.join(source,'.env.local'),
+  'ENABLE_V2_RETURN_AUTH_EMULATOR=true\nENABLE_SERVICE_CASE_EMULATOR=true\nENABLE_PREVIEW_FORMAL_PURCHASE=true\n');
  const runtime=path.join(root,'functions/node_modules');
  if(!fs.existsSync(path.join(runtime,'firebase-functions')))throw Error('Install functions dependencies before running the Emulator');
  fs.symlinkSync(runtime,path.join(source,'node_modules'),'dir');
@@ -40,7 +41,8 @@ try{
  const result=spawnSync('npx',['--yes','firebase-tools@15','emulators:exec','--config',config,
   '--only','firestore,auth,functions','--project','demo-yushin',
   'node --test --test-concurrency=1 '+testFiles.map(shellQuote).join(' ')],{cwd:root,stdio:'inherit',env:{...process.env,
-   ENABLE_V2_RETURN_AUTH_EMULATOR:'true',ENABLE_SERVICE_CASE_EMULATOR:'true'}});
+   ENABLE_V2_RETURN_AUTH_EMULATOR:'true',ENABLE_SERVICE_CASE_EMULATOR:'true',
+   ENABLE_PREVIEW_FORMAL_PURCHASE:'true'}});
  if(result.error)throw result.error;
  process.exitCode=result.status??1;
 }finally{fs.rmSync(temporary,{recursive:true,force:true});}

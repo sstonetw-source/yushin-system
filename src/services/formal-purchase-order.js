@@ -43,15 +43,47 @@ async function saveFormalPurchaseDocument(record, {actorUid=currentUser?.uid,act
     check();return {id:saved.poNo,...saved};
 }
 // Authoritative PO, supply commitments and source-order linkage. Incoming remains a separate checkpoint.
-async function commitFormalPurchaseEmulator(poRecord,actorUid,assertActor) {
+// Preview is opt-in; production always retains the existing writer until a
+// separate deployment/acceptance decision. A rejected Callable NEVER falls back.
+function formalPurchaseBackendPilotEnabled() {
+    return (typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='emulator'
+        && globalThis.YUSHIN_FORMAL_PURCHASE_EMULATOR===true)
+        || (typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='preview'
+        && globalThis.YUSHIN_PREVIEW_FORMAL_PURCHASE===true);
+}
+let formalPurchaseFunctionsScriptPromise=null;
+async function ensureFormalPurchaseFunctionsCompat() {
+    if(firebase.functions)return;
+    if(!formalPurchaseFunctionsScriptPromise){
+        formalPurchaseFunctionsScriptPromise=new Promise((resolve,reject)=>{
+            const script=document.createElement('script');
+            script.src='https://www.gstatic.com/firebasejs/10.8.0/firebase-functions-compat.js';
+            script.onload=resolve;
+            script.onerror=()=>reject(new Error('無法載入 Firebase Functions，採購尚未提交。'));
+            document.head.appendChild(script);
+        }).catch(error=>{formalPurchaseFunctionsScriptPromise=null;throw error;});
+    }
+    await formalPurchaseFunctionsScriptPromise;
+    if(!firebase.functions)throw new Error('Firebase Functions 未載入，採購尚未提交。');
+}
+async function commitFormalPurchaseBackend(poRecord,actorUid,assertActor) {
     const local=host=>['localhost','127.0.0.1'].includes(host);
-    if(typeof APP_ENVIRONMENT==='undefined'||APP_ENVIRONMENT!=='emulator'
-        ||!local(globalThis.location?.hostname)||typeof firebase==='undefined'||!firebase.functions)
-        throw new Error('採購後端試點僅限明確啟用的本機 Emulator。');
-    const auth=firebase.auth(),functions=firebase.app().functions('asia-east1');
-    if(auth.app?.options?.projectId!=='demo-yushin'||functions.app?.options?.projectId!=='demo-yushin'
-        ||!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099)
-        throw new Error('採購必須使用 demo-yushin 本機登入與 Functions Emulator。');
+    const isEmulator=APP_ENVIRONMENT==='emulator'&&globalThis.YUSHIN_FORMAL_PURCHASE_EMULATOR===true;
+    const isPreview=APP_ENVIRONMENT==='preview'&&globalThis.YUSHIN_PREVIEW_FORMAL_PURCHASE===true;
+    const hostname=String(globalThis.location?.hostname||'').toLowerCase();
+    if(!formalPurchaseBackendPilotEnabled()||typeof firebase==='undefined'||!firebase.auth||!firebase.app
+        ||(isEmulator&&!local(hostname))
+        ||(isPreview&&!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(hostname)))
+        throw new Error('採購後端僅限明確啟用的 Preview 或本機 Emulator。');
+    const auth=firebase.auth(),project=isPreview?'preview-20135':'demo-yushin';
+    if(auth.app?.options?.projectId!==project||firebase.app().options?.projectId!==project
+        ||(isEmulator&&(!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099))
+        ||(isPreview&&auth.emulatorConfig))
+        throw new Error('採購登入與後端 Firebase 專案不一致。');
+    await ensureFormalPurchaseFunctionsCompat();
+    const functions=firebase.app().functions('asia-east1');
+    if(functions.app?.options?.projectId!==project)
+        throw new Error('採購後端連線專案不正確。');
     const check=()=>{assertActor();if(auth.currentUser?.uid!==actorUid)throw new Error('實際登入身分已變更，請以原帳號核對採購結果。');};
     check();
     if(poRecord.items.length>5||poRecord.items.some(item=>!item.orderId||!item.itemId
@@ -66,7 +98,7 @@ async function commitFormalPurchaseEmulator(poRecord,actorUid,assertActor) {
             expectedDate:poRecord.expectedDate||'',expectedDateSource:poRecord.expectedDateSource||'',
             lineScheduleDates:poRecord.items.map(item=>item.scheduleDate||'')}};
     if(poRecord.documentRevision)request.documentRevision=poRecord.documentRevision;
-    functions.useEmulator('127.0.0.1',5001);
+    if(isEmulator)functions.useEmulator('127.0.0.1',5001);
     // A failed/unknown Callable never falls through to the old client writer.
     const reply=await functions.httpsCallable('commitV2FormalPurchase')(request);check();
     const result=reply?.data,ids=request.items.map((_,index)=>formalSupplyOrderId(request.poNo,index));
@@ -106,8 +138,12 @@ async function commitFormalPurchaseOrder(poRecord, {actorUid=currentUser?.uid,ac
             if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) throw new Error('目前無採購作業權限。');
         };
         assertActor();
-        if(globalThis.YUSHIN_FORMAL_PURCHASE_EMULATOR===true)
-            return commitFormalPurchaseEmulator(poRecord,actorUid,assertActor);
+        if((globalThis.YUSHIN_FORMAL_PURCHASE_EMULATOR===true
+            || globalThis.YUSHIN_PREVIEW_FORMAL_PURCHASE===true)
+            && !formalPurchaseBackendPilotEnabled())
+            throw new Error('採購後端試點與目前環境不一致，禁止改由舊交易提交。');
+        if(formalPurchaseBackendPilotEnabled())
+            return commitFormalPurchaseBackend(poRecord,actorUid,assertActor);
         const actorName=currentUserName||currentUser?.email||'', now=poRecord.createdAt||new Date().toISOString();
         const poNo=poRecord.poNo, vendorName=poRecord.vendorName, poDocumentId=poNo;
         const orderIds=[...new Set(poRecord.items.map(item=>item.orderId).filter(Boolean))];

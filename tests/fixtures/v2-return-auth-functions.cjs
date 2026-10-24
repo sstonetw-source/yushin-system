@@ -8,11 +8,16 @@ const {onCall,HttpsError}=runtime('firebase-functions/v2/https');
 const {getApps,initializeApp}=runtime('firebase-admin/app');
 const {getFirestore}=runtime('firebase-admin/firestore');
 if(!getApps().length)initializeApp();
-module.exports=require(path.join(root,'functions/v2-return-callable-adapter')).createV2ReturnCallables({
+const standard=require(path.join(root,'functions/v2-return-callable-adapter')).createV2ReturnCallables({
  onCall,HttpsError,getDatabase:getFirestore});
 // Use the real, demo-gated service endpoints for original full-site UI acceptance.
 const service=require(path.join(root,'functions/index'));
-module.exports.commitServiceCaseEvent=service.commitServiceCaseEvent;
-module.exports.getServiceCaseStatus=service.getServiceCaseStatus;
-module.exports.getServiceOrderProgress=service.getServiceOrderProgress;
-module.exports.commitServiceOrderBilling=service.commitServiceOrderBilling;
+// Exercise the same guarded endpoint that functions/index.js exports for
+// Preview, instead of silently testing the older Emulator-only PO wrapper.
+const previewPurchase=require(path.join(root,'functions/formal-purchase-preview-callable'))
+ .createPreviewFormalPurchaseCallable({onCall,HttpsError,getDatabase:getFirestore});
+module.exports={...standard,commitV2FormalPurchase:previewPurchase,
+ commitServiceCaseEvent:service.commitServiceCaseEvent,
+ getServiceCaseStatus:service.getServiceCaseStatus,
+ getServiceOrderProgress:service.getServiceOrderProgress,
+ commitServiceOrderBilling:service.commitServiceOrderBilling};
