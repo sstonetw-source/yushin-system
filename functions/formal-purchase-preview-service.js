@@ -57,7 +57,7 @@ async function validateV2FormalPurchaseTx(tx,db,uid,intent,{allowExistingPo=fals
     ||source.status==='cancelled'||source.orderStatus==='cancelled'
     ||source.status==='voided'||source.orderStatus==='voided'
     ||source.returnPending===true||source.inventoryReservationStatus!=='completed'
-    ||!Array.isArray(source.items)||source.items.length<1||source.items.length>5)
+    ||!Array.isArray(source.items)||source.items.length<1)
    reject('failed-precondition','來源訂單不可建立正式採購單');
   const matching=source.items.map((row,index)=>({row,index}))
    .filter(({row})=>row?.itemId===intent.itemId);
