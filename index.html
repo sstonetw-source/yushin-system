@@ -14,7 +14,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261021-1">
+        <link rel="stylesheet" href="styles.css?v=20261024-1">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -841,6 +841,7 @@
         <div class="module-header no-print">
             <h2 class="workspace-page-title">訂單 <button type="button" class="page-help-trigger no-print" data-page-help="order-system" aria-label="訂單功能與注意事項" aria-haspopup="dialog" aria-controls="pageHelpDialog">!</button></h2>
             <button onclick="openOrderModal()">＋ 新增訂單</button>
+            <button type="button" id="serviceCaseEntry" class="btn-secondary" hidden onclick="openServiceCases()">服務案件</button>
         </div>
         <div id="orderWorkCards" class="order-work-cards no-print"></div>
         <div class="order-period-toolbar no-print">
@@ -1692,12 +1693,13 @@
     <script src="modules/supply-core.js?v=20261008-1"></script>
     <script src="modules/reservation-core.js?v=20261016-1"></script>
     <script src="modules/procurement-demand-core.js?v=20261011-8"></script>
-    <script src="modules/workflow-core.js?v=20261015-12"></script>
+    <script src="modules/workflow-core.js?v=20261023-1"></script>
     <script src="modules/purchasing-analytics-core.js?v=20261008-1"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261013-file-share"></script>
     <script src="modules/order-entry-core.js?v=20261014-1"></script>
-    <script src="app.js?v=20261022-4"></script>
+<script src="modules/service-work-core.js?v=20261023-2"></script>
+    <script src="app.js?v=20261024-1"></script>
     <script src="modules/order-self-order-required.js?v=20261013-1"></script>
     <script src="modules/customer-cancellations.js?v=20261021-3"></script>
     <script src="modules/free-stock-recovery.js?v=20261014-9"></script>

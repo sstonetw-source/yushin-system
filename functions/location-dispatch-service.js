@@ -93,6 +93,7 @@ async function commitLocationDispatchPreparation(db,uid,data){
   if(multi){
    const products=new Map();
    for(const row of order.items){
+  if(String(row.productType||row.type||'').trim().toUpperCase()==='SERVICE')continue;
     const part=whole.items.find(p=>p.itemId===row.itemId);
     if((row.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'||String(row.productType||row.type||'').toUpperCase()==='SERVICE'
      ||row.transferPendingId||row.custodyTransferId||qty(row.warehouseShippedQty??0,'品項出貨')!==part.shippedQty
@@ -154,8 +155,9 @@ async function commitLocationDispatchPreparation(db,uid,data){
    qty:quantity,actorUid:uid,actorRole,ownerUid:order.ownerUid,salesCode:order.salesCode,
    syncAttemptId,intentHash:intent.hash,createdAt:now,result};
   // This operation does NOT write inventory, lots, reservation, shipment or delivery.
+  const workIndex=await require('./service-order-fulfillment').mixedWorkIndex(db,tx,orderId,order);
   tx.create(recordRef,record);
-  tx.update(orderRef,{items:order.items.map(row=>row.itemId===itemId?{...row,dispatchPreparedQty:updatedPrepared}:row),updatedAt:now});
+  tx.update(orderRef,{...workIndex,items:order.items.map(row=>row.itemId===itemId?{...row,dispatchPreparedQty:updatedPrepared}:row),updatedAt:now});
   return {...result,status:'applied',recordId:recordRef.id};
  });
 }

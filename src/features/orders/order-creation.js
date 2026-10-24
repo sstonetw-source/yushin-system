@@ -81,6 +81,7 @@ function setOrderModalItem(item={}) {
     const codeInput=document.getElementById('orderItemCode');
     codeInput.dataset.productLine=normalized.productLine||'';
     codeInput.dataset.productType=normalized.productType||'';
+    codeInput.dataset.serviceKind=normalized.serviceKind||'';
     codeInput.dataset.productMasterMatched=normalized.productMasterMatched===true?'1':'0';
     delete codeInput.dataset.autofillBrand;
     codeInput.dataset.matchedProductCode=normalizeItemCodeLoose(normalized.itemCode);
@@ -199,22 +200,26 @@ function normalizeNewOrderItem(item = {}) {
     const qty=Math.max(0,Number(item.qty||0));
     const unitPrice=item.unitPrice===null || item.unitPrice===undefined || String(item.unitPrice).trim()==='' ? null : Number(item.unitPrice);
     const productId=String(item.productId||match?.productId||'').trim();
+    const productType=match?.productType||item.productType||'';
+    // Service kind is a snapshot only; the Service writer rechecks live Product Master.
+    const serviceKind=String(productType).trim().toUpperCase()==='SERVICE'
+        ? (match?.serviceKind||item.serviceKind||'') : '';
     const brand=resolveBrandName(match?.brand||item.brand||'');
     return {
         ...item,itemId:item.itemId||`item-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
         itemCode:String(item.itemCode||'').trim(),itemCodeKey:normalizeHistoryItemCode(item.itemCode||''),itemName:String(item.itemName||'').trim(),
         brand,brandId:match?.brandId||item.brandId||brandIdForName(brand),qty,orderedQty:qty,unitPrice,totalPrice:qty*unitPrice,
-        productId,productLine:match?.productLine||item.productLine||'',productType:match?.productType||item.productType||'',
+        productId,productLine:match?.productLine||item.productLine||'',productType,serviceKind,
         productMasterMatched:!!productId && (!!match || item.productMasterMatched === true),
         supplier:item.supplier||match?.supplier||'',spec:match?.spec||item.spec||'',
         procurementType:item.procurementType||'PURCHASING_PO', fulfillmentType:item.fulfillmentType||'WAREHOUSE',
-        warehouseId:(item.fulfillmentType||'WAREHOUSE')==='WAREHOUSE' ? String(item.warehouseId||'') : ''
+        warehouseId:(item.fulfillmentType||'WAREHOUSE')==='WAREHOUSE' && String(productType).trim().toUpperCase()!=='SERVICE' ? String(item.warehouseId||'') : ''
     };
 }
 
 function currentOrderModalItem() {
     const codeInput=document.getElementById('orderItemCode');
-    const item={supplier:document.getElementById('orderSelfSupplier')?.value.trim()||'',itemCode:codeInput.value,itemName:document.getElementById('orderItemName').value,itemNameEn:document.getElementById('orderItemNameEn')?.value||'',productLine:codeInput.dataset.productLine||document.getElementById('orderProductLine')?.value||'',productType:codeInput.dataset.productType||'',productMasterMatched:codeInput.dataset.productMasterMatched==='1',productCheckStatus:codeInput.dataset.productCheckStatus||'',spec:document.getElementById('orderSpec')?.value||'',brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:document.getElementById('orderQty').value,unitPrice:document.getElementById('orderUnitPrice').value,procurementType:document.getElementById('orderProcurementType')?.value||'PURCHASING_PO',fulfillmentType:document.getElementById('orderFulfillmentType')?.value||'WAREHOUSE',warehouseId:document.getElementById('orderWarehouse')?.value||'',productId:window._orderModalProductId||''};
+    const item={supplier:document.getElementById('orderSelfSupplier')?.value.trim()||'',itemCode:codeInput.value,itemName:document.getElementById('orderItemName').value,itemNameEn:document.getElementById('orderItemNameEn')?.value||'',productLine:codeInput.dataset.productLine||document.getElementById('orderProductLine')?.value||'',productType:codeInput.dataset.productType||'',serviceKind:codeInput.dataset.serviceKind||'',productMasterMatched:codeInput.dataset.productMasterMatched==='1',productCheckStatus:codeInput.dataset.productCheckStatus||'',spec:document.getElementById('orderSpec')?.value||'',brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:document.getElementById('orderQty').value,unitPrice:document.getElementById('orderUnitPrice').value,procurementType:document.getElementById('orderProcurementType')?.value||'PURCHASING_PO',fulfillmentType:document.getElementById('orderFulfillmentType')?.value||'WAREHOUSE',warehouseId:document.getElementById('orderWarehouse')?.value||'',productId:window._orderModalProductId||''};
     item.selfOrderConfirmed=document.getElementById('orderSelfOrderConfirmed')?.value==='confirmed';
     item.deliveryPlan=window.orderShippingInstructions?.()||{};
     item.deliveryCustomerName=document.getElementById('orderCustomer')?.value.trim()||'';
@@ -266,7 +271,7 @@ async function checkNewOrderDraftProducts() {
             if(!newOrderDraftItems.includes(item)||item.itemCode!==code||item.brand!==brand) continue;
             const match=selectProductCodeMatch(matches,brand);
             if(match) Object.assign(item,{productId:match.productId||stableProductId(match),productMasterMatched:true,
-                brandId:match.brandId||item.brandId,productLine:match.productLine||item.productLine,productType:match.productType||item.productType,productCheckStatus:'matched'});
+                brandId:match.brandId||item.brandId,productLine:match.productLine||item.productLine,productType:match.productType||item.productType,serviceKind:match.serviceKind||'',productCheckStatus:'matched'});
             else Object.assign(item,{productId:'',productMasterMatched:false,productCheckStatus:!brand&&matches.length>1?'ambiguous':'missing'});
         } catch(err) {
             if(opening!==orderModalOpenGeneration||generation!==orderDraftProductCheckGeneration) return;
@@ -295,7 +300,12 @@ window.addCurrentOrderItemToDraft=function(){
     const item=currentOrderModalItem();
     const validation=globalThis.YushinOrderEntry.validateItem(item);
     if(!validation.valid){alert(validation.message);document.getElementById(validation.field)?.focus();return;}
-    try { globalThis.YushinWarehouseLogistics.validatePlan(item.deliveryPlan,true); } catch(err) { alert(err.message); const details=document.getElementById('orderRecipientDetails');if(details)details.open=true;return; }
+    if(String(item.productType||'').trim().toUpperCase()==='SERVICE'){
+        if(item.fulfillmentType!=='WAREHOUSE'){alert('服務型品項尚不支援原廠直送或實貨履約入口。');return;}
+        item.deliveryPlan={};item.warehouseId='';
+    }else{
+        try { globalThis.YushinWarehouseLogistics.validatePlan(item.deliveryPlan,true); } catch(err) { alert(err.message); const details=document.getElementById('orderRecipientDetails');if(details)details.open=true;return; }
+    }
     if(!item.itemName||item.qty<=0){alert('請先完成目前品項的品名與數量。');return;}
     if(item.productMasterMatched!==true||!item.productId||orderItemProductStatus(item)!=='matched'){alert('正式訂單品項必須先對應產品主檔。請輸入既有貨號，或使用「快速新增產品」完成基本產品資料。');return;}
     const duplicateIndex=newOrderDraftItems.findIndex(existing=>globalThis.YushinOrderEntry.sameDraftItem(existing,item));
@@ -307,7 +317,7 @@ window.addCurrentOrderItemToDraft=function(){
     const nextSelfStatus=document.getElementById('orderSelfOrderConfirmed');if(nextSelfStatus)nextSelfStatus.value='pending';
     for(const id of ['orderSelfSupplier','orderCostPrice']){const field=document.getElementById(id);if(field){field.value='';delete field.dataset.autofillCost;}}
     window.syncOrderEntrySelfStatus?.();
-    delete nextCodeInput.dataset.productLine;delete nextCodeInput.dataset.productType;delete nextCodeInput.dataset.productMasterMatched;delete nextCodeInput.dataset.productCheckStatus;delete nextCodeInput.dataset.preserveOrderPriceCode;delete nextCodeInput.dataset.matchedProductCode;delete nextCodeInput.dataset.autofillBrand;
+    delete nextCodeInput.dataset.productLine;delete nextCodeInput.dataset.productType;delete nextCodeInput.dataset.serviceKind;delete nextCodeInput.dataset.productMasterMatched;delete nextCodeInput.dataset.productCheckStatus;delete nextCodeInput.dataset.preserveOrderPriceCode;delete nextCodeInput.dataset.matchedProductCode;delete nextCodeInput.dataset.autofillBrand;
     clearQuickProductButton(nextCodeInput);clearProductMatchChoices(nextCodeInput);
     renderNewOrderDraftItems();
     document.getElementById('orderQty').value=1;document.getElementById('orderUnitPrice').value='';document.getElementById('orderTotalPrice').value=0;window._orderModalProductId='';
@@ -369,6 +379,7 @@ window.openOrderModal = function(source = null) {
         codeInput.value = source.itemCode || '';
         codeInput.dataset.productLine = source.productLine || '';
         codeInput.dataset.productType = source.productType || '';
+        codeInput.dataset.serviceKind = source.serviceKind || '';
         codeInput.dataset.matchedProductCode=normalizeItemCodeLoose(source.itemCode||'');
         if (source.productId) codeInput.dataset.autofillBrand=normalizeBrandLookupKey(resolveBrandName(source.brand||''));
         codeInput.dataset.preserveOrderPriceCode=normalizeItemCodeLoose(source.itemCode||'');
@@ -626,7 +637,7 @@ window.saveNewOrder = function() {
         document.getElementById('orderItemCode')?.focus();
         return;
     }
-    if(items.some(item=>item.fulfillmentType==='WAREHOUSE'&&warehouseMasterCache.length&&!item.warehouseId)){alert('請為每個倉庫出貨品項選擇倉庫。');return;}
+    if(items.some(item=>item.fulfillmentType==='WAREHOUSE'&&String(item.productType||'').trim().toUpperCase()!=='SERVICE'&&warehouseMasterCache.length&&!item.warehouseId)){alert('請為每個倉庫出貨品項選擇倉庫。');return;}
     const assistedOwner = currentUserRole === 'purchaser'
         ? salesList.find(person => person.uid === document.getElementById('orderOwnerUid')?.value
             && isSelectableCommercialOwner(person))
@@ -642,12 +653,17 @@ window.saveNewOrder = function() {
     try {
         const fallback=window.orderShippingInstructions?.()||{};
         for(const item of items) {
+            if(String(item.productType||'').trim().toUpperCase()==='SERVICE'){
+                if(item.fulfillmentType==='DIRECT_SHIP')throw new Error('服務型品項不屬於原廠直送實貨，請選擇一般服務處理。');
+                item.deliveryPlan={};item.warehouseId='';
+                continue;
+            }
             const plan=item.deliveryPlan||fallback;
             if(plan.mode==='CUSTOMER_SHIP'&&item.deliveryCustomerName&&item.deliveryCustomerName!==document.getElementById('orderCustomer').value.trim())throw new Error('客戶已更換，請編輯各品項並重新確認收件資訊。');
             if(item.fulfillmentType==='DIRECT_SHIP'&&plan.mode!=='CUSTOMER_SHIP')throw new Error('原廠直送請設定客戶收件資訊。');
             item.deliveryPlan=globalThis.YushinWarehouseLogistics.validatePlan(plan,true);
         }
-        shippingInstructions=items[0].deliveryPlan;
+        shippingInstructions=items.find(item=>String(item.productType||'').trim().toUpperCase()!=='SERVICE')?.deliveryPlan||{};
     } catch(err) {alert(err.message);const details=document.getElementById('orderRecipientDetails');if(details)details.open=true;return;}
     items.forEach(item=>{delete item.productCheckStatus;});
     const firstItem=items[0];
@@ -701,7 +717,7 @@ window.saveNewOrder = function() {
         alert('請至少填寫訂單日期與品名');
         return;
     }
-    if (data.fulfillmentType === 'WAREHOUSE' && warehouseMasterCache.length && !data.warehouseId) {
+    if (data.fulfillmentType === 'WAREHOUSE' && String(firstItem.productType||'').trim().toUpperCase()!=='SERVICE' && warehouseMasterCache.length && !data.warehouseId) {
         alert('請選擇出貨倉庫；若由原廠直接送客戶，請改選「原廠直送客戶」。');
         return;
     }
@@ -713,7 +729,7 @@ window.saveNewOrder = function() {
     data.customerId = syncCustomerMaster(data.customerName, { salesCode: data.salesCode });
     const priceMatch = findPriceItemForOrder(data);
     data.productLine = firstItem.productLine || (priceMatch && priceMatch.productLine) || '';
-    data.productType = (priceMatch && priceMatch.productType) || '';
+    data.productType = firstItem.productType || (priceMatch && priceMatch.productType) || '';
     if (priceMatch) {
         data.productId = priceMatch.productId || stableProductId(priceMatch);
         data.supplier = priceMatch.supplier || '';

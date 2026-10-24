@@ -41,6 +41,7 @@ async function readMultiReturnSource(tx,db,order,intent,context,{ledger=null,inv
  await readWholeOrderShipmentProofs(tx,db,order,intent);
  let candidates=null,companyHeld=0;const warehouseHeld=new Map();
  for(const item of order.items){
+  if(String(item.productType||item.type||'').trim().toUpperCase()==='SERVICE')continue;
   const part=context.whole.items.find(row=>row.itemId===item.itemId);
   const snap=item.itemId===intent.itemId&&ledger?null:
    await tx.get(db.collection('inventoryReservations').doc(intent.orderId+'__'+item.itemId));

@@ -347,6 +347,10 @@ window.addEventListener('DOMContentLoaded', () => {
         if (pageKey === 'products') return;
         if(pageKey==='quote.my'&&canEditPage('quote.create')&&/^copyQuoteAsNew\b/.test(event.target.closest?.('button')?.getAttribute('onclick')||''))return;
         const actionText = event.target.closest?.('button')?.getAttribute('onclick') || '';
+        // Service work has its own server-authorized actions; opening its view
+        // does not grant permission to edit the commercial order page.
+        if(pageKey==='orders.list'&&actionText.trim()==='openServiceCases()'
+            &&globalThis.serviceCaseEntryEnabled?.())return;
         if (/^(toggleInventoryRowDetails|loadInventory|closeInventory|downloadInventoryImportTemplate|switchInventoryWorkView)\b/.test(actionText.trim())) return;
         const control = event.target.closest('button, input, textarea, select');
         if (!control) return;

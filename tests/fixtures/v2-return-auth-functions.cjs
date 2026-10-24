@@ -10,8 +10,14 @@ const {getFirestore}=runtime('firebase-admin/firestore');
 if(!getApps().length)initializeApp();
 const standard=require(path.join(root,'functions/v2-return-callable-adapter')).createV2ReturnCallables({
  onCall,HttpsError,getDatabase:getFirestore});
+// Use the real, demo-gated service endpoints for original full-site UI acceptance.
+const service=require(path.join(root,'functions/index'));
 // Exercise the same guarded endpoint that functions/index.js exports for
 // Preview, instead of silently testing the older Emulator-only PO wrapper.
 const previewPurchase=require(path.join(root,'functions/formal-purchase-preview-callable'))
  .createPreviewFormalPurchaseCallable({onCall,HttpsError,getDatabase:getFirestore});
-module.exports={...standard,commitV2FormalPurchase:previewPurchase};
+module.exports={...standard,commitV2FormalPurchase:previewPurchase,
+ commitServiceCaseEvent:service.commitServiceCaseEvent,
+ getServiceCaseStatus:service.getServiceCaseStatus,
+ getServiceOrderProgress:service.getServiceOrderProgress,
+ commitServiceOrderBilling:service.commitServiceOrderBilling};

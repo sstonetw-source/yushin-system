@@ -19,7 +19,7 @@ function number(value,name){
  if(!Number.isSafeInteger(value)||value<0)fault(name+'數量不正確');
  return value;
 }
-function normalizeLifecycleIntent(data){
+function normalizeLifecycleIntent(data,{allowNoWarehouse=false}={}){
  if(!data||typeof data!=='object'||Array.isArray(data)
   ||Object.keys(data).some(k=>!['orderId','itemId','warehouseIds','nextStatus','operationId','syncAttemptId','date','reason'].includes(k)))
   fault('取消或恢復請求含未授權的欄位','invalid-argument');
@@ -28,10 +28,10 @@ function normalizeLifecycleIntent(data){
  if(!/^[a-zA-Z0-9_-]{12,96}$/.test(operationId)||syncAttemptId.length>96)
   fault('操作或同步識別碼不正確','invalid-argument');
  if(!['cancelled','normal'].includes(data.nextStatus))fault('目標狀態不正確','invalid-argument');
- if(!Array.isArray(data.warehouseIds)||data.warehouseIds.length!==2)
+ if(!Array.isArray(data.warehouseIds)||(data.warehouseIds.length!==2&&!(allowNoWarehouse&&data.warehouseIds.length===0)))
   fault('必須提供原兩個候選實體倉','invalid-argument');
  const warehouseIds=data.warehouseIds.map(x=>ident(x,'倉庫 ID')).sort();
- if(warehouseIds[0]===warehouseIds[1])fault('候選倉重複','invalid-argument');
+ if(warehouseIds.length&&warehouseIds[0]===warehouseIds[1])fault('候選倉重複','invalid-argument');
  if(typeof data.date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(data.date)
   ||!Number.isFinite(Date.parse(data.date+'T00:00:00Z'))
   ||new Date(data.date+'T00:00:00Z').toISOString().slice(0,10)!==data.date)
@@ -49,7 +49,7 @@ function normalizeOrderLifecycleIntent(data){
  const itemIds=data.itemIds.map(value=>ident(value,'品項 ID')).sort();
  if(new Set(itemIds).size!==itemIds.length)fault('整單品項重複','invalid-argument');
  const {itemIds:ignored,...rest}=data;
- const {hash:oldHash,itemId:oldId,...single}=normalizeLifecycleIntent({...rest,itemId:itemIds[0]});
+ const {hash:oldHash,itemId:oldId,...single}=normalizeLifecycleIntent({...rest,itemId:itemIds[0]},{allowNoWarehouse:true});
  const intent={...single,itemIds};
  return {...intent,hash:createHash('sha256').update(JSON.stringify(intent)).digest('hex')};
 }
@@ -109,9 +109,21 @@ async function runLocationLifecycle(db,uid,data,wholeOrder){
    if(!evidenceCache.has(key))evidenceCache.set(key,await tx.get(db.collection(collection).where(field,'==',value).limit(51)));
    return evidenceCache.get(key);
   };
+  const serviceItems=order.items.filter(item=>String(item.productType||item.type||'').trim().toUpperCase()==='SERVICE');
+  const hasGoods=serviceItems.length!==order.items.length;
+  if(warehouseIds.length!==(hasGoods?2:0))fault('取消恢復的實體倉來源不正確');
+  if(serviceItems.length&&order.isBilled===true)fault('請先撤銷核銷，再取消服務訂單');
+  const serviceProgress=serviceItems.length?await require('./service-case-service').readServiceOrderProgress(db,tx,orderId,order):null;
+  if(serviceProgress&&current==='normal'&&serviceProgress.serviceCompleted
+    &&(!hasGoods||order.isDelivered===true))fault('訂單已全部完成，不能取消');
   let wholeFulfillment=null,returnProofChecked=false;
   for(const [itemIndex,item] of order.items.entries()){
   const itemId=item.itemId;
+  if(serviceItems.includes(item)){
+   if((await tx.get(ref('inventoryReservations',orderId+'__'+itemId))).exists)
+    fault('服務品項已有實貨預留來源，須先稽核');
+   continue;
+  }
   if((item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
     ||String(item.productType||item.type||'').toUpperCase()==='SERVICE'
     ||item.transferPendingId||item.custodyTransferId
@@ -119,7 +131,7 @@ async function runLocationLifecycle(db,uid,data,wholeOrder){
    fault('品項不是可取消或恢復的實體倉商品');
   const ordered=number(item.qty??item.orderedQty,'訂購量');
   if(!ordered||(item.qty!==undefined&&item.orderedQty!==undefined&&item.qty!==item.orderedQty)
-   ||order.isDelivered===true)
+   ||(order.isDelivered===true&&!serviceItems.length))
    fault('全部送達或訂購量異常的訂單不在此取消試點範圍');
   if(!Array.isArray(order.warehouseShipmentRecords??[])||!Array.isArray(order.deliveryRecords??[])
     ||!Array.isArray(order.returnRecords??[])||!Array.isArray(order.orderLifecycleHistory??[])
@@ -139,7 +151,7 @@ async function runLocationLifecycle(db,uid,data,wholeOrder){
   if(wholeOrder&&!wholeFulfillment){
    wholeFulfillment=fulfillmentCore.projectOrderShipmentReturns({orderId,items:order.items,
     shipments:order.warehouseShipmentRecords??[],deliveries:order.deliveryRecords??[],returns:returnRecords});
-   if(!wholeFulfillment.outstandingQty)fault('訂單已無剩餘未交付數量');
+   if(!wholeFulfillment.outstandingQty&&(!serviceProgress||serviceProgress.serviceCompleted))fault('訂單已無剩餘未交付數量');
    if((order.warehouseShipmentRecords??[]).length>40)fault('整單出貨憑證超過 40 筆安全上限');
   }
   const fulfillment=wholeFulfillment?wholeFulfillment.items.find(row=>row.itemId===itemId):
@@ -457,7 +469,12 @@ async function runLocationLifecycle(db,uid,data,wholeOrder){
   const history={action:nextStatus==='normal'?'restore':'status_change',
    before:{status:current},after:{status:nextStatus,date:intent.date,reason:intent.reason},
    by:uid,actorRole:role,operationId,at:now};
-  const result=wholeOrder?{orderId,nextStatus,items:plans.map(row=>row.result)}:plans[0].result;
+  const nextItems=order.items.map(item=>plans.find(row=>row.itemId===item.itemId)?.nextItem||item);
+  const serviceResults=serviceItems.map(item=>({orderId,itemId:item.itemId,nextStatus,reservedQty:0,shortageQty:0,warehouseDeltas:[]}));
+  const result=wholeOrder?{orderId,nextStatus,items:[...plans.map(row=>row.result),...serviceResults]}:plans[0]?.result;
+  if(!result)fault('服務取消恢復須使用整單入口');
+  const workIndex=await require('./service-order-fulfillment').mixedWorkIndex(db,tx,orderId,
+   {...order,...nextStatusData,items:nextItems},{proofOrder:order});
   for(const state of [...companyStates.values(),...stockStates.values()]){
    if(state.current.reserved!==state.initial.reserved)tx.update(state.ref,{reserved:state.current.reserved,updatedAt:now});
   }
@@ -487,7 +504,7 @@ async function runLocationLifecycle(db,uid,data,wholeOrder){
    else tx.create(demandRef,nextDemand);
   }
   }
-  tx.update(orderRef,{...nextStatusData,items:plans.map(row=>row.nextItem),
+  tx.update(orderRef,{...nextStatusData,...workIndex,items:nextItems,
    orderLifecycleHistory:[...(order.orderLifecycleHistory||[]),history],updatedAt:now});
   tx.create(receiptRef,{action,actorUid:uid,actorRole:role,orderId,
    ...(wholeOrder?{itemIds:intent.itemIds}:{itemId:intent.itemId,productKey:plans[0].productKey}),

@@ -46,6 +46,40 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex, actorUid 
             if(currentDemand||demandDoc.requestedQty>0||demandDoc.orderedQty>0||demandDoc.receivedQty>0)tx.set(demandRef,demandDoc,{merge:true});
             tx.update(orderRef,updates);
         };
+        // Service master data is not physical stock. Verify it against the live
+        // product document before skipping warehouse reservation and procurement.
+        // An old physical/supplier commitment must be audited, not erased.
+        if(String(item.productType||'').trim().toUpperCase()==='SERVICE'){
+            const productId=String(item.productId||'').trim();
+            if(!productId||productId.includes('/'))throw new Error('服務型品項缺少有效產品主檔。');
+            if((item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE')
+                throw new Error('服務型品項尚不支援原廠直送或實貨履約入口。');
+            const [productSnap,reservationSnap]=await Promise.all([
+                tx.get(db.collection('products').doc(productId)),
+                tx.get(db.collection('inventoryReservations').doc(`${orderId}__${itemId}`))
+            ]);
+            if(!productSnap.exists||productSnap.data().active===false
+                ||String(productSnap.data().productType||productSnap.data().type||'').trim().toUpperCase()!=='SERVICE')
+                throw new Error('服務型品項與啟用的產品主檔不符，不能建立虛擬實貨。');
+            const hasProgress=[reservationSnap.exists?reservationSnap.data().quantity:0,
+                item.reservedQty,item.dispatchPreparedQty,item.warehouseShippedQty,
+                item.supplyOrderedQty,item.receivedQty,currentDemand?.orderedQty,currentDemand?.receivedQty]
+                .some(value=>value!==undefined&&value!==null&&Number(value)!==0);
+            if(hasProgress)throw new Error('服務型品項已有實貨預留或供應進度，請先稽核，不能自動抹除。');
+            publish({...item,orderedQty,reservedQty:0,shortageQty:0,
+                inventoryProductKey:'',warehouseId:'',reservationStatus:'not_required'});
+            return;
+        }
+        // Verify the inverse case, too: a Service product must not be disguised
+        // as Goods and accidentally allocated company stock. Only live master
+        // data, re-read inside the transaction, can determine this boundary.
+        if(item.productId){
+            const productId=String(item.productId).trim();
+            if(!productId||productId.includes('/'))throw new Error('產品主檔識別碼不正確。');
+            const productSnap=await tx.get(db.collection('products').doc(productId));
+            if(productSnap.exists&&String(productSnap.data().productType||productSnap.data().type||'').trim().toUpperCase()==='SERVICE')
+                throw new Error('產品主檔為服務型，訂單品項不可冒充商品預留實貨；請修正產品類型後重試。');
+        }
         if(!productKey){publish({...item,orderedQty,reservedQty:0,shortageQty:requested,inventoryProductKey:'',reservationError:'missing_product_master'});return;}
         if((item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'){
             publish({...item,orderedQty,reservedQty:0,shortageQty:0,inventoryProductKey:productKey,warehouseId:'',reservationStatus:'not_required'});return;
@@ -292,7 +326,8 @@ async function reserveInventoryForNewOrder(orderId, order, actorUid = currentUse
         throw new Error('已有較新的庫存同步工作，請更新這筆訂單後確認結果。');
     const items=normalizedOrderItems(liveOrder);
     if(!items.length)throw new Error('訂單缺少正式 items 品項資料，請重新建立訂單。');
-    if(items.some(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP')){
+    if(items.some(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'
+        &&String(item.productType||'').trim().toUpperCase()!=='SERVICE')){
         await loadWarehouseMaster(true);
         if(!warehouseMasterLoadPromise)throw new Error('倉庫主檔讀取失敗，請重試同步。');
     }

@@ -60,7 +60,7 @@ function pendingV2OrderLifecycle(orderId){
   if(!intent||intent.orderId!==orderId||intent.actorUid!==currentUser?.uid||intent.actorRole!==currentUserRole
    ||!['normal','cancelled'].includes(intent.nextStatus)||!/^\w[\w-]{11,95}$/.test(intent.operationId||'')
    ||!Array.isArray(intent.itemIds)||!intent.itemIds.length||intent.itemIds.length>5
-   ||!Array.isArray(intent.warehouseIds)||intent.warehouseIds.length!==2)throw Error('invalid pending lifecycle');
+   ||!Array.isArray(intent.warehouseIds)||![0,2].includes(intent.warehouseIds.length))throw Error('invalid pending lifecycle');
   return intent;
  }catch(_){throw Error('前次取消／恢復結果尚未確認，請使用原帳號與角色核對。');}
 }
@@ -97,6 +97,7 @@ async function setV2OrderLifecycleEmulator(orderId,nextStatus,details=null){
   if(normalizedOrderStatus(order)===nextStatus)throw Error('訂單已是此狀態；v2 試點不提供單獨更正日期／原因。');
   let warehouseIds;
   for(const item of items){
+   if(String(item.productType||item.type||'').trim().toUpperCase()==='SERVICE')continue;
    const snap=await db.collection('inventoryReservations').doc(orderId+'__'+item.itemId).get({source:'server'});check();
    const ledger=snap.exists?snap.data():null,candidates=ledger?.lifecycleWarehouseIds;
    if(!ledger||ledger.locationSchemaVersion!==2||ledger.orderId!==orderId||ledger.itemId!==item.itemId
@@ -107,7 +108,7 @@ async function setV2OrderLifecycleEmulator(orderId,nextStatus,details=null){
    if(warehouseIds&&JSON.stringify(warehouseIds)!==JSON.stringify(sorted))throw Error('整單品項的原候選倉不一致。');
    warehouseIds=sorted;
   }
-  frozen={orderId,itemIds:items.map(row=>row.itemId).sort(),warehouseIds,nextStatus,date,reason,
+  frozen={orderId,itemIds:items.map(row=>row.itemId).sort(),warehouseIds:warehouseIds||[],nextStatus,date,reason,
    operationId:'lifecycle_'+globalThis.crypto.randomUUID().replaceAll('-','_'),
    syncAttemptId:order.inventoryReservationAttemptId,actorUid:uid,actorRole:role};
   sessionStorage.setItem(key,JSON.stringify(frozen));

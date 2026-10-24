@@ -73,6 +73,11 @@ body { font-family: "Microsoft JhengHei", Arial, sans-serif; background-color: #
     box-sizing: border-box;
 }
 .modal-overlay.active { display: flex; }
+#serviceCaseOverlay input, #serviceCaseOverlay select, #serviceCaseOverlay textarea {
+    width: 100%; box-sizing: border-box; margin: 4px 0 10px;
+}
+#serviceCaseFields { display: grid; gap: 4px; min-width: 0; margin: 12px 0; }
+#serviceCaseOverlay details { overflow-wrap: anywhere; margin: 8px 0; }
 .modal-overlay .modal,
 #selfOrderOverlay .modal-box {
     width: min(560px, 100%);
@@ -1773,7 +1778,8 @@ button:focus-visible { outline: 2px solid var(--ys-primary); outline-offset: 2px
 .preview-environment-banner {
     position: sticky;
     top: 0;
-    z-index: 10000;
+    /* Above navigation (1200), below dialogs (3000): never cover dialog actions. */
+    z-index: 1500;
     width: 100%;
     box-sizing: border-box;
     padding: 8px 12px;

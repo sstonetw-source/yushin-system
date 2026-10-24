@@ -1,9 +1,10 @@
 (function(root,factory){
   const fulfillment=typeof module==='object'&&module.exports?require('./fulfillment-core.js'):root?.YushinFulfillment;
-  const api=factory(fulfillment);
+  const serviceWork=typeof module==='object'&&module.exports?require('./service-work-core.js'):null;
+  const api=factory(fulfillment,()=>serviceWork||root?.YushinServiceWork);
   if(typeof module==='object'&&module.exports)module.exports=api;
   if(root)root.YushinWorkflow=api;
-})(typeof globalThis!=='undefined'?globalThis:this,function(fulfillment){
+})(typeof globalThis!=='undefined'?globalThis:this,function(fulfillment,serviceWork){
   const RELEASE_MODES=Object.freeze({
     STANDARD:'STANDARD',
     ADVANCE_TO_CUSTOMER:'ADVANCE_TO_CUSTOMER'
@@ -34,9 +35,26 @@
 
   // ERP-style projection: one authoritative calculation for order demand,
   // reservation, procurement, receipt and fulfillment state.
-  function projectItem(input={}){
+  function projectItem(input={},serviceCases){
     const orderedQty=n(input.orderedQty??input.qty);
     const fulfillmentType=input.fulfillmentType||'WAREHOUSE';
+    const serviceItem=String(input.productType||'').trim().toUpperCase()==='SERVICE';
+    let serviceProgress=null;
+    // Only an adapter that has read the complete registered case index may
+    // supply this second argument. Never adopt a quantity/cache from input.
+    if(serviceCases!==undefined){
+      const core=serviceWork();
+      if(!serviceItem||!core)throw Error('服務履約必須使用 Service 品項與服務事件核心。');
+      for(const key of ['orderId','itemId','productId']){
+        const value=input[key];
+        if(typeof value!=='string'||!value||value!==value.trim()||value.includes('/')||value.length>160)
+          throw Error('服務履約來源識別碼不正確。');
+      }
+      if(!Object.prototype.hasOwnProperty.call(core.STEPS,input.serviceKind)
+        ||!Array.isArray(serviceCases)||serviceCases.some(record=>record?.orderId!==input.orderId))
+        throw Error('服務履約事件的來源訂單或類型不一致。');
+      serviceProgress=core.projectServiceItem(input,serviceCases);
+    }
     const returnedQty=n(input.returnedQty);
     // itemWorkCategory 的 deliveredQty 歷來代表「退貨扣除後的有效送貨量」。
     // app 若同時掌握 gross/effective 會明確傳 effectiveDeliveredQty；
@@ -50,10 +68,15 @@
     // Explicit cumulative input uses the same projection as dispatch. Legacy
     // deliveredQty-only input remains effective quantity at this boundary.
     const delivery=fulfillment.deliveryQuantities({deliveredQty:grossDeliveredQty,returnedQty});
-    const effectiveDeliveredQty=Math.min(orderedQty,hasExplicitEffective
+    // SERVICE fulfillment needs a separate, verified service-completion event.
+    // Legacy product deliveryRecords, their cached totals, and billing flags
+    // must never close a customer service order (including mixed orders).
+    // Without registered case evidence, pending service work stays open.
+    const effectiveDeliveredQty=serviceItem?0:Math.min(orderedQty,hasExplicitEffective
       ? n(input.effectiveDeliveredQty)
       : hasNumber(input.grossDeliveredQty)?delivery.effectiveDeliveredQty:n(input.deliveredQty));
-    const outstandingQty=Math.max(0,orderedQty-effectiveDeliveredQty);
+    const fulfilledQty=serviceProgress?serviceProgress.completedQty:effectiveDeliveredQty;
+    const outstandingQty=Math.max(0,orderedQty-fulfilledQty);
 
     const shipmentContext=input.warehouseShipmentContext;
     const shipment=shipmentContext===undefined?null:fulfillment.projectShipmentReturns({
@@ -67,10 +90,10 @@
     const stockOutstandingQty=shipment?shipment.outstandingQty:outstandingQty;
     let reservedQty=0;
     let shortageQty=0;
-    if(hasNumber(input.reservedQty)){
+    if(!serviceItem&&hasNumber(input.reservedQty)){
       reservedQty=Math.min(stockOutstandingQty,n(input.reservedQty));
       shortageQty=Math.max(0,stockOutstandingQty-reservedQty);
-    }else if(hasNumber(input.shortageQty)){
+    }else if(!serviceItem&&hasNumber(input.shortageQty)){
       shortageQty=Math.min(stockOutstandingQty,n(input.shortageQty));
       reservedQty=Math.max(0,stockOutstandingQty-shortageQty);
     }
@@ -80,19 +103,24 @@
 
     const supplyOrderedQty=n(input.supplyOrderedQty);
     const receivedQty=n(input.receivedQty);
-    const inTransitQty=Math.max(0,supplyOrderedQty-receivedQty);
-    const requiredSupplyQty=fulfillmentType==='DIRECT_SHIP'
+    if(serviceItem&&(supplyOrderedQty>0||receivedQty>0||n(input.reservedQty)>0))
+      throw Error('服務品項已有供應或實貨預留，須先稽核，不能偽裝為一般實貨需求。');
+    const inTransitQty=serviceItem?0:Math.max(0,supplyOrderedQty-receivedQty);
+    const requiredSupplyQty=serviceItem?0:fulfillmentType==='DIRECT_SHIP'
       ? orderedQty+returnedQty
       : shortageQty;
-    const remainingToOrderQty=fulfillmentType==='DIRECT_SHIP'
+    const remainingToOrderQty=serviceItem?0:fulfillmentType==='DIRECT_SHIP'
       ? Math.max(0,requiredSupplyQty-supplyOrderedQty)
       : Math.max(0,shortageQty-inTransitQty);
 
     let workCategory;
     if(input.lifecycleStatus&&input.lifecycleStatus!=='normal'){
       workCategory=ITEM_WORK_CATEGORIES.CLOSED;
-    }else if(orderedQty>0&&effectiveDeliveredQty>=orderedQty){
+    }else if(orderedQty>0&&fulfilledQty>=orderedQty){
       workCategory=input.isBilled?ITEM_WORK_CATEGORIES.COMPLETE:ITEM_WORK_CATEGORIES.BILLING;
+    }else if(serviceItem){
+      // A service awaits its own completion evidence, not warehouse procurement.
+      workCategory=ITEM_WORK_CATEGORIES.DELIVERY;
     }else if(fulfillmentType==='DIRECT_SHIP'){
       if(remainingToOrderQty>0)workCategory=ITEM_WORK_CATEGORIES.ORDERING;
       else if(receivedQty<requiredSupplyQty)workCategory=ITEM_WORK_CATEGORIES.ARRIVAL;
@@ -110,6 +138,7 @@
       returnedQty,
       effectiveDeliveredQty,
       outstandingQty,
+      ...(serviceProgress?{serviceProgress}:{}),
       ...(shipment?{stockOutstandingQty,pendingDeliveryQty:shipment.pendingDeliveryQty}:{}),
       reservedQty,
       shortageQty,

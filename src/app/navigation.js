@@ -109,6 +109,7 @@ window.addEventListener('pageshow', event => {
 let sessionDataGeneration = 0;
 function resetSessionData() {
     sessionDataGeneration++;
+    window.resetServiceCaseView?.();
     window.resetCustomerReturnReceiptView?.();
     window.resetV2ShipmentLocations?.();
     window.closePurchaseOrderModal?.();

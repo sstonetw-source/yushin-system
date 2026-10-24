@@ -1,8 +1,57 @@
 # ARCHITECTURE — 又鑫系統程式碼責任地圖
 
+## 2026-10-23｜服務核銷日期與工作分類原子同步（demo 試點，待本批 CI）
+
+核銷日期修改沿既有 commitServiceOrderBilling 與 readServiceOrderProgress，不新增 writer／Callable／Core。可選 action=CHANGE_DATE 在同一交易核對已核銷狀態、預期原日期、真實角色／所有權、來源與全量服務完工證據；日期、歷程、工作分類和原操作憑證原子更新。原日期欄位在純服務 demo gate 下接線，與核銷共用 pending checkpoint、未知回覆確認與現況回讀；Goods 沿用原 Service，混合單不開放。
+
+此節更新先前日期尚未接線的狀態；其他 writer 對 workCategories 的持續維護、混合單商品憑證、材料耗用與 Preview 仍未完成，PR #234 保持 Draft，未合併 main 或部署 Firebase。
+
+## 2026-10-23｜原核銷接線與 Client 財務防護（demo 試點，待本批完整 CI）
+
+原訂單 `toggleOrderStatus` 對 Service 轉入原核銷 Callable adapter；不樂觀改寫財務狀態、不另建核銷核心。adapter 使用原 demo Auth／Functions gate，並核對 session generation；送出前保存固定意圖，同操作重送後另讀一次 server orders，避免將歷史憑證覆蓋後續撤銷。畫面只套用目前訂單。Rules 在所有角色（含 admin client）前共同限制服務財務欄位，並保護服務品項綁定免於先改類型／刪除再核銷。核銷日期後端修改仍未實作，原日期 Service 對服務單拒絕。
+
+尚未完成：核銷日期後端、其他 writer 對 workCategories 的維護、混合單商品交付證據、材料耗用與 Preview。此節更新先前「原 UI 未接線」的歷史狀態；PR #234 保持 Draft，未合併 main 或部署 Firebase。
+
+## 2026-10-23｜純服務後端核銷試點（未正式啟用）
+
+純服務核銷試點由 `commitServiceOrderBilling` 負責，同一 transaction 呼叫從既有整單查詢抽出的 `readServiceOrderProgress`；共同 `Workflow.projectItem`／註冊案件仍是唯一完成量及工作分類來源。角色限 admin 或本人 sales／engineer，重新讀取 users、orders、索引、產品與案件，核銷只在全數服務完成及商務文件齊備時可提交。混合單拒絕，不以商品快取當交付憑證。原 Client `setOrderBillingStatus` 對含 Service 品項明確拒絕，尚未將原 UI 接到新後端。
+
+
+## 2026-10-23 服務查詢與操作資格一致性
+
+已實作：`service-case-service.js` 的 writer 與品項查詢共用 `activeServiceMasterKind`。查詢從既有完整案件索引投影歷程，另以即時主檔決定是否可新增／接續；不以畫面操作提示取代提交時的交易驗證。原訂單列表索引與核銷 writer 整合仍未完成。
+
+## 2026-10-23 服務案件與共用履約投影（已實作，待本批 CI）
+
+`YushinWorkflow.projectItem(input, registeredCases)` 接受後端從完整品項索引讀取且核對來源的案件事件，沿唯一 `YushinServiceWork.projectServiceItem` 取得商務完成量，並共用既有工作分類：未全數完成為 delivery、完成未核銷為 billing、完成且已核銷為 complete、取消為 closed。未提供第二參數時保留原本的服務未履約保護；不採用 input 的完成量快取或一般送貨事件。服務 effectiveDeliveredQty 仍為 0，outstandingQty 表示尚未完成的服務需求。
+
+原 `commitServiceCaseEvent` 與 `getServiceCaseStatus` 使用同一投影回傳 itemWorkCategory；原服務視窗僅顯示後端分類。沒有新增 writer、集合、查詢、Listener、資料庫讀寫或持久快取。原訂單列表／workCategories 索引仍沒有案件證據，維持服務待處理，尚須後續整合；本批不是整張訂單完成、核銷 writer 或 Preview 上線。PR #234 保持 Draft。
+
+
+## 2026-10-23 服務案件原畫面接線（已實作，真瀏覽器待本批 CI）
+
+`src/features/orders/service-cases.js` 在原訂單列及頁首提供同一服務視窗；`src/services/service-cases.js` 僅傳送既有 Callable，不寫 Firestore。業務從原訂單開案，倉管／工程師可用訂單編號查詢最小服務資料並接手；讀取授權與可執行動作由原後端 Service 依真實使用者決定。案件數量仍由唯一 Service Work Core 計算，沒有第二個交易 writer。整合分支 `aa0eef6` 完整 CI 已通過。
+
+僅明確 `YUSHIN_SERVICE_CASE_EMULATOR`、本機 demo Auth／Functions gate 啟用；sessionStorage 固定原事件意圖，重送後經原查詢核對事件證據再解除。非同步讀取核對視窗、UID、角色、session generation 及請求代次；resetSessionData 清畫面、保留未確認意圖。來源改動後已重建 app.js。本機 Node 1759/1759；新增 1280／390px 原站真 Auth 四類服務及交接／遺失回覆案例，完整結果以本批最新 head CI 為準。尚未完成訂單服務交付／核銷、耗材領用、混合單與 Preview；未合併 main、未部署 Firebase。
+
 版本：2026-10-16｜以 PR #92 為重整起點，持續依已實作的 Service 邊界更新。**不代表交易核心或資料模型已完成全面驗收。**
 
 ## 目標與現況
+
+### 服務型產品主檔 UI 的權威分類（2026-10-23）
+
+`src/features/products/product-management.js` 沿用既有主檔視窗，只在選擇 `Service` 時顯示四種服務子類型，來自已載入的 `modules/service-work-core.js` 的 `STEPS` Key，而非新增獨立 Business Core。`serviceKind` 存在原有 `products/{id}`；既有產品查詢經 `productMasterDocToPriceItem` 傳進共用快取，再沿 `normalizeNewOrderItem`／`order-entry-core.copyItem` 保留在估價／Forecast／手動建單的品項快照，但後端仍以即時產品主檔判斷作業類型。不新增 Collection／Index／查詢／Listener。`app.js` 由 `tools/build-app.cjs` 固定的 55 個 `src` 來源依序生成。正式主檔需要管理員／採購角色既有 Rules 授權。
+
+後端 `functions/service-case-service.js` 在同一 Transaction 讀取產品主檔的 `serviceKind`，並拒絕與訂單快照、既存案件類型衝突。主檔可選類型不代表服務操作 UI、受託物保管與訂單完成量串接已上線；PR #234 保留 Draft，Preview 與正式部署未執行。
+
+
+### Service 案件真實 Auth／後端事件入口（2026-10-22，僅 demo Emulator）
+
+- `modules/service-work-core.js` 是四類 Service 事件順序／保管／必要憑證的唯一純 Core，透過 `tools/build-functions-core.cjs` 產生 `functions/shared/service-work-core.js`。
+- `functions/service-case-service.js` 是唯一 Service 事件 transaction writer；重新讀取 Auth 身份、停權／角色、訂單唯一來源品項與正式 Service 產品主檔，不建立實貨、批次、一般採購或送貨憑證。
+- `functions/index.js` 的 `commitServiceCaseEvent` 是**只限 demo-yushin 本機 Firestore＋Auth Emulator** 的 gated Callable；`ENABLE_SERVICE_CASE_EMULATOR=true` 也無法在 Preview／正式 project 開啟。Firestore Rules `serviceCases` 禁止 Client 直接讀寫。
+- 此階段新補真 Auth→Callable→Firestore Emulator 代表流程，不是正式啟用。服務 subtype 在主檔／UI 設定、受託物與數量、訂單品項完成量／核銷、Client 對案件的角色可見性、Preview 與正式部署仍未完成。**PR #234 應保持 Draft**。
+
 
 
 
@@ -763,3 +812,26 @@ receiveV2Supply 隔離登入入口延伸正常單品項來源的履約後收貨�
 ## 多品項出貨後的採購顯示修正（2026-10-22）
 
 已實作、完整 Emulator／原站驗收待本批 CI：`procurementDemandForOrderItem` 以原 `projectOrderShipmentReturns` 驗證整單履約事件後，依 itemId 傳入原 Workflow 單品項核心。實體需求使用原始 items 的預留／缺口；不得把 normalizedOrderItems 的待送達顯示當成庫存需求。此 helper 同由既有 receiving runtime 建置引用，需同步重建 app 及 Functions 生成檔。無新增 writer、讀取或資料模型。
+
+
+### 四類服務的共同事件核心（2026-10-22，純計算已實作，未接 UI／Firestore）
+
+`modules/service-work-core.js` 提供 `projectServiceCase` 與 `applyServiceEvent`：一案一受託物或一次現場工作，採 ID 冪等、時序與必要憑證驗證，計算 Bio-Plex、Pipette、切片、現場維修的進度和保管位置。它不接管 `YushinWorkflow` 的商品庫存投影、不取代 `YushinFulfillment` 真實出貨，也不建立第二套採購或耗材扣帳。`functions/service-case-service.js` 已提供**未匯出的** Admin SDK 交易 writer，重讀權限／訂單／主檔後對服務案件追加不可變事件，並以固定事件 ID 防止重送，未連到實際 UI 或 Functions `index.js`。Service 事件不修改商品庫存、採購、送貨、核銷。訂單品項完成量投影、角色真 Emulator、Rules 讀取及 Preview 尚未實作；本次未修改 `src`、`app.js`、Firestore Rules／索引／正式資料。
+
+
+### 2026-10-23｜服務案件的原產品綁定（demo Emulator）
+
+新案件由唯一 `commitServiceCaseEvent` 在交易內保存 `productId`，後續寫入、同事件重送與 `getServiceCaseStatus` 均核對來源訂單品項的產品識別及服務類型；相同 itemId 換成另一個服務產品也不得接續或套用原歷程。未保存 productId 的既有試點案件明確拒絕，不從目前品項猜測補綁、不遷移正式資料。歷史查詢仍驗證當前登入權限與來源品項，保留取消後唯讀；產品主檔停用、刪除或分類變更不抹除已綁定的歷史保管證據，新增事件仍需有效主檔。
+
+不增加 Collection、索引、Listener、查詢或資料庫讀取；唯一既有案件文件增加 productId。案件數與訂單數量、原頁面操作、客戶交付與核銷及 Preview 仍待完成，PR #234 維持 Draft，正式功能未啟用。
+
+
+### 2026-10-23｜服務案件與訂單數量對應（demo Emulator，尚未正式啟用）
+
+已實作：原 `commitServiceCaseEvent` 要求明確正數 `serviceQty`，代表案件對應的商務訂購量，不從檢體件數、試劑盒數或器材數自行推算。首次事件固定數量，接續與重送不得改量；來源 item 的 `orderedQty ?? qty` 是上限。`YushinServiceWork.projectServiceItem` 是唯一案件量投影，從已註冊案件及事件計算 allocatedQty、completedQty、unassignedQty、inProgressQty、remainingQty；不保存另一份完成量快取，不更新商品 deliveredQty、庫存、採購或核銷。浮點比較只容許相對機器精度誤差，不以固定容差放行極小數量的超額。
+
+同一 `serviceCases` 集合新增每品項一份 `ITEM_CASE_INDEX` 文件，固定 ID 為四段 `item-index|encode(orderId)|encode(itemId)|v1`，和原三段案件 ID 不衝突。文件只保存來源 orderId／itemId／productId／kind 與 caseIds，不保存數量。唯一 writer 同交易讀索引及全部已註冊案件，首次事件原子寫索引與案件；共同索引讓並行不同 caseId 競爭餘量也會重新驗證。每品項最多 100 案，超過明確拒絕，不截斷當作全部。平常不新增 Query／Listener／Collection／複合索引；首次缺索引額外查相同 orderId＋itemId 至多一案，發現舊案件即拒絕自動補綁，不把既存保管紀錄當成零數量。
+
+新案首次交易多讀一份索引並寫入它，後續事件及已綁定查詢最多再讀 100 份已註冊案件；這是有界的權威核對成本。歷史查詢回傳 serviceQty 與 itemProgress；未綁數量的舊試點案件仍可依原授權唯讀，itemProgress=null，不推定完成量。索引失聯、來源不符、缺少案件或訂單縮量小於已綁量均拒絕，不自動刪索引或釋放額度。Client 對該集合原有全面拒絕 Rules 不變，Callable 仍限 demo-yushin Emulator。
+
+本機完整 Node 1751/1751 通過，零失敗／略過；建置一致性及 diff 通過。新增真 Auth／Callable 的不同案件搶最後餘量、同案並行重送、分批完成、改量／縮單／索引損壞零寫入與 Client 索引讀寫拒絕驗收，結果須以本批最新 head 完整 CI 為準。尚未完成：原 UI 開案與數量輸入、既有主檔分類、服務交付／核銷、混合單與 Preview 完整驗收。PR #234 仍為整合 Draft，未合併 main、未部署 Firebase、未操作正式資料。

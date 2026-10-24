@@ -249,6 +249,7 @@ function procurementDemandForOrderItem(order, item, dispatchOverride = null) {
     const quantities = globalThis.YushinWorkflow?.procurementQuantities({
         orderedQty:source.orderedQty ?? source.qty,
         fulfillmentType,
+        productType:source.productType||item.productType||order.productType||'',
         ...(hasWarehouseShipments?{warehouseShipmentContext,warehouseShippedQty:source.warehouseShippedQty}:{}),
         reservedQty:source.reservedQty,
         shortageQty:source.shortageQty,

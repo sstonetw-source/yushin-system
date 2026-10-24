@@ -108,6 +108,57 @@ test('direct initialization shares demand projection but never creates physical 
  const f=fixture({items:[{itemId:'I',productId:'P',qty:3,fulfillmentType:'DIRECT_SHIP'}]});f.docs.delete('inventory/P');f.docs.delete('warehouseStocks/W__P');
  await f.sync();assert.equal(f.demand('I').remainingToOrderQty,3);assert.equal(f.order().items[0].warehouseId,'');assert.equal([...f.docs.keys()].some(k=>/^(inventory|warehouseStocks|inventoryReservations)\//.test(k)),false);
 });
+test('Service-only order initializes as a non-stock item without reservation, demand, lot or inventory movement',async()=>{
+ const f=fixture({items:[{itemId:'I',productId:'S',productType:'Service',fulfillmentType:'WAREHOUSE',qty:3}]});
+ f.put('products/S',{productType:'Service',active:true});f.docs.delete('inventory/P');f.docs.delete('warehouseStocks/W__P');
+ await f.sync();const item=f.order().items[0];
+ assert.equal(item.reservedQty,0);assert.equal(item.shortageQty,0);assert.equal(item.warehouseId,'');
+ assert.equal(item.reservationStatus,'not_required');assert.equal(f.demand('I'),undefined);
+ assert.equal([...f.docs.keys()].some(k=>/^(inventory|warehouseStocks|inventoryReservations|inventoryLots|inventoryMovements)\//.test(k)),false);
+ await f.sync();assert.equal(f.controls.selfCalls,2);assert.equal(f.demand('I'),undefined);
+});
+
+test('Goods type cannot bypass a live Service product master and reserve physical stock',async()=>{
+ const f=fixture({items:[{itemId:'I',productId:'S',productType:'Goods',warehouseId:'W',qty:3}]});
+ f.put('products/S',{productType:'Service',active:true});
+ const before=JSON.stringify([...f.docs]);
+ await assert.rejects(f.sync(),/產品主檔為服務型/);
+ assert.equal(JSON.stringify([...f.docs]),before);
+ assert.equal(f.docs.get('inventory/P').reserved,0);
+ assert.equal(f.docs.has('inventoryReservations/O__I'),false);
+});
+
+test('Goods plus Service order reserves only the real Goods item and never creates Service supply',async()=>{
+ const f=fixture({items:[
+  {itemId:'SERVICE',productId:'S',productType:'Service',qty:2,fulfillmentType:'WAREHOUSE'},
+  {itemId:'GOODS',productId:'P',productType:'Goods',warehouseId:'W',qty:3,fulfillmentType:'WAREHOUSE'}
+ ]});
+ f.put('products/S',{productType:'Service',active:true});
+ await f.sync();assert.equal(f.order().items[0].reservedQty,0);
+ assert.equal(f.order().items[1].reservedQty,3);assert.equal(f.docs.get('inventory/P').reserved,3);
+ assert.equal(f.docs.get('warehouseStocks/W__P').reserved,3);
+ assert.equal(f.demand('SERVICE'),undefined);assert.equal(f.demand('GOODS'),undefined);
+ assert.equal(f.docs.has('inventoryReservations/O__SERVICE'),false);
+ assert.equal(f.docs.get('inventoryReservations/O__GOODS').quantity,3);
+ const movements=[...f.docs.values()].filter(row=>row.type==='reserve');
+ assert.equal(movements.length,1);assert.equal(movements[0].itemId,'GOODS');
+});
+
+test('Service initialization rejects forged or inactive master, old stock and supplier commitments without partial writes',async()=>{
+ for(const variant of ['missing','goods-master','inactive','reserved','ledger','supplier','direct']){
+  const item={itemId:'I',productId:'S',productType:'Service',qty:2,fulfillmentType:variant==='direct'?'DIRECT_SHIP':'WAREHOUSE'};
+  if(variant==='reserved')item.reservedQty=1;
+  if(variant==='supplier')item.supplyOrderedQty=1;
+  const f=fixture({items:[item]});
+  if(variant!=='missing')f.put('products/S',{productType:variant==='goods-master'?'Goods':'Service',active:variant!=='inactive'});
+  if(variant==='ledger')f.put('inventoryReservations/O__I',{orderId:'O',itemId:'I',productKey:'S',warehouseId:'W',quantity:1});
+  const original=JSON.stringify([...f.docs]);
+  await assert.rejects(f.sync(),/服務型/);
+  assert.equal(JSON.stringify([...f.docs]),original,variant);
+  assert.equal(f.controls.selfCalls,0);
+ }
+});
+
 test('missing aggregate cannot reserve from warehouse only; total stock bounds allocation',async()=>{
  for(const total of [null,2]){
   const f=fixture();if(total===null)f.docs.delete('inventory/P');else f.put('inventory/P',{onHand:total,reserved:0});

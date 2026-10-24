@@ -162,3 +162,36 @@ test('cancelled orders cannot gain new delivery records and invalid quantities n
   for(const qty of [NaN,Infinity,0,-1,'3'])await assert.rejects(f.c.saveOrderDeliveryRecord('O',request({qty})),/大於 0/);
   assert.equal(f.writes(),0);
 });
+
+test('Bioplex, pipette calibration, outsourced slicing and repair cannot bypass service evidence through product shipment',async()=>{
+  for(const serviceKind of ['BIOPLEX_LAB','PIPETTE_CALIBRATION','TISSUE_SLICING','ONSITE_REPAIR']){
+    const row={itemId:'I',qty:2,orderedQty:2,productType:'Service',serviceKind,fulfillmentType:'WAREHOUSE',
+      reservedQty:0,dispatchPreparedQty:0};
+    const f=fixture({patch:{items:[row],inventoryReservationStatus:'completed'}});
+    await assert.rejects(f.c.saveOrderDeliveryRecord('O',request({qty:1})),/服務型品項/);
+    await assert.rejects(f.c.completeOrderDelivery('O','2026-10-16'),/服務型品項/);
+    assert.equal(f.writes(),0);assert.deepEqual(f.stock(),[]);
+    assert.equal(f.state().deliveryRecords.length,0);
+  }
+});
+
+test('historical Service delivery cannot be reversed through physical stock corrections',async()=>{
+  const row={itemId:'I',qty:2,productType:'Service',reservedQty:0,dispatchPreparedQty:0,fulfillmentType:'WAREHOUSE'};
+  const patch={items:[row],deliveryRecords:[{id:'old',itemId:'I',qty:2,lotAllocations:[]}],deliveredQty:2,isDelivered:true};
+  const f=fixture({patch});
+  await assert.rejects(f.c.cancelOrderDeliveries('O'),/服務型品項/);
+  await assert.rejects(f.c.correctOrderDeliveryRecord('O','old','誤登'),/服務型品項/);
+  assert.equal(f.writes(),0);assert.deepEqual(f.stock(),[]);
+  assert.equal(f.state().deliveryRecords.length,1);
+});
+
+test('stock delta and physical return helpers reject service orders before any inventory read',async()=>{
+  const stockSource=fs.readFileSync(path.join(__dirname,'../src/services/delivery-stock.js'),'utf8');
+  const context=vm.createContext({});
+  vm.runInContext(stockSource,context);
+  const row={productType:'Service',fulfillmentType:'WAREHOUSE'};
+  for(const qty of [0,1,-1])
+    await assert.rejects(context.applyInventoryDeliveryDeltaInTransaction(null,row,qty,'Sales','O'),/服務型品項/);
+  for(const qty of [0,1,-1])
+    await assert.rejects(context.applyInventoryReturnDeltaInTransaction(null,row,qty,'Sales','O'),/服務型品項/);
+});

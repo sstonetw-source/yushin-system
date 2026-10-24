@@ -31,7 +31,7 @@
     }
     function copyItem(item={},fallback={}) {
         const draft={};
-        for(const key of ['itemCode','itemName','itemNameEn','brand','brandId','productId','productMasterMatched','productCheckStatus','productLine','productType','spec','qty','unitPrice','supplier','costPrice','procurementType','fulfillmentType','warehouseId','deliveryCustomerName']) {
+        for(const key of ['itemCode','itemName','itemNameEn','brand','brandId','productId','productMasterMatched','productCheckStatus','productLine','productType','serviceKind','spec','qty','unitPrice','supplier','costPrice','procurementType','fulfillmentType','warehouseId','deliveryCustomerName']) {
             if(item[key]!==undefined)draft[key]=item[key];
         }
         draft.selfOrderConfirmed=false;

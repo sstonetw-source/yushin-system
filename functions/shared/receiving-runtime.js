@@ -166,6 +166,7 @@ function orderItemWorkCategory(order, item, lifecycleOverride = null, dispatchOv
         deliveredQty:dispatch.grossDelivered,
         isBilled:!!order.isBilled,
         fulfillmentType:item.fulfillmentType||order.fulfillmentType||'WAREHOUSE',
+        productType:item.productType||order.productType||'',
         reservedQty:item.reservedQty,
         shortageQty:item.shortageQty,
         supplyOrderedQty:item.supplyOrderedQty,
@@ -180,7 +181,8 @@ function orderWorkCategories(order) {
     const items=normalizedOrderItems(order);
     const categories=[...new Set(items.flatMap(item=>{
         const category=orderItemWorkCategory(order,item);
-        const warehouse=(item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP';
+        const warehouse=(item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'
+            &&String(item.productType||'').trim().toUpperCase()!=='SERVICE';
         return warehouse && ['ordering','arrival','delivery'].includes(category) && itemDispatchState(order,item).pending>0
             ? [category,'dispatch'] : [category];
     }))];
@@ -188,6 +190,16 @@ function orderWorkCategories(order) {
     return categories;
 }
 function orderWorkIndexFields(order) {
+    const items=normalizedOrderItems(order);
+    const hasService=items.some(item=>String(item.productType||'').trim().toUpperCase()==='SERVICE');
+    // Registered Service case events are the authority for completion. A
+    // subsequent client-side edit must not reset their server-projected queue.
+    if (hasService&&Array.isArray(order.workCategories)
+        &&(order.workCategoryUpdatedAt||order.workCategories.some(category=>category==='billing'||category==='complete'))) {
+        if(orderLifecycleInfo(order).status!=='normal')
+            throw new Error('已有服務完成紀錄的訂單須由後端核對案件後取消或恢復。');
+        return {};
+    }
     const categories=orderWorkCategories(order);
     return {
         workCategories:categories,
@@ -229,6 +241,7 @@ function procurementDemandForOrderItem(order, item, dispatchOverride = null) {
     const quantities = globalThis.YushinWorkflow?.procurementQuantities({
         orderedQty:source.orderedQty ?? source.qty,
         fulfillmentType,
+        productType:source.productType||item.productType||order.productType||'',
         ...(hasWarehouseShipments?{warehouseShipmentContext,warehouseShippedQty:source.warehouseShippedQty}:{}),
         reservedQty:source.reservedQty,
         shortageQty:source.shortageQty,
@@ -493,6 +506,7 @@ async function validateV2ReceiptSource(transaction, {order,supply,reservation,it
             throw new Error('整單原候選倉資料不正確。');
         candidates.forEach(id);
         for(const row of order.items){
+  if(String(row.productType||row.type||'').trim().toUpperCase()==='SERVICE')continue;
             const rowId=id(row?.itemId),productId=id(row.productId),key=id(row.inventoryProductKey||productId);
             const ordered=integer(row.qty??row.orderedQty,'品項訂購量');
             if(seen.has(rowId)||!ordered||(row.orderedQty!==undefined&&row.orderedQty!==ordered)

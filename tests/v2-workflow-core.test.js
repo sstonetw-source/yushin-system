@@ -2,7 +2,9 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const w=require('../modules/workflow-core.js');
 const fulfillment=require('../modules/fulfillment-core.js');
+const procurementDemand=require('../modules/procurement-demand-core.js');
 const reservation=require('../modules/reservation-core.js');
+const vm=require('node:vm'),fs=require('node:fs');
 const receiving=require('../modules/receiving-core.js');
 const supply=require('../modules/supply-core.js');
 
@@ -37,6 +39,79 @@ test('item workflow treats stock-covered items as delivery and direct ship as or
   assert.equal(w.itemWorkCategory({orderedQty:3,shortageQty:0}),'delivery');
   assert.equal(w.itemWorkCategory({orderedQty:3,fulfillmentType:'DIRECT_SHIP',supplyOrderedQty:0}),'ordering');
   assert.equal(w.itemWorkCategory({orderedQty:3,fulfillmentType:'DIRECT_SHIP',supplyOrderedQty:3}),'arrival');
+});
+
+test('Service work projection is not a physical shortage, even without warehouse reservation',()=>{
+ const pending=w.projectItem({productType:'Service',orderedQty:3,qty:3,fulfillmentType:'WAREHOUSE',reservedQty:0,shortageQty:3});
+ assert.equal(pending.requiredSupplyQty,0);
+ assert.equal(pending.remainingToOrderQty,0);
+ assert.equal(pending.inTransitQty,0);
+ assert.equal(pending.shortageQty,0);
+ assert.equal(pending.workCategory,'delivery');
+ // A past physical delivery or a billing toggle is not proof of service completion.
+ const delivered=w.projectItem({productType:'Service',orderedQty:3,deliveredQty:3,isBilled:true});
+ assert.equal(delivered.workCategory,'delivery');
+ assert.equal(delivered.effectiveDeliveredQty,0);
+ assert.equal(delivered.outstandingQty,3);
+ const forged=w.projectItem({productType:'Service',orderedQty:3,
+   grossDeliveredQty:3,effectiveDeliveredQty:3,isBilled:true});
+ assert.equal(forged.workCategory,'delivery');
+ assert.equal(forged.outstandingQty,3);
+ for(const serviceKind of ['BIOPLEX_LAB','PIPETTE_CALIBRATION','TISSUE_SLICING','ONSITE_REPAIR']){
+   assert.equal(w.itemWorkCategory({productType:'Service',serviceKind,orderedQty:1,
+     deliveredQty:1,isBilled:true}),'delivery');
+ }
+ assert.throws(()=>w.projectItem({productType:'Service',orderedQty:3,reservedQty:1}),/服務品項/);
+ assert.throws(()=>w.projectItem({productType:'Service',orderedQty:3,supplyOrderedQty:1}),/服務品項/);
+});
+
+test('Service normalization never recreates physical shortage on mixed-order updates',()=>{
+ const row={itemId:'SERVICE',productType:'Service',orderedQty:3,reservedQty:0,shortageQty:3};
+ const normalized=fulfillment.normalizeItem(row);
+ assert.equal(normalized.shortageQty,0);assert.equal(normalized.orderedQty,3);
+ assert.deepEqual(fulfillment.normalizeItem(normalized),normalized);
+ const goods=fulfillment.normalizeItem({...row,productType:'Goods',reservedQty:1});
+ assert.equal(goods.shortageQty,2);
+ const conflict=fulfillment.normalizeItem({...row,reservedQty:1});
+ assert.equal(conflict.reservedQty,1);assert.throws(()=>w.projectItem(conflict),/服務品項/);
+});
+
+test('original order purchase and shipping summaries exclude service work from physical quantities',()=>{
+ const source=fs.readFileSync('src/features/orders/order-workspace.js','utf8');
+ const start=source.indexOf('function purchaseProgressInfo('),end=source.indexOf('const pendingDispatchOrderIds',start);
+ const service={productType:'Service',qty:3,reservedQty:0,shortageQty:3,fulfillmentType:'WAREHOUSE'};
+ const c=vm.createContext({normalizedOrderItems:order=>order.items,YushinWorkflow:w,
+  itemDispatchState:(_order,item)=>fulfillment.dispatchState(item),defaultWarehouse:()=>({id:'W'})});
+ vm.runInContext(source.slice(start,end),c);
+ assert.equal(c.purchaseProgressInfo({items:[service]}).state,'not_required');
+ assert.equal(c.fulfillmentProgressInfo({items:[service]}).state,'not_required');
+ const goods={qty:2,reservedQty:2,shortageQty:0,fulfillmentType:'WAREHOUSE'};
+ const mixed=c.fulfillmentProgressInfo({items:[service,goods]});
+ assert.equal(mixed.total,2);assert.equal(mixed.ready,2);assert.equal(mixed.pendingDispatch,2);
+ assert.equal(c.purchaseProgressInfo({items:[service,{...goods,reservedQty:0,shortageQty:2}]}).label,'待採購 2');
+ assert.equal(c.fulfillmentProgressInfo({items:[{qty:1,fulfillmentType:'DIRECT_SHIP'}]}).state,'direct');
+});
+
+test('two Bio-Plex service sales do not produce two kits of demand; shared reagent uses independent real replenishment',()=>{
+ const jobs=['BIO-A','BIO-B'];
+ for(const sourceId of jobs){
+   const work=w.procurementQuantities({productType:'Service',sourceId,orderedQty:1,shortageQty:1});
+   assert.equal(work.requiredSupplyQty,0);
+   assert.equal(work.remainingToOrderQty,0);
+ }
+ // Material stock is its own demand and may serve multiple customer experiments.
+ const reagent=procurementDemand.fromStockReplenishment({
+   sourceId:'BIOPLEX-REAGENT-01',safetyStock:8,availableQty:3,incomingQty:0
+ });
+ assert.equal(reagent.demandId,'STOCK_REPLENISHMENT:BIOPLEX-REAGENT-01');
+ assert.equal(reagent.remainingToOrderQty,5);
+ const ordered=procurementDemand.applyOrder(reagent,5);
+ assert.equal(ordered.appliedQty,5);
+ const received=procurementDemand.applyReceipt(ordered.demand,5);
+ assert.equal(received.appliedQty,5);
+ assert.equal(received.demand.status,'RECEIVED');
+ // A real material receipt is not a service-completion event.
+ assert.equal(w.itemWorkCategory({productType:'Service',orderedQty:1,isBilled:true}),'delivery');
 });
 
 test('item workflow moves delivered items through billing and complete',()=>{

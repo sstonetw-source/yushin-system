@@ -73,3 +73,21 @@ test('invalid dates never write or trigger transactions',async()=>{
   }
   assert.equal(called,0);
 });
+
+test('legacy client billing cannot bypass registered service proof for pure or mixed orders',async()=>{
+  for(const items of [[{productType:'Service'}],[{productType:'Goods'},{productType:'SERVICE'}]]){
+    for(const isBilled of [true,false]){
+      const f=fixture({items,isBilled:!isBilled});
+      await assert.rejects(f.sandbox.setOrderBillingStatus('O1',isBilled,'2026-10-23',{},'now'),/後端核對完工憑證/);
+      assert.equal(f.count(),0);
+    }
+  }
+});
+
+test('legacy service billing date cannot write around the server boundary',async()=>{
+  for(const items of [[{productType:'Service'}],[{productType:'Goods'},{productType:' service '}]]){
+    const f=fixture({items,isBilled:true,billingDate:'2026-10-22'});
+    await assert.rejects(f.sandbox.changeOrderBillingDate('O1','2026-10-23',{at:'now'}),/須由後端修改/);
+    assert.equal(f.count(),0);
+  }
+});

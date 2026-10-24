@@ -60,11 +60,20 @@ async function receiveV2Supply(db,uid,input){
    fail('failed-precondition','原收貨憑證不是 v2 格式');
   if(!previous.exists&&(!Array.isArray(order.items)||order.items.length<1||order.items.length>5||order.status!=='active'||order.orderStatus!=='normal'))
    fail('failed-precondition','收貨登入試點僅支援正常 1–5 品項來源；取消尚未開放');
+  const pending=[],orderPatches=[];
   const adapter={get,update(reference,data){
-   native.update(reference,data);
-   if(reference.path===supplyRef.path)native.set(db.collection('receivingSupplyOrders').doc(intent.supplyId),stockPermissions.sanitizeSupply({...supply,...data}));
-  },set:(...args)=>native.set(...args)};
-  return callback(adapter);
+   pending.push(()=>native.update(reference,data));
+   if(reference.path===supplyRef.path)pending.push(()=>native.set(db.collection('receivingSupplyOrders').doc(intent.supplyId),stockPermissions.sanitizeSupply({...supply,...data})));
+   if(reference.path==='orders/'+supply.orderId)orderPatches.push(data);
+  },set:(...args)=>pending.push(()=>native.set(...args))};
+  const result=await callback(adapter);
+  if(orderPatches.length&&order.items?.some(item=>String(item.productType||'').trim().toUpperCase()==='SERVICE')){
+   const next=Object.assign({},order,...orderPatches);
+   const index=await require('./service-order-fulfillment').mixedWorkIndex(db,{get},supply.orderId,next,{proofOrder:order});
+   pending.push(()=>native.update(db.collection('orders').doc(supply.orderId),index));
+  }
+  pending.forEach(write=>write());
+  return result;
  });
  const runtime=createReceivingService({db,currentUser:{uid},currentUserRole:role,currentUserCode:String(profile.data().code||''),permissionRulesReady:false,cores,
   runRoleTransaction,canConfirmSupplyReceipt:()=>true,deliveryActor:()=>actor,

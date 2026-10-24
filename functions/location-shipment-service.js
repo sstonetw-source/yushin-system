@@ -122,6 +122,7 @@ async function commitLocationShipment(db,uid,data){
    const products=new Map([[productId,product]]),claims=new Map(),warehouseClaims=new Map();
    let originalWarehouses=null;
    for(const row of order.items){
+  if(String(row.productType||row.type||'').trim().toUpperCase()==='SERVICE')continue;
     const part=whole.items.find(candidate=>candidate.itemId===row.itemId);
     const siblingProductId=id(row.productId,'來源產品');
     const siblingKey=id(row.inventoryProductKey||siblingProductId,'來源庫存產品');
@@ -243,6 +244,10 @@ async function commitLocationShipment(db,uid,data){
   else fulfillmentCore.projectShipmentReturns({orderId,itemId,productKey,orderedQty:ordered,
    shipments:nextRecords,deliveries:order.deliveryRecords,returns:order.returnRecords});
   const nextLedger={...stockPlan.reservation,updatedAt:now};delete nextLedger.warehouseId;
+  const workIndex=await require('./service-order-fulfillment').mixedWorkIndex(db,tx,orderId,
+   {...order,items:order.items.map(row=>row.itemId===itemId?{...row,reservedQty:result.reservedQty,
+    shortageQty:nextLedger.shortageQty,warehouseShippedQty:result.grossShippedQty}:row),warehouseShipmentRecords:nextRecords},
+   {proofOrder:order});
   tx.update(inventoryRef,{...stockPlan.aggregateStock,updatedAt:now});
   tx.update(stockRef,{...stockPlan.warehouseStock,updatedAt:now});
   tx.set(reservationRef,nextLedger);
@@ -250,7 +255,7 @@ async function commitLocationShipment(db,uid,data){
    const lot=lots.find(lot=>lot.id===row.lotId);
    tx.update(ref('inventoryLots',row.lotId),{remainingQty:lot.remainingQty-row.qty,updatedAt:now});
   }
-  tx.update(orderRef,{items:order.items.map(row=>row.itemId===itemId?{...row,
+  tx.update(orderRef,{...workIndex,items:order.items.map(row=>row.itemId===itemId?{...row,
    reservedQty:result.reservedQty,shortageQty:nextLedger.shortageQty,
    warehouseShippedQty:result.grossShippedQty}:row),warehouseShipmentRecords:nextRecords,
    warehouseShipmentRecordId:operationId,updatedAt:now});

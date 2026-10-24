@@ -129,6 +129,8 @@ async function reverseV2ShipmentDeliveryEmulator(orderId,deliveryRecordId,{date,
 
 // Order delivery mutations. UI owns input/feedback; this service owns protected writes.
 function assertOrderDeliveryIncrease(order,item,qty) {
+    if(String(item?.productType||item?.type||'').trim().toUpperCase()==='SERVICE')
+        throw new Error('服務型品項不能使用商品送貨紀錄；須另有服務完成及客戶交付憑證。');
     if(qty<=0)return;
     if(orderInventorySyncIncomplete(order))throw new Error('訂單庫存尚未同步完成');
     if((item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP')return;
@@ -221,6 +223,7 @@ async function cancelOrderDeliveries(orderId) {
         const history = { action: 'cancel_all', source: 'quick_toggle', before, after: { records: [], deliveredQty: 0 }, by: actor, at: now };
         const currentItems=normalizedOrderItems(order);
         const deliveryItem=currentItems[0];
+        assertOrderDeliveryIncrease(order,deliveryItem,0);
         const itemOrder={...order,...deliveryItem,deliveryRecords:savedDeliveryRecords(order),isDelivered:false};
         const inventoryResult=await applyInventoryDeliveryDeltaInTransaction(transaction, itemOrder, -progress.delivered, actor, orderId, savedDeliveryRecords(order));
         const nextItems=currentItems.map((item,index)=>index===0?{...item,reservedQty:Number(inventoryResult?.newReservedQty??item.reservedQty??0)}:item);
@@ -350,6 +353,7 @@ async function correctOrderDeliveryRecord(orderId,recordId,correctionReason) {
         const orderItems=normalizedOrderItems(order);
         const targetItem=orderItems.find(item=>item.itemId===removed.itemId) || (orderItems.length===1?orderItems[0]:null);
         if(!targetItem)throw new Error('找不到原送貨品項，無法安全還原庫存。');
+        assertOrderDeliveryIncrease(order,targetItem,0);
         const itemRecords=records.filter(r=>((!r.itemId&&orderItems.length===1)||r.itemId===targetItem.itemId));
         const itemGrossAfter=itemRecords.filter(r=>r.id!==recordId).reduce((sum,row)=>sum+Number(row.qty||0),0);
         const itemReturned=savedReturnRecords(order)

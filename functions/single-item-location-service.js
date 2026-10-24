@@ -123,6 +123,18 @@ async function runLocationReservation(db,uid,input,operation=null){
    const matches=order.items.map((v,index)=>({v,index,id:String(v.itemId||'item-'+(index+1))})).filter(x=>x.id===itemId);
    if(matches.length!==1)reject('來源品項不是唯一');
    const item=matches[0].v;
+   if(wholeOrder&&String(item.productType||item.type||'').trim().toUpperCase()==='SERVICE'){
+    const product=await tx.get(ref('products',ident(item.productId,'服務主檔')));
+    if(!product.exists||product.data().active===false
+      ||String(product.data().productType||product.data().type||'').trim().toUpperCase()!=='SERVICE')
+     reject('服務品項主檔不一致');
+    const ledger=await tx.get(ref('inventoryReservations',orderId+'__'+itemId));
+    if(ledger.exists)reject('服務品項已有實貨預留來源，須先稽核');
+    if(item.fulfillmentType==='DIRECT_SHIP')reject('服務品項不能使用商品直送');
+    for(const field of ['reservedQty','shortageQty','supplyOrderedQty','receivedQty','dispatchPreparedQty','warehouseShippedQty','deliveredQty','returnedQty'])
+     if(item[field]!==undefined&&item[field]!==0)reject('服務品項不可有實貨數量');
+    continue;
+   }
    if((item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'||String(item.productType||item.type||'').toUpperCase()==='SERVICE'
      ||item.transferPendingId||item.custodyTransferId||integer(item.dispatchPreparedQty??0,'備貨量')>0)
      reject('非實體倉或已開始物流的品項不可預留');
