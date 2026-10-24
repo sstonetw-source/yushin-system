@@ -10,19 +10,19 @@ const SERVICE_WORK_LABELS={delivery:'待服務處理',billing:'服務完成・�
 // This must never be used for workCategories, billing writes or fulfillment decisions.
 const verifiedServiceListHints=new Map();
 const SERVICE_LIST_HINT_TTL_MS=120000;
+function serviceCaseVerifiedItemHint(orderId,item){
+    if(!serviceCaseEntryEnabled()||!currentUser?.uid
+        ||String(item?.productType||'').trim().toUpperCase()!=='SERVICE')return '';
+    const key=JSON.stringify([currentUser.uid,currentUserRole,sessionDataGeneration,orderId,item.itemId]);
+    const saved=verifiedServiceListHints.get(key),now=Date.now();
+    if(!saved)return '';
+    if(saved.readAt>now||now-saved.readAt>SERVICE_LIST_HINT_TTL_MS){
+        verifiedServiceListHints.delete(key);return '';
+    }
+    return `<small class="service-case-verified-hint">${escapeHtml(item.itemName||item.itemCode||'服務品項')}：上次查核完成 ${escapeHtml(saved.completedQty)}/${escapeHtml(saved.orderedQty)}（${escapeHtml(SERVICE_WORK_LABELS[saved.category])}；僅供畫面參考）</small>`;
+}
 function serviceCaseVerifiedOrderHints(orderId,items){
-    if(!serviceCaseEntryEnabled()||!currentUser?.uid)return '';
-    const now=Date.now();
-    return (items||[]).filter(item=>String(item.productType||'').trim().toUpperCase()==='SERVICE')
-        .map(item=>{
-            const key=JSON.stringify([currentUser.uid,currentUserRole,sessionDataGeneration,orderId,item.itemId]);
-            const saved=verifiedServiceListHints.get(key);
-            if(!saved)return '';
-            if(saved.readAt>now||now-saved.readAt>SERVICE_LIST_HINT_TTL_MS){
-                verifiedServiceListHints.delete(key);return '';
-            }
-            return `<small class="service-case-verified-hint">${escapeHtml(item.itemName||item.itemCode||'服務品項')}：上次查核完成 ${escapeHtml(saved.completedQty)}/${escapeHtml(saved.orderedQty)}（${escapeHtml(SERVICE_WORK_LABELS[saved.category])}；僅供畫面參考）</small>`;
-        }).join('');
+    return (items||[]).map(item=>serviceCaseVerifiedItemHint(orderId,item)).join('');
 }
 function rememberVerifiedServiceItem(view,orderId,itemId,progress,category){
     if(!Object.prototype.hasOwnProperty.call(SERVICE_WORK_LABELS,category)
@@ -132,10 +132,12 @@ window.loadServiceCaseItem=async function(itemId){
 // Explicit whole-order verification, never invoked by list rendering.
 // The verified view does not authorize billing or modify Firestore indexes.
 window.verifyServiceOrderProgress=async function(){
-    const view=serviceCaseView;if(!view||view.busy||view.orderLookup||!view.order?.orderId)return;
+    const view=serviceCaseView;if(!view||view.busy||view.verifying||view.orderLookup||!view.order?.orderId)return;
     serviceCaseCurrent(view);
     const orderId=view.order.orderId,seq=view.request;
     const body=document.getElementById('serviceOrderSummaryBody');
+    const button=document.getElementById('verifyServiceOrderButton');
+    view.verifying=true;if(button){button.disabled=true;button.textContent='查核中…';}
     if(body)body.textContent='正在核對整張服務訂單的案件事件…';
     try{
         const data=await readServiceOrderProgress(orderId);
@@ -166,6 +168,12 @@ window.verifyServiceOrderProgress=async function(){
             &&view.role===currentUserRole&&view.generation===sessionDataGeneration
             &&view.request===seq&&view.order?.orderId===orderId){
             if(body)body.textContent='整張服務單查核未完成：'+error.message;
+        }
+    }finally{
+        view.verifying=false;
+        if(serviceCaseView===view&&view.order?.orderId===orderId
+            &&document.getElementById('verifyServiceOrderButton')===button&&button){
+            button.disabled=false;button.textContent='查核整張服務單進度';
         }
     }
 };
