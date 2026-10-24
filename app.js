@@ -11903,6 +11903,16 @@ function orderItemWorkCategory(order, item, lifecycleOverride = null, dispatchOv
 function orderItemDisplayCategory(order, item, lifecycleOverride = null, dispatchOverride = null) {
     const dispatch = dispatchOverride || itemDispatchState(order, item);
     const category = orderItemWorkCategory(order, item, lifecycleOverride, dispatch);
+    // Presentation only: a uniform pure-Service index can describe every line.
+    // Never pass this persisted summary to orderWorkIndexFields or a writer.
+    if (category !== 'closed' && String(item.productType||'').trim().toUpperCase()==='SERVICE'
+        && order.inventoryReservationStatus==='completed'
+        && Array.isArray(order.items) && order.items.length>0
+        && order.items.every(row=>String(row?.productType||'').trim().toUpperCase()==='SERVICE')
+        && Array.isArray(order.workCategories) && order.workCategories.length===1) {
+        const saved=order.workCategories[0];
+        if ((saved==='billing' && !order.isBilled) || (saved==='complete' && order.isBilled===true)) return saved;
+    }
     if (category !== 'delivery') return category;
     if (String(item.productType||'').trim().toUpperCase()==='SERVICE') return category;
     if ((item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return 'shipping';
@@ -11953,6 +11963,9 @@ function orderItemWorkAmount(order, item, category, totalQtyOverride = null, dis
     const explicitSales=[item.unitPrice,item.salesPrice].find(value=>value!==null&&value!==undefined&&String(value).trim()!==''&&Number.isFinite(Number(value)));
     const unitSales=explicitSales!==undefined?Number(explicitSales):(totalQty?salesAmount(order)/totalQty:(parseFloat(order.unitPrice)||0));
     const state=dispatchOverride || itemDispatchState(order,item);
+    if (String(item.productType||'').trim().toUpperCase()==='SERVICE'
+        && ['billing','complete'].includes(category)
+        && orderItemDisplayCategory(order,item,null,state)===category) return qty*unitSales;
     // Work-card amounts represent quantities in each action queue, not the full
     // order line repeated when the same line is partly printed or partly waiting.
     if(category==='dispatch')return Math.max(0,Number(state.pending||0))*unitSales;
