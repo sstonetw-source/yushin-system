@@ -1,5 +1,14 @@
 # 核心交易驗收：風險、證據與結束標準
 
+## 2026-10-24｜在途同步 Rules 評估成本（獨立修正，待完整 CI）
+
+- 基準 main `49b8742b`；在途 Service／Stock Permissions 與服務整合分支相同。#255 第一輪 CI `40056066066` 在第二張 PO 成功後的 Client 在途 checkpoint 失敗，log 明示 supplyOrders update 1,000 expressions；同 head 重跑成功不代表已修復。
+- 本批只重排 supplyOrders update 的角色分流：從已啟用 users profile 取得一次角色，先選擇購買／收貨／本人直送的合法分支，再保留原識別、數量、來源、取消處理、鏡像及成本限制。管理員仍沿既有允許分支；不增加角色、欄位或資料存取能力，不變更 transaction writer。
+- 新增真 Client Rules 的原 registerPurchaseIncoming → Stock Permissions 代表：已有部分收貨的第二張 PO，兩個並行原意圖只增在途一次；鏡像遭拒全部回滾，修正後原 PO 安全重試；偽造 UI 採購角色及停權者不得提交。沿完整 Rules suite 驗證其他身分、更新繞過、來源／數量篡改、直送、取消及重放，無新增低風險數量排列。
+- 本機來源一致性、語法、差異檢查與相關 Node 44/44 通過；完整 Node 1,704/1,704 通過；CI 以本批實際結果補記。此主機只有 Java 17，未本機啟動要求 Java 21 的 Emulator；Rules 編譯與上述真 Client 測試尚待 GitHub CI，不能列為已通過。
+- 這是待 Emulator／完整 CI 驗證的 Rules 修正版；不能僅憑角色計算減少就宣稱已根除間歇超限。#199 正式 Client 採購入口／Preview 邊界、#234／#255 的有限缺口仍保留。未部署 Firebase、未改正式資料；不以本批關閉整輪核心驗收。
+
+
 更新：2026-10-22。核對基準：main `9faf78b`（#232，已含 #230／#231）。本文件取代歷史交接中不斷增加數量排列的施工順序；原商業契約、安全測試及環境限制仍保留。合併後以最新 main／CI 為準，不以測試總數判定完成。
 
 ## 客觀評估

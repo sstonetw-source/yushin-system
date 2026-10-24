@@ -2980,3 +2980,70 @@ test('actual return Service cannot grant sales or engineer receipt permission th
   assert.equal((await getDoc(doc(db('admin'),'customerReturnReceipts/forged-'+uid))).exists(),false);
  }
 });
+
+// Run the existing incoming Service and mirror wrapper against real Client Rules.
+// Represents the second PO after a partially received first PO, with stock already
+// present in both the company and warehouse rows (the failing update path).
+async function actualIncomingCheckpointFixture(uid='buyer1',clientRole='purchaser') {
+ const key='incoming-product',orderId='incoming-source',poId='PO-SECOND',supplyId='incoming-second';
+ const supply={type:'PURCHASING_PO',purchaseDocumentId:poId,orderId,itemId:'I',
+  ownerUid:'sales1',salesCode:'S01',productKey:key,productId:key,itemCode:'IN-1',itemName:'Incoming product',
+  brand:'Roche',brandId:'roche',qty:3,receivedQty:0,incomingRegisteredQty:0,status:'ORDERED',
+  fulfillmentType:'WAREHOUSE',warehouseId:'W1',unitCost:20,supplier:'Supplier'};
+ const po={status:'ORDERED',supplyOrderIds:[supplyId]};
+ await seed('orders/'+orderId,{ownerUid:'sales1',salesCode:'S01',status:'active',inventoryReservationStatus:'completed',items:[{itemId:'I',productId:key,qty:7,supplyOrderedQty:7,receivedQty:2}]});
+ await seed('purchaseOrders/'+poId,po);
+ await seed('supplyOrders/incoming-first',{...supply,purchaseDocumentId:'PO-FIRST',qty:4,receivedQty:2,incomingRegisteredQty:2,status:'PARTIAL_RECEIPT'});
+ await seed('supplyOrders/'+supplyId,supply);
+ await seed('receivingSupplyOrders/'+supplyId,stockPermissions.sanitizeSupply(supply));
+ await seed('inventory/'+key,{productKey:key,productId:key,onHand:5,reserved:3,incoming:2});
+ await seed('warehouseStocks/W1__'+key,{warehouseId:'W1',productKey:key,productId:key,onHand:5,reserved:3,incoming:2});
+ const client=compatDb(uid),native=client.runTransaction,plain=v=>JSON.parse(JSON.stringify(v));
+ let corruptMirror=false;
+ client.runTransaction=fn=>native(tx=>fn({...tx,
+  set:(ref,data,options)=>{
+   const value=plain(data);
+   if(corruptMirror&&ref.path==='receivingSupplyOrders/'+supplyId)value.itemName='forged mirror';
+   return options?tx.set(ref,value,options):tx.set(ref,value);
+  },update:(ref,data)=>tx.update(ref,plain(data))}));
+ const c=vm.createContext({db:client,currentUser:{uid},currentUserRole:clientRole,currentUserName:uid,
+  canCreatePurchaseOrderCapability:()=>true,canAccessPage:()=>true,
+  isPurchaseTerminalStatus:s=>['CANCELLED','CLOSED','RECEIVED'].includes(s),
+  YushinReceiving:require('../modules/receiving-core'),
+  supplyOrdersCollection:()=>client.collection('supplyOrders'),warehouseStockDocId:(w,k)=>w+'__'+k,
+  inventoryNumbers:d=>({onHand:Number(d.onHand||0),reserved:Number(d.reserved||0),incoming:Number(d.incoming||0)}),
+  resolveBrandName:b=>b,brandIdForName:()=> 'roche',
+  runRoleTransaction:fn=>stockPermissions.run(client,fn,uid,false,clientRole)});
+ const source=fs.readFileSync('src/services/supply-order.js','utf8');
+ vm.runInContext(source.slice(0,source.indexOf('async function cancelOutstandingSupplyRecord')),c);
+ const paths=['inventory/'+key,'warehouseStocks/W1__'+key,'supplyOrders/'+supplyId,'receivingSupplyOrders/'+supplyId];
+ const read=async()=>({rows:await Promise.all(paths.map(async path=>(await getDoc(doc(db('admin'),path))).data())),
+  movements:(await getDocs(collection(db('admin'),'inventoryMovements'))).docs.map(d=>d.data())});
+ return {run:()=>c.registerPurchaseIncoming(poId,po),read,corruptMirror:value=>{corruptMirror=value;}};
+}
+test('actual second PO incoming checkpoint updates both totals and cost-free mirror once under concurrent replay',async()=>{
+ const f=await actualIncomingCheckpointFixture();
+ await Promise.all([f.run(),f.run()]);
+ const after=await f.read();
+ for(const stock of after.rows.slice(0,2)){assert.equal(stock.incoming,5);assert.equal(stock.onHand,5);assert.equal(stock.reserved,3);}
+ assert.equal(after.rows[2].incomingRegisteredQty,3);
+ assert.deepEqual(after.rows[3],stockPermissions.sanitizeSupply(after.rows[2]));
+ assert.equal(after.movements.length,1);assert.equal(after.movements[0].qty,3);
+ await f.run();assert.deepEqual(await f.read(),after);
+});
+test('actual incoming checkpoint rolls back every write on rejected mirror and safely resumes the same PO',async()=>{
+ const f=await actualIncomingCheckpointFixture(),before=await f.read();
+ f.corruptMirror(true);await assert.rejects(f.run(),e=>e.code==='permission-denied');
+ assert.deepEqual(await f.read(),before);
+ f.corruptMirror(false);await f.run();const after=await f.read();
+ assert.equal(after.rows[0].incoming,5);assert.equal(after.rows[1].incoming,5);assert.equal(after.movements.length,1);
+});
+test('actual incoming checkpoint rejects forged purchaser UI role and disabled trusted profile without partial writes',async()=>{
+ for(const uid of ['sales1','eng1','wh1','off1']){
+  const f=await actualIncomingCheckpointFixture(uid,'purchaser'),before=await f.read();
+  await assert.rejects(f.run(),e=>e.code==='permission-denied');assert.deepEqual(await f.read(),before);
+ }
+ const f=await actualIncomingCheckpointFixture(),before=await f.read();
+ await seed('users/buyer1',{role:'purchaser',active:false});
+ await assert.rejects(f.run(),e=>e.code==='permission-denied');assert.deepEqual(await f.read(),before);
+});

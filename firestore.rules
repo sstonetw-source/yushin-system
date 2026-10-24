@@ -228,10 +228,10 @@ service cloud.firestore {
     // Direct-ship receiving is a narrow hot path used in the same atomic batch as
     // the order delivery summary. Keep it intentionally small so the combined
     // Firestore Rules evaluation stays below the platform expression limit.
-    function directShipSupplyReceiptUpdate(id) {
+    function directShipSupplyReceiptUpdate(id, userRole) {
       let nextReceived = request.resource.data.get('receivedQty', 0);
       let qty = resource.data.get('qty', 0);
-      return directShipReceiver()
+      return userRole in ['sales','engineer'] && resource.data.get('ownerUid', '') == request.auth.uid
         && resource.data.get('fulfillmentType', 'WAREHOUSE') == 'DIRECT_SHIP'
         && directShipSupplyReceiptEvidence(id)
         && resource.data.get('status', 'ORDERED') != 'CANCELLED'
@@ -268,9 +268,9 @@ service cloud.firestore {
         && record.qty == receipt.qty;
     }
 
-    function purchaserSupplyOperationalUpdate() {
+    function purchaserSupplyOperationalUpdate(userRole) {
       // Supply identity is immutable; purchasing may only change operational progress.
-      return purchaser()
+      return userRole == 'purchaser'
         && (resource.data.get('fulfillmentType', 'WAREHOUSE') != 'DIRECT_SHIP'
           || request.resource.data.get('receivedQty', 0) == resource.data.get('receivedQty', 0))
         && sameSupplyIdentity()
@@ -303,8 +303,8 @@ service cloud.firestore {
         || before.get('customerCancellationDisposition', '') == 'KEEP_STOCK';
     }
 
-    function warehouseSupplyOperationalUpdate() {
-      return warehouse()
+    function warehouseSupplyOperationalUpdate(userRole) {
+      return userRole == 'warehouse'
         && resource.data.get('fulfillmentType', 'WAREHOUSE') != 'DIRECT_SHIP'
         && sameSupplyIdentity()
         && validSupplyOperationalState()
@@ -1296,7 +1296,7 @@ service cloud.firestore {
         && (before.size() <= 29 || commercialItemCostProtected(before[29], after[29], resource.data.get('procurementType', 'PURCHASING_PO')))));
     }
 
-    function supplierCancellationResolution() {
+    function supplierCancellationResolution(userRole) {
       let before = resource.data;
       let after = request.resource.data;
       let order = get(/databases/$(database)/documents/orders/$(before.orderId)).data;
@@ -1305,7 +1305,7 @@ service cloud.firestore {
       let invPath = /databases/$(database)/documents/inventory/$(after.get('redirectInventoryId', 'unused'));
       let whId = after.get('redirectWarehouseStockId', 'unused');
       let whPath = /databases/$(database)/documents/warehouseStocks/$(whId);
-      return purchaser() && orderIsCancelled(order)
+      return userRole == 'purchaser' && orderIsCancelled(order)
         && before.get('status', '') in ['ORDERED', 'PARTIAL_RECEIPT'] && remaining > 0
         && before.get('customerCancellationDisposition', '') != 'KEEP_STOCK'
         && after.customerCancellationDisposition == 'KEEP_STOCK'
@@ -1927,6 +1927,19 @@ service cloud.firestore {
           && !(get(/databases/$(database)/documents/orders/$(orderId)).data.get('inventoryReservationStatus', '') in ['pending','failed']));
     }
 
+    // Resolve the trusted, enabled profile once. Dispatch before evaluating
+    // unrelated receipt/cancellation branches in the incoming stock transaction.
+    // Every branch retains its existing identity, quantity and evidence checks.
+    function supplyOperationalUpdateAllowed(id) {
+      let userRole = role();
+      return (userRole == 'admin'
+        || (userRole == 'purchaser' && (purchaserSupplyOperationalUpdate(userRole)
+          || supplierCancellationResolution(userRole)))
+        || (userRole == 'warehouse' && warehouseSupplyOperationalUpdate(userRole))
+        || (userRole in ['sales','engineer'] && directShipSupplyReceiptUpdate(id, userRole)))
+        && supplierReceiptDispositionAllowed() && validQuickPurchaseUpdate();
+    }
+
     // Unified source/order evidence: PURCHASING_PO, PURCHASING_MANUAL, SALES_SELF_ORDER, STOCK_REPLENISHMENT.
     match /supplyOrders/{id} {
       allow read: if admin() || purchaser()
@@ -1944,11 +1957,7 @@ service cloud.firestore {
       // but supply execution becomes operational evidence after creation. Only purchasing
       // or receiving roles may mutate quantities/status; this prevents direct API edits
       // from bypassing procurement and receipt workflows.
-      allow update: if (admin()
-        || directShipSupplyReceiptUpdate(id)
-        || purchaserSupplyOperationalUpdate()
-        || supplierCancellationResolution()
-        || warehouseSupplyOperationalUpdate()) && supplierReceiptDispositionAllowed() && validQuickPurchaseUpdate();
+      allow update: if supplyOperationalUpdateAllowed(id);
       allow delete: if admin();
     }
 
