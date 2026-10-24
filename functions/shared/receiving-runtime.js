@@ -190,6 +190,16 @@ function orderWorkCategories(order) {
     return categories;
 }
 function orderWorkIndexFields(order) {
+    const items=normalizedOrderItems(order);
+    const pureService=items.length>0&&items.every(item=>String(item.productType||'').trim().toUpperCase()==='SERVICE');
+    // Registered Service case events are the authority for completion. A
+    // subsequent client-side edit must not reset their server-projected queue.
+    if (pureService&&Array.isArray(order.workCategories)
+        &&order.workCategories.some(category=>category==='billing'||category==='complete')) {
+        if(orderLifecycleInfo(order).status!=='normal')
+            throw new Error('已有服務完成紀錄的訂單須由後端核對案件後取消或恢復。');
+        return {};
+    }
     const categories=orderWorkCategories(order);
     return {
         workCategories:categories,
