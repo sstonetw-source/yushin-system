@@ -3,7 +3,7 @@ window.serviceBillingDateEnabled=function(order){
     return globalThis.YUSHIN_SERVICE_CASE_EMULATOR===true
         &&canManageOrderLifecycleCapability()&&canEditPage('orders.list')&&canBusinessSelfOrder(order)
         &&Array.isArray(order.items)&&order.items.length>0
-        &&order.items.every(i=>String(i?.productType||'').trim().toUpperCase()==='SERVICE');
+        &&order.items.some(i=>String(i?.productType||'').trim().toUpperCase()==='SERVICE');
 };
 async function toggleServiceOrderBilling(order,newValue,dateValue){
     const key=order.id+':isBilled',pendingSet=pendingOrderStatusKeys;

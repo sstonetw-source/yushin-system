@@ -157,7 +157,7 @@ window.verifyServiceOrderProgress=async function(){
         view.summary=data;
         if(body)body.innerHTML='<p>服務案件整單查核：已完成 '
             +escapeHtml(data.completedQty)+'／'+escapeHtml(data.orderedQty)
-            +(data.mixedOrder?'（此訂單另有一般商品，未包含在服務進度中）':'')+'</p><ul>'
+            +(data.mixedOrder?(data.goodsCompleted?'；商品已全數交付':'；商品尚未全數交付'):'')+'</p><ul>'
             +data.items.map(item=>'<li>'+escapeHtml(item.itemName)+'：'
                 +escapeHtml(item.completedQty)+'／'+escapeHtml(item.orderedQty)
                 +'・'+escapeHtml(SERVICE_WORK_LABELS[item.workCategory])+'</li>').join('')+'</ul>'

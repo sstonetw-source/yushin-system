@@ -98,6 +98,7 @@ function multiShipmentDeliveryContext(order,intent,{allowCancelledCloseReturn=fa
   ||(order.isDelivered??false)!==whole.isDelivered)
   fault('整張訂單的客戶送達與退貨合計不一致');
  for(const source of order.items){
+  if(String(source.productType||source.type||'').trim().toUpperCase()==='SERVICE')continue;
   const part=whole.items.find(row=>row.itemId===source.itemId);
   if(!part||(source.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
    ||String(source.productType||source.type||'').toUpperCase()==='SERVICE'
@@ -184,7 +185,10 @@ async function commitShipmentDelivery(db,uid,data){
   const history={action:'create',source:'shipment_confirmation',recordId:operationId,before:null,after:record,by:uid,at:now};
   // One order document carries both authoritative acknowledgement and caches.
   // No inventory/warehouse/reservation/lot reads or stock-operation writes.
-  tx.update(orderRef,{deliveryRecords:records,items:order.items.map(row=>row.itemId===itemId?
+  const workIndex=await require('./service-order-fulfillment').mixedWorkIndex(db,tx,orderId,
+   {...order,deliveryRecords:records,items:order.items.map(row=>row.itemId===itemId?{...row,deliveredQty:next.confirmedQty}:row),
+    deliveredQty:(nextWhole??next).confirmedQty,isDelivered:(nextWhole??next).isDelivered},{proofOrder:order});
+  tx.update(orderRef,{...workIndex,deliveryRecords:records,items:order.items.map(row=>row.itemId===itemId?
    {...row,deliveredQty:next.confirmedQty}:row),
    deliveredQty:(nextWhole??next).confirmedQty,isDelivered:(nextWhole??next).isDelivered,
    deliveryHistory:[...(order.deliveryHistory||[]),history],updatedAt:now});
@@ -260,7 +264,10 @@ async function reverseShipmentDelivery(db,uid,data){
    recordId:deliveryRecordId,operationId,before:target,after:null,date:intent.date,reason:intent.reason,
    actorUid:uid,actorRole,by:uid,at:now,intentHash:intent.hash,result};
   // Correct only customer acknowledgement; the goods remain physically shipped.
-  tx.update(orderRef,{deliveryRecords:records,deliveryHistory:[...history,event],
+  const workIndex=await require('./service-order-fulfillment').mixedWorkIndex(db,tx,orderId,
+   {...order,deliveryRecords:records,items:order.items.map(row=>row.itemId===itemId?{...row,deliveredQty:next.confirmedQty}:row),
+    deliveredQty:(nextWhole??next).confirmedQty,isDelivered:(nextWhole??next).isDelivered},{proofOrder:order});
+  tx.update(orderRef,{...workIndex,deliveryRecords:records,deliveryHistory:[...history,event],
    items:order.items.map(row=>row.itemId===itemId?{...row,deliveredQty:next.confirmedQty}:row),
    deliveredQty:(nextWhole??next).confirmedQty,isDelivered:(nextWhole??next).isDelivered,updatedAt:now});
   return {...result,status:'applied',operationId};

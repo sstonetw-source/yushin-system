@@ -1,8 +1,7 @@
 'use strict';
-// Isolated pure-Service billing trial. Mixed orders require verified Goods
-// delivery evidence and are deliberately outside this writer's contract.
+// Service and mixed-order billing use registered cases and physical delivery proofs.
 const {createHash}=require('node:crypto');
-const {readServiceOrderProgress,caseDocId}=require('./service-case-service');
+const {caseDocId}=require('./service-case-service');
 const workflow=require('./shared/workflow-core');
 const {allowServiceCaseEmulator}=require('./service-case-gate');
 function fail(message,code='failed-precondition'){const e=new Error(message);e.code=code;throw e;}
@@ -69,16 +68,18 @@ async function commitServiceOrderBilling(db,uid,data){
       ||[order.status,order.orderStatus].some(s=>['cancelled','canceled','void','voided','deleted','closed','已取消','作廢','已結案'].includes(String(s||'').trim().toLowerCase())))
       fail('訂單已停止履約或尚未完成初始化。');
     if(!Array.isArray(order.items)||!order.items.length
-      ||order.items.some(i=>String(i?.productType||'').trim().toUpperCase()!=='SERVICE'))
-      fail('此核銷入口僅支援純服務訂單；混合單須另驗商品交付憑證。');
+      ||!order.items.some(i=>String(i?.productType||'').trim().toUpperCase()==='SERVICE'))
+      fail('此核銷入口須包含服務品項。');
     if(order.isBilled!==undefined&&typeof order.isBilled!=='boolean')fail('原核銷狀態資料不正確。');
     if((order.isBilled===true)!==intent.expectedIsBilled)fail('核銷狀態已變更，請重新讀取後操作。');
     const dateChange=intent.action==='CHANGE_DATE';
     if(dateChange&&order.billingDate!==intent.expectedBillingDate)
       fail('核銷日期已變更，請重新載入後操作。');
     if(intent.isBilled&&(!workflow.canBill(order)))fail('預先交付的商務文件尚未補齊，不能核銷。');
-    const progress=await readServiceOrderProgress(db,tx,intent.orderId,{...order,isBilled:intent.isBilled});
+    const progress=await require('./service-order-fulfillment').readOrderFulfillment(
+      db,tx,intent.orderId,{...order,isBilled:intent.isBilled});
     if(intent.isBilled&&!progress.serviceCompleted)fail('服務尚未全數完成，不能核銷。');
+    if(intent.isBilled&&!progress.goodsCompleted)fail('商品尚未全數交付，不能核銷。');
     if(order.statusHistory!==undefined&&!Array.isArray(order.statusHistory))fail('核銷歷程資料不正確。');
     const changed=dateChange?order.billingDate!==intent.billingDate:(order.isBilled===true)!==intent.isBilled;
     if(!dateChange&&!changed&&intent.isBilled&&order.billingDate!==intent.billingDate)
@@ -97,7 +98,7 @@ async function commitServiceOrderBilling(db,uid,data){
         by:uid,actorRole:user.role,operationId:intent.operationId,at
       }]}:{statusHistory:[...(order.statusHistory||[]),entry]};
       tx.update(orderRef,{isBilled:result.isBilled,billingDate:result.billingDate,updatedAt:at,...history,
-        workCategories:[...new Set(progress.items.map(i=>i.workCategory))],
+        workCategories:progress.workCategories,
         workCategoryUpdatedAt:at});
     }
     tx.set(receiptRef,{recordType:'SERVICE_BILLING_OPERATION',orderId:intent.orderId,

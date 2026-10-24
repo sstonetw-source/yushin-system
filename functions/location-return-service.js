@@ -144,11 +144,14 @@ async function commitLocationReturn(db,uid,data){
   if(requestPlan)Object.assign(result,{requestId:intent.requestId,receiptId:operationId,
    requestReceivedQty:requestPlan.requests[requestPlan.index].receivedQty,
    requestStatus:requestPlan.requests[requestPlan.index].status});
+  const workIndex=await require('./service-order-fulfillment').mixedWorkIndex(db,tx,orderId,
+   {...order,items:order.items.map(row=>row.itemId===itemId?{...row,reservedQty:result.reservedQty,returnedQty:next.returnedQty}:row),
+    returnedQty:(nextWhole??next).returnedQty,isDelivered:(nextWhole??next).isDelivered,returnRecords:records},{proofOrder:order});
   tx.update(invRef,{...stockPlan.aggregateStock,updatedAt:now});
   tx.update(stockRef,{...stockPlan.warehouseStock,updatedAt:now});
   tx.set(ledgerRef,{...stockPlan.reservation,updatedAt:now});
   for(const row of restoration)tx.update(ref('inventoryLots',row.lotId),{remainingQty:row.remainingQty,updatedAt:now});
-  tx.update(orderRef,{items:order.items.map(row=>row.itemId===itemId?
+  tx.update(orderRef,{...workIndex,items:order.items.map(row=>row.itemId===itemId?
    {...row,reservedQty:result.reservedQty,returnedQty:next.returnedQty}:row),
    returnedQty:(nextWhole??next).returnedQty,isDelivered:(nextWhole??next).isDelivered,returnRecords:records,
    returnHistory:[...(order.returnHistory||[]),{action:'add',recordId:operationId,before:null,after:record,by:uid,at:now}],

@@ -187,21 +187,13 @@ async function commitServiceCaseEvent(db,actorUid,input){
       nextEvent:projection.nextEvent,custody:projection.custody,
       serviceQty:record.serviceQty,itemProgress,itemWorkCategory:itemWorkflow.workCategory};
     if(next.status==='already-applied')return;
-    // Service events cannot infer Goods delivery. Pure-Service orders may
-    // refresh their query index only from the full registered case history.
-    // A single Service line already has all its proofs above; for multiple
-    // lines use the existing bounded reader before any transaction writes.
-    if(items.every(row=>String(row?.productType||'').trim().toUpperCase()==='SERVICE')){
-      const categories=items.length===1?[itemWorkflow.workCategory]
-        :(await readServiceOrderProgress(db,tx,intent.orderId,order)).items
-          .map(row=>row.itemId===intent.itemId?itemWorkflow.workCategory:row.workCategory);
-      const unique=[...new Set(categories)];
-      if(!Array.isArray(order.workCategories)
-        ||unique.length!==order.workCategories.length
-        ||unique.some((category,i)=>category!==order.workCategories[i])){
-        tx.update(orderRef,{workCategories:unique,workCategoryUpdatedAt:recordedAt});
-      }
-    }
+    // Project the pending event through the same full evidence reader before
+    // either the case or the order index is written.
+    const progress=await require('./service-order-fulfillment').readOrderFulfillment(
+      db,tx,intent.orderId,order,{serviceOverride:{itemId:intent.itemId,workflow:itemWorkflow}});
+    const unique=progress.workCategories;
+    if(!Array.isArray(order.workCategories)||JSON.stringify(unique)!==JSON.stringify(order.workCategories))
+      tx.update(orderRef,{workCategories:unique,workCategoryUpdatedAt:recordedAt});
     if(!saved)tx.set(index.ref,{...index.record,
       caseIds:[...index.record.caseIds,intent.caseId]});
     tx.set(ref,{
@@ -343,12 +335,12 @@ async function getServiceOrderProgress(db,actorUid,input){
     const order=orderSnap.data();
     if(profile.role==='sales'&&order.ownerUid!==actorUid)
       fail('只有訂單負責業務有權限查看服務案件。','permission-denied');
-    return readServiceOrderProgress(db,tx,orderId,order);
+    return require('./service-order-fulfillment').readOrderFulfillment(db,tx,orderId,order);
   });
 }
 
 // Shared transaction reader: callers supply an already-authorized live order.
-async function readServiceOrderProgress(db,tx,orderId,order){
+async function readServiceOrderProgress(db,tx,orderId,order,{serviceOverride}={}){
     const all=order.items;
     if(!Array.isArray(all)||all.length<1||all.length>30)
       fail('訂單品項數量不符合整單查核限制。');
@@ -390,7 +382,8 @@ async function readServiceOrderProgress(db,tx,orderId,order){
         fail('服務案件索引的服務類型不正確。');
       assertCaseProduct({productId:item.productId,kind},item);
       const index=await readItemCases(db,tx,orderId,item.itemId,item,kind,snap.index);
-      const projected=serviceItemWorkflow(orderId,order,item,kind,index.cases);
+      const projected=serviceOverride?.itemId===item.itemId?serviceOverride.workflow
+        :serviceItemWorkflow(orderId,order,item,kind,index.cases);
       summaries.push({itemId:item.itemId,itemName:item.itemName||item.itemCode||'服務品項',
         serviceKind:kind,workCategory:projected.workCategory,
         orderedQty:projected.serviceProgress.orderedQty,
