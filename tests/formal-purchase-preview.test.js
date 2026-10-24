@@ -91,6 +91,19 @@ test('server PO admission refuses stale source, bad warehouses, replaced demand 
  await assert.rejects(previewV2FormalPurchase(db,'buyer',input),{code:'already-exists'});
  assert.equal(writes(),0);
 });
+test('warehouse purchase refuses overbooked reserved and shortage quantities before any write',async()=>{
+ for(const reservedQty of [6,12]){
+  const x=writeFixture();
+  const item=x.records.get('orders/ORDER-1').items[0];
+  item.reservedQty=reservedQty; // shortage stays 7 of 12: reserved + shortage exceeds order qty.
+  const before=structuredClone([...x.records]);
+  await assert.rejects(previewV2FormalPurchase(x.db,'buyer',x.input),{code:'failed-precondition'});
+  await assert.rejects(commitV2FormalPurchase(x.db,'buyer',x.data),{code:'failed-precondition'});
+  assert.equal(x.history.length,0);
+  assert.deepEqual([...x.records],before);
+ }
+});
+
 test('strict PO request allows only a bounded four-field identity',()=>{
  const input={poNo:'PO-1',orderId:'O-1',itemId:'S',qty:4};
  assert.deepEqual(strictRequest(input),input);
