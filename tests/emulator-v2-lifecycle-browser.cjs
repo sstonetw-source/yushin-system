@@ -2394,4 +2394,3 @@ for(const width of [1280,390])test('full site '+width+'px original UI gated PO p
    tasks:typeof receiptTaskJobs==='undefined'?[]:[...receiptTaskJobs.values()],orders:typeof ordersCache==='undefined'?[]:ordersCache.filter(o=>o.id.includes('direct-entry'))}))),JSON.stringify({errors,dialogs,functions}));throw error;
  }finally{await context.close();}
 });
-
