@@ -19478,7 +19478,7 @@ function pendingV2OrderLifecycle(orderId){
   if(!intent||intent.orderId!==orderId||intent.actorUid!==currentUser?.uid||intent.actorRole!==currentUserRole
    ||!['normal','cancelled'].includes(intent.nextStatus)||!/^\w[\w-]{11,95}$/.test(intent.operationId||'')
    ||!Array.isArray(intent.itemIds)||!intent.itemIds.length||intent.itemIds.length>5
-   ||!Array.isArray(intent.warehouseIds)||intent.warehouseIds.length!==2)throw Error('invalid pending lifecycle');
+   ||!Array.isArray(intent.warehouseIds)||![0,2].includes(intent.warehouseIds.length))throw Error('invalid pending lifecycle');
   return intent;
  }catch(_){throw Error('前次取消／恢復結果尚未確認，請使用原帳號與角色核對。');}
 }
