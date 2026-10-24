@@ -57,7 +57,7 @@ async function validateV2FormalPurchaseTx(tx,db,uid,intent,{allowExistingPo=fals
     ||source.status==='cancelled'||source.orderStatus==='cancelled'
     ||source.status==='voided'||source.orderStatus==='voided'
     ||source.returnPending===true||source.inventoryReservationStatus!=='completed'
-    ||!Array.isArray(source.items)||source.items.length<1||source.items.length>5)
+    ||!Array.isArray(source.items)||source.items.length<1)
    reject('failed-precondition','來源訂單不可建立正式採購單');
   const matching=source.items.map((row,index)=>({row,index}))
    .filter(({row})=>row?.itemId===intent.itemId);
@@ -74,7 +74,10 @@ async function validateV2FormalPurchaseTx(tx,db,uid,intent,{allowExistingPo=fals
   const shortage=stockNumber(row.shortageQty??0,'缺貨');
   const received=stockNumber(row.receivedQty??0,'已收貨');
   const ordered=stockNumber(row.supplyOrderedQty??0,'已採購');
-  if(orderQty===0||reserved>orderQty||shortage>orderQty||ordered<received)
+  // Warehouse reservation and uncovered shortage must not exceed ordered quantity.
+  // Both Preview admission and the atomic commit revalidate this current source.
+  if(orderQty===0||reserved>orderQty||shortage>orderQty||ordered<received
+    ||(!directShip&&reserved+shortage>orderQty))
    reject('failed-precondition','來源品項數量不一致');
   const masterId=identifier(row.productId,'來源產品',1500);
   const warehouseId=directShip?'':identifier(row.warehouseId||source.warehouseId,'來源倉庫',200);
