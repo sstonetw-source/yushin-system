@@ -10925,19 +10925,19 @@ const SERVICE_WORK_LABELS={delivery:'待服務處理',billing:'服務完成・�
 // This must never be used for workCategories, billing writes or fulfillment decisions.
 const verifiedServiceListHints=new Map();
 const SERVICE_LIST_HINT_TTL_MS=120000;
+function serviceCaseVerifiedItemHint(orderId,item){
+    if(!serviceCaseEntryEnabled()||!currentUser?.uid
+        ||String(item?.productType||'').trim().toUpperCase()!=='SERVICE')return '';
+    const key=JSON.stringify([currentUser.uid,currentUserRole,sessionDataGeneration,orderId,item.itemId]);
+    const saved=verifiedServiceListHints.get(key),now=Date.now();
+    if(!saved)return '';
+    if(saved.readAt>now||now-saved.readAt>SERVICE_LIST_HINT_TTL_MS){
+        verifiedServiceListHints.delete(key);return '';
+    }
+    return `<small class="service-case-verified-hint">${escapeHtml(item.itemName||item.itemCode||'服務品項')}：上次查核完成 ${escapeHtml(saved.completedQty)}/${escapeHtml(saved.orderedQty)}（${escapeHtml(SERVICE_WORK_LABELS[saved.category])}；僅供畫面參考）</small>`;
+}
 function serviceCaseVerifiedOrderHints(orderId,items){
-    if(!serviceCaseEntryEnabled()||!currentUser?.uid)return '';
-    const now=Date.now();
-    return (items||[]).filter(item=>String(item.productType||'').trim().toUpperCase()==='SERVICE')
-        .map(item=>{
-            const key=JSON.stringify([currentUser.uid,currentUserRole,sessionDataGeneration,orderId,item.itemId]);
-            const saved=verifiedServiceListHints.get(key);
-            if(!saved)return '';
-            if(saved.readAt>now||now-saved.readAt>SERVICE_LIST_HINT_TTL_MS){
-                verifiedServiceListHints.delete(key);return '';
-            }
-            return `<small class="service-case-verified-hint">${escapeHtml(item.itemName||item.itemCode||'服務品項')}：上次查核完成 ${escapeHtml(saved.completedQty)}/${escapeHtml(saved.orderedQty)}（${escapeHtml(SERVICE_WORK_LABELS[saved.category])}；僅供畫面參考）</small>`;
-        }).join('');
+    return (items||[]).map(item=>serviceCaseVerifiedItemHint(orderId,item)).join('');
 }
 function rememberVerifiedServiceItem(view,orderId,itemId,progress,category){
     if(!Object.prototype.hasOwnProperty.call(SERVICE_WORK_LABELS,category)
@@ -11047,10 +11047,12 @@ window.loadServiceCaseItem=async function(itemId){
 // Explicit whole-order verification, never invoked by list rendering.
 // The verified view does not authorize billing or modify Firestore indexes.
 window.verifyServiceOrderProgress=async function(){
-    const view=serviceCaseView;if(!view||view.busy||view.orderLookup||!view.order?.orderId)return;
+    const view=serviceCaseView;if(!view||view.busy||view.verifying||view.orderLookup||!view.order?.orderId)return;
     serviceCaseCurrent(view);
     const orderId=view.order.orderId,seq=view.request;
     const body=document.getElementById('serviceOrderSummaryBody');
+    const button=document.getElementById('verifyServiceOrderButton');
+    view.verifying=true;if(button){button.disabled=true;button.textContent='查核中…';}
     if(body)body.textContent='正在核對整張服務訂單的案件事件…';
     try{
         const data=await readServiceOrderProgress(orderId);
@@ -11081,6 +11083,12 @@ window.verifyServiceOrderProgress=async function(){
             &&view.role===currentUserRole&&view.generation===sessionDataGeneration
             &&view.request===seq&&view.order?.orderId===orderId){
             if(body)body.textContent='整張服務單查核未完成：'+error.message;
+        }
+    }finally{
+        view.verifying=false;
+        if(serviceCaseView===view&&view.order?.orderId===orderId
+            &&document.getElementById('verifyServiceOrderButton')===button&&button){
+            button.disabled=false;button.textContent='查核整張服務單進度';
         }
     }
 };
@@ -12609,8 +12617,8 @@ window.renderOrdersList = function() {
             <td class="order-date-cell" data-th="訂單日期">${escapeHtml(o.orderDate || '')}</td>
             <td class="order-customer-cell" data-th="客戶名稱"><div class="record-reference">客戶訂單${o.orderNo ? `・${escapeHtml(o.orderNo)}` : o.quoteNo ? `・來源估價單 ${escapeHtml(o.quoteNo)}` : ''}</div>${o.customerName ? `<button type="button" class="btn-small btn-secondary" onclick="showCustomerOrderHistory(${inlineJsValue(o.customerName)})">${escapeHtml(o.customerName)}</button>` : ''}</td>
             <td class="order-sales-cell" data-th="負責業務">${escapeHtml(stripPhoneSuffix(o.salesName))}</td>
-            <td data-th="產品資訊" class="order-product-cell">${orderItems.map((item,index)=>{const displayCategories=displayCategoriesByItem.get(item)||[];const primaryStatus=displayCategories[0]||'ordering';const itemStatus=['dispatch','shipping'].includes(activeOrderWorkFilter)&&displayCategories.includes(activeOrderWorkFilter)?activeOrderWorkFilter:primaryStatus;const itemStatusMap={ordering:'待採購',arrival:'待到貨',dispatch:'待打單',shipping:'已打單',billing:'待核銷',complete:'已完成',closed:lifecycle.label};const waiting=primaryStatus==='arrival'?waitingDaysFromDate(item.orderedAt):'';const state=dispatchStateByItem.get(item)||itemDispatchState(o,item);const parallelDispatch=primaryStatus!=='dispatch'&&state.pending>0;return `<div style="${index?'margin-top:5px;padding-top:5px;border-top:1px solid #eee;':''}"><strong>${escapeHtml(item.itemName || '－')}</strong><small>${escapeHtml(item.brand || '未分類')}${item.itemCode ? `・${escapeHtml(item.itemCode)}` : ''}・${activeOrderWorkFilter==='shipping'?`已打單 ${state.shippable}／訂單數量 ${Number(item.orderedQty||item.qty||0)}`:activeOrderWorkFilter==='dispatch'?`待打單 ${state.pending}／訂單數量 ${Number(item.orderedQty||item.qty||0)}`:Number(item.orderedQty||item.qty||0)}</small><small class="order-item-work-status">訂單狀態：<span class="order-progress-badge">${escapeHtml(((lifecycle.status==='normal'&&orderInventorySyncIncomplete(o)) ? (o.inventoryReservationStatus==='failed'?'庫存同步未完成':'庫存同步中…') : ((String(item.productType||'').trim().toUpperCase()==='SERVICE'&&lifecycle.status==='normal'&&primaryStatus==='delivery'?'待服務處理':(lifecycle.status==='normal'&&globalThis.YushinWarehouseLogistics?.shippingStatus(o,item,state)))||itemStatusMap[itemStatus]||'待採購')))}</span>${waiting?`・已等 ${escapeHtml(waiting)}`:''}${parallelDispatch&&itemStatus!=='dispatch'?`・另有 ${escapeHtml(state.pending)} 待打單`:''}${state.shippable>0?`・已有 ${escapeHtml(state.shippable)} 可出貨`:''}</small></div>`}).join('')}</td>
-            <td data-th="訂單總額" class="order-money-cell"><strong>NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice ?? '').replace(/,/g, '')) || 0).toLocaleString())}</strong><small>${o.isBilled ? '已核銷' : '未核銷'}</small>${window.serviceCaseVerifiedOrderHints?.(o.id, allOrderItems)||''}</td>
+            <td data-th="產品資訊" class="order-product-cell">${orderItems.map((item,index)=>{const displayCategories=displayCategoriesByItem.get(item)||[];const primaryStatus=displayCategories[0]||'ordering';const itemStatus=['dispatch','shipping'].includes(activeOrderWorkFilter)&&displayCategories.includes(activeOrderWorkFilter)?activeOrderWorkFilter:primaryStatus;const itemStatusMap={ordering:'待採購',arrival:'待到貨',dispatch:'待打單',shipping:'已打單',billing:'待核銷',complete:'已完成',closed:lifecycle.label};const waiting=primaryStatus==='arrival'?waitingDaysFromDate(item.orderedAt):'';const state=dispatchStateByItem.get(item)||itemDispatchState(o,item);const parallelDispatch=primaryStatus!=='dispatch'&&state.pending>0;return `<div style="${index?'margin-top:5px;padding-top:5px;border-top:1px solid #eee;':''}"><strong>${escapeHtml(item.itemName || '－')}</strong><small>${escapeHtml(item.brand || '未分類')}${item.itemCode ? `・${escapeHtml(item.itemCode)}` : ''}・${activeOrderWorkFilter==='shipping'?`已打單 ${state.shippable}／訂單數量 ${Number(item.orderedQty||item.qty||0)}`:activeOrderWorkFilter==='dispatch'?`待打單 ${state.pending}／訂單數量 ${Number(item.orderedQty||item.qty||0)}`:Number(item.orderedQty||item.qty||0)}</small><small class="order-item-work-status">訂單狀態：<span class="order-progress-badge">${escapeHtml(((lifecycle.status==='normal'&&orderInventorySyncIncomplete(o)) ? (o.inventoryReservationStatus==='failed'?'庫存同步未完成':'庫存同步中…') : ((String(item.productType||'').trim().toUpperCase()==='SERVICE'&&lifecycle.status==='normal'&&primaryStatus==='delivery'?'待服務處理':(lifecycle.status==='normal'&&globalThis.YushinWarehouseLogistics?.shippingStatus(o,item,state)))||itemStatusMap[itemStatus]||'待採購')))}</span>${waiting?`・已等 ${escapeHtml(waiting)}`:''}${parallelDispatch&&itemStatus!=='dispatch'?`・另有 ${escapeHtml(state.pending)} 待打單`:''}${state.shippable>0?`・已有 ${escapeHtml(state.shippable)} 可出貨`:''}</small>${window.serviceCaseVerifiedItemHint?.(o.id,item)||''}</div>`}).join('')}</td>
+            <td data-th="訂單總額" class="order-money-cell"><strong>NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice ?? '').replace(/,/g, '')) || 0).toLocaleString())}</strong><small>${o.isBilled ? '已核銷' : '未核銷'}</small></td>
             <td class="order-details-cell">
                 <div class="order-text-summary">${escapeHtml([o.transactionType ? `交易：${o.transactionType}` : '', o.invoiceTitle || '', o.isBilled && orderBillingDate(o) ? `核銷日期：${orderBillingDate(o)}` : '', o.remarks || ''].filter(Boolean).join('・'))}</div>
                 <details class="order-detail-panel">

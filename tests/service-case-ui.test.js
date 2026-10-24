@@ -152,3 +152,41 @@ test('whole-order verification rejects foreign item injection and stale selectio
  await old;
  assert.doesNotMatch(f.c.serviceCaseVerifiedOrderHints('O',[{itemId:'I',productType:'SERVICE'}]),/2\/2/);
 });
+
+test('partial siblings retain their own verified progress; Goods and unverified items get no hint',async()=>{
+ const f=fixture();
+ f.c.ordersCache[0].items.push({itemId:'J',productType:'SERVICE',itemName:'校正'});
+ await f.c.openServiceCases('O');
+ f.setReadOrder(async()=>({orderId:'O',orderedQty:4,completedQty:2,mixedOrder:false,items:[
+  {itemId:'I',itemName:'檢測',orderedQty:2,completedQty:2,workCategory:'billing'},
+  {itemId:'J',itemName:'校正',orderedQty:2,completedQty:0,workCategory:'delivery'}]}));
+ await f.c.verifyServiceOrderProgress();
+ const hint=id=>f.c.serviceCaseVerifiedItemHint('O',{itemId:id,productType:'SERVICE'});
+ assert.match(hint('I'),/2\/2.*服務完成・待核銷/);
+ assert.match(hint('J'),/0\/2.*待服務處理/);
+ assert.equal(hint('UNKNOWN'),'');
+ assert.equal(f.c.serviceCaseVerifiedItemHint('O',{itemId:'I',productType:'Goods'}),'');
+ assert.equal(f.calls.length,0);
+});
+test('whole-order read coalesces repeated clicks, restores retry after failure and never writes',async()=>{
+ const f=fixture();await f.c.openServiceCases('O');let reject,reads=0;
+ f.setReadOrder(()=>{reads++;return new Promise((_,r)=>reject=r);});
+ const pending=f.c.verifyServiceOrderProgress();await f.c.verifyServiceOrderProgress();
+ assert.equal(reads,1);assert.equal(f.node('verifyServiceOrderButton').disabled,true);
+ assert.equal(f.node('verifyServiceOrderButton').textContent,'查核中…');
+ reject(Error('連線中斷'));await pending;
+ assert.match(f.node('serviceOrderSummaryBody').textContent,/查核未完成.*連線中斷/);
+ assert.equal(f.node('verifyServiceOrderButton').disabled,false);
+ f.setReadOrder(async()=>({orderId:'O',orderedQty:2,completedQty:1,items:[
+  {itemId:'I',itemName:'檢測',orderedQty:2,completedQty:1,workCategory:'delivery'}]}));
+ await f.c.verifyServiceOrderProgress();
+ assert.match(f.node('serviceOrderSummaryBody').innerHTML,/已完成 1／2/);
+ assert.equal(f.calls.length,0);
+});
+test('expired verified progress disappears without changing the authoritative order',async()=>{
+ const f=fixture();await f.c.openServiceCases('O');await f.c.verifyServiceOrderProgress();
+ const before=JSON.stringify(f.c.ordersCache);
+ vm.runInContext('for(const value of verifiedServiceListHints.values())value.readAt-=SERVICE_LIST_HINT_TTL_MS+1;',f.c);
+ assert.equal(f.c.serviceCaseVerifiedItemHint('O',{itemId:'I',productType:'SERVICE'}),'');
+ assert.equal(JSON.stringify(f.c.ordersCache),before);assert.equal(f.calls.length,0);
+});

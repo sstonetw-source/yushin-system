@@ -379,6 +379,18 @@ for(const width of [1280,390])test('original service case UI '+width+'px: four k
   assert.deepEqual(partialFacts,order,'case UI only updates the work index, never stock/delivery/billing order facts');
   for(const entry of items)assert.equal((await db.doc('inventory/'+entry.productId).get()).exists,false);
   assert.equal((await db.collection('supplyOrders').where('sourceId','==',orderId).get()).size,0);
+  // Read the original server endpoint once, then show each sibling's progress
+  // beneath that exact product in the original desktop/mobile order renderer.
+  await page.locator('#verifyServiceOrderButton').click();
+  await page.waitForFunction(()=>!!serviceCaseView?.summary);
+  const productLines=row.locator('.order-product-cell > div');
+  for(const entry of items){
+   const line=productLines.filter({hasText:entry.itemName});
+   const hint=await line.locator('.service-case-verified-hint').textContent();
+   assert.ok(hint.includes(entry.itemId==='BIOPLEX_LAB'?'1/2':'2/2'));
+   assert.ok(hint.includes(entry.itemId==='BIOPLEX_LAB'?'待服務處理':'服務完成・待核銷'));
+  }
+  assert.equal(await row.locator('.order-money-cell .service-case-verified-hint').count(),0);
   // The original billing button must reject the still-partial Bio-Plex work.
   await page.locator('button[onclick="closeServiceCases()"]').click();
   await row.getByRole('button',{name:'核銷',exact:true}).click();
