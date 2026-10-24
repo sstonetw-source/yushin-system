@@ -16204,6 +16204,11 @@ async function commitFormalPurchaseOrder(poRecord, {actorUid=currentUser?.uid,ac
             || globalThis.YUSHIN_PREVIEW_FORMAL_PURCHASE===true)
             && !formalPurchaseBackendPilotEnabled())
             throw new Error('採購後端試點與目前環境不一致，禁止改由舊交易提交。');
+        // Preview purchase confirmation is backend-only. Missing opt-in must
+        // fail closed instead of silently falling back to the old Client writer.
+        if(typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='preview'
+            && !formalPurchaseBackendPilotEnabled())
+            throw new Error('Preview 採購後端尚未啟用，禁止改由舊交易提交。');
         if(formalPurchaseBackendPilotEnabled())
             return commitFormalPurchaseBackend(poRecord,actorUid,assertActor);
         const actorName=currentUserName||currentUser?.email||'', now=poRecord.createdAt||new Date().toISOString();
