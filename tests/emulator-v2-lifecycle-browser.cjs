@@ -372,7 +372,11 @@ for(const width of [1280,390])test('original service case UI '+width+'px: four k
    const summary=await page.locator('#serviceItemBody').textContent();
    assert.ok(summary.includes(kind==='BIOPLEX_LAB'?'待服務處理':'服務完成・待核銷'));
   }
-  assert.deepEqual((await db.doc('orders/'+orderId).get()).data(),order,'case UI never mutates stock/delivery/billing order facts');
+  const {workCategories:partialCategories,workCategoryUpdatedAt:partialUpdatedAt,...partialFacts}=
+   (await db.doc('orders/'+orderId).get()).data();
+  assert.deepEqual(partialCategories,['billing','delivery'],'completed siblings coexist with outstanding Bio-Plex work');
+  assert.ok(Number.isFinite(Date.parse(partialUpdatedAt)),'verified event timestamps the work index');
+  assert.deepEqual(partialFacts,order,'case UI only updates the work index, never stock/delivery/billing order facts');
   for(const entry of items)assert.equal((await db.doc('inventory/'+entry.productId).get()).exists,false);
   assert.equal((await db.collection('supplyOrders').where('sourceId','==',orderId).get()).size,0);
   // The original billing button must reject the still-partial Bio-Plex work.
@@ -385,6 +389,11 @@ for(const width of [1280,390])test('original service case UI '+width+'px: four k
   await openByNumber();await item('BIOPLEX_LAB');await start('BIO-002');await confirmed();
   await switchRole('engineer');await openByNumber();await item('BIOPLEX_LAB');
   await advance('BIO-002');await advance('BIO-002','REPORT-002');
+  const {workCategories:completedCategories,workCategoryUpdatedAt:completedUpdatedAt,...completedFacts}=
+   (await db.doc('orders/'+orderId).get()).data();
+  assert.deepEqual(completedCategories,['billing'],'all commercial service quantity completed before billing');
+  assert.ok(Number.isFinite(Date.parse(completedUpdatedAt)));
+  assert.deepEqual(completedFacts,order,'completion classification does not perform delivery or billing');
   await switchRole('sales');await openByNumber();
   await page.locator('button[onclick="closeServiceCases()"]').click();
   billingLose=true;
