@@ -69,6 +69,42 @@ function previewSetup(){
  x.c.firebase.app=()=>({options,functions:()=>x.functions});
  return x;
 }
+function productionSetup(){
+ const x=previewSetup(),options={projectId:'yu-shing-company'};
+ x.c.YUSHIN_PREVIEW_FORMAL_PURCHASE=false;
+ x.c.YUSHIN_PRODUCTION_FORMAL_PURCHASE=true;
+ x.c.APP_ENVIRONMENT='production';x.c.location.hostname='yu-shing-company.web.app';
+ x.auth.app.options=options;x.auth.emulatorConfig=null;
+ x.functions.app.options=options;
+ x.c.firebase.app=()=>({options,functions:()=>x.functions});
+ return x;
+}
+test('production PO backend opt-in uses Callable and verified records, not legacy client writes',async()=>{
+ const x=productionSetup(),result=await x.c.commitFormalPurchaseOrder(x.po);
+ assert.equal(result.poRecord.buyerName,'Server Buyer');
+ assert.equal(result.committedSupplyOrders.length,1);
+ assert.equal(x.writes.length,0);
+ assert.equal(x.calls.filter(call=>call.name==='commitV2FormalPurchase').length,1);
+ assert.equal(x.calls.filter(call=>call.emulator).length,0);
+});
+test('production opt-in refuses unexpected hostname project emulator login change or bad response without fallback',async()=>{
+ for(const mutate of [x=>x.c.location.hostname='example.com',
+  x=>x.auth.app.options.projectId='preview-20135',
+  x=>x.auth.emulatorConfig={host:'127.0.0.1',port:9099},
+  x=>x.auth.currentUser.uid='different']){
+  const x=productionSetup();mutate(x);
+  await assert.rejects(x.c.commitFormalPurchaseOrder(x.po));
+  assert.equal(x.writes.length,0);
+  assert.equal(x.calls.some(call=>call.name),false);
+ }
+ const failed=productionSetup();failed.functions.httpsCallable=()=>async()=>{throw Error('lost reply');};
+ await assert.rejects(failed.c.commitFormalPurchaseOrder(failed.po),/lost reply/);
+ assert.equal(failed.writes.length,0);
+ const unsupported=productionSetup();unsupported.po.items[0].sourceType='STOCK_REPLENISHMENT';
+ await assert.rejects(unsupported.c.commitFormalPurchaseOrder(unsupported.po),/只支援/);
+ assert.equal(unsupported.writes.length,0);
+});
+
 test('Preview without backend opt-in fails closed instead of using legacy purchase transaction',async()=>{
  for(const flag of [false,undefined]){
   const x=previewSetup();x.c.YUSHIN_PREVIEW_FORMAL_PURCHASE=flag;
