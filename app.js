@@ -11072,7 +11072,7 @@ window.verifyServiceOrderProgress=async function(){
         view.summary=data;
         if(body)body.innerHTML='<p>服務案件整單查核：已完成 '
             +escapeHtml(data.completedQty)+'／'+escapeHtml(data.orderedQty)
-            +(data.mixedOrder?'（此訂單另有一般商品，未包含在服務進度中）':'')+'</p><ul>'
+            +(data.mixedOrder?(data.goodsCompleted?'；商品已全數交付':'；商品尚未全數交付'):'')+'</p><ul>'
             +data.items.map(item=>'<li>'+escapeHtml(item.itemName)+'：'
                 +escapeHtml(item.completedQty)+'／'+escapeHtml(item.orderedQty)
                 +'・'+escapeHtml(SERVICE_WORK_LABELS[item.workCategory])+'</li>').join('')+'</ul>'
@@ -11916,8 +11916,10 @@ function orderItemDisplayCategory(order, item, lifecycleOverride = null, dispatc
     if (category !== 'closed' && String(item.productType||'').trim().toUpperCase()==='SERVICE'
         && order.inventoryReservationStatus==='completed'
         && Array.isArray(order.items) && order.items.length>0
-        && order.items.every(row=>String(row?.productType||'').trim().toUpperCase()==='SERVICE')
-        && Array.isArray(order.workCategories) && order.workCategories.length===1) {
+        && order.items.some(row=>String(row?.productType||'').trim().toUpperCase()==='SERVICE')
+        && Array.isArray(order.workCategories) && order.workCategories.length===1
+        && order.items.every(row=>String(row?.productType||'').trim().toUpperCase()==='SERVICE'
+            ||orderItemWorkCategory(order,row,lifecycleOverride)===order.workCategories[0])) {
         const saved=order.workCategories[0];
         if ((saved==='billing' && !order.isBilled) || (saved==='complete' && order.isBilled===true)) return saved;
     }
@@ -11959,11 +11961,11 @@ function orderWorkCategories(order) {
 
 function orderWorkIndexFields(order) {
     const items=normalizedOrderItems(order);
-    const pureService=items.length>0&&items.every(item=>String(item.productType||'').trim().toUpperCase()==='SERVICE');
+    const hasService=items.some(item=>String(item.productType||'').trim().toUpperCase()==='SERVICE');
     // Registered Service case events are the authority for completion. A
     // subsequent client-side edit must not reset their server-projected queue.
-    if (pureService&&Array.isArray(order.workCategories)
-        &&order.workCategories.some(category=>category==='billing'||category==='complete')) {
+    if (hasService&&Array.isArray(order.workCategories)
+        &&(order.workCategoryUpdatedAt||order.workCategories.some(category=>category==='billing'||category==='complete'))) {
         if(orderLifecycleInfo(order).status!=='normal')
             throw new Error('已有服務完成紀錄的訂單須由後端核對案件後取消或恢復。');
         return {};
@@ -16690,6 +16692,7 @@ async function validateV2ReceiptSource(transaction, {order,supply,reservation,it
             throw new Error('整單原候選倉資料不正確。');
         candidates.forEach(id);
         for(const row of order.items){
+  if(String(row.productType||row.type||'').trim().toUpperCase()==='SERVICE')continue;
             const rowId=id(row?.itemId),productId=id(row.productId),key=id(row.inventoryProductKey||productId);
             const ordered=integer(row.qty??row.orderedQty,'品項訂購量');
             if(seen.has(rowId)||!ordered||(row.orderedQty!==undefined&&row.orderedQty!==ordered)
@@ -18870,7 +18873,7 @@ window.serviceBillingDateEnabled=function(order){
     return globalThis.YUSHIN_SERVICE_CASE_EMULATOR===true
         &&canManageOrderLifecycleCapability()&&canEditPage('orders.list')&&canBusinessSelfOrder(order)
         &&Array.isArray(order.items)&&order.items.length>0
-        &&order.items.every(i=>String(i?.productType||'').trim().toUpperCase()==='SERVICE');
+        &&order.items.some(i=>String(i?.productType||'').trim().toUpperCase()==='SERVICE');
 };
 async function toggleServiceOrderBilling(order,newValue,dateValue){
     const key=order.id+':isBilled',pendingSet=pendingOrderStatusKeys;
@@ -19475,7 +19478,7 @@ function pendingV2OrderLifecycle(orderId){
   if(!intent||intent.orderId!==orderId||intent.actorUid!==currentUser?.uid||intent.actorRole!==currentUserRole
    ||!['normal','cancelled'].includes(intent.nextStatus)||!/^\w[\w-]{11,95}$/.test(intent.operationId||'')
    ||!Array.isArray(intent.itemIds)||!intent.itemIds.length||intent.itemIds.length>5
-   ||!Array.isArray(intent.warehouseIds)||intent.warehouseIds.length!==2)throw Error('invalid pending lifecycle');
+   ||!Array.isArray(intent.warehouseIds)||![0,2].includes(intent.warehouseIds.length))throw Error('invalid pending lifecycle');
   return intent;
  }catch(_){throw Error('前次取消／恢復結果尚未確認，請使用原帳號與角色核對。');}
 }
@@ -19512,6 +19515,7 @@ async function setV2OrderLifecycleEmulator(orderId,nextStatus,details=null){
   if(normalizedOrderStatus(order)===nextStatus)throw Error('訂單已是此狀態；v2 試點不提供單獨更正日期／原因。');
   let warehouseIds;
   for(const item of items){
+   if(String(item.productType||item.type||'').trim().toUpperCase()==='SERVICE')continue;
    const snap=await db.collection('inventoryReservations').doc(orderId+'__'+item.itemId).get({source:'server'});check();
    const ledger=snap.exists?snap.data():null,candidates=ledger?.lifecycleWarehouseIds;
    if(!ledger||ledger.locationSchemaVersion!==2||ledger.orderId!==orderId||ledger.itemId!==item.itemId
@@ -19522,7 +19526,7 @@ async function setV2OrderLifecycleEmulator(orderId,nextStatus,details=null){
    if(warehouseIds&&JSON.stringify(warehouseIds)!==JSON.stringify(sorted))throw Error('整單品項的原候選倉不一致。');
    warehouseIds=sorted;
   }
-  frozen={orderId,itemIds:items.map(row=>row.itemId).sort(),warehouseIds,nextStatus,date,reason,
+  frozen={orderId,itemIds:items.map(row=>row.itemId).sort(),warehouseIds:warehouseIds||[],nextStatus,date,reason,
    operationId:'lifecycle_'+globalThis.crypto.randomUUID().replaceAll('-','_'),
    syncAttemptId:order.inventoryReservationAttemptId,actorUid:uid,actorRole:role};
   sessionStorage.setItem(key,JSON.stringify(frozen));

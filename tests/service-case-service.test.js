@@ -48,6 +48,13 @@ function fixture({role='sales',ownerUid='U',kind='BIOPLEX_LAB',productType='SERV
   };
   return {db,docs,written,orderWrites,ids};
 }
+function mixedSource(f){
+ const order=f.docs.get('orders/O');Object.assign(order,{salesCode:'S',inventoryReservationAttemptId:'sync-mixed-source'});
+ for(const item of order.items.filter(i=>i.productType.toUpperCase()==='GOODS')){
+  f.docs.set('products/'+item.productId,{productType:'Goods',active:true});
+  item.shortageQty=item.qty-(item.reservedQty||0);
+ }
+}
 const now=i=>new Date(Date.UTC(2026,9,22,9,i)).toISOString();
 const intent=(type,i=0,extra={},caseId='case1')=>({orderId:'O',itemId:'I',caseId,serviceQty:1,
   event:{id:'op'+i,type,occurredAt:now(i),...extra}});
@@ -114,12 +121,13 @@ test('Service work index initializes missing status without altering Goods or gu
     order.items.push(sibling==='GOODS'
       ?{itemId:'G',productId:'PG',productType:'GOODS',qty:2}
       :{itemId:'J',productId:'PJ',productType:'SERVICE',serviceKind:'ONSITE_REPAIR',qty:2});
+    if(sibling==='GOODS')mixedSource(f);
     if(sibling==='SERVICE')f.docs.set('products/PJ',{
       active:true,productType:'SERVICE',serviceKind:'ONSITE_REPAIR'
     });
     await commit(f,intent('REPAIR_COMPLETED',0,{workSummary:'完成第一項'}));
-    assert.deepEqual(order.workCategories,sibling==='GOODS'?['delivery','ordering']:['billing','delivery']);
-    assert.deepEqual(f.orderWrites,sibling==='GOODS'?[]:['orders/O']);
+    assert.deepEqual(order.workCategories,sibling==='GOODS'?['billing','ordering']:['billing','delivery']);
+    assert.deepEqual(f.orderWrites,['orders/O']);
     assert.equal(f.written.length,2);
   }
 });
@@ -175,6 +183,7 @@ test('service workflow reads use registered events and the live billing and life
   const f=fixture({role:'admin',kind:'ONSITE_REPAIR'}),order=f.docs.get('orders/O');
   order.items[0].qty=2;
   order.items.push({itemId:'G',productId:'GOODS',productType:'Goods',qty:1,reservedQty:1});
+  mixedSource(f);
   const query={orderId:'O',itemId:'I'};
   assert.equal((await getServiceCaseStatus(f.db,'U',query)).itemWorkCategory,'delivery');
   const first=intent('REPAIR_COMPLETED',0,{workSummary:'修復'},'first');
@@ -523,7 +532,8 @@ test('whole-order summary handles two Service lines and mixed Goods without inve
  const f=fixture({role:'admin',kind:'ONSITE_REPAIR'});
  const order=f.docs.get('orders/O');
  order.items.push({itemId:'J',productId:'PJ',productType:'SERVICE',serviceKind:'ONSITE_REPAIR',qty:1});
- order.items.push({itemId:'G',productId:'PG',productType:'Goods',qty:4,deliveredQty:4});
+ order.items.push({itemId:'G',productId:'PG',productType:'Goods',qty:4,deliveredQty:0});
+ mixedSource(f);
  f.docs.set('products/PJ',{active:true,productType:'SERVICE',serviceKind:'ONSITE_REPAIR'});
  await commit(f,intent('REPAIR_COMPLETED',0,{workSummary:'完成第一項'}));
  let p=await getServiceOrderProgress(f.db,'U',{orderId:'O'});
@@ -534,8 +544,11 @@ test('whole-order summary handles two Service lines and mixed Goods without inve
  assert.equal(p.serviceCompleted,false);
  assert.deepEqual(p.items.map(i=>i.itemId),['I','J']);
  assert.equal(p.items[1].workCategory,'delivery');
- assert.equal(order.items[2].deliveredQty,4);
- assert.equal(f.docs.get('orders/O').workCategories,undefined);
+ assert.equal(order.items[2].deliveredQty,0);
+ assert.equal(p.goodsCompleted,false);
+ assert.deepEqual(f.docs.get('orders/O').workCategories,['billing','delivery','ordering']);
+ order.items[2].deliveredQty=4;
+ await assert.rejects(getServiceOrderProgress(f.db,'U',{orderId:'O'}),/交付憑證/);
 });
 test('whole-order read requires actor authorization, stable identifiers, consistent case indexes',async()=>{
  for(const opt of [{role:'purchaser'},{role:'sales',ownerUid:'OTHER'},{role:'sales',disabled:true}]){

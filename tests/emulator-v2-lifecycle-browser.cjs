@@ -258,6 +258,94 @@ async function siteNav(page,key){
  await page.locator('.nav-tab[data-main-nav="'+key+'"]').click();
 }
 
+for(const width of [1280,390])test('mixed service and Goods original UI '+width+'px: real delivery, completion, billing and lost reply',{timeout:180000},async()=>{
+ const tag='mixed-ui-'+width,orderId=tag+'-order',orderNo='YS-'+tag,key=tag+'-goods',serviceKey=tag+'-service';
+ const accounts={};
+ for(const role of ['sales','warehouse','engineer']){
+  const uid=tag+'-'+role,email=uid+'@example.test';await auth.createUser({uid,email,password});
+  await db.doc('users/'+uid).set({role,active:true,name:role,email,code:uid});accounts[role]={uid,email};
+ }
+ const plan={mode:'CUSTOMER_SHIP',contact:'混合單客戶',phone:'02-12345678',address:'台北市驗收地址'};
+ const goods={itemId:'G',productId:key,productType:'Goods',itemName:'混合單商品',qty:1,unitPrice:200,
+  warehouseId:tag+'-A',fulfillmentType:'WAREHOUSE',deliveryPlan:plan,reservedQty:0,shortageQty:1,deliveredQty:0,returnedQty:0};
+ const service={itemId:'S',productId:serviceKey,productType:'Service',serviceKind:'ONSITE_REPAIR',itemName:'現場維修',
+  qty:1,unitPrice:100,fulfillmentType:'WAREHOUSE',warehouseId:'',deliveryPlan:{},reservationStatus:'not_required',
+  reservedQty:0,shortageQty:0,deliveredQty:0,returnedQty:0};
+ const syncAttemptId=tag+'-sync';
+ const setup=db.batch();
+ setup.set(db.doc('products/'+key),{productType:'Goods',active:true});
+ setup.set(db.doc('products/'+serviceKey),{productType:'Service',serviceKind:'ONSITE_REPAIR',active:true});
+ setup.set(db.doc('inventory/'+key),{productKey:key,onHand:1,reserved:0});
+ for(const [suffix,onHand] of [['A',1],['B',0]]){
+  const wh=tag+'-'+suffix;setup.set(db.doc('warehouses/'+wh),{active:true,name:wh});
+  setup.set(db.doc('warehouseStocks/'+wh+'__'+key),{warehouseId:wh,productKey:key,onHand,reserved:0});
+ }
+ setup.set(db.doc('inventoryLots/'+tag+'-lot'),{productKey:key,warehouseId:tag+'-A',receivedQty:1,remainingQty:1,lotNo:'MIX',receivedAt:'2026-10-24T08:00:00Z'});
+ setup.set(db.doc('orders/'+orderId),{orderNo,customerName:'混合單客戶',ownerUid:accounts.sales.uid,salesCode:accounts.sales.uid,
+  salesName:'sales',status:'active',orderStatus:'normal',orderDate:'2026-10-24',inventoryReservationStatus:'pending',
+  inventoryReservationAttemptId:syncAttemptId,orderSchemaVersion:2,itemCount:2,items:[service,goods],totalPrice:300,
+  productIds:[serviceKey,key],deliveryRecords:[],returnRecords:[],deliveredQty:0,isDelivered:false,isBilled:false});
+ await setup.commit();
+ // Source and initialization checkpoint are explicit fixtures. The original
+ // reservation, paperwork and physical shipment Services create real proofs.
+ await require('../functions/single-item-location-service').commitOrderTwoWarehouse(db,accounts.sales.uid,
+  {orderId,itemIds:['S','G'],warehouseIds:[tag+'-A',tag+'-B'],attemptId:tag+'-reserve',syncAttemptId});
+ await db.doc('orders/'+orderId).update({inventoryReservationStatus:'completed'});
+ await require('../functions/location-dispatch-service').commitLocationDispatchPreparation(db,accounts.warehouse.uid,
+  {orderId,itemId:'G',quantity:1,operationId:tag+'-prepare',syncAttemptId});
+ await require('../functions/location-shipment-service').commitLocationShipment(db,accounts.warehouse.uid,
+  {orderId,itemId:'G',warehouseId:tag+'-A',quantity:1,operationId:tag+'-ship',syncAttemptId,date:'2026-10-24',expectedPlan:plan});
+ const physical=async()=>{
+  const result={};for(const name of ['inventory','warehouseStocks','inventoryLots','inventoryMovements','inventoryReservations'])
+   result[name]=(await db.collection(name).where('productKey','==',key).get()).docs.map(doc=>({id:doc.id,...doc.data()})).sort((a,b)=>a.id.localeCompare(b.id));
+  return result;
+ };
+ const stock=await physical(),context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage(),dialogs=[];
+ let lose=true;const billingCalls=[];
+ await page.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_SERVICE_CASE_EMULATOR=true;window.YUSHIN_V2_DELIVERY_EMULATOR=true;});
+ page.on('dialog',async dialog=>{dialogs.push(dialog.message());await dialog.dismiss();});
+ await context.route('**/*',async route=>{
+  const request=route.request(),url=new URL(request.url());
+  if(!['localhost','127.0.0.1'].includes(url.hostname)){await route.abort();return;}
+  if(url.port==='5001'&&request.method()==='POST'&&url.pathname.endsWith('/commitServiceOrderBilling')){
+   billingCalls.push(request.postDataJSON().data);
+   if(lose&&billingCalls.at(-1).operationId!==billingCalls[0]?.operationId){lose=false;const result=await route.fetch();assert.equal(result.status(),200);await route.abort('failed');return;}
+  }
+  await route.continue();
+ });
+ try{
+  await siteOpen(page);await siteLogin(page,accounts.sales,'sales');
+  await siteOrderAction(page,{sourceId:orderNo},'分批交貨');
+  await page.locator('#deliveryFormPanel').waitFor({state:'visible'});
+  await page.locator('#deliveryItemId').selectOption('G');await page.locator('#deliveryShipmentId').selectOption(tag+'-ship');
+  await page.locator('#deliveryDate').fill('2026-10-24');await page.locator('#deliveryQty').fill('1');
+  await page.locator('#deliveryFormPanel button[onclick="saveDeliveryRecord()"]').click();
+  await page.waitForFunction(id=>!pendingDeliveryOrderIds.has(id)&&ordersCache.find(o=>o.id===id)?.deliveredQty===1,orderId);
+  await page.locator('#deliveryModalOverlay button[onclick="closeDeliveryModal()"]').click();
+  const row=page.locator('#ordersBody > tr').filter({hasText:orderNo});
+  await row.getByRole('button',{name:'核銷',exact:true}).click();await page.waitForFunction(()=>!pendingOrderStatusKeys.size);
+  assert.equal((await db.doc('orders/'+orderId).get()).data().isBilled,false);assert.ok(dialogs.some(s=>s.includes('尚未全數完成')));
+  await siteLogout(page);await siteLogin(page,accounts.engineer,'engineer');await siteNav(page,'orders');
+  await page.locator('#serviceCaseEntry').click();await page.locator('#serviceOrderNo').fill(orderNo);
+  await page.locator('button[onclick="findServiceCaseOrder()"]').click();await page.locator('#serviceNewCaseId').waitFor({state:'visible'});
+  await page.locator('#serviceEvidence').fill('客戶現場校正完成');await page.locator('#serviceNewCaseId').fill('MIX-REPAIR');
+  await page.locator('#serviceNewQty').fill('1');await page.locator('#serviceCaseSave').click();
+  await page.waitForFunction(()=>!serviceCaseView?.busy&&document.getElementById('serviceCaseMessage')?.textContent==='服務操作已確認。');
+  assert.deepEqual((await db.doc('orders/'+orderId).get()).data().workCategories,['billing']);
+  await page.locator('button[onclick="closeServiceCases()"]').click();await siteLogout(page);await siteLogin(page,accounts.sales,'sales');await siteNav(page,'orders');
+  await row.getByRole('button',{name:'核銷',exact:true}).click();
+  await page.waitForFunction(()=>!pendingOrderStatusKeys.size&&!!pendingServiceBillingIntent());
+  const original=billingCalls.at(-1);assert.equal((await db.doc('orders/'+orderId).get()).data().isBilled,true);
+  await siteOpen(page,'sales');await siteNav(page,'orders');const count=billingCalls.length;
+  await row.getByRole('button',{name:/^(核銷|已核銷)$/}).click();await page.waitForFunction(()=>!pendingOrderStatusKeys.size&&!pendingServiceBillingIntent());
+  assert.equal(billingCalls.length,count+1);assert.deepEqual(billingCalls.at(-1),original);
+  const done=(await db.doc('orders/'+orderId).get()).data();assert.deepEqual(done.workCategories,['complete']);
+  assert.equal(done.items[0].deliveredQty,0);assert.equal(done.deliveredQty,1);assert.equal(done.statusHistory.length,1);
+  assert.deepEqual(await physical(),stock,'delivery, service completion and billing do not repeat physical debit');
+  assert.equal((await db.doc('inventory/'+serviceKey).get()).exists,false);
+ }finally{await context.close();}
+});
+
 for(const width of [1280,390])test('original service case UI '+width+'px: four kinds, role handoff and immutable lost-reply recovery',async()=>{
  const tag='service-ui-'+width,orderId=tag+'-order',orderNo='YS-'+tag,accounts={};
  const kinds=['PIPETTE_CALIBRATION','BIOPLEX_LAB','TISSUE_SLICING','ONSITE_REPAIR'];

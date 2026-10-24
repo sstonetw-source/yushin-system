@@ -535,8 +535,10 @@ function orderItemDisplayCategory(order, item, lifecycleOverride = null, dispatc
     if (category !== 'closed' && String(item.productType||'').trim().toUpperCase()==='SERVICE'
         && order.inventoryReservationStatus==='completed'
         && Array.isArray(order.items) && order.items.length>0
-        && order.items.every(row=>String(row?.productType||'').trim().toUpperCase()==='SERVICE')
-        && Array.isArray(order.workCategories) && order.workCategories.length===1) {
+        && order.items.some(row=>String(row?.productType||'').trim().toUpperCase()==='SERVICE')
+        && Array.isArray(order.workCategories) && order.workCategories.length===1
+        && order.items.every(row=>String(row?.productType||'').trim().toUpperCase()==='SERVICE'
+            ||orderItemWorkCategory(order,row,lifecycleOverride)===order.workCategories[0])) {
         const saved=order.workCategories[0];
         if ((saved==='billing' && !order.isBilled) || (saved==='complete' && order.isBilled===true)) return saved;
     }
@@ -578,11 +580,11 @@ function orderWorkCategories(order) {
 
 function orderWorkIndexFields(order) {
     const items=normalizedOrderItems(order);
-    const pureService=items.length>0&&items.every(item=>String(item.productType||'').trim().toUpperCase()==='SERVICE');
+    const hasService=items.some(item=>String(item.productType||'').trim().toUpperCase()==='SERVICE');
     // Registered Service case events are the authority for completion. A
     // subsequent client-side edit must not reset their server-projected queue.
-    if (pureService&&Array.isArray(order.workCategories)
-        &&order.workCategories.some(category=>category==='billing'||category==='complete')) {
+    if (hasService&&Array.isArray(order.workCategories)
+        &&(order.workCategoryUpdatedAt||order.workCategories.some(category=>category==='billing'||category==='complete'))) {
         if(orderLifecycleInfo(order).status!=='normal')
             throw new Error('已有服務完成紀錄的訂單須由後端核對案件後取消或恢復。');
         return {};

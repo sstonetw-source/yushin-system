@@ -176,6 +176,7 @@ async function validateV2ReceiptSource(transaction, {order,supply,reservation,it
             throw new Error('整單原候選倉資料不正確。');
         candidates.forEach(id);
         for(const row of order.items){
+  if(String(row.productType||row.type||'').trim().toUpperCase()==='SERVICE')continue;
             const rowId=id(row?.itemId),productId=id(row.productId),key=id(row.inventoryProductKey||productId);
             const ordered=integer(row.qty??row.orderedQty,'品項訂購量');
             if(seen.has(rowId)||!ordered||(row.orderedQty!==undefined&&row.orderedQty!==ordered)

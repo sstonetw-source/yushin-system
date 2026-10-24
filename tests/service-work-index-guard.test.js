@@ -39,8 +39,8 @@ test('new or unfinished Service index and Goods writer keep existing projection'
   const product={items:[{productType:'GOODS'}],workCategories:['billing']};
   assert.deepEqual(Array.from(f.index(product).workCategories),['delivery']);
   const mixed={items:[{productType:'GOODS'},{productType:'SERVICE'}],workCategories:['billing']};
-  assert.deepEqual(Array.from(f.index(mixed).workCategories),['delivery']);
-  assert.equal(f.recomputes(),3);
+  assert.deepEqual({...f.index(mixed)},{});
+  assert.equal(f.recomputes(),2);
 });
 
 test('cancel/restore cannot silently discard verified Service completion',()=>{

@@ -316,15 +316,27 @@
     };
     ident(orderId);
     if(!Array.isArray(items)||!items.length||items.length>5)throw Error('整單履約僅支援 1–5 個品項。');
-    const sources=new Map();
+    const sources=new Map(),allIds=new Set();
     for(const item of items){
-      const itemId=ident(item?.itemId),productKey=ident(item.inventoryProductKey||item.productId);
+      const itemId=ident(item?.itemId);
+      if(allIds.has(itemId))throw Error('整單履約品項識別碼重複。');
+      allIds.add(itemId);
+      if(String(item.productType||item.type||'').trim().toUpperCase()==='SERVICE'){
+        // Service quantity is commercial work, never physical supply or delivery.
+        for(const field of ['reservedQty','shortageQty','supplyOrderedQty','receivedQty',
+          'dispatchPreparedQty','warehouseShippedQty','deliveredQty','returnedQty'])
+          if(item[field]!==undefined&&item[field]!==0)
+            throw Error('服務品項不可含實貨、供應或送達數量。');
+        continue;
+      }
+      const productKey=ident(item.inventoryProductKey||item.productId);
       const orderedQty=item.qty??item.orderedQty;
       if(sources.has(itemId)||!Number.isSafeInteger(orderedQty)||orderedQty<=0
         ||(item.qty!==undefined&&item.orderedQty!==undefined&&item.qty!==item.orderedQty))
         throw Error('整單履約品項重複或訂購量不正確。');
       sources.set(itemId,{itemId,productKey,orderedQty});
     }
+    if(!sources.size)throw Error('整單實貨履約缺少商品品項。');
     for(const records of [shipments,deliveries,returns]){
       if(!Array.isArray(records)||records.length>200)throw Error('整單履約事件格式不正確或超過安全上限。');
       const seen=new Set();

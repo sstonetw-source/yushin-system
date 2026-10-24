@@ -1553,3 +1553,100 @@ test('real Auth multi-item receipt preserves fulfilled siblings and refuses corr
  await db.collection('users').doc(x.receiver.uid).update({disabled:true});
  await assert.rejects(x.receive(input),code('permission-denied'));assert.deepEqual(await x.receiptSnapshot(),applied);
 });
+
+for(const serviceFirst of [false,true])test('mixed order real Auth: '+(serviceFirst?'service':'goods')+' finishes first, both proofs required for billing and retry',async()=>{
+ const x=await fixture('mixed-'+serviceFirst,{cancelled:false});
+ const ref=db.doc('orders/'+x.orderId),serviceId=x.key+'-service';
+ const source=(await ref.get()).data();
+ await db.doc('products/'+serviceId).set({productType:'Service',serviceKind:'ONSITE_REPAIR',active:true});
+ await ref.update({items:[...source.items,{itemId:'S',productId:serviceId,productType:'Service',serviceKind:'ONSITE_REPAIR',qty:1,
+  reservedQty:0,shortageQty:0,deliveredQty:0,returnedQty:0}],itemCount:2}); // explicit mixed source preparation
+ const engineer=await identity('mixed-engineer-'+serviceFirst,'engineer');
+ const call=(who,name,data)=>httpsCallable(who.functions,name,{timeout:30000})(data).then(r=>r.data);
+ const billing={orderId:x.orderId,operationId:'mixed-bill-'+serviceFirst+'-0001',isBilled:true,expectedIsBilled:false,billingDate:'2026-10-24'};
+ const lifecycle={orderId:x.orderId,itemIds:['I','S'],warehouseIds:['AUTH-A','AUTH-B'],syncAttemptId:source.inventoryReservationAttemptId,
+  date:'2026-10-23',reason:'混合單取消恢復'};
+ await x.actor.setLifecycle({...lifecycle,nextStatus:'cancelled',operationId:'mixed-cancel-'+serviceFirst});
+ assert.deepEqual((await ref.get()).data().workCategories,['closed']);
+ await assert.rejects(call(engineer,'commitServiceCaseEvent',{orderId:x.orderId,itemId:'S',caseId:'repair',serviceQty:1,
+  event:{id:'repair-complete',type:'REPAIR_COMPLETED',occurredAt:'2026-10-23T09:00:00Z',workSummary:'校正完成'}}),e=>e.code==='functions/failed-precondition');
+ await x.actor.setLifecycle({...lifecycle,nextStatus:'normal',operationId:'mixed-restore-'+serviceFirst});
+ assert.deepEqual((await ref.get()).data().items.find(i=>i.itemId==='S'),{itemId:'S',productId:serviceId,productType:'Service',serviceKind:'ONSITE_REPAIR',qty:1,reservedQty:0,shortageQty:0,deliveredQty:0,returnedQty:0});
+ const beforeService=await snapshot(x);
+ const finishService=()=>call(engineer,'commitServiceCaseEvent',{orderId:x.orderId,itemId:'S',caseId:'repair',serviceQty:1,
+  event:{id:'repair-complete',type:'REPAIR_COMPLETED',occurredAt:'2026-10-23T09:00:00Z',workSummary:'校正完成'}});
+ const syncAttemptId=source.inventoryReservationAttemptId;
+ const shipId='mixed-shipment-'+serviceFirst;
+ const finishGoods=async()=>{
+  await x.operator.dispatch({orderId:x.orderId,itemId:'I',quantity:6,operationId:'mixed-dispatch-'+serviceFirst,syncAttemptId});
+  await x.operator.ship({orderId:x.orderId,itemId:'I',warehouseId:'AUTH-B',quantity:6,operationId:shipId,
+   syncAttemptId,date:'2026-10-23',expectedPlan:source.items[0].deliveryPlan});
+  const intent={orderId:x.orderId,itemId:'I',shipmentId:shipId,quantity:6,operationId:'mixed-confirm-'+serviceFirst,
+   syncAttemptId,date:'2026-10-24'};
+  const same=await Promise.all([x.actor.confirm(intent),x.actor.confirm(intent)]);
+  assert.deepEqual(same.map(r=>r.status).sort(),['already-applied','applied']);
+ };
+ if(serviceFirst){
+  await finishService();
+  const after=await snapshot(x);
+  assert.deepEqual(after.documents.slice(1),beforeService.documents.slice(1));
+  assert.deepEqual(after.movements,beforeService.movements,'service event never touches physical stock');
+  await assert.rejects(call(x.actor,'commitServiceOrderBilling',billing),e=>e.code==='functions/failed-precondition');
+  await finishGoods();
+ }else{
+  await finishGoods();
+  await assert.rejects(call(x.actor,'commitServiceOrderBilling',billing),e=>e.code==='functions/failed-precondition');
+  await finishService();
+ }
+ let order=(await ref.get()).data();assert.deepEqual(order.workCategories,['billing']);
+ assert.equal(order.items[1].deliveredQty,0);assert.equal(order.deliveredQty,10);
+ const physical=await snapshot(x);
+ const movementRef=db.doc('inventoryMovements/location-ship-'+shipId),proof=(await movementRef.get()).data();
+ await movementRef.update({intentHash:'forged'});
+ await assert.rejects(call(x.actor,'commitServiceOrderBilling',billing),e=>e.code==='functions/failed-precondition');
+ assert.equal((await ref.get()).data().isBilled,undefined);
+ await movementRef.set(proof);
+ await assert.rejects(call(engineer,'commitServiceOrderBilling',billing),e=>e.code==='functions/permission-denied');
+ const same=await Promise.all([call(x.actor,'commitServiceOrderBilling',billing),call(x.actor,'commitServiceOrderBilling',billing)]);
+ assert.deepEqual(same.map(r=>r.status).sort(),['already-applied','committed']);
+ order=(await ref.get()).data();assert.deepEqual(order.workCategories,['complete']);
+ assert.equal(order.statusHistory.length,1);
+ assert.deepEqual((await snapshot(x)).documents.slice(1),physical.documents.slice(1));
+ const date={...billing,action:'CHANGE_DATE',operationId:'mixed-date-'+serviceFirst+'-0001',expectedIsBilled:true,
+  expectedBillingDate:'2026-10-24',billingDate:'2026-10-25'};
+ await call(x.actor,'commitServiceOrderBilling',date);
+ const undo={...billing,operationId:'mixed-undo-'+serviceFirst+'-0001',isBilled:false,expectedIsBilled:true,billingDate:''};
+ await call(x.actor,'commitServiceOrderBilling',undo);
+ await call(x.actor,'commitServiceOrderBilling',billing);
+ assert.equal((await ref.get()).data().isBilled,false,'old receipt never reapplies financial state');
+ await x.actor.reverse({orderId:x.orderId,itemId:'I',deliveryRecordId:'mixed-confirm-'+serviceFirst,
+  operationId:'mixed-reverse-'+serviceFirst,syncAttemptId,date:'2026-10-25',reason:'客戶更正收貨'});
+ assert.deepEqual((await ref.get()).data().workCategories,['delivery','billing']);
+ await assert.rejects(call(x.actor,'commitServiceOrderBilling',{...billing,operationId:'mixed-rebill-'+serviceFirst}),e=>e.code==='functions/failed-precondition');
+ assert.equal((await db.doc('inventory/'+serviceId).get()).exists,false);
+ assert.equal((await db.collection('inventoryMovements').where('productKey','==',serviceId).get()).size,0);
+});
+
+test('pure Service cancellation and restoration preserve custody evidence without inventing a warehouse or stock',async()=>{
+ const actor=await identity('pure-service-life','sales'),orderId='pure-service-life-order',productId='pure-service-life-product';
+ await db.doc('products/'+productId).set({productType:'Service',serviceKind:'BIOPLEX_LAB',active:true});
+ const item={itemId:'S',productId,productType:'Service',serviceKind:'BIOPLEX_LAB',qty:1,reservedQty:0,shortageQty:0};
+ await db.doc('orders/'+orderId).set({ownerUid:actor.uid,salesCode:'S',status:'active',orderStatus:'normal',inventoryReservationStatus:'completed',
+  inventoryReservationAttemptId:'pure-service-life-sync',items:[item]});
+ const call=(name,data)=>httpsCallable(actor.functions,name)(data).then(r=>r.data);
+ const event={orderId,itemId:'S',caseId:'sample',serviceQty:1,event:{id:'sample-received',type:'SAMPLE_RECEIVED',occurredAt:'2026-10-24T08:00:00Z'}};
+ await call('commitServiceCaseEvent',event);
+ const lifecycle={orderId,itemIds:['S'],warehouseIds:[],syncAttemptId:'pure-service-life-sync',date:'2026-10-24',reason:'客戶暫停'};
+ const cancel={...lifecycle,nextStatus:'cancelled',operationId:'pure-service-life-cancel'};
+ const result=await Promise.all([actor.setLifecycle(cancel),actor.setLifecycle(cancel)]);
+ assert.deepEqual(result.map(r=>r.status).sort(),['already-applied','applied']);
+ assert.deepEqual((await db.doc('orders/'+orderId).get()).data().workCategories,['closed']);
+ await assert.rejects(call('commitServiceCaseEvent',{...event,event:{...event.event,id:'new-event'}}),e=>e.code==='functions/failed-precondition');
+ await actor.setLifecycle({...lifecycle,nextStatus:'normal',operationId:'pure-service-life-restore'});
+ const order=(await db.doc('orders/'+orderId).get()).data();
+ assert.deepEqual(order.items,[item]);assert.deepEqual(order.workCategories,['delivery']);
+ const history=await call('getServiceCaseStatus',{orderId,itemId:'S',caseId:'sample'});
+ assert.equal(history.events.length,1);assert.equal(history.custody,'IN_HOUSE');
+ for(const name of ['inventoryReservations','inventoryMovements','supplyOrders'])
+  assert.equal((await db.collection(name).where(name==='inventoryMovements'?'sourceId':'orderId','==',orderId).get()).size,0);
+});

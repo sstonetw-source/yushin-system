@@ -95,3 +95,15 @@ test('regional callable uses the compat app API, not a region string in the glob
  assert.equal((await c.setOrderLifecycleStatus('O','cancelled')).orderStatus,'cancelled');
  assert.equal(region,'asia-east1');assert.equal(f.calls.length,1);
 });
+
+for(const pure of [false,true])test('Service lifecycle freezes '+(pure?'no virtual warehouses':'only Goods warehouse evidence')+' and recovers the same pending operation',async()=>{
+ const f=fixture();f.order.items=[{itemId:'S',productType:'Service'},...(pure?[]:[{itemId:'I',productType:'Goods'}])];
+ f.setTransport(p=>{f.applied(p);throw Error('lost reply');});
+ await assert.rejects(f.open().setOrderLifecycleStatus('O','cancelled'),/lost reply/);
+ assert.deepEqual(f.calls[0].warehouseIds,pure?[]:['A','B']);
+ assert.equal(f.reads.some(([name,id])=>name==='inventoryReservations'&&id==='O__S'),false);
+ f.setTransport(p=>({...f.applied(p),data:{...f.applied(p).data,status:'already-applied'}}));
+ const c=f.open();assert.equal(c.pendingV2OrderLifecycle('O').operationId,f.calls[0].operationId);
+ await c.setOrderLifecycleStatus('O','cancelled');
+ assert.deepEqual(f.calls[1],f.calls[0]);assert.equal(f.order.orderLifecycleHistory.length,1);assert.equal(f.storage.size,0);
+});

@@ -201,6 +201,9 @@ async function commitV2FormalPurchase(db,uid,data){
    ...(draft?{status:'ORDERED',documentOnly:false,documentRevision:draft.documentRevision||1,confirmedAt:now,confirmedByUid:uid}:{}),
    ...purchaseDocumentFields(intent,savedItems,buyerName)
   };
+  const serviceIndexes=new Map();
+  for(const [orderId,{source,items}] of sourceUpdates)
+   serviceIndexes.set(orderId,await require('./service-order-fulfillment').mixedWorkIndex(db,tx,orderId,{...source,items},{proofOrder:source}));
   // No writes are staged until EVERY line passes and all deterministic supply
   // IDs have been read. A bad final row rejects the whole PO, never a prefix.
   if(draft)tx.set(poRef,savedPo);else tx.create(poRef,savedPo);
@@ -223,7 +226,7 @@ async function commitV2FormalPurchase(db,uid,data){
     ...(intent.document?{linkedDocuments:[...(source.linkedDocuments||[]).filter(link=>
      !(link.type==='purchaseOrder'&&link.id===intent.poNo&&link.relation==='document')),
      {type:'purchaseOrder',id:intent.poNo,relation:'document'}]}:{}),
-    workCategories:[...categories],workCategoryUpdatedAt:now,updatedAt:now
+    workCategories:[...categories],workCategoryUpdatedAt:now,...serviceIndexes.get(orderId),updatedAt:now
    });
   }
   return purchaseResult('committed',intent,supplyIds,demands.map(d=>d.data.demandId));
