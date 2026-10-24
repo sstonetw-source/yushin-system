@@ -413,11 +413,12 @@ for(const width of [1280,390])test('original service case UI '+width+'px: four k
   // Date correction still uses the same Callable and recovery checkpoint; no new writer.
   await row.locator('details.order-detail-panel > summary').click();
   const dateEdit=row.locator('input[aria-label="核銷日期"]');assert.equal(await dateEdit.isDisabled(),false);
-  billingLose=true;await dateEdit.fill('2026-10-24');
+  const correctedBillingDate=new Date(Date.parse(billed.billingDate+'T00:00:00Z')-86400000).toISOString().slice(0,10);
+  billingLose=true;await dateEdit.fill(correctedBillingDate);
   await page.waitForFunction(()=>!pendingOrderStatusKeys.size&&pendingServiceBillingIntent()?.intent.action==='CHANGE_DATE');
   assert.equal(await row.getByRole('button',{name:'已核銷',exact:true}).isDisabled(),false);
   const dateFirst=billingCalls.at(-1);assert.equal(dateFirst.expectedIsBilled,true);
-  assert.equal((await db.doc('orders/'+orderId).get()).data().billingDate,'2026-10-24');
+  assert.equal((await db.doc('orders/'+orderId).get()).data().billingDate,correctedBillingDate);
   const beforeReloadCalls=billingCalls.length;
   await siteOpen(page,'sales');await siteNav(page,'orders');assert.equal(billingCalls.length,beforeReloadCalls);
   // The original billing button confirms the pending date, never changes its intent.
@@ -426,7 +427,7 @@ for(const width of [1280,390])test('original service case UI '+width+'px: four k
   assert.deepEqual(billingCalls.at(-1),dateFirst);
   const dateOrder=(await db.doc('orders/'+orderId).get()).data();
   assert.equal(dateOrder.fieldEditHistory.length,1);assert.equal(dateOrder.statusHistory.length,1);
-  assert.equal(dateOrder.billingDate,'2026-10-24');assert.equal(dateOrder.isBilled,true);
+  assert.equal(dateOrder.billingDate,correctedBillingDate);assert.equal(dateOrder.isBilled,true);
   assert.deepEqual(dateOrder.workCategories,['complete']);
   // A new click after confirmation is a distinct undo, with no inventory effect.
   await row.getByRole('button',{name:'已核銷',exact:true}).click();
