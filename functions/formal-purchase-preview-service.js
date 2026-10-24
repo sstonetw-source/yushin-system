@@ -74,7 +74,11 @@ async function validateV2FormalPurchaseTx(tx,db,uid,intent,{allowExistingPo=fals
   const shortage=stockNumber(row.shortageQty??0,'缺貨');
   const received=stockNumber(row.receivedQty??0,'已收貨');
   const ordered=stockNumber(row.supplyOrderedQty??0,'已採購');
-  if(orderQty===0||reserved>orderQty||shortage>orderQty||ordered<received)
+  // In a warehouse order, reserved stock and uncovered shortage are parts
+  // of the same outstanding requirement. Reject an overbooked source before
+  // committing supplier obligations; do not trust a matching demand snapshot.
+  if(orderQty===0||reserved>orderQty||shortage>orderQty||ordered<received
+    ||(!directShip&&reserved+shortage>orderQty))
    reject('failed-precondition','來源品項數量不一致');
   const masterId=identifier(row.productId,'來源產品',1500);
   const warehouseId=directShip?'':identifier(row.warehouseId||source.warehouseId,'來源倉庫',200);
