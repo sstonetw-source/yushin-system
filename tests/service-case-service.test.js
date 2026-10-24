@@ -59,6 +59,46 @@ const now=i=>new Date(Date.UTC(2026,9,22,9,i)).toISOString();
 const intent=(type,i=0,extra={},caseId='case1')=>({orderId:'O',itemId:'I',caseId,serviceQty:1,
   event:{id:'op'+i,type,occurredAt:now(i),...extra}});
 const commit=(f,data)=>commitServiceCaseEvent(f.db,'U',data);
+test('two Bio-Plex sales complete and replay without linking or consuming independently purchased reagents',async()=>{
+  const f=fixture({role:'engineer',retry:true});
+  f.docs.set('orders/O2',structuredClone(f.docs.get('orders/O')));
+  const physical=[
+    ['inventory/REAGENT',{onHand:1,reserved:0,incoming:0}],
+    ['warehouseStocks/W__REAGENT',{warehouseId:'W',productKey:'REAGENT',onHand:1,reserved:0}],
+    ['inventoryLots/KIT',{productKey:'REAGENT',remainingQty:1}],
+    ['purchaseOrders/PO',{status:'received',items:[{productKey:'REAGENT',qty:1}]}],
+    ['inventoryMovements/RECEIPT',{productKey:'REAGENT',qty:1,type:'RECEIPT'}]
+  ];
+  for(const [path,data] of physical)f.docs.set(path,structuredClone(data));
+  const unchanged=structuredClone([...f.docs].filter(([path])=>! /^(users|orders|serviceCases)\//.test(path)));
+  for(const orderId of ['O','O2']){
+    const send=async data=>commit(f,{...data,orderId});
+    f.docs.set('users/U',{role:'sales',active:true});
+    await send(intent('SAMPLE_RECEIVED'));
+    f.docs.set('users/U',{role:'engineer',active:true});
+    await send(intent('EXPERIMENT_COMPLETED',1));
+    const report=intent('REPORT_SENT',2,{reportRef:'report/'+orderId});
+    assert.equal((await send(report)).completed,true);
+    assert.equal((await send(report)).completed,true);
+  }
+  assert.deepEqual([...f.docs].filter(([path])=>! /^(users|orders|serviceCases)\//.test(path)),unchanged);
+  assert.deepEqual(f.orderWrites.filter(path=>!path.startsWith('orders/')),[]);
+});
+test('repair completion requires work evidence only and leaves independently purchased parts untouched',async()=>{
+  const f=fixture({role:'engineer',kind:'ONSITE_REPAIR'});
+  const physical=[
+    ['inventory/PART',{onHand:3,reserved:1}],
+    ['inventoryLots/PART-LOT',{productKey:'PART',remainingQty:3}],
+    ['purchaseOrders/PART-PO',{status:'received',items:[{productKey:'PART',qty:3}]}]
+  ];
+  for(const [path,data] of physical)f.docs.set(path,structuredClone(data));
+  const unchanged=structuredClone([...f.docs].filter(([path])=>! /^(users|orders|serviceCases)\//.test(path)));
+  const done=intent('REPAIR_COMPLETED',0,{workSummary:'完成維修與功能確認'});
+  assert.equal((await commit(f,done)).completed,true);
+  assert.equal((await commit(f,done)).completed,true);
+  assert.deepEqual([...f.docs].filter(([path])=>! /^(users|orders|serviceCases)\//.test(path)),unchanged);
+  assert.deepEqual(f.orderWrites.filter(path=>!path.startsWith('orders/')),[]);
+});
 test('sales can log customer Bio-Plex sample custody but not fake experiment or report',async()=>{
   const f=fixture();
   const sent=await commit(f,intent('SAMPLE_RECEIVED'));
