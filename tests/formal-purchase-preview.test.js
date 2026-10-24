@@ -91,6 +91,19 @@ test('server PO admission refuses stale source, bad warehouses, replaced demand 
  await assert.rejects(previewV2FormalPurchase(db,'buyer',input),{code:'already-exists'});
  assert.equal(writes(),0);
 });
+test('warehouse purchase refuses overbooked reserved and shortage quantities before any write',async()=>{
+ for(const reservedQty of [6,12]){
+  const x=writeFixture();
+  const item=x.records.get('orders/ORDER-1').items[0];
+  item.reservedQty=reservedQty; // shortage stays 7 of 12: reserved + shortage exceeds order qty.
+  const before=structuredClone([...x.records]);
+  await assert.rejects(previewV2FormalPurchase(x.db,'buyer',x.input),{code:'failed-precondition'});
+  await assert.rejects(commitV2FormalPurchase(x.db,'buyer',x.data),{code:'failed-precondition'});
+  assert.equal(x.history.length,0);
+  assert.deepEqual([...x.records],before);
+ }
+});
+
 test('strict PO request allows only a bounded four-field identity',()=>{
  const input={poNo:'PO-1',orderId:'O-1',itemId:'S',qty:4};
  assert.deepEqual(strictRequest(input),input);
@@ -202,6 +215,21 @@ function addPurchaseSource(x,orderId,itemId,{productId='P',warehouseId='W',short
  return {orderId,itemId,qty:shortageQty,unitCost:10.25};
 }
 function mergedIntent(x,items){return {poNo:x.data.poNo,poDate:x.data.poDate,supplier:x.data.supplier,items};}
+
+test('one-line formal purchase from a six-item source order preserves untouched siblings',async()=>{
+ const x=writeFixture();
+ for(let index=0;index<5;index++)addPurchaseSource(x,'ORDER-1','OTHER-'+index);
+ const source=x.records.get('orders/ORDER-1');
+ assert.equal(source.items.length,6);
+ const before=structuredClone(source.items.slice(1));
+ const result=await commitV2FormalPurchase(x.db,'buyer',x.data);
+ assert.equal(result.status,'committed');
+ assert.equal(x.records.get('orders/ORDER-1').items.length,6);
+ assert.deepEqual(x.records.get('orders/ORDER-1').items.slice(1),before);
+ assert.deepEqual(x.records.get('orders/ORDER-1').items.map(item=>item.supplyOrderedQty),[4,0,0,0,0,0]);
+ assert.equal(x.history.filter(row=>row.path==='orders/ORDER-1').length,1);
+ assert.equal((await commitV2FormalPurchase(x.db,'buyer',x.data)).status,'already-applied');
+});
 
 test('five-line server PO merges same-order updates and crossed orders without overwriting siblings',async()=>{
  const x=writeFixture();
