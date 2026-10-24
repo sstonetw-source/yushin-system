@@ -203,6 +203,21 @@ function addPurchaseSource(x,orderId,itemId,{productId='P',warehouseId='W',short
 }
 function mergedIntent(x,items){return {poNo:x.data.poNo,poDate:x.data.poDate,supplier:x.data.supplier,items};}
 
+test('one-line formal purchase from a six-item source order preserves untouched siblings',async()=>{
+ const x=writeFixture();
+ for(let index=0;index<5;index++)addPurchaseSource(x,'ORDER-1','OTHER-'+index);
+ const source=x.records.get('orders/ORDER-1');
+ assert.equal(source.items.length,6);
+ const before=structuredClone(source.items.slice(1));
+ const result=await commitV2FormalPurchase(x.db,'buyer',x.data);
+ assert.equal(result.status,'committed');
+ assert.equal(x.records.get('orders/ORDER-1').items.length,6);
+ assert.deepEqual(x.records.get('orders/ORDER-1').items.slice(1),before);
+ assert.deepEqual(x.records.get('orders/ORDER-1').items.map(item=>item.supplyOrderedQty),[4,0,0,0,0,0]);
+ assert.equal(x.history.filter(row=>row.path==='orders/ORDER-1').length,1);
+ assert.equal((await commitV2FormalPurchase(x.db,'buyer',x.data)).status,'already-applied');
+});
+
 test('five-line server PO merges same-order updates and crossed orders without overwriting siblings',async()=>{
  const x=writeFixture();
  const items=[{orderId:x.data.orderId,itemId:x.data.itemId,qty:4,unitCost:19.99},
