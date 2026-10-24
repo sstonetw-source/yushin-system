@@ -123,7 +123,7 @@ test('cancelled direct shipment redirect enforces active physical warehouse in U
  assert.match(action,/await commitCancelledPurchaseKeepStock\(/);
  assert.match(service,/if\(redirect\)await assertActiveReturnWarehouse\(tx,warehouseId\)/);
  const rules=fs.readFileSync('firestore.rules','utf8');
- const rulesStart=rules.indexOf('function supplierCancellationResolution()');
+ const rulesStart=rules.indexOf('function supplierCancellationResolution(userRole)');
  const rulesEnd=rules.indexOf('function validReturnPendingFlag(',rulesStart);
  assert.ok(rulesStart>=0&&rulesEnd>rulesStart);
  assert.match(rules.slice(rulesStart,rulesEnd),/validActiveReturnWarehouse\(after\.warehouseId\)/);
