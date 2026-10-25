@@ -75,6 +75,33 @@ test('quick purchase backend commits one atomic supplier demand, order and incom
  await assert.rejects(commitV2QuickPurchase(x.db,'buyer',{...x.data,qty:3}),{code:'already-exists'});
  assert.equal(x.history.length,count);
 });
+test('quick purchase replay fails closed when source or incoming evidence is missing or altered',async()=>{
+ const mutations=[
+  x=>{x.records.get('orders/ORDER-1').items[0].orderEvents=[];},
+  x=>{x.records.get('purchaseOperations/quick-'+x.data.operationId).movementId='wrong';},
+  x=>{x.records.delete('inventoryMovements/quick-'+x.data.operationId);},
+  x=>{x.records.get('inventoryMovements/quick-'+x.data.operationId).qty=3;},
+  x=>{x.records.get('inventoryMovements/quick-'+x.data.operationId).sourceId='wrong';},
+  x=>{x.records.get('inventoryMovements/quick-'+x.data.operationId).warehouseId='wrong';},
+  x=>{x.records.get('inventoryMovements/quick-'+x.data.operationId).actorUid='wrong';}
+ ];
+ for(const mutate of mutations){
+  const x=fixture();
+  await commitV2QuickPurchase(x.db,'buyer',x.data);
+  const writes=x.history.length;
+  mutate(x);
+  await assert.rejects(commitV2QuickPurchase(x.db,'buyer',x.data),{code:'failed-precondition'});
+  assert.equal(x.history.length,writes,'failed replay must not write a second ledger');
+ }
+ const direct=fixture({directShip:true});
+ await commitV2QuickPurchase(direct.db,'buyer',direct.data);
+ const count=direct.history.length;
+ assert.equal((await commitV2QuickPurchase(direct.db,'buyer',direct.data)).status,'already-applied');
+ assert.equal(direct.history.length,count);
+ direct.records.get('orders/ORDER-1').items[0].orderEvents=[];
+ await assert.rejects(commitV2QuickPurchase(direct.db,'buyer',direct.data),{code:'failed-precondition'});
+ assert.equal(direct.history.length,count);
+});
 test('quick purchase backend enforces role, demand, supplier and stock integrity without partial writes',async()=>{
  for(const who of ['seller','off','unknown']){
   const x=fixture();await assert.rejects(commitV2QuickPurchase(x.db,who,x.data),{code:'permission-denied'});
