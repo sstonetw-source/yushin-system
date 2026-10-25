@@ -2003,7 +2003,7 @@ service cloud.firestore {
       allow get: if operationalOrOwnedReader(resource == null ? null : resource.data);
       allow list: if operationalOrOwnedReader(resource.data);
       allow create: if canCreateCommercialDoc()
-        && request.resource.data.get('items', []).size() <= 10
+        && request.resource.data.get('items', []).size() <= 15
         && validOrderTransactionType(request.resource.data)
         && validClientBillingCreate(request.resource.data)
         && validNewOrderSourceSync(id)

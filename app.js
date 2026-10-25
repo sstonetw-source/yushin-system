@@ -231,7 +231,7 @@ const BUSINESS_STATUS = Object.freeze({
     CANCELLED: 'cancelled',
     VOIDED: 'voided'
 });
-const MAX_ORDER_ITEMS = 10;
+const MAX_ORDER_ITEMS = 15;
 function assertOrderItemCount(items) {
     if (items.length > MAX_ORDER_ITEMS) throw new Error(`每張訂單最多 ${MAX_ORDER_ITEMS} 個品項；請分成多張訂單後再儲存，避免後續採購／倉庫作業無法處理。`);
 }
@@ -3143,7 +3143,7 @@ async function commitOrderCreation(orderId,data,{actorUid=currentUser?.uid,actor
             // facts, not a modified/stale form, and never overwrite fulfillment progress.
             savedData=live;return;
         }
-        if((snapshot.items || []).length>10)throw new Error('每張訂單最多 10 個品項；請分成多張訂單後再儲存。');
+        if((snapshot.items || []).length>15)throw new Error('每張訂單最多 15 個品項；請分成多張訂單後再儲存。');
         const tradeValidation=globalThis.YushinOrderEntry.validateTrade(snapshot,{requireInvoiceTitle:false});
         if(!tradeValidation.valid)throw new Error(tradeValidation.message);
         let forecastRef=null;
@@ -22206,7 +22206,7 @@ window.addCurrentOrderItemToDraft=function(){
     if(item.productMasterMatched!==true||!item.productId||orderItemProductStatus(item)!=='matched'){alert('正式訂單品項必須先對應產品主檔。請輸入既有貨號，或使用「快速新增產品」完成基本產品資料。');return;}
     const duplicateIndex=newOrderDraftItems.findIndex(existing=>globalThis.YushinOrderEntry.sameDraftItem(existing,item));
     if(duplicateIndex>=0){newOrderDraftItems[duplicateIndex]={...newOrderDraftItems[duplicateIndex],qty:Number(newOrderDraftItems[duplicateIndex].qty||0)+Number(item.qty||0)};newOrderDraftItems[duplicateIndex].totalPrice=Number(newOrderDraftItems[duplicateIndex].qty||0)*Number(newOrderDraftItems[duplicateIndex].unitPrice||0);}
-    else {if(newOrderDraftItems.length>=MAX_ORDER_ITEMS){alert('每張訂單最多 10 個品項，請另建訂單。');return;}newOrderDraftItems.push(item);}renderNewOrderDraftItems();
+    else {if(newOrderDraftItems.length>=MAX_ORDER_ITEMS){alert('每張訂單最多 15 個品項，請另建訂單。');return;}newOrderDraftItems.push(item);}renderNewOrderDraftItems();
     ['orderItemCode','orderItemName','orderItemNameEn','orderProductLine','orderSpec'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
     const nextCodeInput=document.getElementById('orderItemCode');
     if(nextCodeInput.dataset.autofillBrand){document.getElementById('orderBrand').value='';onOrderBrandSelectChange();}

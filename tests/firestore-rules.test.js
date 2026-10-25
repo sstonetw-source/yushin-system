@@ -3287,11 +3287,11 @@ test('business delivery plan requires first receipt boundary while warehouse sco
  await assertSucceeds(updateDoc(doc(db('buyer1'),'orders/timing-plan'),change('buyer1',arrived)));
 });
 
-test('new orders cap line items at ten without blocking legacy metadata updates',async()=>{
+test('new orders cap line items at fifteen without blocking legacy metadata updates',async()=>{
  const base={...validOrderProduct,ownerUid:'sales1',salesCode:'S01'};
- const items=Array.from({length:10},()=>({productId:base.productId,qty:1}));
- await assertSucceeds(setDoc(doc(db('sales1'),'orders/ten-lines'),{...base,items}));
- await assertFails(setDoc(doc(db('sales1'),'orders/eleven-lines'),{...base,items:[...items,{...items[0]}]}));
- await seed('orders/legacy-eleven',{...base,items:[...items,{...items[0]}]});
- await assertSucceeds(updateDoc(doc(db('sales1'),'orders/legacy-eleven'),{remarks:'保留舊訂單'}));
+ const items=Array.from({length:15},()=>({productId:base.productId,qty:1}));
+ await assertSucceeds(setDoc(doc(db('sales1'),'orders/fifteen-lines'),{...base,items}));
+ await assertFails(setDoc(doc(db('sales1'),'orders/sixteen-lines'),{...base,items:[...items,{...items[0]}]}));
+ await seed('orders/legacy-sixteen',{...base,items:[...items,{...items[0]}]});
+ await assertSucceeds(updateDoc(doc(db('sales1'),'orders/legacy-sixteen'),{remarks:'保留舊訂單'}));
 });
