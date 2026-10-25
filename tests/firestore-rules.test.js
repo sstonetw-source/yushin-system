@@ -3113,7 +3113,8 @@ test('purchaser Quick Purchase needs same-commit supply, demand, stock and movem
     warehouseStockId:'W1__p-order',movementId:'quick-M'}};
  const movement={type:'purchase_incoming',sourceType:'SUPPLY_ORDER',sourceId:id,
   productKey:'p-order',warehouseId:'W1',qty:2,actorUid:'buyer1'};
- const put=({uid='buyer1',complete=true,wrongQty=false,forgedDemand=false,forgedSupply=false,forgedStock=false}={})=>{
+ const put=({uid='buyer1',complete=true,wrongQty=false,forgedDemand=false,forgedSupply=false,forgedStock=false,
+  wrongMovementActor=false,wrongMovementSource=false,omitMovement=false}={})=>{
   const client=db(uid),batch=writeBatch(client);
   const supplyWitness=forgedSupply?'forged-supply':id;
   const demandWitness=forgedDemand?'forged-demand':demandDocId;
@@ -3127,7 +3128,9 @@ test('purchaser Quick Purchase needs same-commit supply, demand, stock and movem
   batch.set(doc(client,'procurementDemands/'+demandWitness),demand);
   if(complete){batch.update(doc(client,'inventory/'+inventoryWitness),{incoming:2});
    batch.update(doc(client,'warehouseStocks/'+warehouseWitness),{incoming:2});
-   batch.set(doc(client,'inventoryMovements/quick-M'),{...movement,sourceId:supplyWitness});}
+   if(!omitMovement)batch.set(doc(client,'inventoryMovements/quick-M'),{...movement,
+    actorUid:wrongMovementActor?'sales1':'buyer1',
+    sourceId:wrongMovementSource?'unrelated-supply':supplyWitness});}
   batch.update(doc(client,'orders/quick'),wrongQty?{...witnessProof,
    items:[{...witnessProof.items[0],supplyOrderedQty:3}]}:witnessProof);
   return batch.commit();
@@ -3144,6 +3147,12 @@ test('purchaser Quick Purchase needs same-commit supply, demand, stock and movem
  await assertFails(put({forgedDemand:true}));
  await assertFails(put({forgedSupply:true}));
  await assertFails(put({forgedStock:true}));
+ await assertFails(put({wrongMovementActor:true}));
+ await assertFails(put({wrongMovementSource:true}));
+ await assertFails(put({omitMovement:true}));
+ // All rejected multi-document writes must be atomic, not leave partial incoming or order updates.
+ assert.equal((await getDoc(doc(db('buyer1'),'orders/quick'))).data().items[0].supplyOrderedQty,0);
+ assert.equal((await getDoc(doc(db('buyer1'),'inventory/p-order'))).data().incoming,0);
  await assertSucceeds(put());
  const docAfter=await getDoc(doc(db('buyer1'),'orders/quick'));
  assert.equal(docAfter.data().items[0].supplyOrderedQty,2);
