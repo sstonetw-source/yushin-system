@@ -19,8 +19,10 @@ test('所有複合索引都有對應的 Firestore Rules 集合',()=>{
   for(const row of index.indexes)
     assert.ok(ruleCollections.has(row.collectionGroup),'索引缺少集合規則: '+row.collectionGroup);
 });
-test('不把 app 原始碼與建置工具發布到 Hosting',()=>{
+test('網站不再配置 Firebase Hosting，保留 Firebase 後端設定',()=>{
   const firebase=JSON.parse(fs.readFileSync(path.join(root,'firebase.json'),'utf8'));
-  assert.ok(firebase.hosting.ignore.includes('src/**'));
-  assert.ok(firebase.hosting.ignore.includes('tools/**'));
+  assert.equal(Object.hasOwn(firebase,'hosting'),false);
+  assert.equal(firebase.firestore.rules,'firestore.rules');
+  assert.equal(firebase.firestore.indexes,'firestore.indexes.json');
+  assert.equal(firebase.functions.source,'functions');
 });
