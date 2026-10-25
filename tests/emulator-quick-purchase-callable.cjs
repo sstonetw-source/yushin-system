@@ -126,6 +126,30 @@ test('real concurrent identical operations do not double-book and a later distin
  assert.equal(order.items[0].orderEvents.length,2);
  assert.equal((await f.data('procurementDemands/'+encodeURIComponent(f.demandId))).orderedQty,7);
 });
+test('real concurrent distinct operations cannot overbook the same shortage',async()=>{
+ const f=await seeded('distinct-race');
+ const a=f.intent('operation-distinct-race-A',5);
+ const b=f.intent('operation-distinct-race-B',5);
+ // Two different idempotency keys must still contend on the same source and demand.
+ const results=await Promise.allSettled([f.call(a),f.call(b)]);
+ assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+ const rejected=results.find(r=>r.status==='rejected');
+ assert.equal(rejected.reason.code,'functions/failed-precondition');
+ const order=await f.data('orders/'+f.orderId);
+ const demand=await f.data('procurementDemands/'+encodeURIComponent(f.demandId));
+ assert.equal(order.items[0].supplyOrderedQty,5);
+ assert.equal(demand.orderedQty,5);
+ assert.equal(demand.remainingToOrderQty,2);
+ assert.equal((await f.data('inventory/'+f.productId)).incoming,5);
+ assert.equal((await f.data('warehouseStocks/'+f.warehouseId+'__'+f.productId)).incoming,5);
+ const supply=await f.data('supplyOrders/manual-'+encodeURIComponent(f.orderId)+'-'+encodeURIComponent(f.itemId));
+ assert.equal(supply.qty,5);
+ assert.equal(supply.orderEvents.length,1);
+ const operations=await Promise.all([a,b].map(i=>f.data('purchaseOperations/quick-'+i.operationId)));
+ const movements=await Promise.all([a,b].map(i=>f.data('inventoryMovements/quick-'+i.operationId)));
+ assert.equal(operations.filter(Boolean).length,1);
+ assert.equal(movements.filter(Boolean).length,1);
+});
 test('real direct-ship purchase creates a cost-free receiving mirror without warehouse stock',async()=>{
  const f=await seeded('direct',{directShip:true});
  const res=(await f.call(f.intent())).data;
