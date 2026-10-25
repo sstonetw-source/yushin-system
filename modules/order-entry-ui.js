@@ -45,7 +45,12 @@
         const self=$('orderProcurementType')?.value==='SALES_SELF_ORDER';
         if($('orderSelfStatusWrap'))$('orderSelfStatusWrap').hidden=!self;
         const confirmed=$('orderSelfOrderConfirmed');
-        if(confirmed){confirmed.disabled=currentUserRole==='purchaser';if(confirmed.disabled)confirmed.value='pending';}
+        if(confirmed){
+            confirmed.disabled=currentUserRole==='purchaser';
+            confirmed.value=self&&!confirmed.disabled?'confirmed':'pending';
+        }
+        const status=$('orderSelfStatusText');
+        if(status)status.textContent=currentUserRole==='purchaser'?'由負責業務確認下訂':'已向供應商下訂';
         root.YushinOrderSelfRequired?.sync();
         root.refreshOrderEntrySummary();
     };

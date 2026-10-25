@@ -553,7 +553,7 @@ function setOrderCostFieldForProduct(item) {
     const authorized = currentUserRole === 'admin' || currentUserRole === 'purchaser';
     wrap.style.display = selfOrder || authorized ? '' : 'none';
     input.readOnly = !selfOrder;
-    input.placeholder = selfOrder ? '尚未下訂可先留白，已下訂可填 0' : '選擇產品後帶入標準成本';
+    input.placeholder = selfOrder ? (currentUserRole==='purchaser'?'由負責業務確認成本':'請填寫含稅成本，可填 0') : '選擇產品後帶入標準成本';
     const label = wrap.querySelector('label');
     if (label && label.firstChild) label.firstChild.textContent = selfOrder ? '含稅單位成本 ' : '含稅標準成本（參考） ';
     if (!selfOrder) input.value = '';
