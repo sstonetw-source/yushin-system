@@ -429,7 +429,7 @@ service cloud.firestore {
         && purchaserQuickPurchaseItemProof(orderId,index,e);
     }
     function purchaserQuickPurchaseItemProof(orderId,index,e) {
-      let oldItem = resource.datrequest.resource.data.items[index];
+      let oldItem = resource.data.items[index];
       let item = request.resource.data.items[index];
       let supplyPath = /databases/$(database)/documents/supplyOrders/$(e.supplyId);
       let beforeSupply = exists(supplyPath) ? get(supplyPath).data : {};
@@ -440,7 +440,7 @@ service cloud.firestore {
       let oldNos = oldItem.get('manualOrderNos', []);
       let newNos = item.get('manualOrderNos', []);
       return oldItem.get('itemId', '') != ''
-        && request.resource.data.items.removeAll([item]) == resource.datrequest.resource.data.items.removeAll([oldItem])
+        && request.resource.data.items.removeAll([item]) == resource.data.items.removeAll([oldItem])
         && item.diff(oldItem).affectedKeys().hasOnly(['supplyOrderedQty','manualOrderNos','orderedAt','orderEvents'])
         && item.get('itemId', '') == oldItem.itemId
         && supply.get('type', '') == 'PURCHASING_MANUAL'
