@@ -85,7 +85,7 @@ async function commitV2QuickPurchase(db,uid,data){
   if(old&&(old.type!=='PURCHASING_MANUAL'||old.sourceType!=='SALES_ORDER'
     ||old.orderId!==intent.orderId||old.itemId!==intent.itemId
     ||old.sourceId!==intent.orderId||old.sourceItemId!==intent.itemId
-    ||old.demandId!==demandId||old.productKey!==productKey
+    ||old.demandId!==demandId||old.orderItemIndex!==sourceItemIndex||old.productKey!==productKey
     ||old.productId!==sourceItem.productId||old.ownerUid!==source.ownerUid
     ||old.salesCode!==source.salesCode||old.fulfillmentType!==fulfillmentType
     ||old.warehouseId!==warehouseId||old.supplier!==intent.supplier
@@ -112,6 +112,8 @@ async function commitV2QuickPurchase(db,uid,data){
    // acceptance case; do not manufacture a second stock identity here.
    if(!inventory.exists||!warehouse.exists
      ||inventory.data().productId!==sourceItem.productId
+     ||inventory.data().productKey!==productKey
+     ||warehouse.data().productId!==sourceItem.productId
      ||warehouse.data().productKey!==productKey
      ||warehouse.data().warehouseId!==warehouseId)
     fail('failed-precondition','入庫倉庫或產品庫存尚未完成初始化');
@@ -155,7 +157,8 @@ async function commitV2QuickPurchase(db,uid,data){
    orderEvents:[...(item.orderEvents||[]),sourceEvent]};
   const categories=new Set(source.workCategories||[]);
   categories.add('arrival');
-  if(items.some(row=>demandCore.fromSalesOrder(row).remainingToOrderQty>0))
+  if(items.some(row=>demandCore.fromSalesOrder({...row,
+    requiredSupplyQty:row.fulfillmentType==='DIRECT_SHIP'?row.qty:undefined}).remainingToOrderQty>0))
    categories.add('ordering');
   else categories.delete('ordering');
   const demandDoc=demandCore.demandDocument({...demandBefore,...demandAfter},{updatedAt:now});

@@ -82,6 +82,8 @@ test('quick purchase backend enforces role, demand, supplier and stock integrity
  }
  for(const change of [x=>{x.data.qty=8;},x=>{x.records.delete('warehouseStocks/W__P');},
   x=>{x.records.get('inventory/P').incoming=-1;},
+  x=>{x.records.get('inventory/P').productKey='wrong-product';},
+  x=>{x.records.get('warehouseStocks/W__P').productId='wrong-product';},
   x=>{x.records.get('orders/ORDER-1').orderStatus='cancelled';},
   x=>{x.records.get('procurementDemands/'+encodeURIComponent(x.demandId)).orderedQty=2;}]){
   const x=fixture();change(x);
@@ -95,6 +97,7 @@ test('quick purchase backend direct-ship updates only cost-free mirror and never
  assert.equal(x.records.get('supplyOrders/'+result.supplyId).incomingRegisteredQty,0);
  const view=x.records.get('receivingSupplyOrders/'+result.supplyId);
  assert.equal(view.qty,4);assert.equal(Object.hasOwn(view,'unitCost'),false);
+ assert.equal(x.records.get('orders/ORDER-1').workCategories.includes('ordering'),true);
  assert.equal(x.history.some(path=>path.startsWith('inventory/')),false);
  assert.equal(x.history.some(path=>path.startsWith('inventoryMovements/')),false);
 });
