@@ -1517,9 +1517,14 @@ test('real Auth post-fulfillment receipt rejects corrupted evidence and current-
 
  const returnQuery=await db.collection('inventoryMovements').where('sourceId','==',x.orderId).where('action','==','location_customer_return').get();
  assert.equal(returnQuery.size,1);const returnDoc=returnQuery.docs[0],returnProof=returnDoc.data();
- for(const damage of ['ship-proof','ship-debit-mismatch','return-proof','return-cache','projection']){
+ // Equal total debit is insufficient: its warehouse and exact lot allocations
+ // must still match the immutable source shipment before any receipt writes.
+ for(const damage of ['ship-proof','ship-debit-mismatch','ship-warehouse-mismatch','ship-lot-mismatch','return-proof','return-cache','projection']){
   if(damage==='ship-proof')await shipRef.delete();
   if(damage==='ship-debit-mismatch')await shipRef.update({qty:shipProof.qty+1});
+  if(damage==='ship-warehouse-mismatch')await shipRef.update({warehouseId:shipProof.warehouseId+'-mismatch'});
+  if(damage==='ship-lot-mismatch')await shipRef.update({lotAllocations:shipProof.lotAllocations.map((lot,index)=>
+   index===0?{...lot,lotId:lot.lotId+'-mismatch'}:lot)});
   if(damage==='return-proof')await returnDoc.ref.delete();
   if(damage==='return-cache')await sourceRef.update({returnRecords:[]});
   if(damage==='projection')await sourceRef.update({items:original.items.map(item=>({...item,warehouseShippedQty:3}))});
