@@ -626,8 +626,8 @@ async function multiReceiptSiteFixture(width,prefix='multi-receipt'){
  for(const warehouseId of warehouses)put('warehouses',warehouseId,{active:true,warehouseName:warehouseId});
  for(const key of keys){
   put('products',key,{productType:'Goods',active:true,productId:key,itemCode:key,model:key,brand:'Roche',nameCn:key});
-  put('inventory',key,{productKey:key,onHand:0,reserved:0,incoming:0,transferFreeInTransit:0});
-  for(const warehouseId of warehouses)put('warehouseStocks',warehouseId+'__'+key,{warehouseId,productKey:key,onHand:0,reserved:0,incoming:0,transferFreeInTransit:0});
+  put('inventory',key,{productId:key,productKey:key,onHand:0,reserved:0,incoming:0,transferFreeInTransit:0});
+  for(const warehouseId of warehouses)put('warehouseStocks',warehouseId+'__'+key,{warehouseId,productId:key,productKey:key,onHand:0,reserved:0,incoming:0,transferFreeInTransit:0});
  }
  const items=[{itemId:'I1',productId:keys[0],qty:3,warehouseId:warehouses[0]},
   {itemId:'I2',productId:keys[0],qty:2,warehouseId:warehouses[1]},
