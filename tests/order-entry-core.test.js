@@ -25,7 +25,7 @@ test('copying an order retains customer-facing product settings but creates a ne
 });
 const source=fs.readFileSync('app.js','utf8');
 function validationFixture(current=item,drafts=[]) {
- const nodes={orderOwnerUid:{value:'sales'},orderCustomer:{value:'台大',focus(){}},orderItemCode:{focus(){},scrollIntoView(){}},orderRecipientDetails:{open:false}};
+ const nodes={orderOwnerUid:{value:'sales'},orderCustomer:{value:'台大',focus(){}},orderItemCode:{focus(){},scrollIntoView(){}},orderRecipientDetails:{open:false},orderTradeDetails:{open:false},orderTransactionType:{value:'借',focus(){}}};
  const alerts=[];
  const c=vm.createContext({window:{orderShippingInstructions:()=>({mode:'PICKUP'})},document:{getElementById:id=>nodes[id]},newOrderSaveInProgress:false,
   currentOrderModalItem:()=>({...current}),newOrderDraftItems:drafts,YushinOrderEntry:core,YushinWarehouseLogistics:logistics,
@@ -110,13 +110,25 @@ test('purchaser can assist with pending entry but cannot confirm a salesperson s
  f.c.currentUserRole='purchaser';assert.equal(f.c.window.saveNewOrder(),undefined);assert.match(f.alerts[0],/負責業務確認/);
 });
 
-test('trade information may be empty at creation but printing requires type and invoice title when applicable',()=>{
+test('trade type is required at creation while invoice title remains required before printing',()=>{
  assert.equal(core.validateTrade({}).valid,false);
  assert.equal(core.validateTrade({transactionType:'直'}).valid,false);
  assert.equal(core.validateTrade({transactionType:'直',invoiceTitle:'台大'}).valid,true);
  for(const transactionType of ['借','扣'])assert.equal(core.validateTrade({transactionType}).valid,true);
 });
 
+test('new order form refuses missing or invalid transaction type and opens the required section',()=>{
+ for(const type of ['', '之後確認', '其他']){
+  const f=validationFixture();f.nodes.orderTransactionType.value=type;
+  assert.equal(f.c.window.saveNewOrder(),undefined);assert.equal(f.nodes.orderTradeDetails.open,true);
+  assert.match(f.alerts[0],/交易方式/);
+ }
+ for(const transactionType of ['直','借','扣']){
+  const f=validationFixture();f.nodes.orderTransactionType.value=transactionType;
+  assert.ok(f.c.window.saveNewOrder());
+  assert.equal(core.validateTrade({transactionType},{requireInvoiceTitle:false}).valid,true);
+ }
+});
 test('printing validates current transaction information before writing a dispatch record',async()=>{
  for(const trade of [{},{transactionType:'直'},{transactionType:'直',invoiceTitle:'台大'},{transactionType:'借'}]){
   const order={id:'O',...trade,items:[{itemId:'I',qty:1}]};const writes=[],alerts=[];const storage=new Map();

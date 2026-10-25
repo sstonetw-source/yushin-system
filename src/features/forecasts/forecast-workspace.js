@@ -1111,7 +1111,7 @@ function forecastItemToOrderSource(forecast, item) {
     };
 }
 
-async function createForecastOrdersDirectly(forecast, items) {
+async function createForecastOrdersDirectly(forecast, items, trade={}) {
     const synchronizationUid=currentUser?.uid;
     const synchronizationRole=currentUserRole;
     const assertCreationActor=()=>{if(!synchronizationUid||currentUser?.uid!==synchronizationUid||currentUserRole!==synchronizationRole)throw new Error('登入帳號或角色已變更，請以原身分確認 Forecast 轉單結果。');};
@@ -1170,8 +1170,8 @@ async function createForecastOrdersDirectly(forecast, items) {
         spec:firstItem.spec||'',
         status:BUSINESS_STATUS.ACTIVE,
         ...grossAmountMetadata(totalPrice),
-        transactionType:'',
-        invoiceTitle:'',
+        transactionType:trade.transactionType||'',
+        invoiceTitle:trade.invoiceTitle||'',
         quoteNo:'',
         ...linkedDocumentFields(
             DOCUMENT_TYPES.FORECAST,
@@ -1234,26 +1234,13 @@ window.createOrderFromForecast = async function(id) {
             return;
         }
 
-        if (items.length === 1) {
-            // 單品項仍開啟新增訂單視窗，讓使用者最後確認／補資料再儲存。
-            openOrderModal(forecastItemToOrderSource(forecast, items[0]));
-            return;
-        }
-
-        if (!confirm(`此 Forecast 含 ${items.length} 個品項，將建立 1 張多品項訂單。確定繼續？`)) return;
-        const result = await createForecastOrdersDirectly(forecast, items);
-        assertConversionActor();
-        writeAppDataCache('orders', ordersCache);
-        renderOrdersList();
-        if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
-        if (result.reservationFailures.length) {
-            alert(`已建立 1 張含 ${items.length} 個品項的訂單；庫存預留未完成，訂單已標記為「庫存同步失敗」，請由管理員或採購在訂單頁重新同步，請勿重複建立訂單。`);
-        } else {
-            alert(`已將 Forecast 的 ${items.length} 個品項建立為 1 張訂單，庫存預留已同步。`);
-        }
-        if (canAccessPage('orders.po') && canCreatePurchaseOrderCapability()) {
-            loadPendingPurchaseOrders(true).catch(refreshErr => console.error('Forecast 轉訂單後採購背景刷新失敗', refreshErr));
-        }
+        // Reuse the existing order form so transaction choice is explicit for
+        // both one-line and multi-line Forecasts before any order is written.
+        openOrderModal(forecastItemToOrderSource(forecast, items[0]));
+        window._orderModalForecastContext={id:forecast.id,updatedAt:forecast.updatedAt||'',
+            ownerUid:forecast.ownerUid||currentUser?.uid||'',salesName:forecast.salesName||currentUserName||'',salesCode:forecast.salesCode||currentUserCode||''};
+        newOrderDraftItems=items.slice(1).map(item=>normalizeNewOrderItem(forecastItemToOrderSource(forecast,item)));
+        renderNewOrderDraftItems();
     } catch (err) {
         console.error('Forecast 轉訂單失敗', err);
         alert('Forecast 轉訂單失敗：' + err.message + '\n請確認目前這筆資料及連線／權限，重試前先查詢作業結果；若持續失敗，請聯絡管理員。');

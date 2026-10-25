@@ -16,7 +16,9 @@ const service=require(path.join(root,'functions/index'));
 // Preview, instead of silently testing the older Emulator-only PO wrapper.
 const previewPurchase=require(path.join(root,'functions/formal-purchase-preview-callable'))
  .createPreviewFormalPurchaseCallable({onCall,HttpsError,getDatabase:getFirestore});
-module.exports={...standard,commitV2FormalPurchase:previewPurchase,
+const quickPurchase=require(path.join(root,'functions/quick-purchase-callable'))
+ .createQuickPurchaseCallable({onCall,HttpsError,getDatabase:getFirestore});
+module.exports={...standard,commitV2FormalPurchase:previewPurchase,commitV2QuickPurchase:quickPurchase,
  commitServiceCaseEvent:service.commitServiceCaseEvent,
  getServiceCaseStatus:service.getServiceCaseStatus,
  getServiceOrderProgress:service.getServiceOrderProgress,

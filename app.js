@@ -1067,7 +1067,6 @@ function initializePageData(mainKey, options = {}) {
     }
     if (mainKey === 'quote') jobs.push(ensureQuoteFormInitialized());
     if (mainKey === 'products' && productManagementSourceMode === 'search') { renderProductManagementResults(); }
-    else if (mainKey === 'products' && wasLoaded && force && productBrandBrowseCurrent) { reloadCurrentProductBrand(); return; }
     else if (mainKey === 'products') {
         clearProductManagementSearch({ preserveInput: true });
         updatePendingProductMasterButton();
@@ -1523,7 +1522,7 @@ function resetSessionData() {
     equipmentLoadGeneration++; equipmentSearchGeneration++;
     forecastLoadGeneration++; forecastHistorySearchGeneration++;
     quoteHistorySearchGeneration++; orderHistorySearchGeneration++; poHistorySearchGeneration++;
-    productManagementSearchGeneration++; productBrandBrowseGeneration++; businessProductSearchGeneration++;
+    productManagementSearchGeneration++; businessProductSearchGeneration++;
     orderModalOpenGeneration++; orderDraftProductCheckGeneration++;
     forecastHistorySearchResults=[]; quoteHistorySearchResults=[]; orderHistorySearchResults=[];
     salesList=[]; salesListLoadPromise=null; allUsersCache=[]; salesCodeMasterCache=[];
@@ -1627,10 +1626,6 @@ let pendingProductMasterRows = [];
 let pendingProductMasterIgnoredItems = [];
 let productBatchMaintenanceInProgress = false;
 let productManagementSourceMode = 'none';
-let productBrandBrowseCurrent = '';
-let productBrandBrowseCursor = null;
-let productBrandBrowseHasMore = false;
-const PRODUCT_BRAND_BROWSE_PAGE_SIZE = 50;
 
 function setProductBatchMaintenanceBusy(busy) {
     productBatchMaintenanceInProgress = !!busy;
@@ -1676,20 +1671,21 @@ function updateProductSearchControls() {
     const button = document.getElementById('productManagementSearchBtn');
     // Exact product-code lookup works without a brand; selecting one narrows the result.
     if (input) input.disabled = false;
-    const browseButton = document.getElementById('productManagementBrowseBtn');
-    if (browseButton) browseButton.disabled = !selected || productManagementSearchInProgress;
+    const frequentButton = document.getElementById('productManagementFrequentBtn');
+    if (frequentButton) frequentButton.disabled = !selected || productManagementSearchInProgress;
     if (button) button.disabled = productManagementSearchInProgress || !String(input?.value || '').trim();
 }
 
 window.onProductSearchBrandChange = function() {
     clearProductManagementSearch();
     updateProductSearchControls();
+    return loadFrequentProducts(document.getElementById('productManagementSearchBrand')?.value);
 };
 
 let productSearchOtherBrandsExpanded = false;
 window.selectProductSearchBrand = function(brand) {
     const field = document.getElementById('productManagementSearchBrand');
-    if (!field || field.value === brand) return;
+    if (!field) return;
     field.value = brand;
     onProductSearchBrandChange();
 };
@@ -1728,93 +1724,6 @@ async function ensureProductBrandBrowserLoaded() {
         if (container) container.innerHTML = '<span class="product-brand-browser-empty">廠牌載入失敗，請稍後再試。</span>';
     }
 }
-
-let productBrandBrowseGeneration = 0;
-async function fetchProductBrandBrowsePage(reset = false) {
-    const generation = reset ? ++productBrandBrowseGeneration : productBrandBrowseGeneration;
-    const role = currentUserRole, uid=currentUser?.uid;
-    const brand = productBrandBrowseCurrent;
-    if (!brand) return;
-    const status = document.getElementById('productManagementSearchStatus');
-    if (reset) {
-        productBrandBrowseCursor = null;
-        productBrandBrowseHasMore = false;
-        productManagementResults = [];
-        productManagementVisibleLimit = PRODUCT_MANAGEMENT_RENDER_STEP;
-    }
-
-    const brandEntry = brandMasterEntryForName(brand);
-    const storedBrandNames = dedupeBrandsCaseInsensitive([
-        brand,
-        ...(brandEntry?.aliases || [])
-    ]).slice(0, 10);
-    let query = db.collection('products')
-        .where('brandName', storedBrandNames.length > 1 ? 'in' : '==', storedBrandNames.length > 1 ? storedBrandNames : brand)
-        .orderBy(firebase.firestore.FieldPath.documentId())
-        .limit(PRODUCT_BRAND_BROWSE_PAGE_SIZE);
-    if (productBrandBrowseCursor) query = query.startAfter(productBrandBrowseCursor);
-    if (status) status.textContent = `正在讀取 ${brand} 產品主檔…`;
-
-    const snapshot = await firestoreReadWithTimeout(query.get(), `產品主檔－${brand}`);
-    if (generation !== productBrandBrowseGeneration || brand !== productBrandBrowseCurrent || role !== currentUserRole || uid !== currentUser?.uid) return;
-    const showInactive = canManagePendingProductMaster()
-        && document.getElementById('productManagementShowInactive')?.checked === true;
-    const nextRows = snapshot.docs.map(doc => ({ id:doc.id, ...doc.data() }))
-        .filter(row => showInactive || (row.status !== 'INACTIVE' && row.active !== false));
-    const existing = new Map(productManagementResults.map(row => [row.id || row.productId, row]));
-    nextRows.forEach(row => existing.set(row.id || row.productId, row));
-    productManagementResults = [...existing.values()]
-        .sort((a,b) => String(a.manufacturerPartNo || '').localeCompare(String(b.manufacturerPartNo || ''), 'zh-Hant'));
-
-    productBrandBrowseCursor = snapshot.docs[snapshot.docs.length - 1] || productBrandBrowseCursor;
-    productBrandBrowseHasMore = snapshot.size === PRODUCT_BRAND_BROWSE_PAGE_SIZE;
-    productManagementSourceMode = 'brand';
-    productManagementVisibleLimit = Math.max(PRODUCT_MANAGEMENT_RENDER_STEP, productManagementResults.length);
-    renderProductManagementResults();
-    if (status) status.textContent = productBrandBrowseHasMore
-        ? `${brand}：目前已載入 ${productManagementResults.length} 筆，可再載入更多。`
-        : `${brand}：共載入 ${productManagementResults.length} 筆啟用產品。`;
-}
-
-window.browseProductMasterBrand = async function(brand) {
-    if (!canAccessPage('products') || productManagementSearchInProgress || !brand) return;
-    productManagementSearchGeneration++;
-    productManagementSearchInProgress = true;
-    productManagementActiveSearch = null;
-    productBrandBrowseCurrent = resolveBrandName(brand);
-    const searchBrand = document.getElementById('productManagementSearchBrand');if (searchBrand) searchBrand.value = productBrandBrowseCurrent;
-    productManagementSourceMode = 'brand';
-    pendingProductMasterRows = [];
-    productBrandBrowseCursor = null;
-    productBrandBrowseHasMore = false;
-    const input = document.getElementById('productManagementSearch');
-    if (input) input.value = '';
-    renderProductBrandBrowser();
-    const requestedBrand = productBrandBrowseCurrent, requestedGeneration=productBrandBrowseGeneration+1;
-    try {
-        await fetchProductBrandBrowsePage(true);
-    } catch (err) {
-        if (requestedBrand !== productBrandBrowseCurrent || requestedGeneration !== productBrandBrowseGeneration) return;
-        mainPageLoadFailed('products');
-        console.error('依廠牌讀取產品主檔失敗：', err);
-        productManagementResults = [];
-        productBrandBrowseHasMore = false;
-        renderProductManagementResults();
-        const status = document.getElementById('productManagementSearchStatus');
-        if (status) status.textContent = '廠牌產品讀取失敗，請稍後再試。';
-    } finally {
-        if (requestedBrand === productBrandBrowseCurrent && requestedGeneration === productBrandBrowseGeneration) {
-            productManagementSearchInProgress = false;
-            updateProductSearchControls();
-            updateProductManagementMoreButton();
-        }
-    }
-};
-
-window.reloadCurrentProductBrand = function() {
-    if (!productBrandBrowseCurrent) return;
-    browseProductMasterBrand(productBrandBrowseCurrent);
-};
 
 function pendingProductKey(item = {}) {
     const brand = normalizeBrandLookupKey(resolveBrandName(item.brand || ''));
@@ -2110,8 +2019,10 @@ function productManagementRow(product, duplicate = false) {
       <td data-th="類型">${escapeHtml(product.productType || product.category || '未分類')}</td>
       <td data-th="規格">${escapeHtml(product.specification || product.spec || '')}</td>
       <td data-th="建議售價">${price ? price.toLocaleString() : '－'}</td>
-      <td data-th="狀態">${inactive ? '停用' : duplicate ? '重複主檔・請核對' : escapeHtml(status === 'TEMPORARY' ? '待補主檔' : '啟用')}</td>
+      <td data-th="狀態">${product.isFrequentlySold === true ? '常賣・' : ''}${inactive ? '停用' : duplicate ? '重複主檔・請核對' : escapeHtml(status === 'TEMPORARY' ? '待補主檔' : '啟用')}</td>
       <td data-th="操作" class="no-print product-management-actions">
+        ${productId ? `<button type="button" class="btn-small btn-secondary" onclick="copyProductInformation(${inlineJsValue(productId)}, this)">複製資訊</button>` : ''}
+        ${productId && canManagePendingProductMaster() ? `<button type="button" class="btn-small btn-secondary" ${inactive && !product.isFrequentlySold ? 'disabled' : ''} onclick="setProductFrequentlySold(${inlineJsValue(productId)}, ${product.isFrequentlySold !== true}, this)">${product.isFrequentlySold === true ? '移出常賣' : '設為常賣'}</button>` : ''}
         ${productId ? `<button type="button" class="btn-small btn-secondary" onclick="openProduct360(${inlineJsValue(productId)})">庫存</button>` : ''}
         ${canManagePendingProductMaster() ? `<button type="button" class="btn-small btn-secondary" onclick="openProductMasterEditor(${inlineJsValue(productId)})">編輯</button>` : ''}
         ${canDelete ? `<button type="button" class="btn-small btn-danger" onclick="deleteProductMaster(${inlineJsValue(productId)})">刪除</button>` : ''}
@@ -2294,15 +2205,12 @@ function updateProductManagementMoreButton() {
     const button = document.getElementById('productManagementMoreBtn');
     if (!row || !button) return;
 
-    if (productManagementSourceMode === 'brand') {
-        row.style.display = productBrandBrowseHasMore ? '' : 'none';
+    if (productManagementSourceMode === 'frequent') {
+        row.style.display = productFrequentActive?.state.hasMore ? '' : 'none';
         button.disabled = productManagementSearchInProgress;
-        button.textContent = productBrandBrowseHasMore
-            ? `載入更多 ${productBrandBrowseCurrent}（目前 ${productManagementResults.length} 筆）`
-            : '載入更多結果';
+        button.textContent = '載入更多常賣品項（20 筆）';
         return;
     }
-
     if (productManagementSourceMode === 'search') {
         row.style.display = productManagementActiveSearch?.hasMore ? '' : 'none';
         button.disabled = productManagementSearchInProgress;
@@ -2319,6 +2227,7 @@ function updateProductManagementMoreButton() {
 }
 
 function renderProductManagementResults() {
+    if(productManagementSourceMode==='frequent')productManagementResults=productManagementResults.filter(row=>isVisibleFrequentProduct(row,productFrequentActive?.brand));
     setProductManagementTableMode('products');
     const body = document.getElementById('productManagementBody');
     if (!body) return;
@@ -2339,27 +2248,8 @@ function renderProductManagementResults() {
 }
 
 window.loadMoreProductManagementResults = async function() {
+    if (productManagementSourceMode === 'frequent') { await loadFrequentProducts(productFrequentActive?.brand, true); return; }
     if (productManagementSourceMode === 'search') { await searchProductManagement(true); return; }
-    if (productManagementSourceMode === 'brand') {
-        if (!productBrandBrowseHasMore || productManagementSearchInProgress) return;
-        productManagementSearchInProgress = true;
-        updateProductSearchControls();
-        updateProductManagementMoreButton();
-        const generation = productBrandBrowseGeneration;
-        try { await fetchProductBrandBrowsePage(false); }
-        catch (err) {
-            console.error('載入更多廠牌產品失敗：', err);
-            const status = document.getElementById('productManagementSearchStatus');
-            if (generation === productBrandBrowseGeneration && status) status.textContent = '載入更多產品失敗，請稍後再試。';
-        } finally {
-            if (generation === productBrandBrowseGeneration) {
-                productManagementSearchInProgress = false;
-                updateProductSearchControls();
-                updateProductManagementMoreButton();
-            }
-        }
-        return;
-    }
 
     productManagementVisibleLimit += PRODUCT_MANAGEMENT_RENDER_STEP;
     renderProductManagementResults();
@@ -2375,15 +2265,11 @@ window.loadMoreProductManagementResults = async function() {
 window.clearProductManagementSearch = function(options = {}) {
     clearTimeout(productManagementSearchTimer);
     productManagementSearchGeneration++;
-    productBrandBrowseGeneration++;
     productManagementSearchInProgress = false;
     productManagementResults = [];
     productManagementVisibleLimit = PRODUCT_MANAGEMENT_RENDER_STEP;
     productManagementSourceMode = 'none';
     productManagementActiveSearch = null;
-    productBrandBrowseCurrent = '';
-    productBrandBrowseCursor = null;
-    productBrandBrowseHasMore = false;
     pendingProductMasterRows = [];
     renderProductBrandBrowser();
     setProductManagementTableMode('products');
@@ -2415,13 +2301,9 @@ window.searchProductManagement = async function(loadMore = false) {
     }
     const generation = ++productManagementSearchGeneration;
     const role = currentUserRole, uid = currentUser?.uid;
-    productBrandBrowseGeneration++;
     clearTimeout(productManagementSearchTimer);
     pendingProductMasterRows = [];
     productManagementSourceMode = 'search';
-    productBrandBrowseCurrent = '';
-    productBrandBrowseCursor = null;
-    productBrandBrowseHasMore = false;
     productManagementSearchInProgress = true;
     if (!loadMore) {
         const body = document.getElementById('productManagementBody');
@@ -2664,6 +2546,8 @@ window.setProductMasterActive = async function(productId, active) {
         await db.collection('products').doc(id).set(patch, { merge:true });
 
         const next = { ...product, ...patch, productId:product.productId || id };
+        invalidateProductFrequentCache();
+        productManagementSearchCache.clear();
         cacheProductLookupItem(productMasterDocToPriceItem({ id, data:() => next }));
         if (!active) productManagementSelection.delete(id);
 
@@ -2779,6 +2663,8 @@ window.deleteProductMaster = async function(productId) {
         batch.delete(db.collection('productCosts').doc(id));
         await batch.commit();
 
+        invalidateProductFrequentCache();
+        productManagementSearchCache.clear();
         productManagementSelection.delete(id);
         productManagementResults = productManagementResults.filter(item => (item.productId || item.id) !== id);
         priceList = priceList.filter(item => (item.productId || stableProductId(item)) !== id);
@@ -2835,13 +2721,14 @@ async function findDuplicateProductMaster(brand, code, excludeId = '') {
 }
 
 function syncSavedProductMaster(productId, record) {
+    invalidateProductFrequentCache();
     cacheProductLookupItem(productMasterDocToPriceItem({id:productId,data:()=>record}));
     productManagementSearchCache.clear();
     productManagementSearchGeneration++;
-    productBrandBrowseGeneration++;
     productManagementSearchInProgress=false;
     productManagementActiveSearch=null;
-    const next={id:productId,...record};
+    const existing=productManagementResults.find(item=>(item.productId||item.id)===productId);
+    const next={id:productId,isFrequentlySold:existing?.isFrequentlySold===true,...record};
     const index=productManagementResults.findIndex(item=>(item.productId||item.id)===productId);
     if(index>=0)productManagementResults[index]=next;
     else productManagementResults.unshift(next);
@@ -3055,6 +2942,126 @@ window.openPurchasingWorkspace = function(el) {
     switchMainTab('purchasing-system', el);
 };
 
+/* Company favourites use product master IDs and sale prices, never transaction history or costs. */
+const PRODUCT_FREQUENT_PAGE_SIZE = 20;
+const productFrequentCache = new Map();
+const productFrequentWrites = new Set();
+let productFrequentActive = null;
+
+function isVisibleFrequentProduct(product, brand) {
+    return product.isFrequentlySold===true&&product.active!==false&&product.status!=='INACTIVE'
+        && normalizeBrandLookupKey(resolveBrandName(product.brandName||product.brand||''))===normalizeBrandLookupKey(resolveBrandName(brand||''));
+}
+
+function invalidateProductFrequentCache() {
+    productFrequentCache.clear();
+    if(productManagementSourceMode==='frequent'){
+        productManagementSearchGeneration++;
+        productManagementSearchInProgress=false;
+    }
+}
+
+window.loadFrequentProducts = async function(brand, loadMore = false) {
+    if (!canAccessPage('products') || !brand || productManagementSearchInProgress) return;
+    const uid=currentUser?.uid, role=currentUserRole;
+    if (!uid) return;
+    const generation=++productManagementSearchGeneration;
+    const current=()=>generation===productManagementSearchGeneration&&uid===currentUser?.uid&&role===currentUserRole;
+    const names=dedupeBrandsCaseInsensitive([brand,...(brandMasterEntryForName(brand)?.aliases||[])]).slice(0,10);
+    const key=JSON.stringify([uid,role,names]);
+    let state=productFrequentCache.get(key);
+    if (!state || Date.now()-state.at>300000) state={rows:new Map(),cursor:null,hasMore:false,loaded:false,at:Date.now()};
+    productFrequentActive={brand,state,key};
+    productManagementSearchInProgress=true;
+    productManagementSourceMode='frequent';
+    productManagementActiveSearch=null;
+    if (!loadMore) productManagementResults=[];
+    const input=document.getElementById('productManagementSearch');if(input)input.value='';
+    const status=document.getElementById('productManagementSearchStatus');
+    if(status)status.textContent=`正在讀取 ${brand} 常賣品項…`;
+    renderProductManagementResults();
+    updateProductSearchControls();
+    try {
+        if (!state.loaded || (loadMore&&state.hasMore)) {
+            let query=db.collection('products').where('isFrequentlySold','==',true)
+                .where('brandName',names.length>1?'in':'==',names.length>1?names:brand)
+                .orderBy(firebase.firestore.FieldPath.documentId()).limit(PRODUCT_FREQUENT_PAGE_SIZE);
+            if(state.cursor)query=query.startAfter(state.cursor);
+            const page=await firestoreReadWithTimeout(query.get(),`${brand} 常賣品項`);
+            if(!current())return;
+            page.docs.forEach(doc=>state.rows.set(doc.id,{...doc.data(),id:doc.id}));
+            state.cursor=page.docs.at(-1)||state.cursor;
+            state.hasMore=page.size===PRODUCT_FREQUENT_PAGE_SIZE;
+            state.loaded=true;
+            productFrequentCache.set(key,state);
+            if(productFrequentCache.size>20)productFrequentCache.delete(productFrequentCache.keys().next().value);
+        }
+        if(!current())return;
+        productManagementResults=[...state.rows.values()].filter(row=>row.isFrequentlySold===true&&row.active!==false&&row.status!=='INACTIVE');
+        productManagementVisibleLimit=Math.max(PRODUCT_MANAGEMENT_RENDER_STEP,productManagementResults.length);
+        renderProductManagementResults();
+        if(status)status.textContent=productManagementResults.length
+            ? `${brand}：常賣品項 ${productManagementResults.length} 筆${state.hasMore?'，可載入更多':''}。`
+            : state.hasMore?'此批常賣品項已停用，可載入更多。':`${brand} 尚未設定啟用的常賣品項，可輸入完整貨號搜尋。`;
+    } catch(err) {
+        if(!current())return;
+        if(status)status.textContent=productOperationErrorMessage(`${brand} 常賣品項讀取`,err)+'可重新點選廠牌重試。';
+    } finally {
+        if(current()){
+            productManagementSearchInProgress=false;
+            updateProductSearchControls();updateProductManagementMoreButton();
+        }
+    }
+};
+
+window.setProductFrequentlySold = async function(productId, enabled, button) {
+    if(!canAccessPage('products')||!canManagePendingProductMaster()||productFrequentWrites.has(productId))return;
+    const product=productManagementResults.find(row=>(row.productId||row.id)===productId);
+    if(!product)return;
+    if(enabled&&(product.active===false||product.status==='INACTIVE')){alert('停用產品不能加入常賣品項，請先啟用。');return;}
+    const uid=currentUser?.uid,role=currentUserRole;
+    const state=beginActionButton(button,'儲存中…');if(button&&!state)return;
+    productFrequentWrites.add(productId);
+    try {
+        await db.collection('products').doc(productId).update({isFrequentlySold:enabled===true,updatedAt:new Date().toISOString(),updatedBy:uid});
+        invalidateProductFrequentCache();productManagementSearchCache.clear();
+        if(uid!==currentUser?.uid||role!==currentUserRole)return;
+        const next={...product,isFrequentlySold:enabled===true};
+        if(productManagementSourceMode==='frequent'&&productFrequentActive){
+            const active=productFrequentActive;
+            if(enabled)active.state.rows.set(productId,next);else active.state.rows.delete(productId);
+            productFrequentCache.set(active.key,active.state);
+        }
+        productManagementResults=productManagementResults.map(row=>(row.productId||row.id)===productId?next:row);
+        if(productManagementSourceMode==='frequent'&&!enabled)productManagementResults=productManagementResults.filter(row=>(row.productId||row.id)!==productId);
+        if(productManagementSelection.has(productId))productManagementSelection.set(productId,next);
+        renderProductManagementResults();
+        updateProductSearchControls();
+        showActionFeedback(enabled?'已加入公司常賣品項。':'已移出公司常賣品項。');
+    } catch(err) {
+        alert(productOperationErrorMessage(`${product.manufacturerPartNo||productId} 常賣設定`,err));
+    } finally { productFrequentWrites.delete(productId);endActionButton(button,state); }
+};
+
+function productInformationText(product) {
+    const brand=resolveBrandName(product.brandName||product.brand||'');
+    const price=isBrandPriceListActive(brand)?Number(product.listPrice??product.price??0):0;
+    return [`廠牌：${brand}`,`貨號：${product.manufacturerPartNo||product.sku||''}`,
+        `品名：${product.productName||product.nameCn||product.nameEn||''}`,
+        `建議售價：${price?price.toLocaleString():'未提供'}`].join('\n');
+}
+
+window.copyProductInformation = async function(productId, button) {
+    if(!canAccessPage('products'))return;
+    const product=productManagementResults.find(row=>(row.productId||row.id)===productId);
+    if(!product){alert('找不到這筆產品，請重新搜尋後再複製。');return;}
+    const state=beginActionButton(button,'複製中…');if(button&&!state)return;
+    try {
+        await navigator.clipboard.writeText(productInformationText(product));
+        showActionFeedback('已複製廠牌、貨號、品名與建議售價。');
+    } catch(err) { alert('無法複製產品資訊，請允許瀏覽器使用剪貼簿後再試。'); }
+    finally { endActionButton(button,state); }
+};
 /* =========================================================
    Forecast：業務機會追蹤
    - Stage 1~5
@@ -3136,6 +3143,8 @@ async function commitOrderCreation(orderId,data,{actorUid=currentUser?.uid,actor
             // facts, not a modified/stale form, and never overwrite fulfillment progress.
             savedData=live;return;
         }
+        const tradeValidation=globalThis.YushinOrderEntry.validateTrade(snapshot,{requireInvoiceTitle:false});
+        if(!tradeValidation.valid)throw new Error(tradeValidation.message);
         let forecastRef=null;
         if(reorder){
             const source=await tx.get(db.collection('orders').doc(reorder.orderId));assertActor();
@@ -4281,7 +4290,7 @@ function forecastItemToOrderSource(forecast, item) {
     };
 }
 
-async function createForecastOrdersDirectly(forecast, items) {
+async function createForecastOrdersDirectly(forecast, items, trade={}) {
     const synchronizationUid=currentUser?.uid;
     const synchronizationRole=currentUserRole;
     const assertCreationActor=()=>{if(!synchronizationUid||currentUser?.uid!==synchronizationUid||currentUserRole!==synchronizationRole)throw new Error('登入帳號或角色已變更，請以原身分確認 Forecast 轉單結果。');};
@@ -4340,8 +4349,8 @@ async function createForecastOrdersDirectly(forecast, items) {
         spec:firstItem.spec||'',
         status:BUSINESS_STATUS.ACTIVE,
         ...grossAmountMetadata(totalPrice),
-        transactionType:'',
-        invoiceTitle:'',
+        transactionType:trade.transactionType||'',
+        invoiceTitle:trade.invoiceTitle||'',
         quoteNo:'',
         ...linkedDocumentFields(
             DOCUMENT_TYPES.FORECAST,
@@ -4404,26 +4413,13 @@ window.createOrderFromForecast = async function(id) {
             return;
         }
 
-        if (items.length === 1) {
-            // 單品項仍開啟新增訂單視窗，讓使用者最後確認／補資料再儲存。
-            openOrderModal(forecastItemToOrderSource(forecast, items[0]));
-            return;
-        }
-
-        if (!confirm(`此 Forecast 含 ${items.length} 個品項，將建立 1 張多品項訂單。確定繼續？`)) return;
-        const result = await createForecastOrdersDirectly(forecast, items);
-        assertConversionActor();
-        writeAppDataCache('orders', ordersCache);
-        renderOrdersList();
-        if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
-        if (result.reservationFailures.length) {
-            alert(`已建立 1 張含 ${items.length} 個品項的訂單；庫存預留未完成，訂單已標記為「庫存同步失敗」，請由管理員或採購在訂單頁重新同步，請勿重複建立訂單。`);
-        } else {
-            alert(`已將 Forecast 的 ${items.length} 個品項建立為 1 張訂單，庫存預留已同步。`);
-        }
-        if (canAccessPage('orders.po') && canCreatePurchaseOrderCapability()) {
-            loadPendingPurchaseOrders(true).catch(refreshErr => console.error('Forecast 轉訂單後採購背景刷新失敗', refreshErr));
-        }
+        // Reuse the existing order form so transaction choice is explicit for
+        // both one-line and multi-line Forecasts before any order is written.
+        openOrderModal(forecastItemToOrderSource(forecast, items[0]));
+        window._orderModalForecastContext={id:forecast.id,updatedAt:forecast.updatedAt||'',
+            ownerUid:forecast.ownerUid||currentUser?.uid||'',salesName:forecast.salesName||currentUserName||'',salesCode:forecast.salesCode||currentUserCode||''};
+        newOrderDraftItems=items.slice(1).map(item=>normalizeNewOrderItem(forecastItemToOrderSource(forecast,item)));
+        renderNewOrderDraftItems();
     } catch (err) {
         console.error('Forecast 轉訂單失敗', err);
         alert('Forecast 轉訂單失敗：' + err.message + '\n請確認目前這筆資料及連線／權限，重試前先查詢作業結果；若持續失敗，請聯絡管理員。');
@@ -6173,7 +6169,7 @@ function clearChangedProductDetails(input, mode) {
     delete input.dataset.matchedProductCode;
     delete input.dataset.preserveOrderPriceCode;
     if (row) calculateTotals();
-    else { orderCostRequestGeneration++; const confirmed=document.getElementById('orderSelfOrderConfirmed');if(confirmed)confirmed.value='pending';window.syncOrderEntrySelfStatus?.();calcOrderTotal(); }
+    else { orderCostRequestGeneration++; const confirmed=document.getElementById('orderSelfOrderConfirmed');if(confirmed)confirmed.value=window.defaultOrderEntrySelfOrderStatus?.()||'pending';window.syncOrderEntrySelfStatus?.();calcOrderTotal(); }
 }
 
 async function applyOrderProductMatch(input, match) {
@@ -13482,6 +13478,7 @@ window.loadPurchasingAnalytics = async function(force = false) {
 
 window.renderPurchasingView = function() {
     renderFormalPurchaseRecovery();
+    renderQuickPurchaseRecovery();
     populatePurchasingFilters();
     if (purchasingView === 'suppliers') {
         renderSupplierMasterAdmin();
@@ -14094,6 +14091,76 @@ window.loadPendingPurchaseOrders = async function(reset = true) {
 
 const pendingPurchaseOrderKeys = new Set();
 
+ // A lost Callable HTTP response may leave no ordering-row button: after the
+ // server commits, remainingToOrderQty is zero. Recover by original operation
+ // ID from the purchasing workspace rather than opening a new purchase.
+function pendingQuickPurchaseAttempts() {
+    if(!quickPurchaseBackendPilotEnabled() || !currentUser?.uid) return [];
+    const prefix='quick-purchase-pending:'+encodeURIComponent(currentUser.uid)+':',result=[];
+    for(let i=0;i<sessionStorage.length;i++) {
+        const key=sessionStorage.key(i);
+        if(typeof key!=='string'||!key.startsWith(prefix))continue;
+        try {
+            const record=JSON.parse(sessionStorage.getItem(key));
+            const values=JSON.parse(record.fingerprint);
+            if(record.version!==1||!Array.isArray(values)||values.length!==6
+                ||values[0]!==currentUser.uid
+                ||typeof values[1]!=='string'||!values[1]
+                ||typeof values[2]!=='string'||!values[2]
+                ||!Number.isSafeInteger(values[3])||values[3]<=0
+                ||typeof values[4]!=='string'||!values[4]
+                ||typeof values[5]!=='number'||!Number.isFinite(values[5])||values[5]<0
+                ||key!==prefix+encodeURIComponent(values[1])+':'+encodeURIComponent(values[2])
+                ||typeof record.operationId!=='string'
+                ||!/^qp-[A-Za-z0-9_-]{8,76}$/.test(record.operationId))
+                throw new Error('invalid Quick Purchase checkpoint');
+            result.push({key,orderId:values[1],itemId:values[2],
+                details:{expectedQty:values[3],supplier:values[4],unitCost:values[5]}});
+        } catch (_) {
+            result.push({key,invalid:true});
+        }
+    }
+    return result;
+}
+function renderQuickPurchaseRecovery() {
+    const root=document.getElementById('purchasing-system');
+    if(!root)return;
+    const existing=document.getElementById('quickPurchaseRecoveryPanel');
+    if(!quickPurchaseBackendPilotEnabled() || !currentUser?.uid
+        ||!canCreatePurchaseOrderCapability()||!canAccessPage('orders.po')) {
+        if(existing)existing.hidden=true;
+        return;
+    }
+    const attempts=pendingQuickPurchaseAttempts();
+    if(!attempts.length){if(existing)existing.hidden=true;return;}
+    const panel=existing||document.createElement('div');
+    if(!existing){
+        panel.id='quickPurchaseRecoveryPanel';
+        panel.className='no-print';
+        panel.setAttribute('role','status');
+        root.insertBefore(panel,root.firstChild);
+    }
+    panel.replaceChildren();
+    panel.hidden=false;
+    for(const attempt of attempts){
+        const row=document.createElement('div'),message=document.createElement('span');
+        message.textContent=attempt.invalid
+            ? '前次手動採購憑證異常，請以原帳號請管理員核對，勿另建採購。'
+            : '手動採購 '+attempt.orderId+'／'+attempt.itemId+' 結果尚待確認。';
+        row.appendChild(message);
+        if(!attempt.invalid) {
+            const button=document.createElement('button');
+            button.type='button';
+            button.className='btn-small';
+            button.textContent='確認前次採購結果';
+            button.onclick=()=>markPurchaseItemOrdered(attempt.orderId,attempt.itemId,button,attempt.details);
+            row.appendChild(button);
+        }
+        panel.appendChild(row);
+    }
+}
+
+
 function quickPurchaseSupplyId(orderId, itemId) {
     return `manual-${encodeURIComponent(String(orderId || ''))}-${encodeURIComponent(String(itemId || ''))}`;
 }
@@ -14169,7 +14236,7 @@ async function requestQuickPurchaseDetails(orderId, itemId) {
     return new Promise(resolve => { quickPurchaseConfirmation = resolve; });
 }
 
-window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
+window.markPurchaseItemOrdered = async function(orderId, itemId, button, recoveryDetails=null) {
     if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
     const actionKey = `${orderId}::${itemId}`;
     if (pendingPurchaseOrderKeys.has(actionKey)) return;
@@ -14178,7 +14245,9 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
     if (button) { button.disabled = true; button.textContent = '處理中…'; }
     try {
         const actorUid=currentUser?.uid, actorRole=currentUserRole;
-        const purchaseDetails = await requestQuickPurchaseDetails(orderId, itemId);
+        if(recoveryDetails && !quickPurchaseBackendPilotEnabled())
+            throw new Error('前次採購核對僅限已授權的 Emulator 試點。');
+        const purchaseDetails = recoveryDetails || await requestQuickPurchaseDetails(orderId, itemId);
         if (!purchaseDetails) return;
         if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
         if (!purchaseDetails.supplier || !Number.isFinite(purchaseDetails.unitCost) || purchaseDetails.unitCost < 0) throw new Error('請確認供應商與有效的實際單位成本。');
@@ -14198,8 +14267,10 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
         if (document.getElementById('purchasing-system')?.classList.contains('active')) {
             renderPurchasingView();
         }
+        if(typeof renderQuickPurchaseRecovery==='function')renderQuickPurchaseRecovery();
         showActionFeedback('已採購，品項已列入待到貨，可繼續處理下一筆。', 'success');
     } catch (err) {
+        if(typeof renderQuickPurchaseRecovery==='function')renderQuickPurchaseRecovery();
         alert('切換為已採購失敗：' + err.message + '\n請確認目前這筆資料及連線／權限，重試前先查詢作業結果；若持續失敗，請聯絡管理員。');
     } finally {
         pendingPurchaseOrderKeys.delete(actionKey);
@@ -15333,6 +15404,91 @@ window.openPurchaseOrderFromOrder = async function(poNo) {
     }
 };
 
+// Emulator-only adapter. Normal GitHub-served production never enables this pilot.
+function quickPurchaseBackendPilotEnabled() {
+    return typeof APP_ENVIRONMENT !== 'undefined' && APP_ENVIRONMENT === 'emulator'
+        && globalThis.YUSHIN_QUICK_PURCHASE_EMULATOR === true;
+}
+async function commitQuickPurchaseBackendPilot(orderId,itemId,details,actorUid,assertActor) {
+    const local=host=>['localhost','127.0.0.1'].includes(host);
+    const host=String(globalThis.location?.hostname||'').toLowerCase();
+    if(!quickPurchaseBackendPilotEnabled() || !local(host)
+        || typeof firebase==='undefined' || !firebase.auth || !firebase.app
+        || firebase.app().options?.projectId!=='demo-yushin'
+        || firebase.auth().app?.options?.projectId!=='demo-yushin'
+        || !local(firebase.auth().emulatorConfig?.host)
+        || firebase.auth().emulatorConfig?.port!==9099)
+        throw new Error('手動採購後端試點僅限隔離的 demo Emulator，未提交採購。');
+    if(!Number.isSafeInteger(details.expectedQty) || details.expectedQty<=0 || details.expectedQty>1000000)
+        throw new Error('手動採購數量不正確，未提交採購。');
+    const qty=details.expectedQty, supplier=details.supplier,unitCost=details.unitCost;
+    const key='quick-purchase-pending:'+encodeURIComponent(actorUid)+':'
+        +encodeURIComponent(orderId)+':'+encodeURIComponent(itemId);
+    const fingerprint=JSON.stringify([actorUid,orderId,itemId,qty,supplier,unitCost]);
+    let pending;
+    try {
+        const raw=sessionStorage.getItem(key);
+        if(raw)pending=JSON.parse(raw);
+    } catch (_) {
+        throw new Error('前次採購憑證無法讀取，請先核對採購結果，勿另建採購。');
+    }
+    if(pending && (pending.version!==1||pending.fingerprint!==fingerprint
+        ||typeof pending.operationId!=='string'||!/^qp-[A-Za-z0-9_-]{8,76}$/.test(pending.operationId)))
+        throw new Error('前次手動採購尚待核對，請使用原操作及內容確認，勿另建採購。');
+    const operationId=pending?.operationId||('qp-'+db.collection('purchaseOperations').doc().id);
+    if(!pending) {
+        try {sessionStorage.setItem(key,JSON.stringify({version:1,fingerprint,operationId}));}
+        catch (_) {throw new Error('無法保存採購重試憑證，未提交採購。');}
+    }
+    await ensureFormalPurchaseFunctionsCompat();
+    const functions=firebase.app().functions('asia-east1');
+    if(functions.app?.options?.projectId!=='demo-yushin')
+        throw new Error('手動採購後端連線專案不正確，未提交採購。');
+    functions.useEmulator('127.0.0.1',5001);
+    const check=()=>{assertActor();
+        if(firebase.auth().currentUser?.uid!==actorUid)
+            throw new Error('登入身分已變更，請以原帳號核對採購結果。');};
+    check();
+    const response=await functions.httpsCallable('commitV2QuickPurchase')({
+        operationId,orderId,itemId,qty,supplier,unitCost
+    });
+    check();
+    const result=response?.data;
+    const supplyId=quickPurchaseSupplyId(orderId,itemId);
+    const demandId=globalThis.YushinProcurementDemand.demandIdForSource({
+        sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId
+    });
+    if(!['committed','already-applied'].includes(result?.status)
+        ||result.operationId!==operationId||result.supplyId!==supplyId
+        ||result.demandId!==demandId||result.committedQty!==qty)
+        throw new Error('採購回覆不明確，請以原操作核對，勿另建採購。');
+    // A missing response or failed read preserves the checkpoint, never
+    // silently retries through the legacy client multi-document transaction.
+    const read=async(name,id)=>{
+        const snapshot=await db.collection(name).doc(id).get({source:'server'});
+        check();
+        if(!snapshot.exists)throw new Error('採購可能已提交但回讀資料不完整，請確認原操作。');
+        return {id,...snapshot.data()};
+    };
+    const [savedOrder,savedSupply,savedDemand]=await Promise.all([
+        read('orders',orderId),read('supplyOrders',supplyId),
+        read('procurementDemands',encodeURIComponent(demandId))
+    ]);
+    const sourceItem=savedOrder.items?.find(row=>row.itemId===itemId);
+    if(savedSupply.demandId!==demandId || savedDemand.demandId!==demandId
+        ||!savedSupply.orderEvents?.some(row=>row.operationId===operationId
+            &&row.createdByUid===actorUid&&row.qty===qty
+            &&row.supplier===supplier&&row.unitCost===unitCost)
+        ||!sourceItem?.orderEvents?.some(row=>row.id==='quick-'+operationId))
+        throw new Error('採購權威憑證不一致，請確認原操作，勿另建採購。');
+    check();
+    try {sessionStorage.removeItem(key);}
+    catch (_) {throw new Error('採購已確認但重試憑證未能清除，請先核對原操作。');}
+    return {savedOrder,savedSupply,savedDemand,
+        incomingProductKey:savedSupply.fulfillmentType==='DIRECT_SHIP'?'':savedSupply.productKey,
+        incomingWarehouseId:savedSupply.fulfillmentType==='DIRECT_SHIP'?'':savedSupply.warehouseId};
+}
+
 // Atomic quick-purchase commitment; UI refresh belongs to the caller.
 async function commitQuickPurchase(orderId, itemId, purchaseDetails, actorUid=currentUser?.uid, actorRole=currentUserRole) {
         if (!purchaseDetails || typeof purchaseDetails.supplier !== 'string' || !purchaseDetails.supplier.trim()
@@ -15346,6 +15502,11 @@ async function commitQuickPurchase(orderId, itemId, purchaseDetails, actorUid=cu
             if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) throw new Error('目前無採購作業權限。');
         };
         assertActor();
+        if(globalThis.YUSHIN_QUICK_PURCHASE_EMULATOR===true) {
+            if(!quickPurchaseBackendPilotEnabled())
+                throw new Error('手動採購後端試點與目前環境不一致，禁止改用舊交易。');
+            return commitQuickPurchaseBackendPilot(orderId,itemId,purchaseDetails,actorUid,assertActor);
+        }
         const actorName=currentUserName||currentUser?.email||'', now=new Date().toISOString(), orderDate=localDateString();
         let savedOrder, savedSupply, savedDemand, incomingProductKey='', incomingWarehouseId='';
         const supplyRef = supplyOrdersCollection().doc(quickPurchaseSupplyId(orderId, itemId));
@@ -16138,10 +16299,14 @@ async function commitFormalPurchaseBackend(poRecord,actorUid,assertActor) {
     const isPreview=APP_ENVIRONMENT==='preview'&&globalThis.YUSHIN_PREVIEW_FORMAL_PURCHASE===true;
     const isProduction=APP_ENVIRONMENT==='production'&&globalThis.YUSHIN_PRODUCTION_FORMAL_PURCHASE===true;
     const hostname=String(globalThis.location?.hostname||'').toLowerCase();
+    const pathname=String(globalThis.location?.pathname||'');
+    const productionSite=['yu-shing-company.web.app','yu-shing-company.firebaseapp.com'].includes(hostname)
+        || (hostname==='sstonetw-source.github.io'
+            && (pathname==='/yushin-system'||pathname.startsWith('/yushin-system/')));
     if(!formalPurchaseBackendPilotEnabled()||typeof firebase==='undefined'||!firebase.auth||!firebase.app
         ||(isEmulator&&!local(hostname))
         ||(isPreview&&!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(hostname))
-        ||(isProduction&&!['yu-shing-company.web.app','yu-shing-company.firebaseapp.com'].includes(hostname)))
+        ||(isProduction&&!productionSite))
         throw new Error('採購後端僅限已授權的網站及專案。');
     const auth=firebase.auth(),project=isProduction?'yu-shing-company':isPreview?'preview-20135':'demo-yushin';
     if(auth.app?.options?.projectId!==project||firebase.app().options?.projectId!==project
@@ -21697,13 +21862,22 @@ function pendingOrderCreateKey() {
 
 async function createOrResumeNewOrder(data) {
     const key=pendingOrderCreateKey();
-    let orderId=localStorage.getItem(key);
+    const forecast=window._orderModalForecastContext;
+    const legacyForecastKey=forecast?`${orderDraftStorageKey()}:forecast:${forecast.id}:pending_order_id`:'';
+    let orderId=localStorage.getItem(key)|| (legacyForecastKey&&localStorage.getItem(legacyForecastKey));
     if(!orderId){
         orderId=db.collection('orders').doc().id;
         // 記下編號後才寫入雲端；斷線後重試仍會指向同一張訂單。
         localStorage.setItem(key,orderId);
     }
-    return commitOrderCreation(orderId,data,{actorUid:currentUser?.uid,actorRole:currentUserRole});
+    localStorage.setItem(key,orderId);
+    const linkForecast=!!forecast&&data.sourceType===DOCUMENT_TYPES.FORECAST&&data.sourceId===forecast.id;
+    if(linkForecast)data.sourceDocumentSyncStatus='completed';
+    return commitOrderCreation(orderId,data,{actorUid:currentUser?.uid,actorRole:currentUserRole,
+        linkForecast,expectedForecastUpdatedAt:linkForecast?forecast.updatedAt||'':''}).then(committed=>{
+            if(legacyForecastKey&&localStorage.getItem(legacyForecastKey)===committed.id)localStorage.removeItem(legacyForecastKey);
+            return committed;
+        });
 }
 
 function orderDraftFieldValue(id) {
@@ -21726,6 +21900,7 @@ function collectOrderDraft() {
         shippingInstructions:window.orderShippingInstructions?.()||{},
         sourceLink:window._orderModalSourceLink||null,
         quoteContext:window._orderModalQuoteContext||null,
+        forecastContext:window._orderModalForecastContext||null,
         returnReorderSource:window._orderModalReturnReorder||null
     };
 }
@@ -21795,6 +21970,7 @@ function restoreSavedOrderDraft(){
         window._orderModalSourceLink = draft.sourceLink || null;
         window._orderModalReturnReorder = draft.returnReorderSource || null;
         window._orderModalQuoteContext = draft.quoteContext || null;
+        window._orderModalForecastContext = draft.forecastContext || null;
         populateOrderOwnerSelect();
         document.getElementById('orderDateInput').value=draft.date||'';
         document.getElementById('orderCustomer').value=draft.customerName||'';
@@ -21991,7 +22167,7 @@ window.addCurrentOrderItemToDraft=function(){
     ['orderItemCode','orderItemName','orderItemNameEn','orderProductLine','orderSpec'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
     const nextCodeInput=document.getElementById('orderItemCode');
     if(nextCodeInput.dataset.autofillBrand){document.getElementById('orderBrand').value='';onOrderBrandSelectChange();}
-    const nextSelfStatus=document.getElementById('orderSelfOrderConfirmed');if(nextSelfStatus)nextSelfStatus.value='pending';
+    const nextSelfStatus=document.getElementById('orderSelfOrderConfirmed');if(nextSelfStatus)nextSelfStatus.value=window.defaultOrderEntrySelfOrderStatus?.()||'pending';
     for(const id of ['orderSelfSupplier','orderCostPrice']){const field=document.getElementById(id);if(field){field.value='';delete field.dataset.autofillCost;}}
     window.syncOrderEntrySelfStatus?.();
     delete nextCodeInput.dataset.productLine;delete nextCodeInput.dataset.productType;delete nextCodeInput.dataset.serviceKind;delete nextCodeInput.dataset.productMasterMatched;delete nextCodeInput.dataset.productCheckStatus;delete nextCodeInput.dataset.preserveOrderPriceCode;delete nextCodeInput.dataset.matchedProductCode;delete nextCodeInput.dataset.autofillBrand;
@@ -22002,6 +22178,7 @@ window.addCurrentOrderItemToDraft=function(){
 
 window.openOrderModal = function(source = null) {
     window._orderModalReturnReorder = null;
+    window._orderModalForecastContext = null;
     const overlay = document.getElementById('orderModalOverlay');
     if (!overlay) return;
     const openingGeneration = ++orderModalOpenGeneration;
@@ -22026,7 +22203,7 @@ window.openOrderModal = function(source = null) {
         if (field) field.value = '';
     });
     onOrderBrandSelectChange();
-    const selfStatus=document.getElementById('orderSelfOrderConfirmed');if(selfStatus)selfStatus.value=source?.selfOrderConfirmed===true?'confirmed':'pending';
+    const selfStatus=document.getElementById('orderSelfOrderConfirmed');if(selfStatus)selfStatus.value=source?.selfOrderConfirmed===true?'confirmed':source?.selfOrderConfirmed===false?'pending':window.defaultOrderEntrySelfOrderStatus?.()||'pending';
     window.syncOrderEntrySelfStatus?.();
     const productDetails=document.getElementById('orderProductDetails');if(productDetails)productDetails.open=false;
     const recipientDetails=document.getElementById('orderRecipientDetails');if(recipientDetails)recipientDetails.open=false;
@@ -22270,6 +22447,7 @@ window.closeOrderModal = function(options = {}) {
     if (!options.preserveSource) {
         window._orderModalSourceLink = null;
         window._orderModalReturnReorder = null;
+    window._orderModalForecastContext = null;
         window._orderModalQuoteContext = null;
         window._orderModalProductId = '';
     }
@@ -22326,6 +22504,8 @@ window.saveNewOrder = function() {
         const validation=globalThis.YushinOrderEntry.validateItem(items[index]);
         if(!validation.valid){alert(`第 ${index+1} 項：${validation.message}`);if(index<newOrderDraftItems.length)editNewOrderDraftItem(index);document.getElementById(validation.field)?.focus();return;}
     }
+    const tradeValidation=globalThis.YushinOrderEntry.validateTrade({transactionType:document.getElementById('orderTransactionType')?.value},{requireInvoiceTitle:false});
+    if(!tradeValidation.valid){alert(tradeValidation.message);const details=document.getElementById('orderTradeDetails');if(details)details.open=true;document.getElementById('orderTransactionType')?.focus();return;}
     let shippingInstructions;
     try {
         const fallback=window.orderShippingInstructions?.()||{};
@@ -22373,9 +22553,9 @@ window.saveNewOrder = function() {
         quoteNo: window._orderModalQuoteContext?.quoteNo || '',
         ...linkedDocumentFields(window._orderModalSourceLink?.sourceType || '', window._orderModalSourceLink?.sourceId || '', window._orderModalSourceLink ? [documentLink(window._orderModalSourceLink.sourceType, window._orderModalSourceLink.sourceId, 'source')] : []),
         productId: firstItem.productId || '',
-        salesName: assistedOwner?.name || window._orderModalQuoteContext?.salesName || currentUserName || '',
-        salesCode: assistedOwner?.code || window._orderModalQuoteContext?.salesCode || currentUserCode || '',
-        ownerUid: assistedOwner?.uid || window._orderModalQuoteContext?.ownerUid || currentUser?.uid || '',
+        salesName: assistedOwner?.name || window._orderModalQuoteContext?.salesName || window._orderModalForecastContext?.salesName || currentUserName || '',
+        salesCode: assistedOwner?.code || window._orderModalQuoteContext?.salesCode || window._orderModalForecastContext?.salesCode || currentUserCode || '',
+        ownerUid: assistedOwner?.uid || window._orderModalQuoteContext?.ownerUid || window._orderModalForecastContext?.ownerUid || currentUser?.uid || '',
         isDelivered: false,
         isBilled: false,
         billingDate: ''
@@ -23620,7 +23800,8 @@ window.bulkSetProductActive = async function(active, button) {
         }
         refreshPriceDatalists();
         renderProductManagementOverview();
-        if (productBrandBrowseCurrent) reloadCurrentProductBrand();
+        invalidateProductFrequentCache();
+        if (productManagementSourceMode === 'frequent') clearProductManagementSearch({ preserveInput:true });
         alert(`已${active ? '恢復' : '停用'} ${completed} 個產品，可重新匯入修正資料。`);
     } catch(err) {
         renderProductManagementOverview();

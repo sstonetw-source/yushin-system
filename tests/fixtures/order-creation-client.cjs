@@ -7,7 +7,7 @@ function orderCreationClient(app,uid,role){
   throw Error('Client creation fixture only permits demo-yushin Emulator');
  const live=getFirestore(app);connectFirestoreEmulator(live,'127.0.0.1',8080);
  const plain=value=>JSON.parse(JSON.stringify(value));
- const context=vm.createContext({currentUser:{uid},currentUserRole:role,BUSINESS_STATUS:{ACTIVE:'active'},
+ const context=vm.createContext({currentUser:{uid},currentUserRole:role,BUSINESS_STATUS:{ACTIVE:'active'},YushinOrderEntry:require('../../modules/order-entry-core'),
   db:{collection:name=>({doc:id=>doc(live,name,id)})},
   runRoleTransaction:callback=>runTransaction(live,async transaction=>callback({
    get:async ref=>{const snapshot=await transaction.get(ref);return {exists:snapshot.exists(),data:()=>snapshot.data()};},

@@ -1740,7 +1740,7 @@ function clearChangedProductDetails(input, mode) {
     delete input.dataset.matchedProductCode;
     delete input.dataset.preserveOrderPriceCode;
     if (row) calculateTotals();
-    else { orderCostRequestGeneration++; const confirmed=document.getElementById('orderSelfOrderConfirmed');if(confirmed)confirmed.value='pending';window.syncOrderEntrySelfStatus?.();calcOrderTotal(); }
+    else { orderCostRequestGeneration++; const confirmed=document.getElementById('orderSelfOrderConfirmed');if(confirmed)confirmed.value=window.defaultOrderEntrySelfOrderStatus?.()||'pending';window.syncOrderEntrySelfStatus?.();calcOrderTotal(); }
 }
 
 async function applyOrderProductMatch(input, match) {

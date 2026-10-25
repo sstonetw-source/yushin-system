@@ -791,11 +791,14 @@ service cloud.firestore {
       let path = /databases/$(database)/documents/inventoryReservations/$(id);
       let before = exists(path) ? get(path).data : {};
       let after = getAfter(path).data;
-      return after.productKey == productKey
-        && (before.get('productKey', productKey) == productKey)
-        ? (warehouseId == '' || after.get('warehouseId', '') == warehouseId ? after.get('quantity', 0) : 0)
-          - (warehouseId == '' || before.get('warehouseId', '') == warehouseId ? before.get('quantity', 0) : 0)
-        : 999999999;
+      let oldQty = before.get('quantity', 0);
+      let qty = after.get('quantity', 0);
+      // The company proof runs first and validates every product once. Local
+      // sums reuse those same cached snapshots without repeating identity checks.
+      return warehouseId == ''
+        ? (after.productKey == productKey && before.get('productKey', productKey) == productKey ? qty - oldQty : null)
+        : (after.get('warehouseId', '') == warehouseId ? qty : 0)
+          - (before.get('warehouseId', '') == warehouseId ? oldQty : 0);
     }
     function operationalStockDelta(e, productKey, warehouseId) {
       return operationalReservationDelta(e, 0, productKey, warehouseId)
@@ -804,12 +807,12 @@ service cloud.firestore {
         + operationalReservationDelta(e, 3, productKey, warehouseId)
         + operationalReservationDelta(e, 4, productKey, warehouseId);
     }
-    function operationalReservedStockMatches(path, e, productKey, warehouseId) {
+    function operationalReservedStockMatches(path, delta, productKey, warehouseId) {
       let before = exists(path) ? get(path).data : {};
       let after = getAfter(path).data;
       return after.get('productKey', after.get('productId', '')) == productKey
         && (warehouseId == '' || after.get('warehouseId', '') == warehouseId)
-        && after.get('reserved', 0) - before.get('reserved', 0) == operationalStockDelta(e, productKey, warehouseId);
+        && after.get('reserved', 0) - before.get('reserved', 0) == delta;
     }
     function sameWarehouseReservationDelta(e, index, productKey, warehouseId) {
       return index < e.reservationIds.size()
@@ -822,7 +825,7 @@ service cloud.firestore {
       return after.get('quantity', 0) == 0 && before.get('quantity', 0) == 0 ? 0
         : after.productKey == productKey && after.warehouseId == warehouseId
           && (before.get('quantity', 0) == 0 || before.get('warehouseId', warehouseId) == warehouseId)
-          ? after.quantity - before.get('quantity', 0) : 999999999;
+          ? after.quantity - before.get('quantity', 0) : null;
     }
     function sameWarehouseReservationStocks(e, productKey, warehouseId) {
       let delta = sameWarehouseReservationDelta(e, 0, productKey, warehouseId)
@@ -841,6 +844,40 @@ service cloud.firestore {
         && afterInv.reserved - beforeInv.get('reserved', 0) == delta
         && afterWh.reserved - beforeWh.get('reserved', 0) == delta;
     }
+    // Only one fresh warehouse movement evaluates the full company delta.
+    // All other warehouse movements must link that validated primary movement.
+    function linkedCompanyReservationProof(e, productKey, warehouseId) {
+      let path = /databases/$(database)/documents/inventoryMovements/$(e.companyMovementId);
+      let primary = getAfter(path).data;
+      let proof = primary.get('reservationStockEvidence', {});
+      return !exists(path)
+        && primary.get('productKey', '') == productKey
+        && primary.get('sourceId', '') == request.resource.data.get('sourceId', '')
+        && primary.get('warehouseId', '') != warehouseId
+        && proof.get('crossWarehouse', false) == true
+        && proof.get('movementId', '') == e.companyMovementId
+        && proof.get('companyMovementId', '') == e.companyMovementId
+        && proof.get('inventoryId', '') == e.inventoryId
+        && proof.get('reservationIds', []).size() == e.reservationIds.size()
+        && proof.get('reservationIds', []).hasAll(e.reservationIds);
+    }
+    function crossWarehouseReservationStocks(e, productKey, warehouseId) {
+      let local = {'reservationIds': e.warehouseReservationIds};
+      let delta = sameWarehouseReservationDelta(local, 0, productKey, warehouseId)
+        + sameWarehouseReservationDelta(local, 1, productKey, warehouseId)
+        + sameWarehouseReservationDelta(local, 2, productKey, warehouseId)
+        + sameWarehouseReservationDelta(local, 3, productKey, warehouseId)
+        + sameWarehouseReservationDelta(local, 4, productKey, warehouseId);
+      return e.get('companyMovementId', '') is string && e.get('companyMovementId', '') != ''
+        && e.warehouseReservationIds is list && e.warehouseReservationIds.size() > 0
+        && e.warehouseReservationIds.size() <= e.reservationIds.size()
+        && e.warehouseReservationIds.toSet().size() == e.warehouseReservationIds.size()
+        && e.reservationIds.hasAll(e.warehouseReservationIds)
+        && (e.companyMovementId == e.movementId
+          ? operationalReservedStockMatches(/databases/$(database)/documents/inventory/$(e.inventoryId), operationalStockDelta(e, productKey, ''), productKey, '')
+          : linkedCompanyReservationProof(e, productKey, warehouseId))
+        && operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId), delta, productKey, warehouseId);
+    }
     function operationalReservationStockEvidence(id) {
       let data = request.resource.data;
       let before = resource == null ? {} : resource.data;
@@ -849,8 +886,9 @@ service cloud.firestore {
           && data.get('warehouseId', '') == before.get('warehouseId', ''))
         || (data.get('quantity', 0) == 0 && before.get('quantity', 0) == 0)
         || (e.get('movementId', '') != '' && id in e.get('reservationIds', [])
-          && e == getAfter(/databases/$(database)/documents/inventoryMovements/$(e.movementId)).data.get('reservationStockEvidence', {})
-          && operationalReservationMovement(e.movementId, data, before));
+          && (e.get('crossWarehouse', false) != true || (id in e.get('warehouseReservationIds', [])
+            && (before.get('quantity', 0) == 0 || before.get('warehouseId', '') == data.warehouseId)))
+          && operationalReservationMovement(e.movementId, data, before, e));
     }
     // Validate the group once on its immutable movement rather than repeating
     // the five-reservation sums on every reservation in the batch.
@@ -865,13 +903,16 @@ service cloud.firestore {
         && e.previousWarehouseStockId is string && e.previousWarehouseStockId.size() > 0
         && e.reservationIds is list && e.reservationIds.size() > 0 && e.reservationIds.size() <= 5
         && e.reservationIds.toSet().size() == e.reservationIds.size()
+        && e.get('crossWarehouse', false) is bool
         && request.resource.data.productKey == data.productKey
-        && (before.get('quantity', 0) == 0 || before.get('warehouseId', data.warehouseId) == data.warehouseId
-          ? sameWarehouseReservationStocks(e, data.productKey, data.warehouseId)
-          : operationalReservedStockMatches(/databases/$(database)/documents/inventory/$(e.inventoryId), e, data.productKey, '')
-            && operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId), e, data.productKey, data.warehouseId)
-            && ((request.resource.data.get('sourceType', '') == 'WAREHOUSE_TRANSFER' && operationalTransferReservationArrival(e, data, before))
-              || operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.previousWarehouseStockId), e, data.productKey, before.warehouseId)));
+        && (e.get('crossWarehouse', false)
+          ? crossWarehouseReservationStocks(e, data.productKey, data.warehouseId)
+          : (before.get('quantity', 0) == 0 || before.get('warehouseId', data.warehouseId) == data.warehouseId)
+            ? sameWarehouseReservationStocks(e, data.productKey, data.warehouseId)
+            : operationalReservedStockMatches(/databases/$(database)/documents/inventory/$(e.inventoryId), operationalStockDelta(e, data.productKey, ''), data.productKey, '')
+              && operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId), operationalStockDelta(e, data.productKey, data.warehouseId), data.productKey, data.warehouseId)
+              && ((request.resource.data.get('sourceType', '') == 'WAREHOUSE_TRANSFER' && operationalTransferReservationArrival(e, data, before))
+                || operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.previousWarehouseStockId), operationalStockDelta(e, data.productKey, before.warehouseId), data.productKey, before.warehouseId)));
     }
     function operationalTransferReservationArrival(e, data, before) {
       let movement = request.resource.data;
@@ -889,10 +930,11 @@ service cloud.firestore {
         && transfer.toStockId == e.warehouseStockId && transfer.inventoryId == e.inventoryId
         && getAfter(stockPath).data.reserved == get(stockPath).data.reserved;
     }
-    function operationalReservationMovement(id, data, before) {
+    function operationalReservationMovement(id, data, before, evidence) {
       let path = /databases/$(database)/documents/inventoryMovements/$(id);
       let movement = getAfter(path).data;
       return id is string && id.size() > 0 && !exists(path)
+        && movement.get('reservationStockEvidence', {}) == evidence
         && movement.productKey == data.productKey
         && movement.get('warehouseId', '') in [data.warehouseId, before.get('warehouseId', data.warehouseId)]
         && (movement.get('sourceId', '') == data.orderId
@@ -1888,10 +1930,16 @@ service cloud.firestore {
           && (before.size() <= 0 && after.size() <= 0 ? true : serviceBillingBindingAt(before, after, 0) && (before.size() <= 1 && after.size() <= 1 ? true : serviceBillingBindingAt(before, after, 1) && (before.size() <= 2 && after.size() <= 2 ? true : serviceBillingBindingAt(before, after, 2) && (before.size() <= 3 && after.size() <= 3 ? true : serviceBillingBindingAt(before, after, 3) && (before.size() <= 4 && after.size() <= 4 ? true : serviceBillingBindingAt(before, after, 4) && (before.size() <= 5 && after.size() <= 5 ? true : serviceBillingBindingAt(before, after, 5) && (before.size() <= 6 && after.size() <= 6 ? true : serviceBillingBindingAt(before, after, 6) && (before.size() <= 7 && after.size() <= 7 ? true : serviceBillingBindingAt(before, after, 7) && (before.size() <= 8 && after.size() <= 8 ? true : serviceBillingBindingAt(before, after, 8) && (before.size() <= 9 && after.size() <= 9 ? true : serviceBillingBindingAt(before, after, 9) && (before.size() <= 10 && after.size() <= 10 ? true : serviceBillingBindingAt(before, after, 10) && (before.size() <= 11 && after.size() <= 11 ? true : serviceBillingBindingAt(before, after, 11) && (before.size() <= 12 && after.size() <= 12 ? true : serviceBillingBindingAt(before, after, 12) && (before.size() <= 13 && after.size() <= 13 ? true : serviceBillingBindingAt(before, after, 13) && (before.size() <= 14 && after.size() <= 14 ? true : serviceBillingBindingAt(before, after, 14) && (before.size() <= 15 && after.size() <= 15 ? true : serviceBillingBindingAt(before, after, 15) && (before.size() <= 16 && after.size() <= 16 ? true : serviceBillingBindingAt(before, after, 16) && (before.size() <= 17 && after.size() <= 17 ? true : serviceBillingBindingAt(before, after, 17) && (before.size() <= 18 && after.size() <= 18 ? true : serviceBillingBindingAt(before, after, 18) && (before.size() <= 19 && after.size() <= 19 ? true : serviceBillingBindingAt(before, after, 19) && (before.size() <= 20 && after.size() <= 20 ? true : serviceBillingBindingAt(before, after, 20) && (before.size() <= 21 && after.size() <= 21 ? true : serviceBillingBindingAt(before, after, 21) && (before.size() <= 22 && after.size() <= 22 ? true : serviceBillingBindingAt(before, after, 22) && (before.size() <= 23 && after.size() <= 23 ? true : serviceBillingBindingAt(before, after, 23) && (before.size() <= 24 && after.size() <= 24 ? true : serviceBillingBindingAt(before, after, 24) && (before.size() <= 25 && after.size() <= 25 ? true : serviceBillingBindingAt(before, after, 25) && (before.size() <= 26 && after.size() <= 26 ? true : serviceBillingBindingAt(before, after, 26) && (before.size() <= 27 && after.size() <= 27 ? true : serviceBillingBindingAt(before, after, 27) && (before.size() <= 28 && after.size() <= 28 ? true : serviceBillingBindingAt(before, after, 28) && (before.size() <= 29 && after.size() <= 29 ? true : serviceBillingBindingAt(before, after, 29) && true))))))))))))))))))))))))))))))));
     }
 
+    // New orders require an explicit commercial transaction choice. Legacy
+    // orders may retain an absent/blank choice until edited, never clear a valid one.
+    function validOrderTransactionType(data) {
+      return data.get('transactionType', '') in ['直', '借', '扣'];
+    }
     match /orders/{id} {
       allow get: if operationalOrOwnedReader(resource == null ? null : resource.data);
       allow list: if operationalOrOwnedReader(resource.data);
       allow create: if canCreateCommercialDoc()
+        && validOrderTransactionType(request.resource.data)
         && validClientBillingCreate(request.resource.data)
         && validNewOrderSourceSync(id)
         && validOwnedCommercialCreate(request.resource.data)
@@ -1899,7 +1947,8 @@ service cloud.firestore {
         && validOrderEmbeddedCost(request.resource.data);
       // Commercial owner edits commercial data; purchaser/warehouse must use scoped
       // workflow collections below instead of broad order mutation.
-      allow update: if orderUpdateAllowed(id);
+      allow update: if (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['transactionType'])
+          || validOrderTransactionType(request.resource.data)) && orderUpdateAllowed(id);
       allow delete: if admin();
     }
 

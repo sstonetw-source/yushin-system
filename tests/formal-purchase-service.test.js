@@ -87,6 +87,26 @@ test('production PO backend opt-in uses Callable and verified records, not legac
  assert.equal(x.calls.filter(call=>call.name==='commitV2FormalPurchase').length,1);
  assert.equal(x.calls.filter(call=>call.emulator).length,0);
 });
+test('GitHub Pages repository path uses guarded production Callable without client writes',async()=>{
+ for(const pathname of ['/yushin-system','/yushin-system/','/yushin-system/index.html']){
+  const x=productionSetup();Object.assign(x.c.location,{hostname:'sstonetw-source.github.io',pathname});
+  await x.c.commitFormalPurchaseOrder(x.po);
+  assert.equal(x.calls.filter(call=>call.name==='commitV2FormalPurchase').length,1);
+  assert.equal(x.writes.length,0);
+ }
+});
+test('GitHub Pages rejects other repositories and lookalike hosts before any purchase write',async()=>{
+ for(const location of [
+  {hostname:'sstonetw-source.github.io',pathname:'/'},
+  {hostname:'sstonetw-source.github.io',pathname:'/other/'},
+  {hostname:'sstonetw-source.github.io',pathname:'/yushin-system-copy/'},
+  {hostname:'sstonetw-source.github.io.evil.example',pathname:'/yushin-system/'},
+  {hostname:'another.github.io',pathname:'/yushin-system/'}]){
+  const x=productionSetup();Object.assign(x.c.location,location);
+  await assert.rejects(x.c.commitFormalPurchaseOrder(x.po));
+  assert.equal(x.calls.length,0);assert.equal(x.writes.length,0);
+ }
+});
 test('production opt-in refuses unexpected hostname project emulator login change or bad response without fallback',async()=>{
  for(const mutate of [x=>x.c.location.hostname='example.com',
   x=>x.auth.app.options.projectId='preview-20135',
