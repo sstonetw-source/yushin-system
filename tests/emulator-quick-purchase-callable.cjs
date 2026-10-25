@@ -96,6 +96,19 @@ test('replayed purchase rejects corrupted supply-source identity without another
  assert.equal((await f.data('inventoryMovements/quick-'+intent.operationId)).qty,4);
  assert.equal((await f.data('purchaseOperations/quick-'+intent.operationId)).supplyId,first.supplyId);
 });
+test('real Callable replay rejects relinked demand with no second incoming movement',async()=>{
+ const f=await seeded('demand-proof'),intent=f.intent();
+ const first=(await f.call(intent)).data;
+ const demandRef=db.doc('procurementDemands/'+encodeURIComponent(f.demandId));
+ await demandRef.update({sourceId:'forged-order'});
+ await assert.rejects(f.call(intent),e=>e.code==='functions/failed-precondition');
+ assert.equal((await f.data('supplyOrders/'+first.supplyId)).qty,4);
+ assert.equal((await f.data('inventory/'+f.productId)).incoming,4);
+ assert.equal((await f.data('warehouseStocks/'+f.warehouseId+'__'+f.productId)).incoming,4);
+ assert.equal((await f.data('inventoryMovements/quick-'+intent.operationId)).qty,4);
+ assert.equal((await f.data('orders/'+f.orderId)).items[0].supplyOrderedQty,4);
+});
+
 test('real admin can purchase; sales and engineer cannot forge purchaser role',async()=>{
  const admin=await seeded('admin',{role:'admin'});
  assert.equal((await admin.call(admin.intent())).data.status,'committed');
