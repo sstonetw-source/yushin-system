@@ -13358,7 +13358,7 @@ function renderPurchasingCompletedOrders(completedRows = null) {
     if (!body) return;
     const allRows = completedRows || purchasingCompletedRows();
     const rows = allRows.slice(0, purchasingCompletedVisibleLimit);
-    body.innerHTML = rows.map(({order, item, state}) => `<tr><td data-th="訂單日期">${escapeHtml(order.orderDate || '')}</td><td data-th="客戶">${escapeHtml(order.customerName || order.customer || '')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="已完成採購品項">${escapeHtml(item.itemCode || item.itemName || item.itemId)} × ${Number(state.prepared || item.dispatchPreparedQty || item.qty || 0)}</td><td data-th="操作" class="no-print"><button type="button" class="btn-small btn-secondary" onclick="openOrderStatusHistory(${inlineJsValue(order.id)})">紀錄</button></td></tr>`).join('');
+    body.innerHTML = rows.map(({order, item, state}) => `<tr><td data-th="訂單日期">${escapeHtml(order.orderDate || '')}</td><td data-th="客戶">${escapeHtml(order.customerName || order.customer || '')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="已完成採購品項"><strong>${escapeHtml(item.itemCode || item.itemName || item.itemId)} × ${Number(state.prepared || item.dispatchPreparedQty || item.qty || 0)}</strong><small class="purchase-item-description">${escapeHtml([item.itemCode ? item.itemName : '', item.brand].filter(Boolean).join('・'))}</small></td><td data-th="操作" class="no-print"><button type="button" class="btn-small btn-secondary" onclick="openOrderStatusHistory(${inlineJsValue(order.id)})">紀錄</button></td></tr>`).join('');
     if (status) status.textContent = rows.length
         ? `已顯示 ${rows.length} 筆採購已完成品項${purchasingDispatchHasMore || allRows.length > rows.length ? '；可載入更多' : ''}`
         : '目前沒有採購已完成品項';
@@ -13866,7 +13866,7 @@ function renderPurchasingDispatchOrders(normalizedItemsByOrder = null, filterCon
                 ? `<button type="button" class="btn-small" onclick="markOrderItemDispatchPrepared(${inlineJsValue(order.id)},${inlineJsValue(item.itemId)})" ${preparing?'disabled':''}>${preparing?'處理中…':(pendingDispatchPreparation(order.id,item.itemId)?'確認打單結果':`已打單 × ${state.pending}`)}</button>`
                 : '<span class="order-progress-badge">唯讀</span>';
             const tr=document.createElement('tr');
-            tr.innerHTML=`<td data-th="訂單日期">${escapeHtml(order.orderDate||'')}</td><td data-th="客戶">${escapeHtml(order.customerName||order.customer||'')}</td><td data-th="負責業務">${escapeHtml(order.salesName||'')}</td><td data-th="待打單品項">${escapeHtml(item.itemCode||item.itemName||item.itemId)} × ${state.pending}</td><td data-th="操作">${action}</td>`;
+            tr.innerHTML=`<td data-th="訂單日期">${escapeHtml(order.orderDate||'')}</td><td data-th="客戶">${escapeHtml(order.customerName||order.customer||'')}</td><td data-th="負責業務">${escapeHtml(order.salesName||'')}</td><td data-th="待打單品項"><strong>${escapeHtml(item.itemCode||item.itemName||item.itemId)} × ${state.pending}</strong><small class="purchase-item-description">${escapeHtml([item.itemCode ? item.itemName : '', item.brand].filter(Boolean).join('・'))}</small></td><td data-th="操作">${action}</td>`;
             fragment.appendChild(tr);
             shown++;
         });
@@ -14018,7 +14018,7 @@ function renderPendingPurchaseOrders() {
 
         const row=document.createElement('tr');
         row.classList.add('procurement-demand-row');
-        row.innerHTML=`<td data-th="合併" class="no-print" style="text-align:center;">${selectionHtml}</td><td data-th="需求日期">${escapeHtml(date)}</td><td data-th="客戶／用途">${escapeHtml(customer)}<div class="record-reference">${order?.orderNo ? `來源客戶訂單・${escapeHtml(order.orderNo)}` : order?.quoteNo ? `來源估價單・${escapeHtml(order.quoteNo)}` : '客戶訂單採購需求'}</div></td><td data-th="負責業務">${escapeHtml(salesName)}</td><td data-th="待採購品項"><strong>${escapeHtml(demand.itemCode||demand.itemName||demand.productKey||demand.demandId)} × ${qty}</strong><div style="font-size:11px;color:#667584;margin-top:3px;">${sourceType==='STOCK_REPLENISHMENT'?'備庫採購':'客戶訂單'}・${escapeHtml(statusLabel)}</div></td><td data-th="操作">${actionHtml}</td>`;
+        row.innerHTML=`<td data-th="合併" class="no-print" style="text-align:center;">${selectionHtml}</td><td data-th="需求日期">${escapeHtml(date)}</td><td data-th="客戶／用途">${escapeHtml(customer)}<div class="record-reference">${order?.orderNo ? `來源客戶訂單・${escapeHtml(order.orderNo)}` : order?.quoteNo ? `來源估價單・${escapeHtml(order.quoteNo)}` : '客戶訂單採購需求'}</div></td><td data-th="負責業務">${escapeHtml(salesName)}</td><td data-th="待採購品項"><strong>${escapeHtml(demand.itemCode||demand.itemName||demand.productKey||demand.demandId)} × ${qty}</strong><small class="purchase-item-description">${escapeHtml([demand.itemCode ? demand.itemName : '', demand.brand].filter(Boolean).join('・'))}</small><div style="font-size:11px;color:#667584;margin-top:3px;">${sourceType==='STOCK_REPLENISHMENT'?'備庫採購':'客戶訂單'}・${escapeHtml(statusLabel)}</div></td><td data-th="操作">${actionHtml}</td>`;
         fragment.appendChild(row);
         shown++;
     }
