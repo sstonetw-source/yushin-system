@@ -203,7 +203,8 @@ test('purchaser may assist sales and engineer quotes and orders without changing
   }));
   await assertSucceeds(getDoc(doc(db('eng1'), 'orders/assisted-engineer')));
   await assertFails(getDoc(doc(db('sales1'), 'orders/assisted-engineer')));
-  await assertSucceeds(updateDoc(doc(db('buyer1'), 'orders/assisted-engineer'), {remarks:'代辦備註'}));
+  // Purchasers may create assisted orders, but commercial remarks are owner/admin edits only.
+  await assertFails(updateDoc(doc(db('buyer1'), 'orders/assisted-engineer'), {remarks:'代辦備註'}));
   await assertSucceeds(updateDoc(doc(db('buyer1'), 'quotes/assisted-engineer'), {quoteDate:'2026-09-21'}));
   await assertFails(updateDoc(doc(db('buyer1'), 'orders/assisted-engineer'), {ownerUid:'sales1',salesCode:'S01'}));
   await assertFails(updateDoc(doc(db('buyer1'), 'quotes/assisted-engineer'), {ownerUid:'sales1',salesCode:'S01'}));
