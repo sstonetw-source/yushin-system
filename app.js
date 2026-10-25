@@ -3136,6 +3136,8 @@ async function commitOrderCreation(orderId,data,{actorUid=currentUser?.uid,actor
             // facts, not a modified/stale form, and never overwrite fulfillment progress.
             savedData=live;return;
         }
+        const tradeValidation=globalThis.YushinOrderEntry.validateTrade(snapshot,{requireInvoiceTitle:false});
+        if(!tradeValidation.valid)throw new Error(tradeValidation.message);
         let forecastRef=null;
         if(reorder){
             const source=await tx.get(db.collection('orders').doc(reorder.orderId));assertActor();
@@ -4281,7 +4283,7 @@ function forecastItemToOrderSource(forecast, item) {
     };
 }
 
-async function createForecastOrdersDirectly(forecast, items) {
+async function createForecastOrdersDirectly(forecast, items, trade={}) {
     const synchronizationUid=currentUser?.uid;
     const synchronizationRole=currentUserRole;
     const assertCreationActor=()=>{if(!synchronizationUid||currentUser?.uid!==synchronizationUid||currentUserRole!==synchronizationRole)throw new Error('登入帳號或角色已變更，請以原身分確認 Forecast 轉單結果。');};
@@ -4340,8 +4342,8 @@ async function createForecastOrdersDirectly(forecast, items) {
         spec:firstItem.spec||'',
         status:BUSINESS_STATUS.ACTIVE,
         ...grossAmountMetadata(totalPrice),
-        transactionType:'',
-        invoiceTitle:'',
+        transactionType:trade.transactionType||'',
+        invoiceTitle:trade.invoiceTitle||'',
         quoteNo:'',
         ...linkedDocumentFields(
             DOCUMENT_TYPES.FORECAST,
@@ -4404,26 +4406,13 @@ window.createOrderFromForecast = async function(id) {
             return;
         }
 
-        if (items.length === 1) {
-            // 單品項仍開啟新增訂單視窗，讓使用者最後確認／補資料再儲存。
-            openOrderModal(forecastItemToOrderSource(forecast, items[0]));
-            return;
-        }
-
-        if (!confirm(`此 Forecast 含 ${items.length} 個品項，將建立 1 張多品項訂單。確定繼續？`)) return;
-        const result = await createForecastOrdersDirectly(forecast, items);
-        assertConversionActor();
-        writeAppDataCache('orders', ordersCache);
-        renderOrdersList();
-        if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
-        if (result.reservationFailures.length) {
-            alert(`已建立 1 張含 ${items.length} 個品項的訂單；庫存預留未完成，訂單已標記為「庫存同步失敗」，請由管理員或採購在訂單頁重新同步，請勿重複建立訂單。`);
-        } else {
-            alert(`已將 Forecast 的 ${items.length} 個品項建立為 1 張訂單，庫存預留已同步。`);
-        }
-        if (canAccessPage('orders.po') && canCreatePurchaseOrderCapability()) {
-            loadPendingPurchaseOrders(true).catch(refreshErr => console.error('Forecast 轉訂單後採購背景刷新失敗', refreshErr));
-        }
+        // Reuse the existing order form so transaction choice is explicit for
+        // both one-line and multi-line Forecasts before any order is written.
+        openOrderModal(forecastItemToOrderSource(forecast, items[0]));
+        window._orderModalForecastContext={id:forecast.id,updatedAt:forecast.updatedAt||'',
+            ownerUid:forecast.ownerUid||currentUser?.uid||'',salesName:forecast.salesName||currentUserName||'',salesCode:forecast.salesCode||currentUserCode||''};
+        newOrderDraftItems=items.slice(1).map(item=>normalizeNewOrderItem(forecastItemToOrderSource(forecast,item)));
+        renderNewOrderDraftItems();
     } catch (err) {
         console.error('Forecast 轉訂單失敗', err);
         alert('Forecast 轉訂單失敗：' + err.message + '\n請確認目前這筆資料及連線／權限，重試前先查詢作業結果；若持續失敗，請聯絡管理員。');
@@ -6173,7 +6162,7 @@ function clearChangedProductDetails(input, mode) {
     delete input.dataset.matchedProductCode;
     delete input.dataset.preserveOrderPriceCode;
     if (row) calculateTotals();
-    else { orderCostRequestGeneration++; const confirmed=document.getElementById('orderSelfOrderConfirmed');if(confirmed)confirmed.value='pending';window.syncOrderEntrySelfStatus?.();calcOrderTotal(); }
+    else { orderCostRequestGeneration++; const confirmed=document.getElementById('orderSelfOrderConfirmed');if(confirmed)confirmed.value=window.defaultOrderEntrySelfOrderStatus?.()||'pending';window.syncOrderEntrySelfStatus?.();calcOrderTotal(); }
 }
 
 async function applyOrderProductMatch(input, match) {
@@ -21697,13 +21686,22 @@ function pendingOrderCreateKey() {
 
 async function createOrResumeNewOrder(data) {
     const key=pendingOrderCreateKey();
-    let orderId=localStorage.getItem(key);
+    const forecast=window._orderModalForecastContext;
+    const legacyForecastKey=forecast?`${orderDraftStorageKey()}:forecast:${forecast.id}:pending_order_id`:'';
+    let orderId=localStorage.getItem(key)|| (legacyForecastKey&&localStorage.getItem(legacyForecastKey));
     if(!orderId){
         orderId=db.collection('orders').doc().id;
         // 記下編號後才寫入雲端；斷線後重試仍會指向同一張訂單。
         localStorage.setItem(key,orderId);
     }
-    return commitOrderCreation(orderId,data,{actorUid:currentUser?.uid,actorRole:currentUserRole});
+    localStorage.setItem(key,orderId);
+    const linkForecast=!!forecast&&data.sourceType===DOCUMENT_TYPES.FORECAST&&data.sourceId===forecast.id;
+    if(linkForecast)data.sourceDocumentSyncStatus='completed';
+    return commitOrderCreation(orderId,data,{actorUid:currentUser?.uid,actorRole:currentUserRole,
+        linkForecast,expectedForecastUpdatedAt:linkForecast?forecast.updatedAt||'':''}).then(committed=>{
+            if(legacyForecastKey&&localStorage.getItem(legacyForecastKey)===committed.id)localStorage.removeItem(legacyForecastKey);
+            return committed;
+        });
 }
 
 function orderDraftFieldValue(id) {
@@ -21726,6 +21724,7 @@ function collectOrderDraft() {
         shippingInstructions:window.orderShippingInstructions?.()||{},
         sourceLink:window._orderModalSourceLink||null,
         quoteContext:window._orderModalQuoteContext||null,
+        forecastContext:window._orderModalForecastContext||null,
         returnReorderSource:window._orderModalReturnReorder||null
     };
 }
@@ -21795,6 +21794,7 @@ function restoreSavedOrderDraft(){
         window._orderModalSourceLink = draft.sourceLink || null;
         window._orderModalReturnReorder = draft.returnReorderSource || null;
         window._orderModalQuoteContext = draft.quoteContext || null;
+        window._orderModalForecastContext = draft.forecastContext || null;
         populateOrderOwnerSelect();
         document.getElementById('orderDateInput').value=draft.date||'';
         document.getElementById('orderCustomer').value=draft.customerName||'';
@@ -21991,7 +21991,7 @@ window.addCurrentOrderItemToDraft=function(){
     ['orderItemCode','orderItemName','orderItemNameEn','orderProductLine','orderSpec'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
     const nextCodeInput=document.getElementById('orderItemCode');
     if(nextCodeInput.dataset.autofillBrand){document.getElementById('orderBrand').value='';onOrderBrandSelectChange();}
-    const nextSelfStatus=document.getElementById('orderSelfOrderConfirmed');if(nextSelfStatus)nextSelfStatus.value='pending';
+    const nextSelfStatus=document.getElementById('orderSelfOrderConfirmed');if(nextSelfStatus)nextSelfStatus.value=window.defaultOrderEntrySelfOrderStatus?.()||'pending';
     for(const id of ['orderSelfSupplier','orderCostPrice']){const field=document.getElementById(id);if(field){field.value='';delete field.dataset.autofillCost;}}
     window.syncOrderEntrySelfStatus?.();
     delete nextCodeInput.dataset.productLine;delete nextCodeInput.dataset.productType;delete nextCodeInput.dataset.serviceKind;delete nextCodeInput.dataset.productMasterMatched;delete nextCodeInput.dataset.productCheckStatus;delete nextCodeInput.dataset.preserveOrderPriceCode;delete nextCodeInput.dataset.matchedProductCode;delete nextCodeInput.dataset.autofillBrand;
@@ -22002,6 +22002,7 @@ window.addCurrentOrderItemToDraft=function(){
 
 window.openOrderModal = function(source = null) {
     window._orderModalReturnReorder = null;
+    window._orderModalForecastContext = null;
     const overlay = document.getElementById('orderModalOverlay');
     if (!overlay) return;
     const openingGeneration = ++orderModalOpenGeneration;
@@ -22026,7 +22027,7 @@ window.openOrderModal = function(source = null) {
         if (field) field.value = '';
     });
     onOrderBrandSelectChange();
-    const selfStatus=document.getElementById('orderSelfOrderConfirmed');if(selfStatus)selfStatus.value=source?.selfOrderConfirmed===true?'confirmed':'pending';
+    const selfStatus=document.getElementById('orderSelfOrderConfirmed');if(selfStatus)selfStatus.value=source?.selfOrderConfirmed===true?'confirmed':source?.selfOrderConfirmed===false?'pending':window.defaultOrderEntrySelfOrderStatus?.()||'pending';
     window.syncOrderEntrySelfStatus?.();
     const productDetails=document.getElementById('orderProductDetails');if(productDetails)productDetails.open=false;
     const recipientDetails=document.getElementById('orderRecipientDetails');if(recipientDetails)recipientDetails.open=false;
@@ -22270,6 +22271,7 @@ window.closeOrderModal = function(options = {}) {
     if (!options.preserveSource) {
         window._orderModalSourceLink = null;
         window._orderModalReturnReorder = null;
+    window._orderModalForecastContext = null;
         window._orderModalQuoteContext = null;
         window._orderModalProductId = '';
     }
@@ -22326,6 +22328,8 @@ window.saveNewOrder = function() {
         const validation=globalThis.YushinOrderEntry.validateItem(items[index]);
         if(!validation.valid){alert(`第 ${index+1} 項：${validation.message}`);if(index<newOrderDraftItems.length)editNewOrderDraftItem(index);document.getElementById(validation.field)?.focus();return;}
     }
+    const tradeValidation=globalThis.YushinOrderEntry.validateTrade({transactionType:document.getElementById('orderTransactionType')?.value},{requireInvoiceTitle:false});
+    if(!tradeValidation.valid){alert(tradeValidation.message);const details=document.getElementById('orderTradeDetails');if(details)details.open=true;document.getElementById('orderTransactionType')?.focus();return;}
     let shippingInstructions;
     try {
         const fallback=window.orderShippingInstructions?.()||{};
@@ -22373,9 +22377,9 @@ window.saveNewOrder = function() {
         quoteNo: window._orderModalQuoteContext?.quoteNo || '',
         ...linkedDocumentFields(window._orderModalSourceLink?.sourceType || '', window._orderModalSourceLink?.sourceId || '', window._orderModalSourceLink ? [documentLink(window._orderModalSourceLink.sourceType, window._orderModalSourceLink.sourceId, 'source')] : []),
         productId: firstItem.productId || '',
-        salesName: assistedOwner?.name || window._orderModalQuoteContext?.salesName || currentUserName || '',
-        salesCode: assistedOwner?.code || window._orderModalQuoteContext?.salesCode || currentUserCode || '',
-        ownerUid: assistedOwner?.uid || window._orderModalQuoteContext?.ownerUid || currentUser?.uid || '',
+        salesName: assistedOwner?.name || window._orderModalQuoteContext?.salesName || window._orderModalForecastContext?.salesName || currentUserName || '',
+        salesCode: assistedOwner?.code || window._orderModalQuoteContext?.salesCode || window._orderModalForecastContext?.salesCode || currentUserCode || '',
+        ownerUid: assistedOwner?.uid || window._orderModalQuoteContext?.ownerUid || window._orderModalForecastContext?.ownerUid || currentUser?.uid || '',
         isDelivered: false,
         isBilled: false,
         billingDate: ''

@@ -568,7 +568,7 @@ async function multiReceiptSiteFixture(width){
    unitPrice:100,fulfillmentType:'WAREHOUSE',reservedQty:0,deliveredQty:0,returnedQty:0,dispatchPreparedQty:0,warehouseShippedQty:0,
    deliveryPlan:{mode:'CUSTOMER_SHIP',contact:'測試客戶',phone:'02-12345678',address:'測試地址'}}));
  await batch.commit();
- const source={orderNo:orderId,customerName:'多品項收貨驗收',ownerUid:accounts.sales.uid,salesCode:'B',status:'active',orderStatus:'normal',
+ const source={transactionType:'借',orderNo:orderId,customerName:'多品項收貨驗收',ownerUid:accounts.sales.uid,salesCode:'B',status:'active',orderStatus:'normal',
   createdByUid:accounts.sales.uid,createdByRole:'sales',createdAt:new Date().toISOString(),productId:keys[0],productMasterMatched:true,
   itemCount:items.length,orderSchemaVersion:2,orderDate:'2026-10-22',inventoryReservationStatus:'pending',inventoryReservationAttemptId:'sync_'+tag,
   deliveryRecords:[],returnRecords:[],deliveryHistory:[],deliveredQty:0,isDelivered:false,items};
@@ -2058,6 +2058,7 @@ for(const width of [1280,390])test('full site '+width+'px original multi-item pu
   await page.locator('#orderItemCode').fill(correctCode);await page.locator('#orderItemCode').blur();
   await page.waitForFunction(()=>document.getElementById('orderItemCode').dataset.productCheckStatus==='matched');
   await page.locator('#orderQty').fill('1');await page.locator('#orderUnitPrice').fill('275');
+  await page.locator('#orderTransactionType').selectOption('借');
   await page.locator('#saveNewOrderBtn').click();await page.locator('#orderModalOverlay.active').waitFor({state:'hidden'});
   await page.waitForFunction(source=>ordersCache.some(o=>o.returnReorderSource?.orderId===source&&o.inventoryReservationStatus==='completed'),x.orderId,{timeout:45000});
   const owned=await db.collection('orders').where('createdByUid','==',x.accounts.sales.uid).get();
@@ -2150,6 +2151,7 @@ for(const multi of [false,true])for(const width of [1280,390])test('full site '+
    await page.locator('#orderQty').fill('2');await page.locator('#orderUnitPrice').fill('150');
    await page.locator('#orderDeliveryChoice').selectOption('BUSINESS');
   }
+  await page.locator('#orderTransactionType').selectOption('借');
   await page.locator('#saveNewOrderBtn').click();await page.locator('#orderModalOverlay.active').waitFor({state:'hidden'});
   await page.waitForFunction(uid=>ordersCache.some(o=>o.createdByUid===uid&&o.inventoryReservationStatus==='completed'),uid,{timeout:45000});
   const snapshot=await db.collection('orders').where('createdByUid','==',uid).get();assert.equal(snapshot.size,1);
@@ -2239,6 +2241,7 @@ for(const mixed of [false,true])for(const width of [1280,390])test('full site '+
    // Keep the original hidden warehouse default. The real reservation Service
    // must discover the warehouse holding this Goods product itself.
   }
+  await page.locator('#orderTransactionType').selectOption('借');
   await page.locator('#saveNewOrderBtn').click();await page.locator('#orderModalOverlay.active').waitFor({state:'hidden'});
   await page.waitForFunction(uid=>ordersCache.some(o=>o.createdByUid===uid&&o.inventoryReservationStatus==='completed'),uid,{timeout:45000});
   const snapshot=await db.collection('orders').where('createdByUid','==',uid).get();assert.equal(snapshot.size,1);
@@ -2290,7 +2293,7 @@ for(const width of [1280,390])test('full site '+width+'px original UI gated PO p
  put('warehouseStocks',warehouseId+'__'+key,{productKey:key,warehouseId,onHand:5,reserved:1,incoming:0,transferFreeInTransit:0});
  put('inventoryLots',tag+'-lot',{productKey:key,warehouseId,lotNo:tag,receivedQty:5,remainingQty:5});
  await setup.commit();
- const source={orderNo:orderId,customerName:tag+'客戶',ownerUid:accounts.sales.uid,salesCode:'B',status:'active',orderStatus:'normal',
+ const source={transactionType:'借',orderNo:orderId,customerName:tag+'客戶',ownerUid:accounts.sales.uid,salesCode:'B',status:'active',orderStatus:'normal',
   createdByUid:accounts.sales.uid,createdByRole:'sales',createdAt:new Date().toISOString(),productId:key,productMasterMatched:true,
   itemCount:1,orderSchemaVersion:2,orderDate:'2026-10-22',inventoryReservationStatus:'pending',inventoryReservationAttemptId:tag+'-sync',
   deliveryRecords:[],returnRecords:[],deliveredQty:0,isDelivered:false,totalPrice:300,

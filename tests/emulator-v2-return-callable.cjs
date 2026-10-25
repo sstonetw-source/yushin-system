@@ -100,7 +100,7 @@ test('real signed-in client creates an order through the existing Order Creation
  }
  await setup.commit();
  const creator=orderCreationClient(actor.app,actor.uid,'sales');
- const order={status:'active',orderStatus:'normal',createdByUid:actor.uid,createdByRole:'sales',
+ const order={transactionType:'借',status:'active',orderStatus:'normal',createdByUid:actor.uid,createdByRole:'sales',
   ownerUid:actor.uid,salesCode:'R',customerName:'真實登入建單測試',productId:key,productMasterMatched:true,
   inventoryReservationStatus:'pending',inventoryReservationAttemptId:'auth_client_initial',
   deliveryRecords:[],returnRecords:[],deliveredQty:0,isDelivered:false,

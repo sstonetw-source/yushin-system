@@ -126,7 +126,7 @@ test.beforeEach(async () => {
 });
 
 const validOrderProduct = {
-  productId:'p-order', productMasterMatched:true, procurementType:'PURCHASING_PO'
+  transactionType:'借', productId:'p-order', productMasterMatched:true, procurementType:'PURCHASING_PO'
 };
 
 function db(uid) {
@@ -1655,7 +1655,7 @@ test('common creation service reads and creates orders under actual commercial r
  for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['admin','admin']]){
   const client=compatDb(uid),nativeRun=client.runTransaction;
   client.runTransaction=fn=>nativeRun(tx=>fn({...tx,set:(ref,data)=>tx.set(ref,JSON.parse(JSON.stringify(data)))}));
-  const c=vm.createContext({db:client,currentUser:{uid},currentUserRole:role,BUSINESS_STATUS:{ACTIVE:'active'},
+  const c=vm.createContext({db:client,currentUser:{uid},currentUserRole:role,YushinOrderEntry:require('../modules/order-entry-core'),BUSINESS_STATUS:{ACTIVE:'active'},
    runRoleTransaction:fn=>stockPermissions.run(client,fn,uid,['sales','engineer'].includes(role),role)});
   vm.runInContext(fs.readFileSync('src/services/order-creation.js','utf8'),c);
   const data={...validOrderProduct,ownerUid:role==='engineer'?uid:'sales1',salesCode:role==='engineer'?'E01':'S01',status:'active',
@@ -1671,7 +1671,7 @@ test('common Forecast creation transaction atomically proves source link under s
   const id='common-forecast-'+uid,client=compatDb(uid),nativeRun=client.runTransaction;
   client.runTransaction=fn=>nativeRun(tx=>fn({...tx,set:(ref,data)=>tx.set(ref,JSON.parse(JSON.stringify(data))),
    update:(ref,data)=>tx.update(ref,{updatedAt:data.updatedAt,linkedDocuments:data.linkedDocuments})}));
-  const c=vm.createContext({db:client,currentUser:{uid},currentUserRole:role,BUSINESS_STATUS:{ACTIVE:'active'},DOCUMENT_TYPES:{FORECAST:'forecast',ORDER:'order'},
+  const c=vm.createContext({db:client,currentUser:{uid},currentUserRole:role,YushinOrderEntry:require('../modules/order-entry-core'),BUSINESS_STATUS:{ACTIVE:'active'},DOCUMENT_TYPES:{FORECAST:'forecast',ORDER:'order'},
    firebase:{firestore:{FieldValue:{arrayUnion}}},documentLink:(type,id,relation)=>({type,id,relation}),normalizedOrderStatus:()=> 'normal',
    runRoleTransaction:fn=>stockPermissions.run(client,fn,uid,role==='sales',role)});
   vm.runInContext(fs.readFileSync('src/services/order-creation.js','utf8'),c);
@@ -3090,3 +3090,15 @@ test('actual incoming checkpoint rejects forged purchaser UI role and disabled t
  await seed('users/buyer1',{role:'purchaser',active:false});
  await assert.rejects(f.run(),e=>e.code==='permission-denied');assert.deepEqual(await f.read(),before);
 });
+
+ test('order transaction type is required on creation and cannot be cleared, preserving untouched legacy orders',async()=>{
+ const base={...validOrderProduct,ownerUid:'sales1',salesCode:'S01'};
+ for(const value of ['',null,123,'之後確認'])await assertFails(setDoc(doc(db('sales1'),'orders/trade-invalid'),{...base,transactionType:value}));
+ const {transactionType,...missing}=base;
+ await assertFails(setDoc(doc(db('sales1'),'orders/trade-missing'),missing));
+ for(const type of ['直','借','扣'])await assertSucceeds(setDoc(doc(db('sales1'),'orders/trade-'+type),{...base,transactionType:type}));
+ await assertFails(updateDoc(doc(db('sales1'),'orders/trade-借'),{transactionType:''}));
+ await assertFails(updateDoc(doc(db('sales1'),'orders/trade-借'),{transactionType:deleteField()}));
+ await seed('orders/trade-legacy',missing);
+ await assertSucceeds(updateDoc(doc(db('sales1'),'orders/trade-legacy'),{remarks:'legacy unchanged'}));
+ });

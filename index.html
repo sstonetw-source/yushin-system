@@ -1096,7 +1096,7 @@
             </section>
             <section class="order-entry-section">
                 <h4>採購方式</h4><div class="form-grid">
-                    <div class="order-entry-wide"><label for="orderProcurementType">由誰訂貨</label><select id="orderProcurementType" onchange="onOrderProcurementTypeChange()"><option value="PURCHASING_PO">交由採購</option><option value="SALES_SELF_ORDER">業務自行訂貨</option></select></div>
+                    <div class="order-entry-wide"><label for="orderProcurementType">由誰訂貨</label><select id="orderProcurementType" onchange="onOrderProcurementTypeChange(true)"><option value="PURCHASING_PO">交由採購</option><option value="SALES_SELF_ORDER">業務自行訂貨</option></select></div>
                     <div id="orderSelfStatusWrap" hidden class="order-entry-wide"><label for="orderSelfOrderConfirmed">自行訂貨進度</label><select id="orderSelfOrderConfirmed" onchange="syncOrderEntrySelfStatus()"><option value="pending">尚未下訂</option><option value="confirmed">已向供應商下訂</option></select></div>
                     <div id="orderSelfSupplierWrap" style="display:none;"><label for="orderSelfSupplier">供應商 <span id="orderSelfSupplierRequired" hidden aria-hidden="true">＊</span></label><input type="text" id="orderSelfSupplier" placeholder="供應商名稱"></div>
                     <div id="orderCostFieldWrap" style="display:none;"><label for="orderCostPrice">含稅單位成本 <span id="orderCostPriceRequired" hidden aria-hidden="true">＊</span></label><input type="number" id="orderCostPrice" min="0" step="any" inputmode="decimal" placeholder="可先留白"><small id="orderSelfCostHint" hidden>確認已下訂時必填；無成本可填 0。</small></div>
@@ -1112,8 +1112,8 @@
             <div class="order-entry-add"><button type="button" class="btn-secondary" onclick="addCurrentOrderItemToDraft()">加入下一品項</button><span>每個品項會保留當時的訂貨與交付設定。</span></div>
             <div id="orderProductCheckSummary" role="status"></div>
             <div class="table-wrap" id="newOrderItemsWrap" style="display:none;"><table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>數量</th><th>單價</th><th>產品狀態</th><th>訂貨／交付</th><th>操作</th></tr></thead><tbody id="newOrderItemsBody"></tbody></table></div>
-            <details class="order-entry-details"><summary>交易與發票資訊</summary><div class="form-grid">
-                <div><label>交易方式</label><select id="orderTransactionType" onchange="document.getElementById('orderInvoiceTitle').disabled = this.value !== '直'"><option value="">之後確認</option><option value="直">直（開發票）</option><option value="借">借（不開發票）</option><option value="扣">扣（扣寄款）</option></select></div>
+            <details class="order-entry-details" id="orderTradeDetails" open><summary>交易與發票資訊</summary><div class="form-grid">
+                <div><label for="orderTransactionType">交易方式 <span aria-hidden="true">*</span></label><select id="orderTransactionType" required aria-required="true" onchange="document.getElementById('orderInvoiceTitle').disabled = this.value !== '直'"><option value="">請選擇交易方式</option><option value="直">直（開發票）</option><option value="借">借（不開發票）</option><option value="扣">扣（扣寄款）</option></select></div>
                 <div><label>發票抬頭</label><input type="text" id="orderInvoiceTitle" disabled></div>
             </div></details>
             <details class="order-entry-details"><summary>日期與備註</summary><div class="form-grid">
@@ -1697,16 +1697,16 @@
     <script src="modules/purchasing-analytics-core.js?v=20261008-1"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261013-file-share"></script>
-    <script src="modules/order-entry-core.js?v=20261014-1"></script>
+    <script src="modules/order-entry-core.js?v=20261025-3"></script>
 <script src="modules/service-work-core.js?v=20261023-2"></script>
-    <script src="app.js?v=20261024-1"></script>
+    <script src="app.js?v=20261025-3"></script>
     <script src="modules/order-self-order-required.js?v=20261013-1"></script>
     <script src="modules/customer-cancellations.js?v=20261021-3"></script>
     <script src="modules/free-stock-recovery.js?v=20261014-9"></script>
     <script src="modules/inventory-workspace.js?v=20261021-locations-1"></script>
     <script src="modules/warehouse-logistics.js?v=20261021-locations-1"></script>
     <script src="modules/delivery-settings.js?v=20261013-1"></script>
-    <script src="modules/order-entry-ui.js?v=20261014-1"></script>
+    <script src="modules/order-entry-ui.js?v=20261025-3"></script>
     <script src="modules/quote-decision-analysis.js?v=20261005-5"></script>
 
 
