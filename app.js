@@ -820,7 +820,7 @@ function applyPermissionVisibility() {
     const adminTab = document.getElementById('navAdminTab');
     if (adminTab) adminTab.style.display = trueUserRole === 'admin' && currentUserRole === 'admin' ? '' : 'none';
     const quoteListTab = document.getElementById('qsub-my');
-    if (quoteListTab) quoteListTab.innerText = canViewAllData('quotes') ? '📋 全部估價單' : '📋 我的估價單';
+    if (quoteListTab) quoteListTab.innerText = canViewAllData('quotes') ? '全部估價單' : '我的估價單';
     const purchaseAnalysisTab = document.getElementById('purchase-tab-analysis');
     if (purchaseAnalysisTab) purchaseAnalysisTab.style.display = canCreatePurchaseOrderCapability() ? '' : 'none';
     populatePurchaserOrderFilters();
