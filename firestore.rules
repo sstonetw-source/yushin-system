@@ -1835,7 +1835,12 @@ service cloud.firestore {
         : userRole in ['sales', 'engineer'] && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId'])
           && (changed.hasOnly(['returnRequests', 'returnPending', 'returnRequestMutationIndex', 'updatedAt'])
             && (changed.size() == 0 || changed.hasAny(['returnRequests', 'returnPending']))
-            ? commercialReturnRequestOnlyUpdate() : ((request.resource.data.diff(resource.data).affectedKeys().hasAny(['deliveryRecords']) && directShipReceiptOrderUpdate(id)) || (owns(resource.data) && (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) ? warehouseDeliveryPlanUpdate() : (sameCommercialOwner() && preservesCreator() && validCommercialOrderCostUpdate() && businessOrderFactsProtected(id, changed) && commercialReturnProtection() && (resource.data.get('warehouseLogisticsId', '') == '' || commercialKeepsPendingTransfer())))))));
+            ? commercialReturnRequestOnlyUpdate() : ((request.resource.data.diff(resource.data).affectedKeys().hasAny(['deliveryRecords']) && directShipReceiptOrderUpdate(id)) || (owns(resource.data) && (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) ? warehouseDeliveryPlanUpdate() : (sameCommercialOwner() && preservesCreator()
+              // Pure delivery ledger updates cannot change item identity or cost.
+              // Keep all delivery, ownership, stock witness and custody proofs below.
+              && (changed.hasOnly(['deliveredQty', 'deliveryRecords', 'businessDeliveryEvidence', 'updatedAt'])
+                || validCommercialOrderCostUpdate())
+              && businessOrderFactsProtected(id, changed) && commercialReturnProtection() && (resource.data.get('warehouseLogisticsId', '') == '' || commercialKeepsPendingTransfer())))))));
     }
 
     function businessDeliveryRecordChange(before, after, index) {
