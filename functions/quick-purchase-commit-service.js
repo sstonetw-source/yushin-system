@@ -66,6 +66,30 @@ async function commitV2QuickPurchase(db,uid,data){
        &&e.createdByUid===uid&&e.qty===intent.qty
        &&e.supplier===intent.supplier&&e.unitCost===intent.unitCost))
     fail('failed-precondition','重送採購的權威供應憑證不一致');
+   // A saved operation is not proof that the source and incoming ledger agree.
+   // Recheck immutable evidence before acknowledging a lost Callable reply.
+   const supply=original.data(),directShip=supply.fulfillmentType==='DIRECT_SHIP';
+   if(saved.type!=='PURCHASING_MANUAL'||saved.operationId!==intent.operationId
+     ||saved.orderId!==intent.orderId||saved.itemId!==intent.itemId
+     ||saved.qty!==intent.qty||saved.demandId!==demandId
+     ||saved.movementId!==(directShip?'':movementRef.id))
+    fail('failed-precondition','重送採購的操作憑證不一致');
+   const source=await tx.get(ref('orders',intent.orderId));
+   const item=source.exists&&Array.isArray(source.data().items)
+     ?source.data().items.find(row=>row.itemId===intent.itemId):null;
+   if(!item||!Array.isArray(item.orderEvents)
+     ||!item.orderEvents.some(e=>e.id==='quick-'+intent.operationId
+       &&e.type==='PURCHASING_MANUAL'&&e.qty===intent.qty))
+    fail('failed-precondition','重送採購的來源訂單憑證不一致');
+   if(!directShip){
+    const movement=await tx.get(movementRef),ledger=movement.exists?movement.data():null;
+    if(!ledger||ledger.type!=='purchase_incoming'||ledger.qty!==intent.qty
+      ||ledger.sourceType!=='SUPPLY_ORDER'||ledger.sourceId!==supplyId
+      ||ledger.productKey!==supply.productKey||ledger.productId!==supply.productId
+      ||ledger.warehouseId!==supply.warehouseId||ledger.actorUid!==uid
+      ||ledger.purchaseDocumentId!==supply.internalNo)
+     fail('failed-precondition','重送採購的在途扣帳憑證不一致');
+   }
    return {status:'already-applied',operationId:intent.operationId,supplyId,
     demandId,committedQty:intent.qty};
   }
