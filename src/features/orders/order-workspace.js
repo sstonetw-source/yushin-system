@@ -154,6 +154,7 @@ function purchaseProgressInfo(order) {
         const quantities=globalThis.YushinWorkflow.procurementQuantities({
             orderedQty:item.orderedQty??item.qty,
             fulfillmentType:item.fulfillmentType||order.fulfillmentType||'WAREHOUSE',
+            productType:item.productType||order.productType||'',
             reservedQty:item.reservedQty,
             shortageQty:item.shortageQty,
             supplyOrderedQty:item.supplyOrderedQty,
@@ -175,7 +176,9 @@ function purchaseProgressInfo(order) {
 }
 
 function fulfillmentProgressInfo(order, normalizedItems = null, dispatchStateByItem = null) {
-    const items=(normalizedItems || normalizedOrderItems(order)).filter(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP');
+    const allItems=normalizedItems || normalizedOrderItems(order);
+    const items=allItems.filter(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'
+        &&String(item.productType||'').trim().toUpperCase()!=='SERVICE');
     const total=items.reduce((s,item)=>s+Number(item.orderedQty||item.qty||0),0);
     const states=items.map(item=>{const state=dispatchStateByItem?.get(item) || itemDispatchState(order,item);return globalThis.YushinWarehouseLogistics?.businessDeliveryState?globalThis.YushinWarehouseLogistics.businessDeliveryState(order,item,state,defaultWarehouse()?.id||''):state;});
     const ready=states.reduce((s,state)=>s+state.reserved,0);
@@ -183,7 +186,9 @@ function fulfillmentProgressInfo(order, normalizedItems = null, dispatchStateByI
     const delivered=states.reduce((s,state)=>s+state.delivered,0);
     const shippable=states.reduce((s,state)=>s+state.shippable,0);
     const pendingDispatch=states.reduce((s,state)=>s+state.pending,0);
-    if(!items.length)return {state:'direct',label:'原廠直送',total:0,ready:0,prepared:0,delivered:0,shippable:0,pendingDispatch:0};
+    if(!items.length)return allItems.some(item=>String(item.productType||'').trim().toUpperCase()==='SERVICE')
+        ? {state:'not_required',label:'無需實貨出貨',total:0,ready:0,prepared:0,delivered:0,shippable:0,pendingDispatch:0}
+        : {state:'direct',label:'原廠直送',total:0,ready:0,prepared:0,delivered:0,shippable:0,pendingDispatch:0};
     if(total>0 && delivered>=total)return {state:'complete',label:'出貨完成',total,ready,prepared,delivered,shippable:0,pendingDispatch:0};
     if(shippable>0)return {state:'shippable',label:`可出貨 ${shippable}/${total}`,total,ready,prepared,delivered,shippable,pendingDispatch};
     if(pendingDispatch>0)return {state:ready>=Math.max(0,total-delivered)?'pending_dispatch':'partial_dispatch',label:`待打單 ${pendingDispatch}/${total}`,total,ready,prepared,delivered,shippable,pendingDispatch};
@@ -195,6 +200,12 @@ const pendingDispatchOrderIds = new Set();
 
 function itemDispatchState(order, item) {
     if(orderInventorySyncIncomplete(order))return {ordered:Number(item.orderedQty||item.qty||0),reserved:0,prepared:0,delivered:0,grossDelivered:0,returned:0,shippable:0,pending:0};
+    if(globalThis.YUSHIN_V2_DISPATCH_EMULATOR===true){
+        // The Emulator bridge consumes physical shipments, not acknowledgements.
+        const source=order.items?.find(row=>row.itemId===item.itemId)||item;
+        return {...globalThis.YushinFulfillment.warehouseShipmentState(source),
+            delivered:source.deliveredQty??0,grossDelivered:source.deliveredQty??0,returned:source.returnedQty??0};
+    }
     // deliveryRecords / returnRecords 仍由頁面層整理；所有物流數量公式交給 fulfillment-core。
     // 這樣訂單頁、採購頁與實際送貨動作不會各自維護一套「待打單／可出貨」算法。
     const hasSnapshot = item?.__fulfillmentSnapshot === true;
@@ -223,6 +234,10 @@ function orderLifecycleActionButtons(order, lifecycle, progress, actions) {
     if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) return '';
     if (pendingLifecycleOrderIds.has(order.id)) return '<button type="button" disabled>處理中…</button>';
     const id = inlineJsValue(order.id);
+    try{
+        const retry=globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true?pendingV2OrderLifecycle(order.id):null;
+        if(retry)return `<button type="button" onclick="quickSetOrderLifecycle(${id}, ${inlineJsValue(retry.nextStatus)})">確認前次取消／恢復結果</button>`;
+    }catch(err){return `<span role="alert">${escapeHtml(err.message)}</span>`;}
     const buttons = [];
     if (lifecycle.status === 'normal') {
         if (actions.showPartialDelivery) buttons.push(`<button type="button" onclick="openPartialDeliveryForOrder(${id})">分批交貨</button>`);
@@ -257,9 +272,21 @@ function orderContextActionState(order, normalizedItems = null, dispatchStateByI
         // 避免部分到貨紀錄存在，但該批已全數送出時仍顯示無效操作。
         return ordered > 0 && received > 0 && received < ordered && Number(state?.shippable || 0) > 0;
     });
+    let showPartialDelivery=hasPartialArrival || (items.length > 1 && states.some(state => Number(state?.shippable || 0) > 0));
+    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true){
+        try{
+            // Customer acknowledgement consumes shipped quota. Once all printed
+            // goods leave the warehouse, shippable is zero but arrival is pending.
+            const frozen=pendingV2DeliveryConfirmation(order.id);
+            const projected=globalThis.YushinFulfillment.projectOrderShipmentReturns({orderId:order.id,items:order.items,
+                shipments:order.warehouseShipmentRecords||[],deliveries:order.deliveryRecords||[],returns:order.returnRecords||[]});
+            showPartialDelivery=!!frozen||(!orderInventorySyncIncomplete(order)
+                &&(order.returnRecords||[]).every(row=>row.settlement==='CLOSE')&&projected.pendingDeliveryQty>0);
+        }catch(_){showPartialDelivery=false;}
+    }
     return {
         showPartialDelivery: normalizedOrderStatus(order) === 'normal'
-            && (hasPartialArrival || (items.length > 1 && states.some(state => Number(state?.shippable || 0) > 0))),
+            && showPartialDelivery,
         showReturn: netDelivered > 0
     };
 }
@@ -271,31 +298,68 @@ function dispatchActionHtml(order, normalizedItems = null, dispatchStateByItem =
     return (normalizedItems || normalizedOrderItems(order))
         .filter(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP')
         .map(item=>({item,state:dispatchStateByItem?.get(item) || itemDispatchState(order,item)}))
-        .filter(x=>x.state.pending>0)
-        .map(({item,state})=>`<button type="button" onclick="markOrderItemDispatchPrepared(${inlineJsValue(order.id)},${inlineJsValue(item.itemId)})" ${pendingDispatchOrderIds.has(order.id+'__'+item.itemId)?'disabled':''}>待打單：${escapeHtml(item.itemCode||item.itemName||item.itemId)} × ${state.pending}</button>`)
+        .filter(x=>x.state.pending>0||pendingDispatchPreparation(order.id,x.item.itemId))
+        .map(({item,state})=>`<button type="button" onclick="markOrderItemDispatchPrepared(${inlineJsValue(order.id)},${inlineJsValue(item.itemId)})" ${pendingDispatchOrderIds.has(order.id+'__'+item.itemId)?'disabled':''}>${pendingDispatchPreparation(order.id,item.itemId)?'確認打單結果':'待打單'}：${escapeHtml(item.itemCode||item.itemName||item.itemId)} × ${pendingDispatchPreparation(order.id,item.itemId)?.quantity||state.pending}</button>`)
         .join('');
 }
 
+// Frozen UI intents survive refresh and uncertain replies. Both pages use this
+// same entry; quantities are proposals from itemDispatchState, never a new formula.
+function dispatchPreparationStorageKey(orderId,itemId,uid=currentUser?.uid) {
+    return 'yushin-dispatch-attempt:'+JSON.stringify([uid,orderId,itemId]);
+}
+function pendingDispatchPreparation(orderId,itemId) {
+    try{return JSON.parse(sessionStorage.getItem(dispatchPreparationStorageKey(orderId,itemId))||'null');}
+    catch(_){return null;}
+}
 window.markOrderItemDispatchPrepared = async function(orderId,itemId) {
     if (!(currentUserRole === 'purchaser' || currentUserRole === 'admin')) return;
+    const actorUid=currentUser?.uid,actorRole=currentUserRole;
+    if(!actorUid)return;
+    const isCurrent=()=>currentUser?.uid===actorUid&&currentUserRole===actorRole;
     const key=orderId+'__'+itemId;
     if(pendingDispatchOrderIds.has(key))return;
     pendingDispatchOrderIds.add(key);
-    if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
-    else if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingDispatchOrders();
     try{
-        const saved=await prepareOrderDispatch(orderId,itemId);
+        const storageKey=dispatchPreparationStorageKey(orderId,itemId,actorUid);
+        let attempt=pendingDispatchPreparation(orderId,itemId);
+        if(!attempt){
+            const order=ordersCache.find(o=>o.id===orderId)||purchasingDispatchCache.find(o=>o.id===orderId);
+            const item=order&&normalizedOrderItems(order).find(i=>i.itemId===itemId);
+            if(!item)throw new Error('找不到品項，請更新訂單後重試。');
+            const state=itemDispatchState(order,item);
+            if(state.pending<=0)throw new Error('此品項目前沒有待打單數量。');
+            attempt={operationId:'dispatch-ui-'+db.collection('dispatchRecords').doc().id,
+                orderId,itemId,actorUid,actorRole,quantity:state.pending,expectedPreparedQty:state.prepared};
+            if(globalThis.YUSHIN_V2_DISPATCH_EMULATOR===true)attempt.syncAttemptId=order.inventoryReservationAttemptId;
+            // If persistence is unavailable, do not submit an unresumable operation.
+            sessionStorage.setItem(storageKey,JSON.stringify(attempt));
+        }
+        if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
+        else if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingDispatchOrders();
+        let saved;
+        try{saved=await prepareOrderDispatch(orderId,itemId,attempt);}
+        catch(err){
+            // This code is raised only after reading an absent receipt inside the
+            // transaction. Unknown network/permission outcomes retain the intent.
+            if(err.code==='dispatch-stale'&&isCurrent())sessionStorage.removeItem(storageKey);
+            throw err;
+        }
+        if(!isCurrent())return;
+        sessionStorage.removeItem(storageKey);
         const idx=ordersCache.findIndex(o=>o.id===orderId);
-        const savedOrder={id:orderId,...saved};
+        const savedOrder={...saved,id:orderId};
         if(idx>=0)ordersCache[idx]=savedOrder;
         syncOrderIntoPurchasingCaches(savedOrder, { render:false });
         writeAppDataCache('orders', ordersCache);
-    }catch(err){alert('標記已打單失敗：'+err.message + '\n請確認目前這筆資料及連線／權限，重試前先查詢作業結果；若持續失敗，請聯絡管理員。');}
+    }catch(err){if(isCurrent())alert('打單結果待確認：'+err.message+'\n請更新清單後重試；未確認的作業會沿用原識別碼與數量。');}
     finally{
         pendingDispatchOrderIds.delete(key);
-        if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
-        if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
-        if(currentDeliveryOrderId===orderId)renderDeliveryModal();
+        if(isCurrent()){
+            if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
+            if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
+            if(currentDeliveryOrderId===orderId)renderDeliveryModal();
+        }
     }
 };
 
@@ -451,6 +515,7 @@ function orderItemWorkCategory(order, item, lifecycleOverride = null, dispatchOv
         deliveredQty:dispatch.grossDelivered,
         isBilled:!!order.isBilled,
         fulfillmentType:item.fulfillmentType||order.fulfillmentType||'WAREHOUSE',
+        productType:item.productType||order.productType||'',
         reservedQty:item.reservedQty,
         shortageQty:item.shortageQty,
         supplyOrderedQty:item.supplyOrderedQty,
@@ -465,7 +530,20 @@ function orderItemWorkCategory(order, item, lifecycleOverride = null, dispatchOv
 function orderItemDisplayCategory(order, item, lifecycleOverride = null, dispatchOverride = null) {
     const dispatch = dispatchOverride || itemDispatchState(order, item);
     const category = orderItemWorkCategory(order, item, lifecycleOverride, dispatch);
+    // Presentation only: a uniform pure-Service index can describe every line.
+    // Never pass this persisted summary to orderWorkIndexFields or a writer.
+    if (category !== 'closed' && String(item.productType||'').trim().toUpperCase()==='SERVICE'
+        && order.inventoryReservationStatus==='completed'
+        && Array.isArray(order.items) && order.items.length>0
+        && order.items.some(row=>String(row?.productType||'').trim().toUpperCase()==='SERVICE')
+        && Array.isArray(order.workCategories) && order.workCategories.length===1
+        && order.items.every(row=>String(row?.productType||'').trim().toUpperCase()==='SERVICE'
+            ||orderItemWorkCategory(order,row,lifecycleOverride)===order.workCategories[0])) {
+        const saved=order.workCategories[0];
+        if ((saved==='billing' && !order.isBilled) || (saved==='complete' && order.isBilled===true)) return saved;
+    }
     if (category !== 'delivery') return category;
+    if (String(item.productType||'').trim().toUpperCase()==='SERVICE') return category;
     if ((item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP') return 'shipping';
     return dispatch.pending > 0 ? 'dispatch' : 'shipping';
 }
@@ -474,7 +552,8 @@ function orderItemDisplayCategories(order, item, lifecycleOverride = null, dispa
     const dispatch = dispatchOverride || itemDispatchState(order, item);
     const category=orderItemDisplayCategory(order,item,lifecycleOverride,dispatch);
     if(category!=='closed'&&['pending','failed'].includes(order?.inventoryReservationStatus))return [];
-    const warehouse=(item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP';
+    const warehouse=(item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'
+        &&String(item.productType||'').trim().toUpperCase()!=='SERVICE';
     // A single line can be partly printed and partly awaiting paperwork/arrival.
     // Keep both work queues visible, but never present unprinted quantities to sales.
     if(!warehouse || category==='closed' || category==='billing' || category==='complete')return [category];
@@ -490,7 +569,8 @@ function orderWorkCategories(order) {
     const items=normalizedOrderItems(order);
     const categories=[...new Set(items.flatMap(item=>{
         const category=orderItemWorkCategory(order,item);
-        const warehouse=(item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP';
+        const warehouse=(item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'
+            &&String(item.productType||'').trim().toUpperCase()!=='SERVICE';
         return warehouse && ['ordering','arrival','delivery'].includes(category) && itemDispatchState(order,item).pending>0
             ? [category,'dispatch'] : [category];
     }))];
@@ -499,6 +579,16 @@ function orderWorkCategories(order) {
 }
 
 function orderWorkIndexFields(order) {
+    const items=normalizedOrderItems(order);
+    const hasService=items.some(item=>String(item.productType||'').trim().toUpperCase()==='SERVICE');
+    // Registered Service case events are the authority for completion. A
+    // subsequent client-side edit must not reset their server-projected queue.
+    if (hasService&&Array.isArray(order.workCategories)
+        &&(order.workCategoryUpdatedAt||order.workCategories.some(category=>category==='billing'||category==='complete'))) {
+        if(orderLifecycleInfo(order).status!=='normal')
+            throw new Error('已有服務完成紀錄的訂單須由後端核對案件後取消或恢復。');
+        return {};
+    }
     const categories=orderWorkCategories(order);
     return {
         workCategories:categories,
@@ -512,6 +602,9 @@ function orderItemWorkAmount(order, item, category, totalQtyOverride = null, dis
     const explicitSales=[item.unitPrice,item.salesPrice].find(value=>value!==null&&value!==undefined&&String(value).trim()!==''&&Number.isFinite(Number(value)));
     const unitSales=explicitSales!==undefined?Number(explicitSales):(totalQty?salesAmount(order)/totalQty:(parseFloat(order.unitPrice)||0));
     const state=dispatchOverride || itemDispatchState(order,item);
+    if (String(item.productType||'').trim().toUpperCase()==='SERVICE'
+        && ['billing','complete'].includes(category)
+        && orderItemDisplayCategory(order,item,null,state)===category) return qty*unitSales;
     // Work-card amounts represent quantities in each action queue, not the full
     // order line repeated when the same line is partly printed or partly waiting.
     if(category==='dispatch')return Math.max(0,Number(state.pending||0))*unitSales;
@@ -573,6 +666,8 @@ async function loadOrderWorkQueue(force = false) {
             records.concat(finished).forEach(row=>merged.set(row.id,row));
             finishedIds.filter(id=>!finished.some(row=>row.id===id)).forEach(id=>merged.delete(id));
             ordersCache = [...merged.values()];
+            await window.loadV2WarehouseShipmentLocations?.(orderWorkQueueCache);
+            if (generation !== orderWorkQueueGeneration || uid !== currentUser?.uid || role !== currentUserRole) return;
             orderWorkQueueReady = true;
             orderWorkQueueLoadedAt = Date.now(); orderWorkQueueLoadedScope = scope;
         } catch (err) {
@@ -584,6 +679,7 @@ async function loadOrderWorkQueue(force = false) {
             if (generation === orderWorkQueueGeneration && uid === currentUser?.uid && role === currentUserRole) {
                 if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
                 if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
+                if (document.getElementById('inventory-system')?.classList.contains('active')) window.renderInventoryShipping?.();
             }
         }
     })();
@@ -1061,6 +1157,7 @@ function populatePurchaserOrderFilters() {
 
 
 window.renderOrdersList = function() {
+    window.renderServiceCaseEntry?.();
     const tbody = document.getElementById('ordersBody');
     const searchInput = document.getElementById('orderSearch');
     if (!tbody || !searchInput) return;
@@ -1151,7 +1248,7 @@ window.renderOrdersList = function() {
             <td class="order-date-cell" data-th="訂單日期">${escapeHtml(o.orderDate || '')}</td>
             <td class="order-customer-cell" data-th="客戶名稱"><div class="record-reference">客戶訂單${o.orderNo ? `・${escapeHtml(o.orderNo)}` : o.quoteNo ? `・來源估價單 ${escapeHtml(o.quoteNo)}` : ''}</div>${o.customerName ? `<button type="button" class="btn-small btn-secondary" onclick="showCustomerOrderHistory(${inlineJsValue(o.customerName)})">${escapeHtml(o.customerName)}</button>` : ''}</td>
             <td class="order-sales-cell" data-th="負責業務">${escapeHtml(stripPhoneSuffix(o.salesName))}</td>
-            <td data-th="產品資訊" class="order-product-cell">${orderItems.map((item,index)=>{const displayCategories=displayCategoriesByItem.get(item)||[];const primaryStatus=displayCategories[0]||'ordering';const itemStatus=['dispatch','shipping'].includes(activeOrderWorkFilter)&&displayCategories.includes(activeOrderWorkFilter)?activeOrderWorkFilter:primaryStatus;const itemStatusMap={ordering:'待採購',arrival:'待到貨',dispatch:'待打單',shipping:'已打單',billing:'待核銷',complete:'已完成',closed:lifecycle.label};const waiting=primaryStatus==='arrival'?waitingDaysFromDate(item.orderedAt):'';const state=dispatchStateByItem.get(item)||itemDispatchState(o,item);const parallelDispatch=primaryStatus!=='dispatch'&&state.pending>0;return `<div style="${index?'margin-top:5px;padding-top:5px;border-top:1px solid #eee;':''}"><strong>${escapeHtml(item.itemName || '－')}</strong><small>${escapeHtml(item.brand || '未分類')}${item.itemCode ? `・${escapeHtml(item.itemCode)}` : ''}・${activeOrderWorkFilter==='shipping'?`已打單 ${state.shippable}／訂單數量 ${Number(item.orderedQty||item.qty||0)}`:activeOrderWorkFilter==='dispatch'?`待打單 ${state.pending}／訂單數量 ${Number(item.orderedQty||item.qty||0)}`:Number(item.orderedQty||item.qty||0)}</small><small class="order-item-work-status">訂單狀態：<span class="order-progress-badge">${escapeHtml(((lifecycle.status==='normal'&&orderInventorySyncIncomplete(o)) ? (o.inventoryReservationStatus==='failed'?'庫存同步未完成':'庫存同步中…') : ((lifecycle.status==='normal'&&globalThis.YushinWarehouseLogistics?.shippingStatus(o,item,state))||itemStatusMap[itemStatus]||'待採購')))}</span>${waiting?`・已等 ${escapeHtml(waiting)}`:''}${parallelDispatch&&itemStatus!=='dispatch'?`・另有 ${escapeHtml(state.pending)} 待打單`:''}${state.shippable>0?`・已有 ${escapeHtml(state.shippable)} 可出貨`:''}</small></div>`}).join('')}</td>
+            <td data-th="產品資訊" class="order-product-cell">${orderItems.map((item,index)=>{const displayCategories=displayCategoriesByItem.get(item)||[];const primaryStatus=displayCategories[0]||'ordering';const itemStatus=['dispatch','shipping'].includes(activeOrderWorkFilter)&&displayCategories.includes(activeOrderWorkFilter)?activeOrderWorkFilter:primaryStatus;const itemStatusMap={ordering:'待採購',arrival:'待到貨',dispatch:'待打單',shipping:'已打單',billing:'待核銷',complete:'已完成',closed:lifecycle.label};const waiting=primaryStatus==='arrival'?waitingDaysFromDate(item.orderedAt):'';const state=dispatchStateByItem.get(item)||itemDispatchState(o,item);const parallelDispatch=primaryStatus!=='dispatch'&&state.pending>0;return `<div style="${index?'margin-top:5px;padding-top:5px;border-top:1px solid #eee;':''}"><strong>${escapeHtml(item.itemName || '－')}</strong><small>${escapeHtml(item.brand || '未分類')}${item.itemCode ? `・${escapeHtml(item.itemCode)}` : ''}・${activeOrderWorkFilter==='shipping'?`已打單 ${state.shippable}／訂單數量 ${Number(item.orderedQty||item.qty||0)}`:activeOrderWorkFilter==='dispatch'?`待打單 ${state.pending}／訂單數量 ${Number(item.orderedQty||item.qty||0)}`:Number(item.orderedQty||item.qty||0)}</small><small class="order-item-work-status">訂單狀態：<span class="order-progress-badge">${escapeHtml(((lifecycle.status==='normal'&&orderInventorySyncIncomplete(o)) ? (o.inventoryReservationStatus==='failed'?'庫存同步未完成':'庫存同步中…') : ((String(item.productType||'').trim().toUpperCase()==='SERVICE'&&lifecycle.status==='normal'&&primaryStatus==='delivery'?'待服務處理':(lifecycle.status==='normal'&&globalThis.YushinWarehouseLogistics?.shippingStatus(o,item,state)))||itemStatusMap[itemStatus]||'待採購')))}</span>${waiting?`・已等 ${escapeHtml(waiting)}`:''}${parallelDispatch&&itemStatus!=='dispatch'?`・另有 ${escapeHtml(state.pending)} 待打單`:''}${state.shippable>0?`・已有 ${escapeHtml(state.shippable)} 可出貨`:''}</small>${window.serviceCaseVerifiedItemHint?.(o.id,item)||''}</div>`}).join('')}</td>
             <td data-th="訂單總額" class="order-money-cell"><strong>NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice ?? '').replace(/,/g, '')) || 0).toLocaleString())}</strong><small>${o.isBilled ? '已核銷' : '未核銷'}</small></td>
             <td class="order-details-cell">
                 <div class="order-text-summary">${escapeHtml([o.transactionType ? `交易：${o.transactionType}` : '', o.invoiceTitle || '', o.isBilled && orderBillingDate(o) ? `核銷日期：${orderBillingDate(o)}` : '', o.remarks || ''].filter(Boolean).join('・'))}</div>
@@ -1169,7 +1266,7 @@ window.renderOrdersList = function() {
                     <option value="扣" ${o.transactionType === '扣' ? 'selected' : ''}>扣</option>
                 </select>
                 ${o.transactionType === '直' ? `<input type="text" aria-label="發票抬頭" placeholder="發票抬頭" value="${escapeAttr(o.invoiceTitle || '')}" onchange="updateOrderField('${o.id}','invoiceTitle',this.value)">` : ''}
-                ${o.isBilled ? `<label class="order-invoice-date-label">核銷日期<input type="date" aria-label="核銷日期" value="${escapeAttr(orderBillingDate(o))}" onchange="updateOrderBillingDate('${o.id}',this.value)"></label>` : ''}
+                ${o.isBilled ? `<label class="order-invoice-date-label">核銷日期<input type="date" aria-label="核銷日期" ${allOrderItems.some(item=>String(item.productType||'').trim().toUpperCase()==='SERVICE')&&(!window.serviceBillingDateEnabled?.(o)||billingPending)?'disabled title="目前無法修改服務核銷日期"':''} value="${escapeAttr(orderBillingDate(o))}" onchange="updateOrderBillingDate('${o.id}',this.value)"></label>` : ''}
             </div>
             <label class="order-remarks-editor">備註<input type="text" value="${escapeAttr(o.remarks || '')}" placeholder="備註" onchange="updateOrderField('${o.id}','remarks',this.value)"></label>
                     </div>
@@ -1178,6 +1275,7 @@ window.renderOrdersList = function() {
             <td class="no-print" data-th="操作">
                 ${orderInventorySyncStatusHtml(o)}
                 <div class="order-compact-actions">
+                    ${window.serviceCaseActionHtml?.(o)||''}
                     ${selfOrderActionHtml(o, allOrderItems, dispatchStateByItem)}
                     ${directShipReceiptActionHtml(o, allOrderItems)}
                     

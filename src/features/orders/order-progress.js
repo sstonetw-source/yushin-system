@@ -73,7 +73,10 @@ window.closeOrderLifecycleForm = function() {
 window.openOrderLifecycleForm = function() {
     const order = ordersCache.find(o => o.id === currentLifecycleOrderId);
     if (!order || !canManageOrderLifecycleCapability() || !canEditPage('orders.list')) return;
-    if (normalizedOrderStatus(order) === 'normal' && deliveryProgressInfo(order).remaining <= 0) return;
+    if (globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true){
+        try{if(!pendingV2OrderLifecycle(order.id)&&normalizedOrderStatus(order)==='normal'&&deliveryProgressInfo(order).remaining<=0)return;}
+        catch(err){alert(err.message);return;}
+    }else if (normalizedOrderStatus(order) === 'normal' && deliveryProgressInfo(order).remaining <= 0) return;
     selectOrderProgressTab('returns');
     orderLifecycleFormOpen = true;
     document.getElementById('orderLifecycleStatus').value = normalizedOrderStatus(order) === 'normal' ? 'cancelled' : 'normal';

@@ -44,6 +44,157 @@ function setup({retry=false,fail=false,changeAtRead=false,stock=false}={}) {
     vm.runInContext(validator+service,c);
     return {c,records,writes,po};
 }
+function emulatorSetup(){
+ const x=setup(),calls=[];
+ Object.assign(x.po,{company:'yushin',supplierName:'Vendor',supplierSnapshot:{supplierId:'',supplierName:'Vendor',purchaseHeaderName:'Vendor',email:'',leadTimeDays:0}});
+ x.po.items[0].fulfillmentType='WAREHOUSE';
+ const options={projectId:'demo-yushin'};
+ const auth={app:{options},emulatorConfig:{host:'127.0.0.1',port:9099},currentUser:{uid:'buyer'}};
+ const functions={app:{options},useEmulator:(host,port)=>calls.push({emulator:[host,port]}),
+  httpsCallable:name=>async request=>{calls.push({name,request});
+   return {data:{status:'committed',poNo:'PO1',supplyOrderIds:['PO1-0']}};}};
+ x.records.set('purchaseOrders/PO1',{...x.po,buyerName:'Server Buyer'});
+ x.records.set('supplyOrders/PO1-0',{purchaseDocumentId:'PO1',qty:1,unitCost:0});
+ x.c.YUSHIN_FORMAL_PURCHASE_EMULATOR=true;x.c.APP_ENVIRONMENT='emulator';x.c.location={hostname:'localhost'};
+ x.c.firebase={auth:()=>auth,functions:()=>functions,app:()=>({options,functions:()=>functions})};
+ x.c.db={collection:name=>({doc:id=>({get:async()=>({exists:x.records.has(name+'/'+id),data:()=>structuredClone(x.records.get(name+'/'+id))})})})};
+ return {...x,auth,functions,calls};
+}
+function previewSetup(){
+ const x=emulatorSetup(),options={projectId:'preview-20135'};
+ x.c.YUSHIN_FORMAL_PURCHASE_EMULATOR=false;
+ x.c.YUSHIN_PREVIEW_FORMAL_PURCHASE=true;
+ x.c.APP_ENVIRONMENT='preview';x.c.location.hostname='preview-20135.web.app';
+ x.auth.app.options=options;x.auth.emulatorConfig=null;x.functions.app.options=options;
+ x.c.firebase.app=()=>({options,functions:()=>x.functions});
+ return x;
+}
+function productionSetup(){
+ const x=previewSetup(),options={projectId:'yu-shing-company'};
+ x.c.YUSHIN_PREVIEW_FORMAL_PURCHASE=false;
+ x.c.YUSHIN_PRODUCTION_FORMAL_PURCHASE=true;
+ x.c.APP_ENVIRONMENT='production';x.c.location.hostname='yu-shing-company.web.app';
+ x.auth.app.options=options;x.auth.emulatorConfig=null;
+ x.functions.app.options=options;
+ x.c.firebase.app=()=>({options,functions:()=>x.functions});
+ return x;
+}
+test('production PO backend opt-in uses Callable and verified records, not legacy client writes',async()=>{
+ const x=productionSetup(),result=await x.c.commitFormalPurchaseOrder(x.po);
+ assert.equal(result.poRecord.buyerName,'Server Buyer');
+ assert.equal(result.committedSupplyOrders.length,1);
+ assert.equal(x.writes.length,0);
+ assert.equal(x.calls.filter(call=>call.name==='commitV2FormalPurchase').length,1);
+ assert.equal(x.calls.filter(call=>call.emulator).length,0);
+});
+test('GitHub Pages repository path uses guarded production Callable without client writes',async()=>{
+ for(const pathname of ['/yushin-system','/yushin-system/','/yushin-system/index.html']){
+  const x=productionSetup();Object.assign(x.c.location,{hostname:'sstonetw-source.github.io',pathname});
+  await x.c.commitFormalPurchaseOrder(x.po);
+  assert.equal(x.calls.filter(call=>call.name==='commitV2FormalPurchase').length,1);
+  assert.equal(x.writes.length,0);
+ }
+});
+test('GitHub Pages rejects other repositories and lookalike hosts before any purchase write',async()=>{
+ for(const location of [
+  {hostname:'sstonetw-source.github.io',pathname:'/'},
+  {hostname:'sstonetw-source.github.io',pathname:'/other/'},
+  {hostname:'sstonetw-source.github.io',pathname:'/yushin-system-copy/'},
+  {hostname:'sstonetw-source.github.io.evil.example',pathname:'/yushin-system/'},
+  {hostname:'another.github.io',pathname:'/yushin-system/'}]){
+  const x=productionSetup();Object.assign(x.c.location,location);
+  await assert.rejects(x.c.commitFormalPurchaseOrder(x.po));
+  assert.equal(x.calls.length,0);assert.equal(x.writes.length,0);
+ }
+});
+test('production opt-in refuses unexpected hostname project emulator login change or bad response without fallback',async()=>{
+ for(const mutate of [x=>x.c.location.hostname='example.com',
+  x=>x.auth.app.options.projectId='preview-20135',
+  x=>x.auth.emulatorConfig={host:'127.0.0.1',port:9099},
+  x=>x.auth.currentUser.uid='different']){
+  const x=productionSetup();mutate(x);
+  await assert.rejects(x.c.commitFormalPurchaseOrder(x.po));
+  assert.equal(x.writes.length,0);
+  assert.equal(x.calls.some(call=>call.name),false);
+ }
+ const failed=productionSetup();failed.functions.httpsCallable=()=>async()=>{throw Error('lost reply');};
+ await assert.rejects(failed.c.commitFormalPurchaseOrder(failed.po),/lost reply/);
+ assert.equal(failed.writes.length,0);
+ const unsupported=productionSetup();unsupported.po.items[0].sourceType='STOCK_REPLENISHMENT';
+ await assert.rejects(unsupported.c.commitFormalPurchaseOrder(unsupported.po),/只支援/);
+ assert.equal(unsupported.writes.length,0);
+});
+
+test('Preview without backend opt-in fails closed instead of using legacy purchase transaction',async()=>{
+ for(const flag of [false,undefined]){
+  const x=previewSetup();x.c.YUSHIN_PREVIEW_FORMAL_PURCHASE=flag;
+  await assert.rejects(x.c.commitFormalPurchaseOrder(x.po),/Preview 採購後端尚未啟用/);
+  assert.equal(x.writes.length,0);
+  assert.equal(x.calls.some(call=>call.name==='commitV2FormalPurchase'),false);
+ }
+});
+test('preview original confirm action uses the same backend, re-reads records and never uses legacy writer',async()=>{
+ const x=previewSetup(),result=await x.c.commitFormalPurchaseOrder(x.po);
+ assert.equal(result.poRecord.buyerName,'Server Buyer');
+ assert.equal(result.committedSupplyOrders.length,1);
+ assert.equal(x.writes.length,0);
+ assert.equal(x.calls.filter(call=>call.name==='commitV2FormalPurchase').length,1);
+ assert.equal(x.calls.filter(call=>call.emulator).length,0,'Preview must never connect to local Emulator');
+});
+test('preview lazily loads missing Functions Compat SDK before submitting and remains fail-closed on load error',async()=>{
+ const x=previewSetup(),scripts=[];
+ x.c.firebase.functions=undefined;
+ x.c.document={createElement:()=>({}),head:{appendChild:script=>{
+  scripts.push(script.src);x.c.firebase.functions=()=>x.functions;script.onload();
+ }}};
+ await x.c.commitFormalPurchaseOrder(x.po);
+ assert.equal(scripts.length,1);
+ assert.match(scripts[0],/firebase-functions-compat\.js$/);
+ assert.equal(x.writes.length,0);
+ const failed=previewSetup();failed.c.firebase.functions=undefined;
+ failed.c.document={createElement:()=>({}),head:{appendChild:script=>script.onerror()}};
+ await assert.rejects(failed.c.commitFormalPurchaseOrder(failed.po),/無法載入 Firebase Functions/);
+ assert.equal(failed.writes.length,0);
+});
+test('preview purchase rejects wrong host, project, Auth emulator or changed login without legacy fallback',async()=>{
+ for(const mutate of [x=>x.c.location.hostname='yu-shing-company.web.app',
+  x=>x.c.APP_ENVIRONMENT='production',x=>x.auth.app.options.projectId='yu-shing-company',
+  x=>x.auth.emulatorConfig={host:'127.0.0.1',port:9099},x=>x.auth.currentUser.uid='other']){
+  const x=previewSetup();mutate(x);
+  await assert.rejects(x.c.commitFormalPurchaseOrder(x.po));
+  assert.equal(x.writes.length,0);
+  assert.equal(x.calls.some(call=>call.name),false);
+ }
+});
+test('unknown Preview Callable response never retries through old Firestore writer',async()=>{
+ const x=previewSetup();x.functions.httpsCallable=()=>async()=>{throw Error('lost response');};
+ await assert.rejects(x.c.commitFormalPurchaseOrder(x.po),/lost response/);
+ assert.equal(x.writes.length,0);
+});
+test('formal PO original Service calls scoped backend and re-reads authoritative records without legacy writes',async()=>{
+ const x=emulatorSetup(),result=await x.c.commitFormalPurchaseOrder(x.po);
+ assert.equal(result.poRecord.buyerName,'Server Buyer');assert.equal(result.committedSourceOrders.length,1);
+ assert.equal(result.committedSupplyOrders.length,1);assert.equal(x.writes.length,0);
+ const request=x.calls.find(row=>row.name).request;
+ assert.equal(request.actorUid,undefined);assert.equal(request.actorRole,undefined);
+ assert.equal(request.document.company,'yushin');assert.equal(request.items[0].unitCost,0);
+});
+test('formal backend gate refuses remote project, wrong Auth or switched real account without fallback',async()=>{
+ for(const mutate of [x=>x.c.APP_ENVIRONMENT='production',x=>x.c.location.hostname='example.com',
+  x=>x.auth.app.options.projectId='production',x=>x.auth.emulatorConfig.port=1234,x=>x.auth.currentUser.uid='other']){
+  const x=emulatorSetup();mutate(x);await assert.rejects(x.c.commitFormalPurchaseOrder(x.po));
+  assert.equal(x.writes.length,0);assert.equal(x.calls.some(row=>row.name),false);
+ }
+});
+test('formal backend unknown reply and account changes never fall back to client transaction',async()=>{
+ for(const change of [false,true]){
+  const x=emulatorSetup();x.functions.httpsCallable=()=>async()=>{
+   if(change){x.auth.currentUser.uid='other';return {data:{status:'committed',poNo:'PO1',supplyOrderIds:['PO1-0']}};}
+   throw Error('reply lost');
+  };
+  await assert.rejects(x.c.commitFormalPurchaseOrder(x.po));assert.equal(x.writes.length,0);
+ }
+});
 test('formal service accumulates split lines into one demand and source order atomically',async()=>{
     const x=setup({retry:true});x.po.items.push({...x.po.items[0],qty:2});
     const result=await x.c.commitFormalPurchaseOrder(x.po);
@@ -199,4 +350,135 @@ test('formal boundary rejects invalid cost quantity and missing permission',asyn
     }
     const x=setup();x.c.canCreatePurchaseOrderCapability=()=>false;
     await assert.rejects(x.c.commitFormalPurchaseOrder(x.po),/無採購作業權限/);
+});
+
+function recoverySetup() {
+ const x=emulatorSetup(),storage=new Map(),incoming=new Set(),feedback=[];
+ Object.assign(x.c,{
+  sessionStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},
+  document:{getElementById:()=>null},poSaveInProgress:false,poEditingId:null,poIncomingSyncPending:true,
+  poListCache:[],supplyReceivingCache:[],invalidateProcurementDemandQueue:()=>{},
+  syncCommittedPurchaseOrderSources:()=>{},invalidateWarehouseStockCache:()=>{},
+  registerPurchaseIncoming:async id=>incoming.add(id),renderPurchasingView:()=>{},
+  showActionFeedback:(message,type)=>feedback.push({message,type}),window:{}
+ });
+ vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/features/purchasing/formal-purchase-recovery.js'),'utf8'),x.c);
+ return {...x,storage,incoming,feedback};
+}
+test('formal pending checkpoint freezes original intent across reload and resumes the same Service without another writer',async()=>{
+ const x=recoverySetup();x.c.rememberFormalPurchase(x.po,'buyer','purchaser');
+ const raw=[...x.storage.values()][0];x.po.items[0].qty=99;
+ assert.equal(x.c.pendingFormalPurchase().poRecord.items[0].qty,1);
+ // Re-evaluate the browser feature as a new page using the same session data.
+ const reloaded=recoverySetup();for(const entry of x.storage)reloaded.storage.set(...entry);
+ await reloaded.c.recoverFormalPurchase();
+ assert.equal(reloaded.calls.find(row=>row.name).request.items[0].qty,1);
+ assert.equal(reloaded.storage.size,0);assert.equal(reloaded.incoming.size,1);
+ assert.equal(reloaded.c.poListCache[0].buyerName,'Server Buyer');
+ assert.equal(reloaded.c.supplyReceivingCache.length,1);assert.equal(reloaded.writes.length,0);
+ await reloaded.c.recoverFormalPurchase();assert.equal(reloaded.calls.filter(row=>row.name).length,1);
+ assert.ok(raw.includes('PO1'));
+});
+test('formal unknown reply and incoming failure retain the exact checkpoint and block a new intent until recovered',async()=>{
+ for(const stage of ['callable','incoming']){
+  const x=recoverySetup();x.c.rememberFormalPurchase(x.po,'buyer','purchaser');const before=[...x.storage.values()][0];
+  const transport=x.functions.httpsCallable;
+  if(stage==='callable')x.functions.httpsCallable=()=>async()=>{throw Error('reply lost');};
+  else x.c.registerPurchaseIncoming=async()=>{throw Error('incoming reply lost');};
+  await x.c.recoverFormalPurchase();assert.equal([...x.storage.values()][0],before);
+  assert.throws(()=>x.c.rememberFormalPurchase({...x.po,poNo:'OTHER'},'buyer','purchaser'),/前次/);
+  x.functions.httpsCallable=transport;x.c.registerPurchaseIncoming=async id=>x.incoming.add(id);
+  await x.c.recoverFormalPurchase();assert.equal(x.storage.size,0);assert.equal(x.incoming.size,1);
+  assert.equal(x.c.poListCache.length,1);assert.equal(x.c.supplyReceivingCache.length,1);
+ }
+});
+test('formal recovery serializes clicks and account switching cannot clear the original checkpoint or hydrate another session',async()=>{
+ const x=recoverySetup();x.c.rememberFormalPurchase(x.po,'buyer','purchaser');const original=[...x.storage.values()][0];
+ let finish;x.functions.httpsCallable=()=>()=>new Promise(resolve=>{finish=resolve;});
+ const first=x.c.recoverFormalPurchase();await x.c.recoverFormalPurchase();
+ x.c.currentUser={uid:'other'};x.auth.currentUser={uid:'other'};
+ finish({data:{status:'committed',poNo:'PO1',supplyOrderIds:['PO1-0']}});await first;
+ assert.equal([...x.storage.values()][0],original);assert.equal(x.c.poListCache.length,0);
+ assert.equal(x.incoming.size,0);assert.equal(x.feedback.length,0);
+ x.c.currentUser={uid:'buyer'};x.auth.currentUser={uid:'buyer'};
+ assert.equal(x.c.pendingFormalPurchase().poRecord.poNo,'PO1');
+});
+test('formal corrupt checkpoint, changed role, unsupported input or unavailable storage fail closed before submission',async()=>{
+ const x=recoverySetup();x.c.rememberFormalPurchase(x.po,'buyer','purchaser');
+ x.c.currentUserRole='admin';assert.throws(()=>x.c.pendingFormalPurchase(),/原帳號及角色/);
+ await x.c.recoverFormalPurchase();assert.equal(x.calls.filter(row=>row.name).length,0);assert.equal(x.storage.size,1);
+ x.c.currentUserRole='purchaser';x.storage.set(x.c.formalPurchasePendingKey(),'{broken');
+ assert.throws(()=>x.c.pendingFormalPurchase(),/前次採購/);await x.c.recoverFormalPurchase();
+ assert.equal(x.calls.filter(row=>row.name).length,0);assert.equal(x.storage.size,1);
+ x.storage.clear();
+ assert.throws(()=>x.c.rememberFormalPurchase({...x.po,items:[{...x.po.items[0],fulfillmentType:'SERVICE'}]},'buyer','purchaser'),/1–5/);
+ assert.equal(x.storage.size,0);
+ x.c.sessionStorage.setItem=()=>{throw Error('storage disabled');};
+ assert.throws(()=>x.c.rememberFormalPurchase(x.po,'buyer','purchaser'),/storage disabled/);
+ assert.equal(x.calls.filter(row=>row.name).length,0);
+});
+
+test('document preparation persists only PO snapshot and replays without supply or demand writes',async()=>{
+ const x=setup(),before=structuredClone([...x.records]);
+ const doc=await x.c.saveFormalPurchaseDocument(x.po);
+ assert.equal(doc.status,'DRAFT');assert.equal(doc.documentOnly,true);
+ assert.equal(doc.createdByUid,'buyer');assert.equal(doc.supplyOrderIds,undefined);
+ assert.deepEqual(x.writes,['purchaseOrders/PO1']);
+ assert.deepEqual([...x.records].filter(([key])=>key!=='purchaseOrders/PO1'),before);
+ await x.c.saveFormalPurchaseDocument(x.po);assert.equal(x.writes.length,1);
+ await assert.rejects(x.c.saveFormalPurchaseDocument({...x.po,items:[{...x.po.items[0],qty:2}]}),/不同內容/);
+});
+test('explicit confirmation upgrades original document through existing trade Service once',async()=>{
+ const x=setup();const draft=await x.c.saveFormalPurchaseDocument(x.po);
+ const result=await x.c.commitFormalPurchaseOrder(draft);
+ assert.equal(result.poRecord.status,'ORDERED');assert.equal(result.poRecord.documentOnly,false);
+ assert.equal(result.committedSourceOrders[0].items[0].supplyOrderedQty,1);
+ assert.equal(result.committedSupplyOrders.length,1);
+ const writes=x.writes.length,before=structuredClone([...x.records]);
+ await x.c.commitFormalPurchaseOrder(draft);
+ assert.equal(x.writes.length,writes);assert.deepEqual([...x.records],before);
+ await assert.rejects(x.c.saveFormalPurchaseDocument(x.po),/已確認採購/);
+});
+test('changed source demand or changed document intent rejects confirmation without trade writes',async()=>{
+ for(const change of ['demand','document']){
+  const x=setup();const draft=await x.c.saveFormalPurchaseDocument(x.po);
+  if(change==='demand')x.records.get('orders/o').items[0].supplyOrderedQty=3;
+  else draft.items[0].qty=2;
+  const before=structuredClone([...x.records]),count=x.writes.length;
+  await assert.rejects(x.c.commitFormalPurchaseOrder(draft));
+  assert.equal(x.writes.length,count);assert.deepEqual([...x.records],before);
+ }
+});
+
+test('unconfirmed documents allow versioned edits and reject stale concurrent changes',async()=>{
+ const x=setup();const original=await x.c.saveFormalPurchaseDocument(x.po);
+ assert.equal(original.documentRevision,1);
+ const changed={...x.po,items:[{...x.po.items[0],qty:2}]};
+ const saved=await x.c.saveFormalPurchaseDocument(changed,{expectedRevision:1});
+ assert.equal(saved.documentRevision,2);assert.equal(saved.items[0].qty,2);
+ assert.equal((await x.c.saveFormalPurchaseDocument(changed,{expectedRevision:1})).documentRevision,2,'unknown reply replay returns original revision');
+ await assert.rejects(x.c.saveFormalPurchaseDocument({...x.po,items:[{...x.po.items[0],qty:3}]},{expectedRevision:1}),/重新載入/);
+ const before=structuredClone([...x.records]);
+ await assert.rejects(x.c.commitFormalPurchaseOrder(original),/不同/);assert.deepEqual([...x.records],before);
+ assert.equal([...x.records.keys()].some(key=>key.startsWith('supplyOrders/')),false);
+});
+
+test('formal PO recovery refreshes the visible demand queue once after committing, but not hidden views',async()=>{
+  for(const view of ['ordering','history']){
+    const x=recoverySetup(),refreshes=[];
+    x.c.document={getElementById:id=>id==='purchasing-system'?{classList:{contains:name=>name==='active'}}:null};
+    x.c.purchasingView=view;
+    x.c.purchasingViewLoaded=new Set();
+    x.c.procurementDemandLoaded=false;
+    x.c.pendingPurchaseError='';
+    x.c.loadPendingPurchaseOrders=async reset=>{refreshes.push(reset);x.c.procurementDemandLoaded=true;};
+    x.c.rememberFormalPurchase(x.po,'buyer','purchaser');
+    await x.c.recoverFormalPurchase();
+    assert.deepEqual(refreshes,view==='ordering'?[true]:[]);
+    assert.equal(x.c.purchasingViewLoaded.has('ordering'),view==='ordering');
+    assert.equal(x.storage.size,0);
+    await x.c.recoverFormalPurchase();
+    assert.equal(refreshes.length,view==='ordering'?1:0);
+    assert.equal(x.incoming.size,1);
+  }
 });

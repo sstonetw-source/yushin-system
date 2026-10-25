@@ -25,7 +25,7 @@ test('copying an order retains customer-facing product settings but creates a ne
 });
 const source=fs.readFileSync('app.js','utf8');
 function validationFixture(current=item,drafts=[]) {
- const nodes={orderOwnerUid:{value:'sales'},orderCustomer:{value:'台大',focus(){}},orderItemCode:{focus(){},scrollIntoView(){}},orderRecipientDetails:{open:false}};
+ const nodes={orderOwnerUid:{value:'sales'},orderCustomer:{value:'台大',focus(){}},orderItemCode:{focus(){},scrollIntoView(){}},orderRecipientDetails:{open:false},orderTradeDetails:{open:false},orderTransactionType:{value:'借',focus(){}}};
  const alerts=[];
  const c=vm.createContext({window:{orderShippingInstructions:()=>({mode:'PICKUP'})},document:{getElementById:id=>nodes[id]},newOrderSaveInProgress:false,
   currentOrderModalItem:()=>({...current}),newOrderDraftItems:drafts,YushinOrderEntry:core,YushinWarehouseLogistics:logistics,
@@ -53,6 +53,48 @@ test('mixed order retains delivery instructions for every line and blocks a miss
  assert.equal(result.items[0].deliveryPlan.address,'台北');assert.equal(result.items[1].deliveryPlan.mode,'PICKUP');
  f=validationFixture(item,[{...customer,deliveryPlan:{mode:'CUSTOMER_SHIP',contact:'客戶'}}]);assert.equal(f.c.window.saveNewOrder(),undefined);
 });
+test('Service-only orders do not demand a warehouse or fake physical delivery instructions',()=>{
+ const service={...item,productType:'Service',productId:'BIOPLEX',
+   warehouseId:'',deliveryPlan:{mode:'CUSTOMER_SHIP'}};
+ const f=validationFixture(service);
+ const result=f.c.window.saveNewOrder();
+ assert.equal(f.alerts.length,0);
+ assert.equal(result.items[0].warehouseId,'');
+ assert.equal(Object.keys(result.items[0].deliveryPlan).length,0);
+ assert.equal(Object.keys(result.shippingInstructions).length,0);
+});
+
+test('Goods plus Service validates only real shipment; rejects direct-ship Service',()=>{
+ const service={...item,itemId:'SERVICE',productId:'BIOPLEX',
+   productType:'Service',warehouseId:'',deliveryPlan:{mode:'CUSTOMER_SHIP'}};
+ let f=validationFixture({...item,itemId:'GOODS',warehouseId:'MAIN',deliveryPlan:{mode:'PICKUP'}},[service]);
+ const result=f.c.window.saveNewOrder();
+ assert.equal(f.alerts.length,0);
+ assert.equal(result.items[0].productType,'Service');
+ assert.equal(result.items[0].warehouseId,'');
+ assert.equal(result.items[1].warehouseId,'MAIN');
+ assert.equal(result.shippingInstructions.mode,'PICKUP');
+ f=validationFixture({...service,fulfillmentType:'DIRECT_SHIP'});
+ assert.equal(f.c.window.saveNewOrder(),undefined);
+ assert.match(f.alerts[0],/服務型/);
+});
+
+test('adding a Service draft skips physical delivery fields; Goods and direct-ship safeguards remain',()=>{
+ const start=source.indexOf('window.addCurrentOrderItemToDraft=function()'),end=source.indexOf('window.openOrderModal',start);
+ for(const productType of ['Service','Goods'])for(const fulfillmentType of ['WAREHOUSE','DIRECT_SHIP']){
+  const row={...item,productType,fulfillmentType,deliveryPlan:{mode:'CUSTOMER_SHIP'},warehouseId:'STALE'};
+  const nodes={},drafts=[],alerts=[];
+  const c=vm.createContext({window:{},document:{getElementById:id=>nodes[id]||(nodes[id]={dataset:{},value:''})},
+   currentOrderModalItem:()=>({...row}),newOrderDraftItems:drafts,YushinOrderEntry:core,YushinWarehouseLogistics:logistics,
+   orderItemProductStatus:()=> 'matched',alert:message=>alerts.push(message),renderNewOrderDraftItems(){},
+   clearQuickProductButton(){},clearProductMatchChoices(){}});
+  vm.runInContext(source.slice(start,end),c);c.window.addCurrentOrderItemToDraft();
+  if(productType==='Service'&&fulfillmentType==='WAREHOUSE'){
+   assert.equal(drafts.length,1);assert.equal(drafts[0].warehouseId,'');assert.equal(Object.keys(drafts[0].deliveryPlan).length,0);assert.deepEqual(alerts,[]);
+  }else{assert.equal(drafts.length,0);assert.equal(alerts.length,1);}
+ }
+});
+
 test('normalized order fields retain missing price as null before save validation',()=>{
  const c=vm.createContext({findPriceItemForOrder:()=>null,normalizeHistoryItemCode:x=>x,resolveBrandName:x=>x,brandIdForName:x=>x});
  const a=source.indexOf('function normalizeNewOrderItem('),b=source.indexOf('function currentOrderModalItem()',a);vm.runInContext(source.slice(a,b),c);
@@ -68,21 +110,33 @@ test('purchaser can assist with pending entry but cannot confirm a salesperson s
  f.c.currentUserRole='purchaser';assert.equal(f.c.window.saveNewOrder(),undefined);assert.match(f.alerts[0],/負責業務確認/);
 });
 
-test('trade information may be empty at creation but printing requires type and invoice title when applicable',()=>{
+test('trade type is required at creation while invoice title remains required before printing',()=>{
  assert.equal(core.validateTrade({}).valid,false);
  assert.equal(core.validateTrade({transactionType:'直'}).valid,false);
  assert.equal(core.validateTrade({transactionType:'直',invoiceTitle:'台大'}).valid,true);
  for(const transactionType of ['借','扣'])assert.equal(core.validateTrade({transactionType}).valid,true);
 });
 
+test('new order form refuses missing or invalid transaction type and opens the required section',()=>{
+ for(const type of ['', '之後確認', '其他']){
+  const f=validationFixture();f.nodes.orderTransactionType.value=type;
+  assert.equal(f.c.window.saveNewOrder(),undefined);assert.equal(f.nodes.orderTradeDetails.open,true);
+  assert.match(f.alerts[0],/交易方式/);
+ }
+ for(const transactionType of ['直','借','扣']){
+  const f=validationFixture();f.nodes.orderTransactionType.value=transactionType;
+  assert.ok(f.c.window.saveNewOrder());
+  assert.equal(core.validateTrade({transactionType},{requireInvoiceTitle:false}).valid,true);
+ }
+});
 test('printing validates current transaction information before writing a dispatch record',async()=>{
  for(const trade of [{},{transactionType:'直'},{transactionType:'直',invoiceTitle:'台大'},{transactionType:'借'}]){
-  const order={...trade,items:[{itemId:'I',qty:1}]};const writes=[],alerts=[];
-  const c=vm.createContext({window:{},currentUser:{uid:'buyer'},currentUserRole:'purchaser',pendingDispatchOrderIds:new Set(),YushinOrderEntry:core,document:{getElementById:()=>null},ordersCache:[],currentDeliveryOrderId:null,
-   db:{collection:()=>({doc:()=>({})})},runRoleTransaction:async fn=>fn({get:async()=>({exists:true,data:()=>order}),set:(...x)=>writes.push(x),update:(...x)=>writes.push(x)}),
+  const order={id:'O',...trade,items:[{itemId:'I',qty:1}]};const writes=[],alerts=[];const storage=new Map();
+  const c=vm.createContext({window:{},currentUser:{uid:'buyer'},currentUserRole:'purchaser',pendingDispatchOrderIds:new Set(),YushinOrderEntry:core,document:{getElementById:()=>null},ordersCache:[order],purchasingDispatchCache:[],currentDeliveryOrderId:null,sessionStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},
+   db:{collection:n=>({doc:id=>({id:id||'AAAAAAAAAAAAAAAAAAAA',path:n+'/'+id})})},runRoleTransaction:async fn=>fn({get:async r=>({exists:r.path.startsWith('orders/'),data:()=>order}),set:(...x)=>writes.push(x),update:(...x)=>writes.push(x)}),
    normalizedOrderStatus:()=> 'normal',normalizedOrderItems:o=>o.items,itemDispatchState:()=>({pending:1,prepared:0}),deliveryActor:()=> 'Buyer',orderWorkIndexFields:()=>({}),syncOrderIntoPurchasingCaches(){},writeAppDataCache(){},alert:x=>alerts.push(x)});
   vm.runInContext(fs.readFileSync('src/services/dispatch-preparation.js','utf8'),c);
-  const a=source.indexOf('window.markOrderItemDispatchPrepared = async function'),b=source.indexOf('function canBusinessSelfOrder(',a);vm.runInContext(source.slice(a,b),c);
+  const a=source.indexOf('function dispatchPreparationStorageKey('),b=source.indexOf('function canBusinessSelfOrder(',a);vm.runInContext(source.slice(a,b),c);
   await c.window.markOrderItemDispatchPrepared('O','I');
   assert.equal(writes.length,core.validateTrade(trade).valid?2:0);assert.equal(c.pendingDispatchOrderIds.size,0);
  }

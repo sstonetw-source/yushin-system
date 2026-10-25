@@ -5,7 +5,7 @@ function setup(){
  const records=Array.from({length:125},(_,i)=>({id:String(i),data:()=>({brandName:i<75?'Brand':'Other',productName:'test',manufacturerPartNo:`P${i}`,normalizedPartNo:`p${i}`})}));
  const calls=[];
  const c=vm.createContext({window:{},document:{getElementById:id=>nodes[id]},currentUser:{uid:'u'},currentUserRole:'sales',
-  productManagementSearchInProgress:false,productManagementSearchGeneration:0,productBrandBrowseGeneration:0,productManagementSearchTimer:null,
+  productManagementSearchInProgress:false,productManagementSearchGeneration:0,productManagementSearchTimer:null,
   PRODUCT_MANAGEMENT_RENDER_STEP:50,productManagementVisibleLimit:50,productManagementResults:[],
   canAccessPage:()=>true,canManagePendingProductMaster:()=>false,clearTimeout:()=>{},renderProductBrandBrowser:()=>{},renderProductManagementResults:()=>{},updateProductManagementMoreButton:()=>{},updateProductSearchControls:()=>{},
   normalizeBrandLookupKey:s=>String(s).toLowerCase(),resolveBrandName:s=>s,dedupeBrandsCaseInsensitive:x=>x,brandMasterEntryForName:()=>({aliases:[]}),
@@ -35,7 +35,7 @@ test('empty matches are cached; name, partial code and a different leading zero 
 test('primary brands are visible; other brands expand locally and selection enables search',()=>{
  const nodes={productManagementSearchBrand:{value:''},productSearchBrandButtons:{innerHTML:''},productManagementSearch:{value:''},productManagementSearchBtn:{}};
  const c=vm.createContext({window:{},document:{getElementById:id=>nodes[id]},productManagementSearchInProgress:false,
-  clearProductManagementSearch:()=>{},getUnifiedBrandEntries:()=>[{name:'Beckman',active:true},{name:'OtherVendor',active:true}],
+  loadFrequentProducts:()=>{},clearProductManagementSearch:()=>{},getUnifiedBrandEntries:()=>[{name:'Beckman',active:true},{name:'OtherVendor',active:true}],
   getPrimaryBrandNames:()=>['Beckman'],normalizeBrandLookupKey:s=>s.toLowerCase(),inlineJsValue:JSON.stringify,escapeHtml:s=>s});
  vm.runInContext(source.slice(source.indexOf('function updateProductSearchControls'),source.indexOf('async function ensureProductBrandBrowserLoaded')),c);
  c.renderProductBrandBrowser=c.window.renderProductBrandBrowser;c.onProductSearchBrandChange=c.window.onProductSearchBrandChange;

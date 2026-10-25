@@ -228,10 +228,10 @@ service cloud.firestore {
     // Direct-ship receiving is a narrow hot path used in the same atomic batch as
     // the order delivery summary. Keep it intentionally small so the combined
     // Firestore Rules evaluation stays below the platform expression limit.
-    function directShipSupplyReceiptUpdate(id) {
+    function directShipSupplyReceiptUpdate(id, userRole) {
       let nextReceived = request.resource.data.get('receivedQty', 0);
       let qty = resource.data.get('qty', 0);
-      return directShipReceiver()
+      return userRole in ['sales','engineer'] && resource.data.get('ownerUid', '') == request.auth.uid
         && resource.data.get('fulfillmentType', 'WAREHOUSE') == 'DIRECT_SHIP'
         && directShipSupplyReceiptEvidence(id)
         && resource.data.get('status', 'ORDERED') != 'CANCELLED'
@@ -268,9 +268,9 @@ service cloud.firestore {
         && record.qty == receipt.qty;
     }
 
-    function purchaserSupplyOperationalUpdate() {
+    function purchaserSupplyOperationalUpdate(userRole) {
       // Supply identity is immutable; purchasing may only change operational progress.
-      return purchaser()
+      return userRole == 'purchaser'
         && (resource.data.get('fulfillmentType', 'WAREHOUSE') != 'DIRECT_SHIP'
           || request.resource.data.get('receivedQty', 0) == resource.data.get('receivedQty', 0))
         && sameSupplyIdentity()
@@ -303,8 +303,8 @@ service cloud.firestore {
         || before.get('customerCancellationDisposition', '') == 'KEEP_STOCK';
     }
 
-    function warehouseSupplyOperationalUpdate() {
-      return warehouse()
+    function warehouseSupplyOperationalUpdate(userRole) {
+      return userRole == 'warehouse'
         && resource.data.get('fulfillmentType', 'WAREHOUSE') != 'DIRECT_SHIP'
         && sameSupplyIdentity()
         && validSupplyOperationalState()
@@ -552,12 +552,20 @@ service cloud.firestore {
         && data.get('safetyStock', 0) == 0;
     }
 
-    function warehouseKeepsInventoryPlanning() {
-      return warehouse()
+    function warehouseKeepsInventoryPlanning(userRole) {
+      return userRole == 'warehouse'
         && request.resource.data.get('stockPolicy', 'ORDER_ONLY')
           == resource.data.get('stockPolicy', 'ORDER_ONLY')
         && request.resource.data.get('safetyStock', 0)
           == resource.data.get('safetyStock', 0);
+    }
+    function inventoryUpdateWriter(id) {
+      let userRole = role();
+      return (userRole in ['admin','purchaser','warehouse']
+          && nonNegativeInventory(request.resource.data)
+          && validInventoryStockPolicy(request.resource.data)
+          && (userRole != 'warehouse' || warehouseKeepsInventoryPlanning(userRole)))
+        || businessInventoryOperationalUpdate(id);
     }
 
     // Client-side delivery/reservation transactions need narrowly-scoped stock writes.
@@ -759,13 +767,13 @@ service cloud.firestore {
       // fulfillment paths still prove exactly one warehouse per reservation.
       return !data.keys().hasAny(['locationSchemaVersion','locations','allocations','warehouseAllocations']);
     }
-    function validReservationSource(id, data) {
+    function validReservationSource(id, data, userRole) {
       let order = getAfter(/databases/$(database)/documents/orders/$(data.orderId)).data;
       let index = data.get('orderItemIndex', -1);
       let item = order.items[index];
       return legacyReservationLocationShape(data)
         && index is int && index >= 0 && index < order.items.size()
-        && (role() != 'warehouse' || !(order.get('inventoryReservationStatus', '') in ['pending', 'failed']))
+        && (userRole != 'warehouse' || !(order.get('inventoryReservationStatus', '') in ['pending', 'failed']))
         && id == data.orderId + '__' + data.itemId
         && data.itemId == item.get('itemId', 'item-' + string(index + 1))
         && data.productKey == item.get('productId', item.get('inventoryProductKey', ''))
@@ -774,7 +782,7 @@ service cloud.firestore {
         && data.get('quantity', null) is number && data.quantity >= 0 && data.quantity <= item.get('qty', 0)
         && data.get('shortageQty', 0) is number && data.get('shortageQty', 0) >= 0
         && data.get('warehouseId', '') == item.get('warehouseId', order.get('warehouseId', ''))
-        && (!orderIsCancelled(order) || data.quantity == 0);
+        && (data.quantity == 0 || !orderIsCancelled(order));
     }
 
     function reservationIdentityUnchanged() {
@@ -783,13 +791,10 @@ service cloud.firestore {
 
     // Reserved totals include every reservation of this product changed by the
     // operation, including a move between warehouses. Unchanged siblings add zero.
-    function operationalReservationDelta(e, index, productKey, warehouseId) {
-      return index < e.reservationIds.size()
-        ? operationalReservationDeltaAt(e.reservationIds[index], productKey, warehouseId) : 0;
-    }
     function operationalReservationDeltaAt(id, productKey, warehouseId) {
       let path = /databases/$(database)/documents/inventoryReservations/$(id);
-      let before = exists(path) ? get(path).data : {};
+      let previous = get(path);
+      let before = previous == null ? {} : previous.data;
       let after = getAfter(path).data;
       let oldQty = before.get('quantity', 0);
       let qty = after.get('quantity', 0);
@@ -801,38 +806,42 @@ service cloud.firestore {
           - (before.get('warehouseId', '') == warehouseId ? oldQty : 0);
     }
     function operationalStockDelta(e, productKey, warehouseId) {
-      return operationalReservationDelta(e, 0, productKey, warehouseId)
-        + operationalReservationDelta(e, 1, productKey, warehouseId)
-        + operationalReservationDelta(e, 2, productKey, warehouseId)
-        + operationalReservationDelta(e, 3, productKey, warehouseId)
-        + operationalReservationDelta(e, 4, productKey, warehouseId);
+      let ids = e.reservationIds;
+      return operationalReservationDeltaAt(ids[0], productKey, warehouseId)
+        + (ids.size() <= 1 ? 0 : operationalReservationDeltaAt(ids[1], productKey, warehouseId)
+        + (ids.size() <= 2 ? 0 : operationalReservationDeltaAt(ids[2], productKey, warehouseId)
+        + (ids.size() <= 3 ? 0 : operationalReservationDeltaAt(ids[3], productKey, warehouseId)
+        + (ids.size() <= 4 ? 0 : operationalReservationDeltaAt(ids[4], productKey, warehouseId)))));
     }
     function operationalReservedStockMatches(path, delta, productKey, warehouseId) {
-      let before = exists(path) ? get(path).data : {};
+      let previous = get(path);
+      let before = previous == null ? {} : previous.data;
       let after = getAfter(path).data;
       return after.get('productKey', after.get('productId', '')) == productKey
         && (warehouseId == '' || after.get('warehouseId', '') == warehouseId)
         && after.get('reserved', 0) - before.get('reserved', 0) == delta;
     }
-    function sameWarehouseReservationDelta(e, index, productKey, warehouseId) {
-      return index < e.reservationIds.size()
-        ? sameWarehouseReservationDeltaAt(e.reservationIds[index], productKey, warehouseId) : 0;
-    }
     function sameWarehouseReservationDeltaAt(id, productKey, warehouseId) {
       let path = /databases/$(database)/documents/inventoryReservations/$(id);
-      let before = exists(path) ? get(path).data : {};
+      let previous = get(path);
+      let before = previous == null ? {} : previous.data;
       let after = getAfter(path).data;
-      return after.get('quantity', 0) == 0 && before.get('quantity', 0) == 0 ? 0
+      let oldQty = before.get('quantity', 0);
+      let qty = after.get('quantity', 0);
+      return qty == 0 && oldQty == 0 ? 0
         : after.productKey == productKey && after.warehouseId == warehouseId
-          && (before.get('quantity', 0) == 0 || before.get('warehouseId', warehouseId) == warehouseId)
-          ? after.quantity - before.get('quantity', 0) : null;
+          && (oldQty == 0 || before.get('warehouseId', warehouseId) == warehouseId)
+          ? qty - oldQty : null;
+    }
+    function sameWarehouseReservationTotal(ids, productKey, warehouseId) {
+      return sameWarehouseReservationDeltaAt(ids[0], productKey, warehouseId)
+        + (ids.size() <= 1 ? 0 : sameWarehouseReservationDeltaAt(ids[1], productKey, warehouseId)
+        + (ids.size() <= 2 ? 0 : sameWarehouseReservationDeltaAt(ids[2], productKey, warehouseId)
+        + (ids.size() <= 3 ? 0 : sameWarehouseReservationDeltaAt(ids[3], productKey, warehouseId)
+        + (ids.size() <= 4 ? 0 : sameWarehouseReservationDeltaAt(ids[4], productKey, warehouseId)))));
     }
     function sameWarehouseReservationStocks(e, productKey, warehouseId) {
-      let delta = sameWarehouseReservationDelta(e, 0, productKey, warehouseId)
-        + sameWarehouseReservationDelta(e, 1, productKey, warehouseId)
-        + sameWarehouseReservationDelta(e, 2, productKey, warehouseId)
-        + sameWarehouseReservationDelta(e, 3, productKey, warehouseId)
-        + sameWarehouseReservationDelta(e, 4, productKey, warehouseId);
+      let delta = sameWarehouseReservationTotal(e.reservationIds, productKey, warehouseId);
       let invPath = /databases/$(database)/documents/inventory/$(e.inventoryId);
       let whPath = /databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId);
       let beforeInv = exists(invPath) ? get(invPath).data : {};
@@ -862,12 +871,6 @@ service cloud.firestore {
         && proof.get('reservationIds', []).hasAll(e.reservationIds);
     }
     function crossWarehouseReservationStocks(e, productKey, warehouseId) {
-      let local = {'reservationIds': e.warehouseReservationIds};
-      let delta = sameWarehouseReservationDelta(local, 0, productKey, warehouseId)
-        + sameWarehouseReservationDelta(local, 1, productKey, warehouseId)
-        + sameWarehouseReservationDelta(local, 2, productKey, warehouseId)
-        + sameWarehouseReservationDelta(local, 3, productKey, warehouseId)
-        + sameWarehouseReservationDelta(local, 4, productKey, warehouseId);
       return e.get('companyMovementId', '') is string && e.get('companyMovementId', '') != ''
         && e.warehouseReservationIds is list && e.warehouseReservationIds.size() > 0
         && e.warehouseReservationIds.size() <= e.reservationIds.size()
@@ -876,7 +879,8 @@ service cloud.firestore {
         && (e.companyMovementId == e.movementId
           ? operationalReservedStockMatches(/databases/$(database)/documents/inventory/$(e.inventoryId), operationalStockDelta(e, productKey, ''), productKey, '')
           : linkedCompanyReservationProof(e, productKey, warehouseId))
-        && operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId), delta, productKey, warehouseId);
+        && operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId),
+          sameWarehouseReservationTotal(e.warehouseReservationIds, productKey, warehouseId), productKey, warehouseId);
     }
     function operationalReservationStockEvidence(id) {
       let data = request.resource.data;
@@ -896,7 +900,8 @@ service cloud.firestore {
       let e = request.resource.data.reservationStockEvidence;
       let path = /databases/$(database)/documents/inventoryReservations/$(e.reservationIds[0]);
       let data = getAfter(path).data;
-      let before = exists(path) ? get(path).data : {};
+      let previous = get(path);
+      let before = previous == null ? {} : previous.data;
       return e.keys().hasAll(['inventoryId','warehouseStockId','previousWarehouseStockId','reservationIds','movementId'])
         && e.movementId == id && e.inventoryId is string && e.inventoryId.size() > 0
         && e.warehouseStockId is string && e.warehouseStockId.size() > 0
@@ -957,18 +962,27 @@ service cloud.firestore {
         'productKey','productId','warehouseId','sourceType','sourceId','transferId','costLotId','receivedAt'
       ]);
     }
-    function reservationCreateWriter(id) {
-      let userRole = role();
+    function reservationCreateWriter(id, userRole) {
       return userRole == 'admin'
         || (userRole in ['purchaser','warehouse'] && operationalReservationStockEvidence(id))
         || (userRole in ['sales','engineer'] && validBusinessReservation(id, request.resource.data));
     }
-    function reservationUpdateWriter(id) {
-      let userRole = role();
+    function reservationUpdateWriter(id, userRole) {
       return userRole == 'admin'
         || (userRole in ['purchaser','warehouse'] && operationalReservationStockEvidence(id))
         || (userRole in ['sales','engineer'] && businessReservationOperationalUpdate()
           && validBusinessReservation(id, request.resource.data));
+    }
+    function reservationCreateAllowed(id) {
+      let userRole = role();
+      return validReservationSource(id, request.resource.data, userRole)
+        && reservationCreateWriter(id, userRole);
+    }
+    function reservationUpdateAllowed(id) {
+      let userRole = role();
+      return validReservationSource(id, request.resource.data, userRole)
+        && reservationIdentityUnchanged() && legacyReservationLocationShape(resource.data)
+        && reservationUpdateWriter(id, userRole);
     }
     function inventoryMovementWriter(id) {
       let userRole = role();
@@ -1293,52 +1307,58 @@ service cloud.firestore {
         && (items.size() <= 28 || validNewItemCost(items[28], data.get('procurementType', 'PURCHASING_PO')))
         && (items.size() <= 29 || validNewItemCost(items[29], data.get('procurementType', 'PURCHASING_PO')));
     }
-    function commercialItemCostProtected(before, after, method) {
+    // Ordinary operational changes use the existing cheap path. Only changes to
+    // cost or identity enter the additional Service binding validation.
+    function commercialItemIdentityAndCostProtected(before, after, method) {
       return before == after || (before.get('procurementType', method) == after.get('procurementType', method)
-        && (!after.diff(before).affectedKeys().hasAny(['costPrice','costSource','unitCost','cost'])
-          || (before.get('procurementType', method) == 'SALES_SELF_ORDER'
-            && !after.diff(before).affectedKeys().hasAny(['unitCost','cost'])
-            && after.get('costPrice', null) is number && after.costPrice >= 0)));
+        && (!after.diff(before).affectedKeys().hasAny([
+            'costPrice','costSource','unitCost','cost','itemId','productId','productType','serviceKind'
+          ]) || ((!after.diff(before).affectedKeys().hasAny(['itemId','productId','productType','serviceKind'])
+              || !isServiceBillingItem(before) && !isServiceBillingItem(after))
+            && (!after.diff(before).affectedKeys().hasAny(['costPrice','costSource','unitCost','cost'])
+              || (before.get('procurementType', method) == 'SALES_SELF_ORDER'
+                && !after.diff(before).affectedKeys().hasAny(['unitCost','cost'])
+                && after.get('costPrice', null) is number && after.costPrice >= 0)))));
     }
     function validCommercialOrderCostUpdate() {
       let before = resource.data.get('items', []);
       let after = request.resource.data.get('items', []);
       return request.resource.data.get('procurementType', 'PURCHASING_PO') == resource.data.get('procurementType', 'PURCHASING_PO')
-        && commercialItemCostProtected(resource.data, request.resource.data, 'PURCHASING_PO')
-        && (before == after || (before is list && after is list && before.size() == after.size() && before.size() <= 30
-        && (before.size() <= 0 || commercialItemCostProtected(before[0], after[0], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 1 || commercialItemCostProtected(before[1], after[1], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 2 || commercialItemCostProtected(before[2], after[2], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 3 || commercialItemCostProtected(before[3], after[3], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 4 || commercialItemCostProtected(before[4], after[4], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 5 || commercialItemCostProtected(before[5], after[5], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 6 || commercialItemCostProtected(before[6], after[6], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 7 || commercialItemCostProtected(before[7], after[7], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 8 || commercialItemCostProtected(before[8], after[8], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 9 || commercialItemCostProtected(before[9], after[9], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 10 || commercialItemCostProtected(before[10], after[10], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 11 || commercialItemCostProtected(before[11], after[11], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 12 || commercialItemCostProtected(before[12], after[12], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 13 || commercialItemCostProtected(before[13], after[13], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 14 || commercialItemCostProtected(before[14], after[14], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 15 || commercialItemCostProtected(before[15], after[15], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 16 || commercialItemCostProtected(before[16], after[16], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 17 || commercialItemCostProtected(before[17], after[17], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 18 || commercialItemCostProtected(before[18], after[18], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 19 || commercialItemCostProtected(before[19], after[19], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 20 || commercialItemCostProtected(before[20], after[20], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 21 || commercialItemCostProtected(before[21], after[21], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 22 || commercialItemCostProtected(before[22], after[22], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 23 || commercialItemCostProtected(before[23], after[23], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 24 || commercialItemCostProtected(before[24], after[24], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 25 || commercialItemCostProtected(before[25], after[25], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 26 || commercialItemCostProtected(before[26], after[26], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 27 || commercialItemCostProtected(before[27], after[27], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 28 || commercialItemCostProtected(before[28], after[28], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 29 || commercialItemCostProtected(before[29], after[29], resource.data.get('procurementType', 'PURCHASING_PO')))));
+        && commercialItemIdentityAndCostProtected(resource.data, request.resource.data, 'PURCHASING_PO')
+        && (before == after ? true : (before is list && after is list && before.size() == after.size() && before.size() <= 30
+        && (before.size() <= 0 || commercialItemIdentityAndCostProtected(before[0], after[0], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 1 || commercialItemIdentityAndCostProtected(before[1], after[1], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 2 || commercialItemIdentityAndCostProtected(before[2], after[2], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 3 || commercialItemIdentityAndCostProtected(before[3], after[3], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 4 || commercialItemIdentityAndCostProtected(before[4], after[4], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 5 || commercialItemIdentityAndCostProtected(before[5], after[5], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 6 || commercialItemIdentityAndCostProtected(before[6], after[6], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 7 || commercialItemIdentityAndCostProtected(before[7], after[7], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 8 || commercialItemIdentityAndCostProtected(before[8], after[8], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 9 || commercialItemIdentityAndCostProtected(before[9], after[9], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 10 || commercialItemIdentityAndCostProtected(before[10], after[10], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 11 || commercialItemIdentityAndCostProtected(before[11], after[11], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 12 || commercialItemIdentityAndCostProtected(before[12], after[12], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 13 || commercialItemIdentityAndCostProtected(before[13], after[13], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 14 || commercialItemIdentityAndCostProtected(before[14], after[14], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 15 || commercialItemIdentityAndCostProtected(before[15], after[15], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 16 || commercialItemIdentityAndCostProtected(before[16], after[16], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 17 || commercialItemIdentityAndCostProtected(before[17], after[17], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 18 || commercialItemIdentityAndCostProtected(before[18], after[18], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 19 || commercialItemIdentityAndCostProtected(before[19], after[19], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 20 || commercialItemIdentityAndCostProtected(before[20], after[20], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 21 || commercialItemIdentityAndCostProtected(before[21], after[21], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 22 || commercialItemIdentityAndCostProtected(before[22], after[22], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 23 || commercialItemIdentityAndCostProtected(before[23], after[23], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 24 || commercialItemIdentityAndCostProtected(before[24], after[24], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 25 || commercialItemIdentityAndCostProtected(before[25], after[25], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 26 || commercialItemIdentityAndCostProtected(before[26], after[26], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 27 || commercialItemIdentityAndCostProtected(before[27], after[27], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 28 || commercialItemIdentityAndCostProtected(before[28], after[28], resource.data.get('procurementType', 'PURCHASING_PO')))
+        && (before.size() <= 29 || commercialItemIdentityAndCostProtected(before[29], after[29], resource.data.get('procurementType', 'PURCHASING_PO')))));
     }
 
-    function supplierCancellationResolution() {
+    function supplierCancellationResolution(userRole) {
       let before = resource.data;
       let after = request.resource.data;
       let order = get(/databases/$(database)/documents/orders/$(before.orderId)).data;
@@ -1347,7 +1367,7 @@ service cloud.firestore {
       let invPath = /databases/$(database)/documents/inventory/$(after.get('redirectInventoryId', 'unused'));
       let whId = after.get('redirectWarehouseStockId', 'unused');
       let whPath = /databases/$(database)/documents/warehouseStocks/$(whId);
-      return purchaser() && orderIsCancelled(order)
+      return userRole == 'purchaser' && orderIsCancelled(order)
         && before.get('status', '') in ['ORDERED', 'PARTIAL_RECEIPT'] && remaining > 0
         && before.get('customerCancellationDisposition', '') != 'KEEP_STOCK'
         && after.customerCancellationDisposition == 'KEEP_STOCK'
@@ -1370,8 +1390,21 @@ service cloud.firestore {
           && after.get('incomingRegisteredQty', 0) == before.get('incomingRegisteredQty', 0));
     }
 
+    // Skip groups beyond the actual list length instead of evaluating all 30
+    // candidates for a short, fully withdrawn request list.
+    function returnPendingInGroup(requests, start) {
+      let count = requests.size();
+      return count > start && (requests[start].status == 'PENDING'
+        || (count > start + 1 && requests[start + 1].status == 'PENDING')
+        || (count > start + 2 && requests[start + 2].status == 'PENDING')
+        || (count > start + 3 && requests[start + 3].status == 'PENDING')
+        || (count > start + 4 && requests[start + 4].status == 'PENDING'));
+    }
     function validReturnPendingFlag(requests, flag) {
-      return requests.size() <= 30 && flag == !((requests.size() <= 0 || requests[0].status != 'PENDING') && (requests.size() <= 1 || requests[1].status != 'PENDING') && (requests.size() <= 2 || requests[2].status != 'PENDING') && (requests.size() <= 3 || requests[3].status != 'PENDING') && (requests.size() <= 4 || requests[4].status != 'PENDING') && (requests.size() <= 5 || requests[5].status != 'PENDING') && (requests.size() <= 6 || requests[6].status != 'PENDING') && (requests.size() <= 7 || requests[7].status != 'PENDING') && (requests.size() <= 8 || requests[8].status != 'PENDING') && (requests.size() <= 9 || requests[9].status != 'PENDING') && (requests.size() <= 10 || requests[10].status != 'PENDING') && (requests.size() <= 11 || requests[11].status != 'PENDING') && (requests.size() <= 12 || requests[12].status != 'PENDING') && (requests.size() <= 13 || requests[13].status != 'PENDING') && (requests.size() <= 14 || requests[14].status != 'PENDING') && (requests.size() <= 15 || requests[15].status != 'PENDING') && (requests.size() <= 16 || requests[16].status != 'PENDING') && (requests.size() <= 17 || requests[17].status != 'PENDING') && (requests.size() <= 18 || requests[18].status != 'PENDING') && (requests.size() <= 19 || requests[19].status != 'PENDING') && (requests.size() <= 20 || requests[20].status != 'PENDING') && (requests.size() <= 21 || requests[21].status != 'PENDING') && (requests.size() <= 22 || requests[22].status != 'PENDING') && (requests.size() <= 23 || requests[23].status != 'PENDING') && (requests.size() <= 24 || requests[24].status != 'PENDING') && (requests.size() <= 25 || requests[25].status != 'PENDING') && (requests.size() <= 26 || requests[26].status != 'PENDING') && (requests.size() <= 27 || requests[27].status != 'PENDING') && (requests.size() <= 28 || requests[28].status != 'PENDING') && (requests.size() <= 29 || requests[29].status != 'PENDING'));
+      return requests.size() <= 30 && flag == (
+        returnPendingInGroup(requests, 0) || returnPendingInGroup(requests, 5)
+        || returnPendingInGroup(requests, 10) || returnPendingInGroup(requests, 15)
+        || returnPendingInGroup(requests, 20) || returnPendingInGroup(requests, 25));
     }
 
     function returnReceiptOrderUpdate(id) {
@@ -1405,6 +1438,13 @@ service cloud.firestore {
         ]) && operationalItemsOnly(['reservedQty']) && sameCommercialOwner();
     }
 
+    // A return request never edits stock, delivery, products, costs or ownership.
+    // Keep the existing mutation validator, without evaluating unrelated writers.
+    function commercialReturnRequestOnlyUpdate() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return changed.hasOnly(['returnRequests', 'returnPending', 'returnRequestMutationIndex', 'updatedAt'])
+        && owns(resource.data) && (changed.size() == 0 || validCommercialReturnRequestMutation());
+    }
     function commercialReturnProtection() {
       let changed = request.resource.data.diff(resource.data).affectedKeys();
       return !changed.hasAny(['returnRecords', 'returnedQty', 'returnReceiptId'])
@@ -1744,11 +1784,23 @@ service cloud.firestore {
 
     function orderUpdateAllowed(id) {
       let userRole = role();
-      return userRole == 'admin' ? true
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      // Billing-only changes cannot affect commercial items, stock or ownership.
+      // Avoid evaluating unrelated 30-item stock/cost validators after the guard.
+      return (changed.hasAny(['isBilled','billingDate']) ? validClientBillingUpdate() : true)
+        && (!changed.hasAny(['status','orderStatus']) || validOrderCancellationTransition())
+        && (!changed.hasAny(['inventoryReservationStatus','inventoryReservationError','inventoryReservationUpdatedAt','inventoryReservationAttemptId']) || validOrderInventorySyncTransition(userRole))
+        && (!changed.hasAny(['sourceDocumentSyncStatus','sourceDocumentSyncError','sourceDocumentSyncUpdatedAt']) || validOrderSourceSyncTransition(id, userRole))
+        && (userRole == 'admin' ? (changed.hasAny(['items','productId','productType','serviceKind']) ? validClientServiceBillingBinding() : true)
+        : userRole in ['sales','engineer'] && changed.hasAny(['isBilled','billingDate'])
+          && changed.hasOnly(['isBilled','billingDate','statusHistory','updatedAt',
+            'status','workCategories','workCategoryUpdatedAt']) ? owns(resource.data)
         : userRole == 'purchaser' ? (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) && warehouseDeliveryPlanUpdate()) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['warehouseLogisticsId','warehouseLogisticsEventId']) && warehouseLogisticsOrderUpdate(id)) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id)) || purchaserOrderWorkflowUpdate(id) || returnReceiptOrderUpdate(id)
         : userRole == 'warehouse' ? (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) && warehouseDeliveryPlanUpdate()) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['warehouseLogisticsId','warehouseLogisticsEventId']) && warehouseLogisticsOrderUpdate(id)) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id)) || warehouseOrderWorkflowUpdate() || returnReceiptOrderUpdate(id)
         : userRole in ['sales', 'engineer'] && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId'])
-          && ((request.resource.data.diff(resource.data).affectedKeys().hasAny(['deliveryRecords']) && directShipReceiptOrderUpdate(id)) || (owns(resource.data) && owns(request.resource.data) && (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) ? warehouseDeliveryPlanUpdate() : (sameCommercialOwner() && preservesCreator() && validCommercialOrderCostUpdate() && businessOrderFactsProtected(id) && commercialReturnProtection() && (resource.data.get('warehouseLogisticsId', '') == '' || commercialKeepsPendingTransfer())))));
+          && (changed.hasOnly(['returnRequests', 'returnPending', 'returnRequestMutationIndex', 'updatedAt'])
+            && (changed.size() == 0 || changed.hasAny(['returnRequests', 'returnPending']))
+            ? commercialReturnRequestOnlyUpdate() : ((request.resource.data.diff(resource.data).affectedKeys().hasAny(['deliveryRecords']) && directShipReceiptOrderUpdate(id)) || (owns(resource.data) && (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) ? warehouseDeliveryPlanUpdate() : (sameCommercialOwner() && preservesCreator() && validCommercialOrderCostUpdate() && businessOrderFactsProtected(id, changed) && commercialReturnProtection() && (resource.data.get('warehouseLogisticsId', '') == '' || commercialKeepsPendingTransfer())))))));
     }
 
     function businessDeliveryRecordChange(before, after, index) {
@@ -1777,13 +1829,14 @@ service cloud.firestore {
         && getAfter(invPath).data.onHand - get(invPath).data.onHand == op.qtyDelta
         && op.qtyDelta == resource.data.get('deliveredQty', 0) - request.resource.data.get('deliveredQty', 0);
     }
-    function businessOrderFactsProtected(id) {
+    function businessOrderFactsProtected(id, changed) {
       let before = resource.data;
       let after = request.resource.data;
       let prior = before.get('deliveryRecords', []);
       let next = after.get('deliveryRecords', []);
       let e = after.get('businessDeliveryEvidence', {});
-      return before.get('qty', 0) == after.get('qty', 0)
+      return !changed.hasAny(['qty','isOrdered','isArrived','receivedQty','deliveryRecords','deliveredQty','isDelivered'])
+        || before.get('qty', 0) == after.get('qty', 0)
         && before.get('isOrdered', false) == after.get('isOrdered', false)
         && before.get('isArrived', false) == after.get('isArrived', false)
         && before.get('receivedQty', 0) == after.get('receivedQty', 0)
@@ -1798,13 +1851,13 @@ service cloud.firestore {
               : businessPhysicalDelivery(id, e))));
     }
 
-    function validOrderInventorySyncTransition() {
+    function validOrderInventorySyncTransition(userRole) {
       let before = resource.data;
       let after = request.resource.data;
       let attempt = after.get('inventoryReservationAttemptId', '');
       let error = after.get('inventoryReservationError', '');
       let updatedAt = after.get('inventoryReservationUpdatedAt', '');
-      return (role() in ['admin','purchaser','sales','engineer']
+      return (userRole in ['admin','purchaser','sales','engineer']
           && !orderIsCancelled(before) && !orderIsCancelled(after)
           && before.get('inventoryReservationStatus', '') != 'completed'
           && attempt is string && attempt.size() > 0 && attempt.size() <= 128
@@ -1818,11 +1871,11 @@ service cloud.firestore {
               && (after.inventoryReservationStatus != 'completed' || after.inventoryReservationError == '')));
     }
 
-    function validOrderSourceSyncTransition(id) {
+    function validOrderSourceSyncTransition(id, userRole) {
       let before = resource.data;
       let after = request.resource.data;
-      return (role() in ['admin','purchaser','sales','engineer']
-          && (role() in ['admin','purchaser'] || before.get('ownerUid', '') == request.auth.uid)
+      return (userRole in ['admin','purchaser','sales','engineer']
+          && (userRole in ['admin','purchaser'] || before.get('ownerUid', '') == request.auth.uid)
           && !orderIsCancelled(before) && !orderIsCancelled(after)
           && before.get('inventoryReservationStatus', '') == 'completed'
           && before.get('sourceDocumentSyncStatus', '') != 'completed'
@@ -1854,21 +1907,62 @@ service cloud.firestore {
             || data.sourceDocumentSyncStatus == 'completed' && sourceSyncEvidenceForData(id, data)));
     }
 
+    // Service snapshot identity cannot be stripped to bypass server-only billing.
+    // orders: isBilled bool (optional legacy false), billingDate YYYY-MM-DD/empty;
+    // items <=30 maps, productType string; bound Service identity stays immutable.
+    function isServiceBillingItem(item) {
+      return item.get('productType', '').matches('(?i)\\s*service\\s*');
+    }
+    function clientGoodsBillingData(data) {
+      let items = data.get('items', []);
+      return !isServiceBillingItem(data) && items is list && items.size() <= 30
+        && (items.size() <= 0 ? true : !items[0].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 1 ? true : !items[1].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 2 ? true : !items[2].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 3 ? true : !items[3].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 4 ? true : !items[4].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 5 ? true : !items[5].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 6 ? true : !items[6].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 7 ? true : !items[7].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 8 ? true : !items[8].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 9 ? true : !items[9].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 10 ? true : !items[10].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 11 ? true : !items[11].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 12 ? true : !items[12].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 13 ? true : !items[13].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 14 ? true : !items[14].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 15 ? true : !items[15].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 16 ? true : !items[16].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 17 ? true : !items[17].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 18 ? true : !items[18].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 19 ? true : !items[19].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 20 ? true : !items[20].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 21 ? true : !items[21].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 22 ? true : !items[22].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 23 ? true : !items[23].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 24 ? true : !items[24].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 25 ? true : !items[25].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 26 ? true : !items[26].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 27 ? true : !items[27].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 28 ? true : !items[28].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 29 ? true : !items[29].get('productType', '').matches('(?i)\\s*service\\s*') && true))))))))))))))))))))))))))))));
+    }
+    function validClientBillingCreate(data) {
+      return data.get('isBilled', false) == false && data.get('billingDate', '') == '';
+    }
+    function validClientBillingUpdate() {
+      let before = resource.data;
+      let after = request.resource.data;
+      return clientGoodsBillingData(before)
+        && (before.get('items', []) == after.get('items', [])
+          ? !isServiceBillingItem(after) : clientGoodsBillingData(after));
+    }
+    function serviceBillingBindingAt(before, after, index) {
+      let old = index < before.size() ? before[index] : {};
+      let next = index < after.size() ? after[index] : {};
+      return !next.diff(old).affectedKeys().hasAny(['itemId','productId','productType','serviceKind'])
+        || !(isServiceBillingItem(old) || isServiceBillingItem(next));
+    }
+    function validClientServiceBillingBinding() {
+      let before = resource.data.get('items', []);
+      let after = request.resource.data.get('items', []);
+      return (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['productId','productType','serviceKind'])
+          || !isServiceBillingItem(resource.data) && !isServiceBillingItem(request.resource.data))
+        && (before == after ? true : (before is list && after is list
+          && before.size() <= 30 && after.size() <= 30
+          && (before.size() <= 0 && after.size() <= 0 ? true : serviceBillingBindingAt(before, after, 0) && (before.size() <= 1 && after.size() <= 1 ? true : serviceBillingBindingAt(before, after, 1) && (before.size() <= 2 && after.size() <= 2 ? true : serviceBillingBindingAt(before, after, 2) && (before.size() <= 3 && after.size() <= 3 ? true : serviceBillingBindingAt(before, after, 3) && (before.size() <= 4 && after.size() <= 4 ? true : serviceBillingBindingAt(before, after, 4) && (before.size() <= 5 && after.size() <= 5 ? true : serviceBillingBindingAt(before, after, 5) && (before.size() <= 6 && after.size() <= 6 ? true : serviceBillingBindingAt(before, after, 6) && (before.size() <= 7 && after.size() <= 7 ? true : serviceBillingBindingAt(before, after, 7) && (before.size() <= 8 && after.size() <= 8 ? true : serviceBillingBindingAt(before, after, 8) && (before.size() <= 9 && after.size() <= 9 ? true : serviceBillingBindingAt(before, after, 9) && (before.size() <= 10 && after.size() <= 10 ? true : serviceBillingBindingAt(before, after, 10) && (before.size() <= 11 && after.size() <= 11 ? true : serviceBillingBindingAt(before, after, 11) && (before.size() <= 12 && after.size() <= 12 ? true : serviceBillingBindingAt(before, after, 12) && (before.size() <= 13 && after.size() <= 13 ? true : serviceBillingBindingAt(before, after, 13) && (before.size() <= 14 && after.size() <= 14 ? true : serviceBillingBindingAt(before, after, 14) && (before.size() <= 15 && after.size() <= 15 ? true : serviceBillingBindingAt(before, after, 15) && (before.size() <= 16 && after.size() <= 16 ? true : serviceBillingBindingAt(before, after, 16) && (before.size() <= 17 && after.size() <= 17 ? true : serviceBillingBindingAt(before, after, 17) && (before.size() <= 18 && after.size() <= 18 ? true : serviceBillingBindingAt(before, after, 18) && (before.size() <= 19 && after.size() <= 19 ? true : serviceBillingBindingAt(before, after, 19) && (before.size() <= 20 && after.size() <= 20 ? true : serviceBillingBindingAt(before, after, 20) && (before.size() <= 21 && after.size() <= 21 ? true : serviceBillingBindingAt(before, after, 21) && (before.size() <= 22 && after.size() <= 22 ? true : serviceBillingBindingAt(before, after, 22) && (before.size() <= 23 && after.size() <= 23 ? true : serviceBillingBindingAt(before, after, 23) && (before.size() <= 24 && after.size() <= 24 ? true : serviceBillingBindingAt(before, after, 24) && (before.size() <= 25 && after.size() <= 25 ? true : serviceBillingBindingAt(before, after, 25) && (before.size() <= 26 && after.size() <= 26 ? true : serviceBillingBindingAt(before, after, 26) && (before.size() <= 27 && after.size() <= 27 ? true : serviceBillingBindingAt(before, after, 27) && (before.size() <= 28 && after.size() <= 28 ? true : serviceBillingBindingAt(before, after, 28) && (before.size() <= 29 && after.size() <= 29 ? true : serviceBillingBindingAt(before, after, 29) && true))))))))))))))))))))))))))))))));
+    }
+
+    // New orders require an explicit commercial transaction choice. Legacy
+    // orders may retain an absent/blank choice until edited, never clear a valid one.
+    function validOrderTransactionType(data) {
+      return data.get('transactionType', '') in ['直', '借', '扣'];
+    }
     match /orders/{id} {
       allow get: if operationalOrOwnedReader(resource == null ? null : resource.data);
       allow list: if operationalOrOwnedReader(resource.data);
       allow create: if canCreateCommercialDoc()
+        && validOrderTransactionType(request.resource.data)
+        && validClientBillingCreate(request.resource.data)
         && validNewOrderSourceSync(id)
         && validOwnedCommercialCreate(request.resource.data)
         && validNewOrderProductMaster(request.resource.data)
         && validOrderEmbeddedCost(request.resource.data);
       // Commercial owner edits commercial data; purchaser/warehouse must use scoped
       // workflow collections below instead of broad order mutation.
-      allow update: if (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'orderStatus'])
-        || validOrderCancellationTransition())
-        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryReservationStatus','inventoryReservationError','inventoryReservationUpdatedAt','inventoryReservationAttemptId']) || validOrderInventorySyncTransition())
-        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['sourceDocumentSyncStatus','sourceDocumentSyncError','sourceDocumentSyncUpdatedAt']) || validOrderSourceSyncTransition(id))
-        && orderUpdateAllowed(id);
+      allow update: if (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['transactionType'])
+          || validOrderTransactionType(request.resource.data)) && orderUpdateAllowed(id);
       allow delete: if admin();
     }
 
@@ -1946,6 +2040,19 @@ service cloud.firestore {
           && !(get(/databases/$(database)/documents/orders/$(orderId)).data.get('inventoryReservationStatus', '') in ['pending','failed']));
     }
 
+    // Resolve the trusted, enabled profile once. Dispatch before evaluating
+    // unrelated receipt/cancellation branches in the incoming stock transaction.
+    // Every branch retains its existing identity, quantity and evidence checks.
+    function supplyOperationalUpdateAllowed(id) {
+      let userRole = role();
+      return (userRole == 'admin'
+        || (userRole == 'purchaser' && (purchaserSupplyOperationalUpdate(userRole)
+          || supplierCancellationResolution(userRole)))
+        || (userRole == 'warehouse' && warehouseSupplyOperationalUpdate(userRole))
+        || (userRole in ['sales','engineer'] && directShipSupplyReceiptUpdate(id, userRole)))
+        && supplierReceiptDispositionAllowed() && validQuickPurchaseUpdate();
+    }
+
     // Unified source/order evidence: PURCHASING_PO, PURCHASING_MANUAL, SALES_SELF_ORDER, STOCK_REPLENISHMENT.
     match /supplyOrders/{id} {
       allow read: if admin() || purchaser()
@@ -1963,11 +2070,7 @@ service cloud.firestore {
       // but supply execution becomes operational evidence after creation. Only purchasing
       // or receiving roles may mutate quantities/status; this prevents direct API edits
       // from bypassing procurement and receipt workflows.
-      allow update: if (admin()
-        || directShipSupplyReceiptUpdate(id)
-        || purchaserSupplyOperationalUpdate()
-        || supplierCancellationResolution()
-        || warehouseSupplyOperationalUpdate()) && supplierReceiptDispositionAllowed() && validQuickPurchaseUpdate();
+      allow update: if supplyOperationalUpdateAllowed(id);
       allow delete: if admin();
     }
 
@@ -2173,14 +2276,7 @@ service cloud.firestore {
         && (!request.resource.data.keys().hasAny(inventoryArchiveKeys())
           || (admin() && request.resource.data.get('listArchived', false) is bool))
         && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
-      allow update: if (
-          ((admin() || purchaser()) && nonNegativeInventory(request.resource.data)
-            && validInventoryStockPolicy(request.resource.data))
-          || (warehouse() && nonNegativeInventory(request.resource.data)
-            && validInventoryStockPolicy(request.resource.data)
-            && warehouseKeepsInventoryPlanning())
-          || businessInventoryOperationalUpdate(id)
-        )
+      allow update: if inventoryUpdateWriter(id)
         && validInventoryArchiveChange(id)
         && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
       allow delete: if false;
@@ -2204,11 +2300,8 @@ service cloud.firestore {
       // A missing document contains no business data; existing documents stay owner-scoped.
       allow get: if operationalOrOwnedReader(resource == null ? null : resource.data);
       allow list: if operationalOrOwnedReader(resource.data);
-      allow create: if validReservationSource(id, request.resource.data)
-        && reservationCreateWriter(id);
-      allow update: if validReservationSource(id, request.resource.data) && reservationIdentityUnchanged()
-        && legacyReservationLocationShape(resource.data)
-        && reservationUpdateWriter(id);
+      allow create: if reservationCreateAllowed(id);
+      allow update: if reservationUpdateAllowed(id);
       allow delete: if admin();
     }
 
@@ -2402,6 +2495,18 @@ service cloud.firestore {
       allow update: if canManageEquipment()
         || (sales() && owns(resource.data) && owns(request.resource.data));
       allow delete: if false;
+    }
+
+    // Callable-only idempotency receipt; client SDK cannot create or delete
+    // the server's transaction checkpoint even if it is signed in.
+    match /reservationOperationReceipts/{id} {
+      allow read, write: if false;
+    }
+
+    // Service work events are written only by the gated Admin SDK Service.
+    // No client access until per-role reads and Service UI are accepted.
+    match /serviceCases/{id} {
+      allow read, write: if false;
     }
 
     match /{document=**} {

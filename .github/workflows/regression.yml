@@ -22,7 +22,9 @@ jobs:
       - name: Verify generated app and module source consistency
         run: |
           node tools/build-app.cjs --check
+          node tools/build-functions-core.cjs --check
           find src -name '*.js' -print0 | xargs -0 -n 1 node --check
+          find tests -maxdepth 1 \( -name '*.js' -o -name '*.cjs' \) -print0 | xargs -0 -n 1 node --check
       - name: JavaScript syntax check
         run: |
           node --check modules/order-entry-core.js
@@ -51,10 +53,12 @@ jobs:
           node --check functions/index.js
       - name: All application regression tests
         run: node --test $(find tests -maxdepth 1 -name '*.test.js' ! -name 'firestore-rules.test.js' | sort)
-      - name: Install headless Chrome viewport driver
-        run: npm install --no-save --no-package-lock playwright-core@1.56.0
+      - name: Install shared browser and Firestore integration dependencies once
+        run: npm install --no-save --no-package-lock @firebase/rules-unit-testing firebase firebase-admin@14.2.0 playwright-core@1.56.0 esbuild@0.25.0 html2canvas@1.4.1 jspdf@2.5.2
       - name: Check shared buttons in desktop and mobile Chrome
         run: node tests/ui-control-browser-smoke.js
+      - name: Check per-item service progress in desktop and mobile Chrome
+        run: node tests/service-progress-browser-smoke.js
       - name: Check order entry in desktop and mobile Chrome
         run: node tests/order-entry-browser-smoke.js
       - name: Check direct arrival and source retry for five roles in desktop and mobile Chrome
@@ -63,20 +67,38 @@ jobs:
         run: node tests/free-stock-recovery-browser-smoke.js
       - name: Check reconciled product search and margin privacy in desktop and mobile Chrome
         run: node tests/pr-reconciliation-browser-smoke.js
+      - name: Check company frequent products and public copy in desktop and mobile Chrome
+        run: node tests/frequent-products-browser-smoke.js
       - name: Check authoritative lot display and batch search in desktop and mobile Chrome
         run: node tests/inventory-lot-browser-smoke.js
-      - name: Install Firestore rules test dependencies
-        run: npm install --no-save @firebase/rules-unit-testing firebase
+      - name: Check shared dispatch preparation and cross-page retries in desktop and mobile Chrome
+        run: node tests/dispatch-preparation-browser-smoke.js
+      - name: Check v2 customer delivery original form in desktop and mobile Chrome
+        run: node tests/delivery-confirmation-browser-smoke.js
+      - name: Check v2 lifecycle original quick and form actions in desktop and mobile Chrome
+        run: node tests/lifecycle-browser-smoke.js
+      - name: Check customer return receiving Service in desktop and mobile Chrome
+        run: node tests/customer-return-browser-smoke.js
       - name: Set up Java 21 for Firestore emulator
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
-      # Scoped profiler: reproduce the failing batch in isolation while the
-      # Emulator is running. The diagnostic probe must not mask regression status.
-      - name: Profile five-reservation rule evaluation
-        if: github.head_ref == 'feat/cross-warehouse-reservation-evidence-20261017'
-        run: |
-          npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin 'node --test --test-name-pattern="five operational reservations across two warehouses" tests/firestore-rules.test.js; node tools/firestore-rule-coverage.cjs'
+      - name: Emulator Admin SDK grouped reservation integration
+        run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --test tests/emulator-grouped-reservation.cjs"
+      - name: Install Functions runtime for real callable emulator
+        run: npm install --prefix functions --no-save --no-package-lock
+      - name: Preview Callable Auth + Functions + Firestore Emulator integration
+        env:
+          ENABLE_GROUPED_RESERVATION: "true"
+          ENABLE_SERVICE_CASE_EMULATOR: "true"
+          ENABLE_QUICK_PURCHASE_EMULATOR: "true"
+        run: npx --yes firebase-tools@15 emulators:exec --only firestore,auth,functions --project demo-yushin "node --test --test-concurrency=1 tests/emulator-grouped-reservation-callable.cjs tests/emulator-service-case-callable.cjs tests/emulator-quick-purchase-callable.cjs"
+      - name: Verify v2 Auth Callables and real browser lifecycle handoff in isolated demo Emulator
+        run: node tools/run-v2-return-auth-emulator.cjs
+      - name: Verify single-item and whole-order dual-warehouse atomic reservation in Emulator
+        run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --test tests/emulator-single-item-location.cjs tests/emulator-order-location.cjs"
+      - name: Verify shipment, delivery correction and physical return receipt in Emulator
+        run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --test tests/emulator-location-shipment.cjs"
       - name: Compile and test Firestore rules
-        run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --test tests/firestore-rules.test.js"
+        run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --max-old-space-size=4096 --test tests/firestore-rules.test.js"

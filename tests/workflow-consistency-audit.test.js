@@ -136,12 +136,12 @@ test('shared duplicate check finds same-brand product after first fifty exact-co
  assert.equal(await c.findDuplicateProductMaster('Target','A','50'),null);
 });
 test('saved product synchronizes product page and invalidates old search results without extra database reads',()=>{
- let rendered=0,lookup;const c=vm.createContext({productManagementResults:[],productManagementSearchCache:new Map([['old',[]]]),productManagementSearchGeneration:2,productBrandBrowseGeneration:3,productManagementSearchInProgress:true,productManagementActiveSearch:'old',
+ let rendered=0,lookup;const c=vm.createContext({invalidateProductFrequentCache(){},productManagementResults:[],productManagementSearchCache:new Map([['old',[]]]),productManagementSearchGeneration:2,productManagementSearchInProgress:true,productManagementActiveSearch:'old',
   productMasterDocToPriceItem:d=>({...d.data(),productId:d.id}),cacheProductLookupItem:item=>lookup=item,renderProductManagementResults:()=>rendered++,updateProductSearchControls(){},updateProductManagementMoreButton(){}});
  vm.runInContext(section('function syncSavedProductMaster(', 'window.saveProductMasterEditor ='),c);
  c.syncSavedProductMaster('P',{productName:'New'});c.syncSavedProductMaster('P',{productName:'Updated'});
  assert.equal(c.productManagementResults.length,1);assert.equal(c.productManagementResults[0].productName,'Updated');
- assert.equal(c.productManagementSearchCache.size,0);assert.equal(c.productManagementSearchGeneration,4);assert.equal(c.productBrandBrowseGeneration,5);
+ assert.equal(c.productManagementSearchCache.size,0);assert.equal(c.productManagementSearchGeneration,4);
  assert.equal(lookup.productId,'P');assert.equal(rendered,2);
  assert.equal(c.productManagementSearchInProgress,false);assert.equal(c.productManagementActiveSearch,null);
 });
@@ -213,4 +213,53 @@ test('same product receipt allocation leaves another warehouse stock and reserva
  await f.c.allocateFreeReceiptStockToShortages('P','W',3,'Tester');
  assert.equal(f.docs.get('warehouseStocks/W__P').reserved,3);assert.equal(f.docs.get('inventory/P').reserved,7);
  assert.deepEqual([f.docs.get('warehouseStocks/OTHER__P'),f.docs.get('inventoryReservations/OTHER')],before);
+});
+
+test('actual purchasing projection excludes warehouse shipments awaiting acknowledgement',()=>{
+ const c=vm.createContext({YushinWorkflow:workflow,YushinProcurementDemand:demandCore,YushinFulfillment:fulfillment,
+  itemDispatchState:()=>({grossDelivered:0,delivered:0,returned:0})});
+ vm.runInContext(section('function procurementDemandForOrderItem(', 'function purchasingLifecycleSnapshot('),c);
+ const item={itemId:'I',productId:'P',qty:10,reservedQty:4,shortageQty:6,supplyOrderedQty:3,receivedQty:1,warehouseShippedQty:4};
+ const order={id:'O',items:[item],warehouseShipmentRecords:[{id:'S',orderId:'O',itemId:'I',productKey:'P',
+  warehouseId:'A',date:'2026-10-17',qty:4,sourceType:'WAREHOUSE_CUSTOMER_SHIPMENT'}],deliveryRecords:[]};
+ const demand=c.procurementDemandForOrderItem(order,item);
+ assert.equal(demand.requestedQty,3);assert.equal(demand.remainingToOrderQty,0);assert.equal(demand.remainingToReceiveQty,2);
+ order.warehouseShipmentRecords[0].sourceType='UNRECOGNIZED';
+ assert.throws(()=>c.procurementDemandForOrderItem(order,item));
+});
+
+test('actual purchasing projection keeps CLOSE returns closed after receipt and pending acknowledgement',()=>{
+ const c=vm.createContext({YushinWorkflow:workflow,YushinProcurementDemand:demandCore,YushinFulfillment:fulfillment,
+  itemDispatchState:()=>({grossDelivered:2,delivered:2,returned:1})});
+ vm.runInContext(section('function procurementDemandForOrderItem(', 'function purchasingLifecycleSnapshot('),c);
+ const item={itemId:'I',productId:'P',qty:10,reservedQty:4,shortageQty:2,supplyOrderedQty:3,receivedQty:1,warehouseShippedQty:4,returnedQty:1};
+ const order={id:'O',items:[item],warehouseShipmentRecords:[{id:'S',orderId:'O',itemId:'I',productKey:'P',warehouseId:'A',date:'2026-10-17',qty:4,sourceType:'WAREHOUSE_CUSTOMER_SHIPMENT'}],
+  deliveryRecords:[{id:'D',shipmentId:'S',orderId:'O',itemId:'I',productKey:'P',warehouseId:'A',date:'2026-10-17',qty:2,sourceType:'WAREHOUSE_SHIPMENT_CONFIRMATION'}],
+  returnRecords:[{id:'R',shipmentId:'S',orderId:'O',itemId:'I',productKey:'P',warehouseId:'A',date:'2026-10-17',qty:1,sourceType:'WAREHOUSE_CUSTOMER_RETURN',condition:'RESTOCKABLE',settlement:'CLOSE'}]};
+ const demand=c.procurementDemandForOrderItem(order,item);
+ assert.equal(demand.requestedQty,3);assert.equal(demand.remainingToOrderQty,0);assert.equal(demand.remainingToReceiveQty,2);
+ item.receivedQty=2;item.reservedQty=5;item.shortageQty=1;
+ const next=c.procurementDemandForOrderItem(order,item);assert.equal(next.requestedQty,3);assert.equal(next.remainingToOrderQty,0);assert.equal(next.remainingToReceiveQty,1);
+});
+
+
+test('actual normalized CLOSE return and v2 dispatch feed total physical returns to purchasing without reopening demand',()=>{
+ const c=vm.createContext({YushinWorkflow:workflow,YushinProcurementDemand:demandCore,YushinFulfillment:fulfillment,
+  YUSHIN_V2_DISPATCH_EMULATOR:true,orderInventorySyncIncomplete:()=>false,
+  brandIdentityForRecord:item=>({brand:item.brand||'',brandId:item.brandId||''}),normalizeHistoryItemCode:x=>x,parseMoney:Number});c.window=c;
+ vm.runInContext(section('function normalizedOrderItems(', 'function ensureOrderItemCompatibility('),c);
+ vm.runInContext(section('function itemDispatchState(', 'function orderLifecycleActionButtons('),c);
+ vm.runInContext(section('function procurementDemandForOrderItem(', 'function purchasingLifecycleSnapshot('),c);
+ const item={itemId:'I',productId:'P',qty:12,reservedQty:5,shortageQty:3,supplyOrderedQty:4,receivedQty:4,
+  warehouseShippedQty:4,dispatchPreparedQty:9,deliveredQty:4,returnedQty:2};
+ const order={id:'O',items:[item],warehouseShipmentRecords:[{id:'S',orderId:'O',itemId:'I',productKey:'P',warehouseId:'A',date:'2026-10-21',qty:4,sourceType:'WAREHOUSE_CUSTOMER_SHIPMENT'}],
+  deliveryRecords:[{id:'D',shipmentId:'S',orderId:'O',itemId:'I',productKey:'P',warehouseId:'A',date:'2026-10-21',qty:4,sourceType:'WAREHOUSE_SHIPMENT_CONFIRMATION'}],
+  returnRecords:[{id:'R',shipmentId:'S',orderId:'O',itemId:'I',productKey:'P',warehouseId:'A',date:'2026-10-21',qty:2,sourceType:'WAREHOUSE_CUSTOMER_RETURN',condition:'RESTOCKABLE',settlement:'CLOSE'}]};
+ const normalized=c.normalizedOrderItems(order)[0];assert.equal(normalized.returnedQty,0);assert.equal(item.returnedQty,2);
+ assert.equal(c.itemDispatchState(order,normalized).returned,2);
+ const before=structuredClone(order),demand=c.procurementDemandForOrderItem(order,normalized);
+ assert.equal(demand.remainingToOrderQty,3);assert.equal(demand.remainingToReceiveQty,0);assert.deepEqual(order,before);
+ // The same projection guard must still reject stale stored totals and unsupported replacement returns.
+ item.returnedQty=1;assert.throws(()=>c.procurementDemandForOrderItem(order,normalized));item.returnedQty=2;
+ order.returnRecords[0].settlement='REPLACE';assert.throws(()=>c.procurementDemandForOrderItem(order,normalized));
 });

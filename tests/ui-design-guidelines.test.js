@@ -53,7 +53,7 @@ test('all working modules show one consistent page title', () => {
     assert.ok(css.includes('#appContainer .forecast-status-active'));
     assert.ok(css.includes('.order-work-card, .product-brand-button):is(.active, [aria-pressed="true"], [aria-selected="true"])'));
     assert.match(html, /<div class="module-header no-print">\s*<h2 class="workspace-page-title">訂單 <button[^>]*data-page-help="order-system"/);
-    assert.ok(html.includes('styles.css?v=20261013-4'));
+    assert.match(html, /styles\.css\?v=20[0-9]{6}-[0-9]+/);
     assert.ok(css.includes('#appContainer #myQuotesPanel > table :is(th, td):nth-child(6)'));
     assert.ok(css.includes('#appContainer #quote-system .quote-more-actions > summary'));
     assert.ok(css.includes('@media screen and (min-width: 769px)'));

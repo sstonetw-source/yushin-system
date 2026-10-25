@@ -34,6 +34,30 @@ function sampleOrder(){
          reservedQty:3,shortageQty:2,supplyOrderedQty:5,receivedQty:3,dispatchPreparedQty:1}
     ]};
 }
+test('uniform completed Service display uses the order index without inventing delivery or changing writer classification',()=>{
+    const x=setup(),line={itemId:'S',productType:'Service',qty:2,unitPrice:100};
+    const order={status:'normal',inventoryReservationStatus:'completed',items:[line],workCategories:['billing']};
+    assert.equal(x.orderItemWorkCategory(order,line),'delivery');
+    assert.deepEqual(Array.from(x.orderItemDisplayCategories(order,line)),['billing']);
+    assert.equal(x.orderItemWorkAmount(order,line,'billing'),200);
+    order.isBilled=true;order.workCategories=['complete'];
+    assert.equal(x.orderItemDisplayCategory(order,line),'complete');
+    assert.equal(x.orderItemWorkAmount(order,line,'complete'),200);
+    assert.equal(line.deliveredQty,undefined);
+    order.status='cancelled';
+    assert.equal(x.orderItemDisplayCategory(order,line),'closed');
+});
+test('Service display does not infer per-line completion from mixed, partial or incompatible indexes',()=>{
+    const x=setup(),line={itemId:'S',productType:'Service',qty:2,unitPrice:100};
+    const order={status:'normal',inventoryReservationStatus:'completed',items:[line],workCategories:['billing','delivery']};
+    assert.equal(x.orderItemDisplayCategory(order,line),'delivery');
+    order.workCategories=['complete'];
+    assert.equal(x.orderItemDisplayCategory(order,line),'delivery');
+    order.workCategories=['billing'];order.items.push({productType:'Goods',qty:1});
+    assert.equal(x.orderItemDisplayCategory(order,line),'delivery');
+    order.items.pop();order.inventoryReservationStatus='pending';
+    assert.equal(x.orderItemDisplayCategory(order,line),'delivery');
+});
 test('purchaser can print ready parts while another supplier order remains in transit',()=>{
     const x=setup(),order=sampleOrder(),[a,b,c]=order.items;
     assert.deepEqual(Array.from(x.orderItemDisplayCategories(order,a)),['shipping']);
@@ -56,7 +80,7 @@ test('unprinted items cannot enter sales ready list and delivered/cancelled item
 test('printing stays purchaser/admin only, and reuses the existing transactional dispatch record',()=>{
     const slice=app.slice(app.indexOf('window.markOrderItemDispatchPrepared = async function'),app.indexOf('\nfunction canBusinessSelfOrder',app.indexOf('window.markOrderItemDispatchPrepared = async function')));
     assert.match(slice,/currentUserRole === 'purchaser' \|\| currentUserRole === 'admin'/);
-    assert.match(slice,/await prepareOrderDispatch\(orderId,itemId\)/);
+    assert.match(slice,/await prepareOrderDispatch\(orderId,itemId,attempt\)/);
     assert.doesNotMatch(slice,/await runRoleTransaction\(async tx=>/);
     const service=fs.readFileSync(path.join(__dirname,'../src/services/dispatch-preparation.js'),'utf8');
     assert.match(service,/await runRoleTransaction\(async tx=>/);

@@ -42,5 +42,49 @@ const allocateFreeReceiptStockToShortages=async(key,warehouseId,qty)=>{if(failAl
   await page.locator('#freeStockRecoveryMore').click();await page.waitForFunction(()=>[...docs].filter(([p,d])=>p.startsWith('warehouseStocks/')&&d.allocationPending).length===0);
   assert.equal(await page.evaluate(()=>reads),2);assert.equal(await page.locator('#freeStockRecoveryPanel').isVisible(),false);
   await page.close();console.log('Free-stock recovery '+width+'px: five-role visibility, no unauthorized queries, failure, retry and 55-row paging passed.');
+  const v2=await browser.newPage({viewport:{width,height:950}});v2.on('pageerror',e=>errors.push(e.message));
+  let allocated=0,lost=true,listCalls=0;const resumeCalls=[];
+  await v2.exposeFunction('readV2Recovery',input=>{
+   listCalls++;
+   if(!input.afterId)return {rows:[],hasMore:true,afterId:'completed-page'};
+   return {rows:allocated===2?[]:[{movementId:'M',productKey:'P',warehouseId:'W',quantity:2,allocatedQty:allocated,status:'active'}],hasMore:false,afterId:'M'};
+  });
+  await v2.exposeFunction('resumeV2Recovery',input=>{
+   resumeCalls.push(structuredClone(input));assert.deepEqual(input,{movementId:'M'});
+   if(allocated<2)allocated++;
+   if(allocated===2&&lost){lost=false;throw Error('browser recovery reply lost');}
+   return {data:{sourceMovementId:'M',productKey:'P',warehouseId:'W',maxQty:2,allocatedQty:allocated,
+    status:allocated===2?'completed':'active',recoveryPending:allocated!==2,affectedOrderIds:['O']}};
+  });
+  await v2.route('http://127.0.0.1:4188/',r=>r.fulfill({contentType:'text/html',body:'<html lang="zh-Hant"><meta charset="utf-8"><body>'+panel+'</body></html>'}));
+  const setup=async()=>{
+   await v2.goto('http://127.0.0.1:4188/');await v2.addStyleTag({content:fs.readFileSync('styles.css','utf8')});
+   await v2.addScriptTag({content:bootstrap+`
+    globalThis.YUSHIN_V2_RECOVERY_EMULATOR=true;
+    const app={options:{projectId:'demo-yushin'}};
+    const firebase={app(){return {functions:region=>this.functions(region)};},auth:()=>({app,currentUser:{uid:'receiver'},emulatorConfig:{host:'localhost',port:9099}}),
+     functions:()=>({app,useEmulator:(h,p)=>{if(h!=='127.0.0.1'||p!==5001)throw Error('remote emulator');},
+      httpsCallable:name=>name==='listV2FreeStockRecovery'?async p=>({data:await readV2Recovery(p)}):resumeV2Recovery})};`});
+   await v2.addScriptTag({content:fs.readFileSync('modules/free-stock-recovery.js','utf8')});
+  };
+  await setup();
+  for(const role of ['sales','engineer']){
+   const before=listCalls;await v2.evaluate(async role=>{currentUserRole=role;resetFreeStockRecovery();await loadFreeStockRecovery();},role);
+   assert.equal(listCalls,before);assert.equal(await v2.locator('#freeStockRecoveryPanel').isVisible(),false);
+  }
+  await v2.evaluate(async()=>{currentUserRole='warehouse';await loadFreeStockRecovery();});
+  assert.equal(resumeCalls.length,0);assert.equal(await v2.locator('#freeStockRecoveryMore').isVisible(),true);
+  await v2.locator('#freeStockRecoveryMore').click();await v2.waitForFunction(()=>document.querySelector('#freeStockRecoveryBody button'));
+  assert.equal(resumeCalls.length,0);assert.match(await v2.locator('#freeStockRecoveryQuantityLabel').textContent(),/釋放／已分配/);
+  const resume=v2.locator('#freeStockRecoveryBody button');await resume.click();
+  await v2.waitForFunction(()=>document.getElementById('freeStockRecoveryBody').textContent.includes('本次進度已確認'));
+  assert.equal(allocated,1);await resume.click();
+  await v2.waitForFunction(()=>document.getElementById('freeStockRecoveryBody').textContent.includes('browser recovery reply lost'));
+  assert.equal(allocated,2);assert.equal(await resume.isEnabled(),true);await resume.click();
+  await v2.waitForFunction(()=>document.getElementById('freeStockRecoveryPanel').hidden);
+  assert.equal(allocated,2);assert.equal(resumeCalls.length,3);assert.deepEqual(resumeCalls[0],resumeCalls[2]);
+  await setup();await v2.evaluate(async()=>{await loadFreeStockRecovery();await loadFreeStockRecovery(true);});
+  assert.equal(await v2.locator('#freeStockRecoveryPanel').isVisible(),false);assert.equal(resumeCalls.length,3);
+  await v2.close();console.log('V2 free-stock recovery '+width+'px: original panel, read-only paging, partial continuation, lost reply, same source retry and reload passed.');
  }}finally{await browser.close();}assert.deepEqual(errors,[]);
 })().catch(err=>{console.error(err);process.exitCode=1;});

@@ -9,3 +9,11 @@
 - 計算與事件：`docs/BUSINESS_RULES.md`
 - AI / 開發修改守則：`docs/DEVELOPMENT_RULES.md`
 - 交易未完成清單仍請對照 `docs/workflow-consistency-audit-20261014.md`。
+
+## 網站與 Firebase 發布
+
+- 正式網站使用 [GitHub Pages](https://sstonetw-source.github.io/yushin-system/)，來源為 `main` 的根目錄。
+- 本專案不設定或發布 Firebase Hosting；GitHub 網站更新與 Firebase 後端發布分開處理。
+- Firebase 繼續提供 Authentication、Firestore 與 Cloud Functions。保留 Firebase 登入用的 `authDomain`，不要因移除 Hosting 設定而刪除驗證網域。
+- Functions、Rules 與 Index 只有在對應內容需要更新且取得發布授權時才發布；不要把網站更新當成後端已同步。
+- 移除本機 Hosting 設定不會停用線上既有 Hosting 站台；若需下架舊網址，應另列站台及停用範圍。

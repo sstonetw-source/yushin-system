@@ -24,14 +24,14 @@
             && a.fulfillmentType===b.fulfillmentType && a.supplier===b.supplier && a.costPrice===b.costPrice
             && a.selfOrderConfirmed===b.selfOrderConfirmed && JSON.stringify(a.deliveryPlan||{})===JSON.stringify(b.deliveryPlan||{});
     }
-    function validateTrade(order={}) {
-        if(!['直','借','扣'].includes(order.transactionType))return {valid:false,message:'請至訂單的交易資訊選擇直、借或扣，供採購打單確認。'};
-        if(order.transactionType==='直'&&!text(order.invoiceTitle))return {valid:false,message:'開發票的訂單請先填寫發票抬頭，再打單。'};
+    function validateTrade(order={}, {requireInvoiceTitle=true}={}) {
+        if(!['直','借','扣'].includes(order.transactionType))return {valid:false,message:'請選擇交易方式（直、借或扣）。'};
+        if(requireInvoiceTitle&&order.transactionType==='直'&&!text(order.invoiceTitle))return {valid:false,message:'開發票的訂單請先填寫發票抬頭，再打單。'};
         return {valid:true};
     }
     function copyItem(item={},fallback={}) {
         const draft={};
-        for(const key of ['itemCode','itemName','itemNameEn','brand','brandId','productId','productMasterMatched','productCheckStatus','productLine','productType','spec','qty','unitPrice','supplier','costPrice','procurementType','fulfillmentType','warehouseId','deliveryCustomerName']) {
+        for(const key of ['itemCode','itemName','itemNameEn','brand','brandId','productId','productMasterMatched','productCheckStatus','productLine','productType','serviceKind','spec','qty','unitPrice','supplier','costPrice','procurementType','fulfillmentType','warehouseId','deliveryCustomerName']) {
             if(item[key]!==undefined)draft[key]=item[key];
         }
         draft.selfOrderConfirmed=false;

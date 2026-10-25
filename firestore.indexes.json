@@ -1,6 +1,14 @@
 {
   "indexes": [
     {
+      "collectionGroup": "products",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "isFrequentlySold", "order": "ASCENDING"},
+        {"fieldPath": "brandName", "order": "ASCENDING"}
+      ]
+    },
+    {
       "collectionGroup": "inventoryLots",
       "queryScope": "COLLECTION",
       "fields": [

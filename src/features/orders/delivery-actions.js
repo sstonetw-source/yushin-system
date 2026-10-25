@@ -5,6 +5,9 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
     if (pendingDeliveryOrderIds.has(orderId)) return;
     const cachedOrder = ordersCache.find(item => item.id === orderId);
     if (!cachedOrder || !canManageOrderLifecycleCapability() || !canEditPage('orders.list')) return;
+    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true){
+        openDeliveryModal(orderId);openPartialDeliveryForm();return;
+    }
     if(orderInventorySyncIncomplete(cachedOrder)){showActionFeedback('訂單庫存尚未同步完成，請先完成同步。','warning');return;}
     const cachedProgress = deliveryProgressInfo(cachedOrder);
     if (normalizedOrderStatus(cachedOrder) !== 'normal') { alert('已取消的訂單不能送貨。'); return; }
@@ -63,6 +66,7 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
 };
 
 window.quickCancelAllDelivery = async function(orderIdOverride) {
+    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true){alert('v2 送達須逐筆撤銷，不可回補已寄出的庫存。');return;}
     const orderId = orderIdOverride || currentDeliveryOrderId;
     if (pendingDeliveryOrderIds.has(orderId)) return;
     const cachedOrder = ordersCache.find(item => item.id === orderId);
@@ -105,9 +109,16 @@ window.quickCancelAllDelivery = async function(orderIdOverride) {
 function renderDeliveryModal() {
     const order = ordersCache.find(item => item.id === currentDeliveryOrderId);
     if (!order) return;
-    const editable = canManageOrderLifecycleCapability() && canEditPage('orders.list');
+    const v2=globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true;
+    let confirmation=null,reversal=null,pendingError='';
+    if(v2)try{confirmation=pendingV2DeliveryConfirmation(order.id);reversal=pendingV2DeliveryReversal(order.id);}
+    catch(error){pendingError=error.message;}
+    const editable = canManageOrderLifecycleCapability() && canEditPage('orders.list') && !pendingError;
+    const deliveryItems=normalizedOrderItems(order);
+    const physicalDeliveryItems=deliveryItems.filter(item=>String(item.productType||'').trim().toUpperCase()!=='SERVICE');
     const isEditing = !!document.getElementById('deliveryEditId').value;
-    document.getElementById('deliveryFormPanel').style.display = editable && (normalizedOrderStatus(order) === 'normal' || isEditing) && (deliveryPartialFormOpen || isEditing) ? '' : 'none';
+    document.getElementById('deliveryFormPanel').style.display = editable && physicalDeliveryItems.length>0
+        && (normalizedOrderStatus(order) === 'normal' || isEditing) && (deliveryPartialFormOpen || isEditing) ? '' : 'none';
     const progress = deliveryProgressInfo(order);
     const lifecycle = orderLifecycleInfo(order);
     const locked = lifecycle.status !== 'normal';
@@ -118,9 +129,8 @@ function renderDeliveryModal() {
     document.getElementById('orderWorkflowSteps').innerHTML = `
         <button type="button" class="workflow-step ${['ordered','not_required','direct'].includes(purchase.state)?'done':purchase.state==='partial'?'partial':''}" disabled><span>1</span>${escapeHtml(purchase.label)}</button>
         <button type="button" class="workflow-step ${['ready','direct','complete'].includes(fulfillment.state)?'done':fulfillment.state==='partial'?'partial':''}" disabled><span>2</span>${escapeHtml(fulfillment.label)}</button>
-        <button type="button" class="workflow-step ${progress.state==='complete'?'done':progress.state==='partial'?'partial':''}" ${editableSteps&&progress.remaining>0?'onclick="openPartialDeliveryForm()"':'disabled'}><span>3</span>${escapeHtml(progress.label)}</button>
+        <button type="button" class="workflow-step ${progress.state==='complete'?'done':progress.state==='partial'?'partial':''}" ${editableSteps&&progress.remaining>0&&physicalDeliveryItems.length?'onclick="openPartialDeliveryForm()"':'disabled'}><span>3</span>${escapeHtml(progress.label)}</button>
         <button type="button" class="workflow-step ${order.isBilled?'done':''}" ${editableSteps?`onclick="toggleOrderProgressStatus('isBilled', ${!order.isBilled})"`:'disabled'}><span>4</span>${order.isBilled?'已核銷':'未核銷'}</button>`;
-    const deliveryItems=normalizedOrderItems(order);
     const deliveryItemNameById=new Map(deliveryItems.map(item=>[item.itemId,item.itemName||item.itemId||'']));
     const itemSummary=deliveryItems.map(item=>{
         const grossDelivered=savedDeliveryRecords(order)
@@ -132,7 +142,9 @@ function renderDeliveryModal() {
         const delivered=Math.max(0,grossDelivered-returned);
         return `<div><strong>${escapeHtml(item.itemName||'未命名品項')}</strong>（${escapeHtml(item.itemCode||'無貨號')}）<br>訂單數量 ${Number(item.qty||0)}｜已送 ${grossDelivered}｜退貨 ${returned}｜有效已送 ${delivered}</div>`;
     }).join('');
-    document.getElementById('deliveryOrderSummary').innerHTML = itemSummary + `
+    const serviceNotice=deliveryItems.some(item=>String(item.productType||'').trim().toUpperCase()==='SERVICE')
+        ? '<div style="margin-top:8px;padding:8px;background:#f4f2ed;border-radius:5px;">此訂單含服務品項：檢體、委外器材、維修與報告均不算商品送貨；目前的送貨數量僅供實體商品作業參考。服務完工及交付須另有憑證，不能在這裡標記完成。</div>' : '';
+    document.getElementById('deliveryOrderSummary').innerHTML = itemSummary + serviceNotice + `
         <div style="margin-top:6px;">目前狀態：${escapeHtml(lifecycle.label)}｜已送 ${progress.delivered}/${progress.total}｜未送 ${progress.remaining}</div>
         ${progress.isLegacyEstimated ? '<br><span class="delivery-estimated">這是舊版「已送貨」資料，日期暫以訂單日期推估。</span>' : ''}`;
     const deliveryForm=document.getElementById('deliveryFormPanel');
@@ -143,36 +155,92 @@ function renderDeliveryModal() {
             deliveryForm.insertBefore(select,deliveryForm.firstChild);
         }
         const current=select.value;
-        select.innerHTML=deliveryItems.map(item=>`<option value="${escapeAttr(item.itemId)}">${escapeHtml(item.itemCode||'')} ${escapeHtml(item.itemName||'')}</option>`).join('');
-        if(deliveryItems.some(item=>item.itemId===current))select.value=current;
+        select.innerHTML=physicalDeliveryItems.map(item=>`<option value="${escapeAttr(item.itemId)}">${escapeHtml(item.itemCode||'')} ${escapeHtml(item.itemName||'')}</option>`).join('');
+        if(physicalDeliveryItems.some(item=>item.itemId===current))select.value=current;
         select.style.display='';
     }else{
         const select=document.getElementById('deliveryItemId');if(select)select.style.display='none';
     }
 
+    // The existing delivery form selects a real immutable shipment only in
+    // the isolated v2 demo. Never infer arrival from an inventory debit.
+    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true){
+        let host=document.getElementById('deliveryShipmentSelection');
+        if(!host){
+            host=document.createElement('label');host.id='deliveryShipmentSelection';
+            host.textContent='客戶實際收到的出貨批次';
+            const field=document.createElement('select');field.id='deliveryShipmentId';field.style.marginBottom='8px';
+            host.appendChild(field);deliveryForm.insertBefore(host,deliveryForm.firstChild);
+        }
+        const field=document.getElementById('deliveryShipmentId');
+        const frozen=confirmation;
+        const rawItems=order.items||[],selectedItemId=frozen?.itemId
+            ||document.getElementById('deliveryItemId')?.value
+            ||(rawItems.length===1?rawItems[0].itemId:'');
+        const old=field.value;
+        try{
+            const projected=globalThis.YushinFulfillment.projectOrderShipmentReturns({
+                orderId:order.id,items:rawItems,shipments:order.warehouseShipmentRecords||[],
+                deliveries:order.deliveryRecords||[],returns:order.returnRecords||[]});
+            const part=projected.items.find(row=>row.itemId===selectedItemId);
+            const options=(part?.shipments||[]).filter(row=>row.pendingQty>0||row.shipmentId===frozen?.shipmentId);
+            field.innerHTML='<option value="">請選擇原倉庫出貨</option>'+options.map(row=>{
+                const origin=(order.warehouseShipmentRecords||[]).find(s=>s.id===row.shipmentId);
+                return `<option value="${escapeAttr(row.shipmentId)}">${escapeHtml(origin?.date||'')}／${escapeHtml(origin?.warehouseId||'')}／待確認 ${row.pendingQty}</option>`;
+            }).join('');
+            field.value=frozen?.shipmentId||(options.some(row=>row.shipmentId===old)?old:'');
+            field.disabled=!!frozen;
+        }catch(error){
+            field.innerHTML='<option value="">無法核對來源出貨：'+escapeHtml(error.message)+'</option>';
+            field.disabled=true;
+        }
+        const itemSelect=document.getElementById('deliveryItemId');
+        if(itemSelect&&rawItems.length>1){
+            if(frozen)itemSelect.value=frozen.itemId;
+            itemSelect.disabled=!!frozen;
+            itemSelect.onchange=()=>renderDeliveryModal();
+        }
+        if(frozen){
+            document.getElementById('deliveryDate').value=frozen.date;
+            document.getElementById('deliveryQty').value=frozen.quantity;
+            document.getElementById('deliveryNotes').value=frozen.notes;
+        }
+    }else document.getElementById('deliveryShipmentSelection')?.remove();
     const tbody = document.getElementById('deliveryRecordsBody');
     const partialButton = document.getElementById('openPartialDeliveryBtn');
-    if (partialButton) partialButton.style.display = editable && !locked && progress.remaining > 0 ? '' : 'none';
+    if (partialButton) partialButton.style.display = editable && !locked && progress.remaining > 0 && physicalDeliveryItems.length ? '' : 'none';
     const records = savedDeliveryRecords(order).slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
     if (records.length) {
         tbody.innerHTML = records.map(record => `<tr>
             <td>${escapeHtml(record.date || '')}</td><td>${escapeHtml(String(record.qty || ''))}</td>
             <td>${record.itemId ? escapeHtml(deliveryItemNameById.get(record.itemId)||record.itemId)+'<br>' : ''}${escapeHtml(record.notes || '')}</td>
             <td>${escapeHtml(record.createdBy || '')}<br><span style="font-size:10px;color:#666;">${escapeHtml(formatOrderStatusTime(record.createdAt))}</span></td>
-            <td>${editable ? `<details class="order-record-actions"><summary>操作</summary><button type="button" class="btn-small btn-secondary" onclick="editDeliveryRecord(${inlineJsValue(record.id)})">編輯</button> <button type="button" class="btn-danger" onclick="deleteDeliveryRecord(${inlineJsValue(record.id)})">更正誤登</button></details>` : '僅可查看'}</td>
+            <td>${editable && globalThis.YUSHIN_V2_DELIVERY_EMULATOR!==true ? `<details class="order-record-actions"><summary>操作</summary><button type="button" class="btn-small btn-secondary" onclick="editDeliveryRecord(${inlineJsValue(record.id)})">編輯</button> <button type="button" class="btn-danger" onclick="deleteDeliveryRecord(${inlineJsValue(record.id)})">更正誤登</button></details>` : editableSteps && record.sourceType==='WAREHOUSE_SHIPMENT_CONFIRMATION' && !order.returnRecords?.length && !confirmation && !reversal ? `<button type="button" class="btn-danger" onclick="deleteDeliveryRecord(${inlineJsValue(record.id)})">撤銷送達確認</button>` : '僅可查看'}</td>
         </tr>`).join('');
     } else if (progress.isLegacyEstimated) {
         tbody.innerHTML = `<tr><td>${escapeHtml(order.orderDate || '')}<br><span class="delivery-estimated">歷史推估</span></td><td>${progress.total}</td><td>舊版已送貨資料</td><td>－</td><td>${editable ? '<button type="button" class="btn-secondary" onclick="clearLegacyDelivery()">取消此推估</button>' : '僅可查看'}</td></tr>`;
     } else {
         tbody.innerHTML = '<tr><td colspan="5" style="color:#888;">尚無送貨紀錄。</td></tr>';
     }
+    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true){
+        if(pendingError)tbody.insertAdjacentHTML('beforeend',`<tr><td colspan="5">${escapeHtml(pendingError)}</td></tr>`);
+        if(reversal)tbody.insertAdjacentHTML('beforeend',`<tr><td colspan="5">前次送達撤銷結果待確認。${editable&&!syncing?`<button type="button" class="btn-secondary" onclick="deleteDeliveryRecord(${inlineJsValue(reversal.deliveryRecordId)})">確認撤銷結果</button>`:''}</td></tr>`);
+    }
     labelOrderProgressRecords('deliveryRecordsBody', ['送貨日期', '數量', '備註', '登錄人／時間', '操作']);
     document.getElementById('deliveryFormHint').innerText = progress.isLegacyEstimated
         ? '請先取消舊資料推估，再登錄正確的分批送貨紀錄。'
         : `目前最多還可登錄 ${progress.remaining} 個。`;
+    if(v2&&(reversal||pendingError))document.getElementById('deliveryFormPanel').style.display='none';
+    if(v2)
+        document.getElementById('deliveryFormHint').innerText=pendingError||(reversal?'前次撤銷結果待確認，請點選確認撤銷結果。':confirmation
+            ? '前次送達結果未確認：使用原出貨批次及原操作識別碼重試。'
+            : '只確認客戶實際收到的數量；不會再次扣除倉庫實貨。');
+    if(v2)for(const id of ['deliveryDate','deliveryQty','deliveryNotes'])
+        document.getElementById(id).disabled=!!confirmation||!!reversal||!!pendingError||syncing;
 }
 
 window.editDeliveryRecord = function(recordId) {
+    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true){alert('v2 送達紀錄不可直接編輯；請走送達更正流程。');return;}
     const order = ordersCache.find(item => item.id === currentDeliveryOrderId);
     const record = savedDeliveryRecords(order).find(item => item.id === recordId);
     if (!record) return;
@@ -215,16 +283,23 @@ window.saveDeliveryRecord = async function() {
         return;
     }
     if (pendingDeliveryOrderIds.has(orderId)) return;
-    const itemId=document.getElementById('deliveryItemId')?.value||'';
-    const fingerprint=JSON.stringify([orderId,itemId,date,qty,notes]);
+    const itemId=globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true
+        ? (ordersCache.find(row=>row.id===orderId)?.items?.length===1
+            ? ordersCache.find(row=>row.id===orderId).items[0].itemId
+            : document.getElementById('deliveryItemId')?.value||'')
+        : document.getElementById('deliveryItemId')?.value||'';
+    const shipmentChoice=document.getElementById('deliveryShipmentId')?.value||'';
+    const fingerprint=JSON.stringify([orderId,itemId,shipmentChoice,date,qty,notes]);
     if(!editId&&deliveryCreateAttempt?.fingerprint!==fingerprint)
         deliveryCreateAttempt={fingerprint,recordId:deliveryRecordId()};
-    const recordId=editId||deliveryCreateAttempt.recordId;
+    const frozen=globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true?pendingV2DeliveryConfirmation(orderId):null;
+    const recordId=frozen?.operationId||editId||deliveryCreateAttempt.recordId;
+    const shipmentId=frozen?.shipmentId||document.getElementById('deliveryShipmentId')?.value||'';
     const saveButton = document.querySelector('[onclick="saveDeliveryRecord()"]');
     pendingDeliveryOrderIds.add(orderId);
     if (saveButton) { saveButton.disabled = true; saveButton.textContent = '儲存中…'; }
     try {
-        const savedOrder=await saveOrderDeliveryRecord(orderId,{date,qty,notes,editId,itemId,recordId});
+        const savedOrder=await saveOrderDeliveryRecord(orderId,{date,qty,notes,editId,itemId,recordId,shipmentId});
         const index = ordersCache.findIndex(item => item.id === orderId);
         if (index >= 0) ordersCache[index] = { id: orderId, ...savedOrder };
         resetDeliveryForm();
@@ -236,10 +311,35 @@ window.saveDeliveryRecord = async function() {
     } finally {
         pendingDeliveryOrderIds.delete(orderId);
         if (saveButton) { saveButton.disabled = false; saveButton.textContent = '💾 儲存送貨紀錄'; }
+        if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true&&currentDeliveryOrderId===orderId)renderDeliveryModal();
     }
 };
 
+async function reverseV2DeliveryRecord(recordId){
+    if(!canManageOrderLifecycleCapability()||!canEditPage('orders.list'))return alert('此操作僅限訂單負責業務或管理員。');
+    const orderId=currentDeliveryOrderId;
+    if(!orderId||pendingDeliveryOrderIds.has(orderId))return;
+    pendingDeliveryOrderIds.add(orderId);
+    try{
+        const pending=pendingV2DeliveryReversal(orderId);
+        if(pending&&pending.deliveryRecordId!==recordId)throw Error('請先確認前次送達撤銷結果。');
+        const reason=pending?.reason||prompt('撤銷客戶送達確認後，貨品仍維持已寄出，不會回補倉庫庫存。\n請填寫撤銷原因：');
+        if(!reason?.trim())return;
+        const saved=await reverseV2ShipmentDeliveryEmulator(orderId,recordId,{
+            reason,date:pending?.date||localDateString(),operationId:pending?.operationId||deliveryRecordId()});
+        const index=ordersCache.findIndex(row=>row.id===orderId);
+        if(index>=0)ordersCache[index]={id:orderId,...saved};
+        if(currentDeliveryOrderId===orderId){resetDeliveryForm();renderOrderLifecycleModal();}
+    }catch(error){alert('送達撤銷尚未確認：'+error.message+'\n請使用原操作核對結果。');}
+    finally{
+        pendingDeliveryOrderIds.delete(orderId);
+        if(currentDeliveryOrderId===orderId)renderDeliveryModal();
+        renderOrdersList();
+    }
+}
+
 window.deleteDeliveryRecord = async function(recordId) {
+    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true)return reverseV2DeliveryRecord(recordId);
     if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) { alert('此操作僅限訂單負責業務或管理員。'); return; }
     const correctionReason = prompt('僅限更正誤登的送貨紀錄，會同步回補原出貨庫存並保留異動軌跡。實際已送出的貨請申請退貨。\n\n請輸入誤登更正原因：');
     if (!correctionReason || !correctionReason.trim()) return;
@@ -264,6 +364,7 @@ window.deleteDeliveryRecord = async function(recordId) {
 };
 
 window.clearLegacyDelivery = async function() {
+    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true)return alert('v2 送達不可使用歷史推估清除功能。');
     if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) { alert('此操作僅限訂單負責業務或管理員。'); return; }
     if (!confirm('確定取消這筆舊資料的「已送貨」推估嗎？取消後請重新登錄正確送貨日期與數量。')) return;
     const order = ordersCache.find(item => item.id === currentDeliveryOrderId);
@@ -363,11 +464,13 @@ function renderOrderLifecycleStatusOptions(order) {
     const currentStatus = normalizedOrderStatus(order);
     const selected = select.value || currentStatus;
     const canCancel = progress.remaining > 0;
+    let pendingCancel=false;
+    if(globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true){try{pendingCancel=pendingV2OrderLifecycle(order.id)?.nextStatus==='cancelled';}catch(_){/* visible error rendered below */}}
     const cancelLabel = currentStatus === 'cancelled' ? '已取消'
         : progress.grossDelivered > 0 ? '取消剩餘未送貨數量' : '取消訂單';
     select.innerHTML = '<option value="normal">正常</option>'
-        + (canCancel || currentStatus === 'cancelled' ? `<option value="cancelled">${cancelLabel}</option>` : '');
-    select.value = selected === 'cancelled' && (canCancel || currentStatus === 'cancelled') ? 'cancelled' : 'normal';
+        + (canCancel || currentStatus === 'cancelled' || pendingCancel ? `<option value="cancelled">${cancelLabel}</option>` : '');
+    select.value = selected === 'cancelled' && (canCancel || currentStatus === 'cancelled' || pendingCancel) ? 'cancelled' : 'normal';
     const hint = document.getElementById('orderLifecycleStatusHint');
     if (hint) hint.innerText = canCancel
         ? (progress.grossDelivered > 0 ? '僅取消剩餘未送貨數量；已送貨部分請申請退貨。' : '')
@@ -388,7 +491,26 @@ function renderOrderLifecycleModal() {
     lifecycleButton.textContent = cancelled ? '恢復訂單' : deliveryProgressInfo(order).grossDelivered > 0 ? '取消剩餘未送數量' : '取消訂單';
     const canReturn = normalizedOrderItems(order).some(item => returnItemDeliveredQty(order, item.itemId) - returnItemReturnedQty(order, item.itemId) - customerReturnPendingQty(order, item.itemId) > 0);
     document.getElementById('openReturnFormBtn').hidden = !editable || !canReturn;
+    const reorderButton=document.getElementById('reorderAfterReturnBtn');
+    if(reorderButton)reorderButton.hidden=!editable||!savedReturnRecords(order).some(row=>row.settlement==='CLOSE'&&Number(row.qty)>0);
     document.getElementById('orderLifecycleActionHint').textContent = !canCancel && !cancelled ? '已無剩餘未送貨數量；退貨請建立申請，由倉庫頁確認實收。' : '取消僅處理未送貨數量；已送貨部分請申請退貨。';
+    if(globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true){
+        let retry,error;
+        try{retry=pendingV2OrderLifecycle(order.id);}catch(err){error=err.message;}
+        if(retry||error){
+            document.getElementById('orderLifecycleActionHint').textContent=error||'前次取消／恢復結果未確認；請以原操作核對，不會重新建立作業。';
+            lifecycleButton.hidden=!editable||!!error;
+            lifecycleButton.textContent='確認前次取消／恢復結果';
+            document.getElementById('orderStatusEditPanel').style.display=editable&&orderLifecycleFormOpen&&!error?'':'none';
+        }
+        for(const [id,value] of [['orderLifecycleStatus',retry?.nextStatus],['orderLifecycleDate',retry?.date],['orderLifecycleReason',retry?.reason]]){
+            const input=document.getElementById(id);
+            input.disabled=!!retry||!!error;
+            if(retry)input.value=value;
+        }
+        const save=document.getElementById('orderLifecycleSaveBtn');
+        if(save){save.disabled=!editable||!!error||pendingLifecycleOrderIds.has(order.id);save.innerText=retry?'確認前次結果':'💾 儲存狀態';}
+    }
     const isEditingReturn = !!document.getElementById('returnEditId').value;
     document.getElementById('returnFormPanel').style.display = editable && (orderReturnFormOpen || isEditingReturn) && (info.effectiveDelivered > 0 || isEditingReturn) ? '' : 'none';
     const records = savedReturnRecords(order).slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
@@ -414,25 +536,29 @@ window.saveOrderLifecycleStatus = async function() {
     const reason = document.getElementById('orderLifecycleReason').value.trim();
     if (!date) { alert('請填寫狀態日期。'); return; }
     const previous = { status: normalizedOrderStatus(order), date: order.orderStatusDate || '', reason: order.orderStatusReason || '' };
-    if (previous.status === nextStatus && previous.date === date && previous.reason === reason) return;
+    let retry;
+    try{retry=globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true?pendingV2OrderLifecycle(order.id):null;}catch(err){alert(err.message);return;}
+    if (!retry&&previous.status === nextStatus && previous.date === date && previous.reason === reason) return;
     if (pendingLifecycleOrderIds.has(order.id)) return;
-    if(nextStatus==='cancelled'&&previous.status!=='cancelled'&&!confirmOrderCancellation(order))return;
+    if(!retry&&nextStatus==='cancelled'&&previous.status!=='cancelled'&&!confirmOrderCancellation(order))return;
     const saveButton = document.getElementById('orderLifecycleSaveBtn');
     pendingLifecycleOrderIds.add(order.id);
     if (saveButton) { saveButton.disabled = true; saveButton.innerText = '儲存中…'; }
+    let committed=false;
     try {
         const savedOrder=await setOrderLifecycleStatus(order.id,nextStatus,{date,reason});
+        committed=true;
         // The lifecycle transaction already synchronizes stock and purchase demand.
-        const index = ordersCache.findIndex(item => item.id === order.id);
-        if (index >= 0) ordersCache[index] = { id: order.id, ...savedOrder };
+        applySavedOrderLifecycle(order.id,savedOrder);
         renderDeliveryModal();
         renderOrderLifecycleModal();
         renderOrdersList();
     } catch (err) {
-        alert('訂單狀態儲存失敗：' + err.message + '\n請確認目前這筆資料及連線／權限，重試前先查詢作業結果；若持續失敗，請聯絡管理員。');
+        alert((committed?'訂單狀態已確認，但畫面更新失敗；請重新讀取，勿重建作業：':'訂單狀態結果未確認：') + err.message + '\n請確認目前這筆資料及連線／權限，重試前先查詢作業結果；若持續失敗，請聯絡管理員。');
     } finally {
         pendingLifecycleOrderIds.delete(order.id);
         if (saveButton) { saveButton.disabled = false; saveButton.innerText = '💾 儲存狀態'; }
+        if(globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true)renderOrderLifecycleModal();
     }
 };
 

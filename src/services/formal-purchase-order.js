@@ -1,4 +1,128 @@
+// Document preparation writes only the versioned PO snapshot, never supply/demand/stock.
+function formalPurchaseDocumentIntent(record) {
+    const ignored = new Set(['id','createdAt','updatedAt','lastOutputAt','lastOutputType','supplyOrderIds',
+        'status','documentOnly','documentRevision','confirmedAt','confirmedByUid']);
+    const canonical = value => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object'
+        ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
+    return JSON.stringify(canonical(Object.fromEntries(Object.entries(record).filter(([key]) => !ignored.has(key)))));
+}
+async function saveFormalPurchaseDocument(record, {actorUid=currentUser?.uid,actorRole=currentUserRole,expectedRevision=0}={}) {
+    const check = () => {
+        if (!actorUid || actorUid!==currentUser?.uid || actorRole!==currentUserRole
+            || !canCreatePurchaseOrderCapability() || !canAccessPage('orders.po'))
+            throw Error('登入身分或採購權限已變更。');
+    };
+    check();
+    record=JSON.parse(JSON.stringify(record));
+    if (!record?.poNo || record.poNo.includes('/') || !record.vendorName?.trim()
+        || !Array.isArray(record.items) || !record.items.length
+        || record.items.some(item=>!Number.isFinite(Number(item.qty)) || Number(item.qty)<=0
+            || item.unitPrice===null || item.unitPrice==='' || !Number.isFinite(Number(item.unitPrice)) || Number(item.unitPrice)<0))
+        throw Error('採購文件的單號、供應商、數量或價格不完整。');
+    delete record.id; delete record.supplyOrderIds;
+    record={...record,status:'DRAFT',documentOnly:true,documentRevision:1,createdByUid:actorUid,createdByRole:actorRole};
+    let saved;
+    await runRoleTransaction(async tx=>{
+        check();
+        const ref=db.collection('purchaseOrders').doc(record.poNo),snapshot=await tx.get(ref);
+        check();
+        if (snapshot.exists) {
+            saved=snapshot.data();
+            if(saved.status!=='DRAFT' || saved.documentOnly!==true)
+                throw Error('這個單號已確認採購，請開啟原單核對。');
+            record.createdByUid=saved.createdByUid;record.createdByRole=saved.createdByRole;
+            if(formalPurchaseDocumentIntent(saved)===formalPurchaseDocumentIntent(record))return;
+            if(!Number.isSafeInteger(expectedRevision) || expectedRevision<1
+                || expectedRevision!==(saved.documentRevision||1))
+                throw Error('這個單號已有不同內容，請重新載入原文件後再編輯。');
+            saved={...record,createdAt:saved.createdAt,documentRevision:expectedRevision+1,updatedAt:new Date().toISOString()};
+            tx.set(ref,saved);return;
+        }
+        saved=record;tx.set(ref,record);
+    });
+    check();return {id:saved.poNo,...saved};
+}
 // Authoritative PO, supply commitments and source-order linkage. Incoming remains a separate checkpoint.
+// Backend routing is opt-in per environment. Production remains on the legacy
+// writer until separately switched on after acceptance. No Callable failure falls back.
+function formalPurchaseBackendPilotEnabled() {
+    return (typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='emulator'
+        && globalThis.YUSHIN_FORMAL_PURCHASE_EMULATOR===true)
+        || (typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='preview'
+        && globalThis.YUSHIN_PREVIEW_FORMAL_PURCHASE===true)
+        || (typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='production'
+        && globalThis.YUSHIN_PRODUCTION_FORMAL_PURCHASE===true);
+}
+let formalPurchaseFunctionsScriptPromise=null;
+async function ensureFormalPurchaseFunctionsCompat() {
+    if(firebase.functions)return;
+    if(!formalPurchaseFunctionsScriptPromise){
+        formalPurchaseFunctionsScriptPromise=new Promise((resolve,reject)=>{
+            const script=document.createElement('script');
+            script.src='https://www.gstatic.com/firebasejs/10.8.0/firebase-functions-compat.js';
+            script.onload=resolve;
+            script.onerror=()=>reject(new Error('無法載入 Firebase Functions，採購尚未提交。'));
+            document.head.appendChild(script);
+        }).catch(error=>{formalPurchaseFunctionsScriptPromise=null;throw error;});
+    }
+    await formalPurchaseFunctionsScriptPromise;
+    if(!firebase.functions)throw new Error('Firebase Functions 未載入，採購尚未提交。');
+}
+async function commitFormalPurchaseBackend(poRecord,actorUid,assertActor) {
+    const local=host=>['localhost','127.0.0.1'].includes(host);
+    const isEmulator=APP_ENVIRONMENT==='emulator'&&globalThis.YUSHIN_FORMAL_PURCHASE_EMULATOR===true;
+    const isPreview=APP_ENVIRONMENT==='preview'&&globalThis.YUSHIN_PREVIEW_FORMAL_PURCHASE===true;
+    const isProduction=APP_ENVIRONMENT==='production'&&globalThis.YUSHIN_PRODUCTION_FORMAL_PURCHASE===true;
+    const hostname=String(globalThis.location?.hostname||'').toLowerCase();
+    const pathname=String(globalThis.location?.pathname||'');
+    const productionSite=['yu-shing-company.web.app','yu-shing-company.firebaseapp.com'].includes(hostname)
+        || (hostname==='sstonetw-source.github.io'
+            && (pathname==='/yushin-system'||pathname.startsWith('/yushin-system/')));
+    if(!formalPurchaseBackendPilotEnabled()||typeof firebase==='undefined'||!firebase.auth||!firebase.app
+        ||(isEmulator&&!local(hostname))
+        ||(isPreview&&!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(hostname))
+        ||(isProduction&&!productionSite))
+        throw new Error('採購後端僅限已授權的網站及專案。');
+    const auth=firebase.auth(),project=isProduction?'yu-shing-company':isPreview?'preview-20135':'demo-yushin';
+    if(auth.app?.options?.projectId!==project||firebase.app().options?.projectId!==project
+        ||(isEmulator&&(!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099))
+        ||((isPreview||isProduction)&&auth.emulatorConfig))
+        throw new Error('採購登入與後端 Firebase 專案不一致。');
+    await ensureFormalPurchaseFunctionsCompat();
+    const functions=firebase.app().functions('asia-east1');
+    if(functions.app?.options?.projectId!==project)
+        throw new Error('採購後端連線專案不正確。');
+    const check=()=>{assertActor();if(auth.currentUser?.uid!==actorUid)throw new Error('實際登入身分已變更，請以原帳號核對採購結果。');};
+    check();
+    if(poRecord.items.length>5||poRecord.items.some(item=>!item.orderId||!item.itemId
+        ||(item.sourceType&&item.sourceType!=='SALES_ORDER')
+        ||!['WAREHOUSE','DIRECT_SHIP'].includes(item.fulfillmentType||'WAREHOUSE')))
+        throw new Error('採購後端試點目前只支援 1–5 個客戶訂單實體入庫或直送品項。');
+    const request={poNo:poRecord.poNo,poDate:poRecord.poDate,
+        supplier:poRecord.supplierName||poRecord.vendorName,
+        items:poRecord.items.map(item=>({orderId:item.orderId,itemId:item.itemId,
+            qty:Number(item.qty),unitCost:Number(item.unitPrice)})),
+        document:{company:poRecord.company,supplierSnapshot:poRecord.supplierSnapshot,
+            expectedDate:poRecord.expectedDate||'',expectedDateSource:poRecord.expectedDateSource||'',
+            lineScheduleDates:poRecord.items.map(item=>item.scheduleDate||'')}};
+    if(poRecord.documentRevision)request.documentRevision=poRecord.documentRevision;
+    if(isEmulator)functions.useEmulator('127.0.0.1',5001);
+    // A failed/unknown Callable never falls through to the old client writer.
+    const reply=await functions.httpsCallable('commitV2FormalPurchase')(request);check();
+    const result=reply?.data,ids=request.items.map((_,index)=>formalSupplyOrderId(request.poNo,index));
+    if(!['committed','already-applied'].includes(result?.status)||result.poNo!==request.poNo
+        ||JSON.stringify(result.supplyOrderIds)!==JSON.stringify(ids))
+        throw new Error('採購回覆不明確，請保留原單號核對，勿另建新單。');
+    const read=async(name,id)=>{
+        const snapshot=await db.collection(name).doc(id).get({source:'server'});check();
+        if(!snapshot.exists)throw new Error('採購可能已提交，但回讀資料不完整，請保留原單號核對。');
+        return {id,...snapshot.data()};
+    };
+    const saved=await read('purchaseOrders',request.poNo);
+    const committedSourceOrders=[];for(const id of [...new Set(request.items.map(item=>item.orderId))])committedSourceOrders.push(await read('orders',id));
+    const committedSupplyOrders=[];for(const id of ids)committedSupplyOrders.push(await read('supplyOrders',id));
+    check();return {poRecord:saved,committedSourceOrders,committedSupplyOrders};
+}
 async function commitFormalPurchaseOrder(poRecord, {actorUid=currentUser?.uid,actorRole=currentUserRole}={}) {
         // Validate numbers before JSON snapshotting: JSON turns NaN/Infinity into null.
         if(poRecord && Array.isArray(poRecord.items) && poRecord.items.some(item=>
@@ -22,6 +146,18 @@ async function commitFormalPurchaseOrder(poRecord, {actorUid=currentUser?.uid,ac
             if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) throw new Error('目前無採購作業權限。');
         };
         assertActor();
+        if((globalThis.YUSHIN_FORMAL_PURCHASE_EMULATOR===true
+            || globalThis.YUSHIN_PREVIEW_FORMAL_PURCHASE===true
+            || globalThis.YUSHIN_PRODUCTION_FORMAL_PURCHASE===true)
+            && !formalPurchaseBackendPilotEnabled())
+            throw new Error('採購後端試點與目前環境不一致，禁止改由舊交易提交。');
+        // Preview purchase confirmation is backend-only. Missing opt-in must
+        // fail closed instead of silently falling back to the old Client writer.
+        if(typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='preview'
+            && !formalPurchaseBackendPilotEnabled())
+            throw new Error('Preview 採購後端尚未啟用，禁止改由舊交易提交。');
+        if(formalPurchaseBackendPilotEnabled())
+            return commitFormalPurchaseBackend(poRecord,actorUid,assertActor);
         const actorName=currentUserName||currentUser?.email||'', now=poRecord.createdAt||new Date().toISOString();
         const poNo=poRecord.poNo, vendorName=poRecord.vendorName, poDocumentId=poNo;
         const orderIds=[...new Set(poRecord.items.map(item=>item.orderId).filter(Boolean))];
@@ -38,9 +174,15 @@ async function commitFormalPurchaseOrder(poRecord, {actorUid=currentUser?.uid,ac
             const poSnapshot = await transaction.get(poRef);
             const orderSnapshots = await Promise.all(orderRefs.map(ref => transaction.get(ref)));
             assertActor();
-            if (poSnapshot.exists) {
+            if (poSnapshot.exists && poSnapshot.data().status==='DRAFT' && poSnapshot.data().documentOnly===true) {
+                const draft=poSnapshot.data();
+                if (formalPurchaseDocumentIntent(draft)!==formalPurchaseDocumentIntent(poRecord))
+                    throw Error('採購文件與確認內容不同，請重新開啟原單。');
+                poRecord={...poRecord,status:'ORDERED',documentOnly:false,
+                    confirmedAt:now,confirmedByUid:actorUid};
+            } else if (poSnapshot.exists) {
                 const saved=poSnapshot.data();
-                const ignored=new Set(['createdAt','lastOutputAt','lastOutputType','supplyOrderIds']);
+                const ignored=new Set(['id','createdAt','updatedAt','lastOutputAt','lastOutputType','supplyOrderIds','status','documentOnly','confirmedAt','confirmedByUid']);
                 const intent=record=>Object.fromEntries(Object.keys(poRecord).filter(key=>!ignored.has(key)).map(key=>[key,record[key]]));
                 const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'
                     ?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;

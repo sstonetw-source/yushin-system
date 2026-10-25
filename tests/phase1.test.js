@@ -212,12 +212,13 @@ test('inventory uses one debounced search for inventory and Product Master resul
     assert.match(appSource, /db\.collection\('products'\).*limit\(25\)/s);
 });
 
-test('product management searches only on explicit action', () => {
+test('product management uses explicit code searches or bounded company favourites', () => {
     assert.doesNotMatch(indexSource, /oninput="queueProductManagementSearch\(\)"/);
     assert.match(indexSource, /id="productManagementSearchBrand"/);
     assert.match(appSource, /where\('normalizedPartNo', '==', normalizedCode\)/);
-    assert.match(indexSource, /選擇廠牌不會載入產品/);
-    assert.match(indexSource, /id="productManagementBrowseBtn"/);
+    assert.match(indexSource, /點選廠牌可查看公司常賣品項，每批最多 20 筆/);
+    assert.doesNotMatch(indexSource, /id="productManagementBrowseBtn"/);
+    assert.doesNotMatch(appSource, /fetchProductBrandBrowsePage|browseProductMasterBrand|PRODUCT_BRAND_BROWSE_PAGE_SIZE/);
 
 });
 
@@ -349,7 +350,7 @@ test('purchaser order form assigns a salesperson while preserving creator identi
     const end = appSource.indexOf('\n};', start) + 3;
     const saveOrder = appSource.slice(start, end);
     assert.match(saveOrder, /currentUserRole === 'purchaser' && !assistedOwner/);
-    assert.match(saveOrder, /ownerUid: assistedOwner\?\.uid \|\| window\._orderModalQuoteContext\?\.ownerUid \|\| currentUser\?\.uid/);
+    assert.match(saveOrder, /ownerUid: assistedOwner\?\.uid \|\| window\._orderModalQuoteContext\?\.ownerUid \|\| window\._orderModalForecastContext\?\.ownerUid \|\| currentUser\?\.uid/);
     assert.match(saveOrder, /\.\.\.commercialCreatorFields\(\)/);
 });
 
@@ -510,6 +511,7 @@ test('new order creation keeps one document ID across uncertain writes and retri
     const documents=new Map();
     let writes=0, uncertain=false;
     const context=vm.createContext({
+        window:{},YushinOrderEntry:require('../modules/order-entry-core'),
         ORDER_DRAFT_STORAGE_PREFIX:'order_draft_v2',currentUser:{uid:'USER-1'},currentUserRole:'sales',
         BUSINESS_STATUS:{ACTIVE:'active'},
         localStorage:{getItem:key=>stored.get(key)||null,setItem:(key,value)=>stored.set(key,value)},
@@ -525,7 +527,7 @@ test('new order creation keeps one document ID across uncertain writes and retri
     vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/services/order-creation.js'),'utf8'),context);
     vm.runInContext(appSource.slice(start,end),context);
     uncertain=true;
-    const order={createdByUid:'USER-1',status:'active',inventoryReservationStatus:'pending'};
+    const order={transactionType:'借',createdByUid:'USER-1',status:'active',inventoryReservationStatus:'pending'};
     await assert.rejects(context.createOrResumeNewOrder(order),/回覆不確定/);
     assert.equal(stored.get('order_draft_v2:USER-1:pending_order_id'),'ORDER-1');
     const resumed=await context.createOrResumeNewOrder({createdByUid:'USER-1',status:'active',customerName:'不同內容'});
@@ -1563,10 +1565,10 @@ test('forecast to order supports one-item prefill and one multi-item internal or
     const start = appSource.indexOf('window.createOrderFromForecast');
     const end = appSource.indexOf('估價單系統', start);
     const source = appSource.slice(start, end);
-    assert.match(source, /items\.length === 1/);
+    assert.match(source, /newOrderDraftItems=items\.slice\(1\)/);
     assert.match(source, /openOrderModal\(forecastItemToOrderSource/);
-    assert.match(source, /將建立 1 張多品項訂單/);
-    assert.match(source, /createForecastOrdersDirectly\(forecast, items\)/);
+    assert.match(source, /window\._orderModalForecastContext=/);
+    assert.doesNotMatch(source, /await createForecastOrdersDirectly/);
 
     const directStart=appSource.indexOf('async function createForecastOrdersDirectly');
     const directEnd=appSource.indexOf('\nwindow.createOrderFromForecast',directStart);
@@ -2066,12 +2068,8 @@ test('ordered action belongs to purchasing while the order list only shows progr
     const saveStart = appSource.indexOf('window.printPurchaseOrder = async function()');
     const saveEnd = appSource.indexOf("window.addEventListener('afterprint'", saveStart);
     const save = appSource.slice(saveStart, saveEnd);
-    assert.match(save, /poEditingId = savedPo\.id;[\s\S]*?採購單 \$\{poNo\} 已同步雲端/);
-    // PO 會同時更新來源訂單與採購資料；核心 transaction 必須先成功，才可開啟可對外使用的列印文件。
-    assert.match(save, /await commitPromise;[\s\S]*?printSavedPoDocument\(poNo, vendorName\);/);
-    assert.doesNotMatch(save, /printSavedPoDocument\(poNo, vendorName\);[\s\S]*?await commitPromise/);
-    // 在途庫存仍維持背景同步，不阻塞列印。
-    assert.doesNotMatch(save, /await registerPurchaseIncoming\(poDocumentId, poRecord\);[\s\S]*?printSavedPoDocument\(poNo, vendorName\)/);
+    assert.match(save,/await saveFormalPurchaseDocument\(/);
+    assert.doesNotMatch(save.slice(0,save.indexOf('// 「製作下一張估價單」')),/commitFormalPurchaseOrder|registerPurchaseIncoming/);
     assert.match(indexSource, /id="poSaveStatus" role="status"/);
 });
 
@@ -3939,8 +3937,10 @@ test('business reservation rules preserve reservation identity and narrow stock 
     const reservationStart=rulesSource.indexOf('match /inventoryReservations/{id}');
     const reservationEnd=rulesSource.indexOf('\n\n    match /inventoryLots/{id}',reservationStart);
     const reservationRule=rulesSource.slice(reservationStart,reservationEnd);
-    assert.match(reservationRule,/allow update: if validReservationSource\(id, request.resource.data\) && reservationIdentityUnchanged\(\)[\s\S]*?reservationUpdateWriter\(id\)/);
-    assert.match(rulesSource,/function reservationUpdateWriter\(id\)[\s\S]*?businessReservationOperationalUpdate\(\)/);
+    assert.match(reservationRule,/allow update: if reservationUpdateAllowed\(id\)/);
+    const updateGuard=rulesSource.slice(rulesSource.indexOf('function reservationUpdateAllowed(id)'),rulesSource.indexOf('function inventoryMovementWriter(id)'));
+    assert.match(updateGuard,/validReservationSource\(id, request.resource.data, userRole\)[\s\S]*?reservationIdentityUnchanged\(\)[\s\S]*?legacyReservationLocationShape\(resource.data\)[\s\S]*?reservationUpdateWriter\(id, userRole\)/);
+    assert.match(rulesSource,/function reservationUpdateWriter\(id, userRole\)[\s\S]*?businessReservationOperationalUpdate\(\)/);
 });
 
 
@@ -4372,7 +4372,7 @@ test('supply order rules preserve identity and valid operational quantities', ()
     });
 
     const stateStart=rulesSource.indexOf('function validSupplyOperationalState()');
-    const stateEnd=rulesSource.indexOf('\n\n    function purchaserSupplyOperationalUpdate()',stateStart);
+    const stateEnd=rulesSource.indexOf('\n\n    function purchaserSupplyOperationalUpdate(userRole)',stateStart);
     const stateSource=rulesSource.slice(stateStart,stateEnd);
     assert.match(stateSource,/qty >= resource\.data\.get\('qty', 0\)/);
     assert.match(stateSource,/receivedQty <= qty/);
@@ -4385,7 +4385,7 @@ test('supply order rules preserve identity and valid operational quantities', ()
     assert.match(stateSource,/nextStatus == 'CANCELLED'/);
     assert.match(stateSource,/nextStatus == 'CLOSED'/);
 
-    const warehouseStart=rulesSource.indexOf('function warehouseSupplyOperationalUpdate()');
+    const warehouseStart=rulesSource.indexOf('function warehouseSupplyOperationalUpdate(userRole)');
     const warehouseEnd=rulesSource.indexOf('\n\n    // Creator identity',warehouseStart);
     const warehouseSource=rulesSource.slice(warehouseStart,warehouseEnd);
     assert.match(warehouseSource,/hasOnly\(\[[\s\S]*?'receivedQty'[\s\S]*?'incomingRegisteredQty'[\s\S]*?'status'[\s\S]*?'updatedAt'/);
@@ -4396,7 +4396,12 @@ test('supply order rules preserve identity and valid operational quantities', ()
     const supplyStart=rulesSource.indexOf('match /supplyOrders/{id}');
     const supplyEnd=rulesSource.indexOf('\n\n    match /inventory/{id}',supplyStart);
     const supplySource=rulesSource.slice(supplyStart,supplyEnd);
-    assert.match(supplySource,/allow update: if \(admin\(\)[\s\S]*?purchaserSupplyOperationalUpdate\(\)[\s\S]*?warehouseSupplyOperationalUpdate\(\)\) && supplierReceiptDispositionAllowed\(\)/);
+    assert.match(supplySource,/allow update: if supplyOperationalUpdateAllowed\(id\)/);
+    const dispatch=rulesSource.slice(rulesSource.indexOf('function supplyOperationalUpdateAllowed(id)'),supplyStart);
+    assert.match(dispatch,/let userRole = role\(\)/);
+    assert.match(dispatch,/userRole == 'purchaser' && \(purchaserSupplyOperationalUpdate\(userRole\)/);
+    assert.match(dispatch,/userRole == 'warehouse' && warehouseSupplyOperationalUpdate\(userRole\)/);
+    assert.match(dispatch,/supplierReceiptDispositionAllowed\(\) && validQuickPurchaseUpdate\(\)/);
     assert.doesNotMatch(supplySource,/allow update: if admin\(\) \|\| purchaser\(\)/);
 });
 
@@ -4467,8 +4472,8 @@ test('direct ship delivery rule is bound to the matching atomic receipt', () => 
     assert.match(orderSource,/orderUpdateAllowed\(id\)/);
     assert.match(rulesSource.slice(rulesSource.indexOf('function orderUpdateAllowed(id)'),rulesSource.indexOf('match /orders/{id}')),/directShipReceiptOrderUpdate\(id\)/);
 
-    const supplyFastStart=rulesSource.indexOf('function directShipSupplyReceiptUpdate(id)');
-    const supplyFastEnd=rulesSource.indexOf('\n\n    function purchaserSupplyOperationalUpdate()',supplyFastStart);
+    const supplyFastStart=rulesSource.indexOf('function directShipSupplyReceiptUpdate(id, userRole)');
+    const supplyFastEnd=rulesSource.indexOf('\n\n    function purchaserSupplyOperationalUpdate(userRole)',supplyFastStart);
     const supplyFastSource=rulesSource.slice(supplyFastStart,supplyFastEnd);
     assert.ok(supplyFastStart>=0&&supplyFastEnd>supplyFastStart);
     assert.match(supplyFastSource,/affectedKeys\(\)\.hasOnly\(\[[\s\S]*?'receivedQty'[\s\S]*?'status'[\s\S]*?'updatedAt'/);
@@ -4477,7 +4482,8 @@ test('direct ship delivery rule is bound to the matching atomic receipt', () => 
     const supplyMatchStart=rulesSource.indexOf('match /supplyOrders/{id}');
     const supplyMatchEnd=rulesSource.indexOf('\n\n    match /inventory/{id}',supplyMatchStart);
     const supplyMatchSource=rulesSource.slice(supplyMatchStart,supplyMatchEnd);
-    assert.match(supplyMatchSource,/directShipSupplyReceiptUpdate\(id\)/);
+    assert.match(supplyMatchSource,/supplyOperationalUpdateAllowed\(id\)/);
+    assert.match(rulesSource.slice(rulesSource.indexOf('function supplyOperationalUpdateAllowed(id)'),supplyMatchStart),/directShipSupplyReceiptUpdate\(id, userRole\)/);
 });
 
 test('direct ship receipt transaction writes the supply delta required by security rules', () => {
@@ -4506,7 +4512,7 @@ test('cancelled or closed supply is terminal and cannot be received again', () =
     assert.match(receiveSource,/已取消，不能再確認到貨/);
 
     const stateStart=rulesSource.indexOf('function validSupplyOperationalState()');
-    const stateEnd=rulesSource.indexOf('\n\n    function purchaserSupplyOperationalUpdate()',stateStart);
+    const stateEnd=rulesSource.indexOf('\n\n    function purchaserSupplyOperationalUpdate(userRole)',stateStart);
     const stateSource=rulesSource.slice(stateStart,stateEnd);
     assert.match(stateSource,/previousStatus != 'CANCELLED'/);
     assert.match(stateSource,/previousStatus != 'CLOSED'/);
@@ -4514,7 +4520,7 @@ test('cancelled or closed supply is terminal and cannot be received again', () =
     assert.match(stateSource,/cancelledQty <= \(qty - receivedQty\)/);
     assert.match(stateSource,/closedQty <= \(qty - receivedQty\)/);
 
-    const warehouseStart=rulesSource.indexOf('function warehouseSupplyOperationalUpdate()');
+    const warehouseStart=rulesSource.indexOf('function warehouseSupplyOperationalUpdate(userRole)');
     const warehouseEnd=rulesSource.indexOf('\n\n    // Creator identity',warehouseStart);
     const warehouseSource=rulesSource.slice(warehouseStart,warehouseEnd);
     assert.match(warehouseSource,/request\.resource\.data\.get\('status', 'ORDERED'\) != 'CANCELLED'/);
@@ -4558,8 +4564,8 @@ test('quick purchase keeps immutable supply snapshot and rules restrict mutable 
     });
     assert.match(identitySource,/affectedKeys\(\)\.hasAny\(\[/);
 
-    const purchaserStart=rulesSource.indexOf('function purchaserSupplyOperationalUpdate()');
-    const purchaserEnd=rulesSource.indexOf('\n\n    function warehouseSupplyOperationalUpdate()',purchaserStart);
+    const purchaserStart=rulesSource.indexOf('function purchaserSupplyOperationalUpdate(userRole)');
+    const purchaserEnd=rulesSource.indexOf('\n\n    function warehouseSupplyOperationalUpdate(userRole)',purchaserStart);
     const purchaserSource=rulesSource.slice(purchaserStart,purchaserEnd);
     assert.match(purchaserSource,/affectedKeys\(\)\.hasOnly/);
     assert.match(purchaserSource,/sameSupplyIdentity\(\)/);
@@ -4574,7 +4580,7 @@ test('quick purchase keeps immutable supply snapshot and rules restrict mutable 
 
 test('supply status must match operational quantities', () => {
     const stateStart=rulesSource.indexOf('function validSupplyOperationalState()');
-    const stateEnd=rulesSource.indexOf('\n\n    function purchaserSupplyOperationalUpdate()',stateStart);
+    const stateEnd=rulesSource.indexOf('\n\n    function purchaserSupplyOperationalUpdate(userRole)',stateStart);
     const source=rulesSource.slice(stateStart,stateEnd);
     assert.ok(stateStart>=0&&stateEnd>stateStart);
 

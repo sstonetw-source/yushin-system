@@ -66,9 +66,13 @@ test('fractional legacy values and empty zero-hold reservations preserve their o
  const empty=plan({...base(),itemReservedQty:0,reservation:{},deltaQty:1});
  assert.equal(empty.reservation.warehouseId,'W');assert.equal(empty.reservation.quantity,1);
 });
-test('a scalar warehouse restoration cannot erase a pending multi-location reservation',()=>{
- const reservation={productKey:'P',locationSchemaVersion:2,quantity:3,locations:[{warehouseId:'W',reservedQty:1},{warehouseId:'OTHER',reservedQty:2}]};
- assert.throws(()=>plan({...base(),reservation}),/不能以單倉作業修改其他位置/);
+test('v2 customer return restores its source hold without erasing a pending other-location reservation',()=>{
+ const reservation={productKey:'P',locationSchemaVersion:2,quantity:3,shortageQty:0,locations:[{warehouseId:'W',reservedQty:1},{warehouseId:'OTHER',reservedQty:2}]};
+ const before=structuredClone(reservation),result=plan({...base(),reservation});
+ assert.deepEqual(reservation,before);assert.equal(result.reservation.quantity,5);
+ assert.deepEqual(result.reservation.locations,[{warehouseId:'OTHER',reservedQty:2},{warehouseId:'W',reservedQty:3}]);
+ assert.equal(result.aggregateStock.reserved,9);assert.equal(result.warehouseStock.reserved,6);
+ assert.throws(()=>plan({...base(),reservation,operation:'SHIP_REVERSAL'}),/不能以單倉作業修改其他位置/);
 });
 test('restoration conserves own and unrelated holds across lifecycle settlement and direction combinations',()=>{
  for(const orderStatus of ['normal','cancelled'])for(const settlement of ['CLOSE','REPLACE'])
@@ -81,4 +85,16 @@ test('restoration conserves own and unrelated holds across lifecycle settlement 
   assert.equal(result.aggregateStock.onHand-input.aggregateStock.onHand,deltaQty);
   assert.equal(result.warehouseStock.onHand-input.warehouseStock.onHand,deltaQty);
  }
+});
+
+test('cancelled v2 CLOSE receipt requires a fully released empty ledger and creates only free physical stock',()=>{
+ const input={...base(),orderStatus:'cancelled',settlement:'CLOSE',itemReservedQty:0,
+  reservation:{productKey:'P',locationSchemaVersion:2,quantity:0,shortageQty:0,status:'released',locations:[],lifecycleWarehouseIds:['W','OTHER']}};
+ const before=structuredClone(input),result=plan(input);
+ assert.deepEqual(input,before);assert.deepEqual(result.reservation,input.reservation);assert.equal(result.reservedDelta,0);
+ assert.deepEqual(result.aggregateStock,{onHand:12,reserved:7});assert.deepEqual(result.warehouseStock,{onHand:9,reserved:4});
+ for(const patch of [{settlement:'REPLACE'},{itemReservedQty:1},
+  {reservation:{...input.reservation,status:'fulfilled'}},{reservation:{...input.reservation,shortageQty:1}},
+  {reservation:{...input.reservation,quantity:1,locations:[{warehouseId:'OTHER',reservedQty:1}]}},
+  {warehouseStock:{onHand:4,reserved:4,transferFreeInTransit:1}}])assert.throws(()=>plan({...input,...patch}));
 });

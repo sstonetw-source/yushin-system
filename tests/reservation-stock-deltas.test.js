@@ -173,7 +173,27 @@ test('operational cross-warehouse groups prove company totals and use a represen
    assert.deepEqual(f.docs.get('inventoryMovements/'+e.movementId).reservationStockEvidence,e);
   }
   assert.equal(new Set(f.reads).size,f.reads.length);
+  const previousWrites=f.writes.length;
+  await f.apply([1,1,1,1,1],{role});
+  const changed=f.writes.slice(previousWrites).filter(w=>w.ref.path.startsWith('inventoryReservations/'));
+  assert.deepEqual(changed.map(w=>w.ref.id),['O__I1','O__I3']);
+  const evidence=f.docs.get('inventoryMovements/M2-B').reservationStockEvidence;
+  assert.equal(evidence.movementId,'M2-B');
+  assert.deepEqual(evidence.reservationIds,['O__I1','O__I3']);
+  assert.equal(evidence.crossWarehouse,false);
+  assert.equal(f.docs.get('inventory/P').reserved,5);
  }
+});
+test('unchanged sibling elision never drops a later patch that restores an earlier value',async()=>{
+ const f=fixture();
+ f.docs.set('inventoryReservations/O__I',{orderId:'O',itemId:'I',productKey:'P',warehouseId:'A',quantity:2,
+  shortageQty:0,orderItemIndex:0,ownerUid:'U',salesCode:'S'});
+ await permissions.run(f.db,async tx=>{
+  const ref=f.db.collection('inventoryReservations').doc('O__I');await tx.get(ref);
+  tx.set(ref,{shortageQty:1},{merge:true});tx.set(ref,{shortageQty:0},{merge:true});
+ },'U',false,'purchaser');
+ assert.equal(f.docs.get('inventoryReservations/O__I').shortageQty,0);
+ assert.equal(f.writes.filter(w=>w.ref.path==='inventoryReservations/O__I').length,2);
 });
 test('cross-warehouse reserve, partial release, zero-company exchange and full release preserve physical stock',async()=>{
  const f=operationalFixture();

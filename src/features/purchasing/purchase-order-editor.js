@@ -14,6 +14,29 @@ let poNoGeneration = 0;
 let poDirectStockOpenGeneration = 0;
 let poNoReady = false;
 let poNoLoading = false;
+let poDraftLoading = false;
+
+function editingUnconfirmedPurchaseDocument() {
+    if(!poEditingId || typeof poListCache==='undefined')return false;
+    const po=poListCache.find(row=>row.id===poEditingId);
+    return po?.status==='DRAFT' && po.documentOnly===true;
+}
+function purchaseDocumentHasUnsavedChanges(record) {
+    if(document.getElementById('poVendorName')?.value.trim()!==record.vendorName
+        || document.getElementById('poDate')?.value!==record.poDate
+        || (document.getElementById('poExpectedDate')?.value||'')!==(record.expectedDate||''))return true;
+    const fields=['orderId','itemId','productId','warehouseId','fulfillmentType','itemCode','itemName','brand','qty','unitPrice'];
+    const intent=items=>items.map(item=>Object.fromEntries(fields.map(key=>[key,
+        ['qty','unitPrice'].includes(key)?Number(item[key]):String(item[key]||'')])));
+    return JSON.stringify(intent(poItems))!==JSON.stringify(intent(purchaseItemsFromSavedPo(record)));
+}
+function setPoDraftLoading(loading) {
+    poDraftLoading = loading;
+    document.querySelectorAll('#poVendorName, #poDate, #poExpectedDate, #poLeadDays, #poItemsBody input, #poItemsBody button, #poModalOverlay .sub-tab').forEach(control => {
+        control.disabled = loading || (!!poEditingId && (!editingUnconfirmedPurchaseDocument() || control.matches?.('.sub-tab')));
+    });
+    updatePoSaveButton();
+}
 
 function updatePoSaveStatus(message = '', isError = false) {
     const status = document.getElementById('poSaveStatus');
@@ -26,12 +49,14 @@ function updatePoSaveButton() {
     const button = document.getElementById('printPurchaseOrderBtn');
     if (!button) return;
     const waitingForNumber = !poEditingId && !poNoReady;
+    const confirmButton = document.getElementById('confirmPoOrderedBtn');
+    if (confirmButton) confirmButton.disabled=poSaveInProgress||poDraftLoading||(typeof formalPurchaseRecoveryRunning!=='undefined'&&formalPurchaseRecoveryRunning);
     const copyButton = document.getElementById('poCopyAsNewBtn');
     if (copyButton) copyButton.disabled = poSaveInProgress;
-    button.disabled = poSaveInProgress || waitingForNumber;
-    button.textContent = waitingForNumber
+    button.disabled = poSaveInProgress || waitingForNumber || poDraftLoading;
+    button.textContent = poDraftLoading ? '載入採購資料中…' : waitingForNumber
         ? (poNoLoading ? '產生單號中…' : '單號未就緒')
-        : poEditingId ? '📄 下載 PDF' : '📄 建立採購單並下載 PDF';
+        : poEditingId && !editingUnconfirmedPurchaseDocument() ? '📄 下載 PDF' : '📄 儲存文件並下載 PDF';
 }
 
 function purchaseItemsFromSavedPo(po) {
@@ -187,7 +212,7 @@ window.openDirectStockPurchase = async function(product = null) {
         renderPoItemsTable();
     }
     updatePoModeUI();
-    updatePoSaveStatus('這張採購單尚未建立。確認品項、供應商與單價後，按「建立採購單並下載 PDF」；建立成功後自動列入待到貨。');
+    updatePoSaveStatus('這張採購單尚未建立。確認品項、供應商與單價後，按「儲存文件並下載 PDF」；實際下單後另按「確認已採購」。');
     document.getElementById('poModalOverlay').classList.add('active');
 
     // 備貨單的空白表單不依賴雲端主檔，先立即顯示；供應商與預設倉庫在背景補齊。
@@ -300,7 +325,7 @@ function updatePoModeUI() {
     if (brandList) brandList.innerHTML = getUnifiedBrandNames(false).map(name => `<option value="${escapeAttr(name)}"></option>`).join('');
 
     const viewingExisting = !!poEditingId;
-    overlay?.classList.toggle('po-viewing-existing', viewingExisting);
+    overlay?.classList.toggle('po-viewing-existing', viewingExisting && !editingUnconfirmedPurchaseDocument());
     if (title) title.textContent = viewingExisting ? '查看採購單' : '建立採購單';
     if (existingBanner) existingBanner.style.display = viewingExisting ? 'flex' : 'none';
     if (existingNumber) existingNumber.textContent = viewingExisting ? (document.getElementById('poNo')?.innerText || poEditingId) : '';
@@ -312,14 +337,17 @@ function updatePoModeUI() {
     if (timelineBtn) timelineBtn.style.display = viewingExisting ? '' : 'none';
     const cancelBtn = document.getElementById('poCancelOutstandingBtn');
     const hasOutstanding = !!savedPo && !isPurchaseTerminalStatus(savedPo.status) && purchaseItemsFromSavedPo(savedPo).some((_, index) => Number(purchaseHistoryItemReceiptProgress(savedPo, index).remainingQty) > 0);
+    const confirmBtn = document.getElementById('confirmPoOrderedBtn');
+    if (confirmBtn) { confirmBtn.hidden = !savedPo || savedPo.status!=='DRAFT'; confirmBtn.disabled=poSaveInProgress||poDraftLoading; }
+    setPoDraftLoading(poDraftLoading);
     if (cancelBtn) cancelBtn.style.display = canCopySafely && hasOutstanding ? '' : 'none';
     const supplierContact = savedPo ? purchaseOrderSupplierContact(savedPo) : purchaseOrderSupplierContact({vendorName:document.getElementById('poVendorName')?.value||''});
 
     if (addBtn) addBtn.style.display = !viewingExisting && poDirectStockMode ? '' : 'none';
     if (hint) hint.textContent = viewingExisting
-        ? '這是已建立的正式採購單。內容鎖定不直接修改；可重新匯出 PDF。'
+        ? savedPo?.status==='DRAFT' ? '這是尚未確認採購的文件；下載 PDF 不增加在途，實際下單後請按「確認已採購」。' : '這是已確認的採購單。內容鎖定；重新匯出 PDF 不重複登記採購。'
         : poDirectStockMode
-            ? '建立庫存採購採購單：可一次加入多個品項；建立後會列入在途庫存。'
+            ? '製作庫存採購文件：可加入多個品項；確認已採購後才列入在途庫存。'
             : '訂單採購：品項來自業務訂單，可調整採購數量與進貨單價。';
     updatePoSaveButton();
 }
@@ -422,8 +450,9 @@ function poItemsWithScheduleDates(items = [], supplierId = '', orderDate = '', h
     });
 }
 
-async function autoFillPoSupplier(items) {
+async function autoFillPoSupplier(items, isCurrent = () => true) {
     await loadSupplierWarehouseMasters();
+    if (!isCurrent()) return '';
     const rows=items||[];
     const resolved = rows.map(item => supplierForProduct(
         item.brand,
@@ -475,11 +504,13 @@ window.closePurchaseOrderModal = function() {
     poNoGeneration++;
     poNoLoading = false;
     poNoReady = false;
+    setPoDraftLoading(false);
     document.getElementById('poModalOverlay').classList.remove('active');
 };
 
 // 切換採購單要用哪間公司的抬頭／單號代碼（又鑫 YS／辰星 MS／鼎新 DS），跟估價單的公司切換邏輯一致
 window.switchPoCompany = function(compKey, el, skipNoGen) {
+    if ((poDraftLoading || poEditingId) && !skipNoGen) return;
     poCurrentCompany = compKey;
     document.querySelectorAll('#poModalOverlay .sub-nav .sub-tab').forEach(t => t.classList.remove('active'));
     const targetTab = document.getElementById(`po-sub-${compKey}`);
@@ -592,12 +623,22 @@ function renderPoItemsTable() {
         tbody.appendChild(tr);
     });
     recalcPoTotals();
+    setPoDraftLoading(poDraftLoading);
 }
 
 window.updatePoItem = function(idx, field, value) {
-    if (!poItems[idx]) return;
+    if (poDraftLoading || (poEditingId&&!editingUnconfirmedPurchaseDocument()) || !poItems[idx] || !['qty','unitPrice'].includes(field)) return;
     poItems[idx][field] = field === 'unitPrice' && String(value).trim() === '' ? null : parseFloat(value);
-    renderPoItemsTable();
+    // Keep focused inputs mounted: a change handler must not replace the next
+    // input after the browser has already moved focus into it.
+    const row = document.getElementById('poItemsBody')?.children[idx];
+    if (row) {
+        row.cells[5].textContent=(Number(poItems[idx].qty||0)*Number(poItems[idx].unitPrice||0)).toFixed(0);
+        const price=row.querySelector('input[onchange*=unitPrice]');
+        if(price)price.classList.toggle('po-missing-price',poItems[idx].unitPrice===null);
+        if(poItems[idx].unitPrice!==null)row.querySelector('.po-missing-price-hint')?.remove();
+    }
+    recalcPoTotals();
 };
 
 window.removePoItem = function(idx) {
@@ -609,12 +650,10 @@ window.removePoItem = function(idx) {
 };
 
 function recalcPoTotals() {
-    const subtotal = poItems.reduce((sum, item) => sum + (item.qty * item.unitPrice), 0);
-    const tax = Math.round(subtotal * 0.05);
-    const grandTotal = Math.round(subtotal) + tax;
-    document.getElementById('poSubtotal').innerText = Math.round(subtotal).toLocaleString();
-    document.getElementById('poTax').innerText = tax.toLocaleString();
-    document.getElementById('poGrandTotal').innerText = grandTotal.toLocaleString();
+    const amounts=globalThis.YushinSupplier.purchaseAmountMetadata(poItems);
+    document.getElementById('poSubtotal').innerText = amounts.subtotalExTax.toLocaleString();
+    document.getElementById('poTax').innerText = amounts.taxAmount.toLocaleString();
+    document.getElementById('poGrandTotal').innerText = amounts.totalIncTax.toLocaleString();
 }
 
 function formalSupplyOrderId(purchaseOrderId, itemIndex) {
@@ -830,10 +869,10 @@ async function printSavedPoDocument(poNo, vendorName) {
 }
 
 window.printPurchaseOrder = async function() {
-    if (poSaveInProgress) return;
+    if (poSaveInProgress || poDraftLoading) return;
     if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
     const leadDaysInput=document.getElementById('poLeadDays');
-    if(!poEditingId&&leadDaysInput?.value&&(!Number.isInteger(Number(leadDaysInput.value))||Number(leadDaysInput.value)<0)){
+    if((!poEditingId||editingUnconfirmedPurchaseDocument())&&leadDaysInput?.value&&(!Number.isInteger(Number(leadDaysInput.value))||Number(leadDaysInput.value)<0)){
         updatePoSaveStatus('預計交期請輸入 0 或以上的整數天數。',true);
         return;
     }
@@ -842,47 +881,18 @@ window.printPurchaseOrder = async function() {
         return;
     }
     const actorUid=currentUser?.uid, actorRole=currentUserRole;
+    const originalDraft=editingUnconfirmedPurchaseDocument()?poListCache.find(po=>po.id===poEditingId):null;
     poSaveInProgress = true;
     try { await window.DocumentDownloads.prepare('purchase'); }
     catch (err) { updatePoSaveStatus(err.message, true); return; }
     finally { poSaveInProgress = false; }
-    if (poEditingId) {
-        const savedPo = poListCache.find(po => po.id === poEditingId);
-        if (!savedPo) { alert('找不到已儲存的採購單，請重新整理。'); return; }
-        if (!poIncomingSyncPending) {
-            const button = document.getElementById('printPurchaseOrderBtn');
-            poSaveInProgress = true;
-            try {
-                await printSavedPoDocument(savedPo.poNo, savedPo.vendorName);
-                db.collection('purchaseOrders').doc(savedPo.id).set({
-                    lastOutputAt: new Date().toISOString(),
-                    lastOutputType: 'PDF'
-                }, { merge:true }).catch(err => console.warn('更新採購單輸出時間失敗：', err));
-            } catch (err) {
-                console.error('產生採購單 PDF 失敗：', err);
-                updatePoSaveStatus('產生採購單 PDF 失敗：' + (err?.message || err), true);
-            } finally {
-                poSaveInProgress = false;
-                if (button) button.disabled = false;
-                updatePoSaveButton();
-            }
-            return;
-        }
-        const button = document.getElementById('printPurchaseOrderBtn');
-        poSaveInProgress = true;
-        if (button) { button.disabled = true; button.innerText = '同步雲端後開啟列印…'; }
-        try {
-            await registerPurchaseIncoming(savedPo.id, savedPo, {actorUid,actorRole,onStockCommitted:invalidateWarehouseStockCache});
-            poIncomingSyncPending = false;
-            updatePoSaveStatus(`採購單 ${savedPo.poNo} 已同步雲端，正在產生 PDF…`);
-            await printSavedPoDocument(savedPo.poNo, savedPo.vendorName);
-        } catch (err) {
-            updatePoSaveStatus(`採購單已同步雲端，但在途庫存同步仍未完成：${err.message}`, true);
-        } finally {
-            poSaveInProgress = false;
-            if (button) button.disabled = false;
-            updatePoSaveButton();
-        }
+    if (poEditingId && !originalDraft) {
+        const savedPo=poListCache.find(po=>po.id===poEditingId);
+        if(!savedPo){alert('找不到已儲存的採購文件，請重新整理。');return;}
+        poSaveInProgress=true;updatePoSaveButton();
+        try { await printSavedPoDocument(savedPo.poNo,savedPo.vendorName); }
+        catch(err){ updatePoSaveStatus('採購文件已儲存，但 PDF 輸出失敗：'+err.message,true); }
+        finally { poSaveInProgress=false;updatePoSaveButton(); }
         return;
     }
     if (poItems.length === 0) {
@@ -946,7 +956,6 @@ window.printPurchaseOrder = async function() {
         return;
     }
     const orderIds = [...new Set(poItems.map(item => item.orderId).filter(Boolean))];
-    const poNetTotal = poItems.reduce((sum, item) => sum + (Number(item.qty || 0) * Number(item.unitPrice || 0)), 0);
     const supplierContact = supplierForVendorName(vendorName);
     if (!globalThis.YushinSupplier?.snapshotForPurchaseOrder) {
         throw new Error('Supplier core 未載入，無法建立供應商快照。');
@@ -985,7 +994,7 @@ window.printPurchaseOrder = async function() {
             const brand = resolveBrandName(item.brand || '');
             return { ...item, brand, brandId:item.brandId || brandIdForName(brand) };
         }),
-        ...netAmountMetadata(poNetTotal),
+        ...globalThis.YushinSupplier.purchaseAmountMetadata(scheduledPoItems),
         createdAt: new Date().toISOString(),
         lastOutputAt: new Date().toISOString(),
         lastOutputType: 'PDF',
@@ -999,81 +1008,27 @@ window.printPurchaseOrder = async function() {
         button.innerText = '同步雲端中…';
     }
     updatePoSaveStatus('正在同步採購單到雲端…');
-    let poCommitted = false;
+    const generation=poDirectStockOpenGeneration;
+    let saved=false;
     try {
-        const poDocumentId = poNo;
-        const commitPromise = commitFormalPurchaseOrder(poRecord, {actorUid,actorRole});
-
-        // 採購單會同時改寫來源訂單與供應紀錄，不能像估價單一樣「先印再存」：
-        // 若 iPhone 在列印畫面直接關閉頁面，背景 transaction 可能尚未完成，會造成紙本已下單但系統沒有紀錄。
-        // 只等待這個最小且必要的核心 transaction；在途庫存仍於列印後背景同步。
-        updatePoSaveStatus('正在確認並儲存採購單…');
-        const {poRecord:committedRecord,committedSourceOrders,committedSupplyOrders} = await commitPromise;
-        Object.assign(poRecord,committedRecord);
-        poCommitted = true;
-        invalidateProcurementDemandQueue();
-        if (button) button.innerText = '同步在途庫存中…';
-
-        // The PO + source-order linkage above is the authoritative commit.
-        // Cache it before the separate incoming-stock registration so a transient
-        // failure can retry the same PO idempotently instead of attempting to
-        // create another PO with the same number.
-        syncCommittedPurchaseOrderSources(committedSourceOrders);
-        // 正式 PO 已成功建立時，立即把供應紀錄放進待到貨快取。
-        // 避免使用者本工作階段曾開過待到貨後，新增備庫 PO 卻要手動更新才看得到。
-        if (committedSupplyOrders.length) {
-            const supplyMap = new Map(supplyReceivingCache.map(row => [row.id, row]));
-            committedSupplyOrders.forEach(row => supplyMap.set(row.id, row));
-            supplyReceivingCache = [...supplyMap.values()]
-                .sort((a,b)=>String(b.orderDate||b.createdAt||'').localeCompare(String(a.orderDate||a.createdAt||'')));
-        }
-        const savedPo = { id: poDocumentId, ...poRecord };
-        const cachedIndex = poListCache.findIndex(po => po.id === savedPo.id);
-        if (cachedIndex >= 0) poListCache[cachedIndex] = savedPo;
-        else poListCache.unshift(savedPo);
-        poEditingId = savedPo.id;
-        poIncomingSyncPending = true;
+        const documentRecord=await saveFormalPurchaseDocument(poRecord,{actorUid,actorRole,expectedRevision:originalDraft?.documentRevision|| (originalDraft?1:0)});
+        saved=true;
+        if(currentUser?.uid!==actorUid || currentUserRole!==actorRole || generation!==poDirectStockOpenGeneration)return;
+        const index=poListCache.findIndex(po=>po.id===documentRecord.id);
+        if(index>=0)poListCache[index]=documentRecord;else poListCache.unshift(documentRecord);
+        poEditingId=documentRecord.id;poIncomingSyncPending=false;
+        document.getElementById('poVendorName').value=documentRecord.vendorName;
+        poItems=purchaseItemsFromSavedPo(documentRecord);poAllItems=poItems;renderPoItemsTable();
         updatePoModeUI();
-        updatePoSaveStatus(`採購單 ${poNo} 已同步雲端；正在產生 PDF，在途庫存稍後背景同步…`);
-
-        // 核心 transaction 完成後才輸出 PDF，確保使用者拿到的正式文件一定有對應的系統紀錄。
-        // PDF 使用與估價單相同的逐頁 Canvas → jsPDF 流程，不再依賴瀏覽器列印視窗。
-        await printSavedPoDocument(poNo, vendorName);
-
-        // PO 與來源訂單已在上方同一個 transaction 成功提交；列印不等待第二段在途庫存同步。
-        // 在途同步以 PO id 冪等處理，失敗時仍可由同一張 PO 重試，不會重複建立採購單。
-        registerPurchaseIncoming(poDocumentId, poRecord, {actorUid,actorRole,onStockCommitted:invalidateWarehouseStockCache})
-            .then(() => {
-                if(poEditingId===poDocumentId)poIncomingSyncPending = false;
-                if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPurchasingView();
-                if(poEditingId===poDocumentId){
-                    updatePoSaveStatus(`採購單 ${poNo} 已建立；在途庫存同步完成。`);
-                    updatePoSaveButton();
-                }
-            })
-            .catch(err => {
-                console.error('採購單在途庫存背景同步失敗：', err);
-                if(poEditingId===poDocumentId){
-                    poIncomingSyncPending = true;
-                    updatePoSaveStatus(`採購單已同步雲端，但在途庫存同步未完成：${err.message}。請由這張採購單重試同步，不要另建一張。`, true);
-                    updatePoSaveButton();
-                }
-                showActionFeedback(`採購單 ${poNo} 已建立；在途同步未完成，請開啟這張採購單重試。`,'warning');
-            });
-    } catch (err) {
-        console.error('儲存採購單紀錄失敗：', err);
-        updatePoSaveStatus(poCommitted
-            ? `採購單已同步雲端，但在途庫存同步未完成：${err.message}`
-            : `採購單未建立：${err.message}`, true);
-        alert(poCommitted
-            ? '採購單已同步雲端，但在途庫存同步未完成。請在這張採購單按「重試同步在途庫存」，不要另建一張：' + err.message
-            : '無法產生採購單：' + err.message);
-    } finally {
-        poSaveInProgress = false;
-        if (button) {
-            button.disabled = false;
+        updatePoSaveStatus(`採購文件 ${poNo} 已儲存，尚未確認採購；下載 PDF 不會增加在途。`);
+        await printSavedPoDocument(poNo,vendorName);
+    } catch(err) {
+        if(currentUser?.uid===actorUid && currentUserRole===actorRole && generation===poDirectStockOpenGeneration){
+            const message=saved ? '採購文件已儲存，但 PDF 輸出失敗；可由原單重印：' : '文件儲存結果未確認，請保留原單號重試或查詢；尚未執行採購登記：';
+            updatePoSaveStatus(message+err.message,true);
         }
-        updatePoSaveButton();
+    } finally {
+        poSaveInProgress=false;updatePoSaveButton();
     }
 };
 

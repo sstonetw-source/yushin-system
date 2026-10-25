@@ -5,6 +5,7 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex, actorUid 
     }
     const orderRef=db.collection('orders').doc(orderId);
     const syncUid=actorUid;
+    const syncAttemptId=String(order.inventoryReservationAttemptId||'');
     const actor=currentUserName||currentUser?.email||'';
     let result,stockToInvalidate=null;
     let releasedStock=null;
@@ -21,6 +22,8 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex, actorUid 
         if(itemIndex<0)throw new Error('訂單品項已變更，請重新讀取後重試同步。');
         item={...order.items[itemIndex],itemId};
         if(order.inventoryReservationStatus==='completed'){result=item;return;}
+        if(syncAttemptId&&(order.inventoryReservationStatus!=='pending'||String(order.inventoryReservationAttemptId||'')!==syncAttemptId))
+            throw new Error('已有較新的庫存同步工作，請更新這筆訂單後確認結果。');
         if(item.transferPendingId)throw new Error('調撥途中不可重新配置訂單庫存。');
         const normalized=normalizedOrderItems(order)[itemIndex];
         const orderedQty=Math.max(0,Number(normalized.qty||0));
@@ -43,6 +46,40 @@ async function reserveSingleOrderItem(orderId, order, item, itemIndex, actorUid 
             if(currentDemand||demandDoc.requestedQty>0||demandDoc.orderedQty>0||demandDoc.receivedQty>0)tx.set(demandRef,demandDoc,{merge:true});
             tx.update(orderRef,updates);
         };
+        // Service master data is not physical stock. Verify it against the live
+        // product document before skipping warehouse reservation and procurement.
+        // An old physical/supplier commitment must be audited, not erased.
+        if(String(item.productType||'').trim().toUpperCase()==='SERVICE'){
+            const productId=String(item.productId||'').trim();
+            if(!productId||productId.includes('/'))throw new Error('服務型品項缺少有效產品主檔。');
+            if((item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE')
+                throw new Error('服務型品項尚不支援原廠直送或實貨履約入口。');
+            const [productSnap,reservationSnap]=await Promise.all([
+                tx.get(db.collection('products').doc(productId)),
+                tx.get(db.collection('inventoryReservations').doc(`${orderId}__${itemId}`))
+            ]);
+            if(!productSnap.exists||productSnap.data().active===false
+                ||String(productSnap.data().productType||productSnap.data().type||'').trim().toUpperCase()!=='SERVICE')
+                throw new Error('服務型品項與啟用的產品主檔不符，不能建立虛擬實貨。');
+            const hasProgress=[reservationSnap.exists?reservationSnap.data().quantity:0,
+                item.reservedQty,item.dispatchPreparedQty,item.warehouseShippedQty,
+                item.supplyOrderedQty,item.receivedQty,currentDemand?.orderedQty,currentDemand?.receivedQty]
+                .some(value=>value!==undefined&&value!==null&&Number(value)!==0);
+            if(hasProgress)throw new Error('服務型品項已有實貨預留或供應進度，請先稽核，不能自動抹除。');
+            publish({...item,orderedQty,reservedQty:0,shortageQty:0,
+                inventoryProductKey:'',warehouseId:'',reservationStatus:'not_required'});
+            return;
+        }
+        // Verify the inverse case, too: a Service product must not be disguised
+        // as Goods and accidentally allocated company stock. Only live master
+        // data, re-read inside the transaction, can determine this boundary.
+        if(item.productId){
+            const productId=String(item.productId).trim();
+            if(!productId||productId.includes('/'))throw new Error('產品主檔識別碼不正確。');
+            const productSnap=await tx.get(db.collection('products').doc(productId));
+            if(productSnap.exists&&String(productSnap.data().productType||productSnap.data().type||'').trim().toUpperCase()==='SERVICE')
+                throw new Error('產品主檔為服務型，訂單品項不可冒充商品預留實貨；請修正產品類型後重試。');
+        }
         if(!productKey){publish({...item,orderedQty,reservedQty:0,shortageQty:requested,inventoryProductKey:'',reservationError:'missing_product_master'});return;}
         if((item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'){
             publish({...item,orderedQty,reservedQty:0,shortageQty:0,inventoryProductKey:productKey,warehouseId:'',reservationStatus:'not_required'});return;
@@ -233,7 +270,7 @@ function orderItemProcurementDemandDocument(order, item, currentDemand, now) {
     },{createdAt:currentDemand?.createdAt||order.createdAt||now,updatedAt:now});
 }
 
-async function persistOrderProcurementDemands(orderId, order, items = []) {
+async function persistOrderProcurementDemands(orderId, order, items = [], initialization = null) {
     const orderRef=db.collection('orders').doc(orderId);
     // The arguments carry identity only; live quantities and lifecycle always come from Firestore.
     const itemIds=items.map((item,index)=>String(item.itemId||`item-${index+1}`));
@@ -244,6 +281,15 @@ async function persistOrderProcurementDemands(orderId, order, items = []) {
             const orderSnap=await tx.get(orderRef);
             if(!orderSnap.exists)throw new Error('訂單已不存在，無法同步採購需求。');
             const liveOrder={id:orderId,...orderSnap.data()};
+            // Only initialization transports supply this fence. Cancellation and
+            // restoration retain their existing live-source demand projection.
+            if(initialization){
+                if(currentUser?.uid!==initialization.actorUid)throw new Error('登入身份已變更，請以原帳號重試同步。');
+                if(!initialization.syncAttemptId||liveOrder.inventoryReservationStatus!=='pending'
+                    ||String(liveOrder.inventoryReservationAttemptId||'')!==initialization.syncAttemptId)
+                    throw new Error('已有較新的庫存同步工作，請更新這筆訂單後確認結果。');
+                if(normalizedOrderStatus(liveOrder)!=='normal')throw new Error('訂單已取消／作廢，停止後續同步。');
+            }
             const currentSnap=await tx.get(ref);
             const current=currentSnap.exists?currentSnap.data():null;
             const item=normalizedOrderItems(liveOrder).find(row=>row.itemId===itemId);
@@ -274,13 +320,24 @@ async function reserveInventoryForNewOrder(orderId, order, actorUid = currentUse
     const snapshot=await firestoreReadWithTimeout(orderRef.get(),'讀取待同步訂單');
     if(!snapshot.exists)throw new Error('訂單已不存在，無法同步庫存。');
     const liveOrder={id:orderId,...snapshot.data()};
+    const expectedAttemptId=String(order.inventoryReservationAttemptId||'');
+    if(expectedAttemptId&&liveOrder.inventoryReservationStatus!=='completed'
+        &&(liveOrder.inventoryReservationStatus!=='pending'||String(liveOrder.inventoryReservationAttemptId||'')!==expectedAttemptId))
+        throw new Error('已有較新的庫存同步工作，請更新這筆訂單後確認結果。');
     const items=normalizedOrderItems(liveOrder);
     if(!items.length)throw new Error('訂單缺少正式 items 品項資料，請重新建立訂單。');
-    if(items.some(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP')){
+    if(items.some(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'
+        &&String(item.productType||'').trim().toUpperCase()!=='SERVICE')){
         await loadWarehouseMaster(true);
         if(!warehouseMasterLoadPromise)throw new Error('倉庫主檔讀取失敗，請重試同步。');
     }
     if(currentUser?.uid!==actorUid)throw new Error('登入身份已變更，請以原帳號重試同步。');
+    // Preview-only grouped initial reservation; all existing per-item demand
+    // reconciliation still runs using fresh snapshots and original checkpoints.
+    // Historical isolated Service tests do not load the optional adapter.
+    // In the real built app it is defined immediately before this Service.
+    if(typeof commitInitialGroupedReservationPreview==='function')
+        await commitInitialGroupedReservationPreview(orderId,liveOrder,actorUid);
     for(let i=0;i<items.length;i++)await reserveSingleOrderItem(orderId,liveOrder,items[i],i,actorUid);
     // Each item transaction has already published stock, reservation, order and demand atomically.
     // Read the result for self-order processing and UI; never overwrite the source with reservedItems.

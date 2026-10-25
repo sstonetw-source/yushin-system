@@ -198,7 +198,8 @@ window.bulkSetProductActive = async function(active, button) {
         }
         refreshPriceDatalists();
         renderProductManagementOverview();
-        if (productBrandBrowseCurrent) reloadCurrentProductBrand();
+        invalidateProductFrequentCache();
+        if (productManagementSourceMode === 'frequent') clearProductManagementSearch({ preserveInput:true });
         alert(`已${active ? '恢復' : '停用'} ${completed} 個產品，可重新匯入修正資料。`);
     } catch(err) {
         renderProductManagementOverview();

@@ -14,7 +14,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261013-4">
+        <link rel="stylesheet" href="styles.css?v=20261025-6">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -97,11 +97,11 @@
     <div id="product-system" class="content-section">
         <h2 class="workspace-page-title no-print">產品 <button type="button" class="page-help-trigger no-print" data-page-help="product-system" aria-label="產品功能與注意事項" aria-haspopup="dialog" aria-controls="pageHelpDialog">!</button></h2>
         <div class="toolbar no-print product-search-toolbar">
-            <div class="product-search-brand-field"><div class="field-help-heading"><strong>廠牌（瀏覽時選擇）</strong></div><input type="hidden" id="productManagementSearchBrand"><div id="productSearchBrandButtons" class="product-search-brand-buttons" role="group" aria-label="選擇搜尋廠牌">正在載入廠牌…</div></div>
+            <div class="product-search-brand-field"><div class="field-help-heading"><strong>廠牌（點選查看常賣品項）</strong></div><input type="hidden" id="productManagementSearchBrand"><div id="productSearchBrandButtons" class="product-search-brand-buttons" role="group" aria-label="選擇搜尋廠牌">正在載入廠牌…</div></div>
             <input id="productManagementSearch" type="search" oninput="updateProductSearchControls()" placeholder="直接輸入完整貨號（不限廠牌）">
             <button type="button" id="productManagementSearchBtn" onclick="searchProductManagement()" disabled>搜尋產品</button>
             <button type="button" class="btn-secondary" onclick="clearProductManagementSearch()">清除</button>
-            <button type="button" id="productManagementBrowseBtn" class="btn-secondary" onclick="browseProductMasterBrand(document.getElementById('productManagementSearchBrand').value)" disabled>瀏覽此廠牌產品</button>
+            <button type="button" id="productManagementFrequentBtn" class="btn-secondary" onclick="loadFrequentProducts(document.getElementById('productManagementSearchBrand').value)" disabled>常賣品項</button>
         </div>
 
         <span id="productManagementSearchStatus" class="inline-status product-search-status" role="status" aria-live="polite"></span>
@@ -152,11 +152,8 @@
     <!-- ============ Forecast 系統 ============ -->
 <div id="forecast-system" class="content-section">
         <h2 class="workspace-page-title no-print">Forecast <button type="button" class="page-help-trigger no-print" data-page-help="forecast-system" aria-label="Forecast功能與注意事項" aria-haspopup="dialog" aria-controls="pageHelpDialog">!</button></h2>
-    <div class="toolbar no-print forecast-section-header">
-        <button type="button" onclick="openForecastModal()">新增 Forecast</button>
-    </div>
-
     <div class="toolbar no-print forecast-toolbar">
+        <button type="button" onclick="openForecastModal()">新增 Forecast</button>
         <div class="forecast-search-row">
             <input
                 id="forecastSearch"
@@ -450,7 +447,7 @@
 
         <button type="button" id="inventoryShippingMoreBtn" class="btn-secondary" style="display:none" onclick="loadMoreInventoryShipping()">載入更多（50）</button>
       </div>
-      <section class="panel no-print" id="freeStockRecoveryPanel" hidden><div class="section-header"><h3>庫存分配待處理</h3><button type="button" class="btn-secondary" onclick="loadFreeStockRecovery()">重新處理</button></div><p id="freeStockRecoveryStatus" role="status"></p><div class="table-wrap inventory-work-table"><table><thead><tr><th>倉庫</th><th>品項</th><th>可用數量</th><th>狀態</th><th>操作</th></tr></thead><tbody id="freeStockRecoveryBody"></tbody></table></div><button type="button" id="freeStockRecoveryMore" class="btn-secondary" onclick="loadFreeStockRecovery(true)" hidden>處理更多（50）</button></section>
+      <section class="panel no-print" id="freeStockRecoveryPanel" hidden><div class="section-header"><h3>庫存分配待處理</h3><button type="button" class="btn-secondary" onclick="loadFreeStockRecovery()">重新處理</button></div><p id="freeStockRecoveryStatus" role="status"></p><div class="table-wrap inventory-work-table"><table><thead><tr><th>倉庫</th><th>品項</th><th id="freeStockRecoveryQuantityLabel">可用數量</th><th>狀態</th><th>操作</th></tr></thead><tbody id="freeStockRecoveryBody"></tbody></table></div><button type="button" id="freeStockRecoveryMore" class="btn-secondary" onclick="loadFreeStockRecovery(true)" hidden>處理更多（50）</button></section>
       <div id="inventoryStockPanel">
         <section class="panel no-print" id="mainTransferRequestPanel" hidden><div class="section-header"><h3>調撥回主倉</h3><button type="button" class="btn-secondary" onclick="exportMainTransferRequests(this)">匯出目前調回清單</button><button type="button" id="mainTransferRetry" class="btn-secondary" onclick="loadMainTransferRequests(true)" hidden>重試讀取</button></div><p id="mainTransferRequestStatus" role="status"></p><div class="table-wrap inventory-work-table"><table><thead><tr><th>來源</th><th>分倉</th><th>品項</th><th>調回數量</th><th>操作</th></tr></thead><tbody id="mainTransferRequestBody"></tbody></table></div></section>
       <div class="section-header no-print"><div class="inventory-header-actions"><button onclick="openInventoryAdjustment('initial')">＋ 手動新增庫存</button><button type="button" class="btn-secondary" onclick="downloadInventoryImportTemplate()">⬇️ 下載 Excel 範本</button><button type="button" class="btn-secondary" onclick="document.getElementById('inventoryExcelImportFile').click()">📤 Excel 批次新增</button><input id="inventoryExcelImportFile" type="file" accept=".xlsx,.xls" style="display:none" onchange="previewInventoryExcelImport(this)"></div></div>
@@ -478,6 +475,19 @@
       <h3>最近庫存異動</h3><div class="table-wrap"><table><thead><tr><th>時間</th><th>品項</th><th>類型</th><th>數量</th><th>來源</th><th>人員</th></tr></thead><tbody id="inventoryLedgerBody"></tbody></table></div>
       </div>
     </div>
+    <div class="eq-modal-overlay no-print" id="customerReturnReceiptOverlay" role="dialog" aria-modal="true" aria-labelledby="customerReturnReceiptTitle">
+      <div class="eq-modal-box">
+        <h3 id="customerReturnReceiptTitle">確認退貨收貨</h3>
+        <p class="inventory-summary-note">僅收回原出貨倉的可再銷售商品。待檢／損壞商品請先分開保管。</p>
+        <div id="customerReturnReceiptBody" class="customer-return-receipt-form"></div>
+        <p id="customerReturnReceiptStatus" role="status" aria-live="polite"></p>
+        <div class="eq-modal-close-row">
+          <button type="button" id="customerReturnReceiptSave" onclick="saveCustomerReturnReceipt()">確認實收並入庫</button>
+          <button type="button" class="btn-secondary" onclick="closeCustomerReturnReceipt()">關閉</button>
+        </div>
+      </div>
+    </div>
+
     <div class="eq-modal-overlay no-print" id="inventoryAdjustmentOverlay" onclick="if(event.target===this) closeInventoryAdjustment()">
       <div class="eq-modal-box" style="max-width:1100px;">
         <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -828,6 +838,7 @@
         <div class="module-header no-print">
             <h2 class="workspace-page-title">訂單 <button type="button" class="page-help-trigger no-print" data-page-help="order-system" aria-label="訂單功能與注意事項" aria-haspopup="dialog" aria-controls="pageHelpDialog">!</button></h2>
             <button onclick="openOrderModal()">＋ 新增訂單</button>
+            <button type="button" id="serviceCaseEntry" class="btn-secondary" hidden onclick="openServiceCases()">服務案件</button>
         </div>
         <div id="orderWorkCards" class="order-work-cards no-print"></div>
         <div class="order-period-toolbar no-print">
@@ -903,6 +914,7 @@
     <!-- ============ 採購管理系統 ============ -->
     <div id="purchasing-system" class="content-section">
         <h2 class="workspace-page-title no-print">採購 <button type="button" class="page-help-trigger no-print" data-page-help="purchasing-system" aria-label="採購功能與注意事項" aria-haspopup="dialog" aria-controls="pageHelpDialog">!</button></h2><section class="panel no-print" id="customerCancellationQueue" hidden></section>
+        <section class="panel no-print" id="formalPurchaseRecoveryPanel" role="status" aria-live="polite" hidden></section>
         <div class="purchase-view-tabs no-print" aria-label="採購頁面">
             <button type="button" id="purchase-tab-work" class="active" onclick="switchPurchasingView('ordering')">採購需求</button>
             <button type="button" id="purchase-tab-history" onclick="switchPurchasingView('history')">採購單</button>
@@ -1081,7 +1093,7 @@
             </section>
             <section class="order-entry-section">
                 <h4>採購方式</h4><div class="form-grid">
-                    <div class="order-entry-wide"><label for="orderProcurementType">由誰訂貨</label><select id="orderProcurementType" onchange="onOrderProcurementTypeChange()"><option value="PURCHASING_PO">交由採購</option><option value="SALES_SELF_ORDER">業務自行訂貨</option></select></div>
+                    <div class="order-entry-wide"><label for="orderProcurementType">由誰訂貨</label><select id="orderProcurementType" onchange="onOrderProcurementTypeChange(true)"><option value="PURCHASING_PO">交由採購</option><option value="SALES_SELF_ORDER">業務自行訂貨</option></select></div>
                     <div id="orderSelfStatusWrap" hidden class="order-entry-wide"><label for="orderSelfOrderConfirmed">自行訂貨進度</label><select id="orderSelfOrderConfirmed" onchange="syncOrderEntrySelfStatus()"><option value="pending">尚未下訂</option><option value="confirmed">已向供應商下訂</option></select></div>
                     <div id="orderSelfSupplierWrap" style="display:none;"><label for="orderSelfSupplier">供應商 <span id="orderSelfSupplierRequired" hidden aria-hidden="true">＊</span></label><input type="text" id="orderSelfSupplier" placeholder="供應商名稱"></div>
                     <div id="orderCostFieldWrap" style="display:none;"><label for="orderCostPrice">含稅單位成本 <span id="orderCostPriceRequired" hidden aria-hidden="true">＊</span></label><input type="number" id="orderCostPrice" min="0" step="any" inputmode="decimal" placeholder="可先留白"><small id="orderSelfCostHint" hidden>確認已下訂時必填；無成本可填 0。</small></div>
@@ -1097,8 +1109,8 @@
             <div class="order-entry-add"><button type="button" class="btn-secondary" onclick="addCurrentOrderItemToDraft()">加入下一品項</button><span>每個品項會保留當時的訂貨與交付設定。</span></div>
             <div id="orderProductCheckSummary" role="status"></div>
             <div class="table-wrap" id="newOrderItemsWrap" style="display:none;"><table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>數量</th><th>單價</th><th>產品狀態</th><th>訂貨／交付</th><th>操作</th></tr></thead><tbody id="newOrderItemsBody"></tbody></table></div>
-            <details class="order-entry-details"><summary>交易與發票資訊</summary><div class="form-grid">
-                <div><label>交易方式</label><select id="orderTransactionType" onchange="document.getElementById('orderInvoiceTitle').disabled = this.value !== '直'"><option value="">之後確認</option><option value="直">直（開發票）</option><option value="借">借（不開發票）</option><option value="扣">扣（扣寄款）</option></select></div>
+            <details class="order-entry-details" id="orderTradeDetails" open><summary>交易與發票資訊</summary><div class="form-grid">
+                <div><label for="orderTransactionType">交易方式 <span aria-hidden="true">*</span></label><select id="orderTransactionType" required aria-required="true" onchange="document.getElementById('orderInvoiceTitle').disabled = this.value !== '直'"><option value="">請選擇交易方式</option><option value="直">直（開發票）</option><option value="借">借（不開發票）</option><option value="扣">扣（扣寄款）</option></select></div>
                 <div><label>發票抬頭</label><input type="text" id="orderInvoiceTitle" disabled></div>
             </div></details>
             <details class="order-entry-details"><summary>日期與備註</summary><div class="form-grid">
@@ -1146,6 +1158,7 @@
             <div class="delivery-section-heading"><h4>退貨／取消</h4><div>
                 <button type="button" class="btn-secondary" id="openLifecycleFormBtn" onclick="openOrderLifecycleForm()">取消訂單</button>
                 <button type="button" id="openReturnFormBtn" onclick="openReturnForm()">申請退貨</button>
+                <button type="button" class="btn-secondary" id="reorderAfterReturnBtn" hidden onclick="reorderAfterReturn(currentLifecycleOrderId)">退貨後重新下單</button>
             </div></div>
             <p id="orderLifecycleActionHint" class="form-hint"></p>
             <div id="orderLifecycleSummary" hidden></div>
@@ -1232,7 +1245,7 @@
                 <h2 style="text-align:center;letter-spacing:10px;margin:10px 0;">採 購 單</h2>
 
                 <div class="meta-row-three">
-                    <div style="white-space:nowrap;"><label style="white-space:nowrap;">供應商：</label><input type="text" id="poVendorName" list="poVendorSuggestions" autocomplete="off" placeholder="請輸入供應商名稱" style="min-width:0;" onchange="autoFillPoExpectedDate(); renderPoItemsTable()"><datalist id="poVendorSuggestions"></datalist></div>
+                    <div style="white-space:nowrap;"><label style="white-space:nowrap;">供應商：</label><input type="text" id="poVendorName" list="poVendorSuggestions" autocomplete="off" placeholder="請輸入供應商名稱" style="min-width:0;" onchange="autoFillPoExpectedDate()"><datalist id="poVendorSuggestions"></datalist></div>
                     <div><label>採購人員：</label><span id="poBuyerName"></span></div>
                     <div><label>採購日期：</label><input type="date" id="poDate" onchange="autoFillPoExpectedDate()"></div>
                 </div>
@@ -1273,7 +1286,8 @@
                     <button type="button" class="btn-secondary" data-download-folder-button onclick="configureDocumentDownloadFolder('purchase')">設定下載資料夾</button>
                     <span data-download-folder="purchase" role="status">使用瀏覽器預設下載</span>
                 </div>
-                <button type="button" id="printPurchaseOrderBtn" onclick="printPurchaseOrder()">📄 建立採購單並下載 PDF</button>
+                <button type="button" id="printPurchaseOrderBtn" onclick="printPurchaseOrder()">📄 儲存文件並下載 PDF</button>
+                <button type="button" id="confirmPoOrderedBtn" hidden onclick="confirmSavedPurchaseOrder(poEditingId)">確認已採購</button>
             </div>
         </div>
     </div>
@@ -1668,27 +1682,28 @@
         }
     }, 15000);
     </script>
-    <script src="modules/supplier-core.js?v=20261002-7"></script>
-<script src="modules/stock-permissions.js?v=20261015-3"></script>
+    <script src="modules/supplier-core.js?v=20261020-1"></script>
+<script src="modules/stock-permissions.js?v=20261025-6"></script>
     <script src="modules/inventory-core.js?v=20261010-1"></script>
     <script src="modules/receiving-core.js?v=20261002-8"></script>
-    <script src="modules/fulfillment-core.js?v=20261015-12"></script>
+    <script src="modules/fulfillment-core.js?v=20261021-1"></script>
     <script src="modules/supply-core.js?v=20261008-1"></script>
     <script src="modules/reservation-core.js?v=20261016-1"></script>
     <script src="modules/procurement-demand-core.js?v=20261011-8"></script>
-    <script src="modules/workflow-core.js?v=20261015-12"></script>
+    <script src="modules/workflow-core.js?v=20261023-1"></script>
     <script src="modules/purchasing-analytics-core.js?v=20261008-1"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261013-file-share"></script>
-    <script src="modules/order-entry-core.js?v=20261014-1"></script>
-    <script src="app.js?v=20261016-10"></script>
+    <script src="modules/order-entry-core.js?v=20261025-3"></script>
+<script src="modules/service-work-core.js?v=20261023-2"></script>
+    <script src="app.js?v=20261025-6"></script>
     <script src="modules/order-self-order-required.js?v=20261013-1"></script>
-    <script src="modules/customer-cancellations.js?v=20261015-1"></script>
+    <script src="modules/customer-cancellations.js?v=20261021-3"></script>
     <script src="modules/free-stock-recovery.js?v=20261014-9"></script>
-    <script src="modules/inventory-workspace.js?v=20261016-1"></script>
-    <script src="modules/warehouse-logistics.js?v=20261016-1"></script>
-    <script src="modules/delivery-settings.js?v=20261013-1"></script>
-    <script src="modules/order-entry-ui.js?v=20261014-1"></script>
+    <script src="modules/inventory-workspace.js?v=20261021-locations-1"></script>
+    <script src="modules/warehouse-logistics.js?v=20261021-locations-1"></script>
+    <script src="modules/delivery-settings.js?v=20261025-address-labels"></script>
+    <script src="modules/order-entry-ui.js?v=20261025-3"></script>
     <script src="modules/quote-decision-analysis.js?v=20261005-5"></script>
 
 
@@ -1817,7 +1832,7 @@
         <div class="page-help-header"><h3 id="pageHelpTitle">頁面說明</h3><button type="button" class="btn-secondary" data-close-page-help>關閉</button></div>
         <div id="pageHelpBody" class="page-help-body"></div>
     </dialog>
-    <div id="pageHelpSources" hidden aria-hidden="true"><div data-page-help-source="product-system" data-help-context=""><div class="inline-help-content">先選擇廠牌，再輸入完整貨號，按「搜尋產品」。搜尋忽略大小寫、空白及連字號、底線、點、斜線，開頭的 0 仍須保留。選擇廠牌不會載入產品；「瀏覽此廠牌產品」每次載入 50 筆。</div></div><div data-page-help-source="product-system" data-help-context=""><div class="inline-help-content">可跨搜尋繼續選品；完成後一次帶入同一張單據。</div></div><div data-page-help-source="forecast-system" data-help-context=""><div class="inline-help-content"><div class="forecast-form-note">
+    <div id="pageHelpSources" hidden aria-hidden="true"><div data-page-help-source="product-system" data-help-context=""><div class="inline-help-content">點選廠牌可查看公司常賣品項，每批最多 20 筆。其他產品請輸入完整貨號，按「搜尋產品」，可不限廠牌搜尋。搜尋忽略大小寫、空白及連字號、底線、點、斜線，開頭的 0 仍須保留。</div></div><div data-page-help-source="product-system" data-help-context=""><div class="inline-help-content">可跨搜尋繼續選品；完成後一次帶入同一張單據。</div></div><div data-page-help-source="forecast-system" data-help-context=""><div class="inline-help-content"><div class="forecast-form-note">
                 新增後狀態自動設為「進行中」，立案日期與第一筆紀錄由系統自動建立。
             </div></div></div><div data-page-help-source="forecast-system" data-help-context=""><div class="inline-help-content"><div class="forecast-form-note">
             儲存後系統會自動加入今天日期，例如「09/18 老師已送明年度設備預算」。

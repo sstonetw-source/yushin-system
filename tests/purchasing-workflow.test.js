@@ -121,7 +121,7 @@ test('purchase order action distinguishes creation from downloading an existing 
     const start = app.indexOf('function updatePoSaveButton()');
     const end = app.indexOf('function purchaseItemsFromSavedPo', start);
     const source = app.slice(start, end);
-    assert.match(source, /poEditingId \? '📄 下載 PDF' : '📄 建立採購單並下載 PDF'/);
+    assert.match(source, /poEditingId && !editingUnconfirmedPurchaseDocument\(\) \? '📄 下載 PDF' : '📄 儲存文件並下載 PDF'/);
     assert.doesNotMatch(source, /重試同步在途庫存/);
 });
 
@@ -254,53 +254,20 @@ test('repeating an incoming-stock update does not count the same supply twice', 
 });
 
 
-test('saved PO keeps one-click print behavior while repairing pending incoming sync', async () => {
-    const start = app.indexOf('window.printPurchaseOrder = async function()');
-    const end = app.indexOf('    if (poItems.length === 0)', start);
-    assert.ok(start >= 0 && end > start);
-    const button = { disabled:false, innerText:'🖨️ 列印 / 存為 PDF（自動同步雲端）' };
-    const savedPo = { id:'PO1', poNo:'PO1', vendorName:'供應商' };
-    let releaseRegistration;
-    let registrationCalls = 0;
-    let printCalls = 0;
-    const messages = [];
-    const context = vm.createContext({
-        window:{DocumentDownloads:{prepare:async()=>{}}}, poEditingId:'PO1', poListCache:[savedPo],
-        currentUser:{uid:'buyer'},currentUserRole:'purchaser',
-        canCreatePurchaseOrderCapability:()=>true, canAccessPage:()=>true,
-        document:{getElementById:()=>button},
-        registerPurchaseIncoming:async () => { registrationCalls++; await new Promise(resolve => { releaseRegistration=resolve; }); },
-        printSavedPoDocument:()=>{printCalls++;}, updatePoSaveStatus:message=>messages.push(message),invalidateWarehouseStockCache:()=>{},
-        updatePoSaveButton:()=>{button.innerText='🖨️ 列印 / 存為 PDF（自動同步雲端）';}, alert:message=>messages.push(message)
-    });
-    vm.runInContext(`let poSaveInProgress=false; let poIncomingSyncPending=false;\n${app.slice(start,end)}\n}`, context);
-
-    await context.window.printPurchaseOrder();
-    assert.equal(printCalls, 1);
-    assert.equal(registrationCalls, 0);
-
-    vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", context);
-vm.runInContext('poIncomingSyncPending=true', context);
-    const pendingPrint = context.window.printPurchaseOrder();
-    await new Promise(resolve => setImmediate(resolve));
-    assert.equal(button.disabled, true);
-    assert.match(button.innerText, /同步雲端後開啟列印/);
-    await context.window.printPurchaseOrder();
-    assert.equal(registrationCalls, 1, 'double tap while syncing must not start another sync');
-    releaseRegistration();
-    await pendingPrint;
-    assert.equal(printCalls, 2, 'successful repair should continue directly to print');
-    assert.equal(button.disabled, false);
-    assert.match(messages.at(-1), /正在產生 PDF/);
-
-    vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", context);
-vm.runInContext('poIncomingSyncPending=true', context);
-    context.registerPurchaseIncoming = async () => { throw new Error('網路中斷'); };
-    await context.window.printPurchaseOrder();
-    assert.equal(printCalls, 2, 'failed sync must not silently print an unsynchronized PO');
-    assert.equal(button.disabled, false);
-    assert.match(messages.at(-1), /在途庫存同步仍未完成.*網路中斷/);
+test('saved document reprint never repairs incoming or confirms a purchase', async () => {
+ const start=app.indexOf('window.printPurchaseOrder = async function()'),end=app.indexOf('    if (poItems.length === 0)',start);
+ let prints=0;
+ const c=vm.createContext({window:{DocumentDownloads:{prepare:async()=>{}}},poEditingId:'PO1',poListCache:[{id:'PO1',poNo:'PO1',vendorName:'Vendor'}],
+  currentUser:{uid:'buyer'},currentUserRole:'purchaser',poSaveInProgress:false,poDraftLoading:false,poIncomingSyncPending:true,
+  canCreatePurchaseOrderCapability:()=>true,canAccessPage:()=>true,document:{getElementById:()=>null},
+  editingUnconfirmedPurchaseDocument:()=>false,printSavedPoDocument:async()=>{prints++;},updatePoSaveStatus:()=>{},updatePoSaveButton:()=>{},alert:()=>{},
+  registerPurchaseIncoming:()=>{throw Error('PDF cannot write incoming');},commitFormalPurchaseOrder:()=>{throw Error('PDF cannot purchase');}});
+ vm.runInContext(app.slice(start,end)+'}',c);
+ await c.window.printPurchaseOrder();await c.window.printPurchaseOrder();assert.equal(prints,2);
+ c.printSavedPoDocument=async()=>{throw Error('PDF offline');};
+ await c.window.printPurchaseOrder();assert.equal(prints,2);assert.equal(c.poSaveInProgress,false);
 });
+
 
 test('PO PDF export starts from the user action without browser print', () => {
     const start = app.indexOf('async function printSavedPoDocument(poNo, vendorName)');
@@ -534,7 +501,7 @@ test('formal PO creates authoritative supplyOrders before saving the document sn
     const printStart = app.indexOf('window.printPurchaseOrder = async function()');
     const printEnd = app.indexOf("window.addEventListener('afterprint'", printStart);
     const printSource = app.slice(printStart, printEnd);
-    assert.match(printSource,/commitFormalPurchaseOrder\(poRecord, \{actorUid,actorRole\}\)/);
+    assert.match(printSource,/saveFormalPurchaseDocument\(poRecord,\{actorUid,actorRole,expectedRevision:/);
     const coreTransaction = formalService;
     assert.match(coreTransaction, /(?:db\.collection\('supplyOrders'\)|supplyOrdersCollection\(\))\.doc\(supplyId\)/);
     assert.match(coreTransaction, /type:'PURCHASING_PO'/);
@@ -547,7 +514,7 @@ test('formal PO creates authoritative supplyOrders before saving the document sn
     assert.match(coreTransaction, /poRecord\.supplyOrderIds=supplyOrderIds/);
     assert.match(coreTransaction, /supplyOrderedQty:cumulative/);
     assert.doesNotMatch(coreTransaction, /purchaseOrderedQty:cumulative/);
-    assert.ok(printSource.indexOf('await commitPromise') < printSource.indexOf('printSavedPoDocument(poNo, vendorName)'));
+    assert.doesNotMatch(printSource.slice(0,printSource.indexOf('// 「製作下一張估價單」')),/commitFormalPurchaseOrder|registerPurchaseIncoming/);
 });
 
 test('purchase receiving queue calculates progress from supply orders only',()=>{
@@ -562,7 +529,7 @@ test('supply receipt synchronizes received quantity back to the source order ite
     const start=app.indexOf('async function receiveSupplyOrderRecord');
     const end=app.indexOf('function receiptOperationStorageKey',start);
     const source=app.slice(start,end);
-    assert.match(source,/const receiptPlan=globalThis\.YushinReceiving\.applyReceiptToOrderItem\(\{\.\.\.item,reservedQty:currentReserved\},qty\)/);
+    assert.match(source,/const receiptPlan=globalThis\.YushinReceiving\.applyReceiptToOrderItem\(\{\.\.\.item,reservedQty:currentReserved\},qty,warehouseShipmentContext\)/);
     assert.match(source,/const currentReserved=Math\.max\(0,Number\(reservation\.quantity\|\|0\)\)/);
     assert.match(source,/const next=receiptPlan\.item/);
     assert.match(source,/reserveQty=sourceStockPlan\.allocatedQty/);
@@ -575,7 +542,7 @@ test('supply receipt synchronizes received quantity back to the source order ite
 
 
 test('self-order receipt uses receiving core receivedQty without adding it twice',()=>{
-    assert.match(app,/const receiptPlan=globalThis\.YushinReceiving\.applyReceiptToOrderItem\(\{\.\.\.item,reservedQty:currentReserved\},qty\);/);
+    assert.match(app,/const receiptPlan=globalThis\.YushinReceiving\.applyReceiptToOrderItem\(\{\.\.\.item,reservedQty:currentReserved\},qty,warehouseShipmentContext\);/);
     assert.match(app,/const next=receiptPlan\.item/);
     assert.match(app,/if\(!reservationSnap\.exists\)throw new Error\('來源訂單缺少庫存預留紀錄/);
     assert.doesNotMatch(app,/\{\.\.\.next,receivedQty:Number\(item\.receivedQty\|\|0\)\+qty/);
@@ -608,7 +575,7 @@ test('purchasing state transitions refresh the derived order work index',()=>{
 test('order lifecycle, delivery and return mutations refresh work category index',()=>{
     assert.match(app,/Object\.assign\(updates,orderWorkIndexFields\(\{\.\.\.order,\.\.\.updates\}\)\);/);
     const deliverySync=(app.match(/orderWorkIndexFields\(\{\.\.\.order,\.\.\.updates\}\)[\s\S]{0,160}deliveryHistory/g)||[]).length;
-    const returns=fs.readFileSync('modules/customer-cancellations.js','utf8');
+    const returns=fs.readFileSync('src/services/customer-return.js','utf8');
     assert.ok(deliverySync>=3,'all delivery mutation paths should refresh the work index');
     assert.match(returns,/Object.assign\(patch,orderWorkIndexFields\(\{\.\.\.order,\.\.\.patch\}\)\)/);
 });
@@ -947,9 +914,12 @@ test('formal purchase order commit immediately hydrates the receiving supply cac
     assert.match(formalService,/let committedSupplyOrders = \[\]/);
     assert.match(formalService,/committedSupplyOrders = \[\]/);
     assert.match(formalService,/committedSupplyOrders\.push\(\{id:supplyId,\.\.\.supplyRecord\}\)/);
-    assert.match(source,/const supplyMap = new Map\(supplyReceivingCache\.map/);
-    assert.match(source,/committedSupplyOrders\.forEach\(row => supplyMap\.set\(row\.id, row\)\)/);
-    assert.match(source,/supplyReceivingCache = \[\.\.\.supplyMap\.values\(\)\]/);
+    assert.doesNotMatch(source,/cacheCommittedFormalPurchase/);
+    assert.match(app,/cacheCommittedFormalPurchase\(result\)/);
+    const cache=app.slice(app.indexOf('function cacheCommittedFormalPurchase('),app.indexOf('function renderFormalPurchaseRecovery('));
+    assert.match(cache,/const supplyMap = new Map\(supplyReceivingCache\.map/);
+    assert.match(cache,/committedSupplyOrders\.forEach\(row => supplyMap\.set\(row\.id, row\)\)/);
+    assert.match(cache,/supplyReceivingCache = \[\.\.\.supplyMap\.values\(\)\]/);
 });
 
 test('receiving queue keeps standalone stock and cancelled-order warehouse supplies visible', () => {
@@ -1013,7 +983,7 @@ test('delivery writes keep isDelivered based on net delivered quantity', () => {
     const save=app.slice(saveStart,saveEnd);
     assert.match(save,/isDelivered: effectiveTotalDelivered >= total/);
 
-    const returns=fs.readFileSync('modules/customer-cancellations.js','utf8');
+    const returns=fs.readFileSync('src/services/customer-return.js','utf8');
     assert.match(returns,/returnRecords:records,returnedQty:/);
     assert.match(returns,/orderWorkIndexFields/);
 });
@@ -1305,7 +1275,7 @@ test('delivery and return writes synchronize live reservedQty back to order item
     assert.match(delivery,/newReservedQty/);
     assert.match(delivery,/updates\.items=syncedItems/);
 
-    const returns=fs.readFileSync('modules/customer-cancellations.js','utf8');
+    const returns=fs.readFileSync('src/services/customer-return.js','utf8');
     assert.match(returns,/result.newReservedQty/);
     assert.match(returns,/patch.items=order.items.map/);
 });
@@ -1368,15 +1338,15 @@ test('purchasing pending card and detail share the procurement demand source', (
     assert.match(detail,/自行訂貨/);
 });
 
-test('PO core transaction commits before the print dialog opens', () => {
+test('document persistence precedes PDF while business confirmation stays independent', () => {
     const start=app.indexOf('window.printPurchaseOrder = async function()');
-    const end=app.indexOf("window.addEventListener('afterprint'",start);
+    const end=app.indexOf('// 「製作下一張估價單」',start);
     const source=app.slice(start,end);
-    const awaitIndex=source.indexOf('await commitPromise;');
-    const printIndex=source.indexOf('printSavedPoDocument(poNo, vendorName);');
-    assert.ok(awaitIndex>=0&&printIndex>awaitIndex,'core PO transaction must finish before print');
-    assert.match(source,/registerPurchaseIncoming\(poDocumentId, poRecord, \{actorUid,actorRole,onStockCommitted:invalidateWarehouseStockCache\}\)\s*\.then/);
+    assert.ok(source.indexOf('await saveFormalPurchaseDocument(')<source.indexOf('await printSavedPoDocument(poNo,vendorName)'));
+    assert.doesNotMatch(source,/commitFormalPurchaseOrder|registerPurchaseIncoming|recoverFormalPurchase/);
+    assert.match(app,/window\.confirmSavedPurchaseOrder = async function/);
 });
+
 
 test('committed PO refreshes item quantities in order and purchasing views', () => {
     assert.match(app,/committedSourceOrders\.push\(\{id:snapshot\.id,\.\.\.orderData,\.\.\.orderUpdates\}\)/);
@@ -1441,7 +1411,7 @@ test('purchase cost preload preserves already resolved costs across repeated PO 
 test('new PO cannot be saved until its number is ready', () => {
     const buttonSource = app.match(/function updatePoSaveButton\(\) \{[\s\S]*?\n\}/)?.[0];
     const saveStart = app.indexOf('window.printPurchaseOrder = async function()');
-    const saveEnd = app.indexOf('    if (poEditingId) {', saveStart);
+    const saveEnd = app.indexOf('    if (poEditingId && !originalDraft) {', saveStart);
     assert.ok(buttonSource && saveStart >= 0 && saveEnd > saveStart);
     assert.match(buttonSource, /waitingForNumber = !poEditingId && !poNoReady/);
     assert.match(buttonSource, /button\.disabled = poSaveInProgress \|\| waitingForNumber/);
@@ -1505,7 +1475,7 @@ test('purchase identity fields stay editable and save-print keeps the secure tra
     assert.match(render, /onchange="updateDirectPoText\(\$\{idx\},'brand'/);
     assert.match(app, /'📄 匯出 PDF（自動同步雲端）'/);
     const save = app.match(/window\.printPurchaseOrder = async function\(\) \{[\s\S]*?\n\};/)?.[0] || '';
-    assert.ok(save.indexOf('await commitPromise') < save.indexOf('printSavedPoDocument(poNo, vendorName)'));
+    assert.ok(save.indexOf('await saveFormalPurchaseDocument(') < save.indexOf('await printSavedPoDocument(poNo,vendorName)'));
 });
 
 
@@ -2235,7 +2205,7 @@ test('lead-time PO date controls preserve manual overrides and recompute automat
     assert.match(source, /expectedDateSource==='manual'/);
     assert.match(source, /YushinSupplier\.purchaseExpectedDate/);
     assert.match(source, /expectedDateSource='lead-time'/);
-    assert.match(html, /id="poVendorName"[^>]+onchange="autoFillPoExpectedDate\(\); renderPoItemsTable\(\)"/);
+    assert.match(html, /id="poVendorName"[^>]+onchange="autoFillPoExpectedDate\(\)"/);
     assert.match(html, /id="poDate"[^>]+onchange="autoFillPoExpectedDate\(\)"/);
     assert.match(html, /id="poExpectedDate"[^>]+onchange="markPoExpectedDateManual\(\)"/);
     assert.match(app, /window\.removePoItem = function[\s\S]*?autoFillPoExpectedDate\(poItems\)/);

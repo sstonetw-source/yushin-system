@@ -8,7 +8,7 @@ const plain=x=>JSON.parse(JSON.stringify(x));
 function fixture(){
  const docs=new Map(),writes=[],reads=[],stored=new Map();
  const state={lost:false,replay:false,rejectCommit:false,afterRead:null,afterCommit:null};
- const c=vm.createContext({currentUser:{uid:'U'},currentUserRole:'sales',BUSINESS_STATUS:{ACTIVE:'active'},
+ const c=vm.createContext({currentUser:{uid:'U'},currentUserRole:'sales',BUSINESS_STATUS:{ACTIVE:'active'},YushinOrderEntry:require('../modules/order-entry-core'),
   DOCUMENT_TYPES:{FORECAST:'forecast',ORDER:'order'},normalizedOrderStatus:o=>[o.status,o.orderStatus].some(s=>['cancelled','voided'].includes(s))?'cancelled':'normal',
   documentLink:(type,id,relation)=>({type,id,relation}),firebase:{firestore:{FieldValue:{arrayUnion:value=>({union:value})}}},
   db:{collection:name=>({doc:id=>({id:id||'O',path:name+'/'+(id||'O')})})},
@@ -28,7 +28,7 @@ function fixture(){
    if(state.lost){state.lost=false;throw Error('lost reply');}
   }});
  vm.runInContext(service,c);
- const data={createdByUid:'U',status:'active',ownerUid:'U',createdAt:'T',inventoryReservationStatus:'pending'};
+ const data={transactionType:'借',createdByUid:'U',status:'active',ownerUid:'U',createdAt:'T',inventoryReservationStatus:'pending'};
  const forecast={...data,sourceType:'forecast',sourceId:'F',sourceDocumentSyncStatus:'completed'};
  docs.set('forecasts/F',{ownerUid:'U',status:'active',updatedAt:'V',linkedDocuments:[]});
  return {c,docs,writes,reads,state,stored,data,forecast,run:(d=forecast,options={})=>c.commitOrderCreation('O',d,{linkForecast:true,expectedForecastUpdatedAt:'V',...options})};
@@ -89,7 +89,7 @@ function forecastFixture(){
   currentUserName:'Name',currentUserCode:'S',buildFullHistorySearchTokens:()=>[],ordersCache:[],
   synchronizeOrderInventory:async(id,data)=>{data.inventoryReservationStatus='completed';}});
  vm.runInContext(forecastFeature.slice(forecastFeature.indexOf('async function createForecastOrdersDirectly'),forecastFeature.indexOf('window.createOrderFromForecast')),c);
- f.convert=()=>c.createForecastOrdersDirectly({id:'F',ownerUid:'U',updatedAt:'V'},[{itemName:'Item',productId:'P',productMasterMatched:true}]);
+ f.convert=()=>c.createForecastOrdersDirectly({id:'F',ownerUid:'U',updatedAt:'V'},[{itemName:'Item',productId:'P',productMasterMatched:true}],{transactionType:'借'});
  return f;
 }
 test('Forecast feature preserves pending ID after lost response then clears only after inventory completion',async()=>{
@@ -105,4 +105,76 @@ test('Forecast inventory failure retains pending ID and retry uses committed con
 test('Forecast postcommit session change does not mutate new session cache or clear pending recovery',async()=>{
  const f=forecastFixture();f.state.afterCommit=()=>{f.c.currentUser={uid:'OTHER'};};await assert.rejects(f.convert(),/身分/);
  assert.equal(f.c.ordersCache.length,0);assert.equal(f.stored.size,1);assert.equal(f.writes.length,2);
+});
+
+test('return reorder uses ordinary creation and only reads its closed-return source without moving stock or changing the old order',async()=>{
+ const f=fixture(),original={ownerUid:'U',customerName:'客戶',returnRecords:[{id:'R',qty:2,settlement:'CLOSE'}],isBilled:true};
+ f.docs.set('orders/OLD',original);const data={...f.data,customerName:'客戶',returnReorderSource:{orderId:'OLD'},items:[{productId:'CORRECT',qty:1,unitPrice:250}]};
+ const result=await f.c.commitOrderCreation('NEW',data);assert.equal(result.data.items[0].productId,'CORRECT');
+ assert.deepEqual(f.writes,[['set','orders/NEW']]);assert.deepEqual(f.docs.get('orders/OLD'),original);
+ f.docs.delete('orders/OLD');f.docs.get('orders/NEW').inventoryReservationStatus='completed';
+ const replay=await f.c.commitOrderCreation('NEW',data);assert.equal(replay.data.inventoryReservationStatus,'completed');assert.equal(f.writes.length,1);
+ await assert.rejects(f.c.commitOrderCreation('NEW',{...data,returnReorderSource:{orderId:'OTHER'}}),/其他退貨來源/);
+});
+test('return reorder rejects pending, replacement, missing, foreign or different-customer sources without any write',async()=>{
+ for(const original of [null,{ownerUid:'U',customerName:'客戶',returnRequests:[{status:'PENDING',qty:2}]},
+  {ownerUid:'U',customerName:'客戶',returnRecords:[{qty:2,settlement:'REPLACE'}]},
+  {ownerUid:'OTHER',customerName:'客戶',returnRecords:[{qty:2,settlement:'CLOSE'}]},
+  {ownerUid:'U',customerName:'其他客戶',returnRecords:[{qty:2,settlement:'CLOSE'}]}]){
+  const f=fixture();if(original)f.docs.set('orders/OLD',original);
+  await assert.rejects(f.c.commitOrderCreation('NEW',{...f.data,customerName:'客戶',returnReorderSource:{orderId:'OLD'}}));assert.equal(f.writes.length,0);
+ }
+ const f=fixture();for(const returnReorderSource of [{orderId:'NEW'},{orderId:'A/B'},{orderId:' OLD '},{orderId:'OLD',settlement:'CLOSE'},null])
+  await assert.rejects(f.c.commitOrderCreation('NEW',{...f.data,returnReorderSource}));
+});
+test('return reorder opens a clean order draft with the customer reference and no copied wrong item or price',()=>{
+ const feature=fs.readFileSync('src/features/orders/order-creation.js','utf8');
+ const fields=new Map();const element=id=>{if(!fields.has(id))fields.set(id,{});return fields.get(id);};let opens=0,saves=0;
+ const c=vm.createContext({window:{},ordersCache:[{id:'OLD',orderNo:'NO-1',customerName:'客戶',transactionType:'直',invoiceTitle:'抬頭',
+  productId:'WRONG',unitPrice:888,returnRecords:[{qty:1,settlement:'CLOSE'}]}],canManageOrderLifecycleCapability:()=>true,canEditPage:()=>true,
+  savedReturnRecords:o=>o.returnRecords,openOrderModal:(...args)=>{assert.deepEqual(args,[]);opens++;},
+  document:{getElementById:element},saveOrderDraft:()=>saves++,alert:()=>assert.fail('unexpected alert')});
+ vm.runInContext(feature.slice(feature.indexOf('window.reorderAfterReturn'),feature.indexOf('window.copyOrderAsNew')),c);
+ c.window.reorderAfterReturn('OLD');assert.equal(opens,1);assert.equal(saves,1);assert.equal(element('orderCustomer').value,'客戶');
+ assert.deepEqual(plain(c.window._orderModalReturnReorder),{orderId:'OLD'});assert.match(element('orderRemarks').value,/NO-1/);
+ assert.equal(fields.has('orderItemCode'),false);assert.equal(fields.has('orderUnitPrice'),false);
+});
+
+test('creation rejects empty and invalid trade types without writes but resumes a legacy committed order',async()=>{
+ for(const transactionType of ['',null,123,'其他']){
+  const f=fixture();await assert.rejects(f.c.commitOrderCreation('O',{...f.data,transactionType}),/交易方式/);
+  assert.equal(f.writes.length,0);
+ }
+ const f=fixture();f.docs.set('orders/O',{...f.data,transactionType:''});
+ const result=await f.c.commitOrderCreation('O',f.data);
+ assert.equal(result.data.transactionType,'');assert.equal(f.writes.length,0);
+});
+
+test('single and multi-item Forecasts open the required order form without writing and preserve owner/version context',async()=>{
+ for(const count of [1,3]){
+  const forecast={id:'F',ownerUid:'OWNER',salesName:'Owner',salesCode:'S01',updatedAt:'VERSION'};
+  const items=Array.from({length:count},(_,i)=>({itemName:'Item '+i}));
+  let opened,rendered=0;
+  const c=vm.createContext({window:{},currentUser:{uid:'ADMIN'},currentUserRole:'admin',currentUserName:'Admin',currentUserCode:'A',
+   forecastCache:[forecast],forecastOrderItems:async()=>items,forecastItemToOrderSource:(f,item)=>({...item,sourceId:f.id}),
+   normalizeNewOrderItem:item=>item,openOrderModal:item=>{opened=item;},renderNewOrderDraftItems:()=>rendered++,
+   alert:message=>{throw Error(message);},console});
+  vm.runInContext(forecastFeature.slice(forecastFeature.indexOf('window.createOrderFromForecast')),c);
+  await c.window.createOrderFromForecast('F');
+  assert.equal(opened.sourceId,'F');assert.equal(c.newOrderDraftItems.length,count-1);assert.equal(rendered,1);
+  assert.deepEqual(plain(c.window._orderModalForecastContext),{id:'F',updatedAt:'VERSION',ownerUid:'OWNER',salesName:'Owner',salesCode:'S01'});
+ }
+});
+
+test('order form adopts an older Forecast pending ID and keeps it through a lost response',async()=>{
+ const f=fixture(),feature=fs.readFileSync('src/features/orders/order-creation.js','utf8');
+ Object.assign(f.c,{window:{_orderModalForecastContext:{id:'F',updatedAt:'V'}},ORDER_DRAFT_STORAGE_PREFIX:'draft',
+  localStorage:{getItem:k=>f.stored.get(k)||null,setItem:(k,v)=>f.stored.set(k,v),removeItem:k=>f.stored.delete(k)}});
+ vm.runInContext(feature.slice(feature.indexOf('function orderDraftStorageKey'),feature.indexOf('function orderDraftFieldValue')),f.c);
+ f.stored.set('draft:U:forecast:F:pending_order_id','LEGACY');f.state.lost=true;
+ await assert.rejects(f.c.createOrResumeNewOrder(f.forecast),/lost reply/);
+ assert.equal(f.stored.get('draft:U:pending_order_id'),'LEGACY');
+ const result=await f.c.createOrResumeNewOrder(f.forecast);
+ assert.equal(result.id,'LEGACY');assert.equal(f.stored.has('draft:U:forecast:F:pending_order_id'),false);
+ assert.deepEqual(f.writes,[['set','orders/LEGACY'],['update','forecasts/F']]);
 });

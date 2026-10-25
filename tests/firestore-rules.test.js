@@ -6,7 +6,7 @@ const {
   assertSucceeds,
   assertFails
 } = require('@firebase/rules-unit-testing');
-const { arrayUnion, collection, deleteDoc, doc, getDoc, getDocs, limit, orderBy, query, setDoc, startAfter, updateDoc, where, writeBatch } = require('firebase/firestore');
+const { arrayUnion, collection, deleteDoc, deleteField, doc, getDoc, getDocs, limit, orderBy, query, setDoc, startAfter, updateDoc, where, writeBatch } = require('firebase/firestore');
 
 let env;
 
@@ -126,12 +126,26 @@ test.beforeEach(async () => {
 });
 
 const validOrderProduct = {
-  productId:'p-order', productMasterMatched:true, procurementType:'PURCHASING_PO'
+  transactionType:'借', productId:'p-order', productMasterMatched:true, procurementType:'PURCHASING_PO'
 };
 
 function db(uid) {
   return env.authenticatedContext(uid).firestore();
 }
+
+test('server-only grouped reservation receipts reject browser SDK reads and writes for all roles',async()=>{
+ const path='reservationOperationReceipts/grouped-test_123456789';
+ await env.withSecurityRulesDisabled(async ctx=>{
+  await setDoc(doc(ctx.firestore(),path),{action:'grouped_reservation',actorUid:'buyer1',intentHash:'h'});
+ });
+ for(const uid of ['admin','buyer1','wh1','sales1','eng1']){
+  const ref=doc(db(uid),path);
+  await assertFails(getDoc(ref));
+  await assertFails(setDoc(ref,{action:'grouped_reservation',actorUid:uid}));
+  await assertFails(updateDoc(ref,{actorUid:uid}));
+  await assertFails(deleteDoc(ref));
+ }
+});
 
 test('inactive user is denied', async () => {
   await assertFails(getDoc(doc(db('off1'), 'settings/company')));
@@ -1378,6 +1392,18 @@ test('real order initialization atomically publishes item reservation and demand
   assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,3);
  }
 });
+test('real client initialization refuses an old attempt before stock writes and accepts the current attempt',async()=>{
+ for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['admin','admin']]){
+  const f=await orderInitializationFixture(uid,role,{ownerUid:role==='purchaser'?'sales1':uid});
+  const source=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+  await seed('orders/'+f.id,{...source,inventoryReservationAttemptId:'current-attempt'});
+  await assert.rejects(f.context.reserveSingleOrderItem(f.id,{inventoryReservationAttemptId:'old-attempt'},{itemId:'I'},0),/較新的庫存同步/);
+  assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,0);
+  assert.equal((await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).exists(),false);
+  await assertSucceeds(f.context.reserveSingleOrderItem(f.id,{inventoryReservationAttemptId:'current-attempt'},{itemId:'I'},0));
+  assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,3);
+ }
+});
 const unactivatedLocationPatches=[{locationSchemaVersion:2},{locationSchemaVersion:0},{locations:[]},
  {locations:[{warehouseId:'W1',reservedQty:1},{warehouseId:'W2',reservedQty:1}]},
  {allocations:[]},{warehouseAllocations:[]}];
@@ -1629,7 +1655,7 @@ test('common creation service reads and creates orders under actual commercial r
  for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['admin','admin']]){
   const client=compatDb(uid),nativeRun=client.runTransaction;
   client.runTransaction=fn=>nativeRun(tx=>fn({...tx,set:(ref,data)=>tx.set(ref,JSON.parse(JSON.stringify(data)))}));
-  const c=vm.createContext({db:client,currentUser:{uid},currentUserRole:role,BUSINESS_STATUS:{ACTIVE:'active'},
+  const c=vm.createContext({db:client,currentUser:{uid},currentUserRole:role,YushinOrderEntry:require('../modules/order-entry-core'),BUSINESS_STATUS:{ACTIVE:'active'},
    runRoleTransaction:fn=>stockPermissions.run(client,fn,uid,['sales','engineer'].includes(role),role)});
   vm.runInContext(fs.readFileSync('src/services/order-creation.js','utf8'),c);
   const data={...validOrderProduct,ownerUid:role==='engineer'?uid:'sales1',salesCode:role==='engineer'?'E01':'S01',status:'active',
@@ -1645,7 +1671,7 @@ test('common Forecast creation transaction atomically proves source link under s
   const id='common-forecast-'+uid,client=compatDb(uid),nativeRun=client.runTransaction;
   client.runTransaction=fn=>nativeRun(tx=>fn({...tx,set:(ref,data)=>tx.set(ref,JSON.parse(JSON.stringify(data))),
    update:(ref,data)=>tx.update(ref,{updatedAt:data.updatedAt,linkedDocuments:data.linkedDocuments})}));
-  const c=vm.createContext({db:client,currentUser:{uid},currentUserRole:role,BUSINESS_STATUS:{ACTIVE:'active'},DOCUMENT_TYPES:{FORECAST:'forecast',ORDER:'order'},
+  const c=vm.createContext({db:client,currentUser:{uid},currentUserRole:role,YushinOrderEntry:require('../modules/order-entry-core'),BUSINESS_STATUS:{ACTIVE:'active'},DOCUMENT_TYPES:{FORECAST:'forecast',ORDER:'order'},
    firebase:{firestore:{FieldValue:{arrayUnion}}},documentLink:(type,id,relation)=>({type,id,relation}),normalizedOrderStatus:()=> 'normal',
    runRoleTransaction:fn=>stockPermissions.run(client,fn,uid,role==='sales',role)});
   vm.runInContext(fs.readFileSync('src/services/order-creation.js','utf8'),c);
@@ -2779,6 +2805,318 @@ for(const status of ['cancelled','normal'])test('actual '+status+' refuses impos
  }
 });
 
+// Actual shared UI service -> stock wrapper -> Client SDK -> current Rules.
+async function dispatchPreparationFixture(uid='buyer1',role='purchaser') {
+ const id='dispatch-ui-'+uid,client=compatDb(uid),native=client.runTransaction;
+ const plain=v=>JSON.parse(JSON.stringify(v));
+ client.runTransaction=cb=>native(tx=>cb({...tx,set:(r,d)=>tx.set(r,plain(d)),update:(r,d)=>tx.update(r,plain(d))}));
+ await seed('orders/'+id,{ownerUid:'sales1',salesCode:'S01',status:'active',inventoryReservationStatus:'completed',items:[
+  {itemId:'I',productId:'p-order',warehouseId:'W1',qty:5,reservedQty:3,dispatchPreparedQty:0},
+  {itemId:'J',productId:'other',warehouseId:'W2',qty:8,reservedQty:2,dispatchPreparedQty:0}]});
+ const c=vm.createContext({db:client,currentUser:{uid},currentUserRole:role,
+  normalizedOrderStatus:o=>o.status==='cancelled'?'cancelled':'normal',normalizedOrderItems:o=>o.items.map(i=>({...i})),
+  itemDispatchState:(_o,i)=>require('../modules/fulfillment-core').dispatchState(i),
+  orderWorkIndexFields:()=>({workCategories:['dispatch','shipping']}),deliveryActor:()=>uid,
+  YushinOrderEntry:{validateTrade:()=>({valid:true})},
+  runRoleTransaction:cb=>stockPermissions.run(client,cb,uid,['sales','engineer'].includes(role),role)});
+ vm.runInContext(fs.readFileSync('src/services/dispatch-preparation.js','utf8'),c);
+ const intent={operationId:'dispatch-ui-'+uid+'-AAAAAAAAAAAA',orderId:id,itemId:'I',actorUid:uid,actorRole:role,quantity:3,expectedPreparedQty:0};
+ return {id,c,intent,run:(i=intent)=>c.prepareOrderDispatch(id,'I',i),
+  order:async()=>(await getDoc(doc(db('admin'),'orders/'+id))).data(),
+  record:async()=>(await getDoc(doc(db('admin'),'dispatchRecords/'+intent.operationId)))};
+}
+test('actual dispatch UI service permits only admin/purchaser across all five current roles',async()=>{
+ for(const [uid,role] of [['admin','admin'],['buyer1','purchaser'],['sales1','sales'],['eng1','engineer'],['wh1','warehouse']]){
+  const f=await dispatchPreparationFixture(uid,role);
+  if(['admin','purchaser'].includes(role)){
+   await f.run();await f.run();const o=await f.order();
+   assert.equal(o.items[0].dispatchPreparedQty,3);assert.equal(o.items[1].dispatchPreparedQty,0);
+   assert.equal(o.items[0].reservedQty,3);assert.equal((await f.record()).data().preparedByUid,uid);
+  }else{await assert.rejects(f.run());assert.equal((await f.order()).items[0].dispatchPreparedQty,0);assert.equal((await f.record()).exists(),false);}
+ }
+});
+test('actual dispatch lost reply/new arrival and concurrent retries reuse one immutable record',async()=>{
+ const f=await dispatchPreparationFixture();await f.run();
+ const o=await f.order();await seed('orders/'+f.id,{...o,items:o.items.map((i,n)=>n?i:{...i,reservedQty:5})});
+ await Promise.all([f.run(),f.run()]);assert.equal((await f.order()).items[0].dispatchPreparedQty,3);
+ await assert.rejects(f.run({...f.intent,quantity:2}),/識別碼/);
+ const fresh={...f.intent,operationId:'dispatch-ui-fresh-AAAAAAAAAAAA',quantity:2,expectedPreparedQty:3};
+ await Promise.all([f.run(fresh),f.run(fresh)]);assert.equal((await f.order()).items[0].dispatchPreparedQty,5);
+});
+test('actual competing dispatch attempts and forbidden receipt creation roll back without partial order changes',async()=>{
+ const f=await dispatchPreparationFixture();
+ const results=await Promise.allSettled([f.run(),f.run({...f.intent,operationId:'dispatch-ui-competing-AAAAAAAAAAAA'})]);
+ assert.equal(results.filter(r=>r.status==='fulfilled').length,1);assert.equal((await f.order()).items[0].dispatchPreparedQty,3);
+ const g=await dispatchPreparationFixture('wh1','purchaser'); // forged frontend role cannot grant permission
+ const before=await g.order();await assert.rejects(g.run());assert.deepEqual(await g.order(),before);assert.equal((await g.record()).exists(),false);
+});
+test('actual dispatch rechecks disabled profiles and refuses the multi-location Emulator contract',async()=>{
+ const f=await dispatchPreparationFixture();await seed('users/buyer1',{role:'purchaser',active:false});
+ await assert.rejects(f.run());assert.equal((await f.record()).exists(),false);
+ await seed('users/buyer1',{role:'purchaser',active:true});
+ await seed('inventoryReservations/'+f.id+'__I',{ownerUid:'sales1',salesCode:'S01',locationSchemaVersion:2,locations:[]});
+ await assert.rejects(f.run(),/尚未啟用的位置資料/);assert.equal((await f.order()).items[0].dispatchPreparedQty,0);
+});
+
+async function actualCustomerReturnFixture(uid='buyer1',role='purchaser') {
+ const f=await actualShipmentFixture(uid,role);await f.ship(2,'source-return-'+uid);
+ const order=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+ await seed('orders/'+f.id,{...order,returnRequests:[{id:'REQUEST',itemId:'I',qty:2,receivedQty:0,status:'PENDING',settlement:'CLOSE',reason:'訂錯貨'}],returnPending:true});
+ Object.assign(f.context,{localDateString:()=> '2026-10-18',DOCUMENT_TYPES:{ORDER:'order'}});
+ const actions=fs.readFileSync('src/features/orders/delivery-actions.js','utf8');
+ vm.runInContext(actions.slice(actions.indexOf('function returnItemDeliveredQty('),actions.indexOf('function populateReturnItemOptions(')),f.context);
+ vm.runInContext(fs.readFileSync('src/services/customer-return.js','utf8'),f.context);
+ f.receive=(receiptId,qty=1,quality='SALEABLE')=>f.context.commitCustomerReturnReceipt({orderId:f.id,requestId:'REQUEST',receiptId,qty,quality,warehouseId:'W1'});
+ return f;
+}
+async function actualReturnRequestFixture(uid,role){
+ const id='request-service-'+uid,ownerUid=['sales','engineer','admin'].includes(role)?uid:'sales1';
+ await seed('orders/'+id,{...validOrderProduct,ownerUid,salesCode:role==='engineer'?'E01':'S01',
+  items:[{itemId:'I',qty:5,warehouseId:'W1'}],deliveredQty:5,returnedQty:0,
+  deliveryRecords:[{id:'D',itemId:'I',qty:5}],returnRecords:[],returnRequests:[],returnPending:false});
+ const client=compatDb(uid),native=client.runTransaction,plain=v=>JSON.parse(JSON.stringify(v));
+ client.runTransaction=fn=>native(tx=>fn({...tx,set:(r,d,o)=>o?tx.set(r,plain(d),o):tx.set(r,plain(d)),update:(r,d)=>tx.update(r,plain(d))}));
+ const c=vm.createContext({db:client,currentUser:{uid},currentUserRole:role,canManageOrderLifecycleCapability:()=>true,
+  normalizedOrderItems:o=>o.items,savedDeliveryRecords:o=>o.deliveryRecords,savedReturnRecords:o=>o.returnRecords,
+  deliveryActor:()=>uid,runRoleTransaction:fn=>stockPermissions.run(client,fn,uid,['sales','engineer'].includes(role),role)});
+ const actions=fs.readFileSync('src/features/orders/delivery-actions.js','utf8');vm.runInContext(actions.slice(actions.indexOf('function returnItemDeliveredQty('),actions.indexOf('function populateReturnItemOptions('))+fs.readFileSync('src/services/customer-return.js','utf8'),c);
+ return {c,id,request:patch=>c.commitCustomerReturnRequest({orderId:id,itemId:'I',operationId:'Q',qty:2,date:'2026-10-19',reason:'訂錯商品',...patch}),read:async()=>(await getDoc(doc(db('admin'),'orders/'+id))).data()};
+}
+test('actual request and withdrawal Services retain commercial roles despite forged frontend capability for other roles',async()=>{
+ for(const [uid,role] of [['admin','admin'],['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['wh1','warehouse']]){
+  const f=await actualReturnRequestFixture(uid,role),before=await f.read();
+  if(['admin','sales','engineer'].includes(role)){
+   await f.request();await f.request();assert.equal((await f.read()).returnRequests.length,1);
+   await f.c.commitCustomerReturnWithdrawal({orderId:f.id,requestId:'Q'});const withdrawn=await f.read();assert.equal(withdrawn.returnRequests[0].status,'CANCELLED');
+   await f.c.commitCustomerReturnWithdrawal({orderId:f.id,requestId:'Q'});assert.deepEqual(await f.read(),withdrawn);
+  }else{await assert.rejects(f.request());assert.deepEqual(await f.read(),before);}
+ }
+ const f=await actualReturnRequestFixture('sales1','sales');await seed('orders/'+f.id,{...await f.read(),ownerUid:'sales2',salesCode:'S02'});const before=await f.read();await assert.rejects(f.request());assert.deepEqual(await f.read(),before);
+});
+test('actual request Services serialize same-ID and competing allowance requests without duplicate pending quantities',async()=>{
+ const f=await actualReturnRequestFixture('sales1','sales');
+ // A competing legacy request proposal may be denied by Rules before the
+ // client receives a transaction retry. Keep that rejection visible, then
+ // verify the original ID recovers the committed result without another write.
+ const same=await Promise.allSettled([f.request(),f.request()]);assert.ok(same.some(r=>r.status==='fulfilled'));
+ for(const result of same)if(result.status==='rejected')assert.equal(result.reason.code,'permission-denied');
+ const once=await f.read();assert.equal(once.returnRequests.length,1);await f.request();assert.deepEqual(await f.read(),once);
+ await assert.rejects(f.request({reason:'不同意圖'}),/識別碼/);
+ const g=await actualReturnRequestFixture('sales1','sales');const race=await Promise.allSettled([g.request({operationId:'A',qty:4}),g.request({operationId:'B',qty:4})]);
+ assert.equal(race.filter(r=>r.status==='fulfilled').length,1);assert.equal((await g.read()).returnRequests.length,1);
+ await seed('users/sales1',{role:'sales',active:false,salesCode:'S01'});const before=await g.read();await assert.rejects(g.request({operationId:'disabled',qty:1}));assert.deepEqual(await g.read(),before);
+});
+test('actual request to partial receipt to withdrawal preserves already returned stock and rejects further receiving',async()=>{
+ const f=await actualCustomerReturnFixture('admin','admin'),order=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();await seed('orders/'+f.id,{...order,returnRequests:[],returnPending:false});
+ Object.assign(f.context,{currentUserRole:'admin',canManageOrderLifecycleCapability:()=>true});
+ await f.context.commitCustomerReturnRequest({orderId:f.id,itemId:'I',operationId:'REQUEST',qty:2,date:'2026-10-19',reason:'訂錯商品'});await f.receive('REQUEST-PARTIAL');
+ const before=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();await f.context.commitCustomerReturnWithdrawal({orderId:f.id,requestId:'REQUEST'});
+ const after=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();assert.equal(after.returnRequests[0].receivedQty,1);assert.equal(after.returnRequests[0].status,'CANCELLED');assert.equal(after.returnPending,false);
+ assert.deepEqual(after.returnRecords,before.returnRecords);assert.equal(after.returnedQty,1);assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().onHand,4);
+ await assert.rejects(f.receive('REQUEST-TOO-LATE'));assert.deepEqual((await getDoc(doc(db('admin'),'orders/'+f.id))).data(),after);
+});
+async function actualKeepStockFixture(uid,role){
+ const id='keep-service-'+uid,key='keep-product',supply={type:'PURCHASING_PO',orderId:id,productKey:key,productId:key,qty:5,receivedQty:2,status:'PARTIAL_RECEIPT',fulfillmentType:'DIRECT_SHIP',warehouseId:'',incomingRegisteredQty:0,ownerUid:'sales1',salesCode:'S01'};
+ await seed('orders/'+id,{ownerUid:'sales1',salesCode:'S01',status:'cancelled',orderStatus:'cancelled'});await seed('supplyOrders/'+id,supply);await seed('receivingSupplyOrders/'+id,supply);
+ await seed('warehouses/W1',{active:true});await seed('inventory/'+key,{productKey:key,onHand:2,reserved:1,incoming:4});await seed('warehouseStocks/W1__'+key,{productKey:key,warehouseId:'W1',onHand:2,reserved:1,incoming:1});
+ const client=compatDb(uid),native=client.runTransaction,plain=v=>JSON.parse(JSON.stringify(v));client.runTransaction=fn=>native(tx=>fn({...tx,set:(r,d,o)=>o?tx.set(r,plain(d),o):tx.set(r,plain(d)),update:(r,d)=>tx.update(r,plain(d))}));
+ const c=vm.createContext({db:client,currentUser:{uid},currentUserRole:role,canCreatePurchaseOrderCapability:()=>true,
+  supplyOrdersCollection:()=>client.collection('supplyOrders'),normalizedOrderStatus:o=>o.status,isPurchaseTerminalStatus:s=>['CANCELLED','CLOSED','RECEIVED'].includes(s),warehouseStockDocId:(w,k)=>w+'__'+k,deliveryActor:()=>uid,
+  runRoleTransaction:fn=>stockPermissions.run(client,fn,uid,['sales','engineer'].includes(role),role)});vm.runInContext(fs.readFileSync('src/services/customer-return.js','utf8'),c);
+ const paths=['supplyOrders/'+id,'receivingSupplyOrders/'+id,'inventory/'+key,'warehouseStocks/W1__'+key,'inventoryMovements/redirect-'+id];
+ return {c,id,run:()=>c.commitCancelledPurchaseKeepStock({supplyId:id,warehouseId:'W1',expectedDirect:true}),read:()=>Promise.all(paths.map(async path=>(await getDoc(doc(db('admin'),path))).data()))};
+}
+test('actual KEEP_STOCK Service atomically redirects only incoming and mirrors the original supply once for purchasing roles',async()=>{
+ for(const [uid,role] of [['admin','admin'],['buyer1','purchaser'],['wh1','warehouse'],['sales1','sales'],['eng1','engineer']]){
+  const f=await actualKeepStockFixture(uid,role),before=await f.read();
+  if(['admin','purchaser'].includes(role)){
+   await f.run();const after=await f.read();assert.equal(after[0].customerCancellationResolvedBy,uid);assert.equal(after[1].fulfillmentType,'WAREHOUSE');assert.equal(after[0].incomingRegisteredQty,3);
+   assert.equal(after[2].incoming,7);assert.equal(after[3].incoming,4);assert.equal(after[2].onHand,2);assert.equal(after[2].reserved,1);assert.equal(after[4].qty,3);
+   await f.run();assert.deepEqual(await f.read(),after);
+  }else{await assert.rejects(f.run());assert.deepEqual(await f.read(),before);}
+ }
+});
+test('actual KEEP_STOCK Service refuses inactive warehouse and disabled purchaser without partial supply or incoming changes',async()=>{
+ const f=await actualKeepStockFixture('buyer1','purchaser'),before=await f.read();await seed('warehouses/W1',{active:false});await assert.rejects(f.run(),/倉庫/);assert.deepEqual(await f.read(),before);
+ await seed('warehouses/W1',{active:true});await seed('users/buyer1',{role:'purchaser',active:false});await assert.rejects(f.run());assert.deepEqual(await f.read(),before);
+});
+test('actual customer return Service receives CLOSE into original stock once for admin purchaser and warehouse',async()=>{
+ for(const [uid,role] of [['admin','admin'],['buyer1','purchaser'],['wh1','warehouse']]){
+  const f=await actualCustomerReturnFixture(uid,role);await f.receive('RETURN-'+uid);await f.receive('RETURN-'+uid);
+  const stock=(await getDoc(doc(db('admin'),'inventory/init-product'))).data(),local=(await getDoc(doc(db('admin'),'warehouseStocks/W1__init-product'))).data();
+  assert.equal(stock.onHand,4);assert.equal(local.onHand,4);assert.equal(stock.reserved,3);assert.equal(local.reserved,3);
+  const order=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();assert.equal(order.returnedQty,1);assert.equal(order.returnRecords.length,1);assert.equal(order.returnRecords[0].settlement,'CLOSE');
+  assert.equal(order.returnRequests[0].receivedQty,1);assert.equal(order.returnPending,true);
+  await assert.rejects(f.receive('RETURN-'+uid,2),/識別碼/);
+ }
+});
+test('actual held return settles without stock then shared release Service credits it exactly once',async()=>{
+ const f=await actualCustomerReturnFixture();await f.receive('HELD',1,'INSPECTION');
+ assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().onHand,3);
+ await f.context.commitCustomerReturnHoldRelease('HELD');await f.context.commitCustomerReturnHoldRelease('HELD');
+ assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().onHand,4);
+ assert.equal((await getDoc(doc(db('admin'),'customerReturnReceipts/HELD'))).data().disposition,'STOCK');
+ assert.equal((await getDoc(doc(db('admin'),'orders/'+f.id))).data().returnRecords.length,1);
+});
+test('actual customer return refuses source warehouse changes before posting stock or receipt',async()=>{
+ const f=await actualCustomerReturnFixture(),order=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+ await seed('warehouses/W1',{active:false});await assert.rejects(f.receive('REJECTED'),/倉庫/);
+ assert.deepEqual((await getDoc(doc(db('admin'),'orders/'+f.id))).data(),order);
+ assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().onHand,3);
+ assert.equal((await getDoc(doc(db('admin'),'customerReturnReceipts/REJECTED'))).exists(),false);
+});
+test('actual return Service cannot grant sales or engineer receipt permission through a forged UI capability',async()=>{
+ const f=await actualCustomerReturnFixture('admin','admin');
+ for(const [uid,role] of [['sales1','sales'],['eng1','engineer']]){
+  const saved=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+  await seed('orders/'+f.id,{...saved,ownerUid:uid,salesCode:role==='sales'?'S01':'E01'});
+  const client=compatDb(uid),native=client.runTransaction,plain=v=>JSON.parse(JSON.stringify(v));
+  client.runTransaction=fn=>native(tx=>fn({...tx,set:(r,d)=>tx.set(r,plain(d)),update:(r,d)=>tx.update(r,plain(d))}));
+  Object.assign(f.context,{db:client,currentUser:{uid},canReceiveInventoryCapability:()=>true,
+   runRoleTransaction:fn=>stockPermissions.run(client,fn,uid,true,role)});
+  const before=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+  await assert.rejects(f.context.commitCustomerReturnReceipt({orderId:f.id,requestId:'REQUEST',receiptId:'forged-'+uid,qty:1,quality:'INSPECTION',warehouseId:'W1'}));
+  assert.deepEqual((await getDoc(doc(db('admin'),'orders/'+f.id))).data(),before);
+  assert.equal((await getDoc(doc(db('admin'),'customerReturnReceipts/forged-'+uid))).exists(),false);
+ }
+});
+
+// Service financial evidence is server-only, including admin client SDKs.
+test('service billing and dates cannot be forged through client create/update/delete fields or type stripping',async()=>{
+ const service={itemId:'S',productId:'service-master',productType:'Service',serviceKind:'ONSITE_REPAIR',qty:1};
+ for(const uid of ['admin','sales1','eng1','buyer1','wh1']){
+  const owner=uid==='eng1'?'eng1':'sales1',code=uid==='eng1'?'E01':'S01';
+  const client=db(uid),ref=doc(client,'orders/service-finance-'+uid);
+  for(const items of [[service],[{itemId:'G',productId:'p-order',qty:1}, {...service,productType:' service '}],
+   Array.from({length:30},(_,i)=>i===29?service:{itemId:'G'+i,productId:'p-order',qty:1})]){
+   await seed('orders/'+ref.id,{ownerUid:owner,salesCode:code,status:'active',isBilled:false,billingDate:'',items});
+   for(const patch of [{isBilled:true},{billingDate:'2026-10-23'},
+     {isBilled:true,items:items.filter(i=>i.itemId!=='S')},
+     {items:items.map(i=>({...i,productType:'Goods'}))},
+     {items:items.map(i=>i.itemId==='S'?{...i,productId:'different'}:i)}])
+    await assertFails(updateDoc(ref,patch));
+   await seed('orders/'+ref.id,{ownerUid:owner,salesCode:code,status:'active',isBilled:true,billingDate:'2026-10-23',items});
+   for(const patch of [{isBilled:false},{billingDate:'2026-10-24'},{isBilled:deleteField(),billingDate:deleteField()}])
+    await assertFails(updateDoc(ref,patch));
+  }
+ }
+ // A client cannot start a new order already billed, even with real master data.
+ for(const uid of ['admin','sales1','eng1']){
+  const code={admin:'ADM',sales1:'S01',eng1:'E01'}[uid];
+  await assertFails(setDoc(doc(db(uid),'orders/created-billed-'+uid),{...validOrderProduct,
+   ownerUid:uid,salesCode:code,isBilled:true,billingDate:'2026-10-23'}));
+ }
+});
+test('service non-financial updates and ordinary Goods billing retain existing access',async()=>{
+ for(const uid of ['admin','sales1','eng1']){
+  const code={admin:'ADM',sales1:'S01',eng1:'E01'}[uid];
+  const base={ownerUid:uid,salesCode:code,status:'active',isBilled:false,billingDate:''};
+  const goods=Array.from({length:30},(_,i)=>({itemId:'I'+i,productId:'p-order',productType:'Goods',qty:1}));
+  const ref=doc(db(uid),'orders/finance-compat-'+uid);
+  await seed('orders/'+ref.id,{...base,items:goods});
+  await assertSucceeds(updateDoc(ref,{isBilled:true,billingDate:'2026-10-23'}));
+  await assertSucceeds(updateDoc(ref,{billingDate:'2026-10-24'}));
+  await assertSucceeds(updateDoc(ref,{isBilled:false,billingDate:''}));
+  const service={itemId:'S',productId:'P',productType:'Service',serviceKind:'ONSITE_REPAIR',qty:1};
+  await seed('orders/'+ref.id,{...base,items:[service]});
+  await assertSucceeds(updateDoc(ref,{remarks:'追蹤服務案件'}));
+  await assertSucceeds(updateDoc(ref,{items:[{...service,remarks:'保留原服務綁定'}]}));
+ }
+});
+
+// Run the existing incoming Service and mirror wrapper against real Client Rules.
+// Represents the second PO after a partially received first PO, with stock already
+// present in both the company and warehouse rows (the failing update path).
+async function actualIncomingCheckpointFixture(uid='buyer1',clientRole='purchaser') {
+ const key='incoming-product',orderId='incoming-source',poId='PO-SECOND',supplyId='incoming-second';
+ const supply={type:'PURCHASING_PO',purchaseDocumentId:poId,orderId,itemId:'I',
+  ownerUid:'sales1',salesCode:'S01',productKey:key,productId:key,itemCode:'IN-1',itemName:'Incoming product',
+  brand:'Roche',brandId:'roche',qty:3,receivedQty:0,incomingRegisteredQty:0,status:'ORDERED',
+  fulfillmentType:'WAREHOUSE',warehouseId:'W1',unitCost:20,supplier:'Supplier'};
+ const po={status:'ORDERED',supplyOrderIds:[supplyId]};
+ await seed('orders/'+orderId,{ownerUid:'sales1',salesCode:'S01',status:'active',inventoryReservationStatus:'completed',items:[{itemId:'I',productId:key,qty:7,supplyOrderedQty:7,receivedQty:2}]});
+ await seed('purchaseOrders/'+poId,po);
+ await seed('supplyOrders/incoming-first',{...supply,purchaseDocumentId:'PO-FIRST',qty:4,receivedQty:2,incomingRegisteredQty:2,status:'PARTIAL_RECEIPT'});
+ await seed('supplyOrders/'+supplyId,supply);
+ await seed('receivingSupplyOrders/'+supplyId,stockPermissions.sanitizeSupply(supply));
+ await seed('inventory/'+key,{productKey:key,productId:key,onHand:5,reserved:3,incoming:2});
+ await seed('warehouseStocks/W1__'+key,{warehouseId:'W1',productKey:key,productId:key,onHand:5,reserved:3,incoming:2});
+ const client=compatDb(uid),native=client.runTransaction,plain=v=>JSON.parse(JSON.stringify(v));
+ let corruptMirror=false;
+ client.runTransaction=fn=>native(tx=>fn({...tx,
+  set:(ref,data,options)=>{
+   const value=plain(data);
+   if(corruptMirror&&ref.path==='receivingSupplyOrders/'+supplyId)value.itemName='forged mirror';
+   return options?tx.set(ref,value,options):tx.set(ref,value);
+  },update:(ref,data)=>tx.update(ref,plain(data))}));
+ const c=vm.createContext({db:client,currentUser:{uid},currentUserRole:clientRole,currentUserName:uid,
+  canCreatePurchaseOrderCapability:()=>true,canAccessPage:()=>true,
+  isPurchaseTerminalStatus:s=>['CANCELLED','CLOSED','RECEIVED'].includes(s),
+  YushinReceiving:require('../modules/receiving-core'),
+  supplyOrdersCollection:()=>client.collection('supplyOrders'),warehouseStockDocId:(w,k)=>w+'__'+k,
+  inventoryNumbers:d=>({onHand:Number(d.onHand||0),reserved:Number(d.reserved||0),incoming:Number(d.incoming||0)}),
+  resolveBrandName:b=>b,brandIdForName:()=> 'roche',
+  runRoleTransaction:fn=>stockPermissions.run(client,fn,uid,false,clientRole)});
+ const source=fs.readFileSync('src/services/supply-order.js','utf8');
+ vm.runInContext(source.slice(0,source.indexOf('async function cancelOutstandingSupplyRecord')),c);
+ const paths=['inventory/'+key,'warehouseStocks/W1__'+key,'supplyOrders/'+supplyId,'receivingSupplyOrders/'+supplyId];
+ const read=async()=>({rows:await Promise.all(paths.map(async path=>(await getDoc(doc(db('admin'),path))).data())),
+  movements:(await getDocs(collection(db('admin'),'inventoryMovements'))).docs.map(d=>d.data())});
+ return {run:()=>c.registerPurchaseIncoming(poId,po),read,corruptMirror:value=>{corruptMirror=value;}};
+}
+test('actual second PO incoming checkpoint updates both totals and cost-free mirror once under concurrent replay',async()=>{
+ const f=await actualIncomingCheckpointFixture();
+ await Promise.all([f.run(),f.run()]);
+ const after=await f.read();
+ for(const stock of after.rows.slice(0,2)){assert.equal(stock.incoming,5);assert.equal(stock.onHand,5);assert.equal(stock.reserved,3);}
+ assert.equal(after.rows[2].incomingRegisteredQty,3);
+ assert.deepEqual(after.rows[3],stockPermissions.sanitizeSupply(after.rows[2]));
+ assert.equal(after.movements.length,1);assert.equal(after.movements[0].qty,3);
+ await f.run();assert.deepEqual(await f.read(),after);
+});
+test('actual incoming checkpoint rolls back every write on rejected mirror and safely resumes the same PO',async()=>{
+ const f=await actualIncomingCheckpointFixture(),before=await f.read();
+ f.corruptMirror(true);await assert.rejects(f.run(),e=>e.code==='permission-denied');
+ assert.deepEqual(await f.read(),before);
+ f.corruptMirror(false);await f.run();const after=await f.read();
+ assert.equal(after.rows[0].incoming,5);assert.equal(after.rows[1].incoming,5);assert.equal(after.movements.length,1);
+});
+test('actual incoming checkpoint rejects forged purchaser UI role and disabled trusted profile without partial writes',async()=>{
+ for(const uid of ['sales1','eng1','wh1','off1']){
+  const f=await actualIncomingCheckpointFixture(uid,'purchaser'),before=await f.read();
+  await assert.rejects(f.run(),e=>e.code==='permission-denied');assert.deepEqual(await f.read(),before);
+ }
+ const f=await actualIncomingCheckpointFixture(),before=await f.read();
+ await seed('users/buyer1',{role:'purchaser',active:false});
+ await assert.rejects(f.run(),e=>e.code==='permission-denied');assert.deepEqual(await f.read(),before);
+});
+
+ test('order transaction type is required on creation and cannot be cleared, preserving untouched legacy orders',async()=>{
+ const base={...validOrderProduct,ownerUid:'sales1',salesCode:'S01'};
+ for(const value of ['',null,123,'之後確認'])await assertFails(setDoc(doc(db('sales1'),'orders/trade-invalid'),{...base,transactionType:value}));
+ const {transactionType,...missing}=base;
+ await assertFails(setDoc(doc(db('sales1'),'orders/trade-missing'),missing));
+ for(const type of ['直','借','扣'])await assertSucceeds(setDoc(doc(db('sales1'),'orders/trade-'+type),{...base,transactionType:type}));
+ await assertFails(updateDoc(doc(db('sales1'),'orders/trade-借'),{transactionType:''}));
+ await assertFails(updateDoc(doc(db('sales1'),'orders/trade-借'),{transactionType:deleteField()}));
+ await seed('orders/trade-legacy',missing);
+ await assertSucceeds(updateDoc(doc(db('sales1'),'orders/trade-legacy'),{remarks:'legacy unchanged'}));
+ });
+test('company frequently sold products keep existing product-manager permissions and sale-only lookup',async()=>{
+ await seed('products/frequent',{productId:'frequent',brandName:'Brand',productName:'Frequent',listPrice:100,isFrequentlySold:false,status:'ACTIVE',active:true});
+ await seed('productCosts/frequent',{standardCost:55});
+ for(const uid of ['sales1','eng1','wh1']){
+  await assertFails(updateDoc(doc(db(uid),'products/frequent'),{isFrequentlySold:true}));
+  await assertFails(getDoc(doc(db(uid),'productCosts/frequent')));
+ }
+ for(const uid of ['admin','buyer1']){
+  await assertSucceeds(updateDoc(doc(db(uid),'products/frequent'),{isFrequentlySold:true}));
+  const rows=await assertSucceeds(getDocs(query(collection(db('sales1'),'products'),where('isFrequentlySold','==',true),where('brandName','==','Brand'),orderBy('__name__'),limit(20))));
+  assert.equal(rows.size,1);assert.equal(rows.docs[0].data().listPrice,100);assert.equal(rows.docs[0].data().standardCost,undefined);
+  await assertSucceeds(updateDoc(doc(db(uid),'products/frequent'),{isFrequentlySold:false}));
+ }
+});
+
 async function crossWarehouseEvidenceFixture(uid,role,count=2,{mutate=null,inventoryId=null}={}){
  const id='cross-'+uid,productKey=id,ownerUid=role==='engineer'?'eng1':'sales1',salesCode=role==='engineer'?'E01':'S01';
  const inventoryDocId=inventoryId||productKey;
@@ -2806,7 +3144,7 @@ async function crossWarehouseEvidenceFixture(uid,role,count=2,{mutate=null,inven
   for(const warehouseId of ['A','B'])tx.set(client.collection('inventoryMovements').doc(id+'-'+movementId+'-'+warehouseId),{
    productKey,warehouseId,sourceType:'order',sourceId:id,ownerUid,salesCode,type:'reserve',
    qty:items.reduce((sum,item,i)=>sum+(item.warehouseId===warehouseId?quantities[i]-old[i]:0),0)});
- },uid,['sales','engineer'].includes(role),role).catch(error=>{throw new Error(uid+' cross-warehouse transaction: '+error.message,{cause:error});});
+ },uid,['sales','engineer'].includes(role),role).catch(error=>{throw new Error(uid+' cross-warehouse transaction '+JSON.stringify(quantities)+': '+error.message,{cause:error});});
  const paths=['inventory/'+inventoryDocId,...['A','B'].map(w=>'warehouseStocks/'+w+'__'+productKey),
   ...items.map(i=>'inventoryReservations/'+id+'__'+i.itemId)];
  const snapshot=()=>Promise.all(paths.map(async p=>{const s=await getDoc(doc(db('admin'),p));return s.exists()?s.data():null;}));

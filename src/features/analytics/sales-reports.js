@@ -489,6 +489,7 @@ function productMasterDocToPriceItem(doc) {
         nameEn: data.nameEn || '',
         productLine: data.productLine || '',
         productType: data.productType || data.category || '',
+        serviceKind: data.serviceKind || '',
         spec: data.specification || data.spec || '',
         unit: data.unit || data.uom || '',
         price: priceListActive ? (data.listPrice ?? data.price ?? 0) : 0,

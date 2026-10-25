@@ -109,6 +109,10 @@ window.addEventListener('pageshow', event => {
 let sessionDataGeneration = 0;
 function resetSessionData() {
     sessionDataGeneration++;
+    window.resetServiceCaseView?.();
+    window.resetCustomerReturnReceiptView?.();
+    window.resetV2ShipmentLocations?.();
+    window.closePurchaseOrderModal?.();
     permissionRulesReady=false; permissionRulesCheckedUid=''; permissionRulesCheckPromise=null;
     // 先清掉前一個視角的分頁狀態，避免非同步查詢完成前短暫顯示不屬於新視角的資料。
     loadedMainPages.clear();
@@ -171,7 +175,7 @@ function resetSessionData() {
     equipmentLoadGeneration++; equipmentSearchGeneration++;
     forecastLoadGeneration++; forecastHistorySearchGeneration++;
     quoteHistorySearchGeneration++; orderHistorySearchGeneration++; poHistorySearchGeneration++;
-    productManagementSearchGeneration++; productBrandBrowseGeneration++; businessProductSearchGeneration++;
+    productManagementSearchGeneration++; businessProductSearchGeneration++;
     orderModalOpenGeneration++; orderDraftProductCheckGeneration++;
     forecastHistorySearchResults=[]; quoteHistorySearchResults=[]; orderHistorySearchResults=[];
     salesList=[]; salesListLoadPromise=null; allUsersCache=[]; salesCodeMasterCache=[];
@@ -236,7 +240,6 @@ function actuallySwitchMainTab(tabId, el, options = {}) {
 
     if (tabId === 'inventory-system') {
         if (!options.skipReload) initializePageData('inventory');
-        loadCustomerReturnQueue();
     } else if (tabId === 'forecast-system') {
         if (!options.skipReload) initializePageData('forecast');
     } else if (tabId === 'equipment-system') {

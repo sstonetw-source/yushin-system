@@ -440,7 +440,7 @@ function quickLifecycleActionFixture(nextStatus){
   adjustInventoryReservationForLifecycle:async()=>({items:[]}),orderWorkIndexFields:()=>({}),
   normalizedOrderItems:o=>o.items,syncOrderIntoPurchasingCaches:()=>{},writeAppDataCache:()=>{},alert:()=>{}});
  vm.runInContext(fs.readFileSync('src/services/order-lifecycle.js','utf8'),c);
- vm.runInContext(app.slice(app.indexOf('window.quickSetOrderLifecycle ='),app.indexOf('window.toggleOrderProgressStatus')),c);
+ vm.runInContext(app.slice(app.indexOf('function applySavedOrderLifecycle('),app.indexOf('window.toggleOrderProgressStatus')),c);
  return {c,before,resolveCommit,rejectCommit,transactions:()=>transactions};
 }
 test('quick cancellation and restoration show the confirmed status until transaction commit and ignore repeated taps',async()=>{

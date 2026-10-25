@@ -1,8 +1,68 @@
 # ARCHITECTURE — 又鑫系統程式碼責任地圖
 
+## 2026-10-24｜目前有效決策：服務銷售與物料採購分開
+
+本節取代下文歷史紀錄中「材料耗用待完成」、跨單試劑分攤及零件耗用連結的要求。
+
+- 業務沿既有服務訂單記錄服務數量、售價與進度；服務數量屬銷售，不轉成試劑或零件數量。
+- 試劑與維修零件由採購直接發單，沿既有採購／收貨流程處理，不要求關聯服務訂單或案件。
+- 不新增耗用登記、領料入口、跨案材料分攤或另一套庫存帳；服務執行、完工、交付、核銷與重送均不觸發物料扣帳。
+- Bio-Plex 共用試劑不按服務單數扣整盒；維修完工不要求零件或採購憑證。
+- 實物收貨仍按原流程增加既有庫存；本流程不記錄使用量，因此帳面數量不代表開封後或實際使用後的剩餘量，也不據此計算逐張服務單材料毛利。
+- 商品銷售仍沿原商品預留、出貨及退貨流程；本決策不變更既有實貨交易、角色權限或服務完工證據。
+
+## 2026-10-23｜服務核銷日期與工作分類原子同步（demo 試點，待本批 CI）
+
+核銷日期修改沿既有 commitServiceOrderBilling 與 readServiceOrderProgress，不新增 writer／Callable／Core。可選 action=CHANGE_DATE 在同一交易核對已核銷狀態、預期原日期、真實角色／所有權、來源與全量服務完工證據；日期、歷程、工作分類和原操作憑證原子更新。原日期欄位在純服務 demo gate 下接線，與核銷共用 pending checkpoint、未知回覆確認與現況回讀；Goods 沿用原 Service，混合單不開放。
+
+此節更新先前日期尚未接線的狀態；其他 writer 對 workCategories 的持續維護、混合單商品憑證、材料耗用與 Preview 仍未完成，PR #234 保持 Draft，未合併 main 或部署 Firebase。
+
+## 2026-10-23｜原核銷接線與 Client 財務防護（demo 試點，待本批完整 CI）
+
+原訂單 `toggleOrderStatus` 對 Service 轉入原核銷 Callable adapter；不樂觀改寫財務狀態、不另建核銷核心。adapter 使用原 demo Auth／Functions gate，並核對 session generation；送出前保存固定意圖，同操作重送後另讀一次 server orders，避免將歷史憑證覆蓋後續撤銷。畫面只套用目前訂單。Rules 在所有角色（含 admin client）前共同限制服務財務欄位，並保護服務品項綁定免於先改類型／刪除再核銷。核銷日期後端修改仍未實作，原日期 Service 對服務單拒絕。
+
+尚未完成：核銷日期後端、其他 writer 對 workCategories 的維護、混合單商品交付證據、材料耗用與 Preview。此節更新先前「原 UI 未接線」的歷史狀態；PR #234 保持 Draft，未合併 main 或部署 Firebase。
+
+## 2026-10-23｜純服務後端核銷試點（未正式啟用）
+
+純服務核銷試點由 `commitServiceOrderBilling` 負責，同一 transaction 呼叫從既有整單查詢抽出的 `readServiceOrderProgress`；共同 `Workflow.projectItem`／註冊案件仍是唯一完成量及工作分類來源。角色限 admin 或本人 sales／engineer，重新讀取 users、orders、索引、產品與案件，核銷只在全數服務完成及商務文件齊備時可提交。混合單拒絕，不以商品快取當交付憑證。原 Client `setOrderBillingStatus` 對含 Service 品項明確拒絕，尚未將原 UI 接到新後端。
+
+
+## 2026-10-23 服務查詢與操作資格一致性
+
+已實作：`service-case-service.js` 的 writer 與品項查詢共用 `activeServiceMasterKind`。查詢從既有完整案件索引投影歷程，另以即時主檔決定是否可新增／接續；不以畫面操作提示取代提交時的交易驗證。原訂單列表索引與核銷 writer 整合仍未完成。
+
+## 2026-10-23 服務案件與共用履約投影（已實作，待本批 CI）
+
+`YushinWorkflow.projectItem(input, registeredCases)` 接受後端從完整品項索引讀取且核對來源的案件事件，沿唯一 `YushinServiceWork.projectServiceItem` 取得商務完成量，並共用既有工作分類：未全數完成為 delivery、完成未核銷為 billing、完成且已核銷為 complete、取消為 closed。未提供第二參數時保留原本的服務未履約保護；不採用 input 的完成量快取或一般送貨事件。服務 effectiveDeliveredQty 仍為 0，outstandingQty 表示尚未完成的服務需求。
+
+原 `commitServiceCaseEvent` 與 `getServiceCaseStatus` 使用同一投影回傳 itemWorkCategory；原服務視窗僅顯示後端分類。沒有新增 writer、集合、查詢、Listener、資料庫讀寫或持久快取。原訂單列表／workCategories 索引仍沒有案件證據，維持服務待處理，尚須後續整合；本批不是整張訂單完成、核銷 writer 或 Preview 上線。PR #234 保持 Draft。
+
+
+## 2026-10-23 服務案件原畫面接線（已實作，真瀏覽器待本批 CI）
+
+`src/features/orders/service-cases.js` 在原訂單列及頁首提供同一服務視窗；`src/services/service-cases.js` 僅傳送既有 Callable，不寫 Firestore。業務從原訂單開案，倉管／工程師可用訂單編號查詢最小服務資料並接手；讀取授權與可執行動作由原後端 Service 依真實使用者決定。案件數量仍由唯一 Service Work Core 計算，沒有第二個交易 writer。整合分支 `aa0eef6` 完整 CI 已通過。
+
+僅明確 `YUSHIN_SERVICE_CASE_EMULATOR`、本機 demo Auth／Functions gate 啟用；sessionStorage 固定原事件意圖，重送後經原查詢核對事件證據再解除。非同步讀取核對視窗、UID、角色、session generation 及請求代次；resetSessionData 清畫面、保留未確認意圖。來源改動後已重建 app.js。本機 Node 1759/1759；新增 1280／390px 原站真 Auth 四類服務及交接／遺失回覆案例，完整結果以本批最新 head CI 為準。尚未完成訂單服務交付／核銷、耗材領用、混合單與 Preview；未合併 main、未部署 Firebase。
+
 版本：2026-10-16｜以 PR #92 為重整起點，持續依已實作的 Service 邊界更新。**不代表交易核心或資料模型已完成全面驗收。**
 
 ## 目標與現況
+
+### 服務型產品主檔 UI 的權威分類（2026-10-23）
+
+`src/features/products/product-management.js` 沿用既有主檔視窗，只在選擇 `Service` 時顯示四種服務子類型，來自已載入的 `modules/service-work-core.js` 的 `STEPS` Key，而非新增獨立 Business Core。`serviceKind` 存在原有 `products/{id}`；既有產品查詢經 `productMasterDocToPriceItem` 傳進共用快取，再沿 `normalizeNewOrderItem`／`order-entry-core.copyItem` 保留在估價／Forecast／手動建單的品項快照，但後端仍以即時產品主檔判斷作業類型。不新增 Collection／Index／查詢／Listener。`app.js` 由 `tools/build-app.cjs` 固定的 55 個 `src` 來源依序生成。正式主檔需要管理員／採購角色既有 Rules 授權。
+
+後端 `functions/service-case-service.js` 在同一 Transaction 讀取產品主檔的 `serviceKind`，並拒絕與訂單快照、既存案件類型衝突。主檔可選類型不代表服務操作 UI、受託物保管與訂單完成量串接已上線；PR #234 保留 Draft，Preview 與正式部署未執行。
+
+
+### Service 案件真實 Auth／後端事件入口（2026-10-22，僅 demo Emulator）
+
+- `modules/service-work-core.js` 是四類 Service 事件順序／保管／必要憑證的唯一純 Core，透過 `tools/build-functions-core.cjs` 產生 `functions/shared/service-work-core.js`。
+- `functions/service-case-service.js` 是唯一 Service 事件 transaction writer；重新讀取 Auth 身份、停權／角色、訂單唯一來源品項與正式 Service 產品主檔，不建立實貨、批次、一般採購或送貨憑證。
+- `functions/index.js` 的 `commitServiceCaseEvent` 是**只限 demo-yushin 本機 Firestore＋Auth Emulator** 的 gated Callable；`ENABLE_SERVICE_CASE_EMULATOR=true` 也無法在 Preview／正式 project 開啟。Firestore Rules `serviceCases` 禁止 Client 直接讀寫。
+- 此階段新補真 Auth→Callable→Firestore Emulator 代表流程，不是正式啟用。服務 subtype 在主檔／UI 設定、受託物與數量、訂單品項完成量／核銷、Client 對案件的角色可見性、Preview 與正式部署仍未完成。**PR #234 應保持 Draft**。
+
 
 
 
@@ -71,7 +131,7 @@
 - `src/` 是 **app.js 的唯一可編輯來源**；`node tools/build-app.cjs` 將原始碼依固定順序組成部署／舊測試使用的 `app.js`。修改來源後必須提交生成結果，CI 會檢查逐位元相同。
 - 目前維持 classic script 的全域識別碼行為，避免大規模轉 ES modules 造成 HTML inline handler、載入順序、Firebase 相依及測試破壞。分割來源**不代表全域依賴已消除**。
 - 既有可直接 `require()` 的純商業核心仍保留於 `modules/`；第一階段不複製、重寫第二套 core。後續經測試才調整實際模組路徑。
-- `functions/` 目前主要有供應商採購郵件相關的雲端函式，不是所有交易的中央服務層；不可聲稱所有庫存交易都在 Cloud Functions。
+- `functions/` 包含停用的供應商郵件相容入口、受 Preview 閘門保護的分組雙倉預留，以及僅 Emulator 可提交的單品項雙倉 Service；多數既有庫存交易仍由前端 Service 執行，不可聲稱已全部移到 Cloud Functions。
 
 ## 責任清單
 
@@ -327,3 +387,462 @@ Service 不再直接呼叫快取函式，改接收可選的同步 `onStockCommit
 已實作：`selectSingleWarehouse` 沿用 `locationWarehouses` 的啟用實體倉篩選與排序，並使用 `inventory-core.normalizeStock` 計算分倉可用量；不再自行計算 onHand − reserved 而漏扣 transferFreeInTransit。`reserveSingleOrderItem` 的公司／分倉可用量檢查與最後選定倉驗證共用 `reservation-core.physicalWarehouse`，包含 warehouseType:CUSTODY、systemCustody 及 custody- 前綴。已有供應進度而鎖定位置的品項也不能繞過最終實體倉驗證。
 
 無新寫入、查詢、索引、Rules 或資料遷移；本批未開放多倉位置 ledger。實際 Service 模擬交易涵蓋途中量、部分現貨、衝突後重新選倉、保管倉及重試；新增四個授權角色的 Emulator 情境，結果依當批 CI 判定。Preview 多倉拆量、分批出貨與服務型訂單全流程仍未驗收。
+
+## 後端分批預留交易（2026-10-17，**已實作但預設關閉／尚未驗收上線**）
+
+- 新增 `functions/grouped-reservation-service.js`，僅處理**同張訂單、同產品、2–5 個不同訂單品項、分布剛好兩個既有實體倉庫**的預留增減。這不是「同一個品項拆成兩個倉」的 v2 `locations` ledger，也不處理出貨、收貨、調撥或取消。保留現行所有瀏覽器端交易入口與 Rules，避免一半遷移造成交易漏洞。
+- 後端使用 Firebase Callable 的已驗證 UID，**每筆新交易**在 Firestore Transaction 內讀取 `users/{uid}` 的角色與停用狀態、來源訂單與品項、公司／分倉庫存、倉庫主檔、各筆預留和操作憑證。業務與工程師只能操作自己所屬的訂單；採購、倉管、管理員按角色操作。不得信任前端傳入的身分、庫存或倉庫名稱。
+- 用同一份 `modules/reservation-core.js` 的 `reservationStockDeltas` 計算權威差額。由 `tools/build-functions-core.cjs` 產生 `functions/shared` 交付副本（含 inventory core），CI 比對來源完全一致；不得另維護一套商業公式。將訂單品項投影、inventory 公司 reserved、warehouseStocks 分倉 reserved、inventoryReservations 與 inventoryMovements 在**同一個 Admin SDK Transaction** 更新；採購在途不得算作實貨，調撥途中與服務型／直送路徑拒絕。
+- `reservationOperationReceipts/grouped-{attemptId}` 保存固定意圖雜湊、真實操作者與最終總帳差額；重複提交相同 ID 直接讀取憑證，換意圖或換人冒用被拒。Firestore Rules 對此集合完全禁止客戶端存取。沒有建立新索引或讀取監聽，也沒有正式資料 migration。
+- `functions/index.js` 的 Callable `commitGroupedWarehouseReservation` **預設回傳尚未啟用**（須明確 `ENABLE_GROUPED_RESERVATION=true`），因為目前沒有把前端工作流程接到新後端，也未完成 Preview 的 Firebase Functions Emulator / 真實 SDK 同步驗收。此批不能解決 PR #131 的 Rules CI，也沒有解除 v2 位置欄位阻擋。僅本批 Node mock 的單交易與冪等測試屬已驗證；完整 E2E、不同角色實際 SDK 與並發及與歷史非標準 inventory ID 的相容性仍待驗收。
+
+備註：後端剩餘交付需求採用與瀏覽器相同的 `fulfillment-core.projectOrderDelivery`（含 CLOSE 結案退貨處理），函式部署的產生副本與原始模組逐位元一致；來源產品主檔辨識為 Service 時必須拒絕實貨預留，並不把已結案退貨算為重新補送需求。
+
+2026-10-17 後端試點補充驗收：`tests/emulator-grouped-reservation.cjs` 以 Firebase Admin SDK 對真正 Firestore Emulator 執行公司／雙倉／預留／憑證的完整同交易更新、冪等重試、權限拒絕、超額拒絕及兩次併發更新的守恆檢查。CI 不依賴正式服務憑證。**這仍不是 Functions Callable 真實 Auth SDK、正式環境部署或前端流程全接線驗收**。
+
+### Preview-only 客戶端接線（2026-10-17，**正式不可用／待驗收**）
+
+新增 `src/services/grouped-reservation.js`，將 `reserveInventoryForNewOrder` 的**初始同步**入口接至雙倉後端試點。僅 `APP_ENVIRONMENT==='preview'` 且明確設定 `globalThis.YUSHIN_PREVIEW_GROUPED_RESERVATION===true` 才讀取候選庫存及呼叫 Callable。若未開啟，完全沿用既有單品項流程，不增加 Firestore 讀取／函式請求。
+
+試點僅接受同一訂單 2–5 個**不同**品項，同產品、剛好兩個固定來源倉、無原預留／採購／出貨／退貨進度、合法整數的情況。前端利用既有 Reservation Core 產生意圖，伺服端重新讀取與驗證。Callable 回傳有效結果後仍逐項沿用既有 Service 完成採購需求投影與工作狀態，不自行宣告整筆完成。身分或回覆不明確時停止，不在當次錯誤中退回單品項重複寫入；原同步的 checkpoint/retry 負責恢復。暫不支援 v2 同一品項多位置、歷史非標準 inventory ID、售後／收貨／出貨全流程。
+
+伺服端另增來源同步嘗試識別碼 `syncAttemptId`，只有訂單 `inventoryReservationStatus='pending'` 且目前的 `inventoryReservationAttemptId` 相同時可建立新的雙倉預留交易；已存在相同操作憑證才可冪等重試，防止較舊初始同步在較新工作後繼續提交。無部署、正式資料操作及 Rules 寫入放寬。
+
+### 2026-10-17 Preview Auth + Callable Emulator 驗收
+
+新增 Firebase Authentication + Functions Callable + Firestore Admin SDK 三套 Emulator 連動測試，明確使用 `demo-yushin` 專案與模擬帳號，驗證持有登入憑證的採購可成功、無憑證拒絕、業務越權拒絕、停用後拒絕、竄改角色拒絕、重送意圖不重複、舊同步 ID 拒絕及交易一致性；CI 環境額外啟用 `ENABLE_GROUPED_RESERVATION=true`，不部署至 Firebase。正式專案 `yu-shing-company` 即使配置同名環境旗標也不得啟用這個試點 Callable。只有 `preview-20135` 在額外設定旗標時才允許（仍須 Preview 實際部署、人工驗收）；這些 Emulator 通過不表示正式切換已完成。
+
+Callable Emulator 啟動修正：在 `firebase.json` 明確配置 `auth:9099`、`firestore:8080`、`functions:5001` 以免 CLI 因 Auth 未初始化而略過模擬登入；Functions 初始化採 `firebase-admin/app` 的 `getApps()/initializeApp()`，避免新版 Admin SDK 不再提供 `admin.apps` 所造成的模組載入失敗。以上僅為 Emulator 設定與程式初始化，不是正式 Firebase 部署。
+
+## 單品項雙倉內部提交（2026-10-17）
+
+`functions/single-item-location-service.js` 由唯讀規劃與 Emulator-only 原子提交共用交易讀取與 Reservation Core。提交更新同一預留 ledger、公司／分倉投影、訂單品項及操作憑證，不建立平行 Core。僅允許 demo-yushin Emulator；無 Callable／UI／Preview／正式入口。後續各履約 Service 尚未接入 v2，不能啟用多倉功能。詳見 `single-item-two-warehouse-readonly-20261017.md`。
+
+## 指定倉分批出貨內部交易（2026-10-17）
+
+新增 `functions/location-shipment-service.js`，只允許 demo-yushin Emulator 的單品項 v2 CUSTOMER_SHIP。沿用 Reservation／Inventory／Fulfillment／WarehouseLogistics 核心；不開 Callable 或 UI。倉庫寄出權威為 warehouseShipmentRecords，獨立於客戶 deliveryRecords，寄完不更新客戶送達。workCategories、既有前端交付服務及簽收確認尚未接入，不能宣稱服務層已全面統一。詳見 `location-shipment-emulator-20261017.md`。
+
+## 出貨後送達確認（2026-10-17，僅 Emulator）
+
+`shipment-delivery-service` 只確認既有實際寄出事件，不再扣實貨。`Fulfillment.projectShipmentDelivery` 為兩個後端 Service 共用的唯一 v2 出貨／送達投影；支援部分送達後再寄下一批。確認只讀 user／order／來源 movement、只寫 order 的送達事件及投影。未提供前端、Callable或Preview入口，workCategories／需求與舊交付／退貨服務仍待整合。詳見 `shipment-delivery-confirmation-emulator-20261017.md`。
+
+## 送達撤銷及原批次追溯（2026-10-17，僅 Emulator）
+
+確認、撤銷及追溯共用 shipment-delivery-service 的 actor／order／projection／shipment proof helpers。reverseShipmentDelivery只修正orders送達事件與投影，不動實貨；location-return-trace-service僅依明確lotId／qty核對真實原批次並產生不可提交的預覽。Inventory.planExplicitShipmentReturn補上混合包裹部分送達的明確選批契約，還原計算仍沿既有planLotRestoration。實物退貨入庫、UI、工作清單／需求及Preview仍待完成。詳見 delivery-reversal-return-trace-emulator-20261017.md。
+
+### 原倉實物退貨交易（2026-10-17，Emulator）
+`functions/location-return-service.js` 使用共同出貨來源驗證、`projectShipmentReturns`、明確原批次退貨、`planReservationReturn` 與 `planLotRestoration`，在單一交易還原原倉實貨及 CLOSE／REPLACE 預留，保存不可重複入庫的 movement。已支援分次退貨，但後續補送出貨及 UI／需求同步仍未完成；詳見 `location-return-receipt-emulator-20261017.md`，不得視為正式上線。
+
+### 訂錯貨流程優先（2026-10-17）
+主要退貨採 CLOSE，不自動補送；需要其他商品時，前端「退貨後重新下單」開啟既有乾淨建單入口，透過 commitOrderCreation 同交易核對原單並保存 returnReorderSource 單向關聯，不搬移舊預留／款項。原單累加補送與獨立免費補送開發暫緩。詳見 `wrong-item-return-reorder-20261017.md`。
+
+### v2 打單準備的內部交易（2026-10-17；僅 Emulator）
+
+`functions/location-dispatch-service.js` 新增 `commitLocationDispatchPreparation`，沿用 `Fulfillment.projectShipmentDelivery` 與 `warehouseShipmentState`，只處理單品項 v2 的待打單量、累計打單量及操作憑證；不另造打單核心、不扣庫存、批次或更新送達。真實使用者／角色、來源同步 ID、原單與 v2 預留帳在 Admin SDK Firestore Transaction 中重讀；`dispatchRecords/v2-{operationId}` 固定操作 ID 與訂單更新同交易。既有前端 `prepareOrderDispatch`／Rules 尚未切換，Emulator fixture 原本直接改品項打單量的操作已改成呼叫真正 Service；仍以手動 checkpoint 模擬初始同步完成，不可視為完整 Preview 驗收。僅 `demo-yushin` Emulator，無 Callable、UI、正式部署；涉及 REPLACE 退貨及完整待打單工作清單的適配尚未完成。
+
+### 單品項 v2 預留取消／恢復（2026-10-17，僅 Emulator）
+
+`functions/single-item-location-lifecycle-service.js` 使用既有 Reservation Core `planLocationReservation` 與 `reservationStockDeltas`，在同一 Firebase Admin SDK Transaction 核對 users／orders／products／inventoryReservations／inventory／兩個 warehouses 與 warehouseStocks／採購需求，完成單筆訂單品項的兩倉預留釋放及重新分配；額外保存原候選倉清單於既有 v2 ledger，避免取消後遺失來源位置。固定 `reservationOperationReceipts/single-v2-lifecycle-{operationId}`、逐倉 inventoryMovements、訂單狀態及公司／分倉帳同交易更新，失敗整筆回滾。嚴格限制**尚未採購、收貨、打單、出貨、送達或退貨**的單品項；有 procurementDemands 文件直接拒絕，避免錯誤跳過需求同步。admin 與本人 sales／engineer 可操作，warehouse／purchaser 不可。沒有新 Core、獨立庫存 ledger、索引或 Rules；沒有 Cloud Callable／前端入口、Preview／正式部署，現行 `setOrderLifecycleStatus` 仍不接 v2。
+
+### v2 初始生命週期與採購需求一致性（2026-10-17，Emulator）
+
+延續單品項初始雙倉取消／恢復 Service：現有採購需求文件實際儲存在 `procurementDemands/${encodeURIComponent('SALES_ORDER:'+orderId+':'+itemId)}`，並非未編碼 ID。`commitSingleItemLocationLifecycle` 已改用與前端 `procurementDemandRef` 相同的**完整 ID 編碼**，交易內重讀該權威文件，避免漏讀並錯放未同步的採購需求。僅允許供應商訂購量與收貨量都為零、狀態與來源完全一致的需求；採購已承諾／到貨、來源錯誤或狀態異常一律拒絕。取消在庫存及訂單同一交易將既有需求標記 `CANCELLED`（保留歷史量），恢復經既有 Workflow → Procurement Demand Core 投影重新計算需求，更新既有文件或依實際缺口建立新文件。`functions/shared/workflow-core.js` 與 `procurement-demand-core.js` **由 modules/ 建置產生**，不是額外權威計算核心，CI 建置一致性檢查同步擴充。仍限 demo-yushin Emulator；有真實 PO、部分出貨或收貨的完整交易，以及前端／Rules／Preview 都未接線。
+
+### 部分交付後的 v2 取消／恢復（2026-10-17，僅 Emulator）
+
+本節更新上述「初始取消／恢復」範圍。既有 `commitSingleItemLocationLifecycle` 現使用同一 `Fulfillment.projectShipmentDelivery` 與 `readShipmentProof`，交易內核對逐筆出貨扣帳證明、送達與訂單投影。僅支援**已寄出部分全部送達，剩餘部分未打單、無退貨及供應商承諾／收貨**的單品項雙倉訂單。取消釋放剩餘預留；恢復以原訂購量減已確認送達量呼叫原 `planLocationReservation`，採購需求同交易使用現有 Workflow／Demand Core 重算。歷史出貨、送達、打單累計與實貨／批次不改。仍無 Callable／前端／Preview／正式部署；途中貨、剩餘已打單及已下 PO 的取消未完成。
+
+### v2 取消／恢復的未到貨供應承諾（2026-10-17，僅 Emulator）
+
+本節更新前述「有供應承諾一律拒絕」限制。沿用 `commitSingleItemLocationLifecycle`；同一 Admin SDK Transaction 用既有 supplyOrders 的 orderId 與 demandId 兩種來源各查最多 51 筆，合併後最多接受 50 筆，逐筆驗證所有權、產品、實體倉、來源及零收貨狀態，正式 PO 額外重讀 purchaseOrders 與對應供應明細。承諾量由現有 `ProcurementDemand.reconcileLinkedSupplies` 計算，須等於訂單／採購需求投影；已登記 incoming 須由公司／分倉帳足量涵蓋。取消保留 supplyOrders、purchaseOrders 及 incoming；恢復將尚未到貨供應承諾交給現有 Reservation／Workflow／Demand Core，避免現貨與採購重複涵蓋。供應商同意取消仍使用既有採購 Service，客戶取消沒有供應商取消權。無新 Service／Core／Collection／Rules／索引；尚無 Callable／UI／Preview 或正式部署。
+
+### 既有收貨 Service 的 v2 雙倉接線（2026-10-17，僅 Emulator）
+
+`src/services/receiving.js::receiveSupplyOrderRecord` 延用同一個收貨寫入流程與既有 Receiving／Supply／Reservation Core；未另建平行收貨 Service。新增交易內 `validateV2ReceiptSource`，對位置版本 2 重讀真實 users 角色、原候選倉／分倉、PO 與需求來源；只准 `demo-yushin` Admin Firestore Emulator（process.env.FIRESTORE_EMULATOR_HOST + db.projectId），瀏覽器入口仍拒絕，StockPermissions／Rules 未放寬。正常來源只將本次到貨的實貨及預留加到供應紀錄指定倉，保留其他 locations，不回填單倉 warehouseId。取消來源須有原採購 KEEP_STOCK 決策，增加實貨及來源 receivedQty、減少採購 incoming，原 released ledger 完全不寫、不占回庫存。
+
+同筆收貨的原 receipt、lot、protected lot cost／warehouse costSourceSupplyId、movement、supply、demand、order 及庫存維持原交易；新增 receipt 位置版本標記讓重送同樣重讀真實角色。原 src 建置產生 app.js，未只改生成檔。此試點只支援尚未出貨／退貨的單品項雙倉來源與分次收貨；非來源自由庫存對其他 v2 缺貨的自動分配、收貨後 v2 取消／恢復、Callable／前端／Preview 尚未整合。
+
+### 已收貨後的 v2 取消／恢復（2026-10-17，僅 Emulator）
+
+本節更新「已收貨一律拒絕」的生命週期限制。既有 `commitSingleItemLocationLifecycle` 現核對部分／全部收貨及已停止供應：供應狀態使用原 Receiving Core `normalizeSupply`、承諾使用原 Demand Core `reconcileLinkedSupplies`。同交易以 orderId／demandId 各限 51 筆查 receipts，聯集最多接受 50 筆；逐筆核對 v2 receipt 來源、唯一入庫 movement、原 lot 與逐供應累計，不以訂單或供應上的 receivedQty 快取當作入庫證明。
+
+取消仍只釋放 reserved，不更改 onHand／incoming／批號／receipt／PO／供應履約；恢復以真實有效供應承諾減已收貨計算 inTransit，再傳給同一 Reservation／Workflow／Demand Core。已收貨歷史保留，需求 requestedQty 仍涵蓋累計收貨與目前缺口，不把收到的量重算為在途。Functions 的 receiving-core.js 由原 modules/ 建置產生並驗證一致，沒有第二個核心或新的 Service。仍只在 demo-yushin Emulator；途中貨、剩餘打單、退貨與正式 Callable／UI／Preview 尚未接線。
+
+### 部分出貨後續收貨（2026-10-17，Emulator-only）
+
+既有 Fulfillment Core 的 `projectShipmentDelivery` 增加 `unshippedQty`；Workflow 的明確 `warehouseShipmentContext` 由同一投影區分客戶尚未收到的 outstandingQty 與倉庫尚未寄出的 stockOutstandingQty。Receiving.applyReceiptToOrderItem 接受此第三參數，採購需求 helper 也提供來源紀錄，因此途中貨不再產生重複預留／採購缺口。沒有 context 的舊呼叫維持原行為。
+
+原 receiving Service 仍為唯一收貨 writer。v2 先保留原始 order item、同交易驗證出貨／送達快取與全部出貨 movement，再交 Core 計算；避免展示 normalizer 用待送達量覆蓋實際 v2 缺口。共用 `Fulfillment.validateShipmentMovement` 核對扣帳身份、倉別、數量與批次配置；原 shipment acknowledgement adapter 仍額外核對完整 normalized intent hash，未減少驗證。無新 Service／Callable／UI／Rules；僅 demo-yushin Emulator。
+
+### 單品項 v2 自由庫存 FIFO 協調器（2026-10-18）
+
+沿用現有 `functions/single-item-location-service.js`；新 `advanceAutomaticFreeStockAllocation` 僅負責在至多 50 筆／狀態的安全候選範圍內依原 Reservation Core 優先順序選擇下一個目標、保存 resumable checkpoint，並呼叫同檔既有 `commitSingleItemFreeStockAllocation`。不建立第二個 stock writer、需求計算或 ledger；每個目標本身仍由既有 Admin SDK Transaction 交易內重讀、守恆並建立不可重用 movement。
+
+job `reservationOperationReceipts` 與 movement 在不同交易，使用 pending 固定操作 ID 協助崩潰後續傳及同 ID 重送。批次有最大量與累計上限、同角色／意圖驗證，但不是跨所有訂單的原子交易。僅 demo-yushin Emulator；正式頁面沒有接線、自動觸發尚未實作、候選 >50 安全拒絕，需後續完成索引／分頁及 Preview 驗收後才可評估開放正式使用。
+
+### v2 FIFO 有界游標分頁（2026-10-18）
+
+原 `advanceAutomaticFreeStockAllocation` 協調器現以既有 productKey/status 等值查詢，採每頁 50 筆、DocumentSnapshot 游標翻頁；讀取 active/shortage 兩個候選集合後，依既有 Reservation Core 優先權比較排序，不新增第二個優先順序函式。掃描超過 500 筆則拒絕，以免不完整選單或無限制 Firestore 成本。對每個批次步驟會重新讀候選，因此效能仍待後續 server-side index/投影優化；正式部署與 Preview 尚未啟用。
+
+### v2 取消與結案退貨的 durable 來源事件（2026-10-18）
+
+現有 lifecycle 和 Location Return Services 不另建 outbox Collection，而是把自由庫存來源資訊寫入**同筆交易的既有 inventoryMovements**。庫存真正變動與事件原子提交；rollback 則來源事件一併回滾。後續 `single-item-location-service.advanceReleasedV2FreeStock` 讀取來源 movement 並核對原交易憑證及**現在**授權物流角色，再導向原來的 `advanceAutomaticFreeStockAllocation`；唯一預留數學和 movement writer 仍為 Reservation Core／原 Service。不同來源固定不同 runId，同事件進度可重送且不重扣帳。此仍是 Emulator 內部可呼叫流程，**尚無自動執行器、正式前端、Callable**。尚未處理到貨 KEEP_STOCK、大批分段、不同執行者 checkpoint 接管。
+
+### 既有收貨三份憑證重用（2026-10-18）
+
+多倉自由庫存來源除取消及 CLOSE 退貨外，現在可讀取原 Receiving Service 已原子建立的 warehouse receipt + movement + physical lot，並以其 `autoAllocationQty` 作為配貨最大量；取消後保留採購需驗證現存供應的 `KEEP_STOCK` 決策。所有實際庫存預留仍只由同一 `commitSingleItemFreeStockAllocation` Service 執行、進度寫原 checkpoint；不在 `src/services/receiving.js` 植入另一個 Admin SDK 或隱藏的側寫。這是 demo-yushin Emulator 的可恢復協調入口，尚非正式收貨 UI 自動執行。
+
+### v2 post-commit 有界運行與可選組合入口（2026-10-18）
+
+沿用唯一 `single-item-location-service.advanceReleasedV2FreeStock` 的來源核對及 checkpoint，新增 `drainReleasedV2FreeStock` 只用最多 10 次有限呼叫逐單推進，不引入第二個 Core／stock writer 或另一份 batch state。原 `commitSingleItemLocationLifecycle` 與 `commitLocationReturn` 仍各自是來源的唯一原子 transaction；同檔新的 `...AndRecover` **先提交來源、再在交易外**呼叫既有 drain。後段失敗回傳明確的 postCommitAllocation pending 和來源 movementId，不能假裝回滾來源；sales/engineer 角色不提升為物流權限。Emulator 新測試覆蓋 admin 同次分配、上限中斷續傳、兩角色 handoff 的未開工來源、來源 replay／REPLACE 不可調撥。沒有新增 Callable、background trigger 或正式 UI 接線。
+
+
+### v2 自由庫存配貨進度完整性（2026-10-18）
+
+已實作：既有 `advanceAutomaticFreeStockAllocation` 的每次 checkpoint 交易讀取（包含已完成重送及扣帳後結算）均經 `validateAutomaticFreeStockCheckpoint`。累計分配須為 0 至原 maxQty 的整數，步數為 0–1000；完成必須沒有 pending、具已知完成原因，quantity-reached 必須實際達到原額度。pending 必須具有完整且僅限既定欄位、正整數且不超過剩餘額度，操作 ID 必須依原 runId／步數／訂單／品項衍生。達 1000 步不可建立新指令。異常進度先拒絕，不自動改成完成、重設操作 ID 或推估已扣帳量。
+
+沿用原 checkpoint、movement 與唯一自由庫存 writer；交易已提交但 checkpoint 結算失敗時，修復正確進度後仍以原指令重送，原 movement 確保不重複預留。不變更角色、Collection、Rules、Index、前端或 Callable，仍僅 demo-yushin Emulator。新增 Emulator 案例涵蓋完成憑證異常、pending 篡改與額度超限、扣帳後再讀進度異常及原 ID 續傳；實際執行結果以本批 PR CI 為準。完整 Preview、不同操作者安全交接及正式部署仍未完成。
+
+
+### v2 配貨自動換人續傳（2026-10-18）
+
+既有 `advanceAutomaticFreeStockAllocation` 在初次進度交易內，允許當前有效 admin／purchaser／warehouse 自動接手相同批次。仍使用原 runId、pending 操作 ID 及 maxQty，沒有新增配貨核心或庫存 writer。每次庫存提交額外在同一 transaction 重讀批次，核對現任操作者及 pending 指令，阻止已失去處理權的舊執行程序繼續寫入。
+
+接手時若 pending 已有真實 movement，先核對原操作者／意圖／來源／數量，再由既有進度結算 helper 累計一次；保留 movement 原身份。交接紀錄與進度更新同交易。已完成批次可由當前合格物流角色唯讀取得結果，不建立交接或新 movement。仍限 demo-yushin Emulator；沒有新增 Callable／前端／背景觸發或 Firebase 部署。
+
+
+### CLOSE 退貨後的剩餘履約（2026-10-18，Emulator-only）
+
+既有 `commitLocationDispatchPreparation`／`commitLocationShipment`／`commitShipmentDelivery` 支援全部退貨皆為 CLOSE 時，繼續完成原訂單剩餘未交付部分。數量與狀態沿用 `projectShipmentReturns`、`warehouseShipmentState`、原 Reservation／FEFO Core；不重開已結案數量、不新增庫存 writer。REPLACE、混合補送、退貨後送達撤銷仍安全拒絕。
+
+原退貨 intent normalizer 及有界實際入庫憑證核對移至現有 `location-return-trace-service.js` 的唯讀契約，由退貨及後續履約共用；`location-return-service.js` 保留原 export、唯一退貨 writer 與 intent hash。Trace 的送達 adapter 改為呼叫時載入，避免 shipment／delivery／return 的載入循環。此重整不表示重複退貨的唯讀追溯已接線。無新增模組／集合／Rules／Index，仍限 Emulator，沒有正式 Callable 或前端啟用。
+
+
+### CLOSE 退貨後的取消／恢復（2026-10-18，Emulator-only）
+
+原 `commitSingleItemLocationLifecycle` 改以既有 `projectShipmentReturns` 投影，並沿用 `readLocationReturnProofs(closedOnly:true)` 核對實際退貨。取消／恢復使用相同 Reservation Core，需求仍走 Workflow → Procurement Demand Core，不新增 writer 或數量核心。新交易在原讀取階段增加一次有界 return movement query，初始空退貨快取可省略欄位但不能略過實際憑證查詢。
+
+CLOSE 後僅剩餘未交付部分可取消／恢復；已出貨須全數確認、累計打單須等於已寄出，仍不處理途中貨或未出貨打單。REPLACE／混合補送與全數完成仍拒絕。組合的取消後配貨入口沿用原 release movements 與 coordinator，不增加自動背景作業。僅 demo-yushin Emulator，沒有 Callable／前端／Firebase 部署。
+
+
+### CLOSE 退貨後的後續收貨（2026-10-18，Emulator-only）
+
+本節更新先前退貨後不能收貨的限制。沿用 `src/services/receiving.js::receiveSupplyOrderRecord` 唯一收貨 writer，交易內從有界 sourceId＋action 查詢核對所有原退貨入庫憑證（空快取也查），並驗證 item／order returnedQty、出貨、送達及供應來源；只支援 CLOSE，REPLACE／混合補送與退貨更正仍拒絕。退貨意圖正規化及憑證資料驗證抽至原 Fulfillment Core，Functions 原 reader 與原收貨 Service 共用；雜湊順序及歷史操作 ID 不變，平台分別使用 Node SHA-256／Web Crypto。
+
+Workflow 的明確 warehouseShipmentContext 現包含 returns，以原 projectShipmentReturns 區分商業未結清與實體尚未寄出量。Receiving 明確傳 gross／effective，CLOSE 不再被扣第二次；採購需求 helper 同樣帶原退貨事件。無 context 的舊契約保留。原 receipt、批次、成本連結、供應／需求、公司／分倉及來源預留維持同一交易；取消後仍須原採購 KEEP_STOCK 決策，收貨只成自由實貨，恢復至多需求剩餘未寄出量。沒有第二個 writer、後端側寫、Rules／索引變更或正式接線。
+
+
+### 取消訂單後 CLOSE 實物退貨（2026-10-18，Emulator-only）
+
+原 commitLocationReturn 可接收已取消來源的 CLOSE 退貨，仍沿唯一退貨 writer／原批次還原／固定 movement ID；不新增 Callable、前端或正式資料寫入。shipmentDeliveryContext 增加僅由此 writer 明確傳入的 allowCancelledCloseReturn；預設仍拒絕取消來源，因此一般新增送達、送達撤銷及唯讀追溯不會連帶開放。
+
+新交易要求 status／orderStatus 同為 cancelled、來源同步完成、已寄出全送達且無額外打單、只含 CLOSE／無退貨更正歷史。v2 ledger 必須 released、quantity／shortageQty皆0且 locations空，item預留／缺口一致。原 Reservation.planReservationReturn 在此條件下只加公司與原倉實貨，保留 released，不因入庫釋放殘存異常預留或占回取消來源。退貨憑證、原出貨 movement、真實批次、角色／所有權與庫存平衡仍在同一 transaction 核對；不新增讀寫集合或查詢。
+
+後續恢復仍由原 lifecycle Service，以原訂購量減歷史寄出量規劃剩餘需求，CLOSE不新增補送；採購／收貨歷史不改。原自由庫存協調器可用同一退貨 movement 將最多退回量分給其他正常訂單，取消來源不重啟。REPLACE／混合補送、途中或額外已打單的取消、更正／撤銷、完整 Auth／UI／Preview 仍未開放。
+
+
+### 取消／既有 CLOSE 後的唯讀批次查核（2026-10-18，Emulator-only）
+
+原 planLocationReturnTrace 現支援正常或一致 cancelled 來源，以及已有 CLOSE 退貨的剩餘批次。沿用原 shipmentDeliveryContext、readShipmentProof 與有界 readLocationReturnProofs；取消來源再核對完整 released 空 v2 ledger。取消後無途中貨／額外打單／更正或REPLACE歷史的限制抽成 assertCancelledCloseReturnContext，查核與實際原退貨 writer 共用，沒有另建 writer。
+
+原 Inventory.planExplicitShipmentReturn 接收選定shipment的 priorReturns，新增唯讀額度結果；不重算另一份數量。查核仍驗證所選真實批次並回傳 status read-only／canCommit false，不寫庫存、訂單或憑證，也不讀公司／分倉庫存或成本集合。入庫必須在原 commitLocationReturn 的新交易重新授權及核對全部帳目，不能以預覽當提交承諾。其他新增送達／撤銷的取消guard不改，無Callable／UI／Preview或正式部署。
+
+
+### 退貨真實登入與 Callable 整合（2026-10-18，Emulator-only）
+
+新增 functions/v2-return-callable-adapter.js 僅包裝原 planLocationReturnTrace／commitLocationReturn；UID只取Firebase Callable request.auth.uid，角色／active／所有權仍由原Service在交易內重讀users與order，不信任請求欄位或token自訂role。沿原意圖normalizer、固定operationId／hash與唯一writer，不新增庫存邏輯。
+
+正式 functions/index.js不載入／不匯出這兩個Callable。tools/run-v2-return-auth-emulator.cjs 在臨時目錄建立測試Functions入口與設定，引用實際checkout服務和SDK，固定demo-yushin；flag、FUNCTIONS_EMULATOR、demo project、本機Auth／Firestore host與db.projectId均核對。CI以獨立Auth＋Functions＋Firestore Emulator跑真實Email/Password登入、Callable SDK與ID token；無正式Firebase或供應商設定變更。
+
+這是退貨邊界的真實登入整合，不代表完整ERP初始化／UI驗收：上游訂單與庫存為Admin fixture，預留／打單／出貨／送達／取消使用原Service，來源sync完成點仍明確fixture設定。正式Callable／前端／Preview、完整初始化與退貨更正／REPLACE仍待整合。
+
+
+### 退貨整合改走實際初始化同步（2026-10-18，Emulator-only）
+
+本節更新退貨Auth整合的手動completed checkpoint限制。tests/fixtures/v2-order-initialization.cjs 在VM載入原src的synchronizeOrderInventory／writeOrderInventorySyncState、reserveInventoryForNewOrder、persistOrderProcurementDemands、採購需求helper、初始自行訂貨判斷與工作索引；品項預留只轉接原commitSingleItemTwoWarehouse，不跑舊單倉writer、不重算庫存／採購數量。
+
+同步工作ID由原流程建立，實際雙倉交易後再用原需求同步，最後由原來源狀態交易完成checkpoint；測試不再直接update completed。Admin SDK adapter在每次transaction重讀真實users／來源並套用原canRetryOrderInventorySync，防止測試adapter繞過當前角色／所有權。原來源重試與失敗恢復邏輯完整執行，仍無新增產品writer或正式入口。
+
+退貨Auth測試已沿此流程初始化後再打單／出貨／送達／取消／退貨。這是實際同步流程的Emulator驗收；來源訂單／初始庫存仍為Admin fixture，初始化本身的瀏覽器Client SDK／Rules／登入呼叫與正式UI仍未串接，不等於完整ERP建立訂單驗收。正式v2阻擋與Firebase設定不改。
+
+### 真實登入建立訂單接入 v2 初始化之驗收（2026-10-18，Emulator-only）
+
+擴充既有退貨 Auth／Callable 整合測試：以 Firebase Client Auth SDK 真實登入業務帳號，Firestore Client SDK Transaction 經實際 firestore.rules 呼叫原 `src/services/order-creation.js::commitOrderCreation`（VM 僅提供模組化 SDK 相容傳輸 adapter），而非以 Admin fixture 直接建立來源訂單。建單後先核對尚未扣預留，再呼叫上一批原 `synchronizeOrderInventory`／雙倉 v2 writer／正式需求同步與 checkpoint，驗證 10 件需求、兩倉可預留 7 件、採購需求 3 件。也驗證 Rules 拒絕含成本建單、倉管直接建單及同一 pending ID 回放不覆寫已完成原單或再次預留。
+
+界線：產品主檔、實體庫存、倉庫與 Auth 的 users profile 仍是 Admin 測試 seed。建單原 Service 透過 Firestore Client SDK adapter 跑實際 Rules，初始化仍透過上一批 Admin SDK VM adapter；**並非實際瀏覽器頁面／Preview 的全線整合**，正式 Callable、前端執行閘門與 Firebase 部署不變。測試以 PR CI 為準。
+
+
+### 2026-10-18 實際打單入口續傳整合
+
+兩個實際打單頁共用固定操作 ID 與凍結數量，Service 使用既有 Fulfillment Core 與 StockPermissions；讀預留時保留未啟用多位置契約的阻擋。 詳見 [介面交易對照與驗收邊界](transaction-ui-integration-20261018.md)。已實作、待本批 CI；未部署 Firebase，單品項多位置仍未啟用正式介面。
+
+
+### 2026-10-18 退貨實收 Service 接線
+
+既有退貨實收與待檢轉庫存的交易編排已移到 src/services/customer-return.js，兩個原操作頁入口只呼叫 Service。實體退回與直送退回仍沿用原有 writer／Core；不新增相同功能的核心。 驗收項目與限制見 [介面交易對照](transaction-ui-integration-20261018.md)。未部署 Firebase，完整 Preview 全流程尚待驗收。
+
+### 2026-10-18 整單雙倉預留引擎
+
+原雙倉 Service 以單一 `runLocationReservation` 同時服務單品項與 `commitOrderTwoWarehouse`。整單 1–5 品項共用交易內公司／分倉餘額、原 Reservation Core 與一次 Transaction；所有品項驗證後才提交，沒有第二組數量規則或逐項獨立提交。仍為 Emulator-only，未接正式 UI／Callable；需求與來源同步 checkpoint 尚待接線。見 [契約及驗收邊界](multi-item-location-transaction-20261018.md)。
+
+### 2026-10-18 整單初始化續傳
+
+整單 Emulator adapter 已接原初始化協調器及原需求 helper；庫存一次交易、需求逐項可恢復，不宣稱跨階段原子。實際前端預留 Service 補上交易內 attempt 防護，需求 helper 可接受初始化 context；原取消／恢復投影不變。正式 v2 UI／Callable 未啟用。見 [完整邊界](multi-item-initialization-20261018.md)。
+
+### 2026-10-18 多品項分批收貨
+
+既有 receiving Service 的 v2 驗證擴充為最多五個實體商品、初始化完成且無履約進度的多品項來源；仍只有原收貨 writer／Core。交易內核對同產品所有 ledger 的合計持有量，未收貨品項原樣保留。正式瀏覽器／Callable 閘門不變。見 [範圍與驗收](multi-item-receiving-20261018.md)。
+
+### 2026-10-18 整單履約 Core 與打單
+
+原 Fulfillment Core 以 projectOrderShipmentReturns 驗證完整事件並分組呼叫既有逐品項投影；原 v2 打單 Service 使用其整單與逐項結果，核對全單 ledger、出貨扣帳與退貨入庫憑證後，只改選定品項及一份打單記錄。仍 Emulator-only，多品項出貨／送達 writer 尚未擴充。見 [契約及驗收](multi-item-dispatch-20261018.md)。
+
+### 2026-10-18 多品項雙倉實際出貨（待 PR CI）
+
+原 `commitLocationShipment` 現沿用整單履約投影驗證 1–5 品項的來源及所有歷史出貨／退貨憑證，再以原預留 Core 和批次分配原子扣除選定品項的實貨與 ledger，保留其他品項資料，不建立第二套交易邏輯。此階段只支援 demo Emulator；未接多品項送達／正式 Callable 或 UI。見 [出貨試點契約](multi-item-shipment-20261018.md)。
+
+### 2026-10-19 多品項獨立送達確認（待 CI 驗收）
+
+原 `commitShipmentDelivery` 接入整單履約 Core，驗證多品項全部來源出貨 movement 與不可變退貨憑證後，在同一 orders 交易內只更新選中品項送達及整單交付合計，不動庫存、批次、預留。單品項撤銷及退貨追溯仍維持原範圍。此功能仍僅 Emulator，未接正式 UI／Callable。見 [多品項送達驗收邊界](multi-item-delivery-20261019.md)。
+
+
+### 2026-10-19 多品項送達撤銷（已實作、待本批 CI）
+
+原 reverseShipmentDelivery 現與多品項確認共用來源及整單出貨憑證 reader，沿用整單 Core，只更新選定送達及全單投影；不另建 writer。 僅 demo-yushin Emulator；未接正式 UI／Callable、未部署 Firebase，完整 Preview 仍未驗收。詳見 [同一份送達契約與驗收範圍](multi-item-delivery-20261019.md)。
+
+
+### 2026-10-19 多品項履約後收貨（已實作、待本批 CI）
+
+原 validateV2ReceiptSource 以既有整單履約 Core 驗證全來源及全出貨 debit，再提供選定 item 的 shipment context 給原 Receiving／Workflow。receiveSupplyOrderRecord 仍是唯一 writer；兄弟原資料與交付事實保留。 限 demo-yushin Emulator，未接正式 UI／Callable 或部署；詳見 [原收貨契約增補](multi-item-receiving-20261018.md)。
+
+
+### 2026-10-19 多品項整單取消／恢復（已實作、待本批 CI）
+
+單項／整單 lifecycle 共用原私有交易引擎，讀完全部品項、供應、實收與出貨證據後一次寫入；同產品共用提案餘額，各stock最後只寫一次。整單取消釋放沿原FIFO恢復入口及checkpoint。 仍限 demo-yushin Emulator，正式 UI／Callable 未開啟，無部署。詳見 [同一份 lifecycle 契約增補](location-lifecycle-20261017.md)。
+
+### 2026-10-19 多品項 CLOSE 退貨（已實作、待本批 CI）
+
+原退貨 trace／receipt 共用完整整單投影、出貨證明與 sibling ledger reader，實收仍由唯一 commitLocationReturn 呼叫既有數量及批次 Core。只寫選定商品／原倉／原批次與品項，再更新全單退貨合計；正式入口未開放。見 [原退貨契約增補](location-return-receipt-emulator-20261017.md)。
+
+
+## 2026-10-19 多品項 CLOSE 後續收貨與整單取消／恢復
+
+本節取代前述「多品項退貨後收貨／取消恢復尚未整合」限制。限原 2–5 品項、兩候選實體倉、completed 初始化及 demo-yushin Emulator。正常訂單已有可驗證 CLOSE 退貨時，可由原 receiveSupplyOrderRecord 繼續收貨，或由原整單 lifecycle 取消／恢復未出貨剩餘。CLOSE 不重開已交付需求；取消／恢復不改寫歷史出貨、送達、退貨、PO、供應在途、實收、批次及成本。
+
+新增共用 Fulfillment.validateOrderLocationReturnProofs，先驗完整整單事件與有界（200）實際退貨 movement 集合，再逐項沿原 validateLocationReturnProofs 驗證 canonical intent SHA-256 與完整 returnRecord。後端 trace／退貨／lifecycle 與瀏覽器收貨共用同一核心；資料庫 query 與 SHA-256 保持平台 adapter。兄弟品項憑證不能被 filter 隱藏，空退貨仍須查核實際入庫。收貨只將選定品項事件傳入原 Receiving／Workflow，維持全單投影與各來源 ledger／合計持有量查核。
+
+新增四項真實 Emulator 驗收：兩產品 CLOSE 後分批及固定 ID 重送收貨並完成 12 件歷史交付；兩產品退貨後原子取消／恢復及恢復後收貨；兄弟憑證遺失／hash／完整紀錄／來源／隱藏紀錄／更正歷史均零寫入；REPLACE 及取消中多品項收貨維持拒絕。fixture 沿真實初始化、PO、收貨、打單、出貨、送達、退貨 Services。
+
+本地 Node 1560/1560 通過，完整 Emulator／Auth／Rules 與八組桌機手機 Chrome 以本批 CI 為準。無新 collection、欄位、Index、Rules、Listener 或額外資料庫查詢；沒有 Firebase 部署或正式資料寫入。多品項取消中 KEEP_STOCK 收貨、取消後再新增退貨、補送／退貨更正、正式 UI／Callable／Preview 真實登入全線 E2E 仍待後續整合。
+
+
+## 2026-10-19 多品項取消後 KEEP_STOCK 收貨
+
+本節取代前述多品項取消中收貨仍拒絕的限制。原 validateV2ReceiptSource 擴充為同時驗證正常及取消整單；取消時全部原 v2 ledger 必須 released、quantity／shortageQty 為零且沒有位置，全部品項無途中貨與額外打單。仍查核全部兄弟產品／來源、整單事件、出貨 debit 與 CLOSE 退貨實際憑證。選定 supply 必須有既有採購 handler 的完整 KEEP_STOCK 決策，不能將某品項核准套到另一品項。
+
+receiveSupplyOrderRecord 沿原取消分支及 planReservationReceipt(requestedReserveQty:0) 入庫，不另建 writer、狀態公式或預留機制。只增加實貨與原收貨／批次／成本紀錄、減少原在途並更新選定品項與取消需求的實收進度；所有已釋放 ledger、兄弟品項與物流退貨事實不變。恢復仍沿原整單 lifecycle，以即時實貨與剩餘未出貨量配置。與恢復競爭時依交易重讀目前狀態，正常分支的來源超額保持自由庫存，不假設必定全部被本單預留。原 receipt ID／actor／role 重送、原自由庫存分配與 durable recovery 接線不變。
+
+新增八項真實 Emulator 案例：逐供應採購核准、分批及完整收貨恢復、兩產品 CLOSE 保留歷史、五列同商品競爭、來源／空 ledger／決策／退貨憑證異常零寫入、五角色與重送綁定、同 ID／超額／恢復競態、ALREADY_EXISTS 末端回滾與回覆遺失、原 receipt 自由庫存來源及正式環境閘門。皆沿既有初始化、採購決策、PO、收貨、出貨、退貨與整單 lifecycle。沒有新資料庫查詢、Collection、持久欄位、Rules、Index 或 Listener。
+
+本地 Node 1560/1560 通過；完整新增 Emulator、Auth、Rules 與八組 Chrome 以本批 CI 為準。僅 demo-yushin Emulator、2–5 個實體倉品項、兩個原候選倉；未啟用正式 UI／Callable、未部署 Firebase 或修改正式資料。多品項取消後再新增退貨、混合服務／直送、補送／更正及 Preview 真實登入全線 E2E 仍待後續整合。
+
+
+## 2026-10-19 取消後多品項 CLOSE 退貨
+
+本節取代前述取消後再新增多品項退貨仍拒絕的限制。僅 demo-yushin Emulator、2–5 個實體倉品項、原兩候選倉、completed 初始化。原 shipmentDeliveryContext 只有同時明確啟用 return／cancelled-CLOSE 選項才接受兩個狀態欄位均 cancelled 的整單；原送達確認與撤銷仍拒絕取消訂單。
+
+原 trace 與唯一 commitLocationReturn writer 共用整單 context／取消 guard／來源 reader：每個品項都須無途中貨、無額外打單、無 REPLACE，退貨歷史僅有可對應原入庫的 add；每份原 v2 ledger 必須 released、quantity／shortage 為零、位置為空，並維持相同候選倉及所有權／商品來源。全單出貨 debit 與全單退貨 movement／canonical hash 查核不變，不能忽略兄弟品項。trace 仍只讀來源證據與原批次，不讀庫存或成本；多品項取消的選定 ledger 已由原整單 reader 查核，不重讀一次。
+
+原庫存／批次／Fulfillment Core 處理實收及原批次還原，CLOSE 只增加自由實貨，取消狀態、released 預留、採購／需求／送達事實保留，不重開已交付需求。整單 returnedQty／isDelivered 沿原整單 Core 投影，只改選定品項；原固定 movement ID、actor／role、intent hash、原子提交、重送與提交後自由庫存續傳沿用。退貨後可接原 KEEP_STOCK 收貨及整單恢復，並依當下實貨配置原未出貨需求。
+
+新增十項真實 Emulator 案例：正常及五列取消後退貨／恢復、唯讀 trace 與過期預覽、五角色及重送／所有權、兄弟出貨／ledger／途中／打單／歷史／隱藏憑證損壞、同 ID／超額／跨品項／恢復競態、ALREADY_EXISTS 末端回滾與回覆遺失、原自由庫存續傳及正式閘門，另含真實 PO→出貨→取消→兩產品退貨→KEEP_STOCK 收貨→恢復與取消前後各一筆 CLOSE。既有 Node context 契約更新為需同時明確啟用兩個退貨選項。
+
+本地 Node 1560/1560 通過；完整 Emulator／Auth／Rules 與八組 Chrome 以本批 CI 為準。無新 writer、資料庫查詢、Collection、持久欄位、Rules、Index、Listener、Firebase 部署或正式資料寫入。正式介面／Callable 接線與 Preview 真實登入全線 E2E、混合服務／直送及退貨更正仍待後續整合。
+
+
+## 2026-10-19 退貨申請／撤回與採購保留入庫介面接線
+
+原 modules/customer-cancellations.js 的三個交易 writer 移入既有 src/services/customer-return.js：saveReturnRecord → commitCustomerReturnRequest、withdrawCustomerReturn → commitCustomerReturnWithdrawal、keepCancelledPurchaseAsStock → commitCancelledPurchaseKeepStock。Feature 保留原輸入、確認、pending 鎖、固定操作 ID、提示與 cache 刷新，已無 runRoleTransaction 或直接 tx 寫入。退貨實收／待檢轉庫存仍沿原 Service，未新增第二個 writer、畫面或操作步驟。
+
+customerReturnPendingQty 原計算原樣移入 Service，不新增退貨額度公式。申請重送核對既有 request 的 ID、item、qty、date、reason、settlement、createdByUid；即使原申請之後已部分實收或撤回，也只回原結果，不再新增。錯誤內容不能沿用原 ID。撤回只關閉原申請未收餘量，保留 receivedQty 與 returnRecords；已完成／已撤回重送不重寫時間。三動作在交易讀取前後、寫入前及回覆前核對目前帳號／前端角色與 capability；真正身份、停用、所有權與作業權限仍交由原 StockPermissions／Client Rules，不以 capability 取代授權。
+
+KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實體倉只登記尚未到貨 incoming 與原 redirect movement，不增加 onHand 或預留；沿原 runRoleTransaction 原子同步 receivingSupplyOrders，重試不重複登記。沒有新資料庫查詢、持久欄位、Collection、Index、Rules 或 Listener。
+
+新增六項 Node 行為測試、五項真實 Client SDK＋StockPermissions＋Rules 測試，涵蓋額度、原 ID 意圖／帳號、30 次上限、部分實收撤回、帳號／角色變更、回覆遺失及末端回滾；Client Rules 驗證五角色／偽造 capability、同 ID／超額競爭、停用與外人、部分實收撤回以及 KEEP_STOCK 原子來源／接收鏡像／在途。既有 1280／390 px Chrome suite 擴充原三個 click handler → 真實 Service，驗證未知回覆重試與 incoming 不重複。Chrome 為記憶體傳輸，不是完整 Auth Browser／Firestore 單線 E2E。
+
+本地 Node 1566/1566、建置同步／語法／diff 通過；新增 Client Rules 與 Chrome 以本批完整 CI 為準。本批接線為原一般介面，v2 多倉正式 Callable／UI 閘門不變，沒有 Firebase 部署或正式資料寫入。v2 正式傳輸、Preview 及完整真實登入端對端驗收仍待後續整合。
+
+
+## 2026-10-19 原打單介面的 v2 Auth 傳輸試點
+
+本節僅擴充 demo-yushin 隔離 Emulator 的介面驗收，未解除正式／Preview v2 限制。原訂單頁與採購頁 markOrderItemDispatchPrepared → prepareOrderDispatch，在明確 YUSHIN_V2_DISPATCH_EMULATOR=true 時轉接 prepareV2OrderDispatchEmulator；其餘一般打單路徑不變。介面沿原 warehouseShipmentState，從原 raw item 的 warehouseShippedQty 計算已消耗的打單額度，不將客戶送達當出貨，也不改寫其他數量投影。原 sessionStorage intent 另保存既有 inventoryReservationAttemptId 作 syncAttemptId，固定操作 ID／數量／打單基準；v2 intent 不得降級改送一般交易。
+
+傳輸要求 localhost／127.0.0.1、Auth 與 Functions SDK 的實際 app.projectId 均 demo-yushin、Auth emulatorConfig 為本機9099，並強制 Functions SDK useEmulator(127.0.0.1,5001)。實際 Auth currentUser.uid 必須等於原前端 actorUid，呼叫前後與回讀訂單後均核對目前帳號／角色；payload 不含 actorUid／role。未載入 Functions、缺同步 ID、環境不符、回覆不明或網路失敗均不 fallback 到一般 writer，保留原作業。成功後只回讀真實 order 更新 cache，不以回應 counters 拼造訂單。
+
+沿既有隔離 v2-return-callable-adapter／runner 新增 prepareV2OrderDispatch，唯一 writer 仍 commitLocationDispatchPreparation。Firebase SDK 驗證登入 token，原 Service 重讀 users 的實際角色／active／disabled；自訂 claims 或 payload 不授權。v2 後端仍允許原 admin／purchaser／warehouse，現有兩頁 UI 仍只有 admin／purchaser 可操作，沒有新增倉管按鈕。正式 functions/index.js 不匯出此入口，沒有 Functions／Auth provider 部署或正式資料寫入。
+
+原 normalizeLocationDispatchIntent 新增可選 expectedPreparedQty，提供時納入 canonical hash 且在讀取原 receipt 確認尚未提交後，於同一交易核對 prepared 基準。不提供者的既有 hash／重送契約不變。僅已確認未提交且基準過期，回 failed-precondition＋details.reason=dispatch-stale，由原 handler 清除舊提案，更新後再確認；未知提交結果不清除。沒有新持久欄位、Collection、Rules、Index、Listener 或數量／預留 writer。
+
+新增五項 Node 測試與四項 Auth SDK→原 UI handler／Service→Functions SDK→原 writer→Firestore 整合：多品項含同商品及另一商品、admin／purchaser 的不明回覆／重新載入原 ID、五角色、即時降權／claim 偽造、未登入／payload UID／停用、同 ID／競爭 ID／打單基準與同步版本。既有八組 Chrome 中，打單 suite 加測1280／390px 原兩頁 renderer 與 click handler，在尚未確認送達的實體出貨後使用正確 Core 額度並跨頁重試；其 Callable 為 scripted local transport，真實 Auth／Backend 由獨立整合測試驗證，不宣稱完整 Browser Auth／Preview E2E。
+
+本地 Node1571/1571、建置同步／語法／diff 通過；完整新增 Auth、Chrome 與既有全部 Emulator／Rules 以本批 CI 為準。v2 初始化、收貨、出貨、送達、取消／恢復與退貨的正式傳輸／UI／Preview 全線仍待逐步接線。
+
+
+### 本機隔離 v2 倉庫出貨介面與傳輸（2026-10-19）
+
+現有 `modules/inventory-workspace.js` 及 `modules/warehouse-logistics.js` 的原按鈕仍呼叫 `src/services/warehouse-shipment.js:commitInventoryShipment`；明確開啟本機 v2 試點時才進入同 Service 的 Auth/Callable adapter，送交原 `functions/location-shipment-service.js`。唯一實貨交易 Core、批次扣帳及後端權限均未另建。每品項以 sessionStorage 固定原意圖及 ID，回覆遺失可跨重新載入重送，不接受不明結果降級為舊 Writer。批次仍逐項 checkpoint，並非整批原子；客戶送達仍要獨立事件。真實登入 SDK/Callable/Firestore 的自動整合與桌機/手機腳本 UI 不能取代完整 Browser Auth／Preview E2E；尚未正式匯出 Callable、啟用 v2 或部署 Firebase。
+
+### v2 客戶送達原介面接線（2026-10-19，隔離本機 Emulator）
+
+沿用 `src/features/orders/delivery-actions.js` 原逐品項送貨表單及唯一 `src/services/delivery-records.js:saveOrderDeliveryRecord`，明確 `YUSHIN_V2_DELIVERY_EMULATOR=true` 時顯示原 `warehouseShipmentRecords` 來源選單，由 `YushinFulfillment.projectOrderShipmentReturns` 唯一計算該筆出貨尚待送達量。Service 在本機 demo-yushin Auth／Functions 環境以同一 Auth UID 呼叫隔離的 `confirmV2ShipmentDelivery` → 原 `commitShipmentDelivery`；正式 `functions/index.js` 不匯出此 Callable。作業意圖按 UID／訂單 ID 在 sessionStorage 固定來源品項、出貨 ID、數量、日期、備註、syncAttemptId 與操作 ID；未知結果不能用新 ID 或舊 Writer 重送，確認後重讀 orders 才清除。v2 快速完成／一鍵取消／一般編輯與刪除途徑失效，避免未經 v2 確認誤回補實貨。多倉選取及真實 Preview Browser Auth E2E 仍未驗收，且未部署 Firebase。
+
+### v2 原介面送達撤銷（2026-10-20，隔離本機 Emulator）
+
+原 delivery-actions 的紀錄按鈕 → delivery-records 的 reverseV2ShipmentDeliveryEmulator → 隔離 reverseV2ShipmentDelivery → 原 reverseShipmentDelivery。前端確認／撤銷共用 v2DeliveryEmulatorTransport，獨立固定 pending intent；UI 不含庫存交易或數量重算。正式 index／Preview 未開啟，真實 Browser Auth 全線仍待驗收；詳見 transaction-ui-integration-20261018.md。
+
+### v2 整單取消／恢復登入傳輸（2026-10-20，本機 Emulator）
+
+隔離 setV2OrderLifecycle → 原 commitOrderLocationLifecycleAndRecover → 唯一整單 runLocationLifecycle；提交後再沿原 continueCommittedV2FreeStock 有界續傳。來源原子交易與後續配貨是分開的責任，後者權限不足回 recovery-pending。沒有新 Core／writer；正式 index、原 UI／Preview 尚未接線，完整 CI 以本批結果為準。
+
+### v2 原取消／恢復介面（2026-10-20，隔離本機 Emulator）
+
+原 quickSetOrderLifecycle／saveOrderLifecycleStatus → 唯一 setOrderLifecycleStatus 的明確 YUSHIN_V2_LIFECYCLE_EMULATOR 分支 → setV2OrderLifecycleEmulator → 上述隔離 Callable。新操作最多讀原單及五筆 deterministic inventoryReservations，再回讀原單；不猜測雙倉、不直接寫庫存，未知回覆不 fallback legacy。原清單／表單提供固定意圖核對，刷新後即使已是目標狀態仍可重試。正式 index／Preview 未開放。
+
+### 取消釋放後的原物流續傳（2026-10-20，本機 Emulator）
+
+原 modules/free-stock-recovery.js 面板在明確 YUSHIN_V2_RECOVERY_EMULATOR 下，唯讀 listV2FreeStockRecovery → 原 Service 的 listReleasedV2FreeStock；原列按鈕 → resumeV2FreeStockRecovery → drainReleasedV2FreeStock → advanceReleasedV2FreeStock／原 coordinator／唯一 allocation writer。每次列表最多 21 筆來源 lookahead、20 筆 checkpoint 及一筆當前 users，同一唯讀交易，完成列也推進 cursor。一次續傳最多五步，來源 ID 衍生同一 runId；沒有新配貨 Core／writer、Collection、Rules、Index 或排程。正式 index／Preview 未開放。
+
+### 瀏覽器真實登入驗收邊界（2026-10-20）
+
+隔離 runner 以相同 Auth／Functions／Firestore Emulator 順序執行原 SDK 整合與 emulator-v2-lifecycle-browser.cjs。後者用實際 Chrome、由 npm 本機打包的 Firebase compat SDK、原登入 handler／profile 套用、原取消與續傳 handler／renderer，直接對 Emulator 送帶 token 的 HTTP。測試主機只提供隔離頁面、導覽與 cache 呈現殼；不是整份正式 app.js 啟動。初始化仍由既有 fixture Service 準備，驗收從已同步訂單的登入取消開始。沒有正式環境切換或部署變更。
+
+首輪實測揭露 compat 區域取用錯誤：全域 firebase.functions 的參數是 app，不能放區域字串。原 grouped Preview、打單、出貨、送達／撤銷、取消與續傳改用 firebase.app().functions('asia-east1')，仍核對實際 SDK app 專案與原環境／身分 gate；重建 app.js。這是傳輸相容修正，原 Core／writer／業務規則不變。
+
+
+## 正式採購多品項後端擴充（2026-10-20）
+
+正式採購後端仍為隔離原型；既有 `commitV2FormalPurchase` 已擴充至 1–5 列 WAREHOUSE 實體來源，可包含同訂單多品項及跨訂單合併。沿用原准入驗證與 Procurement Demand Core，不另建 writer。每個 Transaction callback 內按文件路徑快取相同讀取，重試會重新建立快取；所有列驗證及 supply ID 讀取完成後才寫入，每張來源訂單合併為一次 update。
+
+## 原採購按鈕避開 Rules 運算限制（2026-10-20）
+
+本機明確開啟 `YUSHIN_FORMAL_PURCHASE_EMULATOR` 時，原按鈕仍呼叫唯一 `commitFormalPurchaseOrder`，由同一 Service 轉接既有 `commitV2FormalPurchase`；不再讓原 PO 多文件寫入經過用戶端 Rules 複雜驗證。呼叫前後及回讀期間核對實際 Auth／前端身分，固定 demo-yushin、本機 Auth 9099／Functions 5001；任何錯誤不可退回舊 writer。成功後回讀權威 PO、來源訂單與 Supply，沿原快取／PDF／在途 Service 接續。正式環境與 Preview 未切換，原採購超限是否解除須以原站真實按鈕 CI 案例為準。
+
+
+### 原採購單斷線恢復（2026-10-20）
+
+原採購按鈕在呼叫同一 `commitFormalPurchaseOrder` 前，以 sessionStorage 固定原 UID／角色／單號及完整提交內容；未確認作業只允許原意圖重送，不建立新單號意圖。原採購頁提供「確認前次採購結果」，刷新後仍可經同一後端 writer 回讀 PO／來源／Supply，沿原 `registerPurchaseIncoming` 完成在途後才解除 checkpoint。讀取與導覽不得自行提交。僅 demo-yushin 本機試點啟用；正式／Preview 不啟用，未部署 Firebase。
+
+後端交易及需求公式沒有新增第二套；畫面快取同步抽為共用 feature helper。存取失敗在提交前停止；回覆未知、回讀失敗、在途失敗、角色改變或暫存損壞均保留 checkpoint，不默默刪除或降級 client writer。回覆已確認後的畫面更新失敗須與交易未確認分開顯示。checkpoint 僅保存於同分頁 sessionStorage，不承諾跨裝置或關閉分頁恢復；價格資料不送入新 collection。無新 Rules／Index／Listener／正式資料遷移。
+
+實作及尚未驗收範圍見 [整站驗收紀錄](full-site-emulator-boot-20261020.md)。
+
+
+### 原採購單部分收貨傳輸（2026-10-20，待 CI）
+
+原 receiveSupplyOrderRecord 在明確 YUSHIN_V2_RECEIVING_EMULATOR gate 中轉至 receiveV2Supply，僅 localhost／demo-yushin Auth 9099／Functions 5001 可呼叫，不回退原 client writer。原收貨工作保存 qty／lot／expiry／operationBase；傳輸前須核對 sessionStorage 已保存的同一意圖，回覆後回讀 receipts 權威憑證並核對真實 UID／角色，未知回覆保留既有工作與重試入口。
+
+唯一權威收貨 writer 仍為 src/services/receiving.js。tools/build-receiving-runtime.cjs 從它與現有訂單／需求投影產生 functions/shared/receiving-runtime.js，僅注入每請求身分、SDK 與共用 Core，執行時不使用 eval／VM，不另寫數量或扣帳公式。build-functions-core --check 同時驗證這份 Service 生成內容。隔離後端每次交易重新讀 users 當前 active／disabled／角色、原 Supply／Order／v2 ledger；權限為 admin／purchaser／warehouse，不接受 payload uid、role 或 claims 替代。供應更新在同一交易經既有 sanitizeSupply 更新 receivingSupplyOrders，不暴露成本。
+
+本批新交易入口僅接受正常單品項 WAREHOUSE 客戶訂單 PO、尚未打單／出貨／送達／退貨的來源。已提交憑證以原身分／內容核對後可冪等重試，不再次入庫。舊一般收貨路徑不變，取消、服務型、直送、備庫、多品項與後續履約的此新傳輸尚未開放。無新增 Collection／Rules／Index／Listener，正式 index.js 不匯出，未部署 Firebase。
+
+驗收邊界見 [整站驗收紀錄](full-site-emulator-boot-20261020.md)。
+
+
+### 同 PO 收齊後原打單與分批寄出（2026-10-21，待 CI）
+
+本批僅擴充原整站與真 Auth／Callable 的連續驗收，不新增 writer。原 receiveSupplyOrderRecord／receiveV2Supply、prepareOrderDispatch／commitLocationDispatchPreparation、commitInventoryShipment／commitLocationShipment 維持唯一既有入口；隔離 runner 啟用既有本機旗標，正式 index、Rules、Index 與部署設定不變。
+
+本批本機語法與建置一致性檢查已通過；真 Auth、Chrome 及全套 Emulator／Rules 的執行結果以本批 PR 最新 CI 為準。未部署 Firebase，未修改正式資料。
+
+
+### 同 PO 出貨後分批送達與不重扣驗收（2026-10-21，待 CI）
+
+本批延伸既有原站真 Auth 驗收並修正原分批表單的凍結數量恢復，沿 saveDeliveryRecord → saveOrderDeliveryRecord → confirmV2ShipmentDelivery → commitShipmentDelivery，數量由原 Fulfillment Core 投影。無第二套送達 writer，未修改正式入口、Rules、Index 或產品查詢；送達保持 orders 單文件交易，不寫實貨、預留或 lot。
+
+本機建置一致性與語法檢查已通過；完整真 Auth／Chrome／Emulator／Rules 結果以本批 PR 最新 CI 為準。未部署 Firebase，未修改正式資料。
+
+首輪整站驗收發現：原 openPartialDeliveryForm 在 renderDeliveryModal 已回填原待確認意圖後，又清空 deliveryQty。現於本機 v2 入口重新呼叫同一 renderer 恢復原數量／來源，不改寫 intent、不另造交易。既有 desktop／phone delivery smoke 同步改走原開表單函式，覆蓋此重整恢復回歸；修 src 後已重建 app.js 並更新靜態版本。修正後全套 CI 仍待執行，不將首輪失敗當通過。
+
+
+### 採購讀取的 v2 退貨數量邊界（2026-10-21，待本批 CI）
+
+normalizedOrderItems 的 returnedQty 為既有顯示／補送用途，排除 CLOSE；v2 shipment context 則驗證全部實收退貨。採購讀取由原 itemDispatchState 提供累計實收值，傳入既有 Workflow／Fulfillment Core 核對，不新增事件、資料投影或第二套數量公式。修正避免一筆合法 CLOSE 退貨使其他訂單的採購清單整頁失敗。僅隔離 v2 試點驗收，原退貨 UI 與 Preview／正式部署仍未完成。
+
+
+### 退貨申請與 v2 實收入口（2026-10-21，待 CI）
+
+原退貨表單／撤回仍由 customer-return Service 的既有 Client 交易及 Rules 執行，不為串接新增另一套申請 Service／Callable。customerReturnNeedsLocationReceipt 僅辨識具有分倉實體出貨事件的來源；該來源禁止走一般退貨實收／待檢轉庫存，防止以 legacy writer 改動 v2 實貨或遺失原倉憑證。原庫存頁待收列顯示尚未開放的實收狀態。v2 實收須後續在唯一 commitLocationReturn 交易內整合申請及物流角色，不能因現有 Callable 可由本人業務操作就改變公司實收分工。
+
+
+原退貨申請保留 Client Service；本批既有 Rules 新增欄位範圍明確的前置分支，僅接受原商務角色／所有權與原 request mutation validator。完整 pending 狀態按六組五筆有界掃描；不額外維護統計欄位。此為執行路徑減少不相關驗證，非將角色驗證移往按鈕或免除實收保護。前端／Rules 需配套發布，正式部署尚未執行。
+
+
+同 ID Client 衝突的結果確認也由原 customer-return Service 負責：permission-denied 後追加一次 users／orders 唯讀交易，只確認已提交且意圖相同的原申請，無額外 writer／查詢／Collection。正常成功路徑不增加讀取；未匹配或目前角色／啟用／所有權驗證失敗仍回原錯誤。此確認不是未提交交易的成功替身，也不承諾未知意圖的跨刷新恢復。
+
+
+### v2 退貨申請實收契約（2026-10-21）
+
+既有隔離 receiveV2CustomerReturn 仍只委派 commitLocationReturn，不新增 stock writer。可選 requestId 將倉管 admin／purchaser／warehouse 的有效申請實收與原 admin／本人 sales／engineer 未連結入口分開驗證。共用 fulfillment-core 的 canonical intent／歷史 proof 重建納入可選連結；舊 hash 保持不變。庫存及原批次規劃沿 planExplicitShipmentReturn、planReservationReturn、planLotRestoration；同一交易更新申請及原 customerReturnReceipts。所有讀取先於寫入，申請最多 30 筆、原批次／事件查詢上限沿既有 200 筆，額外只多讀一份固定 ID receipt，無新 listener／索引。
+
+目前僅後端隔離契約；原介面及未知回覆跨刷新恢復待接，不代表倉管 UI／Preview／正式實收已啟用。
+
+
+## 2026-10-21 申請實收的前端傳輸準備（UI 未開放）
+
+前端新增 customer-return-transport Service，以既有隔離 receiveV2CustomerReturn 呼叫唯一 commitLocationReturn；使用既有 Fulfillment Core 正規化意圖，不新增入庫或數量算法。實際 Auth／Functions 專案、本機 Emulator 與物流權限皆須核對。原 UI／legacy guard 不變，僅為後續接線準備。
+
+本機 Node 1642／1642 通過；新增真 Auth 整合與完整 CI 結果以本批 PR 為準。未部署 Firebase、未變更正式資料或角色；詳細契約與未驗收邊界見 transaction-ui-integration-20261018.md 同日章節。
+
+
+## 2026-10-21 原倉管退貨收貨畫面（本機 Emulator 試點）
+
+原 customer-cancellations 的 receiveCustomerReturn 在明確本機退貨旗標下進入既有退貨收貨清單的表單，Feature 僅讀取來源／呈現選擇，沿 receiveV2CustomerReturnEmulator → 隔離 Callable → 唯一 commitLocationReturn。一般 legacy 路徑與其 v2 寫入 guard 不變。沒有新增交易核心或 writer。
+
+本機 Node 1648／1648 通過，零失敗／略過；新增6項UI行為測試。原站真Auth／Chrome與完整CI結果以本批PR為準。未部署Firebase，未修改正式資料或角色。
+
+
+## 2026-10-21 採購草稿非同步載入保護（已實作，待完整 CI）
+
+原採購草稿沿用既有 Feature／Service；背景供應商與成本載入期間，原表單暫停編輯與提交。關閉視窗與 session reset 使原 generation 失效，舊回覆不得改寫新草稿。沒有新增交易 writer。
+
+
+## 2026-10-21 文件製作與採購確認分離（已實作，待完整 CI）
+
+原 saveFormalPurchaseDocument 僅保存 purchaseOrders 文件快照。printPurchaseOrder／重印只呼叫文件儲存與 PDF；confirmSavedPurchaseOrder 明確確認後，沿既有 commitFormalPurchaseOrder（隔離 gate 沿同一 commitV2FormalPurchase）和 registerPurchaseIncoming 執行交易。沒有第二套採購數量公式／stock writer。原快捷「已採購」仍沿既有 Quick Purchase Service。
+本節取代先前「產生 PDF 即登記採購」的操作契約；正式 Firebase 尚未部署。
+
+補充：尚未確認的 DRAFT 文件可以編輯原單；同一 purchaseOrders 文件以 documentRevision 遞增、交易內比對預期版本，舊畫面不得覆蓋他人的修改或已確認單據。相同內容的未知回覆重試回原版本，不重複修改；確認意圖帶原版本，後端拒絕過期確認。載入視窗有未儲存內容時不能直接確認，須先儲存；只有已確認文件鎖定。此補充取代前述草稿一律鎖定／不可更新的描述。
+
+
+## 2026-10-21 履約後剩餘採購收貨（已實作，待本批完整 CI）
+
+receiveV2Supply 隔離登入入口延伸正常單品項來源的履約後收貨；所有數量／原子寫入仍執行原 src/services/receiving.js 生成的 receiving-runtime。由既有 validateV2ReceiptSource 在同一交易內重讀真角色、原來源／Supply／Demand／預留，以及出貨扣帳與 CLOSE 退貨的權威憑證；沒有第二個收貨 writer。
+僅 demo-yushin 隔離試點；未部署 Firebase，Preview／正式尚未驗收。
+
+
+## 多品項出貨後的採購顯示修正（2026-10-22）
+
+已實作、完整 Emulator／原站驗收待本批 CI：`procurementDemandForOrderItem` 以原 `projectOrderShipmentReturns` 驗證整單履約事件後，依 itemId 傳入原 Workflow 單品項核心。實體需求使用原始 items 的預留／缺口；不得把 normalizedOrderItems 的待送達顯示當成庫存需求。此 helper 同由既有 receiving runtime 建置引用，需同步重建 app 及 Functions 生成檔。無新增 writer、讀取或資料模型。
+
+
+### 四類服務的共同事件核心（2026-10-22，純計算已實作，未接 UI／Firestore）
+
+`modules/service-work-core.js` 提供 `projectServiceCase` 與 `applyServiceEvent`：一案一受託物或一次現場工作，採 ID 冪等、時序與必要憑證驗證，計算 Bio-Plex、Pipette、切片、現場維修的進度和保管位置。它不接管 `YushinWorkflow` 的商品庫存投影、不取代 `YushinFulfillment` 真實出貨，也不建立第二套採購或耗材扣帳。`functions/service-case-service.js` 已提供**未匯出的** Admin SDK 交易 writer，重讀權限／訂單／主檔後對服務案件追加不可變事件，並以固定事件 ID 防止重送，未連到實際 UI 或 Functions `index.js`。Service 事件不修改商品庫存、採購、送貨、核銷。訂單品項完成量投影、角色真 Emulator、Rules 讀取及 Preview 尚未實作；本次未修改 `src`、`app.js`、Firestore Rules／索引／正式資料。
+
+
+### 2026-10-23｜服務案件的原產品綁定（demo Emulator）
+
+新案件由唯一 `commitServiceCaseEvent` 在交易內保存 `productId`，後續寫入、同事件重送與 `getServiceCaseStatus` 均核對來源訂單品項的產品識別及服務類型；相同 itemId 換成另一個服務產品也不得接續或套用原歷程。未保存 productId 的既有試點案件明確拒絕，不從目前品項猜測補綁、不遷移正式資料。歷史查詢仍驗證當前登入權限與來源品項，保留取消後唯讀；產品主檔停用、刪除或分類變更不抹除已綁定的歷史保管證據，新增事件仍需有效主檔。
+
+不增加 Collection、索引、Listener、查詢或資料庫讀取；唯一既有案件文件增加 productId。案件數與訂單數量、原頁面操作、客戶交付與核銷及 Preview 仍待完成，PR #234 維持 Draft，正式功能未啟用。
+
+
+### 2026-10-23｜服務案件與訂單數量對應（demo Emulator，尚未正式啟用）
+
+已實作：原 `commitServiceCaseEvent` 要求明確正數 `serviceQty`，代表案件對應的商務訂購量，不從檢體件數、試劑盒數或器材數自行推算。首次事件固定數量，接續與重送不得改量；來源 item 的 `orderedQty ?? qty` 是上限。`YushinServiceWork.projectServiceItem` 是唯一案件量投影，從已註冊案件及事件計算 allocatedQty、completedQty、unassignedQty、inProgressQty、remainingQty；不保存另一份完成量快取，不更新商品 deliveredQty、庫存、採購或核銷。浮點比較只容許相對機器精度誤差，不以固定容差放行極小數量的超額。
+
+同一 `serviceCases` 集合新增每品項一份 `ITEM_CASE_INDEX` 文件，固定 ID 為四段 `item-index|encode(orderId)|encode(itemId)|v1`，和原三段案件 ID 不衝突。文件只保存來源 orderId／itemId／productId／kind 與 caseIds，不保存數量。唯一 writer 同交易讀索引及全部已註冊案件，首次事件原子寫索引與案件；共同索引讓並行不同 caseId 競爭餘量也會重新驗證。每品項最多 100 案，超過明確拒絕，不截斷當作全部。平常不新增 Query／Listener／Collection／複合索引；首次缺索引額外查相同 orderId＋itemId 至多一案，發現舊案件即拒絕自動補綁，不把既存保管紀錄當成零數量。
+
+新案首次交易多讀一份索引並寫入它，後續事件及已綁定查詢最多再讀 100 份已註冊案件；這是有界的權威核對成本。歷史查詢回傳 serviceQty 與 itemProgress；未綁數量的舊試點案件仍可依原授權唯讀，itemProgress=null，不推定完成量。索引失聯、來源不符、缺少案件或訂單縮量小於已綁量均拒絕，不自動刪索引或釋放額度。Client 對該集合原有全面拒絕 Rules 不變，Callable 仍限 demo-yushin Emulator。
+
+本機完整 Node 1751/1751 通過，零失敗／略過；建置一致性及 diff 通過。新增真 Auth／Callable 的不同案件搶最後餘量、同案並行重送、分批完成、改量／縮單／索引損壞零寫入與 Client 索引讀寫拒絕驗收，結果須以本批最新 head 完整 CI 為準。尚未完成：原 UI 開案與數量輸入、既有主檔分類、服務交付／核銷、混合單與 Preview 完整驗收。PR #234 仍為整合 Draft，未合併 main、未部署 Firebase、未操作正式資料。

@@ -1,5 +1,136 @@
+// Emulator-only bridge. A customer acknowledgement never writes physical stock.
+function pendingV2DeliveryConfirmation(orderId){
+ if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR!==true)return null;
+ const key='v2-delivery:'+encodeURIComponent(currentUser?.uid||'')+':'+encodeURIComponent(orderId);
+ const raw=sessionStorage.getItem(key);
+ if(!raw)return null;
+ try{
+  const intent=JSON.parse(raw);
+  if(!intent||intent.orderId!==orderId||intent.actorUid!==currentUser?.uid
+    ||intent.actorRole!==currentUserRole||!intent.operationId)
+    throw Error('invalid pending delivery actor');
+  return intent;
+ }catch(_){throw Error('前次客戶送達結果尚未確認，請使用原帳號核對，不能重新登錄。');}
+}
+function v2DeliveryEmulatorTransport(){
+ const local=host=>host==='localhost'||host==='127.0.0.1';
+ if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR!==true||!local(globalThis.location?.hostname)||typeof firebase==='undefined'||!firebase.auth||!firebase.functions)
+  throw Error('v2 送達目前僅限本機 Emulator。');
+ const auth=firebase.auth(),functions=firebase.app().functions('asia-east1'),uid=currentUser?.uid,role=currentUserRole;
+ if(auth.app?.options?.projectId!=='demo-yushin'||functions.app?.options?.projectId!=='demo-yushin'
+   ||!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099)
+  throw Error('v2 送達只允許本機 demo-yushin Auth／Functions Emulator。');
+ const check=()=>{
+  if(!uid||auth.currentUser?.uid!==uid||currentUser?.uid!==uid||currentUserRole!==role
+   ||!['admin','sales','engineer'].includes(role)
+   ||!canManageOrderLifecycleCapability()||!canEditPage('orders.list'))
+   throw Error('登入身分或送達作業權限已變更。');
+ };
+ check();return {uid,role,functions,check};
+}
+async function confirmV2ShipmentDeliveryEmulator(orderId,{date,qty,notes='',itemId='',shipmentId='',recordId}){
+ const {uid,role,functions,check}=v2DeliveryEmulatorTransport();
+ if(pendingV2DeliveryReversal(orderId))throw Error('尚有未確認的送達撤銷，請先核對原操作。');
+ if(!Number.isSafeInteger(qty)||qty<=0||typeof date!=='string'
+  ||!/^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.test(date)
+  ||!Number.isFinite(Date.parse(date+'T00:00:00Z'))
+  ||new Date(date+'T00:00:00Z').toISOString().slice(0,10)!==date
+  ||typeof notes!=='string'||notes.length>1000)
+  throw Error('v2 送達數量、日期或備註不正確。');
+ const key='v2-delivery:'+encodeURIComponent(uid)+':'+encodeURIComponent(orderId);
+ let frozen=pendingV2DeliveryConfirmation(orderId);
+ if(frozen){
+  if(frozen.quantity!==qty||frozen.date!==date||frozen.notes!==notes
+   ||(itemId&&frozen.itemId!==itemId)||(shipmentId&&frozen.shipmentId!==shipmentId))
+   throw Error('尚有未確認的送達結果，請以原品項、來源出貨、數量與日期重試。');
+ }else{
+  if(!/^[a-zA-Z0-9_-]{12,96}$/.test(recordId||''))throw Error('送達操作識別碼不正確。');
+  const snapshot=await db.collection('orders').doc(orderId).get({source:'server'});check();
+  if(!snapshot.exists)throw Error('找不到原始訂單。');
+  const order=snapshot.data(),rows=order.items||[];
+  const resolvedItemId=itemId||(rows.length===1?rows[0].itemId:'');
+  if(order.inventoryReservationStatus!=='completed'||!order.inventoryReservationAttemptId
+    ||rows.length<1||rows.length>5||!resolvedItemId)
+    throw Error('訂單尚未具備完整的 v2 送達來源。');
+  const source=(order.warehouseShipmentRecords||[]).find(s=>s.id===shipmentId&&s.itemId===resolvedItemId);
+  if(!source)throw Error('請先選擇這個品項的實際出貨紀錄。');
+  const projected=globalThis.YushinFulfillment.projectOrderShipmentReturns({orderId,items:rows,
+   shipments:order.warehouseShipmentRecords||[],deliveries:order.deliveryRecords||[],returns:order.returnRecords||[]});
+  const part=projected.items.find(row=>row.itemId===resolvedItemId);
+  const remaining=part?.shipments.find(row=>row.shipmentId===shipmentId)?.pendingQty;
+  if(!Number.isSafeInteger(remaining)||qty>remaining)throw Error('本筆出貨尚待確認送達數量不足，請重新讀取。');
+  frozen={orderId,itemId:resolvedItemId,shipmentId,quantity:qty,date,notes,
+   operationId:recordId,syncAttemptId:order.inventoryReservationAttemptId,actorUid:uid,actorRole:role};
+  sessionStorage.setItem(key,JSON.stringify(frozen));
+ }
+ check();functions.useEmulator('127.0.0.1',5001);
+ const {actorUid,actorRole,...payload}=frozen;
+ const response=await functions.httpsCallable('confirmV2ShipmentDelivery')(payload);check();
+ const data=response?.data;
+ if(!['applied','already-applied'].includes(data?.status)||data.recordId!==frozen.operationId
+    ||data.orderId!==orderId||data.itemId!==frozen.itemId||data.shipmentId!==frozen.shipmentId)
+  throw Error('送達回覆無法核對，必須保留原識別碼重試。');
+ const refreshed=await db.collection('orders').doc(orderId).get({source:'server'});check();
+ if(!refreshed.exists)throw Error('送達回覆成功但訂單回讀失敗，請核對原操作。');
+ sessionStorage.removeItem(key);
+ return refreshed.data();
+}
+
+function pendingV2DeliveryReversal(orderId){
+ if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR!==true)return null;
+ const raw=sessionStorage.getItem('v2-delivery-reversal:'+encodeURIComponent(currentUser?.uid||'')+':'+encodeURIComponent(orderId));
+ if(!raw)return null;
+ try{
+  const intent=JSON.parse(raw);
+  if(!intent||intent.orderId!==orderId||intent.actorUid!==currentUser?.uid
+   ||intent.actorRole!==currentUserRole||!intent.operationId||!intent.deliveryRecordId)
+   throw Error('invalid pending reversal actor');
+  return intent;
+ }catch(_){throw Error('前次送達撤銷尚未確認，請使用原帳號與角色核對。');}
+}
+async function reverseV2ShipmentDeliveryEmulator(orderId,deliveryRecordId,{date,reason,operationId}){
+ const {uid,role,functions,check}=v2DeliveryEmulatorTransport();
+ if(pendingV2DeliveryConfirmation(orderId))throw Error('尚有未確認的送達登錄，請先核對原操作。');
+ if(typeof reason!=='string'||!reason.trim()||reason.length>1000||typeof date!=='string'
+  ||!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(Date.parse(date+'T00:00:00Z'))
+  ||new Date(date+'T00:00:00Z').toISOString().slice(0,10)!==date)
+  throw Error('請填寫正確的撤銷日期與原因。');
+ reason=reason.trim();
+ const key='v2-delivery-reversal:'+encodeURIComponent(uid)+':'+encodeURIComponent(orderId);
+ let frozen=pendingV2DeliveryReversal(orderId);
+ if(frozen){
+  if(frozen.deliveryRecordId!==deliveryRecordId||frozen.date!==date||frozen.reason!==reason)
+   throw Error('尚有未確認的送達撤銷，請使用原紀錄、日期與原因重試。');
+ }else{
+  if(!/^[a-zA-Z0-9_-]{12,96}$/.test(operationId||''))throw Error('撤銷操作識別碼不正確。');
+  const snapshot=await db.collection('orders').doc(orderId).get({source:'server'});check();
+  if(!snapshot.exists)throw Error('找不到原始訂單。');
+  const order=snapshot.data(),record=(order.deliveryRecords||[]).find(row=>row.id===deliveryRecordId);
+  if(order.inventoryReservationStatus!=='completed'||!order.inventoryReservationAttemptId
+   ||!record||record.sourceType!=='WAREHOUSE_SHIPMENT_CONFIRMATION'||record.orderId!==orderId
+   ||!order.items?.some(row=>row.itemId===record.itemId))throw Error('找不到可撤銷的原始送達確認。');
+  if((order.returnRecords||[]).length)throw Error('已有實物退貨的送達撤銷尚未開放。');
+  frozen={orderId,itemId:record.itemId,deliveryRecordId,operationId,
+   syncAttemptId:order.inventoryReservationAttemptId,date,reason,actorUid:uid,actorRole:role};
+  sessionStorage.setItem(key,JSON.stringify(frozen));
+ }
+ check();functions.useEmulator('127.0.0.1',5001);
+ const {actorUid,actorRole,...payload}=frozen;
+ const response=await functions.httpsCallable('reverseV2ShipmentDelivery')(payload);check();
+ const result=response?.data;
+ if(!['applied','already-applied'].includes(result?.status)||result.operationId!==frozen.operationId
+  ||result.orderId!==orderId||result.itemId!==frozen.itemId||result.deliveryRecordId!==deliveryRecordId)
+  throw Error('撤銷回覆無法核對，請保留原識別碼重試。');
+ const refreshed=await db.collection('orders').doc(orderId).get({source:'server'});check();
+ if(!refreshed.exists)throw Error('撤銷已回覆成功但訂單回讀失敗，請核對原操作。');
+ sessionStorage.removeItem(key);
+ return refreshed.data();
+}
+
 // Order delivery mutations. UI owns input/feedback; this service owns protected writes.
 function assertOrderDeliveryIncrease(order,item,qty) {
+    if(String(item?.productType||item?.type||'').trim().toUpperCase()==='SERVICE')
+        throw new Error('服務型品項不能使用商品送貨紀錄；須另有服務完成及客戶交付憑證。');
     if(qty<=0)return;
     if(orderInventorySyncIncomplete(order))throw new Error('訂單庫存尚未同步完成');
     if((item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP')return;
@@ -19,6 +150,7 @@ function deliveryRecordWasReversed(order,recordId) {
 }
 
 async function completeOrderDelivery(orderId,today) {
+    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true)throw Error('v2 送達必須逐筆對應原出貨；不可使用一般送貨或更正扣帳。');
     const actor=deliveryActor(),now=new Date().toISOString(),recordId=deliveryRecordId();
     let savedOrder;
     await runRoleTransaction(async transaction => {
@@ -70,6 +202,7 @@ async function completeOrderDelivery(orderId,today) {
 }
 
 async function cancelOrderDeliveries(orderId) {
+    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true)throw Error('v2 送達必須逐筆對應原出貨；不可使用一般送貨或更正扣帳。');
     const actor=deliveryActor(),now=new Date().toISOString();
     let savedOrder;
     await runRoleTransaction(async transaction => {
@@ -90,6 +223,7 @@ async function cancelOrderDeliveries(orderId) {
         const history = { action: 'cancel_all', source: 'quick_toggle', before, after: { records: [], deliveredQty: 0 }, by: actor, at: now };
         const currentItems=normalizedOrderItems(order);
         const deliveryItem=currentItems[0];
+        assertOrderDeliveryIncrease(order,deliveryItem,0);
         const itemOrder={...order,...deliveryItem,deliveryRecords:savedDeliveryRecords(order),isDelivered:false};
         const inventoryResult=await applyInventoryDeliveryDeltaInTransaction(transaction, itemOrder, -progress.delivered, actor, orderId, savedDeliveryRecords(order));
         const nextItems=currentItems.map((item,index)=>index===0?{...item,reservedQty:Number(inventoryResult?.newReservedQty??item.reservedQty??0)}:item);
@@ -101,7 +235,11 @@ async function cancelOrderDeliveries(orderId) {
     return savedOrder;
 }
 
-async function saveOrderDeliveryRecord(orderId,{date,qty,notes='',editId='',itemId='',recordId}) {
+async function saveOrderDeliveryRecord(orderId,{date,qty,notes='',editId='',itemId='',recordId,shipmentId=''}) {
+    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true){
+        if(editId)throw Error('v2 已確認的送達紀錄不可直接編輯，請改用送達撤銷流程。');
+        return confirmV2ShipmentDeliveryEmulator(orderId,{date,qty,notes,itemId,shipmentId,recordId});
+    }
     if(!date||typeof qty!=='number'||!Number.isFinite(qty)||qty<=0)
         throw new Error('請填寫送貨日期與大於 0 的送貨數量。');
     if(!editId&&(typeof recordId!=='string'||!recordId.trim()))throw new Error('缺少送貨作業識別碼，請重新開啟表單。');
@@ -192,6 +330,7 @@ async function saveOrderDeliveryRecord(orderId,{date,qty,notes='',editId='',item
 }
 
 async function correctOrderDeliveryRecord(orderId,recordId,correctionReason) {
+    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true)throw Error('v2 送達必須逐筆對應原出貨；不可使用一般送貨或更正扣帳。');
     if(typeof correctionReason!=='string'||!correctionReason.trim())throw new Error('請填寫誤登更正原因。');
     const actor=deliveryActor(),now=new Date().toISOString();
     let savedOrder;
@@ -214,6 +353,7 @@ async function correctOrderDeliveryRecord(orderId,recordId,correctionReason) {
         const orderItems=normalizedOrderItems(order);
         const targetItem=orderItems.find(item=>item.itemId===removed.itemId) || (orderItems.length===1?orderItems[0]:null);
         if(!targetItem)throw new Error('找不到原送貨品項，無法安全還原庫存。');
+        assertOrderDeliveryIncrease(order,targetItem,0);
         const itemRecords=records.filter(r=>((!r.itemId&&orderItems.length===1)||r.itemId===targetItem.itemId));
         const itemGrossAfter=itemRecords.filter(r=>r.id!==recordId).reduce((sum,row)=>sum+Number(row.qty||0),0);
         const itemReturned=savedReturnRecords(order)

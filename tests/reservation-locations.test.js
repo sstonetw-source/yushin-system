@@ -245,3 +245,8 @@ test('multi-location lifecycle conserves other holds and physical stock over can
   assert.equal(result.companyReservedDelta,result.warehouseDeltas.reduce((sum,row)=>sum+row.reservedDelta,0));
  }
 });
+test('a physically completed sibling stays fulfilled on restoration while cancellation still releases its empty ledger',()=>{
+ const original=input({requestedQty:0,reservation:{locationSchemaVersion:2,quantity:0,shortageQty:0,status:'released',locations:[]}});
+ assert.equal(plan(original).reservation.status,'fulfilled');
+ assert.equal(plan({...original,nextStatus:'cancelled'}).reservation.status,'released');
+});

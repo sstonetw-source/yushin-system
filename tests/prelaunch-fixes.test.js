@@ -36,17 +36,6 @@ test('cost reads share an in-flight request and a failed read remains retryable'
  c.currentUserRole='sales';assert.equal(await c.loadVisibleProductCost({productId:'P'}),null);assert.equal(count,3);
 });
 
-test('changing product brands prevents the earlier response from replacing results or the cursor',async()=>{
- const responses=[deferred(),deferred()];let i=0;
- const c=context({currentUser:{uid:'U'},currentUserRole:'admin',productBrandBrowseCurrent:'A',productBrandBrowseCursor:null,productBrandBrowseHasMore:false,productManagementResults:[],productManagementVisibleLimit:50,PRODUCT_MANAGEMENT_RENDER_STEP:50,PRODUCT_BRAND_BROWSE_PAGE_SIZE:200,
- document:{getElementById:()=>null},brandMasterEntryForName:()=>null,dedupeBrandsCaseInsensitive:v=>v,canManagePendingProductMaster:()=>false,renderProductManagementResults:()=>{},firebase:{firestore:{FieldPath:{documentId:()=> '__name__'}}},firestoreReadWithTimeout:p=>p});
- const query={where(){return this;},orderBy(){return this;},limit(){return this;},startAfter(){return this;},get(){return responses[i++].promise;}};c.db={collection:()=>query};
- vm.runInContext(section('let productBrandBrowseGeneration =', '\nwindow.browseProductMasterBrand'),c);
- const a=c.fetchProductBrandBrowsePage(true);c.productBrandBrowseCurrent='B';const b=c.fetchProductBrandBrowsePage(true);
- responses[1].resolve(snapshot('B1',{manufacturerPartNo:'B'}));await b;responses[0].resolve(snapshot('A1',{manufacturerPartNo:'A'}));await a;
- assert.deepEqual(Array.from(c.productManagementResults,x=>x.id),['B1']);assert.equal(c.productBrandBrowseCursor.id,'B1');
-});
-
 test('Forecast queues the latest filter and discards the stale response before changing its cursor',async()=>{
  const requests=[],controls={forecastStatusFilter:{value:'active'}};let renders=0;
  const c=context({forecastLoading:false,forecastCursor:null,forecastHasMore:true,forecastCache:[],currentUserRole:'sales',currentUserCode:'S1',currentUser:{uid:'U'},DEFAULT_LIST_LIMIT:50,
@@ -154,7 +143,7 @@ test('loaded purchase hides cancellation for fully received orders and checks ev
   purchaseItemsFromSavedPo:po=>po.items,purchaseOrderSupplierContact:()=>({}),
   isPurchaseTerminalStatus:status=>['CLOSED','CANCELLED'].includes(status),
   purchaseHistoryItemReceiptProgress:(po,index)=>({remainingQty:po.items[index].remainingQty}),
-  canCreatePurchaseOrderCapability:()=>true,canEditPage:()=>true,updatePoSaveButton(){}
+  canCreatePurchaseOrderCapability:()=>true,canEditPage:()=>true,poDraftLoading:false,editingUnconfirmedPurchaseDocument:()=>false,setPoDraftLoading(){},updatePoSaveButton(){}
  });
  vm.runInContext(section('function updatePoModeUI()', '\nfunction clearPoExpectedDate'),c);
  function cancellationVisible(items,status='ORDERED',allowed=true){
@@ -181,4 +170,16 @@ test('download settings keep folder selection without the default-download reset
  assert.doesNotMatch(html,/>使用預設下載</);
  assert.match(html,/configureDocumentDownloadFolder\('quote'\)/);
  assert.match(html,/configureDocumentDownloadFolder\('purchase'\)/);
+});
+
+
+test('background work queue refresh repaints shipping only after its location projection completes',async()=>{
+ const d=deferred(),query={where(){return this;},orderBy(){return this;}};let renders=0;
+ const c=context({currentUser:{uid:'U'},currentUserRole:'warehouse',BUSINESS_STATUS:{ACTIVE:'active'},ordersCache:[],
+  canAccessPage:()=>true,canViewAllData:()=>true,db:{collection:()=>query},readQueryInBatches:async()=>[{id:'O'}],
+  orderWorkCategories:()=>['dispatch'],loadV2WarehouseShipmentLocations:()=>d.promise,renderInventoryShipping(){renders++;},
+  document:{getElementById:id=>id==='inventory-system'?{classList:{contains:()=>true}}:null}});
+ vm.runInContext(section('const OPEN_ORDER_WORK_CATEGORIES =', '\nwindow.setOrderWorkFilter'),c);
+ const loading=c.loadOrderWorkQueue();await tick();assert.equal(renders,0);
+ d.resolve();await loading;assert.equal(renders,1);
 });

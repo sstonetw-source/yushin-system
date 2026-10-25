@@ -58,11 +58,16 @@
       if(role==='purchaser'||role==='warehouse'){
         const rows=writes.filter(w=>w.ref.path.startsWith('inventoryReservations/')&&w.method!=='delete');
         for(const w of rows)if(!reads.has(w.ref.path))await proxy.get(w.ref);
-        for(const w of rows){
+        const changedRows=rows.filter(w=>{
+          const before=reads.get(w.ref.path)?.data||{},after={...before,...w.data};
+          const delta=reservationDeltas(before,after);
+          return delta.companyReservedDelta||delta.warehouseDeltas.length;
+        });
+        for(const w of changedRows){
           const before=reads.get(w.ref.path)?.data||{},after={...before,...w.data};
           const delta=reservationDeltas(before,after);
           if(!delta.companyReservedDelta&&!delta.warehouseDeltas.length)continue;
-          const siblings=rows.filter(r=>({...reads.get(r.ref.path)?.data,...r.data}).productKey===after.productKey);
+          const siblings=changedRows.filter(r=>({...reads.get(r.ref.path)?.data,...r.data}).productKey===after.productKey);
           const held=siblings.filter(r=>{const old=reads.get(r.ref.path)?.data||{},next={...old,...r.data};return number(next.quantity)||number(old.quantity);});
           const crossWarehouse=new Set(held.map(r=>({...reads.get(r.ref.path)?.data,...r.data}).warehouseId)).size>1;
           // A grouped reserve/release is not a warehouse transfer. Keep transfer
@@ -90,12 +95,15 @@
           // total. Other warehouse movements are linked by fresh document ID.
           const companyMovement=crossWarehouse?writes.find(r=>r.ref.path.startsWith('inventoryMovements/')
             && r.data.productKey===after.productKey
-            && held.some(h=>({...reads.get(h.ref.path)?.data,...h.data}).warehouseId===r.data.warehouseId)):null;
+            && held.some(h=>{const old=reads.get(h.ref.path)?.data||{},next={...old,...h.data};
+              return next.warehouseId===r.data.warehouseId&&number(next.quantity)!==number(old.quantity);})):null;
           if(crossWarehouse&&!companyMovement)throw Error('跨倉預留缺少公司總帳的原始異動憑證。');
           const evidence={inventoryId:inv.id,warehouseStockId:wh.id,previousWarehouseStockId:oldWh.id,
-            movementId:movement.ref.id,reservationIds:siblings.map(r=>r.ref.id),...(crossWarehouse?{crossWarehouse:true,
-              companyMovementId:companyMovement.ref.id,
-              warehouseReservationIds:siblings.filter(r=>({...reads.get(r.ref.path)?.data,...r.data}).warehouseId===after.warehouseId).map(r=>r.ref.id)}:{})};
+            movementId:movement.ref.id,reservationIds:siblings.map(r=>r.ref.id),crossWarehouse,
+            // merge:true retains nested map keys. Explicitly clear the old
+            // cross-warehouse witness when this update changes only one warehouse.
+            companyMovementId:crossWarehouse?companyMovement.ref.id:'',
+            warehouseReservationIds:crossWarehouse?siblings.filter(r=>({...reads.get(r.ref.path)?.data,...r.data}).warehouseId===after.warehouseId).map(r=>r.ref.id):[]};
           if(movement.data.reservationStockEvidence&&JSON.stringify(movement.data.reservationStockEvidence)!==JSON.stringify(evidence))
             throw Error('不同倉庫的庫存預留必須分別記錄，請由管理員檢查此筆交易。');
           movement.data={...movement.data,reservationStockEvidence:evidence};
@@ -206,6 +214,16 @@
       }
       sessionGuard?.();
       for(const write of writes){
+        // Keep unchanged sibling reservations as transaction reads, without
+        // spending the Rules budget on identical merged writes. Only a single
+        // flat primitive patch is eligible; never fold multiple writes or transforms.
+        const held=reads.get(write.ref.path);
+        if((role==='purchaser'||role==='warehouse')&&write.ref.path.startsWith('inventoryReservations/')
+          &&write.method==='set'&&write.options?.merge===true&&held?.snapshot.exists
+          &&writes.filter(row=>row.ref.path===write.ref.path).length===1
+          &&Object.keys(write.data).every(key=>!key.includes('.')&&
+            (write.data[key]===null||['string','number','boolean'].includes(typeof write.data[key]))&&
+            Object.is(write.data[key],held.data[key])))continue;
         if(write.method==='delete')native.delete(write.ref);
         else if(write.method==='update')native.update(write.ref,write.data);
         else if(write.options)native.set(write.ref,write.data,write.options);
