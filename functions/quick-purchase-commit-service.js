@@ -75,6 +75,10 @@ async function commitV2QuickPurchase(db,uid,data){
    poNo:'QP-'+intent.operationId,orderId:intent.orderId,itemId:intent.itemId,qty:intent.qty
   });
   const {source,sourceItem,sourceItemIndex,demandBefore,demandAfter,plan}=details;
+  // Preserve the existing Quick Purchase boundary: sales-self-order lines
+  // cannot become purchaser commitments through the privileged callable.
+  if((sourceItem.procurementType||source.procurementType||'PURCHASING_PO')==='SALES_SELF_ORDER')
+   fail('failed-precondition','此品項為業務自行訂貨，不能執行手動採購');
   if(source.items.some(i=>String(i.productType||i.type||'').toUpperCase()==='SERVICE'))
    fail('failed-precondition','混合服務訂單不在手動採購試點範圍');
   const prior=await tx.get(supplyRef),old=prior.exists?prior.data():null;

@@ -85,6 +85,8 @@ test('quick purchase backend enforces role, demand, supplier and stock integrity
   x=>{x.records.get('inventory/P').productKey='wrong-product';},
   x=>{x.records.get('warehouseStocks/W__P').productId='wrong-product';},
   x=>{x.records.get('orders/ORDER-1').orderStatus='cancelled';},
+  x=>{x.records.get('orders/ORDER-1').items[0].procurementType='SALES_SELF_ORDER';},
+  x=>{x.records.get('orders/ORDER-1').procurementType='SALES_SELF_ORDER';},
   x=>{x.records.get('procurementDemands/'+encodeURIComponent(x.demandId)).orderedQty=2;}]){
   const x=fixture();change(x);
   await assert.rejects(commitV2QuickPurchase(x.db,'buyer',x.data),{code:'failed-precondition'});

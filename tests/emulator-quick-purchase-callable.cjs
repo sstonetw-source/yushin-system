@@ -161,3 +161,14 @@ test('real direct-ship purchase creates a cost-free receiving mirror without war
  assert.equal(Object.hasOwn(mirror,'unitCost'),false);
  assert.equal(await f.data('inventory/'+f.productId),undefined);
 });
+
+test('real purchaser cannot order a sales-self-order item through privileged Callable',async()=>{
+ const f=await seeded('self-order');
+ const order=await f.data('orders/'+f.orderId);
+ order.items[0].procurementType='SALES_SELF_ORDER';
+ await db.doc('orders/'+f.orderId).update({items:order.items});
+ await assert.rejects(f.call(f.intent()),e=>e.code==='functions/failed-precondition');
+ assert.equal(await f.data('purchaseOperations/quick-'+f.intent().operationId),undefined);
+ assert.equal((await f.data('inventory/'+f.productId)).incoming,0);
+ assert.equal((await f.data('procurementDemands/'+encodeURIComponent(f.demandId))).orderedQty,0);
+});
