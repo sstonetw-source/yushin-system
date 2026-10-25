@@ -75,9 +75,18 @@ async function commitV2QuickPurchase(db,uid,data){
      ||saved.movementId!==(directShip?'':movementRef.id))
     fail('failed-precondition','重送採購的操作憑證不一致');
    const source=await tx.get(ref('orders',intent.orderId));
-   const item=source.exists&&Array.isArray(source.data().items)
-     ?source.data().items.find(row=>row.itemId===intent.itemId):null;
-   if(!item||!Array.isArray(item.orderEvents)
+   const sourceData=source.exists?source.data():null;
+   const item=sourceData&&Array.isArray(sourceData.items)
+     ?sourceData.items.find(row=>row.itemId===intent.itemId):null;
+   // The source and supply identities are immutable purchase evidence.
+   // A matching operation ID alone must not acknowledge a corrupted link.
+   if(!item||supply.type!=='PURCHASING_MANUAL'||supply.sourceType!=='SALES_ORDER'
+     ||supply.sourceId!==intent.orderId||supply.sourceItemId!==intent.itemId
+     ||supply.orderId!==intent.orderId||supply.itemId!==intent.itemId
+     ||supply.demandId!==demandId||supply.productId!==item.productId
+     ||supply.productKey!==String(item.inventoryProductKey||item.productId)
+     ||supply.ownerUid!==sourceData.ownerUid||supply.salesCode!==sourceData.salesCode
+     ||!Array.isArray(item.orderEvents)
      ||!item.orderEvents.some(e=>e.id==='quick-'+intent.operationId
        &&e.type==='PURCHASING_MANUAL'&&e.qty===intent.qty))
     fail('failed-precondition','重送採購的來源訂單憑證不一致');
