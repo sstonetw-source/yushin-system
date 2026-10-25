@@ -74,10 +74,14 @@ async function commitFormalPurchaseBackend(poRecord,actorUid,assertActor) {
     const isPreview=APP_ENVIRONMENT==='preview'&&globalThis.YUSHIN_PREVIEW_FORMAL_PURCHASE===true;
     const isProduction=APP_ENVIRONMENT==='production'&&globalThis.YUSHIN_PRODUCTION_FORMAL_PURCHASE===true;
     const hostname=String(globalThis.location?.hostname||'').toLowerCase();
+    const pathname=String(globalThis.location?.pathname||'');
+    const productionSite=['yu-shing-company.web.app','yu-shing-company.firebaseapp.com'].includes(hostname)
+        || (hostname==='sstonetw-source.github.io'
+            && (pathname==='/yushin-system'||pathname.startsWith('/yushin-system/')));
     if(!formalPurchaseBackendPilotEnabled()||typeof firebase==='undefined'||!firebase.auth||!firebase.app
         ||(isEmulator&&!local(hostname))
         ||(isPreview&&!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(hostname))
-        ||(isProduction&&!['yu-shing-company.web.app','yu-shing-company.firebaseapp.com'].includes(hostname)))
+        ||(isProduction&&!productionSite))
         throw new Error('採購後端僅限已授權的網站及專案。');
     const auth=firebase.auth(),project=isProduction?'yu-shing-company':isPreview?'preview-20135':'demo-yushin';
     if(auth.app?.options?.projectId!==project||firebase.app().options?.projectId!==project

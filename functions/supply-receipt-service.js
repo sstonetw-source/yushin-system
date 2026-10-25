@@ -4,6 +4,62 @@ const createReceivingService=require('./shared/receiving-runtime');
 const stockPermissions=require('./shared/stock-permissions');
 const coreNames={YushinInventory:'inventory-core',YushinReservation:'reservation-core',YushinFulfillment:'fulfillment-core',YushinWorkflow:'workflow-core',YushinProcurementDemand:'procurement-demand-core',YushinReceiving:'receiving-core',YushinSupply:'supply-core'};
 const cores=Object.fromEntries(Object.entries(coreNames).map(([key,name])=>[key,require('./shared/'+name)]));
+
+const {createHash}=require('node:crypto');
+const demandCore=require('./shared/procurement-demand-core');
+// Quick Purchase uses the same Receiving writer as formal PO, but has a
+// different immutable purchase witness. Verify the existing single-writer
+// operation and incoming debit before permitting any receipt-side mutation.
+async function verifyQuickPurchaseReceipt(get,db,supply,order,supplyId){
+ const reject=()=>fail('failed-precondition','手動採購缺少一致的權威操作／在途憑證');
+ const directShip=supply.fulfillmentType==='DIRECT_SHIP';
+ const item=Array.isArray(order.items)?order.items.filter(row=>row?.itemId===supply.itemId):[];
+ const events=supply.orderEvents;
+ const demandId=demandCore.demandIdForSource({sourceType:'SALES_ORDER',sourceId:supply.orderId,sourceItemId:supply.itemId});
+ if(supply.type!=='PURCHASING_MANUAL'||supply.method!=='PURCHASING_MANUAL'
+  ||supply.sourceType!=='SALES_ORDER'||supply.sourceId!==supply.orderId
+  ||supply.sourceItemId!==supply.itemId||supply.demandId!==demandId
+  ||!Array.isArray(events)||!events.length||events.length>50||item.length!==1
+  ||!Array.isArray(item[0].orderEvents)||!Array.isArray(item[0].manualOrderNos)
+  ||!item[0].manualOrderNos.includes(supply.internalNo)
+  ||!Number.isSafeInteger(supply.qty)||supply.qty<=0
+  ||!Number.isSafeInteger(item[0].supplyOrderedQty)||item[0].supplyOrderedQty<supply.qty)
+  reject();
+ const seen=new Set();let total=0;
+ for(const event of events){
+  if(!event||typeof event.operationId!=='string'
+   ||!/^[A-Za-z0-9_-]{8,80}$/.test(event.operationId)||seen.has(event.operationId)
+   ||!Number.isSafeInteger(event.qty)||event.qty<=0
+   ||event.supplier!==supply.supplier||event.unitCost!==supply.unitCost
+   ||typeof event.createdByUid!=='string'||!event.createdByUid)reject();
+  seen.add(event.operationId);total+=event.qty;
+  const key='quick-'+event.operationId;
+  const operation=await get(db.collection('purchaseOperations').doc(key));
+  const intent={operationId:event.operationId,orderId:supply.orderId,itemId:supply.itemId,
+   qty:event.qty,supplier:event.supplier,unitCost:event.unitCost};
+  const hash=createHash('sha256').update(JSON.stringify(intent)).digest('hex');
+  const op=operation.exists?operation.data():null;
+  if(!op||op.type!=='PURCHASING_MANUAL'||op.operationId!==event.operationId
+   ||op.uid!==event.createdByUid||op.hash!==hash||op.supplyId!==supplyId
+   ||op.demandId!==demandId||op.orderId!==supply.orderId||op.itemId!==supply.itemId
+   ||op.qty!==event.qty||op.movementId!==(directShip?'':key))reject();
+  const sourceEvents=item[0].orderEvents.filter(row=>row?.id===key);
+  if(sourceEvents.length!==1||sourceEvents[0].type!=='PURCHASING_MANUAL'
+   ||sourceEvents[0].qty!==event.qty||sourceEvents[0].documentNo!==supply.internalNo)reject();
+  if(!directShip){
+   const movement=await get(db.collection('inventoryMovements').doc(key));
+   const m=movement.exists?movement.data():null;
+   if(!m||m.type!=='purchase_incoming'||m.qty!==event.qty
+    ||m.sourceType!=='SUPPLY_ORDER'||m.sourceId!==supplyId
+    ||m.productKey!==supply.productKey||m.productId!==supply.productId
+    ||m.warehouseId!==supply.warehouseId||m.actorUid!==event.createdByUid
+    ||m.purchaseDocumentId!==supply.internalNo)reject();
+  }
+ }
+ if(total!==supply.qty||!Number.isSafeInteger(total)
+  ||(directShip?Number(supply.incomingRegisteredQty||0)!==0:
+   Number(supply.incomingRegisteredQty)!==supply.qty-Number(supply.receivedQty||0)))reject();
+}
 cores.YUSHIN_V2_DISPATCH_EMULATOR=true;
 cores.crypto=require('node:crypto').webcrypto;
 function fail(code,message){const error=new Error(message);error.code=code;throw error;}
@@ -36,13 +92,15 @@ async function receiveV2Supply(db,uid,input){
   if(!supplySnap.exists)fail('not-found','找不到供應紀錄');
   const supply=supplySnap.data();
   const directShip=supply.fulfillmentType==='DIRECT_SHIP';
-  if(supply.type!=='PURCHASING_PO'||!['WAREHOUSE','DIRECT_SHIP'].includes(supply.fulfillmentType)
+  if(!['PURCHASING_PO','PURCHASING_MANUAL'].includes(supply.type)||!['WAREHOUSE','DIRECT_SHIP'].includes(supply.fulfillmentType)
     ||!supply.orderId||!supply.itemId)fail('failed-precondition','試點只支援客戶訂單的實體採購／原廠直送');
   if(directShip&&(intent.lotNo||intent.expiryDate||Number(supply.incomingRegisteredQty||0)!==0))
    fail('failed-precondition','原廠直送不得登記倉庫在途、批號或效期');
   const orderSnap=await get(db.collection('orders').doc(supply.orderId));
   if(!orderSnap.exists)fail('failed-precondition','找不到來源訂單');
   const order=orderSnap.data();
+  if(supply.type==='PURCHASING_MANUAL')
+   await verifyQuickPurchaseReceipt(get,db,supply,order,intent.supplyId);
   if(directShip){
    if(role!=='admin'&&(!['sales','engineer'].includes(role)||order.ownerUid!==uid
       ||supply.ownerUid!==uid))fail('permission-denied','僅原負責業務可確認直送到貨');

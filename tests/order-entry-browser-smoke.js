@@ -43,10 +43,14 @@ const save=slice('window.saveNewOrder = function()','    items.forEach(item=>{de
    await page.locator('#orderCustomer').fill('台大');await page.locator('#orderItemCode').fill('A1');await page.waitForFunction(()=>document.getElementById('orderItemCode').dataset.productCheckStatus==='matched');
    assert.equal(await page.locator('#orderUnitPrice').inputValue(),'100');assert.equal(await page.locator('#orderProductDetails').getAttribute('open'),null);
    assert.match(await page.locator('#orderEntryProductSummary').textContent(),/試劑/);
+   await page.locator('#saveNewOrderBtn').click();assert.match(await page.evaluate(()=>alerts.at(-1)),/交易方式/);
+   await page.locator('#orderTransactionType').selectOption('借');
    await page.locator('#saveNewOrderBtn').click();assert.equal(await page.evaluate(()=>validated.shippingInstructions.mode),'PICKUP');
    await page.evaluate(()=>{document.getElementById('orderModalOverlay').scrollTop=0;});
    await page.screenshot({path:path.join(process.env.ORDER_ENTRY_SCREENSHOT_DIR||'/tmp',`order-entry-default-${width}.png`),fullPage:true});
    await page.locator('#orderProcurementType').selectOption('SALES_SELF_ORDER');assert.equal(await page.locator('#orderSelfStatusWrap').isVisible(),true);
+   assert.equal(await page.locator('#orderSelfOrderConfirmed').inputValue(),'confirmed');
+   await page.locator('#orderSelfOrderConfirmed').selectOption('pending');
    await page.locator('#orderCostPrice').fill('');await page.locator('#orderSelfSupplier').fill('');await page.locator('#saveNewOrderBtn').click();assert.equal(await page.evaluate(()=>validated.items[0].selfOrderConfirmed),false);
    await page.locator('#orderSelfOrderConfirmed').selectOption('confirmed');await page.locator('#saveNewOrderBtn').click();assert.equal(await page.locator('#orderSelfSupplier').evaluate(el=>el.validationMessage.length>0),true);
    await page.locator('#orderSelfSupplier').fill('Vendor');await page.locator('#orderCostPrice').fill('0');await page.locator('#saveNewOrderBtn').click();assert.equal(await page.evaluate(()=>validated.items[0].costPrice),0);

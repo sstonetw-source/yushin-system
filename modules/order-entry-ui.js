@@ -40,6 +40,7 @@
         root.refreshOrderEntrySummary();
         const details=$('orderRecipientDetails');if(details)details.open=choice!=='BUSINESS'&&!['contact','phone','address'].every(key=>String((root.orderShippingInstructions?.()||{})[key]||'').trim());
     };
+    root.defaultOrderEntrySelfOrderStatus=()=>['sales','engineer','admin'].includes(currentUserRole)?'confirmed':'pending';
     root.syncOrderEntrySelfStatus=function(){
         const self=$('orderProcurementType')?.value==='SALES_SELF_ORDER';
         if($('orderSelfStatusWrap'))$('orderSelfStatusWrap').hidden=!self;
@@ -49,7 +50,12 @@
         root.refreshOrderEntrySummary();
     };
     const previousProcurement=root.onOrderProcurementTypeChange;
-    root.onOrderProcurementTypeChange=function(...args){const result=previousProcurement.apply(this,args);root.syncOrderEntrySelfStatus();return result;};
+    root.onOrderProcurementTypeChange=function(...args){
+        const result=previousProcurement.apply(this,args);
+        if(args[0]===true&&$('orderProcurementType')?.value==='SALES_SELF_ORDER'&&$('orderSelfOrderConfirmed'))
+            $('orderSelfOrderConfirmed').value=root.defaultOrderEntrySelfOrderStatus();
+        root.syncOrderEntrySelfStatus();return result;
+    };
     const previousShipping=root.setOrderShippingInstructions;
     root.setOrderShippingInstructions=function(value={}){
         if($('orderFulfillmentType')?.value==='DIRECT_SHIP'&&value.mode!=='CUSTOMER_SHIP')value={mode:'CUSTOMER_SHIP',notes:value.notes||''};

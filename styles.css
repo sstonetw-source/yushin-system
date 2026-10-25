@@ -1586,7 +1586,7 @@ button:focus-visible { outline: 2px solid var(--ys-primary); outline-offset: 2px
         font-weight:700;
     }
     .product-management-actions { width:100%; min-width:0; }
-    .product-management-actions button { flex:1 1 120px; min-width:0; min-height:42px; }
+    .product-management-actions button { flex:1 1 120px; min-width:0; min-height:44px; }
     .product-management-tools { margin-top:16px; }
     .product-management-tools-actions {
         display:grid;

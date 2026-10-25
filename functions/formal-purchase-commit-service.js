@@ -1,9 +1,9 @@
 'use strict';
-// Formal customer-order PO write pilot (1–5 lines), isolated in demo-yushin Emulator.
+// Formal customer-order PO transaction (1–5 lines), guarded by the Callable environment gate.
 // One atomic transaction owns the PO, all Supplies/Demands and source Orders.
 // Reuses exactly the preflight transaction validator and Procurement Demand
 // Core, rechecking Auth and all current facts within the committing callback.
-// NOT exported by production functions/index.js or used by the production UI.
+// Preview/production each require their own explicit rollout flag at the Callable boundary.
 const {createHash}=require('node:crypto');
 const demandCore=require('./shared/procurement-demand-core.js');
 const {strictRequest,validateV2FormalPurchaseTx}=require('./formal-purchase-preview-service.js');

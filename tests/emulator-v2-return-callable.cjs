@@ -100,7 +100,7 @@ test('real signed-in client creates an order through the existing Order Creation
  }
  await setup.commit();
  const creator=orderCreationClient(actor.app,actor.uid,'sales');
- const order={status:'active',orderStatus:'normal',createdByUid:actor.uid,createdByRole:'sales',
+ const order={transactionType:'借',status:'active',orderStatus:'normal',createdByUid:actor.uid,createdByRole:'sales',
   ownerUid:actor.uid,salesCode:'R',customerName:'真實登入建單測試',productId:key,productMasterMatched:true,
   inventoryReservationStatus:'pending',inventoryReservationAttemptId:'auth_client_initial',
   deliveryRecords:[],returnRecords:[],deliveredQty:0,isDelivered:false,
@@ -978,15 +978,15 @@ test('real Auth competing merged POs re-read demand and only one whole PO commit
  for(const orderId of x.orderIds){const source=(await db.collection('orders').doc(orderId).get()).data();assert.ok(source.items.every(row=>row.supplyOrderedQty===7));}
 });
 
-async function partialReceiptFixture(tag,{ownerRole=null}={}){
+async function partialReceiptFixture(tag,{ownerRole=null,quickPurchase=false}={}){
  const buyer=await identity('receipt-'+tag,'purchaser'),key='receipt-'+tag+'-P',orderId='receipt-'+tag+'-O';
  const owner=ownerRole?await identity('receipt-owner-'+tag,ownerRole):buyer;
  const warehouses=['receipt-'+tag+'-A','receipt-'+tag+'-B'];
  const batch=db.batch(),put=(name,id,data)=>batch.set(db.collection(name).doc(id),data);
- put('products',key,{productType:'Goods',active:true});put('inventory',key,{productKey:key,onHand:5,reserved:0,incoming:0,transferFreeInTransit:0});
+ put('products',key,{productType:'Goods',active:true});put('inventory',key,{productId:key,productKey:key,onHand:5,reserved:0,incoming:0,transferFreeInTransit:0});
  for(const [index,id] of warehouses.entries()){
   const onHand=index===0?2:3;put('warehouses',id,{active:true});
-  put('warehouseStocks',id+'__'+key,{warehouseId:id,productKey:key,onHand,reserved:0,incoming:0,transferFreeInTransit:0});
+  put('warehouseStocks',id+'__'+key,{warehouseId:id,productId:key,productKey:key,onHand,reserved:0,incoming:0,transferFreeInTransit:0});
   put('inventoryLots',key+'-'+index,{productKey:key,warehouseId:id,receivedQty:onHand,remainingQty:onHand,lotNo:'INITIAL',expiryDate:'2028-01-01'});
  }
  put('orders',orderId,{ownerUid:owner.uid,salesCode:'P',status:'active',orderStatus:'normal',inventoryReservationStatus:'pending',inventoryReservationAttemptId:'receipt_sync_'+tag,
@@ -994,10 +994,17 @@ async function partialReceiptFixture(tag,{ownerRole=null}={}){
   items:[{itemId:'I',productId:key,itemCode:'CODE',itemName:'部分收貨驗收',brand:'Roche',qty:12,warehouseId:warehouses[0],reservedQty:0,receivedQty:0,deliveredQty:0,returnedQty:0,dispatchPreparedQty:0,warehouseShippedQty:0,fulfillmentType:'WAREHOUSE'}]});
  await batch.commit();await synchronizeV2OrderFixture(db,buyer.uid,{orderId,warehouseIds:warehouses});
  const poNo='RECEIPT-PO-'+tag;
- const committed=(await httpsCallable(buyer.functions,'commitV2FormalPurchase')({poNo,poDate:'2026-10-20',supplier:'供應商',items:[{orderId,itemId:'I',qty:4,unitCost:20}]})).data;
- // Same existing incoming Service, not hand-crafted inventory/demand counters.
- await registerV2PurchaseIncomingFixture(db,buyer.uid,poNo);
- const supplyId=committed.supplyOrderIds[0],input={supplyId,qty:2,lotNo:'PARTIAL',expiryDate:'2028-01-01',operationId:'receipt_partial_'+tag};
+ let supplyId,purchaseIntent;
+ if(quickPurchase){
+  purchaseIntent={operationId:'quick-receipt-'+tag,orderId,itemId:'I',qty:4,supplier:'供應商',unitCost:20};
+  supplyId=(await httpsCallable(buyer.functions,'commitV2QuickPurchase')(purchaseIntent)).data.supplyId;
+ }else{
+  const committed=(await httpsCallable(buyer.functions,'commitV2FormalPurchase')({poNo,poDate:'2026-10-20',supplier:'供應商',items:[{orderId,itemId:'I',qty:4,unitCost:20}]})).data;
+  // Same existing incoming Service, not hand-crafted inventory/demand counters.
+  await registerV2PurchaseIncomingFixture(db,buyer.uid,poNo);
+  supplyId=committed.supplyOrderIds[0];
+ }
+ const input={supplyId,qty:2,lotNo:'PARTIAL',expiryDate:'2028-01-01',operationId:'receipt_partial_'+tag};
  const receive=(data=input,actor=buyer)=>httpsCallable(actor.functions,'receiveV2Supply',{timeout:30000})(data).then(reply=>reply.data);
  const snap=async()=>{
   const read=async(name,id)=>(await db.collection(name).doc(id).get()).data();
@@ -1007,9 +1014,56 @@ async function partialReceiptFixture(tag,{ownerRole=null}={}){
    reservation:await read('inventoryReservations',orderId+'__I'),supply:await read('supplyOrders',supplyId),view:await read('receivingSupplyOrders',supplyId),demand:await read('procurementDemands',encodeURIComponent(demandId)),
    receipts:(await db.collection('receipts').where('supplyOrderId','==',supplyId).get()).docs.map(doc=>({id:doc.id,...doc.data()})).sort((a,b)=>a.id.localeCompare(b.id)),...extra};
  };
- return {buyer,owner,key,orderId,warehouses,supplyId,input,receive,snap,
+ return {buyer,owner,key,orderId,warehouses,supplyId,purchaseIntent,input,receive,snap,
   registerPo:async id=>registerV2PurchaseIncomingFixture(db,buyer.uid,id)};
 }
+test('real Auth Quick Purchase hands off to original partial and final receipt without duplicate incoming',{timeout:120000},async()=>{
+ const x=await partialReceiptFixture('quick-handoff',{quickPurchase:true});
+ const before=await x.snap();
+ assert.equal(before.supply.type,'PURCHASING_MANUAL');
+ assert.equal(before.inventory.incoming,4);
+ assert.equal(before.reservation.quantity,5);
+ const results=await Promise.all([x.receive(),x.receive()]);
+ assert.ok(results.every(result=>result.status==='confirmed'));
+ const partial=await x.snap();
+ assert.equal(partial.supply.receivedQty,2);assert.equal(partial.supply.incomingRegisteredQty,2);
+ assert.equal(partial.inventory.onHand,7);assert.equal(partial.inventory.reserved,7);assert.equal(partial.inventory.incoming,2);
+ assert.equal(partial.order.items[0].receivedQty,2);assert.equal(partial.order.items[0].reservedQty,7);
+ assert.equal(partial.order.items[0].shortageQty,5);assert.equal(partial.reservation.quantity,7);
+ assert.equal(partial.demand.orderedQty,4);assert.equal(partial.demand.receivedQty,2);
+ assert.equal(partial.demand.remainingToOrderQty,3);assert.equal(partial.demand.remainingToReceiveQty,2);
+ assert.equal(partial.receipts.length,1);assert.equal(partial.inventoryLots.length,before.inventoryLots.length+1);
+ assert.deepEqual(partial.stocks[1],before.stocks[1]);
+ // A late retry of the purchase after receipt must not restore the old incoming balance.
+ const replay=(await httpsCallable(x.buyer.functions,'commitV2QuickPurchase')(x.purchaseIntent)).data;
+ assert.equal(replay.status,'already-applied');assert.deepEqual(await x.snap(),partial);
+ await assert.rejects(x.receive({...x.input,qty:3}));assert.deepEqual(await x.snap(),partial);
+ const final={...x.input,operationId:x.input.operationId+'_final',lotNo:'FINAL'};
+ await x.receive(final);
+ const completed=await x.snap();
+ assert.equal(completed.supply.status,'RECEIVED');assert.equal(completed.supply.receivedQty,4);
+ assert.equal(completed.supply.incomingRegisteredQty,0);assert.equal(completed.inventory.incoming,0);
+ assert.equal(completed.inventory.onHand,9);assert.equal(completed.inventory.reserved,9);
+ assert.equal(completed.order.items[0].receivedQty,4);assert.equal(completed.order.items[0].reservedQty,9);
+ assert.equal(completed.order.items[0].shortageQty,3);assert.equal(completed.reservation.quantity,9);
+ assert.equal(completed.demand.remainingToOrderQty,3);assert.equal(completed.demand.remainingToReceiveQty,0);
+ assert.equal(completed.receipts.length,2);assert.equal(completed.inventoryLots.length,before.inventoryLots.length+2);
+ assert.deepEqual(completed.stocks[1],before.stocks[1]);
+ assert.deepEqual(completed.view,require('../modules/stock-permissions').sanitizeSupply(completed.supply));
+ assert.equal(completed.view.unitCost,undefined);
+ await x.receive(final);assert.deepEqual(await x.snap(),completed);
+});
+test('real Auth Quick Purchase receipt rejects a missing original operation witness without stock changes',{timeout:120000},async()=>{
+ const x=await partialReceiptFixture('quick-proof-missing',{quickPurchase:true});
+ const before=await x.snap();
+ await db.collection('purchaseOperations').doc('quick-'+x.purchaseIntent.operationId).delete();
+ const corrupted=await x.snap();
+ await assert.rejects(x.receive(),code('failed-precondition'));
+ assert.deepEqual(await x.snap(),corrupted,'a missing operation must not cause partial receipt writes');
+ assert.deepEqual(corrupted.inventory,before.inventory);
+ assert.deepEqual(corrupted.stocks,before.stocks);
+ assert.equal(corrupted.receipts.length,0);
+});
 test('real Auth partial PO receipt uses the original Receiving Service, preserves two warehouses and same-ID retries',{timeout:120000},async()=>{
  for(const role of ['admin','purchaser','warehouse']){
   const x=await partialReceiptFixture('roles-'+role),operator=role==='purchaser'?x.buyer:await identity('receipt-role-'+role,role),before=await x.snap();
@@ -1463,8 +1517,9 @@ test('real Auth post-fulfillment receipt rejects corrupted evidence and current-
 
  const returnQuery=await db.collection('inventoryMovements').where('sourceId','==',x.orderId).where('action','==','location_customer_return').get();
  assert.equal(returnQuery.size,1);const returnDoc=returnQuery.docs[0],returnProof=returnDoc.data();
- for(const damage of ['ship-proof','return-proof','return-cache','projection']){
+ for(const damage of ['ship-proof','ship-debit-mismatch','return-proof','return-cache','projection']){
   if(damage==='ship-proof')await shipRef.delete();
+  if(damage==='ship-debit-mismatch')await shipRef.update({qty:shipProof.qty+1});
   if(damage==='return-proof')await returnDoc.ref.delete();
   if(damage==='return-cache')await sourceRef.update({returnRecords:[]});
   if(damage==='projection')await sourceRef.update({items:original.items.map(item=>({...item,warehouseShippedQty:3}))});

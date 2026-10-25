@@ -94,3 +94,7 @@ exports.commitServiceOrderBilling=onCall({region:'asia-east1'},async request=>{
     throw new HttpsError('internal','服務核銷交易失敗');
   }
 });
+
+// Disabled in every deployed environment; enabled only by demo-yushin Emulator gate.
+const {createQuickPurchaseCallable}=require('./quick-purchase-callable');
+exports.commitV2QuickPurchase=createQuickPurchaseCallable({onCall,HttpsError,getDatabase:getFirestore});

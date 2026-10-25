@@ -12,6 +12,7 @@ const parts = [
   "src/app/role-capabilities.js",
   "src/app/navigation.js",
   "src/features/products/product-management.js",
+  "src/features/products/frequent-products.js",
   "src/features/forecasts/forecast-head.js",
   "src/shared/action-feedback.js",
   "src/services/order-creation.js",
