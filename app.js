@@ -15333,6 +15333,91 @@ window.openPurchaseOrderFromOrder = async function(poNo) {
     }
 };
 
+// Emulator-only adapter. Normal GitHub-served production never enables this pilot.
+function quickPurchaseBackendPilotEnabled() {
+    return typeof APP_ENVIRONMENT !== 'undefined' && APP_ENVIRONMENT === 'emulator'
+        && globalThis.YUSHIN_QUICK_PURCHASE_EMULATOR === true;
+}
+async function commitQuickPurchaseBackendPilot(orderId,itemId,details,actorUid,assertActor) {
+    const local=host=>['localhost','127.0.0.1'].includes(host);
+    const host=String(globalThis.location?.hostname||'').toLowerCase();
+    if(!quickPurchaseBackendPilotEnabled() || !local(host)
+        || typeof firebase==='undefined' || !firebase.auth || !firebase.app
+        || firebase.app().options?.projectId!=='demo-yushin'
+        || firebase.auth().app?.options?.projectId!=='demo-yushin'
+        || !local(firebase.auth().emulatorConfig?.host)
+        || firebase.auth().emulatorConfig?.port!==9099)
+        throw new Error('手動採購後端試點僅限隔離的 demo Emulator，未提交採購。');
+    if(!Number.isSafeInteger(details.expectedQty) || details.expectedQty<=0 || details.expectedQty>1000000)
+        throw new Error('手動採購數量不正確，未提交採購。');
+    const qty=details.expectedQty, supplier=details.supplier,unitCost=details.unitCost;
+    const key='quick-purchase-pending:'+encodeURIComponent(actorUid)+':'
+        +encodeURIComponent(orderId)+':'+encodeURIComponent(itemId);
+    const fingerprint=JSON.stringify([actorUid,orderId,itemId,qty,supplier,unitCost]);
+    let pending;
+    try {
+        const raw=sessionStorage.getItem(key);
+        if(raw)pending=JSON.parse(raw);
+    } catch (_) {
+        throw new Error('前次採購憑證無法讀取，請先核對採購結果，勿另建採購。');
+    }
+    if(pending && (pending.version!==1||pending.fingerprint!==fingerprint
+        ||typeof pending.operationId!=='string'||!/^qp-[A-Za-z0-9_-]{8,76}$/.test(pending.operationId)))
+        throw new Error('前次手動採購尚待核對，請使用原操作及內容確認，勿另建採購。');
+    const operationId=pending?.operationId||('qp-'+db.collection('purchaseOperations').doc().id);
+    if(!pending) {
+        try {sessionStorage.setItem(key,JSON.stringify({version:1,fingerprint,operationId}));}
+        catch (_) {throw new Error('無法保存採購重試憑證，未提交採購。');}
+    }
+    await ensureFormalPurchaseFunctionsCompat();
+    const functions=firebase.app().functions('asia-east1');
+    if(functions.app?.options?.projectId!=='demo-yushin')
+        throw new Error('手動採購後端連線專案不正確，未提交採購。');
+    functions.useEmulator('127.0.0.1',5001);
+    const check=()=>{assertActor();
+        if(firebase.auth().currentUser?.uid!==actorUid)
+            throw new Error('登入身分已變更，請以原帳號核對採購結果。');};
+    check();
+    const response=await functions.httpsCallable('commitV2QuickPurchase')({
+        operationId,orderId,itemId,qty,supplier,unitCost
+    });
+    check();
+    const result=response?.data;
+    const supplyId=quickPurchaseSupplyId(orderId,itemId);
+    const demandId=globalThis.YushinProcurementDemand.demandIdForSource({
+        sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId
+    });
+    if(!['committed','already-applied'].includes(result?.status)
+        ||result.operationId!==operationId||result.supplyId!==supplyId
+        ||result.demandId!==demandId||result.committedQty!==qty)
+        throw new Error('採購回覆不明確，請以原操作核對，勿另建採購。');
+    // A missing response or failed read preserves the checkpoint, never
+    // silently retries through the legacy client multi-document transaction.
+    const read=async(name,id)=>{
+        const snapshot=await db.collection(name).doc(id).get({source:'server'});
+        check();
+        if(!snapshot.exists)throw new Error('採購可能已提交但回讀資料不完整，請確認原操作。');
+        return {id,...snapshot.data()};
+    };
+    const [savedOrder,savedSupply,savedDemand]=await Promise.all([
+        read('orders',orderId),read('supplyOrders',supplyId),
+        read('procurementDemands',encodeURIComponent(demandId))
+    ]);
+    const sourceItem=savedOrder.items?.find(row=>row.itemId===itemId);
+    if(savedSupply.demandId!==demandId || savedDemand.demandId!==demandId
+        ||!savedSupply.orderEvents?.some(row=>row.operationId===operationId
+            &&row.createdByUid===actorUid&&row.qty===qty
+            &&row.supplier===supplier&&row.unitCost===unitCost)
+        ||!sourceItem?.orderEvents?.some(row=>row.id==='quick-'+operationId))
+        throw new Error('採購權威憑證不一致，請確認原操作，勿另建採購。');
+    check();
+    try {sessionStorage.removeItem(key);}
+    catch (_) {throw new Error('採購已確認但重試憑證未能清除，請先核對原操作。');}
+    return {savedOrder,savedSupply,savedDemand,
+        incomingProductKey:savedSupply.fulfillmentType==='DIRECT_SHIP'?'':savedSupply.productKey,
+        incomingWarehouseId:savedSupply.fulfillmentType==='DIRECT_SHIP'?'':savedSupply.warehouseId};
+}
+
 // Atomic quick-purchase commitment; UI refresh belongs to the caller.
 async function commitQuickPurchase(orderId, itemId, purchaseDetails, actorUid=currentUser?.uid, actorRole=currentUserRole) {
         if (!purchaseDetails || typeof purchaseDetails.supplier !== 'string' || !purchaseDetails.supplier.trim()
@@ -15346,6 +15431,11 @@ async function commitQuickPurchase(orderId, itemId, purchaseDetails, actorUid=cu
             if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) throw new Error('目前無採購作業權限。');
         };
         assertActor();
+        if(globalThis.YUSHIN_QUICK_PURCHASE_EMULATOR===true) {
+            if(!quickPurchaseBackendPilotEnabled())
+                throw new Error('手動採購後端試點與目前環境不一致，禁止改用舊交易。');
+            return commitQuickPurchaseBackendPilot(orderId,itemId,purchaseDetails,actorUid,assertActor);
+        }
         const actorName=currentUserName||currentUser?.email||'', now=new Date().toISOString(), orderDate=localDateString();
         let savedOrder, savedSupply, savedDemand, incomingProductKey='', incomingWarehouseId='';
         const supplyRef = supplyOrdersCollection().doc(quickPurchaseSupplyId(orderId, itemId));
