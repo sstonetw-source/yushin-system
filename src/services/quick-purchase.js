@@ -103,7 +103,7 @@ async function commitQuickPurchase(orderId, itemId, purchaseDetails, actorUid=cu
             const targetIncomingQty = directShip ? 0 : supplyProjection.remainingQty;
             const incomingDelta = targetIncomingQty - registeredIncomingQty;
 
-            let invRef=null, whRef=null, invSnap=null, whSnap=null, incomingMovementRef=null;
+            let invRef=null, whRef=null, invSnap=null, whSnap=null;
             if (!directShip && incomingDelta !== 0) {
                 invRef = db.collection('inventory').doc(encodeURIComponent(productKey));
                 whRef = db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId, productKey));
@@ -198,13 +198,12 @@ async function commitQuickPurchase(orderId, itemId, purchaseDetails, actorUid=cu
                     onHand:wh.onHand,reserved:wh.reserved,
                     incoming:Math.max(0,wh.incoming+incomingDelta),updatedAt:now
                 },{merge:true});
-                incomingMovementRef=db.collection('inventoryMovements').doc();
-                tx.set(incomingMovementRef,{
+                tx.set(db.collection('inventoryMovements').doc(),{
                     type:'purchase_incoming',qty:incomingDelta,productKey,productId,warehouseId,
                     brand:canonicalBrand,brandId:canonicalBrandId,
                     fulfillmentType:'WAREHOUSE',sourceType:'SUPPLY_ORDER',sourceId:supplyRef.id,
                     purchaseDocumentId:internalNo,createdAt:now,
-                    createdBy:actorName,actorUid,
+                    createdBy:actorName,
                     ownerUid:existingSupply?.ownerUid||order.ownerUid||'',
                     salesCode:existingSupply?.salesCode||order.salesCode||''
                 });
@@ -221,18 +220,13 @@ async function commitQuickPurchase(orderId, itemId, purchaseDetails, actorUid=cu
                     manualOrderNos:[...new Set([...(item.manualOrderNos||[]),internalNo])],
                     orderedAt:item.orderedAt && item.orderedAt < orderDate ? item.orderedAt : orderDate,
                     orderEvents:[
-                        // Preserve earlier purchase events; each quantity checkpoint is unique.
-                        ...(item.orderEvents||[]),
-                        {id:supplyRef.id+':'+nextSupplyQty,type:'PURCHASING_MANUAL',at:now,date:orderDate,qty,documentNo:internalNo,by:actorName}
+                        ...(item.orderEvents||[]).filter(event=>event.id!==supplyRef.id),
+                        {id:supplyRef.id,type:'PURCHASING_MANUAL',at:now,date:orderDate,qty,documentNo:internalNo,by:actorName}
                     ]
                 };
                 savedOrder = { ...order, items, itemCount:items.length, orderSchemaVersion:2, updatedAt:now };
-                // Rules validate this against all co-committed supply, demand and
-                // (for warehouse purchases) stock and movement records.
-                const quickPurchaseEvidence={itemIndex,supplyId:supplyRef.id,supplyQty:nextSupplyQty,
-                    demandDocId:demandRef?.id||'',inventoryId:invRef?.id||'',warehouseStockId:whRef?.id||'',movementId:incomingMovementRef?.id||''};
                 tx.update(orderRef, {items, itemCount:items.length, orderSchemaVersion:2,
-                    quickPurchaseEvidence,...orderWorkIndexFields(savedOrder), updatedAt:now});
+                    ...orderWorkIndexFields(savedOrder), updatedAt:now});
             } else {
                 savedOrder = order;
             }
