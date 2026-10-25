@@ -14,7 +14,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261025-6">
+        <link rel="stylesheet" href="styles.css?v=20261025-8">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -1074,14 +1074,18 @@
                 </div>
             </div>
             <section class="order-entry-section">
-                <h4>客戶與商品</h4>
+                <h4>客戶</h4>
                 <div class="form-grid">
                     <div id="orderOwnerWrap" style="display:none"><label for="orderOwnerUid">負責業務</label><select id="orderOwnerUid" onchange="orderDeliveryOwnerChanged()"><option value="">請選擇負責業務</option></select></div>
                     <div class="order-entry-wide"><label for="orderCustomer">客戶名稱</label><input type="text" id="orderCustomer" list="orderCustomerSuggestions" autocomplete="off" required oninput="queueCustomerMasterSuggestions(this.value); orderDeliveryCustomerTyping()" onchange="loadOrderCustomerAddresses()"><datalist id="orderCustomerSuggestions"></datalist></div>
+                </div>
+            </section>
+            <section class="order-entry-section">
+                <h4>商品</h4><div class="form-grid">
                     <div class="order-entry-wide"><label for="orderItemCode">貨號／產品</label><input type="text" id="orderItemCode" list="priceModelList" oninput="onOrderItemCodeInput(this)" onchange="onOrderItemCodeChange(this)"><div id="orderEntryProductSummary" class="order-entry-summary" aria-live="polite"></div><div id="orderProductCheckStatus" role="status" class="order-product-check-status"></div><div id="orderWarehouseStockHint" class="product-stock-hint no-print" role="status" aria-live="polite" hidden></div></div>
-                    <div><label for="orderQty">數量</label><input type="number" id="orderQty" min="0" step="any" value="1" required oninput="calcOrderTotal()"></div>
-                    <div><label for="orderUnitPrice">含稅售價</label><input type="number" id="orderUnitPrice" min="0" step="any" required placeholder="請確認售價，免費品可填 0" oninput="calcOrderTotal()"></div>
-                    <div><label for="orderTotalPrice">含稅總價</label><input type="number" id="orderTotalPrice" readonly></div>
+                    <div class="order-entry-number"><label for="orderQty">數量</label><input type="number" id="orderQty" min="0" step="any" value="1" required oninput="calcOrderTotal()"></div>
+                    <div class="order-entry-number"><label for="orderUnitPrice">含稅售價</label><input type="number" id="orderUnitPrice" min="0" step="any" required placeholder="可填 0" oninput="calcOrderTotal()"></div>
+                    <div class="order-entry-wide order-entry-subtotal"><label for="orderTotalPrice">本品項小計（含稅）</label><input type="number" id="orderTotalPrice" readonly aria-label="本品項含稅小計"></div>
                 </div>
                 <details class="order-entry-details" id="orderProductDetails"><summary>產品詳細資訊</summary><div class="form-grid">
                     <div><label for="orderItemName">中文品名</label><input type="text" id="orderItemName" oninput="refreshOrderEntrySummary()"></div>
@@ -1092,23 +1096,24 @@
                 </div></details>
             </section>
             <section class="order-entry-section">
-                <h4>採購方式</h4><div class="form-grid">
+                <h4>訂貨與交付</h4><div class="form-grid">
                     <div class="order-entry-wide"><label for="orderProcurementType">由誰訂貨</label><select id="orderProcurementType" onchange="onOrderProcurementTypeChange(true)"><option value="PURCHASING_PO">交由採購</option><option value="SALES_SELF_ORDER">業務自行訂貨</option></select></div>
                     <div id="orderSelfStatusWrap" hidden class="order-entry-wide"><span>自行訂貨進度</span><input type="hidden" id="orderSelfOrderConfirmed" value="pending"><div id="orderSelfStatusText" class="order-entry-summary" role="status"></div></div>
                     <div id="orderSelfSupplierWrap" style="display:none;"><label for="orderSelfSupplier">供應商 <span id="orderSelfSupplierRequired" hidden aria-hidden="true">＊</span></label><input type="text" id="orderSelfSupplier" placeholder="供應商名稱"></div>
                     <div id="orderCostFieldWrap" style="display:none;"><label for="orderCostPrice">含稅單位成本 <span id="orderCostPriceRequired" hidden aria-hidden="true">＊</span></label><input type="number" id="orderCostPrice" min="0" step="any" inputmode="decimal" placeholder="可先留白"><small id="orderSelfCostHint" hidden>確認已下訂時必填；無成本可填 0。</small></div>
                 </div>
-            </section>
-            <section class="order-entry-section order-shipping-details">
-                <h4>交付方式</h4>
+                <div class="order-shipping-details">
+                <h5>交付方式</h5>
                 <label for="orderDeliveryChoice">由誰送客戶</label><select id="orderDeliveryChoice" onchange="onOrderDeliveryChoiceChange()"><option value="BUSINESS">我送客戶</option><option value="CUSTOMER">倉庫寄客戶</option><option value="DIRECT">原廠直接送客戶</option></select>
                 <input type="hidden" id="orderFulfillmentType" value="WAREHOUSE"><input type="hidden" id="orderWarehouse" value="">
                 <div id="orderEntryDeliverySummary" class="order-entry-summary" aria-live="polite"></div>
-                <details class="order-entry-details" id="orderRecipientDetails"><summary>查看／修改交付與收件資訊</summary><div id="orderShippingFields"></div></details>
+                <details class="order-entry-details" id="orderRecipientDetails"><summary>收件資訊</summary><div id="orderShippingFields"></div></details>
+                </div>
             </section>
-            <div class="order-entry-add"><button type="button" class="btn-secondary" onclick="addCurrentOrderItemToDraft()">加入下一品項</button><span>每個品項會保留當時的訂貨與交付設定。</span></div>
+            <div class="order-entry-add"><button type="button" class="btn-secondary" onclick="addCurrentOrderItemToDraft()">加入品項</button><span>加入後可繼續填寫下一個品項。</span></div>
             <div id="orderProductCheckSummary" role="status"></div>
             <div class="table-wrap" id="newOrderItemsWrap" style="display:none;"><table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>數量</th><th>單價</th><th>產品狀態</th><th>訂貨／交付</th><th>操作</th></tr></thead><tbody id="newOrderItemsBody"></tbody></table></div>
+            <section class="order-entry-section"><h4>其他資訊</h4>
             <details class="order-entry-details" id="orderTradeDetails" open><summary>交易與發票資訊</summary><div class="form-grid">
                 <div><label for="orderTransactionType">交易方式 <span aria-hidden="true">*</span></label><select id="orderTransactionType" required aria-required="true" onchange="document.getElementById('orderInvoiceTitle').disabled = this.value !== '直'"><option value="">請選擇交易方式</option><option value="直">直（開發票）</option><option value="借">借（不開發票）</option><option value="扣">扣（扣寄款）</option></select></div>
                 <div><label>發票抬頭</label><input type="text" id="orderInvoiceTitle" disabled></div>
@@ -1118,7 +1123,8 @@
 
                 <div class="order-entry-wide"><label for="orderRemarks">備註</label><textarea id="orderRemarks" rows="2"></textarea></div>
             </div></details>
-            <div class="order-entry-actions"><button type="button" id="saveNewOrderBtn" onclick="saveNewOrder()">建立訂單</button><button type="button" class="btn-secondary" onclick="closeOrderModal()">返回</button></div>
+            </section>
+            <div class="order-entry-actions"><button type="button" id="saveNewOrderBtn" onclick="saveNewOrder()">建立訂單</button><button type="button" class="btn-secondary" onclick="closeOrderModal()">取消</button></div>
         </div>
     </div>
 
