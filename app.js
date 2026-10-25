@@ -12539,6 +12539,7 @@ window.renderOrdersList = function() {
     const searchInput = document.getElementById('orderSearch');
     if (!tbody || !searchInput) return;
 
+    const openedDetails=new Set([...tbody.querySelectorAll('details.order-detail-panel[open]')].map(panel=>panel.dataset.orderId));
     const canManageOrderOps = currentUserRole === 'purchaser' || currentUserRole === 'admin';
     const canEditOrders = canEditPage('orders.list');
     const canManageOrderLifecycle = canManageOrderLifecycleCapability();
@@ -12585,6 +12586,8 @@ window.renderOrdersList = function() {
 
     baseOrders.forEach(o => {
         const allOrderItems = normalizedItemsByOrder.get(o.id) || [];
+        const detailsEditable=globalThis.YushinOrderCommercialDetails.canEdit(o)&&!window.orderCommercialEditPending?.has(o.id);
+        const detailsLocked=!globalThis.YushinOrderCommercialDetails.beforeReceipt(o);
         const lifecycle = lifecyclesByOrder.get(o.id) || orderLifecycleInfo(o, allOrderItems);
         const dispatchStateByItem = dispatchStatesByOrder.get(o.id) || new Map();
         const displayCategoriesByItem = new Map(
@@ -12626,16 +12629,16 @@ window.renderOrdersList = function() {
             <td class="order-customer-cell" data-th="客戶名稱"><div class="record-reference">客戶訂單${o.orderNo ? `・${escapeHtml(o.orderNo)}` : o.quoteNo ? `・來源估價單 ${escapeHtml(o.quoteNo)}` : ''}</div>${o.customerName ? `<button type="button" class="btn-small btn-secondary" onclick="showCustomerOrderHistory(${inlineJsValue(o.customerName)})">${escapeHtml(o.customerName)}</button>` : ''}</td>
             <td class="order-sales-cell" data-th="負責業務">${escapeHtml(stripPhoneSuffix(o.salesName))}</td>
             <td data-th="產品資訊" class="order-product-cell">${orderItems.map((item,index)=>{const displayCategories=displayCategoriesByItem.get(item)||[];const primaryStatus=displayCategories[0]||'ordering';const itemStatus=['dispatch','shipping'].includes(activeOrderWorkFilter)&&displayCategories.includes(activeOrderWorkFilter)?activeOrderWorkFilter:primaryStatus;const itemStatusMap={ordering:'待採購',arrival:'待到貨',dispatch:'待打單',shipping:'已打單',billing:'待核銷',complete:'已完成',closed:lifecycle.label};const waiting=primaryStatus==='arrival'?waitingDaysFromDate(item.orderedAt):'';const state=dispatchStateByItem.get(item)||itemDispatchState(o,item);const parallelDispatch=primaryStatus!=='dispatch'&&state.pending>0;return `<div style="${index?'margin-top:5px;padding-top:5px;border-top:1px solid #eee;':''}"><strong>${escapeHtml(item.itemName || '－')}</strong><small>${escapeHtml(item.brand || '未分類')}${item.itemCode ? `・${escapeHtml(item.itemCode)}` : ''}・${activeOrderWorkFilter==='shipping'?`已打單 ${state.shippable}／訂單數量 ${Number(item.orderedQty||item.qty||0)}`:activeOrderWorkFilter==='dispatch'?`待打單 ${state.pending}／訂單數量 ${Number(item.orderedQty||item.qty||0)}`:Number(item.orderedQty||item.qty||0)}</small><small class="order-item-work-status">訂單狀態：<span class="order-progress-badge">${escapeHtml(((lifecycle.status==='normal'&&orderInventorySyncIncomplete(o)) ? (o.inventoryReservationStatus==='failed'?'庫存同步未完成':'庫存同步中…') : ((String(item.productType||'').trim().toUpperCase()==='SERVICE'&&lifecycle.status==='normal'&&primaryStatus==='delivery'?'待服務處理':(lifecycle.status==='normal'&&globalThis.YushinWarehouseLogistics?.shippingStatus(o,item,state)))||itemStatusMap[itemStatus]||'待採購')))}</span>${waiting?`・已等 ${escapeHtml(waiting)}`:''}${parallelDispatch&&itemStatus!=='dispatch'?`・另有 ${escapeHtml(state.pending)} 待打單`:''}${state.shippable>0?`・已有 ${escapeHtml(state.shippable)} 可出貨`:''}</small>${window.serviceCaseVerifiedItemHint?.(o.id,item)||''}</div>`}).join('')}</td>
-            <td data-th="訂單總額" class="order-money-cell"><strong>NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice ?? '').replace(/,/g, '')) || 0).toLocaleString())}</strong><small>${o.isBilled ? '已核銷' : '未核銷'}</small></td>
+            <td data-th="訂單金額" class="order-money-cell"><strong>NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice ?? '').replace(/,/g, '')) || 0).toLocaleString())}</strong>${globalThis.YushinOrderCommercialDetails.amountLines(allOrderItems).map(line=>`<small>${allOrderItems.length>1?escapeHtml(line.name)+'：':''}單價 NT$ ${escapeHtml(line.unit.toLocaleString())} × ${escapeHtml(line.qty)} ＝ NT$ ${escapeHtml(line.total.toLocaleString())}</small>`).join('')}<small>${o.isBilled ? '已核銷' : '未核銷'}</small></td>
             <td class="order-details-cell">
-                <div class="order-text-summary">${escapeHtml([o.transactionType ? `交易：${o.transactionType}` : '', o.invoiceTitle || '', o.isBilled && orderBillingDate(o) ? `核銷日期：${orderBillingDate(o)}` : '', o.remarks || ''].filter(Boolean).join('・'))}</div>
-                <details class="order-detail-panel">
-                    <summary>查看明細${canEditOrders ? '／編輯' : ''}</summary>
+                <details class="order-detail-panel" data-order-id="${escapeAttr(o.id)}" ${openedDetails.has(o.id)?'open':''}>
+                    <summary>查看明細${window.orderCommercialEditPending?.has(o.id)?'（儲存中…）':detailsEditable ? '／編輯' : ''}</summary>
                     <div class="order-detail-content">
-                        <div class="order-item-prices">${allOrderItems.map(item => `<div>${escapeHtml(item.itemName || item.itemCode || '品項')}：NT$ ${escapeHtml(Number(item.unitPrice || 0).toLocaleString())} × ${escapeHtml(Number(item.orderedQty || item.qty || 0))}</div>`).join('')}</div>
+                        <div class="order-item-prices">${allOrderItems.map(item => `<div><strong>${escapeHtml(item.itemName||item.itemCode||'品項')}</strong><div>採購方式：${escapeHtml(globalThis.YushinOrderCommercialDetails.procurementLabel(item))}</div><div>交付方式：${escapeHtml(globalThis.YushinOrderEntry.deliveryLabel({fulfillmentType:item.fulfillmentType,deliveryPlan:item.deliveryPlan||o.shippingInstructions||{}}))}</div>${canEditOrders&&lifecycle.status==='normal'&&!detailsLocked&&(currentUserRole==='admin'||o.ownerUid===currentUser?.uid||canReceiveInventoryCapability())&&!globalThis.YushinOrderCommercialDetails.itemMoved(item)?`<button type="button" class="btn-small btn-secondary" onclick="openWarehouseDeliveryPlan(${inlineJsValue(o.id)},${inlineJsValue(item.itemId)})">修改交付方式／地址</button>`:''}</div>`).join('')}</div>
+                        ${detailsLocked?'<small>已到貨或進入交付流程，訂單交付設定、交易方式及訂單備註已鎖定。</small>':''}
             ${canManageOrderOps ? `
             <div class="no-print order-cost-profit-cell"><label>單位成本</label><input type="number" step="0.01" class="order-cost-input" data-order-id="${o.id}" ${(o.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER' ? 'readonly title="標準成本由產品成本資料帶入"' : ''} value="${o.procurementType === 'SALES_SELF_ORDER' ? (o.costPrice == null ? '' : Number(Number(o.costPrice).toFixed(2))) : ''}" oninput="updateOrderProfitDisplay('${o.id}', this.value)" onchange="updateOrderField('${o.id}','costPrice', this.value === '' ? null : parseFloat(this.value))"><small>毛利：<span id="orderProfit_${o.id}">${formatProfitPercent(o.unitPrice, o.costPrice)}</span></small></div>` : ''}
-            <div class="order-transaction-cell"><label>交易資訊</label>
+            <div class="order-transaction-cell"><label>交易方式</label>
                 <select onchange="updateOrderField('${o.id}','transactionType',this.value)">
                     <option value="" ${!o.transactionType ? 'selected' : ''}>未選擇</option>
                     <option value="直" ${o.transactionType === '直' ? 'selected' : ''}>直</option>
@@ -12645,7 +12648,7 @@ window.renderOrdersList = function() {
                 ${o.transactionType === '直' ? `<input type="text" aria-label="發票抬頭" placeholder="發票抬頭" value="${escapeAttr(o.invoiceTitle || '')}" onchange="updateOrderField('${o.id}','invoiceTitle',this.value)">` : ''}
                 ${o.isBilled ? `<label class="order-invoice-date-label">核銷日期<input type="date" aria-label="核銷日期" ${allOrderItems.some(item=>String(item.productType||'').trim().toUpperCase()==='SERVICE')&&(!window.serviceBillingDateEnabled?.(o)||billingPending)?'disabled title="目前無法修改服務核銷日期"':''} value="${escapeAttr(orderBillingDate(o))}" onchange="updateOrderBillingDate('${o.id}',this.value)"></label>` : ''}
             </div>
-            <label class="order-remarks-editor">備註<input type="text" value="${escapeAttr(o.remarks || '')}" placeholder="備註" onchange="updateOrderField('${o.id}','remarks',this.value)"></label>
+            <label class="order-remarks-editor">訂單備註<input type="text" value="${escapeAttr(o.remarks || '')}" placeholder="訂單備註" onchange="updateOrderField('${o.id}','remarks',this.value)"></label>
                     </div>
                 </details>
             </td>
@@ -12670,11 +12673,14 @@ window.renderOrdersList = function() {
                 </div>
             </td>
         `;
-        if (!canEditOrders) {
-            tr.querySelectorAll('.order-transaction-cell select, .order-transaction-cell input, .order-remarks-editor input').forEach(control => {
+        if (!detailsEditable) {
+            tr.querySelectorAll('.order-transaction-cell select, .order-transaction-cell input:not([type="date"]), .order-remarks-editor input').forEach(control => {
                 control.disabled = true;
                 control.setAttribute('aria-readonly', 'true');
             });
+        }
+        if (!canEditOrders) {
+            tr.querySelectorAll('.order-transaction-cell input[type="date"]').forEach(control=>{control.disabled=true;});
             tr.querySelectorAll('.order-more-menu-popover button').forEach(button => {
                 const action = button.getAttribute('onclick') || '';
                 if (!action.includes('openOrderStatusHistory(')) button.remove();
@@ -21780,7 +21786,36 @@ window.saveOrderLifecycleStatus = async function() {
 
 // Customer return mutations are owned by modules/customer-cancellations.js.
 
+window.orderCommercialEditPending=new Set();
+async function updateOrderCommercialField(orderId,field,value){
+    if(!['transactionType','invoiceTitle','remarks'].includes(field)||typeof value!=='string')return;
+    if(window.orderCommercialEditPending.has(orderId))return;
+    const cached=ordersCache.find(order=>order.id===orderId);
+    if(!cached||!globalThis.YushinOrderCommercialDetails.canEdit(cached)){alert('這筆訂單已到貨、進入交付流程，或目前帳號無法修改。');renderOrdersList();return;}
+    if(field==='transactionType'&&!['直','借','扣'].includes(value)){alert('請選擇直、借或扣。');renderOrdersList();return;}
+    const uid=currentUser?.uid,role=currentUserRole,prior=cached[field]??'';
+    if(String(prior)===String(value??''))return;
+    const history={field,label:{transactionType:'修改交易方式',invoiceTitle:'修改發票抬頭',remarks:'修改訂單備註'}[field],before:prior,after:value??'',by:currentUserName||currentUser?.email||'未知使用者',at:new Date().toISOString()};
+    window.orderCommercialEditPending.add(orderId);renderOrdersList();
+    try{
+        const saved=await runRoleTransaction(async tx=>{
+            const ref=db.collection('orders').doc(orderId),snapshot=await tx.get(ref);
+            if(uid!==currentUser?.uid||role!==currentUserRole)throw Error('登入身分已變更，請重新開啟訂單。');
+            if(!snapshot.exists)throw Error('找不到這筆訂單。');
+            const order=snapshot.data();
+            if((order[field]??'')===value)return order;
+            if(!globalThis.YushinOrderCommercialDetails.canEdit(order))throw Object.assign(Error('訂單已到貨或進入交付流程，不能修改。'),{latestOrder:order});
+            if((order[field]??'')!==prior)throw Object.assign(Error('這個欄位已被其他人修改，已更新為最新資料，請重新確認。'),{latestOrder:order});
+            tx.update(ref,{[field]:value,fieldEditHistory:firebase.firestore.FieldValue.arrayUnion(history)});
+            return {...order,[field]:value,fieldEditHistory:[...(order.fieldEditHistory||[]),history]};
+        });
+        if(uid===currentUser?.uid&&role===currentUserRole){cached[field]=saved[field];cached.fieldEditHistory=saved.fieldEditHistory||[];showActionFeedback('訂單資料已儲存。');}
+    }catch(err){if(err.latestOrder&&uid===currentUser?.uid&&role===currentUserRole)Object.assign(cached,err.latestOrder);alert(productOperationErrorMessage('訂單資料更新',err));}
+    finally{window.orderCommercialEditPending.delete(orderId);if(uid===currentUser?.uid&&role===currentUserRole)renderOrdersList();}
+}
+
 window.updateOrderField = function(orderId, field, value) {
+    if(['transactionType','invoiceTitle','remarks'].includes(field))return updateOrderCommercialField(orderId,field,value);
     const o = ordersCache.find(x => x.id === orderId);
     if (!o || !canEditPage('orders.list')) return;
     if (field === 'costPrice' && (o.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER') {

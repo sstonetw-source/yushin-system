@@ -3587,6 +3587,7 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
     #ordersTable .order-money-cell strong { font-size:16px; }
     #ordersTable .order-money-cell small { margin:0 0 0 auto; }
     #ordersTable .order-detail-content .order-cost-input { width:100%; }
+    #ordersTable .order-detail-content :is(input:not([type="checkbox"]), select, button) { min-height:44px; }
 }
 
 @media print {

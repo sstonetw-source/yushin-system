@@ -16,7 +16,9 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
    const items=[{itemId:'I',itemName:'檢測',productType:'SERVICE',qty:2,orderedQty:2},{itemId:'J',itemName:'校正',productType:'SERVICE',qty:2,orderedQty:2}];
    let ordersCache=[{id:'O',orderNo:'YS-1',customerName:'驗收客戶',items,totalPrice:400,isBilled:false}],activeOrderWorkFilter='all';
    const orderHistorySearchActive=false,orderHistorySearchResults=[],orderHistorySearchLoading=false,orderWorkQueueReady=true,orderWorkQueueError='';
-   const pendingDeliveryOrderIds=new Set(),pendingOrderStatusKeys=new Set();
+   const pendingDeliveryOrderIds=new Set(),pendingOrderStatusKeys=new Set(),pendingLifecycleOrderIds=new Set();
+   const canReceiveInventoryCapability=()=>['admin','purchaser','warehouse'].includes(currentUserRole);
+   const loadVisibleProductCost=async()=>null,findPriceItemForOrder=()=>null,formatProfitPercent=()=>'';
    const canEditPage=()=>true,canManageOrderLifecycleCapability=()=>false,populatePurchaserOrderFilters=()=>[],normalizedOrderItems=o=>o.items;
    const itemDispatchState=()=>({pending:0,shippable:0}),orderLifecycleInfo=()=>({status:'normal'}),renderOrderWorkCards=()=>{},orderItemDisplayCategories=()=>['delivery'];
    const deliveryProgressInfo=()=>({state:'pending'}),orderContextActionState=()=>({}),orderDeliveryRequiresItemForm=()=>false,bindListRowSelection=()=>{};
@@ -29,6 +31,8 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
    const commitServiceCaseIntent=()=>{throw Error('Unexpected write');};
   `});
   await page.addScriptTag({content:read('src/features/orders/service-cases.js')});
+  await page.addScriptTag({content:read('modules/order-commercial-details.js')});
+  await page.addScriptTag({content:read('modules/order-entry-core.js')});
   await page.addScriptTag({content:renderer});
   await page.evaluate(()=>{renderOrdersList();});
   assert.equal(await page.locator('.service-case-verified-hint').count(),0);
@@ -43,6 +47,25 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
   await page.evaluate(()=>{renderOrdersList();renderOrdersList();});assert.equal(await page.evaluate(()=>reads),1);
   await page.locator('button[onclick="closeServiceCases()"]').click();
   assert.equal(await product.evaluate(el=>el.scrollWidth<=el.clientWidth),true);
+  await page.evaluate(()=>{
+   ordersCache=[{id:'G',ownerUid:'U',salesName:'業務',customerName:'金額驗收',totalPrice:339000,transactionType:'直',remarks:'冷藏配送',status:'active',
+    items:[{itemId:'G1',itemName:'RNeasy Mini Kit',itemCode:'74104',brand:'Qiagen',qty:30,orderedQty:30,unitPrice:11300,receivedQty:0,procurementType:'PURCHASING_PO',deliveryPlan:{mode:'PICKUP'}}]}];renderOrdersList();
+  });
+  const amount=page.locator('.order-money-cell');assert.equal(await amount.getAttribute('data-th'),'訂單金額');assert.match(await amount.innerText(),/11,300 × 30 ＝ NT\$ 339,000/);
+  await page.locator('.order-detail-panel summary').click();
+  const details=page.locator('.order-detail-panel');assert.match(await details.innerText(),/採購方式：採購統一訂貨/);assert.match(await details.innerText(),/交付方式：我送・主倉自領/);
+  assert.equal(await details.locator('.order-remarks-editor input').inputValue(),'冷藏配送');assert.equal(await details.locator('.order-transaction-cell select').isDisabled(),false);
+  await page.evaluate(()=>renderOrdersList());assert.equal(await details.getAttribute('open'),'');
+  if(width===390)assert.equal(await details.locator('select, input').evaluateAll(nodes=>nodes.every(n=>n.getBoundingClientRect().height>=44)),true);
+  for(const role of ['sales','engineer','purchaser','warehouse','admin']){
+   await page.evaluate(role=>{currentUserRole=role;trueUserRole=role;renderOrdersList();},role);
+   assert.equal(await details.locator('.order-remarks-editor input').isDisabled(),['purchaser','warehouse'].includes(role));
+  }
+  await page.evaluate(()=>{currentUserRole='sales';trueUserRole='sales';ordersCache[0].items[0].receivedQty=1;renderOrdersList();});
+  assert.equal(await details.locator('.order-remarks-editor input').isDisabled(),true);assert.equal(await details.locator('.order-transaction-cell select').isDisabled(),true);
+  assert.equal(await details.getByRole('button',{name:'修改交付方式／地址'}).count(),0);assert.match(await details.innerText(),/已鎖定/);
+  if(width===390)assert.equal(await page.locator('#ordersTable').evaluate(el=>el.scrollWidth<=el.clientWidth+1),true);
+  await page.screenshot({path:'/tmp/order-amount-details-'+width+'.png',fullPage:true});
   if(process.env.SERVICE_PROGRESS_SCREENSHOT_DIR){fs.mkdirSync(process.env.SERVICE_PROGRESS_SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:require('node:path').join(process.env.SERVICE_PROGRESS_SCREENSHOT_DIR,'service-progress-'+width+'.png'),fullPage:true});}
   assert.deepEqual(errors,[]);console.log('Service item progress '+width+'px: original renderer, per-item results, no render-triggered reads or writes.');
   await page.close();
