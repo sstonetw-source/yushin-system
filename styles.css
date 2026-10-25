@@ -4412,3 +4412,23 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
 .customer-return-receipt-form select, .customer-return-receipt-form textarea, .customer-return-receipt-form input:not([type="checkbox"]) { width:100%; min-width:0; box-sizing:border-box; }
 .customer-return-receipt-form textarea { min-height:72px; }
 #customerReturnReceiptStatus { overflow-wrap:anywhere; }
+
+/* Order / purchasing work lists: consistent information hierarchy; screen only. */
+@media screen {
+    #appContainer :is(#order-system, #purchasing-system) .order-work-card small { font-size:12px; line-height:1.5; white-space:normal; overflow-wrap:anywhere; }
+    #appContainer :is(#purchasePendingBody, #purchaseDispatchBody, #purchaseCompletedBody) strong { display:block; font-size:14px; line-height:1.5; overflow-wrap:anywhere; }
+    #appContainer :is(#purchasePendingBody, #purchaseDispatchBody, #purchaseCompletedBody) .purchase-item-description { display:block; margin-top:4px; font-size:12px; line-height:1.5; color:var(--ys-muted); overflow-wrap:anywhere; }
+    #appContainer .purchase-item-description:empty { display:none; }
+    #appContainer #ordersTable .order-product-cell strong { font-size:14px; line-height:1.5; }
+    #appContainer #ordersTable :is(.order-product-cell, .order-money-cell) small { font-size:12px; line-height:1.5; }
+}
+@media screen and (max-width:768px) {
+    #appContainer :is(#purchaseDispatchBody, #purchaseCompletedBody) > tr { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 12px; }
+    #appContainer :is(#purchaseDispatchBody, #purchaseCompletedBody) > tr > td { display:block; width:auto; min-width:0; box-sizing:border-box; padding:8px 0; }
+    #appContainer :is(#purchaseDispatchBody, #purchaseCompletedBody) td[data-th]::before { content:attr(data-th) "："; display:block; margin-bottom:3px; }
+    #appContainer :is(#purchaseDispatchBody, #purchaseCompletedBody) td:is([data-th="客戶"], [data-th="待打單品項"], [data-th="已完成採購品項"], [data-th="操作"], [colspan]) { grid-column:1/-1; }
+    #appContainer :is(#purchaseDispatchBody, #purchaseCompletedBody) td[data-th="客戶"] { grid-row:1; font-weight:600; }
+    #appContainer :is(#purchaseDispatchBody, #purchaseCompletedBody) td[data-th="操作"]::before { display:none; }
+    #appContainer :is(#purchaseDispatchBody, #purchaseCompletedBody) td button { min-height:44px; max-width:100%; white-space:normal; }
+    #appContainer #purchasePendingBody td[colspan] { grid-column:1/-1; }
+}
