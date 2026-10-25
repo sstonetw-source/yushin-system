@@ -3090,3 +3090,49 @@ test('actual incoming checkpoint rejects forged purchaser UI role and disabled t
  await seed('users/buyer1',{role:'purchaser',active:false});
  await assert.rejects(f.run(),e=>e.code==='permission-denied');assert.deepEqual(await f.read(),before);
 });
+
+test('purchaser Quick Purchase needs same-commit supply, demand, stock and movement evidence',async()=>{
+ const order={ownerUid:'sales1',salesCode:'S01',createdByUid:'sales1',
+  items:[{itemId:'I1',productId:'p-order',qty:5,shortageQty:5,supplyOrderedQty:0,
+   fulfillmentType:'WAREHOUSE',warehouseId:'W1'}]};
+ const at='2026-10-25T00:00:00.000Z',date='2026-10-25',id='manual-quick-I1',internalNo='MO-1';
+ const demandId='SALES_ORDER:quick:I1';
+ const lineEvent={id:id+':2',type:'PURCHASING_MANUAL',at,date,qty:2,documentNo:internalNo,by:'Buyer'};
+ const supply={type:'PURCHASING_MANUAL',sourceType:'SALES_ORDER',sourceId:'quick',sourceItemId:'I1',
+  orderId:'quick',itemId:'I1',orderItemIndex:0,ownerUid:'sales1',salesCode:'S01',
+  productId:'p-order',productKey:'p-order',internalNo,demandId,
+  supplier:'Vendor',unitCost:20,qty:2,receivedQty:0,incomingRegisteredQty:2,
+  fulfillmentType:'WAREHOUSE',warehouseId:'W1',lastOrderedAt:date,
+  orderEvents:[{qty:2,createdAt:at,createdByUid:'buyer1',createdBy:'Buyer'}]};
+ const demand={sourceType:'SALES_ORDER',sourceId:'quick',sourceItemId:'I1',sourceItemIndex:0,demandId,
+  productKey:'p-order',ownerUid:'sales1',salesCode:'S01',
+  requestedQty:5,orderedQty:2,receivedQty:0,remainingToOrderQty:3,remainingToReceiveQty:2,status:'PARTIALLY_ORDERED'};
+ const proof={items:[{...order.items[0],supplyOrderedQty:2,manualOrderNos:[internalNo],orderedAt:date,
+   orderEvents:[lineEvent]}],itemCount:1,orderSchemaVersion:2,updatedAt:at,
+   quickPurchaseEvidence:{itemIndex:0,supplyId:id,supplyQty:2,inventoryId:'p-order',
+    warehouseStockId:'W1__p-order',movementId:'quick-M'}};
+ const movement={type:'purchase_incoming',sourceType:'SUPPLY_ORDER',sourceId:id,
+  productKey:'p-order',warehouseId:'W1',qty:2,actorUid:'buyer1'};
+ const put=({uid='buyer1',complete=true,wrongQty=false}={})=>{
+  const client=db(uid),batch=writeBatch(client);
+  batch.set(doc(client,'supplyOrders/'+id),supply);
+  batch.set(doc(client,'procurementDemands/'+demandId),demand);
+  if(complete){batch.update(doc(client,'inventory/p-order'),{incoming:2});
+   batch.update(doc(client,'warehouseStocks/W1__p-order'),{incoming:2});
+   batch.set(doc(client,'inventoryMovements/quick-M'),movement);}
+  batch.update(doc(client,'orders/quick'),wrongQty?{...proof,items:[{...proof.items[0],supplyOrderedQty:3}]}:proof);
+  return batch.commit();
+ };
+ await seed('orders/quick',order);
+ await seed('inventory/p-order',{productKey:'p-order',productId:'p-order',onHand:0,reserved:0,incoming:0});
+ await seed('warehouseStocks/W1__p-order',{productKey:'p-order',productId:'p-order',warehouseId:'W1',onHand:0,reserved:0,incoming:0});
+ await assertFails(put({uid:'sales1'}));
+ await assertFails(put({uid:'eng1'}));
+ await assertFails(put({wrongQty:true}));
+ await assertFails(put({complete:false}));
+ await assertSucceeds(put());
+ const docAfter=await getDoc(doc(db('buyer1'),'orders/quick'));
+ assert.equal(docAfter.data().items[0].supplyOrderedQty,2);
+ const invAfter=await getDoc(doc(db('buyer1'),'inventory/p-order'));
+ assert.equal(invAfter.data().incoming,2);
+});

@@ -409,6 +409,120 @@ service cloud.firestore {
         && held.orderId == orderId && held.itemId == item.itemId && held.warehouseId == item.warehouseId
         && held.quantity == item.reservedQty && held.shortageQty == item.shortageQty;
     }
+    // Narrow purchaser-only manual order workflow. Never allow audit fields
+    // through the broad purchaser item whitelist without linked evidence.
+    function purchaserQuickPurchaseOrderUpdate(orderId) {
+      let b = resource.data;
+      let a = request.resource.data;
+      let e = a.get('quickPurchaseEvidence', {});
+      let index = e.get('itemIndex', -1);
+      return purchaser() && e.keys().hasAll(['itemIndex','supplyId','supplyQty','inventoryId','warehouseStockId','movementId'])
+        && e.keys().hasOnly(['itemIndex','supplyId','supplyQty','inventoryId','warehouseStockId','movementId'])
+        && index is int && index >= 0 && index < b.get('items', []).size()
+        && a.get('items', []).size() == b.items.size()
+        && e.get('supplyId', '') is string && e.supplyId.size() > 0
+        && e.get('supplyQty', -1) is number && e.supplyQty > 0
+        && a.diff(b).affectedKeys().hasOnly(['items','itemCount','orderSchemaVersion',
+          'quickPurchaseEvidence','workCategories','workCategoryUpdatedAt','updatedAt'])
+        && a.get('itemCount', -1) == b.items.size() && sameCommercialOwner() && preservesCreator()
+        && purchaserQuickPurchaseItemProof(orderId,index,e);
+    }
+    function purchaserQuickPurchaseItemProof(orderId,index,e) {
+      let b = resource.data;
+      let a = request.resource.data;
+      let oldItem = b.items[index];
+      let item = a.items[index];
+      let supplyPath = /databases/$(database)/documents/supplyOrders/$(e.supplyId);
+      let beforeSupply = exists(supplyPath) ? get(supplyPath).data : {};
+      let supply = getAfter(supplyPath).data;
+      let delta = supply.get('qty', 0) - beforeSupply.get('qty', 0);
+      let prevEvents = oldItem.get('orderEvents', []);
+      let events = item.get('orderEvents', []);
+      let oldNos = oldItem.get('manualOrderNos', []);
+      let newNos = item.get('manualOrderNos', []);
+      return oldItem.get('itemId', '') != ''
+        && a.items.removeAll([item]) == b.items.removeAll([oldItem])
+        && item.diff(oldItem).affectedKeys().hasOnly(['supplyOrderedQty','manualOrderNos','orderedAt','orderEvents'])
+        && item.get('itemId', '') == oldItem.itemId
+        && supply.get('type', '') == 'PURCHASING_MANUAL'
+        && supply.get('sourceType', '') == 'SALES_ORDER'
+        && supply.get('orderId', '') == orderId && supply.get('sourceId', '') == orderId
+        && supply.get('itemId', '') == oldItem.itemId && supply.get('sourceItemId', '') == oldItem.itemId
+        && supply.get('orderItemIndex', -1) == index
+        && supply.get('ownerUid', '') == b.get('ownerUid', '')
+        && supply.get('salesCode', '') == b.get('salesCode', '')
+        && supply.get('productKey', '') == oldItem.get('productId', oldItem.get('inventoryProductKey', ''))
+        && supply.get('receivedQty', 0) == beforeSupply.get('receivedQty', 0)
+        && delta > 0 && e.supplyQty == supply.qty
+        && item.get('supplyOrderedQty', 0) == oldItem.get('supplyOrderedQty', 0) + delta
+        && item.supplyOrderedQty <= oldItem.get('qty', 0)
+        && oldNos is list && newNos is list
+        && supply.get('internalNo', '') != ''
+        && newNos == (oldNos.hasAny([supply.internalNo]) ? oldNos : oldNos + [supply.internalNo])
+        && item.get('orderedAt', '') == (oldItem.get('orderedAt', '') != ''
+            && oldItem.orderedAt < supply.get('lastOrderedAt', '') ? oldItem.orderedAt : supply.get('lastOrderedAt', ''))
+        && prevEvents is list && events is list && events.size() == prevEvents.size() + 1
+        && events.removeAll([events[events.size()-1]]) == prevEvents
+        && purchaserQuickPurchaseEventProof(events[events.size()-1],supply,e.supplyId,delta)
+        && purchaserQuickPurchaseDemandProof(orderId,oldItem.itemId,supply,delta)
+        && (supply.get('fulfillmentType', 'WAREHOUSE') == 'DIRECT_SHIP'
+          ? e.get('inventoryId', '') == '' && e.get('warehouseStockId', '') == ''
+            && e.get('movementId', '') == '' && supply.get('incomingRegisteredQty', 0) == 0
+          : purchaserQuickPurchaseStockProof(e,supply,beforeSupply));
+    }
+    function purchaserQuickPurchaseEventProof(event,supply,supplyId,delta) {
+      let events = supply.get('orderEvents', []);
+      return events is list && events.size() > 0
+        && event.get('id', '') == supplyId + ':' + string(supply.qty)
+        && event.get('type', '') == 'PURCHASING_MANUAL'
+        && event.get('qty', -1) == delta
+        && event.get('date', '') == supply.get('lastOrderedAt', '')
+        && event.get('documentNo', '') == supply.get('internalNo', '')
+        && event.get('at', '') == events[events.size()-1].get('createdAt', '')
+        && event.get('by', '') == events[events.size()-1].get('createdBy', '')
+        && events[events.size()-1].get('createdByUid', '') == request.auth.uid
+        && events[events.size()-1].get('qty', -1) == delta;
+    }
+    function purchaserQuickPurchaseDemandProof(orderId,itemId,supply,delta) {
+      let id = 'SALES_ORDER:' + orderId + ':' + itemId;
+      let path = /databases/$(database)/documents/procurementDemands/$(id);
+      let oldDoc = exists(path) ? get(path).data : {};
+      let nextDoc = getAfter(path).data;
+      return supply.get('demandId', '') == id
+        && nextDoc.get('demandId', '') == id
+        && nextDoc.get('orderedQty', -1) == oldDoc.get('orderedQty', 0) + delta
+        && nextDoc.get('receivedQty', -1) == oldDoc.get('receivedQty', 0)
+        && nextDoc.get('sourceType', '') == 'SALES_ORDER'
+        && nextDoc.get('sourceId', '') == orderId && nextDoc.get('sourceItemId', '') == itemId;
+    }
+    function purchaserQuickPurchaseStockProof(e,supply,beforeSupply) {
+      let invPath = /databases/$(database)/documents/inventory/$(e.inventoryId);
+      let whPath = /databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId);
+      let mvPath = /databases/$(database)/documents/inventoryMovements/$(e.movementId);
+      let prevInv = exists(invPath) ? get(invPath).data : {};
+      let nextInv = getAfter(invPath).data;
+      let prevWh = exists(whPath) ? get(whPath).data : {};
+      let nextWh = getAfter(whPath).data;
+      let move = getAfter(mvPath).data;
+      let qty = supply.get('incomingRegisteredQty', 0) - beforeSupply.get('incomingRegisteredQty', 0);
+      return e.get('inventoryId', '') != '' && e.get('warehouseStockId', '') != ''
+        && e.get('movementId', '') != '' && !exists(mvPath)
+        && qty > 0 && move.get('qty', -1) == qty
+        && move.get('type', '') == 'purchase_incoming'
+        && move.get('sourceType', '') == 'SUPPLY_ORDER' && move.get('sourceId', '') == e.supplyId
+        && move.get('actorUid', '') == request.auth.uid
+        && move.get('productKey', '') == supply.get('productKey', '')
+        && move.get('warehouseId', '') == supply.get('warehouseId', '')
+        && nextInv.get('productId', '') == supply.get('productId', '')
+        && nextWh.get('productKey', '') == supply.get('productKey', '')
+        && nextWh.get('warehouseId', '') == supply.get('warehouseId', '')
+        && nextInv.get('onHand', 0) == prevInv.get('onHand', 0)
+        && nextInv.get('reserved', 0) == prevInv.get('reserved', 0)
+        && nextWh.get('onHand', 0) == prevWh.get('onHand', 0)
+        && nextWh.get('reserved', 0) == prevWh.get('reserved', 0)
+        && nextInv.get('incoming', -1) == prevInv.get('incoming', 0) + qty
+        && nextWh.get('incoming', -1) == prevWh.get('incoming', 0) + qty;
+    }
     function purchaserOrderWorkflowUpdate(id) {
       return purchaser()
         && (operationalItemsOnly(purchasingItemFields()) || purchaserInitialLocationItems(id))
@@ -1739,7 +1853,7 @@ service cloud.firestore {
         : userRole in ['sales','engineer'] && changed.hasAny(['isBilled','billingDate'])
           && changed.hasOnly(['isBilled','billingDate','statusHistory','updatedAt',
             'status','workCategories','workCategoryUpdatedAt']) ? owns(resource.data)
-        : userRole == 'purchaser' ? (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) && warehouseDeliveryPlanUpdate()) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['warehouseLogisticsId','warehouseLogisticsEventId']) && warehouseLogisticsOrderUpdate(id)) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id)) || purchaserOrderWorkflowUpdate(id) || returnReceiptOrderUpdate(id)
+        : userRole == 'purchaser' ? (changed.hasAny(['quickPurchaseEvidence']) && purchaserQuickPurchaseOrderUpdate(id)) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) && warehouseDeliveryPlanUpdate()) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['warehouseLogisticsId','warehouseLogisticsEventId']) && warehouseLogisticsOrderUpdate(id)) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id)) || purchaserOrderWorkflowUpdate(id) || returnReceiptOrderUpdate(id)
         : userRole == 'warehouse' ? (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) && warehouseDeliveryPlanUpdate()) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['warehouseLogisticsId','warehouseLogisticsEventId']) && warehouseLogisticsOrderUpdate(id)) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id)) || warehouseOrderWorkflowUpdate() || returnReceiptOrderUpdate(id)
         : userRole in ['sales', 'engineer'] && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId'])
           && (changed.hasOnly(['returnRequests', 'returnPending', 'returnRequestMutationIndex', 'updatedAt'])
