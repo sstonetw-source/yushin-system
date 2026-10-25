@@ -68,18 +68,21 @@ function updateProductSearchControls() {
     if (input) input.disabled = false;
     const browseButton = document.getElementById('productManagementBrowseBtn');
     if (browseButton) browseButton.disabled = !selected || productManagementSearchInProgress;
+    const frequentButton = document.getElementById('productManagementFrequentBtn');
+    if (frequentButton) frequentButton.disabled = !selected || productManagementSearchInProgress;
     if (button) button.disabled = productManagementSearchInProgress || !String(input?.value || '').trim();
 }
 
 window.onProductSearchBrandChange = function() {
     clearProductManagementSearch();
     updateProductSearchControls();
+    return loadFrequentProducts(document.getElementById('productManagementSearchBrand')?.value);
 };
 
 let productSearchOtherBrandsExpanded = false;
 window.selectProductSearchBrand = function(brand) {
     const field = document.getElementById('productManagementSearchBrand');
-    if (!field || field.value === brand) return;
+    if (!field) return;
     field.value = brand;
     onProductSearchBrandChange();
 };
@@ -500,8 +503,10 @@ function productManagementRow(product, duplicate = false) {
       <td data-th="類型">${escapeHtml(product.productType || product.category || '未分類')}</td>
       <td data-th="規格">${escapeHtml(product.specification || product.spec || '')}</td>
       <td data-th="建議售價">${price ? price.toLocaleString() : '－'}</td>
-      <td data-th="狀態">${inactive ? '停用' : duplicate ? '重複主檔・請核對' : escapeHtml(status === 'TEMPORARY' ? '待補主檔' : '啟用')}</td>
+      <td data-th="狀態">${product.isFrequentlySold === true ? '常賣・' : ''}${inactive ? '停用' : duplicate ? '重複主檔・請核對' : escapeHtml(status === 'TEMPORARY' ? '待補主檔' : '啟用')}</td>
       <td data-th="操作" class="no-print product-management-actions">
+        ${productId ? `<button type="button" class="btn-small btn-secondary" onclick="copyProductInformation(${inlineJsValue(productId)}, this)">複製資訊</button>` : ''}
+        ${productId && canManagePendingProductMaster() ? `<button type="button" class="btn-small btn-secondary" ${inactive && !product.isFrequentlySold ? 'disabled' : ''} onclick="setProductFrequentlySold(${inlineJsValue(productId)}, ${product.isFrequentlySold !== true}, this)">${product.isFrequentlySold === true ? '移出常賣' : '設為常賣'}</button>` : ''}
         ${productId ? `<button type="button" class="btn-small btn-secondary" onclick="openProduct360(${inlineJsValue(productId)})">庫存</button>` : ''}
         ${canManagePendingProductMaster() ? `<button type="button" class="btn-small btn-secondary" onclick="openProductMasterEditor(${inlineJsValue(productId)})">編輯</button>` : ''}
         ${canDelete ? `<button type="button" class="btn-small btn-danger" onclick="deleteProductMaster(${inlineJsValue(productId)})">刪除</button>` : ''}
@@ -684,6 +689,12 @@ function updateProductManagementMoreButton() {
     const button = document.getElementById('productManagementMoreBtn');
     if (!row || !button) return;
 
+    if (productManagementSourceMode === 'frequent') {
+        row.style.display = productFrequentActive?.state.hasMore ? '' : 'none';
+        button.disabled = productManagementSearchInProgress;
+        button.textContent = '載入更多常賣品項（20 筆）';
+        return;
+    }
     if (productManagementSourceMode === 'brand') {
         row.style.display = productBrandBrowseHasMore ? '' : 'none';
         button.disabled = productManagementSearchInProgress;
@@ -709,6 +720,7 @@ function updateProductManagementMoreButton() {
 }
 
 function renderProductManagementResults() {
+    if(productManagementSourceMode==='frequent')productManagementResults=productManagementResults.filter(row=>isVisibleFrequentProduct(row,productFrequentActive?.brand));
     setProductManagementTableMode('products');
     const body = document.getElementById('productManagementBody');
     if (!body) return;
@@ -729,6 +741,7 @@ function renderProductManagementResults() {
 }
 
 window.loadMoreProductManagementResults = async function() {
+    if (productManagementSourceMode === 'frequent') { await loadFrequentProducts(productFrequentActive?.brand, true); return; }
     if (productManagementSourceMode === 'search') { await searchProductManagement(true); return; }
     if (productManagementSourceMode === 'brand') {
         if (!productBrandBrowseHasMore || productManagementSearchInProgress) return;
@@ -1054,6 +1067,8 @@ window.setProductMasterActive = async function(productId, active) {
         await db.collection('products').doc(id).set(patch, { merge:true });
 
         const next = { ...product, ...patch, productId:product.productId || id };
+        invalidateProductFrequentCache();
+        productManagementSearchCache.clear();
         cacheProductLookupItem(productMasterDocToPriceItem({ id, data:() => next }));
         if (!active) productManagementSelection.delete(id);
 
@@ -1169,6 +1184,8 @@ window.deleteProductMaster = async function(productId) {
         batch.delete(db.collection('productCosts').doc(id));
         await batch.commit();
 
+        invalidateProductFrequentCache();
+        productManagementSearchCache.clear();
         productManagementSelection.delete(id);
         productManagementResults = productManagementResults.filter(item => (item.productId || item.id) !== id);
         priceList = priceList.filter(item => (item.productId || stableProductId(item)) !== id);
@@ -1225,13 +1242,15 @@ async function findDuplicateProductMaster(brand, code, excludeId = '') {
 }
 
 function syncSavedProductMaster(productId, record) {
+    invalidateProductFrequentCache();
     cacheProductLookupItem(productMasterDocToPriceItem({id:productId,data:()=>record}));
     productManagementSearchCache.clear();
     productManagementSearchGeneration++;
     productBrandBrowseGeneration++;
     productManagementSearchInProgress=false;
     productManagementActiveSearch=null;
-    const next={id:productId,...record};
+    const existing=productManagementResults.find(item=>(item.productId||item.id)===productId);
+    const next={id:productId,isFrequentlySold:existing?.isFrequentlySold===true,...record};
     const index=productManagementResults.findIndex(item=>(item.productId||item.id)===productId);
     if(index>=0)productManagementResults[index]=next;
     else productManagementResults.unshift(next);

@@ -66,6 +66,8 @@ jobs:
         run: node tests/free-stock-recovery-browser-smoke.js
       - name: Check reconciled product search and margin privacy in desktop and mobile Chrome
         run: node tests/pr-reconciliation-browser-smoke.js
+      - name: Check company frequent products and public copy in desktop and mobile Chrome
+        run: node tests/frequent-products-browser-smoke.js
       - name: Check authoritative lot display and batch search in desktop and mobile Chrome
         run: node tests/inventory-lot-browser-smoke.js
       - name: Check shared dispatch preparation and cross-page retries in desktop and mobile Chrome

@@ -3090,3 +3090,18 @@ test('actual incoming checkpoint rejects forged purchaser UI role and disabled t
  await seed('users/buyer1',{role:'purchaser',active:false});
  await assert.rejects(f.run(),e=>e.code==='permission-denied');assert.deepEqual(await f.read(),before);
 });
+
+test('company frequently sold products keep existing product-manager permissions and sale-only lookup',async()=>{
+ await seed('products/frequent',{productId:'frequent',brandName:'Brand',productName:'Frequent',listPrice:100,isFrequentlySold:false,status:'ACTIVE',active:true});
+ await seed('productCosts/frequent',{standardCost:55});
+ for(const uid of ['sales1','eng1','wh1']){
+  await assertFails(updateDoc(doc(db(uid),'products/frequent'),{isFrequentlySold:true}));
+  await assertFails(getDoc(doc(db(uid),'productCosts/frequent')));
+ }
+ for(const uid of ['admin','buyer1']){
+  await assertSucceeds(updateDoc(doc(db(uid),'products/frequent'),{isFrequentlySold:true}));
+  const rows=await assertSucceeds(getDocs(query(collection(db('sales1'),'products'),where('isFrequentlySold','==',true),where('brandName','==','Brand'),orderBy('__name__'),limit(20))));
+  assert.equal(rows.size,1);assert.equal(rows.docs[0].data().listPrice,100);assert.equal(rows.docs[0].data().standardCost,undefined);
+  await assertSucceeds(updateDoc(doc(db(uid),'products/frequent'),{isFrequentlySold:false}));
+ }
+});

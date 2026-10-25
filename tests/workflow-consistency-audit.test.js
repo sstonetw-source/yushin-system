@@ -136,7 +136,7 @@ test('shared duplicate check finds same-brand product after first fifty exact-co
  assert.equal(await c.findDuplicateProductMaster('Target','A','50'),null);
 });
 test('saved product synchronizes product page and invalidates old search results without extra database reads',()=>{
- let rendered=0,lookup;const c=vm.createContext({productManagementResults:[],productManagementSearchCache:new Map([['old',[]]]),productManagementSearchGeneration:2,productBrandBrowseGeneration:3,productManagementSearchInProgress:true,productManagementActiveSearch:'old',
+ let rendered=0,lookup;const c=vm.createContext({invalidateProductFrequentCache(){},productManagementResults:[],productManagementSearchCache:new Map([['old',[]]]),productManagementSearchGeneration:2,productBrandBrowseGeneration:3,productManagementSearchInProgress:true,productManagementActiveSearch:'old',
   productMasterDocToPriceItem:d=>({...d.data(),productId:d.id}),cacheProductLookupItem:item=>lookup=item,renderProductManagementResults:()=>rendered++,updateProductSearchControls(){},updateProductManagementMoreButton(){}});
  vm.runInContext(section('function syncSavedProductMaster(', 'window.saveProductMasterEditor ='),c);
  c.syncSavedProductMaster('P',{productName:'New'});c.syncSavedProductMaster('P',{productName:'Updated'});

@@ -35,7 +35,7 @@ test('empty matches are cached; name, partial code and a different leading zero 
 test('primary brands are visible; other brands expand locally and selection enables search',()=>{
  const nodes={productManagementSearchBrand:{value:''},productSearchBrandButtons:{innerHTML:''},productManagementSearch:{value:''},productManagementSearchBtn:{}};
  const c=vm.createContext({window:{},document:{getElementById:id=>nodes[id]},productManagementSearchInProgress:false,
-  clearProductManagementSearch:()=>{},getUnifiedBrandEntries:()=>[{name:'Beckman',active:true},{name:'OtherVendor',active:true}],
+  loadFrequentProducts:()=>{},clearProductManagementSearch:()=>{},getUnifiedBrandEntries:()=>[{name:'Beckman',active:true},{name:'OtherVendor',active:true}],
   getPrimaryBrandNames:()=>['Beckman'],normalizeBrandLookupKey:s=>s.toLowerCase(),inlineJsValue:JSON.stringify,escapeHtml:s=>s});
  vm.runInContext(source.slice(source.indexOf('function updateProductSearchControls'),source.indexOf('async function ensureProductBrandBrowserLoaded')),c);
  c.renderProductBrandBrowser=c.window.renderProductBrandBrowser;c.onProductSearchBrandChange=c.window.onProductSearchBrandChange;
