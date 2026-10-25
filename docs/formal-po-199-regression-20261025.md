@@ -1,12 +1,12 @@
-# #199 正式採購後端接線回歸修正
+# #199 正式採購 GitHub Pages 入口修正
 
-基準：main `31911ff`。本批不部署、不啟用正式旗標、不改正式資料。
+基準：main `8ead3e98`。本批不部署、不啟用正式旗標、不改正式資料。
 
 ## 原因與修正
 
-最新 main 的服務整合版本遺失 #267 已合併的 production gate、前端接線及相關測試。一般正式採購仍使用會觸發 Rules 1000 expressions 的 Client 多文件交易。
+最新 main 已含 #267 的 production gate，但前端只接受 Firebase Hosting 網址，使用者既有 GitHub Pages 即使啟用正式旗標也會被拒絕。未啟用後端路徑時，一般正式採購仍使用會觸發 Rules 1000 expressions 的 Client 多文件交易。
 
-恢復獨立 `ENABLE_PRODUCTION_FORMAL_PURCHASE=true` 後端 gate 和 `YUSHIN_PRODUCTION_FORMAL_PURCHASE===true` 前端 gate；正式專案固定 `yu-shing-company`，禁止混用 Emulator。補允許既有 GitHub Pages `sstonetw-source.github.io/yushin-system`（含其下頁面），其他帳號、儲存庫及相似路徑拒絕。網址檢查只是環境防誤接，不作為授權來源。
+沿用獨立 `ENABLE_PRODUCTION_FORMAL_PURCHASE=true` 後端 gate 和 `YUSHIN_PRODUCTION_FORMAL_PURCHASE===true` 前端 gate；正式專案固定 `yu-shing-company`，禁止混用 Emulator。補允許既有 GitHub Pages `sstonetw-source.github.io/yushin-system`（含其下頁面），其他帳號、儲存庫及相似路徑拒絕。網址檢查只是環境防誤接，不作為授權來源。
 
 唯一後端仍為 `commitV2FormalPurchase`，在原子交易內讀目前 users 角色及停權狀態、來源商品／需求／供應、可採購量、PO 意圖與原文件版本。只允許 admin/purchaser，沿用原業務歸屬；其餘角色不新增權限。原單號同意圖可重試，未知回覆不回退 Client writer。
 
@@ -23,6 +23,6 @@
 
 - 建置一致性與 diff：通過。
 - 採購相關 Node 測試：63/63 通過。
-- 完整 Node 回歸：1835/1835 通過（後續僅測試名稱、註解與靜態快取版本更新）。
+- 完整 Node 回歸：同步最新 main 後待重新執行；前次基準 1835/1835 通過。
 - Firebase Emulator：執行中，以最終紀錄為準。
 - 實際瀏覽器／Preview／正式環境：尚未執行；完整 CI 尚未執行。#199 不得結案。

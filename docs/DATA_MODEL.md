@@ -1,5 +1,16 @@
 # DATA_MODEL — Firestore 集合與資料責任地圖
 
+## 2026-10-24｜目前有效決策：服務銷售與物料採購分開
+
+本節取代下文歷史紀錄中「材料耗用待完成」、跨單試劑分攤及零件耗用連結的要求。
+
+- 業務沿既有服務訂單記錄服務數量、售價與進度；服務數量屬銷售，不轉成試劑或零件數量。
+- 試劑與維修零件由採購直接發單，沿既有採購／收貨流程處理，不要求關聯服務訂單或案件。
+- 不新增耗用登記、領料入口、跨案材料分攤或另一套庫存帳；服務執行、完工、交付、核銷與重送均不觸發物料扣帳。
+- Bio-Plex 共用試劑不按服務單數扣整盒；維修完工不要求零件或採購憑證。
+- 實物收貨仍按原流程增加既有庫存；本流程不記錄使用量，因此帳面數量不代表開封後或實際使用後的剩餘量，也不據此計算逐張服務單材料毛利。
+- 商品銷售仍沿原商品預留、出貨及退貨流程；本決策不變更既有實貨交易、角色權限或服務完工證據。
+
 ## 2026-10-23｜服務核銷日期與工作分類原子同步（demo 試點，待本批 CI）
 
 原 SERVICE_BILLING_OPERATION 憑證的日期修改意圖增加 action=CHANGE_DATE、expectedBillingDate，結果帶 action；原核銷／撤銷沒有新增 action，意圖與 hash 格式保持完全相同，舊憑證和暫存可重試。日期改動寫 orders.billingDate／fieldEditHistory／updatedAt／workCategories／workCategoryUpdatedAt，加原 serviceCases 操作憑證；不增加 Collection、Rules、Query、Index、Listener 或另一份完成量。讀取沿原有界整單證據，確認後仍只多讀一次目前 orders。
@@ -502,7 +513,7 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 
 ### 服務案件資料責任（2026-10-22：設計／純 Core，尚非 Firestore 集合）
 
-純計算契約 `YushinServiceWork.projectServiceCase` 以 `{orderId, itemId, caseId, kind, events[]}` 接收一個可追溯案件；每個 `events[]` 元素包含不可變操作 `id`、`type`、`occurredAt`、`actorUid` 及該階段必要證據。相同訂單品項可有多個不同 `caseId`（例如多支 pipette 或多個檢體）。事件次序推導案件狀態與受託物位置，不能由商品 `deliveryRecords` 推定服務完成；Bio-Plex 的共用試劑及維修實際零件仍遵循既有 `inventory`、`inventoryLots`、`purchaseOrders` 和實際領用憑證。
+純計算契約 `YushinServiceWork.projectServiceCase` 以 `{orderId, itemId, caseId, kind, events[]}` 接收一個可追溯案件；每個 `events[]` 元素包含不可變操作 `id`、`type`、`occurredAt`、`actorUid` 及該階段必要證據。相同訂單品項可有多個不同 `caseId`（例如多支 pipette 或多個檢體）。事件次序推導案件狀態與受託物位置，不能由商品 `deliveryRecords` 推定服務完成；Bio-Plex 共用試劑及維修零件由採購獨立發單，沿既有 `inventory`、`inventoryLots`、`purchaseOrders` 收貨流程；不要求服務關聯或實際領用憑證，不新增耗用資料模型。
 
 **已寫但尚未接線：** `functions/service-case-service.js` 在單一 Admin SDK transaction 讀取授權帳號、來源訂單、Service 主檔及案件，僅對預定的 `serviceCases/{encode(orderId)|encode(itemId)|encode(caseId)}` 寫入事件與衍生狀態；固定 ID 重試保護、真角色與所有權查核；`occurredAt` 是實際作業時間，`createdAt/updatedAt` 是伺服器寫入時間。只有未匯出的寫入函式，**尚未建立正式可用的 Cloud Functions 入口，也未開放 Rules 讀取或部署**，所以此 Collection 不是目前正式 Firestore 中已存在的集合。
 
