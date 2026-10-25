@@ -1986,6 +1986,7 @@ service cloud.firestore {
       allow get: if operationalOrOwnedReader(resource == null ? null : resource.data);
       allow list: if operationalOrOwnedReader(resource.data);
       allow create: if canCreateCommercialDoc()
+        && request.resource.data.get('items', []).size() <= 10
         && validOrderTransactionType(request.resource.data)
         && validClientBillingCreate(request.resource.data)
         && validNewOrderSourceSync(id)
@@ -1994,8 +1995,8 @@ service cloud.firestore {
         && validOrderEmbeddedCost(request.resource.data);
       // Commercial owner edits commercial data; purchaser/warehouse must use scoped
       // workflow collections below instead of broad order mutation.
-      allow update: if (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['transactionType'])
-          || validOrderTransactionType(request.resource.data)) && orderUpdateAllowed(id);
+      // Transaction type validation is inside the scoped update paths, evaluated once.
+      allow update: if orderUpdateAllowed(id);
       allow delete: if admin();
     }
 

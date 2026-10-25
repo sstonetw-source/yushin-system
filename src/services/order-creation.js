@@ -36,6 +36,7 @@ async function commitOrderCreation(orderId,data,{actorUid=currentUser?.uid,actor
             // facts, not a modified/stale form, and never overwrite fulfillment progress.
             savedData=live;return;
         }
+        if((snapshot.items || []).length>10)throw new Error('每張訂單最多 10 個品項；請分成多張訂單後再儲存。');
         const tradeValidation=globalThis.YushinOrderEntry.validateTrade(snapshot,{requireInvoiceTitle:false});
         if(!tradeValidation.valid)throw new Error(tradeValidation.message);
         let forecastRef=null;

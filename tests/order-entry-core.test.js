@@ -28,7 +28,7 @@ function validationFixture(current=item,drafts=[]) {
  const nodes={orderOwnerUid:{value:'sales'},orderCustomer:{value:'台大',focus(){}},orderItemCode:{focus(){},scrollIntoView(){}},orderRecipientDetails:{open:false},orderTradeDetails:{open:false},orderTransactionType:{value:'借',focus(){}}};
  const alerts=[];
  const c=vm.createContext({window:{orderShippingInstructions:()=>({mode:'PICKUP'})},document:{getElementById:id=>nodes[id]},newOrderSaveInProgress:false,
-  currentOrderModalItem:()=>({...current}),newOrderDraftItems:drafts,YushinOrderEntry:core,YushinWarehouseLogistics:logistics,
+  currentOrderModalItem:()=>({...current}),MAX_ORDER_ITEMS:10,newOrderDraftItems:drafts,YushinOrderEntry:core,YushinWarehouseLogistics:logistics,
   currentUserRole:'sales',salesList:[{uid:'sales',name:'Sales'}],isSelectableCommercialOwner:()=>true,warehouseMasterCache:[{id:'MAIN'}],orderItemProductStatus:()=> 'matched',assertOrderItemCount(){},
   alert:s=>alerts.push(s),editNewOrderDraftItem:i=>nodes.edited=i});
  const start=source.indexOf('window.saveNewOrder = function()');const end=source.indexOf('    items.forEach(item=>{delete item.productCheckStatus;});',start);
@@ -85,7 +85,7 @@ test('adding a Service draft skips physical delivery fields; Goods and direct-sh
   const row={...item,productType,fulfillmentType,deliveryPlan:{mode:'CUSTOMER_SHIP'},warehouseId:'STALE'};
   const nodes={},drafts=[],alerts=[];
   const c=vm.createContext({window:{},document:{getElementById:id=>nodes[id]||(nodes[id]={dataset:{},value:''})},
-   currentOrderModalItem:()=>({...row}),newOrderDraftItems:drafts,YushinOrderEntry:core,YushinWarehouseLogistics:logistics,
+   currentOrderModalItem:()=>({...row}),MAX_ORDER_ITEMS:10,newOrderDraftItems:drafts,YushinOrderEntry:core,YushinWarehouseLogistics:logistics,
    orderItemProductStatus:()=> 'matched',alert:message=>alerts.push(message),renderNewOrderDraftItems(){},
    clearQuickProductButton(){},clearProductMatchChoices(){}});
   vm.runInContext(source.slice(start,end),c);c.window.addCurrentOrderItemToDraft();

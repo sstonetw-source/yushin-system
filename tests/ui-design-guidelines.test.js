@@ -43,7 +43,7 @@ test('all working modules show one consistent page title', () => {
         ['inventory-system', '倉庫'], ['equipment-system', '儀器'],
         ['purchasing-system', '採購'], ['admin-system', '管理員後台']
     ]) {
-        assert.ok(html.includes(`id="${id}" class="content-section">\n        <h2 class="workspace-page-title no-print">${title} <button type="button" class="page-help-trigger`), id);
+        assert.ok(html.replace('<div class="workflow-page-heading">','').includes(`id="${id}" class="content-section">\n        <h2 class="workspace-page-title no-print">${title} <button type="button" class="page-help-trigger`), id);
     }
     assert.ok(html.includes('id="quote-system" class="content-section active">'));
     assert.match(html, /<h2 class="workspace-page-title no-print">估價單 <button[^>]*data-page-help="quote-system"/);

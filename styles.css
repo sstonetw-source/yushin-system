@@ -4433,3 +4433,31 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
     #appContainer :is(#purchaseDispatchBody, #purchaseCompletedBody) td button { min-height:44px; max-width:100%; white-space:normal; }
     #appContainer #purchasePendingBody td[colspan] { grid-column:1/-1; }
 }
+
+/* Shared order/purchase list rhythm. Screen only; formal document print unchanged. */
+@media screen {
+ #appContainer :is(#order-system, #purchasing-system) :is(td, th) { vertical-align:top; }
+ #appContainer :is(#order-system, #purchasing-system) td[data-th="訂單日期"],
+ #appContainer :is(#order-system, #purchasing-system) td[data-th="負責業務"] { white-space:nowrap; }
+ #appContainer .workflow-product { text-align:left; line-height:1.5; }
+ #appContainer .workflow-product strong { display:block; }
+ #appContainer .workflow-quantity { display:block; margin-top:4px; color:var(--ys-muted); }
+ #appContainer .workflow-more { display:inline-block; position:relative; vertical-align:top; }
+ #appContainer .workflow-more summary { cursor:pointer; min-height:44px; box-sizing:border-box; list-style:none; }
+ #appContainer .workflow-more[open] > button { display:block; margin-top:8px; }
+ #appContainer :is(#order-system, #purchasing-system) :is(button, select, input:not([type="checkbox"])) { min-height:44px; }
+ #appContainer #purchaseDirectPanel { padding:0; border:0; background:transparent; margin-bottom:12px; }
+ #appContainer #purchaseDirectPanel .purchase-section-heading { display:none; }
+ #appContainer #purchaseReplenishmentPanel:has(#purchaseReplenishmentDetails[style*="display: none"]) { padding-block:12px; }
+ @media (max-width:600px) {
+  #appContainer :is(#order-system, #purchasing-system) td[data-th="訂單日期"],
+  #appContainer :is(#order-system, #purchasing-system) td[data-th="負責業務"] { white-space:normal; }
+  #appContainer .workflow-more { display:block; margin-top:8px; }
+ }
+}
+
+@media screen {
+ #appContainer .workflow-page-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+ #appContainer .workflow-page-heading #purchaseDirectPanel { margin:0; }
+ #appContainer .workflow-page-heading .workspace-page-title { margin-block:16px; }
+}
