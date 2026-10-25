@@ -14271,10 +14271,10 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button, recover
         if (document.getElementById('purchasing-system')?.classList.contains('active')) {
             renderPurchasingView();
         }
-        renderQuickPurchaseRecovery();
+        if(typeof renderQuickPurchaseRecovery==='function')renderQuickPurchaseRecovery();
         showActionFeedback('已採購，品項已列入待到貨，可繼續處理下一筆。', 'success');
     } catch (err) {
-        renderQuickPurchaseRecovery();
+        if(typeof renderQuickPurchaseRecovery==='function')renderQuickPurchaseRecovery();
         alert('切換為已採購失敗：' + err.message + '\n請確認目前這筆資料及連線／權限，重試前先查詢作業結果；若持續失敗，請聯絡管理員。');
     } finally {
         pendingPurchaseOrderKeys.delete(actionKey);
