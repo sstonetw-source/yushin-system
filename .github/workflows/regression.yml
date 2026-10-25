@@ -101,4 +101,4 @@ jobs:
       - name: Verify shipment, delivery correction and physical return receipt in Emulator
         run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --test tests/emulator-location-shipment.cjs"
       - name: Compile and test Firestore rules
-        run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --test tests/firestore-rules.test.js"
+        run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --max-old-space-size=4096 --test tests/firestore-rules.test.js"

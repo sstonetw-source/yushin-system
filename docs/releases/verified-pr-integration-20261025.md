@@ -12,9 +12,9 @@
 
 保留 main 已合併 #272 的估價單純文字標籤／Forecast 工具列、#275 地址文案，以及 #271 的 GitHub Pages 發布設定。處理前端版本、來源與 Rules 測試衝突；CI 加入所有測試腳本的語法檢查，不略過原有 Chrome、Auth、Functions、Firestore 或 Rules 驗收。
 
-## 未納入：#131
+## 第一批曾排除：#131
 
-實際 demo-yushin Firestore Emulator 重現五筆兩倉的運算預算問題；部分局部修正後，倉管全量釋放仍出現 1000 expressions／文件查核錯誤。未通過完整驗收，不可合併。保留原 Draft PR 及失敗證據；本整合的 ancestry 不包含 #131，不能將其標記為已合併或已解決。
+實際 demo-yushin Firestore Emulator 重現五筆兩倉的運算預算問題；部分局部修正後，倉管全量釋放仍出現 1000 expressions／文件查核錯誤。未通過完整驗收，不可合併。第一批 #277 不包含此提案。後續已在隔離 Emulator 找到並修正重複 exists/get、未異動兄弟列與舊巢狀憑證殘留，原 #131 接續獨立驗收；最新結果以其 head 完整 CI 為準，詳見 cross-warehouse-reservation-evidence-20261017.md。
 
 ## 發布界線
 

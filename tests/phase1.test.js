@@ -3937,8 +3937,10 @@ test('business reservation rules preserve reservation identity and narrow stock 
     const reservationStart=rulesSource.indexOf('match /inventoryReservations/{id}');
     const reservationEnd=rulesSource.indexOf('\n\n    match /inventoryLots/{id}',reservationStart);
     const reservationRule=rulesSource.slice(reservationStart,reservationEnd);
-    assert.match(reservationRule,/allow update: if validReservationSource\(id, request.resource.data\) && reservationIdentityUnchanged\(\)[\s\S]*?reservationUpdateWriter\(id\)/);
-    assert.match(rulesSource,/function reservationUpdateWriter\(id\)[\s\S]*?businessReservationOperationalUpdate\(\)/);
+    assert.match(reservationRule,/allow update: if reservationUpdateAllowed\(id\)/);
+    const updateGuard=rulesSource.slice(rulesSource.indexOf('function reservationUpdateAllowed(id)'),rulesSource.indexOf('function inventoryMovementWriter(id)'));
+    assert.match(updateGuard,/validReservationSource\(id, request.resource.data, userRole\)[\s\S]*?reservationIdentityUnchanged\(\)[\s\S]*?legacyReservationLocationShape\(resource.data\)[\s\S]*?reservationUpdateWriter\(id, userRole\)/);
+    assert.match(rulesSource,/function reservationUpdateWriter\(id, userRole\)[\s\S]*?businessReservationOperationalUpdate\(\)/);
 });
 
 
