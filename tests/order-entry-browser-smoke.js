@@ -49,11 +49,10 @@ const save=slice('window.saveNewOrder = function()','    items.forEach(item=>{de
    await page.evaluate(()=>{document.getElementById('orderModalOverlay').scrollTop=0;});
    await page.screenshot({path:path.join(process.env.ORDER_ENTRY_SCREENSHOT_DIR||'/tmp',`order-entry-default-${width}.png`),fullPage:true});
    await page.locator('#orderProcurementType').selectOption('SALES_SELF_ORDER');assert.equal(await page.locator('#orderSelfStatusWrap').isVisible(),true);
+   assert.equal(await page.locator('select#orderSelfOrderConfirmed, #orderSelfOrderConfirmed option').count(),0);
    assert.equal(await page.locator('#orderSelfOrderConfirmed').inputValue(),'confirmed');
-   await page.locator('#orderSelfOrderConfirmed').selectOption('pending');
-   await page.locator('#orderCostPrice').fill('');await page.locator('#orderSelfSupplier').fill('');await page.locator('#saveNewOrderBtn').click();assert.equal(await page.evaluate(()=>validated.items[0].selfOrderConfirmed),false);
-   await page.locator('#orderSelfOrderConfirmed').selectOption('confirmed');await page.locator('#saveNewOrderBtn').click();assert.equal(await page.locator('#orderSelfSupplier').evaluate(el=>el.validationMessage.length>0),true);
-   await page.locator('#orderSelfSupplier').fill('Vendor');await page.locator('#orderCostPrice').fill('0');await page.locator('#saveNewOrderBtn').click();assert.equal(await page.evaluate(()=>validated.items[0].costPrice),0);
+   await page.locator('#orderCostPrice').fill('');await page.locator('#orderSelfSupplier').fill('');await page.locator('#saveNewOrderBtn').click();assert.equal(await page.locator('#orderSelfSupplier').evaluate(el=>el.validationMessage.length>0),true);
+   await page.locator('#orderSelfSupplier').fill('Vendor');await page.locator('#orderCostPrice').fill('0');await page.locator('#saveNewOrderBtn').click();assert.equal(await page.evaluate(()=>validated.items[0].costPrice),0);assert.equal(await page.evaluate(()=>validated.items[0].selfOrderConfirmed),true);
    await page.locator('#orderDeliveryChoice').selectOption('DIRECT');await page.locator('#saveNewOrderBtn').click();assert.match(await page.evaluate(()=>alerts.at(-1)),/收件/);
    assert.equal(await page.locator('#orderRecipientDetails').isVisible(),true);
    await page.locator('#orderShippingContact').fill('客戶');await page.locator('#orderShippingPhone').fill('123');await page.locator('#orderShippingAddress').fill('台北市測試地址');await page.locator('#saveNewOrderBtn').click();
@@ -62,8 +61,8 @@ const save=slice('window.saveNewOrder = function()','    items.forEach(item=>{de
    const dimensions=await page.evaluate(()=>{const box=document.querySelector('#orderModalOverlay .eq-modal-box');return {box:box.clientWidth,scroll:box.scrollWidth,button:document.getElementById('saveNewOrderBtn').getBoundingClientRect().height};});assert.ok(dimensions.scroll<=dimensions.box+1,JSON.stringify(dimensions));assert.ok(dimensions.button>=44);
    await page.evaluate(()=>{document.getElementById('orderModalOverlay').scrollTop=0;});
    await page.screenshot({path:path.join(process.env.ORDER_ENTRY_SCREENSHOT_DIR||'/tmp',`order-entry-${width}.png`),fullPage:true});
-   for(const role of ['sales','engineer','admin','purchaser']){await page.evaluate(role=>{currentUserRole=role;syncOrderEntrySelfStatus();},role);assert.equal(await page.locator('#orderSelfOrderConfirmed').isDisabled(),role==='purchaser');}
-   console.log(`Browser ${width}px: product lookup, pending/confirmed self-order, direct shipment recipient and layout passed.`);
+   for(const role of ['sales','engineer','admin','purchaser']){await page.evaluate(role=>{currentUserRole=role;syncOrderEntrySelfStatus();},role);assert.equal(await page.locator('#orderSelfOrderConfirmed').isDisabled(),role==='purchaser');assert.equal(await page.locator('#orderSelfOrderConfirmed').inputValue(),role==='purchaser'?'pending':'confirmed');}
+   console.log(`Browser ${width}px: product lookup, automatic confirmed self-order and purchaser authority, direct shipment recipient and layout passed.`);
    await page.close();
   }
   assert.deepEqual(errors,[]);
