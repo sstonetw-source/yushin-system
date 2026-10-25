@@ -1517,8 +1517,9 @@ test('real Auth post-fulfillment receipt rejects corrupted evidence and current-
 
  const returnQuery=await db.collection('inventoryMovements').where('sourceId','==',x.orderId).where('action','==','location_customer_return').get();
  assert.equal(returnQuery.size,1);const returnDoc=returnQuery.docs[0],returnProof=returnDoc.data();
- for(const damage of ['ship-proof','return-proof','return-cache','projection']){
+ for(const damage of ['ship-proof','ship-debit-mismatch','return-proof','return-cache','projection']){
   if(damage==='ship-proof')await shipRef.delete();
+  if(damage==='ship-debit-mismatch')await shipRef.update({qty:shipProof.qty+1});
   if(damage==='return-proof')await returnDoc.ref.delete();
   if(damage==='return-cache')await sourceRef.update({returnRecords:[]});
   if(damage==='projection')await sourceRef.update({items:original.items.map(item=>({...item,warehouseShippedQty:3}))});
