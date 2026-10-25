@@ -15565,7 +15565,7 @@ async function commitQuickPurchase(orderId, itemId, purchaseDetails, actorUid=cu
                 // Rules validate this against all co-committed supply, demand and
                 // (for warehouse purchases) stock and movement records.
                 const quickPurchaseEvidence={itemIndex,supplyId:supplyRef.id,supplyQty:nextSupplyQty,
-                    inventoryId:invRef?.id||'',warehouseStockId:whRef?.id||'',movementId:incomingMovementRef?.id||''};
+                    demandDocId:demandRef?.id||'',inventoryId:invRef?.id||'',warehouseStockId:whRef?.id||'',movementId:incomingMovementRef?.id||''};
                 tx.update(orderRef, {items, itemCount:items.length, orderSchemaVersion:2,
                     quickPurchaseEvidence,...orderWorkIndexFields(savedOrder), updatedAt:now});
             } else {

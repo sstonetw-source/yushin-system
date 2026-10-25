@@ -416,11 +416,12 @@ service cloud.firestore {
       let a = request.resource.data;
       let e = a.get('quickPurchaseEvidence', {});
       let index = e.get('itemIndex', -1);
-      return purchaser() && e.keys().hasAll(['itemIndex','supplyId','supplyQty','inventoryId','warehouseStockId','movementId'])
-        && e.keys().hasOnly(['itemIndex','supplyId','supplyQty','inventoryId','warehouseStockId','movementId'])
+      return purchaser() && e.keys().hasAll(['itemIndex','supplyId','supplyQty','demandDocId','inventoryId','warehouseStockId','movementId'])
+        && e.keys().hasOnly(['itemIndex','supplyId','supplyQty','demandDocId','inventoryId','warehouseStockId','movementId'])
         && index is int && index >= 0 && index < b.get('items', []).size()
         && a.get('items', []).size() == b.items.size()
         && e.get('supplyId', '') is string && e.supplyId.size() > 0
+        && e.get('demandDocId', '') is string && e.demandDocId.size() > 0
         && e.get('supplyQty', -1) is number && e.supplyQty > 0
         && a.diff(b).affectedKeys().hasOnly(['items','itemCount','orderSchemaVersion',
           'quickPurchaseEvidence','workCategories','workCategoryUpdatedAt','updatedAt'])
@@ -462,7 +463,7 @@ service cloud.firestore {
         && prevEvents is list && events is list && events.size() == prevEvents.size() + 1
         && events.removeAll([events[events.size()-1]]) == prevEvents
         && purchaserQuickPurchaseEventProof(events[events.size()-1],supply,e.supplyId,delta)
-        && purchaserQuickPurchaseDemandProof(orderId,oldItem.itemId,supply,delta)
+        && purchaserQuickPurchaseDemandProof(orderId,oldItem.itemId,supply,delta,e.demandDocId)
         && (supply.get('fulfillmentType', 'WAREHOUSE') == 'DIRECT_SHIP'
           ? e.get('inventoryId', '') == '' && e.get('warehouseStockId', '') == ''
             && e.get('movementId', '') == '' && supply.get('incomingRegisteredQty', 0) == 0
@@ -481,9 +482,9 @@ service cloud.firestore {
         && events[events.size()-1].get('createdByUid', '') == request.auth.uid
         && events[events.size()-1].get('qty', -1) == delta;
     }
-    function purchaserQuickPurchaseDemandProof(orderId,itemId,supply,delta) {
+    function purchaserQuickPurchaseDemandProof(orderId,itemId,supply,delta,docId) {
       let id = 'SALES_ORDER:' + orderId + ':' + itemId;
-      let path = /databases/$(database)/documents/procurementDemands/$(id);
+      let path = /databases/$(database)/documents/procurementDemands/$(docId);
       let oldDoc = exists(path) ? get(path).data : {};
       let nextDoc = getAfter(path).data;
       return supply.get('demandId', '') == id

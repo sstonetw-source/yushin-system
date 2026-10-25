@@ -3096,7 +3096,7 @@ test('purchaser Quick Purchase needs same-commit supply, demand, stock and movem
   items:[{itemId:'I1',productId:'p-order',qty:5,shortageQty:5,supplyOrderedQty:0,
    fulfillmentType:'WAREHOUSE',warehouseId:'W1'}]};
  const at='2026-10-25T00:00:00.000Z',date='2026-10-25',id='manual-quick-I1',internalNo='MO-1';
- const demandId='SALES_ORDER:quick:I1';
+ const demandId='SALES_ORDER:quick:I1',demandDocId=encodeURIComponent(demandId);
  const lineEvent={id:id+':2',type:'PURCHASING_MANUAL',at,date,qty:2,documentNo:internalNo,by:'Buyer'};
  const supply={type:'PURCHASING_MANUAL',sourceType:'SALES_ORDER',sourceId:'quick',sourceItemId:'I1',
   orderId:'quick',itemId:'I1',orderItemIndex:0,ownerUid:'sales1',salesCode:'S01',
@@ -3109,14 +3109,14 @@ test('purchaser Quick Purchase needs same-commit supply, demand, stock and movem
   requestedQty:5,orderedQty:2,receivedQty:0,remainingToOrderQty:3,remainingToReceiveQty:2,status:'PARTIALLY_ORDERED'};
  const proof={items:[{...order.items[0],supplyOrderedQty:2,manualOrderNos:[internalNo],orderedAt:date,
    orderEvents:[lineEvent]}],itemCount:1,orderSchemaVersion:2,updatedAt:at,
-   quickPurchaseEvidence:{itemIndex:0,supplyId:id,supplyQty:2,inventoryId:'p-order',
+   quickPurchaseEvidence:{itemIndex:0,supplyId:id,supplyQty:2,demandDocId,inventoryId:'p-order',
     warehouseStockId:'W1__p-order',movementId:'quick-M'}};
  const movement={type:'purchase_incoming',sourceType:'SUPPLY_ORDER',sourceId:id,
   productKey:'p-order',warehouseId:'W1',qty:2,actorUid:'buyer1'};
  const put=({uid='buyer1',complete=true,wrongQty=false}={})=>{
   const client=db(uid),batch=writeBatch(client);
   batch.set(doc(client,'supplyOrders/'+id),supply);
-  batch.set(doc(client,'procurementDemands/'+demandId),demand);
+  batch.set(doc(client,'procurementDemands/'+demandDocId),demand);
   if(complete){batch.update(doc(client,'inventory/p-order'),{incoming:2});
    batch.update(doc(client,'warehouseStocks/W1__p-order'),{incoming:2});
    batch.set(doc(client,'inventoryMovements/quick-M'),movement);}
