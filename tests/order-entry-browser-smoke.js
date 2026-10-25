@@ -51,6 +51,14 @@ const save=slice('window.saveNewOrder = function()','    items.forEach(item=>{de
    await page.locator('#orderProcurementType').selectOption('SALES_SELF_ORDER');assert.equal(await page.locator('#orderSelfStatusWrap').isVisible(),true);
    assert.equal(await page.locator('select#orderSelfOrderConfirmed, #orderSelfOrderConfirmed option').count(),0);
    assert.equal(await page.locator('#orderSelfOrderConfirmed').inputValue(),'confirmed');
+   const layout=await page.evaluate(()=>{
+    const box=id=>document.getElementById(id).getBoundingClientRect();
+    return {heights:['orderCustomer','orderQty','orderUnitPrice','orderDeliveryChoice','orderProcurementType'].map(id=>box(id).height),supplier:box('orderSelfSupplier').top,cost:box('orderCostPrice').top,qty:box('orderQty').top,price:box('orderUnitPrice').top};
+   });
+   assert.ok(layout.heights.every(h=>h>=44&&h<=48),JSON.stringify(layout));
+   assert.equal(layout.qty,layout.price);
+   if(width===390)assert.ok(layout.cost>layout.supplier,JSON.stringify(layout));
+
    await page.locator('#orderCostPrice').fill('');await page.locator('#orderSelfSupplier').fill('');await page.locator('#saveNewOrderBtn').click();assert.equal(await page.locator('#orderSelfSupplier').evaluate(el=>el.validationMessage.length>0),true);
    await page.locator('#orderSelfSupplier').fill('Vendor');await page.locator('#orderCostPrice').fill('0');await page.locator('#saveNewOrderBtn').click();assert.equal(await page.evaluate(()=>validated.items[0].costPrice),0);assert.equal(await page.evaluate(()=>validated.items[0].selfOrderConfirmed),true);
    await page.locator('#orderDeliveryChoice').selectOption('DIRECT');await page.locator('#saveNewOrderBtn').click();assert.match(await page.evaluate(()=>alerts.at(-1)),/收件/);
