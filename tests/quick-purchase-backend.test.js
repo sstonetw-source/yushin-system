@@ -78,6 +78,9 @@ test('quick purchase backend commits one atomic supplier demand, order and incom
 test('quick purchase replay fails closed when source or incoming evidence is missing or altered',async()=>{
  const mutations=[
   x=>{x.records.get('orders/ORDER-1').items[0].orderEvents=[];},
+  x=>{x.records.delete('procurementDemands/'+encodeURIComponent(x.demandId));},
+  x=>{x.records.get('procurementDemands/'+encodeURIComponent(x.demandId)).sourceId='forged-order';},
+  x=>{x.records.get('procurementDemands/'+encodeURIComponent(x.demandId)).productKey='forged-product';},
   x=>{x.records.get('purchaseOperations/quick-'+x.data.operationId).movementId='wrong';},
   x=>{x.records.delete('inventoryMovements/quick-'+x.data.operationId);},
   x=>{x.records.get('inventoryMovements/quick-'+x.data.operationId).qty=3;},
@@ -160,7 +163,6 @@ test('quick purchase callable is strictly demo Emulator only and never touches p
  const result=await make(demo,x.db)({auth:{uid:'buyer'},data:x.data});
  assert.equal(result.status,'committed');
 });
-
 test('preview quick purchase remains disabled by default and cannot be used in production',async()=>{
  const preview={GCLOUD_PROJECT:'preview-20135',ENABLE_PREVIEW_QUICK_PURCHASE:'true'};
  assert.equal(allowPreviewQuickPurchase(preview),true);

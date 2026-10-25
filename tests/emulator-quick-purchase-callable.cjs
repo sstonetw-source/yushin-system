@@ -96,6 +96,19 @@ test('replayed purchase rejects corrupted supply-source identity without another
  assert.equal((await f.data('inventoryMovements/quick-'+intent.operationId)).qty,4);
  assert.equal((await f.data('purchaseOperations/quick-'+intent.operationId)).supplyId,first.supplyId);
 });
+test('real Callable replay rejects relinked demand with no second incoming movement',async()=>{
+ const f=await seeded('demand-proof'),intent=f.intent();
+ const first=(await f.call(intent)).data;
+ const demandRef=db.doc('procurementDemands/'+encodeURIComponent(f.demandId));
+ await demandRef.update({sourceId:'forged-order'});
+ await assert.rejects(f.call(intent),e=>e.code==='functions/failed-precondition');
+ assert.equal((await f.data('supplyOrders/'+first.supplyId)).qty,4);
+ assert.equal((await f.data('inventory/'+f.productId)).incoming,4);
+ assert.equal((await f.data('warehouseStocks/'+f.warehouseId+'__'+f.productId)).incoming,4);
+ assert.equal((await f.data('inventoryMovements/quick-'+intent.operationId)).qty,4);
+ assert.equal((await f.data('orders/'+f.orderId)).items[0].supplyOrderedQty,4);
+});
+
 test('real admin can purchase; sales and engineer cannot forge purchaser role',async()=>{
  const admin=await seeded('admin',{role:'admin'});
  assert.equal((await admin.call(admin.intent())).data.status,'committed');
@@ -181,4 +194,39 @@ test('real purchaser cannot order a sales-self-order item through privileged Cal
  assert.equal(await f.data('purchaseOperations/quick-'+f.intent().operationId),undefined);
  assert.equal((await f.data('inventory/'+f.productId)).incoming,0);
  assert.equal((await f.data('procurementDemands/'+encodeURIComponent(f.demandId))).orderedQty,0);
+});
+
+test('lost HTTP response after committed write: refreshed client retries same operation without a second purchase',async()=>{
+ const f=await seeded('lost-response'),intent=f.intent();
+ // Server committed, but the browser never receives the success response.
+ await f.call(intent);
+ const before={
+  order:(await f.data('orders/'+f.orderId)).items[0].supplyOrderedQty,
+  demand:(await f.data('procurementDemands/'+encodeURIComponent(f.demandId))).orderedQty,
+  inventory:(await f.data('inventory/'+f.productId)).incoming,
+  warehouse:(await f.data('warehouseStocks/'+f.warehouseId+'__'+f.productId)).incoming,
+  movement:await f.data('inventoryMovements/quick-'+intent.operationId),
+  operation:await f.data('purchaseOperations/quick-'+intent.operationId)
+ };
+ // Reload: a new Functions client uses the persisted operationId and exact intent.
+ const app=clientApp({apiKey:'fake-api-key',authDomain:project+'.firebaseapp.com',
+  projectId:project,appId:'quick-callable-reload'},'reload-'+f.uid);
+ clients.push(app);
+ const auth=getAuth(app);
+ connectAuthEmulator(auth,'http://127.0.0.1:9099',{disableWarnings:true});
+ await signInWithEmailAndPassword(auth,f.uid+'@example.test','EmulatorOnly!123456');
+ const functions=getFunctions(app,'asia-east1');
+ connectFunctionsEmulator(functions,'127.0.0.1',5001);
+ const retry=(await httpsCallable(functions,'commitV2QuickPurchase')(intent)).data;
+ assert.equal(retry.status,'already-applied');
+ assert.equal(retry.operationId,intent.operationId);
+ assert.equal(retry.committedQty,4);
+ assert.equal((await f.data('orders/'+f.orderId)).items[0].supplyOrderedQty,before.order);
+ assert.equal((await f.data('procurementDemands/'+encodeURIComponent(f.demandId))).orderedQty,before.demand);
+ assert.equal((await f.data('inventory/'+f.productId)).incoming,before.inventory);
+ assert.equal((await f.data('warehouseStocks/'+f.warehouseId+'__'+f.productId)).incoming,before.warehouse);
+ assert.deepEqual(await f.data('inventoryMovements/quick-'+intent.operationId),before.movement);
+ assert.deepEqual(await f.data('purchaseOperations/quick-'+intent.operationId),before.operation);
+ await assert.rejects(f.call({...intent,qty:3}),e=>e.code==='functions/already-exists');
+ assert.equal((await f.data('inventory/'+f.productId)).incoming,4);
 });
