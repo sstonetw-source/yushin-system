@@ -1747,7 +1747,7 @@ service cloud.firestore {
         && appendsLogisticsHistory(before, after)
         && ((!exists(path) && transfer.createdByUid == request.auth.uid
           && oldItem.get('transferPendingId', '') == ''
-        && (userRole in ['sales','engineer'] ? oldItem.get('qty', oldItem.get('orderedQty', 0)) > 0
+        && (role() in ['sales','engineer'] ? oldItem.get('qty', oldItem.get('orderedQty', 0)) > 0
           : oldItem.get('warehouseShippedQty', oldItem.get('deliveredQty', 0)) - oldItem.get('returnedQty', 0) < oldItem.get('qty', oldItem.get('orderedQty', 0)))
           && transfer.qty == oldItem.get('reservedQty', 0)
           && transfer.fromWarehouseId == oldItem.get('warehouseId', before.get('warehouseId', ''))
