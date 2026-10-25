@@ -258,6 +258,73 @@ async function siteNav(page,key){
  await page.locator('.nav-tab[data-main-nav="'+key+'"]').click();
 }
 
+// Original unchanged GitHub-served app.js, real signed-in Auth and original
+// pending-demand button/confirmation. No synthetic Service invocation.
+for(const width of [1280,390])test('original Quick Purchase '+width+'px commits once through guarded demo Callable',{timeout:180000},async()=>{
+ const fixture=await multiReceiptSiteFixture(width,'quick-original');
+ const context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}});
+ const page=await context.newPage(),calls=[],errors=[],external=[];
+ await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_QUICK_PURCHASE_EMULATOR=true;});
+ page.on('pageerror',error=>errors.push(error.message));
+ page.on('dialog',dialog=>dialog.accept());
+ await context.route('**/*',async route=>{
+  const request=route.request(),url=new URL(request.url());
+  if(!['localhost','127.0.0.1'].includes(url.hostname)){external.push(url.hostname);await route.abort();return;}
+  if(url.port==='5001'&&request.method()==='POST'&&url.pathname.endsWith('/commitV2QuickPurchase')){
+   const payload=request.postDataJSON().data,headers=await request.allHeaders();
+   assert.match(headers.authorization||'',/^Bearer /);
+   assert.equal(payload.actorUid,undefined);assert.equal(payload.actorRole,undefined);
+   calls.push(payload);
+  }
+  await route.continue();
+ });
+ try{
+  await siteOpen(page);await siteLogin(page,fixture.accounts.purchaser,'purchaser');
+  await siteNav(page,'purchasing');
+  await page.waitForFunction(orderId=>document.getElementById('purchasePendingBody')?.textContent?.includes(orderId),fixture.orderId);
+  const row=page.locator('#purchasePendingBody tr').filter({hasText:fixture.orderId}).filter({hasText:fixture.keys[0]}).first();
+  await row.getByRole('button',{name:'已採購',exact:true}).click();
+  await page.locator('#quickPurchaseConfirmationOverlay.active').waitFor({state:'visible'});
+  assert.equal(await page.locator('#quickPurchaseQty').inputValue(),'3');
+  await page.locator('#quickPurchaseSupplier').fill(fixture.supplierName);
+  await page.locator('#quickPurchaseCost').fill('19.99');
+  await page.locator('#quickPurchaseConfirmationOverlay button[onclick="confirmQuickPurchase()"]').click();
+  await page.waitForFunction(()=>document.getElementById('actionFeedback')?.textContent?.includes('已採購，品項已列入待到貨'),null,{timeout:45000});
+  assert.equal(calls.length,1,'original button must invoke exactly one authenticated Callable');
+  const intent=calls[0],supplyId='manual-'+encodeURIComponent(fixture.orderId)+'-I1';
+  assert.equal(intent.orderId,fixture.orderId);assert.equal(intent.itemId,'I1');
+  assert.equal(intent.qty,3);assert.equal(intent.supplier,fixture.supplierName);assert.equal(intent.unitCost,19.99);
+  assert.match(intent.operationId,/^qp-[A-Za-z0-9_-]{8,76}$/);
+  const demandId=require('../modules/procurement-demand-core').demandIdForSource({
+   sourceType:'SALES_ORDER',sourceId:fixture.orderId,sourceItemId:'I1'
+  });
+  const fetch=async(name,id)=>(await db.collection(name).doc(id).get()).data();
+  const supply=await fetch('supplyOrders',supplyId),demand=await fetch('procurementDemands',encodeURIComponent(demandId));
+  const order=await fetch('orders',fixture.orderId);
+  const inventory=await fetch('inventory',fixture.keys[0]);
+  const warehouse=await fetch('warehouseStocks',fixture.warehouses[0]+'__'+fixture.keys[0]);
+  const other=await fetch('warehouseStocks',fixture.warehouses[1]+'__'+fixture.keys[0]);
+  const movement=await fetch('inventoryMovements','quick-'+intent.operationId);
+  assert.equal(supply.qty,3);assert.equal(supply.unitCost,19.99);
+  assert.equal(demand.orderedQty,3);assert.equal(demand.remainingToOrderQty,0);
+  assert.equal(order.items[0].supplyOrderedQty,3);assert.equal(order.items[1].supplyOrderedQty||0,0);
+  assert.equal(inventory.incoming,3);assert.equal(warehouse.incoming,3);assert.equal(other.incoming,0);
+  assert.equal(inventory.onHand,0);assert.equal(warehouse.onHand,0);
+  assert.equal(movement.qty,3);assert.equal(movement.sourceId,supplyId);
+  const checkpoint=await page.evaluate(({uid,orderId})=>
+   sessionStorage.getItem('quick-purchase-pending:'+encodeURIComponent(uid)+':'+encodeURIComponent(orderId)+':I1'),
+   {uid:fixture.accounts.purchaser.uid,orderId:fixture.orderId});
+  assert.equal(checkpoint,null);
+  const replay=await page.evaluate(async data=>(await firebase.app().functions('asia-east1').httpsCallable('commitV2QuickPurchase')(data)).data,intent);
+  assert.equal(replay.status,'already-applied');assert.equal(replay.operationId,intent.operationId);
+  assert.equal((await fetch('inventory',fixture.keys[0])).incoming,3);
+  assert.equal((await fetch('warehouseStocks',fixture.warehouses[0]+'__'+fixture.keys[0])).incoming,3);
+  assert.equal((await fetch('orders',fixture.orderId)).items[0].orderEvents.length,1);
+  assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
+  console.log('Original Quick Purchase '+width+'px: purchaser, real UI/Callable, single supply/demand/incoming/movement and replay passed.');
+ }finally{await context.close();}
+});
+
 for(const width of [1280,390])test('mixed service and Goods original UI '+width+'px: real delivery, completion, billing and lost reply',{timeout:180000},async()=>{
  const tag='mixed-ui-'+width,orderId=tag+'-order',orderNo='YS-'+tag,key=tag+'-goods',serviceKey=tag+'-service';
  const accounts={};
@@ -546,8 +613,8 @@ for(const width of [1280,390])test('original service case UI '+width+'px: four k
  }catch(error){console.log('Service UI diagnostic',JSON.stringify(await page.evaluate(()=>({role:currentUserRole,message:document.getElementById('serviceCaseMessage')?.textContent,body:document.getElementById('serviceCaseBody')?.textContent}))),JSON.stringify({errors,dialogs:serviceDialogs}));throw error;}
  finally{await context.close();}
 });
-async function multiReceiptSiteFixture(width){
- const tag='multi-receipt-'+width,orderId=tag+'-order',keys=[tag+'-P',tag+'-Q'],warehouses=[tag+'-A',tag+'-B'],accounts={};
+async function multiReceiptSiteFixture(width,prefix='multi-receipt'){
+ const tag=prefix+'-'+width,orderId=tag+'-order',keys=[tag+'-P',tag+'-Q'],warehouses=[tag+'-A',tag+'-B'],accounts={};
  for(const role of ['purchaser','warehouse','sales']){
   const uid=tag+'-'+role,email=uid+'@example.test';await auth.createUser({uid,email,password});
   await db.collection('users').doc(uid).set({role,active:true,name:role,email,code:role==='sales'?'B':role});accounts[role]={uid,email};
