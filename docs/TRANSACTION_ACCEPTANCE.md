@@ -224,3 +224,11 @@ Workflow Core 也不再使用一般送貨紀錄、舊 deliveredQty 投影或單�
 - 已有客戶訂單實體品項的 1–5 列、倉庫入庫或原廠直送可參與試點；手動補貨、服務品項、超過五列及混合不符合者維持明確拒絕，不得臨時放寬後端驗證。產生文件與確認已採購仍是兩個動作。
 - 真 Auth demo Emulator 持續透過 `node tools/run-v2-return-auth-emulator.cjs` 測試同一 Preview adapter；本機 Node gate 測試包含正式專案拒絕、匿名／不同專案拒絕、原畫面接線及未知回覆。**仍須在實際 Preview 專案**取得登入角色、4/7 部分採購、重複提交、拒絕／回滾及來源／Supply／需求回讀證據，才可標記 Preview 已驗收。
 - 本批不得直接部署 `yu-shing-company`、啟動正式後端，或修改正式資料；#199 維持開啟直到正式切換另行授權且正式環境驗證成功。
+
+## 2026-10-25｜手動採購後端與既有收貨的接續驗收（PR #269）
+
+- 現行正式手動採購的 Rules 運算上限仍由 Issue #268 追蹤；正式 PO 的 Issue #199 另行追蹤。沿用 #269 唯一 Quick Purchase 後端與原 Receiving Service，不增加交易 writer、數量帳或正式開關。
+- 本批新增同一筆真 Auth Callable 手動採購的部分／最終收貨代表：既有初始化預留 5、採購 4、分兩次各收 2；核對公司／分倉在途、實貨、預留、來源訂單、權威需求、批號及不含成本的收貨鏡像。並驗證同收貨 ID 並行、超收拒絕、收貨後重送採購不恢復已沖銷在途、最終收貨重送無副作用，以及另一倉庫不變。
+- 測試沿用原收貨 fixture 與真 Auth／Functions；初始化仍為明列的 Service adapter fixture，不宣稱正式或原收貨畫面已完成驗收。桌機／手機原手動採購入口另沿既有整站案例；其庫存 fixture 補齊後端已要求的 productId，不放寬正式庫存身分驗證。
+- 本機相關 Node 12 項通過，語法、來源建置一致性及 diff 檢查通過。新增 Emulator 接續案例尚待本批 CI 實際執行，不可將已通過的舊 head 當成本批結果；本機 Java 17 無法取代 CI 所需 Java 21。
+- PR 保留 Draft，直到新增接續案例、桌機／手機與完整 CI 通過，且試點範圍及憑證契約完成檢視。正式 Firebase 未部署、未啟用，也未修改正式資料。網站仍依 GitHub 發布，不要求 Firebase Hosting。

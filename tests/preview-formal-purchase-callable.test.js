@@ -12,7 +12,7 @@ class HttpsError extends Error{constructor(code,message){super(message);this.cod
 const create=(env,db)=>createPreviewFormalPurchaseCallable({onCall:(_options,handler)=>handler,HttpsError,
  getDatabase:()=>db,env});
 
-test('formal purchase is disabled by default and cannot be enabled on production even with the flag',()=>{
+test('Preview flag cannot enable production; demo requires actual local Emulators',()=>{
  assert.equal(allowPreviewFormalPurchase({...preview,ENABLE_PREVIEW_FORMAL_PURCHASE:'false'}),false);
  assert.equal(allowPreviewFormalPurchase(preview),true);
  for(const project of ['yu-shing-company','another-project',''])
@@ -76,7 +76,7 @@ test('enabled endpoint forwards only Auth UID to existing strict atomic purchase
   error=>error.code==='failed-precondition'&&error.message==='backend transaction reached');
 });
 
-test('production Functions entry exposes only the guarded Preview PO endpoint',()=>{
+test('Functions entry routes formal PO through the environment-guarded endpoint',()=>{
  const entry=fs.readFileSync('functions/index.js','utf8');
  assert.match(entry,/createPreviewFormalPurchaseCallable/);
  assert.match(entry,/exports\.commitV2FormalPurchase=createPreviewFormalPurchaseCallable/);

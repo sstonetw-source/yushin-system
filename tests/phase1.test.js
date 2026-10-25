@@ -212,12 +212,13 @@ test('inventory uses one debounced search for inventory and Product Master resul
     assert.match(appSource, /db\.collection\('products'\).*limit\(25\)/s);
 });
 
-test('product management searches only on explicit action', () => {
+test('product management uses explicit code searches or bounded company favourites', () => {
     assert.doesNotMatch(indexSource, /oninput="queueProductManagementSearch\(\)"/);
     assert.match(indexSource, /id="productManagementSearchBrand"/);
     assert.match(appSource, /where\('normalizedPartNo', '==', normalizedCode\)/);
-    assert.match(indexSource, /選擇廠牌不會載入產品/);
-    assert.match(indexSource, /id="productManagementBrowseBtn"/);
+    assert.match(indexSource, /點選廠牌可查看公司常賣品項，每批最多 20 筆/);
+    assert.doesNotMatch(indexSource, /id="productManagementBrowseBtn"/);
+    assert.doesNotMatch(appSource, /fetchProductBrandBrowsePage|browseProductMasterBrand|PRODUCT_BRAND_BROWSE_PAGE_SIZE/);
 
 });
 
@@ -349,7 +350,7 @@ test('purchaser order form assigns a salesperson while preserving creator identi
     const end = appSource.indexOf('\n};', start) + 3;
     const saveOrder = appSource.slice(start, end);
     assert.match(saveOrder, /currentUserRole === 'purchaser' && !assistedOwner/);
-    assert.match(saveOrder, /ownerUid: assistedOwner\?\.uid \|\| window\._orderModalQuoteContext\?\.ownerUid \|\| currentUser\?\.uid/);
+    assert.match(saveOrder, /ownerUid: assistedOwner\?\.uid \|\| window\._orderModalQuoteContext\?\.ownerUid \|\| window\._orderModalForecastContext\?\.ownerUid \|\| currentUser\?\.uid/);
     assert.match(saveOrder, /\.\.\.commercialCreatorFields\(\)/);
 });
 
@@ -510,6 +511,7 @@ test('new order creation keeps one document ID across uncertain writes and retri
     const documents=new Map();
     let writes=0, uncertain=false;
     const context=vm.createContext({
+        window:{},YushinOrderEntry:require('../modules/order-entry-core'),
         ORDER_DRAFT_STORAGE_PREFIX:'order_draft_v2',currentUser:{uid:'USER-1'},currentUserRole:'sales',
         BUSINESS_STATUS:{ACTIVE:'active'},
         localStorage:{getItem:key=>stored.get(key)||null,setItem:(key,value)=>stored.set(key,value)},
@@ -525,7 +527,7 @@ test('new order creation keeps one document ID across uncertain writes and retri
     vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/services/order-creation.js'),'utf8'),context);
     vm.runInContext(appSource.slice(start,end),context);
     uncertain=true;
-    const order={createdByUid:'USER-1',status:'active',inventoryReservationStatus:'pending'};
+    const order={transactionType:'借',createdByUid:'USER-1',status:'active',inventoryReservationStatus:'pending'};
     await assert.rejects(context.createOrResumeNewOrder(order),/回覆不確定/);
     assert.equal(stored.get('order_draft_v2:USER-1:pending_order_id'),'ORDER-1');
     const resumed=await context.createOrResumeNewOrder({createdByUid:'USER-1',status:'active',customerName:'不同內容'});
@@ -1563,10 +1565,10 @@ test('forecast to order supports one-item prefill and one multi-item internal or
     const start = appSource.indexOf('window.createOrderFromForecast');
     const end = appSource.indexOf('估價單系統', start);
     const source = appSource.slice(start, end);
-    assert.match(source, /items\.length === 1/);
+    assert.match(source, /newOrderDraftItems=items\.slice\(1\)/);
     assert.match(source, /openOrderModal\(forecastItemToOrderSource/);
-    assert.match(source, /將建立 1 張多品項訂單/);
-    assert.match(source, /createForecastOrdersDirectly\(forecast, items\)/);
+    assert.match(source, /window\._orderModalForecastContext=/);
+    assert.doesNotMatch(source, /await createForecastOrdersDirectly/);
 
     const directStart=appSource.indexOf('async function createForecastOrdersDirectly');
     const directEnd=appSource.indexOf('\nwindow.createOrderFromForecast',directStart);

@@ -36,6 +36,8 @@ async function commitOrderCreation(orderId,data,{actorUid=currentUser?.uid,actor
             // facts, not a modified/stale form, and never overwrite fulfillment progress.
             savedData=live;return;
         }
+        const tradeValidation=globalThis.YushinOrderEntry.validateTrade(snapshot,{requireInvoiceTitle:false});
+        if(!tradeValidation.valid)throw new Error(tradeValidation.message);
         let forecastRef=null;
         if(reorder){
             const source=await tx.get(db.collection('orders').doc(reorder.orderId));assertActor();

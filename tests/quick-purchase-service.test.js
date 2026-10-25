@@ -74,3 +74,57 @@ test('quick service validates cost quantity permissions and stale confirmation a
     x.c.canCreatePurchaseOrderCapability=()=>false;
     await assert.rejects(x.c.commitQuickPurchase('o','i',x.details),/無採購作業權限/);
 });
+
+test('quick purchase original Service routes demo-only pilot to Callable with stable unknown-reply checkpoint',async()=>{
+ const x=setup(),records=x.records,calls=[],storage=new Map();
+ const db={collection:name=>({doc:id=>({
+  id:id||'12345678901234567890',
+  get:async()=>({exists:records.has(name+'/'+id),data:()=>structuredClone(records.get(name+'/'+id))})
+ })})};
+ const opts={projectId:'demo-yushin'},auth={app:{options:opts},
+  emulatorConfig:{host:'127.0.0.1',port:9099},currentUser:{uid:'buyer'}};
+ let lose=true;
+ const functions={app:{options:opts},useEmulator:()=>{},
+  httpsCallable:name=>async request=>{
+   assert.equal(name,'commitV2QuickPurchase');calls.push(request);
+   const event={operationId:request.operationId,createdByUid:'buyer',
+    qty:request.qty,supplier:request.supplier,unitCost:request.unitCost};
+   records.set('supplyOrders/manual-o-i',{demandId:'d',productKey:'p',fulfillmentType:'DIRECT_SHIP',
+    qty:2,orderEvents:[event]});
+   const order=records.get('orders/o');
+   records.set('orders/o',{...order,items:[{...order.items[0],supplyOrderedQty:2,
+    orderEvents:[{id:'quick-'+request.operationId}]}]});
+   records.set('procurementDemands/d',{demandId:'d',orderedQty:2});
+   if(lose){lose=false;throw Error('response lost');}
+   return {data:{status:'already-applied',operationId:request.operationId,
+    supplyId:'manual-o-i',demandId:'d',committedQty:2}};
+  }};
+ x.c.APP_ENVIRONMENT='emulator';x.c.YUSHIN_QUICK_PURCHASE_EMULATOR=true;
+ x.c.location={hostname:'localhost'};x.c.db=db;
+ x.c.firebase={auth:()=>auth,functions:()=>functions,app:()=>({options:opts,functions:()=>functions})};
+ x.c.ensureFormalPurchaseFunctionsCompat=async()=>{};
+ x.c.sessionStorage={getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)};
+ x.c.YushinProcurementDemand.demandIdForSource=()=> 'd';
+ await assert.rejects(x.c.commitQuickPurchase('o','i',x.details),/response lost/);
+ assert.equal(storage.size,1);
+ const retry=await x.c.commitQuickPurchase('o','i',x.details);
+ assert.equal(retry.savedSupply.qty,2);
+ assert.equal(retry.savedDemand.orderedQty,2);
+ assert.equal(storage.size,0);
+ assert.equal(calls.length,2);
+ assert.equal(calls[0].operationId,calls[1].operationId);
+ assert.equal(x.writes.length,0,'the legacy Client writer must not run');
+});
+test('quick purchase pilot flag never falls back outside local demo, or on corrupted checkpoint',async()=>{
+ const x=setup();x.c.YUSHIN_QUICK_PURCHASE_EMULATOR=true;
+ x.c.APP_ENVIRONMENT='production';
+ await assert.rejects(x.c.commitQuickPurchase('o','i',x.details),/禁止改用舊交易/);
+ assert.equal(x.writes.length,0);
+ x.c.APP_ENVIRONMENT='emulator';x.c.location={hostname:'localhost'};
+ const opts={projectId:'demo-yushin'};
+ const auth={app:{options:opts},emulatorConfig:{host:'127.0.0.1',port:9099},currentUser:{uid:'buyer'}};
+ x.c.firebase={auth:()=>auth,functions:()=>({}),app:()=>({options:opts})};
+ x.c.sessionStorage={getItem:()=>'{corrupt checkpoint',setItem:()=>{},removeItem:()=>{}};
+ await assert.rejects(x.c.commitQuickPurchase('o','i',x.details),/憑證無法讀取/);
+ assert.equal(x.writes.length,0);
+});

@@ -36,17 +36,6 @@ test('cost reads share an in-flight request and a failed read remains retryable'
  c.currentUserRole='sales';assert.equal(await c.loadVisibleProductCost({productId:'P'}),null);assert.equal(count,3);
 });
 
-test('changing product brands prevents the earlier response from replacing results or the cursor',async()=>{
- const responses=[deferred(),deferred()];let i=0;
- const c=context({currentUser:{uid:'U'},currentUserRole:'admin',productBrandBrowseCurrent:'A',productBrandBrowseCursor:null,productBrandBrowseHasMore:false,productManagementResults:[],productManagementVisibleLimit:50,PRODUCT_MANAGEMENT_RENDER_STEP:50,PRODUCT_BRAND_BROWSE_PAGE_SIZE:200,
- document:{getElementById:()=>null},brandMasterEntryForName:()=>null,dedupeBrandsCaseInsensitive:v=>v,canManagePendingProductMaster:()=>false,renderProductManagementResults:()=>{},firebase:{firestore:{FieldPath:{documentId:()=> '__name__'}}},firestoreReadWithTimeout:p=>p});
- const query={where(){return this;},orderBy(){return this;},limit(){return this;},startAfter(){return this;},get(){return responses[i++].promise;}};c.db={collection:()=>query};
- vm.runInContext(section('let productBrandBrowseGeneration =', '\nwindow.browseProductMasterBrand'),c);
- const a=c.fetchProductBrandBrowsePage(true);c.productBrandBrowseCurrent='B';const b=c.fetchProductBrandBrowsePage(true);
- responses[1].resolve(snapshot('B1',{manufacturerPartNo:'B'}));await b;responses[0].resolve(snapshot('A1',{manufacturerPartNo:'A'}));await a;
- assert.deepEqual(Array.from(c.productManagementResults,x=>x.id),['B1']);assert.equal(c.productBrandBrowseCursor.id,'B1');
-});
-
 test('Forecast queues the latest filter and discards the stale response before changing its cursor',async()=>{
  const requests=[],controls={forecastStatusFilter:{value:'active'}};let renders=0;
  const c=context({forecastLoading:false,forecastCursor:null,forecastHasMore:true,forecastCache:[],currentUserRole:'sales',currentUserCode:'S1',currentUser:{uid:'U'},DEFAULT_LIST_LIMIT:50,

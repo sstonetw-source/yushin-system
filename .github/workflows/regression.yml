@@ -24,6 +24,7 @@ jobs:
           node tools/build-app.cjs --check
           node tools/build-functions-core.cjs --check
           find src -name '*.js' -print0 | xargs -0 -n 1 node --check
+          find tests -maxdepth 1 \( -name '*.js' -o -name '*.cjs' \) -print0 | xargs -0 -n 1 node --check
       - name: JavaScript syntax check
         run: |
           node --check modules/order-entry-core.js
@@ -66,6 +67,8 @@ jobs:
         run: node tests/free-stock-recovery-browser-smoke.js
       - name: Check reconciled product search and margin privacy in desktop and mobile Chrome
         run: node tests/pr-reconciliation-browser-smoke.js
+      - name: Check company frequent products and public copy in desktop and mobile Chrome
+        run: node tests/frequent-products-browser-smoke.js
       - name: Check authoritative lot display and batch search in desktop and mobile Chrome
         run: node tests/inventory-lot-browser-smoke.js
       - name: Check shared dispatch preparation and cross-page retries in desktop and mobile Chrome
@@ -89,7 +92,8 @@ jobs:
         env:
           ENABLE_GROUPED_RESERVATION: "true"
           ENABLE_SERVICE_CASE_EMULATOR: "true"
-        run: npx --yes firebase-tools@15 emulators:exec --only firestore,auth,functions --project demo-yushin "node --test --test-concurrency=1 tests/emulator-grouped-reservation-callable.cjs tests/emulator-service-case-callable.cjs"
+          ENABLE_QUICK_PURCHASE_EMULATOR: "true"
+        run: npx --yes firebase-tools@15 emulators:exec --only firestore,auth,functions --project demo-yushin "node --test --test-concurrency=1 tests/emulator-grouped-reservation-callable.cjs tests/emulator-service-case-callable.cjs tests/emulator-quick-purchase-callable.cjs"
       - name: Verify v2 Auth Callables and real browser lifecycle handoff in isolated demo Emulator
         run: node tools/run-v2-return-auth-emulator.cjs
       - name: Verify single-item and whole-order dual-warehouse atomic reservation in Emulator
