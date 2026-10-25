@@ -1053,6 +1053,17 @@ test('real Auth Quick Purchase hands off to original partial and final receipt w
  assert.equal(completed.view.unitCost,undefined);
  await x.receive(final);assert.deepEqual(await x.snap(),completed);
 });
+test('real Auth Quick Purchase receipt rejects a missing original operation witness without stock changes',{timeout:120000},async()=>{
+ const x=await partialReceiptFixture('quick-proof-missing',{quickPurchase:true});
+ const before=await x.snap();
+ await db.collection('purchaseOperations').doc('quick-'+x.purchaseIntent.operationId).delete();
+ const corrupted=await x.snap();
+ await assert.rejects(x.receive(),code('failed-precondition'));
+ assert.deepEqual(await x.snap(),corrupted,'a missing operation must not cause partial receipt writes');
+ assert.deepEqual(corrupted.inventory,before.inventory);
+ assert.deepEqual(corrupted.stocks,before.stocks);
+ assert.equal(corrupted.receipts.length,0);
+});
 test('real Auth partial PO receipt uses the original Receiving Service, preserves two warehouses and same-ID retries',{timeout:120000},async()=>{
  for(const role of ['admin','purchaser','warehouse']){
   const x=await partialReceiptFixture('roles-'+role),operator=role==='purchaser'?x.buyer:await identity('receipt-role-'+role,role),before=await x.snap();
