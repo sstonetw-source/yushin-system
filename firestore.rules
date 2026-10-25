@@ -428,6 +428,22 @@ service cloud.firestore {
         && a.get('itemCount', -1) == b.items.size() && sameCommercialOwner() && preservesCreator()
         && purchaserQuickPurchaseItemProof(orderId,index,e);
     }
+    // Bind each witness to the deterministic authoritative document ID.
+    // A same-shaped document at another path cannot satisfy this proof.
+    function purchaserQuickPurchaseCanonicalIds(orderId,item,e,supply) {
+      let itemId=item.get('itemId','');
+      let productKey=supply.get('productKey','');
+      let warehouseId=supply.get('warehouseId','');
+      return orderId.matches('^[A-Za-z0-9_-]{1,160}$')
+        && itemId is string && itemId.matches('^[A-Za-z0-9_-]{1,160}$')
+        && e.supplyId == 'manual-' + orderId + '-' + itemId
+        && e.demandDocId == 'SALES_ORDER%3A' + orderId + '%3A' + itemId
+        && (supply.get('fulfillmentType','WAREHOUSE') == 'DIRECT_SHIP'
+          || (productKey is string && productKey.matches('^[A-Za-z0-9_.~-]{1,160}$')
+            && warehouseId is string && warehouseId.matches('^[A-Za-z0-9_-]{1,160}$')
+            && e.inventoryId == productKey
+            && e.warehouseStockId == warehouseId + '__' + productKey));
+    }
     function purchaserQuickPurchaseItemProof(orderId,index,e) {
       let oldItem = resource.data.items[index];
       let item = request.resource.data.items[index];
@@ -440,6 +456,7 @@ service cloud.firestore {
       let oldNos = oldItem.get('manualOrderNos', []);
       let newNos = item.get('manualOrderNos', []);
       return oldItem.get('itemId', '') != ''
+        && purchaserQuickPurchaseCanonicalIds(orderId,oldItem,e,supply)
         && request.resource.data.items.removeAll([item]) == resource.data.items.removeAll([oldItem])
         && item.diff(oldItem).affectedKeys().hasOnly(['supplyOrderedQty','manualOrderNos','orderedAt','orderEvents'])
         && item.get('itemId', '') == oldItem.itemId

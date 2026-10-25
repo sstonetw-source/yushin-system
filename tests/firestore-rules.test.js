@@ -3113,23 +3113,37 @@ test('purchaser Quick Purchase needs same-commit supply, demand, stock and movem
     warehouseStockId:'W1__p-order',movementId:'quick-M'}};
  const movement={type:'purchase_incoming',sourceType:'SUPPLY_ORDER',sourceId:id,
   productKey:'p-order',warehouseId:'W1',qty:2,actorUid:'buyer1'};
- const put=({uid='buyer1',complete=true,wrongQty=false}={})=>{
+ const put=({uid='buyer1',complete=true,wrongQty=false,forgedDemand=false,forgedSupply=false,forgedStock=false}={})=>{
   const client=db(uid),batch=writeBatch(client);
-  batch.set(doc(client,'supplyOrders/'+id),supply);
-  batch.set(doc(client,'procurementDemands/'+demandDocId),demand);
-  if(complete){batch.update(doc(client,'inventory/p-order'),{incoming:2});
-   batch.update(doc(client,'warehouseStocks/W1__p-order'),{incoming:2});
-   batch.set(doc(client,'inventoryMovements/quick-M'),movement);}
-  batch.update(doc(client,'orders/quick'),wrongQty?{...proof,items:[{...proof.items[0],supplyOrderedQty:3}]}:proof);
+  const supplyWitness=forgedSupply?'forged-supply':id;
+  const demandWitness=forgedDemand?'forged-demand':demandDocId;
+  const inventoryWitness=forgedStock?'forged-inventory':'p-order';
+  const warehouseWitness=forgedStock?'forged-warehouse':'W1__p-order';
+  const witnessProof={...proof,
+   items:[{...proof.items[0],orderEvents:[{...lineEvent,id:supplyWitness+':2'}]}],
+   quickPurchaseEvidence:{...proof.quickPurchaseEvidence,supplyId:supplyWitness,
+    demandDocId:demandWitness,inventoryId:inventoryWitness,warehouseStockId:warehouseWitness}};
+  batch.set(doc(client,'supplyOrders/'+supplyWitness),supply);
+  batch.set(doc(client,'procurementDemands/'+demandWitness),demand);
+  if(complete){batch.update(doc(client,'inventory/'+inventoryWitness),{incoming:2});
+   batch.update(doc(client,'warehouseStocks/'+warehouseWitness),{incoming:2});
+   batch.set(doc(client,'inventoryMovements/quick-M'),{...movement,sourceId:supplyWitness});}
+  batch.update(doc(client,'orders/quick'),wrongQty?{...witnessProof,
+   items:[{...witnessProof.items[0],supplyOrderedQty:3}]}:witnessProof);
   return batch.commit();
  };
  await seed('orders/quick',order);
  await seed('inventory/p-order',{productKey:'p-order',productId:'p-order',onHand:0,reserved:0,incoming:0});
  await seed('warehouseStocks/W1__p-order',{productKey:'p-order',productId:'p-order',warehouseId:'W1',onHand:0,reserved:0,incoming:0});
+ await seed('inventory/forged-inventory',{productKey:'p-order',productId:'p-order',onHand:0,reserved:0,incoming:0});
+ await seed('warehouseStocks/forged-warehouse',{productKey:'p-order',productId:'p-order',warehouseId:'W1',onHand:0,reserved:0,incoming:0});
  await assertFails(put({uid:'sales1'}));
  await assertFails(put({uid:'eng1'}));
  await assertFails(put({wrongQty:true}));
  await assertFails(put({complete:false}));
+ await assertFails(put({forgedDemand:true}));
+ await assertFails(put({forgedSupply:true}));
+ await assertFails(put({forgedStock:true}));
  await assertSucceeds(put());
  const docAfter=await getDoc(doc(db('buyer1'),'orders/quick'));
  assert.equal(docAfter.data().items[0].supplyOrderedQty,2);
