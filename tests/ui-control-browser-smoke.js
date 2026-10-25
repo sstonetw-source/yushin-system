@@ -49,7 +49,7 @@ const fixture = `<!DOCTYPE html>
     <div class="sub-nav quote-module-nav"><div class="sub-tab active" role="button" id="qsub-create">建立估價單</div><div class="sub-tab" role="button" id="qsub-my">全部估價單</div></div>
     <div id="quoteCreatePanel"><div class="sub-nav company-sub-nav"><div class="sub-tab active" role="button" id="sub-yushin">又鑫 (YS)</div><div class="sub-tab" role="button">辰星 (MS)</div><div class="sub-tab" role="button">鼎新 (DS)</div></div></div>
   </div>
-  <div id="forecast-system" class="content-section active"><div class="toolbar forecast-section-header"><button id="forecastCreateProbe">新增 Forecast</button></div></div>
+  <div id="forecast-system" class="content-section active"><div class="toolbar forecast-toolbar"><button id="forecastCreateProbe">新增 Forecast</button></div></div>
   <div id="product-system" class="content-section active"><div id="productSearchBrandButtons" class="product-brand-browser-list"><button class="product-brand-button active" id="productBrandProbe">廠牌</button><button class="product-brand-button">另一廠牌</button></div></div>
   <div id="order-system" class="content-section active"><div class="order-work-cards"><button class="order-work-card active" id="orderWorkProbe">待送貨</button><button class="order-work-card">其他狀態</button></div></div>
   <div id="purchasing-system" class="content-section active"><div class="purchase-view-tabs"><button class="active" id="purchase-tab-work">採購需求</button><button>採購單</button></div></div>
