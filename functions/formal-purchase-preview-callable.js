@@ -1,7 +1,7 @@
 'use strict';
-// The deployed endpoint is inert unless the actual Firebase project is the
-// dedicated Preview project AND the backend rollout switch is explicitly set.
-// A local demo Emulator may exercise the same entry, never a live project.
+// The endpoint is disabled by default. Preview and demo Emulator have their
+// own gate; production additionally requires a SEPARATE explicit backend flag.
+// Production activation is a distinct rollout/deployment decision.
 const {projectIdFromEnvironment}=require('./grouped-reservation-gate');
 const {commitV2FormalPurchase}=require('./formal-purchase-commit-service');
 
@@ -14,10 +14,20 @@ function allowPreviewFormalPurchase(env=process.env){
   &&local(env.FIRESTORE_EMULATOR_HOST)&&local(env.FIREBASE_AUTH_EMULATOR_HOST);
 }
 
+// Never reuse the Preview switch to activate production. In particular, a
+// misconfigured emulator must never write with Admin SDK to live Firestore.
+function allowProductionFormalPurchase(env=process.env){
+ return env.ENABLE_PRODUCTION_FORMAL_PURCHASE==='true'
+  && projectIdFromEnvironment(env)==='yu-shing-company'
+  && !env.FUNCTIONS_EMULATOR
+  && !env.FIRESTORE_EMULATOR_HOST
+  && !env.FIREBASE_AUTH_EMULATOR_HOST;
+}
+
 function createPreviewFormalPurchaseCallable({onCall,HttpsError,getDatabase,env=process.env}){
  return onCall({region:'asia-east1'},async request=>{
-  if(!allowPreviewFormalPurchase(env))
-   throw new HttpsError('failed-precondition','正式採購後端僅開放獨立 Preview 驗收');
+  if(!allowPreviewFormalPurchase(env)&&!allowProductionFormalPurchase(env))
+   throw new HttpsError('failed-precondition','採購後端尚未在此專案獲准啟用');
   if(!request.auth?.uid)throw new HttpsError('unauthenticated','請先登入');
   const database=getDatabase(),project=projectIdFromEnvironment(env);
   if(database.projectId!==project)
@@ -26,10 +36,10 @@ function createPreviewFormalPurchaseCallable({onCall,HttpsError,getDatabase,env=
   catch(error){
    if(['invalid-argument','permission-denied','failed-precondition','not-found','already-exists'].includes(error.code))
     throw new HttpsError(error.code,error.message);
-   console.error('Preview formal purchase transaction failed',error);
+   console.error('Formal purchase transaction failed',error);
    throw new HttpsError('internal','採購交易查核或提交失敗');
   }
  });
 }
 
-module.exports={allowPreviewFormalPurchase,createPreviewFormalPurchaseCallable};
+module.exports={allowPreviewFormalPurchase,allowProductionFormalPurchase,createPreviewFormalPurchaseCallable};

@@ -43,13 +43,15 @@ async function saveFormalPurchaseDocument(record, {actorUid=currentUser?.uid,act
     check();return {id:saved.poNo,...saved};
 }
 // Authoritative PO, supply commitments and source-order linkage. Incoming remains a separate checkpoint.
-// Preview is opt-in; production always retains the existing writer until a
-// separate deployment/acceptance decision. A rejected Callable NEVER falls back.
+// Backend routing is opt-in per environment. Production remains on the legacy
+// writer until separately switched on after acceptance. No Callable failure falls back.
 function formalPurchaseBackendPilotEnabled() {
     return (typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='emulator'
         && globalThis.YUSHIN_FORMAL_PURCHASE_EMULATOR===true)
         || (typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='preview'
-        && globalThis.YUSHIN_PREVIEW_FORMAL_PURCHASE===true);
+        && globalThis.YUSHIN_PREVIEW_FORMAL_PURCHASE===true)
+        || (typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='production'
+        && globalThis.YUSHIN_PRODUCTION_FORMAL_PURCHASE===true);
 }
 let formalPurchaseFunctionsScriptPromise=null;
 async function ensureFormalPurchaseFunctionsCompat() {
@@ -70,15 +72,21 @@ async function commitFormalPurchaseBackend(poRecord,actorUid,assertActor) {
     const local=host=>['localhost','127.0.0.1'].includes(host);
     const isEmulator=APP_ENVIRONMENT==='emulator'&&globalThis.YUSHIN_FORMAL_PURCHASE_EMULATOR===true;
     const isPreview=APP_ENVIRONMENT==='preview'&&globalThis.YUSHIN_PREVIEW_FORMAL_PURCHASE===true;
+    const isProduction=APP_ENVIRONMENT==='production'&&globalThis.YUSHIN_PRODUCTION_FORMAL_PURCHASE===true;
     const hostname=String(globalThis.location?.hostname||'').toLowerCase();
+    const pathname=String(globalThis.location?.pathname||'');
+    const productionSite=['yu-shing-company.web.app','yu-shing-company.firebaseapp.com'].includes(hostname)
+        || (hostname==='sstonetw-source.github.io'
+            && (pathname==='/yushin-system'||pathname.startsWith('/yushin-system/')));
     if(!formalPurchaseBackendPilotEnabled()||typeof firebase==='undefined'||!firebase.auth||!firebase.app
         ||(isEmulator&&!local(hostname))
-        ||(isPreview&&!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(hostname)))
-        throw new Error('採購後端僅限明確啟用的 Preview 或本機 Emulator。');
-    const auth=firebase.auth(),project=isPreview?'preview-20135':'demo-yushin';
+        ||(isPreview&&!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(hostname))
+        ||(isProduction&&!productionSite))
+        throw new Error('採購後端僅限已授權的網站及專案。');
+    const auth=firebase.auth(),project=isProduction?'yu-shing-company':isPreview?'preview-20135':'demo-yushin';
     if(auth.app?.options?.projectId!==project||firebase.app().options?.projectId!==project
         ||(isEmulator&&(!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099))
-        ||(isPreview&&auth.emulatorConfig))
+        ||((isPreview||isProduction)&&auth.emulatorConfig))
         throw new Error('採購登入與後端 Firebase 專案不一致。');
     await ensureFormalPurchaseFunctionsCompat();
     const functions=firebase.app().functions('asia-east1');
@@ -139,7 +147,8 @@ async function commitFormalPurchaseOrder(poRecord, {actorUid=currentUser?.uid,ac
         };
         assertActor();
         if((globalThis.YUSHIN_FORMAL_PURCHASE_EMULATOR===true
-            || globalThis.YUSHIN_PREVIEW_FORMAL_PURCHASE===true)
+            || globalThis.YUSHIN_PREVIEW_FORMAL_PURCHASE===true
+            || globalThis.YUSHIN_PRODUCTION_FORMAL_PURCHASE===true)
             && !formalPurchaseBackendPilotEnabled())
             throw new Error('採購後端試點與目前環境不一致，禁止改由舊交易提交。');
         // Preview purchase confirmation is backend-only. Missing opt-in must
