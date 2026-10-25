@@ -13482,6 +13482,7 @@ window.loadPurchasingAnalytics = async function(force = false) {
 
 window.renderPurchasingView = function() {
     renderFormalPurchaseRecovery();
+    renderQuickPurchaseRecovery();
     populatePurchasingFilters();
     if (purchasingView === 'suppliers') {
         renderSupplierMasterAdmin();
@@ -14094,6 +14095,76 @@ window.loadPendingPurchaseOrders = async function(reset = true) {
 
 const pendingPurchaseOrderKeys = new Set();
 
+ // A lost Callable HTTP response may leave no ordering-row button: after the
+ // server commits, remainingToOrderQty is zero. Recover by original operation
+ // ID from the purchasing workspace rather than opening a new purchase.
+function pendingQuickPurchaseAttempts() {
+    if(!quickPurchaseBackendPilotEnabled() || !currentUser?.uid) return [];
+    const prefix='quick-purchase-pending:'+encodeURIComponent(currentUser.uid)+':',result=[];
+    for(let i=0;i<sessionStorage.length;i++) {
+        const key=sessionStorage.key(i);
+        if(typeof key!=='string'||!key.startsWith(prefix))continue;
+        try {
+            const record=JSON.parse(sessionStorage.getItem(key));
+            const values=JSON.parse(record.fingerprint);
+            if(record.version!==1||!Array.isArray(values)||values.length!==6
+                ||values[0]!==currentUser.uid
+                ||typeof values[1]!=='string'||!values[1]
+                ||typeof values[2]!=='string'||!values[2]
+                ||!Number.isSafeInteger(values[3])||values[3]<=0
+                ||typeof values[4]!=='string'||!values[4]
+                ||typeof values[5]!=='number'||!Number.isFinite(values[5])||values[5]<0
+                ||key!==prefix+encodeURIComponent(values[1])+':'+encodeURIComponent(values[2])
+                ||typeof record.operationId!=='string'
+                ||!/^qp-[A-Za-z0-9_-]{8,76}$/.test(record.operationId))
+                throw new Error('invalid Quick Purchase checkpoint');
+            result.push({key,orderId:values[1],itemId:values[2],
+                details:{expectedQty:values[3],supplier:values[4],unitCost:values[5]}});
+        } catch (_) {
+            result.push({key,invalid:true});
+        }
+    }
+    return result;
+}
+function renderQuickPurchaseRecovery() {
+    const root=document.getElementById('purchasing-system');
+    if(!root)return;
+    const existing=document.getElementById('quickPurchaseRecoveryPanel');
+    if(!quickPurchaseBackendPilotEnabled() || !currentUser?.uid
+        ||!canCreatePurchaseOrderCapability()||!canAccessPage('orders.po')) {
+        if(existing)existing.hidden=true;
+        return;
+    }
+    const attempts=pendingQuickPurchaseAttempts();
+    if(!attempts.length){if(existing)existing.hidden=true;return;}
+    const panel=existing||document.createElement('div');
+    if(!existing){
+        panel.id='quickPurchaseRecoveryPanel';
+        panel.className='no-print';
+        panel.setAttribute('role','status');
+        root.insertBefore(panel,root.firstChild);
+    }
+    panel.replaceChildren();
+    panel.hidden=false;
+    for(const attempt of attempts){
+        const row=document.createElement('div'),message=document.createElement('span');
+        message.textContent=attempt.invalid
+            ? '前次手動採購憑證異常，請以原帳號請管理員核對，勿另建採購。'
+            : '手動採購 '+attempt.orderId+'／'+attempt.itemId+' 結果尚待確認。';
+        row.appendChild(message);
+        if(!attempt.invalid) {
+            const button=document.createElement('button');
+            button.type='button';
+            button.className='btn-small';
+            button.textContent='確認前次採購結果';
+            button.onclick=()=>markPurchaseItemOrdered(attempt.orderId,attempt.itemId,button,attempt.details);
+            row.appendChild(button);
+        }
+        panel.appendChild(row);
+    }
+}
+
+
 function quickPurchaseSupplyId(orderId, itemId) {
     return `manual-${encodeURIComponent(String(orderId || ''))}-${encodeURIComponent(String(itemId || ''))}`;
 }
@@ -14169,7 +14240,7 @@ async function requestQuickPurchaseDetails(orderId, itemId) {
     return new Promise(resolve => { quickPurchaseConfirmation = resolve; });
 }
 
-window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
+window.markPurchaseItemOrdered = async function(orderId, itemId, button, recoveryDetails=null) {
     if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
     const actionKey = `${orderId}::${itemId}`;
     if (pendingPurchaseOrderKeys.has(actionKey)) return;
@@ -14178,7 +14249,9 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
     if (button) { button.disabled = true; button.textContent = '處理中…'; }
     try {
         const actorUid=currentUser?.uid, actorRole=currentUserRole;
-        const purchaseDetails = await requestQuickPurchaseDetails(orderId, itemId);
+        if(recoveryDetails && !quickPurchaseBackendPilotEnabled())
+            throw new Error('前次採購核對僅限已授權的 Emulator 試點。');
+        const purchaseDetails = recoveryDetails || await requestQuickPurchaseDetails(orderId, itemId);
         if (!purchaseDetails) return;
         if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
         if (!purchaseDetails.supplier || !Number.isFinite(purchaseDetails.unitCost) || purchaseDetails.unitCost < 0) throw new Error('請確認供應商與有效的實際單位成本。');
@@ -14198,8 +14271,10 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button) {
         if (document.getElementById('purchasing-system')?.classList.contains('active')) {
             renderPurchasingView();
         }
+        renderQuickPurchaseRecovery();
         showActionFeedback('已採購，品項已列入待到貨，可繼續處理下一筆。', 'success');
     } catch (err) {
+        renderQuickPurchaseRecovery();
         alert('切換為已採購失敗：' + err.message + '\n請確認目前這筆資料及連線／權限，重試前先查詢作業結果；若持續失敗，請聯絡管理員。');
     } finally {
         pendingPurchaseOrderKeys.delete(actionKey);

@@ -264,6 +264,7 @@ for(const width of [1280,390])test('original Quick Purchase '+width+'px commits 
  const fixture=await multiReceiptSiteFixture(width,'quick-original');
  const context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}});
  const page=await context.newPage(),calls=[],errors=[],external=[];
+ let loseFirstReply=width===1280;
  await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_QUICK_PURCHASE_EMULATOR=true;});
  page.on('pageerror',error=>errors.push(error.message));
  page.on('dialog',dialog=>dialog.accept());
@@ -275,6 +276,12 @@ for(const width of [1280,390])test('original Quick Purchase '+width+'px commits 
    assert.match(headers.authorization||'',/^Bearer /);
    assert.equal(payload.actorUid,undefined);assert.equal(payload.actorRole,undefined);
    calls.push(payload);
+   if(loseFirstReply){
+    loseFirstReply=false;
+    const response=await route.fetch();
+    assert.equal(response.status(),200,'server must commit before dropping the response');
+    await route.abort('failed');return;
+   }
   }
   await route.continue();
  });
@@ -289,8 +296,20 @@ for(const width of [1280,390])test('original Quick Purchase '+width+'px commits 
   await page.locator('#quickPurchaseSupplier').fill(fixture.supplierName);
   await page.locator('#quickPurchaseCost').fill('19.99');
   await page.locator('#quickPurchaseConfirmationOverlay button[onclick="confirmQuickPurchase()"]').click();
-  await page.waitForFunction(()=>document.getElementById('actionFeedback')?.textContent?.includes('已採購，品項已列入待到貨'),null,{timeout:45000});
-  assert.equal(calls.length,1,'original button must invoke exactly one authenticated Callable');
+  if(width===1280){
+   await page.locator('#quickPurchaseRecoveryPanel button').waitFor({state:'visible',timeout:45000});
+   const original=calls[0];
+   // Even when the ordering row disappears, the exact original attempt remains reachable.
+   await siteOpen(page,'purchaser');await siteNav(page,'purchasing');
+   await page.locator('#quickPurchaseRecoveryPanel button').waitFor({state:'visible'});
+   await page.locator('#quickPurchaseRecoveryPanel button').click();
+   await page.waitForFunction(()=>document.getElementById('actionFeedback')?.textContent?.includes('已採購，品項已列入待到貨'),null,{timeout:45000});
+   assert.equal(calls.length,2);
+   assert.deepEqual(calls[1],original,'recovery must reuse the same intent and operation ID');
+  }else{
+   await page.waitForFunction(()=>document.getElementById('actionFeedback')?.textContent?.includes('已採購，品項已列入待到貨'),null,{timeout:45000});
+   assert.equal(calls.length,1,'original button must invoke exactly one authenticated Callable');
+  }
   const intent=calls[0],supplyId='manual-'+encodeURIComponent(fixture.orderId)+'-I1';
   assert.equal(intent.orderId,fixture.orderId);assert.equal(intent.itemId,'I1');
   assert.equal(intent.qty,3);assert.equal(intent.supplier,fixture.supplierName);assert.equal(intent.unitCost,19.99);
