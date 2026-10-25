@@ -17,7 +17,7 @@
     const host=$('orderShippingFields');if(!host)return;
     const mode=$('orderShippingMode');mode.innerHTML='<option value="">請選擇交付方式</option><option value="PICKUP">主倉自領</option><option value="SALES_SHIP">寄給我（寄給負責業務）</option><option value="CUSTOMER_SHIP">直接寄客戶</option>';mode.value=['PICKUP','SALES_SHIP','CUSTOMER_SHIP'].includes(p.mode)?p.mode:'';mode.onchange=()=>root.orderDeliveryChoiceChanged();
     const w=$('orderShippingWarehouse');const label=w.closest('label');if(label.firstChild)label.firstChild.textContent='業務領貨地點';label.style.display='none';
-    const box=document.createElement('div');box.className='delivery-choice-row logistics-wide';box.innerHTML=`<label>客戶常用收件地址<select id="orderCustomerAddress" onchange="selectOrderCustomerAddress(this.value)"><option value="">本次自行填寫</option></select></label><div><button type="button" class="btn-secondary btn-small" onclick="saveOrderCustomerAddress(this)">記住此客戶地址</button><button type="button" class="btn-secondary btn-small" onclick="setDefaultOrderCustomerAddress(this)">儲存並設為預設</button></div><p id="orderAddressStatus" class="inventory-work-status" role="status"></p>`;host.prepend(box);
+    const box=document.createElement('div');box.className='delivery-choice-row logistics-wide';box.innerHTML=`<label>客戶常用收件地址<select id="orderCustomerAddress" onchange="selectOrderCustomerAddress(this.value)"><option value="">本次自行填寫</option></select></label><div><button type="button" class="btn-secondary btn-small" onclick="saveOrderCustomerAddress(this)">加入常用地址</button><button type="button" class="btn-secondary btn-small" onclick="setDefaultOrderCustomerAddress(this)">設為客戶預設地址</button></div><p id="orderAddressStatus" class="inventory-work-status" role="status"></p>`;host.prepend(box);
     host.oninput=e=>{if(e.target.id!=='orderCustomerAddress')changed=true;};
     root.orderDeliveryChoiceChanged(false);
   }
@@ -59,7 +59,7 @@
       const data=snap.exists?snap.data():{};customerRows=data.active!==false?addresses(data.shippingAddresses):[];customerKey=key;
       $('orderCustomerAddress').innerHTML='<option value="">本次自行填寫</option>'+customerRows.map(a=>`<option value="${escapeAttr(a.id)}">${escapeHtml(a.label||a.contact)}｜${escapeHtml(a.address)}</option>`).join('');
       if($('orderShippingMode').value==='CUSTOMER_SHIP'&&fingerprint===JSON.stringify(root.orderShippingInstructions())&&!['contact','phone','address'].some(key=>root.orderShippingInstructions()[key])){const preferred=customerRows.find(a=>a.id===data.defaultShippingAddressId);if(preferred){$('orderCustomerAddress').value=preferred.id;replaceRecipient(preferred);}}
-      $('orderAddressStatus').textContent=customerRows.length?'修改本次地址不會覆蓋常用地址。':'此客戶尚無常用地址，可填寫後按「記住此客戶地址」。';
+      $('orderAddressStatus').textContent=customerRows.length?'修改本次地址不會覆蓋常用地址。':'此客戶尚無常用地址，可填寫後按「加入常用地址」。';
     }catch(err){if(generation===customerGeneration)$('orderAddressStatus').textContent='常用地址讀取失敗：'+err.message+'；可自行填寫本次地址。';}
   };
   root.selectOrderCustomerAddress=function(id){const a=customerRows.find(x=>x.id===id);if(a)replaceRecipient(a);changed=true;customerGeneration++;};
