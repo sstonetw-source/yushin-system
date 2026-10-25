@@ -2287,10 +2287,12 @@ service cloud.firestore {
       allow list: if safeStockReader(resource.data);
       allow create: if canReceiveInventory() && validWarehouseStock(request.resource.data)
         && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
+      // Receiver validation already includes recovery metadata; business updates
+      // validate it in their own branch, so neither path evaluates it twice.
       allow update: if ((canReceiveInventory() && validWarehouseStock(request.resource.data))
-          || businessWarehouseStockOperationalUpdate(id))
+          || (businessWarehouseStockOperationalUpdate(id) && validStockRecoveryMetadata(request.resource.data)))
         && warehouseStockIdentityUnchanged()
-        && validStockRecoveryMetadata(request.resource.data) && validStockRecoveryUpdate()
+        && validStockRecoveryUpdate()
         && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
       allow delete: if false;
     }
