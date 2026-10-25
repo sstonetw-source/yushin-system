@@ -3114,6 +3114,9 @@ test('company frequently sold products keep existing product-manager permissions
   const rows=await assertSucceeds(getDocs(query(collection(db('sales1'),'products'),where('isFrequentlySold','==',true),where('brandName','==','Brand'),orderBy('__name__'),limit(20))));
   assert.equal(rows.size,1);assert.equal(rows.docs[0].data().listPrice,100);assert.equal(rows.docs[0].data().standardCost,undefined);
   await assertSucceeds(updateDoc(doc(db(uid),'products/frequent'),{isFrequentlySold:false}));
+ }
+});
+
 async function crossWarehouseEvidenceFixture(uid,role,count=2,{mutate=null,inventoryId=null}={}){
  const id='cross-'+uid,productKey=id,ownerUid=role==='engineer'?'eng1':'sales1',salesCode=role==='engineer'?'E01':'S01';
  const inventoryDocId=inventoryId||productKey;
