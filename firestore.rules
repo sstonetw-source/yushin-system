@@ -1810,6 +1810,7 @@ service cloud.firestore {
       let changed = request.resource.data.diff(resource.data).affectedKeys();
       let detailsOnly = changed.hasOnly(['transactionType','invoiceTitle','remarks','fieldEditHistory'])
         && changed.hasAny(['transactionType','invoiceTitle','remarks']);
+      let deliveryLedgerOnly = changed.hasOnly(['deliveredQty', 'deliveryRecords', 'businessDeliveryEvidence', 'updatedAt']);
       // Billing-only changes cannot affect commercial items, stock or ownership.
       // Avoid evaluating unrelated 30-item stock/cost validators after the guard.
       return (userRole in ['purchaser','warehouse'] && changed.hasAny(['warehouseLogisticsId','warehouseLogisticsEventId']))
@@ -1838,9 +1839,10 @@ service cloud.firestore {
             ? commercialReturnRequestOnlyUpdate() : ((request.resource.data.diff(resource.data).affectedKeys().hasAny(['deliveryRecords']) && directShipReceiptOrderUpdate(id)) || (owns(resource.data) && (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) ? warehouseDeliveryPlanUpdate() : (sameCommercialOwner() && preservesCreator()
               // Pure delivery ledger updates cannot change item identity or cost.
               // Keep all delivery, ownership, stock witness and custody proofs below.
-              && (changed.hasOnly(['deliveredQty', 'deliveryRecords', 'businessDeliveryEvidence', 'updatedAt'])
-                || validCommercialOrderCostUpdate())
-              && businessOrderFactsProtected(id, changed) && commercialReturnProtection() && (resource.data.get('warehouseLogisticsId', '') == '' || commercialKeepsPendingTransfer())))))));
+              && (deliveryLedgerOnly || validCommercialOrderCostUpdate())
+              && businessOrderFactsProtected(id, changed) && commercialReturnProtection()
+              // Delivery ledger updates leave custody location, pending count and history unchanged.
+              && (deliveryLedgerOnly || resource.data.get('warehouseLogisticsId', '') == '' || commercialKeepsPendingTransfer())))))));
     }
 
     function businessDeliveryRecordChange(before, after, index) {
