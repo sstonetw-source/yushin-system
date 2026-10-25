@@ -1812,7 +1812,9 @@ service cloud.firestore {
         && changed.hasAny(['transactionType','invoiceTitle','remarks']);
       // Billing-only changes cannot affect commercial items, stock or ownership.
       // Avoid evaluating unrelated 30-item stock/cost validators after the guard.
-      return changed.hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId'])
+      return (userRole in ['purchaser','warehouse'] && changed.hasAny(['warehouseLogisticsId','warehouseLogisticsEventId']))
+        ? warehouseLogisticsOrderUpdate(id)
+        : changed.hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId'])
         && changed.hasOnly(['items','logisticsPlanItemIndex','logisticsPlanActorUid','logisticsPlanEventId','logisticsHistory','updatedAt'])
         ? warehouseDeliveryPlanUpdate() : detailsOnly ? (orderBeforeFirstReceipt(resource.data) && !orderIsCancelled(resource.data)
         && (!changed.hasAny(['transactionType']) || request.resource.data.get('transactionType', '') in ['直','借','扣'])
