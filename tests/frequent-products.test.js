@@ -5,7 +5,7 @@ function fixture(){
  const nodes={productManagementSearch:{value:''},productManagementSearchStatus:{}},queries=[],writes=[],copied=[],messages=[],alerts=[];
  const control={fail:false,clipboardFail:false,wait:null,writeWait:null};
  const c=vm.createContext({window:{},currentUser:{uid:'U'},currentUserRole:'sales',Date,Map,Set,console,
-  document:{getElementById:id=>nodes[id]},productManagementSearchGeneration:0,productBrandBrowseGeneration:0,productManagementSearchInProgress:false,
+  document:{getElementById:id=>nodes[id]},productManagementSearchGeneration:0,productManagementSearchInProgress:false,
   productManagementResults:[],productManagementSourceMode:'none',productManagementActiveSearch:null,productManagementSearchCache:new Map(),productManagementSelection:new Map(),
   PRODUCT_MANAGEMENT_RENDER_STEP:100,productManagementVisibleLimit:100,
   canAccessPage:()=>c.currentUserRole!=='blocked',canManagePendingProductMaster:()=>['admin','purchaser'].includes(c.currentUserRole),
@@ -81,4 +81,12 @@ test('edited or disabled products cannot remain visible in the wrong brand favou
  const x=fixture(),valid={brandName:'B',isFrequentlySold:true};
  assert.equal(x.c.isVisibleFrequentProduct(valid,'B'),true);
  for(const patch of [{brandName:'C'},{active:false},{status:'INACTIVE'},{isFrequentlySold:false}])assert.equal(x.c.isVisibleFrequentProduct({...valid,...patch},'B'),false);
+});
+
+test('switching brands discards the older common-list response',async()=>{
+ const x=fixture();let finish;x.control.wait=new Promise(r=>finish=r);
+ const older=x.c.window.loadFrequentProducts('B');
+ x.c.productManagementSearchGeneration++;x.c.productManagementSearchInProgress=false;
+ const newer=x.c.window.loadFrequentProducts('C');finish();await Promise.all([older,newer]);
+ assert.equal(x.c.productManagementResults.length,5);assert.ok(x.c.productManagementResults.every(row=>row.brandName==='C'));
 });

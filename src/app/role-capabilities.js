@@ -365,7 +365,6 @@ function initializePageData(mainKey, options = {}) {
     }
     if (mainKey === 'quote') jobs.push(ensureQuoteFormInitialized());
     if (mainKey === 'products' && productManagementSourceMode === 'search') { renderProductManagementResults(); }
-    else if (mainKey === 'products' && wasLoaded && force && productBrandBrowseCurrent) { reloadCurrentProductBrand(); return; }
     else if (mainKey === 'products') {
         clearProductManagementSearch({ preserveInput: true });
         updatePendingProductMasterButton();

@@ -175,7 +175,7 @@ function resetSessionData() {
     equipmentLoadGeneration++; equipmentSearchGeneration++;
     forecastLoadGeneration++; forecastHistorySearchGeneration++;
     quoteHistorySearchGeneration++; orderHistorySearchGeneration++; poHistorySearchGeneration++;
-    productManagementSearchGeneration++; productBrandBrowseGeneration++; businessProductSearchGeneration++;
+    productManagementSearchGeneration++; businessProductSearchGeneration++;
     orderModalOpenGeneration++; orderDraftProductCheckGeneration++;
     forecastHistorySearchResults=[]; quoteHistorySearchResults=[]; orderHistorySearchResults=[];
     salesList=[]; salesListLoadPromise=null; allUsersCache=[]; salesCodeMasterCache=[];

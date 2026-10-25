@@ -29,6 +29,8 @@ const fs=require('node:fs'),assert=require('node:assert/strict'),{spawnSync}=req
       doc:id=>({update:async patch=>{writeCount++;Object.assign(records.find(r=>r.id===id),patch);}})};return q;}};
    `});
    for(const file of ['src/features/products/product-management.js','src/features/products/frequent-products.js','src/shared/action-feedback.js'])await page.addScriptTag({content:fs.readFileSync(file,'utf8')});
+   assert.equal(await page.locator('#productManagementBrowseBtn').count(),0);
+   assert.equal(await page.evaluate(()=>typeof window.browseProductMasterBrand),'undefined');
    await page.evaluate(()=>renderProductBrandBrowser());
    await page.getByRole('button',{name:'Brand',exact:true}).click();
    await page.waitForFunction(()=>productManagementResults.length===1);

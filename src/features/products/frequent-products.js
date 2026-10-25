@@ -22,7 +22,6 @@ window.loadFrequentProducts = async function(brand, loadMore = false) {
     const uid=currentUser?.uid, role=currentUserRole;
     if (!uid) return;
     const generation=++productManagementSearchGeneration;
-    productBrandBrowseGeneration++;
     const current=()=>generation===productManagementSearchGeneration&&uid===currentUser?.uid&&role===currentUserRole;
     const names=dedupeBrandsCaseInsensitive([brand,...(brandMasterEntryForName(brand)?.aliases||[])]).slice(0,10);
     const key=JSON.stringify([uid,role,names]);
@@ -59,7 +58,7 @@ window.loadFrequentProducts = async function(brand, loadMore = false) {
         renderProductManagementResults();
         if(status)status.textContent=productManagementResults.length
             ? `${brand}：常賣品項 ${productManagementResults.length} 筆${state.hasMore?'，可載入更多':''}。`
-            : state.hasMore?'此批常賣品項已停用，可載入更多。':`${brand} 尚未設定啟用的常賣品項，可搜尋或瀏覽此廠牌產品。`;
+            : state.hasMore?'此批常賣品項已停用，可載入更多。':`${brand} 尚未設定啟用的常賣品項，可輸入完整貨號搜尋。`;
     } catch(err) {
         if(!current())return;
         if(status)status.textContent=productOperationErrorMessage(`${brand} 常賣品項讀取`,err)+'可重新點選廠牌重試。';

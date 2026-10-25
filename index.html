@@ -102,7 +102,6 @@
             <button type="button" id="productManagementSearchBtn" onclick="searchProductManagement()" disabled>搜尋產品</button>
             <button type="button" class="btn-secondary" onclick="clearProductManagementSearch()">清除</button>
             <button type="button" id="productManagementFrequentBtn" class="btn-secondary" onclick="loadFrequentProducts(document.getElementById('productManagementSearchBrand').value)" disabled>常賣品項</button>
-            <button type="button" id="productManagementBrowseBtn" class="btn-secondary" onclick="browseProductMasterBrand(document.getElementById('productManagementSearchBrand').value)" disabled>瀏覽此廠牌產品</button>
         </div>
 
         <span id="productManagementSearchStatus" class="inline-status product-search-status" role="status" aria-live="polite"></span>
@@ -1700,7 +1699,7 @@
     <script src="modules/document-downloads.js?v=20261013-file-share"></script>
     <script src="modules/order-entry-core.js?v=20261014-1"></script>
 <script src="modules/service-work-core.js?v=20261023-2"></script>
-    <script src="app.js?v=20261025-4"></script>
+    <script src="app.js?v=20261025-5"></script>
     <script src="modules/order-self-order-required.js?v=20261013-1"></script>
     <script src="modules/customer-cancellations.js?v=20261021-3"></script>
     <script src="modules/free-stock-recovery.js?v=20261014-9"></script>
@@ -1836,7 +1835,7 @@
         <div class="page-help-header"><h3 id="pageHelpTitle">頁面說明</h3><button type="button" class="btn-secondary" data-close-page-help>關閉</button></div>
         <div id="pageHelpBody" class="page-help-body"></div>
     </dialog>
-    <div id="pageHelpSources" hidden aria-hidden="true"><div data-page-help-source="product-system" data-help-context=""><div class="inline-help-content">先選擇廠牌，再輸入完整貨號，按「搜尋產品」。搜尋忽略大小寫、空白及連字號、底線、點、斜線，開頭的 0 仍須保留。選擇廠牌不會載入產品；「瀏覽此廠牌產品」每次載入 50 筆。</div></div><div data-page-help-source="product-system" data-help-context=""><div class="inline-help-content">可跨搜尋繼續選品；完成後一次帶入同一張單據。</div></div><div data-page-help-source="forecast-system" data-help-context=""><div class="inline-help-content"><div class="forecast-form-note">
+    <div id="pageHelpSources" hidden aria-hidden="true"><div data-page-help-source="product-system" data-help-context=""><div class="inline-help-content">點選廠牌可查看公司常賣品項，每批最多 20 筆。其他產品請輸入完整貨號，按「搜尋產品」，可不限廠牌搜尋。搜尋忽略大小寫、空白及連字號、底線、點、斜線，開頭的 0 仍須保留。</div></div><div data-page-help-source="product-system" data-help-context=""><div class="inline-help-content">可跨搜尋繼續選品；完成後一次帶入同一張單據。</div></div><div data-page-help-source="forecast-system" data-help-context=""><div class="inline-help-content"><div class="forecast-form-note">
                 新增後狀態自動設為「進行中」，立案日期與第一筆紀錄由系統自動建立。
             </div></div></div><div data-page-help-source="forecast-system" data-help-context=""><div class="inline-help-content"><div class="forecast-form-note">
             儲存後系統會自動加入今天日期，例如「09/18 老師已送明年度設備預算」。

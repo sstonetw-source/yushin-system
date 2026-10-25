@@ -212,12 +212,13 @@ test('inventory uses one debounced search for inventory and Product Master resul
     assert.match(appSource, /db\.collection\('products'\).*limit\(25\)/s);
 });
 
-test('product management searches only on explicit action', () => {
+test('product management uses explicit code searches or bounded company favourites', () => {
     assert.doesNotMatch(indexSource, /oninput="queueProductManagementSearch\(\)"/);
     assert.match(indexSource, /id="productManagementSearchBrand"/);
     assert.match(appSource, /where\('normalizedPartNo', '==', normalizedCode\)/);
-    assert.match(indexSource, /選擇廠牌不會載入產品/);
-    assert.match(indexSource, /id="productManagementBrowseBtn"/);
+    assert.match(indexSource, /點選廠牌可查看公司常賣品項，每批最多 20 筆/);
+    assert.doesNotMatch(indexSource, /id="productManagementBrowseBtn"/);
+    assert.doesNotMatch(appSource, /fetchProductBrandBrowsePage|browseProductMasterBrand|PRODUCT_BRAND_BROWSE_PAGE_SIZE/);
 
 });
 
