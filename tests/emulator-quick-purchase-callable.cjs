@@ -86,6 +86,16 @@ test('real purchaser Callable atomically creates supplier, demand, source, both 
  await assert.rejects(f.call({...intent,qty:3}),e=>e.code==='functions/already-exists');
  assert.equal((await f.data('inventory/'+f.productId)).incoming,4);
 });
+test('replayed purchase rejects corrupted supply-source identity without another ledger write',async()=>{
+ const f=await seeded('source-proof'),intent=f.intent();
+ const first=(await f.call(intent)).data;
+ await db.doc('supplyOrders/'+first.supplyId).update({sourceId:'forged-order'});
+ await assert.rejects(f.call(intent),e=>e.code==='functions/failed-precondition');
+ assert.equal((await f.data('inventory/'+f.productId)).incoming,4);
+ assert.equal((await f.data('warehouseStocks/'+f.warehouseId+'__'+f.productId)).incoming,4);
+ assert.equal((await f.data('inventoryMovements/quick-'+intent.operationId)).qty,4);
+ assert.equal((await f.data('purchaseOperations/quick-'+intent.operationId)).supplyId,first.supplyId);
+});
 test('real admin can purchase; sales and engineer cannot forge purchaser role',async()=>{
  const admin=await seeded('admin',{role:'admin'});
  assert.equal((await admin.call(admin.intent())).data.status,'committed');
