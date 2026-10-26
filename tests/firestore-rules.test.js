@@ -2124,6 +2124,24 @@ test('stock quantities reject over-reservation and invalid incoming on both crea
   }
  }
 });
+test('stock metadata is validated once while identity, recovery and role guards remain enforced',async()=>{
+ for(const uid of ['admin','buyer1','wh1']){
+  const ref=doc(db(uid),'warehouseStocks/metadata-'+uid);
+  const valid={productKey:'P',productId:'P',warehouseId:'MAIN',onHand:5,reserved:2,incoming:0,
+   allocationPending:true,allocationRevision:1};
+  await assertFails(setDoc(ref,{...valid,allocationRevision:0}));
+  await assertSucceeds(setDoc(ref,valid));
+  // Ordinary stock changes need not rewrite unchanged recovery metadata.
+  await assertSucceeds(updateDoc(ref,{onHand:6}));
+  await assertFails(updateDoc(ref,{allocationPending:'invalid'}));
+  await assertFails(updateDoc(ref,{allocationRevision:0}));
+  await assertFails(updateDoc(ref,{warehouseId:'OTHER'}));
+  // Clearing recovery metadata is allowed only by an authorized receiver.
+  await assertSucceeds(updateDoc(ref,{allocationPending:false}));
+  await assertSucceeds(updateDoc(ref,{reserved:1}));
+  await assertFails(updateDoc(doc(db('sales1'),'warehouseStocks/metadata-'+uid),{onHand:7}));
+ }
+});
 test('warehouse stock cannot be relabelled as another product or warehouse, including by admin',async()=>{
  for(const uid of ['admin','buyer1','wh1']){
   const ref=doc(db(uid),'warehouseStocks/'+uid);
