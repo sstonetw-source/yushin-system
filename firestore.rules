@@ -85,12 +85,12 @@ service cloud.firestore {
     function operationalOrOwnedReader(data) {
       let userRole = role();
       return userRole in ['admin','purchaser','warehouse']
-        || (userRole in ['sales','engineer'] && (data == null || owns(data)));
+        || (userRole in ['sales','engineer'] && owns(data));
     }
     function safeStockReader(data) {
       let profile = signedIn() ? userDoc().data : {};
       return signedIn() && profileEnabled(profile)
-        && (profile.get('role', '') == 'admin' || data == null || !data.keys().hasAny(['unitCost','cost']));
+        && (profile.get('role', '') == 'admin' || !data.keys().hasAny(['unitCost','cost']));
     }
 
     function validSalesOwner(data) {
@@ -800,26 +800,33 @@ service cloud.firestore {
       let qty = after.get('quantity', 0);
       // The company proof runs first and validates every product once. Local
       // sums reuse those same cached snapshots without repeating identity checks.
-      return warehouseId == ''
-        ? (after.productKey == productKey && before.get('productKey', productKey) == productKey ? qty - oldQty : null)
-        : (after.get('warehouseId', '') == warehouseId ? qty : 0)
-          - (before.get('warehouseId', '') == warehouseId ? oldQty : 0);
+      return {
+        'valid': warehouseId != '' || (after.productKey == productKey && before.get('productKey', productKey) == productKey),
+        'quantity': warehouseId == '' ? qty - oldQty
+          : (after.get('warehouseId', '') == warehouseId ? qty : 0)
+            - (before.get('warehouseId', '') == warehouseId ? oldQty : 0)
+      };
+    }
+    // Invalid evidence stays explicit instead of mixing number/null or using a sentinel.
+    function combinedReservationDelta(a, b, c, d, e) {
+      return {'valid': a.valid && b.valid && c.valid && d.valid && e.valid,
+        'quantity': a.quantity + b.quantity + c.quantity + d.quantity + e.quantity};
     }
     function operationalStockDelta(e, productKey, warehouseId) {
       let ids = e.reservationIds;
-      return operationalReservationDeltaAt(ids[0], productKey, warehouseId)
-        + (ids.size() <= 1 ? 0 : operationalReservationDeltaAt(ids[1], productKey, warehouseId)
-        + (ids.size() <= 2 ? 0 : operationalReservationDeltaAt(ids[2], productKey, warehouseId)
-        + (ids.size() <= 3 ? 0 : operationalReservationDeltaAt(ids[3], productKey, warehouseId)
-        + (ids.size() <= 4 ? 0 : operationalReservationDeltaAt(ids[4], productKey, warehouseId)))));
+      return combinedReservationDelta(operationalReservationDeltaAt(ids[0], productKey, warehouseId),
+        ids.size() > 1 ? operationalReservationDeltaAt(ids[1], productKey, warehouseId) : {'valid': true, 'quantity': 0},
+        ids.size() > 2 ? operationalReservationDeltaAt(ids[2], productKey, warehouseId) : {'valid': true, 'quantity': 0},
+        ids.size() > 3 ? operationalReservationDeltaAt(ids[3], productKey, warehouseId) : {'valid': true, 'quantity': 0},
+        ids.size() > 4 ? operationalReservationDeltaAt(ids[4], productKey, warehouseId) : {'valid': true, 'quantity': 0});
     }
     function operationalReservedStockMatches(path, delta, productKey, warehouseId) {
       let previous = get(path);
       let before = previous == null ? {} : previous.data;
       let after = getAfter(path).data;
-      return after.get('productKey', after.get('productId', '')) == productKey
+      return delta.valid && after.get('productKey', after.get('productId', '')) == productKey
         && (warehouseId == '' || after.get('warehouseId', '') == warehouseId)
-        && after.get('reserved', 0) - before.get('reserved', 0) == delta;
+        && after.get('reserved', 0) - before.get('reserved', 0) == delta.quantity;
     }
     function sameWarehouseReservationDeltaAt(id, productKey, warehouseId) {
       let path = /databases/$(database)/documents/inventoryReservations/$(id);
@@ -828,17 +835,18 @@ service cloud.firestore {
       let after = getAfter(path).data;
       let oldQty = before.get('quantity', 0);
       let qty = after.get('quantity', 0);
-      return qty == 0 && oldQty == 0 ? 0
-        : after.productKey == productKey && after.warehouseId == warehouseId
-          && (oldQty == 0 || before.get('warehouseId', warehouseId) == warehouseId)
-          ? qty - oldQty : null;
+      return {
+        'valid': (qty == 0 && oldQty == 0) || (after.productKey == productKey && after.warehouseId == warehouseId
+          && (oldQty == 0 || before.get('warehouseId', warehouseId) == warehouseId)),
+        'quantity': qty - oldQty
+      };
     }
     function sameWarehouseReservationTotal(ids, productKey, warehouseId) {
-      return sameWarehouseReservationDeltaAt(ids[0], productKey, warehouseId)
-        + (ids.size() <= 1 ? 0 : sameWarehouseReservationDeltaAt(ids[1], productKey, warehouseId)
-        + (ids.size() <= 2 ? 0 : sameWarehouseReservationDeltaAt(ids[2], productKey, warehouseId)
-        + (ids.size() <= 3 ? 0 : sameWarehouseReservationDeltaAt(ids[3], productKey, warehouseId)
-        + (ids.size() <= 4 ? 0 : sameWarehouseReservationDeltaAt(ids[4], productKey, warehouseId)))));
+      return combinedReservationDelta(sameWarehouseReservationDeltaAt(ids[0], productKey, warehouseId),
+        ids.size() > 1 ? sameWarehouseReservationDeltaAt(ids[1], productKey, warehouseId) : {'valid': true, 'quantity': 0},
+        ids.size() > 2 ? sameWarehouseReservationDeltaAt(ids[2], productKey, warehouseId) : {'valid': true, 'quantity': 0},
+        ids.size() > 3 ? sameWarehouseReservationDeltaAt(ids[3], productKey, warehouseId) : {'valid': true, 'quantity': 0},
+        ids.size() > 4 ? sameWarehouseReservationDeltaAt(ids[4], productKey, warehouseId) : {'valid': true, 'quantity': 0});
     }
     function sameWarehouseReservationStocks(e, productKey, warehouseId) {
       let delta = sameWarehouseReservationTotal(e.reservationIds, productKey, warehouseId);
@@ -848,10 +856,10 @@ service cloud.firestore {
       let beforeWh = exists(whPath) ? get(whPath).data : {};
       let afterInv = getAfter(invPath).data;
       let afterWh = getAfter(whPath).data;
-      return afterInv.get('productKey', afterInv.get('productId', '')) == productKey
+      return delta.valid && afterInv.get('productKey', afterInv.get('productId', '')) == productKey
         && afterWh.productKey == productKey && afterWh.warehouseId == warehouseId
-        && afterInv.reserved - beforeInv.get('reserved', 0) == delta
-        && afterWh.reserved - beforeWh.get('reserved', 0) == delta;
+        && afterInv.reserved - beforeInv.get('reserved', 0) == delta.quantity
+        && afterWh.reserved - beforeWh.get('reserved', 0) == delta.quantity;
     }
     // Only one fresh warehouse movement evaluates the full company delta.
     // All other warehouse movements must link that validated primary movement.
@@ -870,6 +878,45 @@ service cloud.firestore {
         && proof.get('reservationIds', []).size() == e.reservationIds.size()
         && proof.get('reservationIds', []).hasAll(e.reservationIds);
     }
+    // Evaluate each primary reservation snapshot once for both stock totals.
+    // A local contribution must keep its warehouse; each changed reservation's
+    // own movement witness also requires membership in this local ID set.
+    function primaryReservationDeltaAt(id, productKey, warehouseId, localIds) {
+      let path = /databases/$(database)/documents/inventoryReservations/$(id);
+      let previous = get(path);
+      let before = previous == null ? {} : previous.data;
+      let after = getAfter(path).data;
+      let oldQty = before.get('quantity', 0);
+      let qty = after.get('quantity', 0);
+      let local = id in localIds;
+      let delta = qty - oldQty;
+      return {
+        'valid': after.productKey == productKey && before.get('productKey', productKey) == productKey
+          && (!local || (qty == 0 && oldQty == 0) || (after.warehouseId == warehouseId
+            && (oldQty == 0 || before.get('warehouseId', warehouseId) == warehouseId))),
+        'company': delta, 'warehouse': local ? delta : 0
+      };
+    }
+    function combinedPrimaryReservationDelta(a, b, c, d, e) {
+      return {'valid': a.valid && b.valid && c.valid && d.valid && e.valid,
+        'company': a.company + b.company + c.company + d.company + e.company,
+        'warehouse': a.warehouse + b.warehouse + c.warehouse + d.warehouse + e.warehouse};
+    }
+    function primaryReservationStocks(e, productKey, warehouseId) {
+      let ids = e.reservationIds;
+      let localIds = e.warehouseReservationIds;
+      let zero = {'valid': true, 'company': 0, 'warehouse': 0};
+      let delta = combinedPrimaryReservationDelta(
+        primaryReservationDeltaAt(ids[0], productKey, warehouseId, localIds),
+        ids.size() > 1 ? primaryReservationDeltaAt(ids[1], productKey, warehouseId, localIds) : zero,
+        ids.size() > 2 ? primaryReservationDeltaAt(ids[2], productKey, warehouseId, localIds) : zero,
+        ids.size() > 3 ? primaryReservationDeltaAt(ids[3], productKey, warehouseId, localIds) : zero,
+        ids.size() > 4 ? primaryReservationDeltaAt(ids[4], productKey, warehouseId, localIds) : zero);
+      return operationalReservedStockMatches(/databases/$(database)/documents/inventory/$(e.inventoryId),
+          {'valid': delta.valid, 'quantity': delta.company}, productKey, '')
+        && operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId),
+          {'valid': delta.valid, 'quantity': delta.warehouse}, productKey, warehouseId);
+    }
     function crossWarehouseReservationStocks(e, productKey, warehouseId) {
       return e.get('companyMovementId', '') is string && e.get('companyMovementId', '') != ''
         && e.warehouseReservationIds is list && e.warehouseReservationIds.size() > 0
@@ -877,10 +924,10 @@ service cloud.firestore {
         && e.warehouseReservationIds.toSet().size() == e.warehouseReservationIds.size()
         && e.reservationIds.hasAll(e.warehouseReservationIds)
         && (e.companyMovementId == e.movementId
-          ? operationalReservedStockMatches(/databases/$(database)/documents/inventory/$(e.inventoryId), operationalStockDelta(e, productKey, ''), productKey, '')
-          : linkedCompanyReservationProof(e, productKey, warehouseId))
-        && operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId),
-          sameWarehouseReservationTotal(e.warehouseReservationIds, productKey, warehouseId), productKey, warehouseId);
+          ? primaryReservationStocks(e, productKey, warehouseId)
+          : linkedCompanyReservationProof(e, productKey, warehouseId)
+            && operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId),
+              sameWarehouseReservationTotal(e.warehouseReservationIds, productKey, warehouseId), productKey, warehouseId));
     }
     function operationalReservationStockEvidence(id) {
       let data = request.resource.data;
@@ -1472,124 +1519,6 @@ service cloud.firestore {
     }
 
 
-    // 外倉送貨僅能由已通知的外倉通知單觸發，且必須與同一次
-    // Firestore transaction 中的 notice SHIPPED 寫入互相對應。
-    function externalWarehouseOrderShipmentUpdate(orderId) {
-      let beforeRecords = resource.data.get('deliveryRecords', []);
-      let afterRecords = request.resource.data.get('deliveryRecords', []);
-      let record = afterRecords[beforeRecords.size()];
-      let id = record.get('externalNoticeId', '');
-      let noticePath = /databases/$(database)/documents/externalDispatchNotices/$(id);
-      let notice = get(noticePath).data;
-      let nextNotice = getAfter(noticePath).data;
-      return (purchaser() || warehouse())
-        && id != ''
-        && beforeRecords.size() + 1 == afterRecords.size()
-        && afterRecords.hasAll(beforeRecords)
-        && !orderIsCancelled(resource.data)
-        && sameCommercialOwner()
-        && preservesCreator()
-        && operationalItemsOnly(['dispatchPreparedQty', 'reservedQty'])
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'items', 'deliveryRecords', 'deliveredQty', 'isDelivered',
-          'deliveryHistory', 'workCategories', 'workCategoryUpdatedAt', 'updatedAt'
-        ])
-        && notice.get('status', '') == 'NOTIFIED'
-        && nextNotice.get('status', '') == 'SHIPPED'
-        && nextNotice.get('orderId', '') == orderId
-        && nextNotice.get('itemId', '') == record.get('itemId', '')
-        && nextNotice.get('warehouseId', '') == record.get('warehouseId', '')
-        && nextNotice.get('deliveryRecordId', '') == record.get('id', '')
-        && nextNotice.get('movementId', '') == record.get('movementId', '')
-        && nextNotice.get('shippedByUid', '') == request.auth.uid
-        && record.get('sourceType', '') == 'EXTERNAL_WAREHOUSE_SHIP'
-        && record.get('createdByUid', '') == request.auth.uid
-        && record.get('qty', 0) is number
-        && record.get('qty', 0) > 0
-        && record.get('qty', 0) == nextNotice.get('qty', 0)
-        && request.resource.data.get('deliveredQty', 0) == resource.data.get('deliveredQty', 0) + record.get('qty', 0);
-    }
-
-    function validExternalNoticeCreate(id) {
-      let data = request.resource.data;
-      let orderId = data.get('orderId', '');
-      let orderPath = /databases/$(database)/documents/orders/$(orderId);
-      let order = get(orderPath).data;
-      let index = data.get('itemIndex', -1);
-      let warehouseId = data.get('warehouseId', '');
-      let whPath = /databases/$(database)/documents/warehouses/$(warehouseId);
-      return (admin() || purchaser() || warehouse())
-        && orderId != '' && warehouseId != ''
-        && data.get('itemId', '') != ''
-        && id == orderId + '__' + data.itemId
-        && data.keys().hasOnly([
-          'orderId', 'itemId', 'itemIndex', 'warehouseId', 'orderNo',
-          'ownerUid', 'salesCode', 'customerName', 'itemCode', 'itemName',
-          'qty', 'status', 'shippingAddress', 'contactName', 'contactPhone',
-          'expectedDate', 'notes', 'notifiedByUid', 'notifiedBy',
-          'notifiedAt', 'createdAt', 'updatedAt'
-        ])
-        && data.get('status', '') == 'NOTIFIED'
-        && data.get('notifiedByUid', '') == request.auth.uid
-        && data.get('notifiedAt', '') is string
-        && data.get('notifiedAt', '') != ''
-        && !orderIsCancelled(order)
-        && order.get('ownerUid', '') == data.get('ownerUid', '')
-        && order.get('salesCode', '') == data.get('salesCode', '')
-        && index is int && index >= 0
-        && index < order.get('items', []).size()
-        && order.items[index].get('itemId', '') == data.itemId
-        && order.items[index].get('fulfillmentType', 'WAREHOUSE') != 'DIRECT_SHIP'
-        && order.items[index].get('warehouseId', order.get('warehouseId', '')) == warehouseId
-        && data.get('qty', 0) is number
-        && data.get('qty', 0) > 0
-        && data.get('qty', 0) <= order.items[index].get('qty', order.items[index].get('orderedQty', 0))
-        && get(whPath).data.get('active', true) == true
-        && get(whPath).data.get('warehouseType', 'INTERNAL') == 'EXTERNAL';
-    }
-
-    function validExternalNoticeShipment(id) {
-      let orderPath = /databases/$(database)/documents/orders/$(resource.data.orderId);
-      let records = getAfter(orderPath).data.get('deliveryRecords', []);
-      let record = records[records.size() - 1];
-      let movementId = request.resource.data.get('movementId', '');
-      let movementPath = /databases/$(database)/documents/inventoryMovements/$(movementId);
-      let movement = getAfter(movementPath).data;
-      let stockPath = /databases/$(database)/documents/warehouseStocks/$(movement.get('warehouseStockId', ''));
-      let inventoryPath = /databases/$(database)/documents/inventory/$(movement.get('inventoryDocId', ''));
-      return (admin() || purchaser() || warehouse())
-        && resource.data.get('status', '') == 'NOTIFIED'
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'status', 'shippedAt', 'shippedBy', 'shippedByUid',
-          'deliveryRecordId', 'movementId', 'updatedAt'
-        ])
-        && request.resource.data.get('status', '') == 'SHIPPED'
-        && request.resource.data.get('shippedByUid', '') == request.auth.uid
-        && request.resource.data.get('shippedAt', '') is string
-        && request.resource.data.get('shippedAt', '') != ''
-        && records.size() > 0
-        && record.get('externalNoticeId', '') == id
-        && record.get('id', '') == request.resource.data.get('deliveryRecordId', '')
-        && record.get('itemId', '') == resource.data.itemId
-        && record.get('warehouseId', '') == resource.data.warehouseId
-        && record.get('qty', 0) == resource.data.qty
-        && record.get('sourceType', '') == 'EXTERNAL_WAREHOUSE_SHIP'
-        && movementId != ''
-        && record.get('movementId', '') == movementId
-        && !exists(movementPath)
-        && getAfter(movementPath).data.get('type', '') == 'ship'
-        && getAfter(movementPath).data.get('sourceId', '') == resource.data.orderId
-        && getAfter(movementPath).data.get('warehouseId', '') == resource.data.warehouseId
-        && movement.get('qty', 0) == -resource.data.qty
-        && movement.get('warehouseStockId', '') != ''
-        && movement.get('inventoryDocId', '') != ''
-        && getAfter(stockPath).data.get('warehouseId', '') == resource.data.warehouseId
-        && getAfter(stockPath).data.get('productKey', '') == movement.get('productKey', '')
-        && getAfter(stockPath).data.get('onHand', -1) == get(stockPath).data.get('onHand', -1) - resource.data.qty
-        && getAfter(inventoryPath).data.get('productKey', '') == movement.get('productKey', '')
-        && getAfter(inventoryPath).data.get('onHand', -1) == get(inventoryPath).data.get('onHand', -1) - resource.data.qty;
-    }
-
     // Completed delivery must be corrected separately or returned, never cancelled.
     // Check both snapshots so a combined flag/status update cannot bypass this guard.
     function validOrderCancellationTransition() {
@@ -2023,7 +1952,7 @@ service cloud.firestore {
       return data.get('transactionType', '') in ['直', '借', '扣'];
     }
     match /orders/{id} {
-      allow get: if operationalOrOwnedReader(resource == null ? null : resource.data);
+      allow get: if (resource == null ? role() in ['admin','purchaser','warehouse','sales','engineer'] : operationalOrOwnedReader(resource.data));
       allow list: if operationalOrOwnedReader(resource.data);
       allow create: if canCreateCommercialDoc()
         && request.resource.data.get('items', []).size() <= 15
@@ -2061,7 +1990,7 @@ service cloud.firestore {
     // supplier orders / receipts link back through demandId.
     match /procurementDemands/{id} {
       // Transactions read the deterministic ID before creating a demand. Missing data carries no customer information.
-      allow get: if operationalOrOwnedReader(resource == null ? null : resource.data);
+      allow get: if (resource == null ? role() in ['admin','purchaser','warehouse','sales','engineer'] : operationalOrOwnedReader(resource.data));
       allow list: if operationalOrOwnedReader(resource.data);
       allow create: if validProcurementDemand(request.resource.data) && (canReceiveInventory()
         || businessProcurementDemandCreate(request.resource.data));
@@ -2339,7 +2268,7 @@ service cloud.firestore {
       // Aggregate operational stock is shared, but cost fields must never be embedded here.
       // stockPolicy/safetyStock are planning master data: admin/purchaser manage them;
       // warehouse keeps those fields unchanged while performing physical stock work.
-      allow get: if safeStockReader(resource == null ? null : resource.data);
+      allow get: if safeStockReader(resource == null ? {} : resource.data);
       allow list: if active() && !('unitCost' in resource.data) && !('cost' in resource.data);
       allow create: if (
           ((admin() || purchaser()) && validInventoryStockPolicy(request.resource.data))
@@ -2357,7 +2286,7 @@ service cloud.firestore {
     }
 
     match /warehouseStocks/{id} {
-      allow get: if safeStockReader(resource == null ? null : resource.data);
+      allow get: if safeStockReader(resource == null ? {} : resource.data);
       allow list: if safeStockReader(resource.data);
       allow create: if canReceiveInventory() && validWarehouseStock(request.resource.data)
         && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
@@ -2374,7 +2303,7 @@ service cloud.firestore {
     match /inventoryReservations/{id} {
       // Reservation transactions first read their deterministic ID so retries remain idempotent.
       // A missing document contains no business data; existing documents stay owner-scoped.
-      allow get: if operationalOrOwnedReader(resource == null ? null : resource.data);
+      allow get: if (resource == null ? role() in ['admin','purchaser','warehouse','sales','engineer'] : operationalOrOwnedReader(resource.data));
       allow list: if operationalOrOwnedReader(resource.data);
       allow create: if reservationCreateAllowed(id);
       allow update: if reservationUpdateAllowed(id);
