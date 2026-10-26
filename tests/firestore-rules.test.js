@@ -203,7 +203,8 @@ test('purchaser may assist sales and engineer quotes and orders without changing
   }));
   await assertSucceeds(getDoc(doc(db('eng1'), 'orders/assisted-engineer')));
   await assertFails(getDoc(doc(db('sales1'), 'orders/assisted-engineer')));
-  await assertSucceeds(updateDoc(doc(db('buyer1'), 'orders/assisted-engineer'), {remarks:'代辦備註'}));
+  // Purchasers may create assisted orders, but commercial remarks are owner/admin edits only.
+  await assertFails(updateDoc(doc(db('buyer1'), 'orders/assisted-engineer'), {remarks:'代辦備註'}));
   await assertSucceeds(updateDoc(doc(db('buyer1'), 'quotes/assisted-engineer'), {quoteDate:'2026-09-21'}));
   await assertFails(updateDoc(doc(db('buyer1'), 'orders/assisted-engineer'), {ownerUid:'sales1',salesCode:'S01'}));
   await assertFails(updateDoc(doc(db('buyer1'), 'quotes/assisted-engineer'), {ownerUid:'sales1',salesCode:'S01'}));
@@ -2124,6 +2125,24 @@ test('stock quantities reject over-reservation and invalid incoming on both crea
   }
  }
 });
+test('stock metadata is validated once while identity, recovery and role guards remain enforced',async()=>{
+ for(const uid of ['admin','buyer1','wh1']){
+  const ref=doc(db(uid),'warehouseStocks/metadata-'+uid);
+  const valid={productKey:'P',productId:'P',warehouseId:'MAIN',onHand:5,reserved:2,incoming:0,
+   allocationPending:true,allocationRevision:1};
+  await assertFails(setDoc(ref,{...valid,allocationRevision:0}));
+  await assertSucceeds(setDoc(ref,valid));
+  // Ordinary stock changes need not rewrite unchanged recovery metadata.
+  await assertSucceeds(updateDoc(ref,{onHand:6}));
+  await assertFails(updateDoc(ref,{allocationPending:'invalid'}));
+  await assertFails(updateDoc(ref,{allocationRevision:0}));
+  await assertFails(updateDoc(ref,{warehouseId:'OTHER'}));
+  // Clearing recovery metadata is allowed only by an authorized receiver.
+  await assertSucceeds(updateDoc(ref,{allocationPending:false}));
+  await assertSucceeds(updateDoc(ref,{reserved:1}));
+  await assertFails(updateDoc(doc(db('sales1'),'warehouseStocks/metadata-'+uid),{onHand:7}));
+ }
+});
 test('warehouse stock cannot be relabelled as another product or warehouse, including by admin',async()=>{
  for(const uid of ['admin','buyer1','wh1']){
   const ref=doc(db(uid),'warehouseStocks/'+uid);
@@ -3252,5 +3271,58 @@ test('cross-warehouse proof rejects unrelated product ids instead of treating a 
   await assertFails(b.commit());
   assert.equal((await getDoc(doc(db('admin'),'inventory/p-order'))).data().reserved,0);
   assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/evidence__I0'))).exists(),false);
+ }
+});
+
+test('commercial order details allow owners before first receipt and lock all metadata on the last of thirty items',async()=>{
+ const items=Array.from({length:30},(_,i)=>({itemId:'I'+i,qty:3,unitPrice:100,receivedQty:0}));
+ for(const [uid,owner,code,allowed] of [['sales1','sales1','S01',true],['eng1','eng1','E01',true],['sales2','sales1','S01',false],['buyer1','sales1','S01',false],['wh1','sales1','S01',false],['admin','sales1','S01',true]]){
+  const id='commercial-timing-'+uid;
+  await seed('orders/'+id,{ownerUid:owner,salesCode:code,status:'active',items,transactionType:'借',remarks:'old'});
+  const patch={transactionType:'直',remarks:'new',invoiceTitle:'公司'};
+  await (allowed?assertSucceeds:assertFails)(updateDoc(doc(db(uid),'orders/'+id),patch));
+  const received=items.map((item,i)=>i===29?{...item,receivedQty:1,receiptEvents:[{qty:1}]}:item);
+  await seed('orders/'+id,{ownerUid:owner,salesCode:code,status:'active',items:received,transactionType:'借',remarks:'old'});
+  for(const patch of [{transactionType:'直'},{remarks:'new'},{invoiceTitle:'公司'},{shippingInstructions:{mode:'PICKUP'}},{remarks:'bypass',items}])
+   await assertFails(updateDoc(doc(db(uid),'orders/'+id),patch));
+ }
+});
+test('business delivery plan requires first receipt boundary while warehouse scoped handling remains usable',async()=>{
+ const p={mode:'PICKUP',warehouseId:'',contact:'',phone:'',address:'',packages:1,notes:''};
+ const item={itemId:'I',qty:3,receivedQty:0,warehouseId:'W',fulfillmentType:'WAREHOUSE',deliveryPlan:p};
+ const original={ownerUid:'sales1',salesCode:'S01',status:'active',items:[item]};
+ const next={...p,mode:'CUSTOMER_SHIP',contact:'C',phone:'123',address:'台北'};
+ const change=(uid,current)=>({items:[{...current,deliveryPlan:next}],logisticsPlanItemIndex:0,logisticsPlanActorUid:uid,logisticsPlanEventId:'edit',logisticsHistory:[{id:'edit',action:'交付設定'}],updatedAt:'T'});
+ await seed('orders/timing-plan',original);await assertSucceeds(updateDoc(doc(db('sales1'),'orders/timing-plan'),change('sales1',item)));
+ const thirty=Array.from({length:30},(_,i)=>({...item,itemId:'I'+i}));
+ await seed('orders/timing-plan',{...original,items:thirty});
+ await assertSucceeds(updateDoc(doc(db('sales1'),'orders/timing-plan'),{...change('sales1',thirty[0]),items:[{...thirty[0],deliveryPlan:next},...thirty.slice(1)]}));
+ const arrived={...item,receivedQty:1,receiptEvents:[{qty:1}]};
+ await seed('orders/timing-plan',{...original,items:[arrived]});
+ await assertFails(updateDoc(doc(db('sales1'),'orders/timing-plan'),change('sales1',arrived)));
+ await assertFails(updateDoc(doc(db('sales1'),'orders/timing-plan'),{items:[{...arrived,deliveryPlan:next}]}));
+ await assertFails(updateDoc(doc(db('sales1'),'orders/timing-plan'),{items:[{...arrived,receivedQty:0,receiptEvents:[]}]}));
+ await assertSucceeds(updateDoc(doc(db('buyer1'),'orders/timing-plan'),change('buyer1',arrived)));
+});
+
+test('new orders cap line items at fifteen without blocking legacy metadata updates',async()=>{
+ const base={...validOrderProduct,ownerUid:'sales1',salesCode:'S01'};
+ const items=Array.from({length:15},()=>({productId:base.productId,qty:1}));
+ await assertSucceeds(setDoc(doc(db('sales1'),'orders/fifteen-lines'),{...base,items}));
+ await assertFails(setDoc(doc(db('sales1'),'orders/sixteen-lines'),{...base,items:[...items,{...items[0]}]}));
+ await seed('orders/legacy-sixteen',{...base,items:[...items,{...items[0]}]});
+ await assertSucceeds(updateDoc(doc(db('sales1'),'orders/legacy-sixteen'),{remarks:'保留舊訂單'}));
+});
+
+
+test('commercial metadata cannot bypass the UI lock when only a line has shipment or delivery history',async()=>{
+ for(const count of [1,4,5,6,15,16,29,30])for(const uid of ['sales1','eng1','admin'])for(const field of ['warehouseShippedQty','deliveredQty']){
+  const items=Array.from({length:count},(_,i)=>({itemId:'I'+i,qty:3,receivedQty:0,...(i===count-1?{[field]:1}:{})}));
+  const owner=uid==='eng1'?'eng1':'sales1',salesCode=uid==='eng1'?'E01':'S01';
+  await seed('orders/line-shipment-lock',{ownerUid:owner,salesCode,status:'active',items:items.map(item=>({...item,[field]:0})),transactionType:'借',remarks:'old'});
+  await assertSucceeds(updateDoc(doc(db(uid),'orders/line-shipment-lock'),{remarks:'allowed before movement'}));
+  await seed('orders/line-shipment-lock',{ownerUid:owner,salesCode,status:'active',items,transactionType:'借',remarks:'old'});
+  for(const patch of [{remarks:'new'},{invoiceTitle:'公司'},{transactionType:'直'}])
+   await assertFails(updateDoc(doc(db(uid),'orders/line-shipment-lock'),patch));
  }
 });

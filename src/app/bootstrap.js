@@ -140,7 +140,7 @@ const BUSINESS_STATUS = Object.freeze({
     CANCELLED: 'cancelled',
     VOIDED: 'voided'
 });
-const MAX_ORDER_ITEMS = 30;
+const MAX_ORDER_ITEMS = 15;
 function assertOrderItemCount(items) {
     if (items.length > MAX_ORDER_ITEMS) throw new Error(`每張訂單最多 ${MAX_ORDER_ITEMS} 個品項；請分成多張訂單後再儲存，避免後續採購／倉庫作業無法處理。`);
 }

@@ -178,3 +178,14 @@ test('order form adopts an older Forecast pending ID and keeps it through a lost
  assert.equal(result.id,'LEGACY');assert.equal(f.stored.has('draft:U:forecast:F:pending_order_id'),false);
  assert.deepEqual(f.writes,[['set','orders/LEGACY'],['update','forecasts/F']]);
 });
+
+test('new order allows fifteen lines, rejects sixteen before writes and resumes legacy orders',async()=>{
+ const f=fixture();const items=Array.from({length:15},()=>({qty:1}));
+ await f.c.commitOrderCreation('FIFTEEN',{...f.data,items});
+ const before=f.writes.length;
+ await assert.rejects(f.c.commitOrderCreation('SIXTEEN',{...f.data,items:[...items,{qty:1}]}),/15/);
+ assert.equal(f.writes.length,before);assert.equal(f.docs.has('orders/SIXTEEN'),false);
+ f.docs.set('orders/LEGACY',{...f.data,items:[...items,{qty:1}],inventoryReservationStatus:'completed'});
+ const result=await f.c.commitOrderCreation('LEGACY',{...f.data,items});
+ assert.equal(result.data.items.length,16);assert.equal(f.writes.length,before);
+});

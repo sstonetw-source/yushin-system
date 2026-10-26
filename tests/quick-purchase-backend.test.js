@@ -3,7 +3,7 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const core=require('../functions/shared/procurement-demand-core');
 const {commitV2QuickPurchase,purchaseIntent}=require('../functions/quick-purchase-commit-service');
-const {allowQuickPurchaseEmulator,createQuickPurchaseCallable}=require('../functions/quick-purchase-callable');
+const {allowQuickPurchaseEmulator,allowPreviewQuickPurchase,createQuickPurchaseCallable}=require('../functions/quick-purchase-callable');
 function fixture({directShip=false}={}){
  const orderId='ORDER-1',itemId='I1',productId='P',warehouseId=directShip?'':'W';
  const item={itemId,productId,warehouseId,fulfillmentType:directShip?'DIRECT_SHIP':'WAREHOUSE',
@@ -162,4 +162,25 @@ test('quick purchase callable is strictly demo Emulator only and never touches p
  assert.equal(x.history.length,0);
  const result=await make(demo,x.db)({auth:{uid:'buyer'},data:x.data});
  assert.equal(result.status,'committed');
+});
+test('preview quick purchase remains disabled by default and cannot be used in production',async()=>{
+ const preview={GCLOUD_PROJECT:'preview-20135',ENABLE_PREVIEW_QUICK_PURCHASE:'true'};
+ assert.equal(allowPreviewQuickPurchase(preview),true);
+ for(const bad of [{GCLOUD_PROJECT:'yu-shing-company'},{GCLOUD_PROJECT:'demo-yushin'},
+  {ENABLE_PREVIEW_QUICK_PURCHASE:'false'},{FUNCTIONS_EMULATOR:'true'},
+  {FIRESTORE_EMULATOR_HOST:'127.0.0.1:8080'},{FIREBASE_AUTH_EMULATOR_HOST:'127.0.0.1:9099'}])
+  assert.equal(allowPreviewQuickPurchase({...preview,...bad}),false);
+ class HttpsError extends Error{constructor(code,message){super(message);this.code=code;}}
+ const make=(env,db)=>createQuickPurchaseCallable({onCall:(_options,handler)=>handler,
+  HttpsError,getDatabase:()=>db,env});
+ const x=fixture(),previewDb={...x.db,projectId:'preview-20135'};
+ await assert.rejects(make({...preview,GCLOUD_PROJECT:'yu-shing-company'},previewDb)
+  ({auth:{uid:'buyer'},data:x.data}),{code:'failed-precondition'});
+ await assert.rejects(make(preview,x.db)({auth:{uid:'buyer'},data:x.data}),{code:'failed-precondition'});
+ await assert.rejects(make(preview,previewDb)({data:x.data}),{code:'unauthenticated'});
+ await assert.rejects(make(preview,previewDb)({auth:{uid:'seller'},data:x.data}),{code:'permission-denied'});
+ assert.equal(x.history.length,0);
+ const result=await make(preview,previewDb)({auth:{uid:'buyer'},data:x.data});
+ assert.equal(result.status,'committed');
+ assert.equal((await make(preview,previewDb)({auth:{uid:'buyer'},data:x.data})).status,'already-applied');
 });

@@ -14,7 +14,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261025-9">
+        <link rel="stylesheet" href="styles.css?v=20261025-101">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -885,7 +885,7 @@
             <th>客戶名稱</th>
             <th>負責業務</th> <!-- 新增 -->
             <th>產品資訊</th>
-            <th>訂單總額</th>
+            <th>訂單金額</th>
             <th id="orderCostHeader">明細</th>
             <th class="no-print">操作</th>
                 </tr>
@@ -913,7 +913,10 @@
 
     <!-- ============ 採購管理系統 ============ -->
     <div id="purchasing-system" class="content-section">
-        <h2 class="workspace-page-title no-print">採購 <button type="button" class="page-help-trigger no-print" data-page-help="purchasing-system" aria-label="採購功能與注意事項" aria-haspopup="dialog" aria-controls="pageHelpDialog">!</button></h2><section class="panel no-print" id="customerCancellationQueue" hidden></section>
+<div class="workflow-page-heading">        <h2 class="workspace-page-title no-print">採購 <button type="button" class="page-help-trigger no-print" data-page-help="purchasing-system" aria-label="採購功能與注意事項" aria-haspopup="dialog" aria-controls="pageHelpDialog">!</button></h2>        <section id="purchaseDirectPanel" class="panel no-print purchase-function-panel" style="display:none;">
+            <div class="purchase-section-heading"><strong>直接採購</strong></div>
+            <button type="button" id="purchaseDirectOrderBtn" onclick="openDirectStockPurchase()">直接採購</button>
+        </section></div><section class="panel no-print" id="customerCancellationQueue" hidden></section>
         <section class="panel no-print" id="formalPurchaseRecoveryPanel" role="status" aria-live="polite" hidden></section>
         <div class="purchase-view-tabs no-print" aria-label="採購頁面">
             <button type="button" id="purchase-tab-work" class="active" onclick="switchPurchasingView('ordering')">採購需求</button>
@@ -944,10 +947,7 @@
             </div>
 
         </div>
-        <section id="purchaseDirectPanel" class="panel no-print purchase-function-panel" style="display:none;">
-            <div class="purchase-section-heading"><strong>直接採購</strong></div>
-            <button type="button" id="purchaseDirectOrderBtn" onclick="openDirectStockPurchase()">直接採購</button>
-        </section>
+
         <div class="panel no-print purchase-replenishment-panel" id="purchaseReplenishmentPanel" style="display:none;">
             <div class="purchase-replenishment-heading">
                 <div>
@@ -1700,15 +1700,16 @@
     <script src="modules/purchasing-analytics-core.js?v=20261008-1"></script>
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261013-file-share"></script>
+    <script src="modules/order-commercial-details.js?v=20261025-1"></script>
     <script src="modules/order-entry-core.js?v=20261025-3"></script>
 <script src="modules/service-work-core.js?v=20261023-2"></script>
-    <script src="app.js?v=20261025-9"></script>
+    <script src="app.js?v=20261025-101"></script>
     <script src="modules/order-self-order-required.js?v=20261013-1"></script>
     <script src="modules/customer-cancellations.js?v=20261021-3"></script>
     <script src="modules/free-stock-recovery.js?v=20261014-9"></script>
     <script src="modules/inventory-workspace.js?v=20261021-locations-1"></script>
-    <script src="modules/warehouse-logistics.js?v=20261021-locations-1"></script>
-    <script src="modules/delivery-settings.js?v=20261025-address-labels"></script>
+    <script src="modules/warehouse-logistics.js?v=20261025-order-details"></script>
+    <script src="modules/delivery-settings.js?v=20261025-order-details"></script>
     <script src="modules/order-entry-ui.js?v=20261025-self-confirmed"></script>
     <script src="modules/quote-decision-analysis.js?v=20261005-5"></script>
 

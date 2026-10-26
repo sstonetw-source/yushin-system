@@ -778,7 +778,7 @@ test('ordered action is a direct snapshot-based state change without a data-entr
     const saveEnd=app.indexOf('\nwindow.openOrderPurchaseDraft',saveStart);
     const saveSource=app.slice(saveStart,saveEnd);
     assert.ok(actionStart>=0 && actionEnd>actionStart && saveStart>=0 && saveEnd>saveStart);
-    assert.match(actionSource, /markPurchaseItemOrdered[\s\S]*?>已採購<\/button>/);
+    assert.match(actionSource, /markPurchaseItemOrdered[\s\S]*?>確認已下訂<\/button>/);
     assert.doesNotMatch(saveSource, /switchPurchasingView\(/);
     assert.doesNotMatch(saveSource, /loadPendingPurchaseOrders\(true\)/);
     assert.match(saveSource, /syncCommittedQuickPurchaseDemand\(savedDemand, savedOrder\)/);
@@ -2049,7 +2049,7 @@ test('standalone receiving and inventory pending rows use canonical supply recei
     const receivingEnd=app.indexOf('\nwindow.renderPoList',receivingStart);
     const receivingSource=app.slice(receivingStart,receivingEnd);
     assert.match(receivingSource,/YushinSupply\?\.receiptProgress\(supply\)/);
-    assert.match(receivingSource,/supplyProgress\.label/);
+    assert.match(receivingSource,/supplyProgress\.receivedQty/);
 
     const inventoryStart=app.indexOf('window.renderPendingInventoryItems=function');
     const inventoryEnd=app.indexOf('\nwindow.renderInventoryLedger',inventoryStart);

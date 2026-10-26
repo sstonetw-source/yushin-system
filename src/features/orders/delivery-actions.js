@@ -564,7 +564,36 @@ window.saveOrderLifecycleStatus = async function() {
 
 // Customer return mutations are owned by modules/customer-cancellations.js.
 
+window.orderCommercialEditPending=new Set();
+async function updateOrderCommercialField(orderId,field,value){
+    if(!['transactionType','invoiceTitle','remarks'].includes(field)||typeof value!=='string')return;
+    if(window.orderCommercialEditPending.has(orderId))return;
+    const cached=ordersCache.find(order=>order.id===orderId);
+    if(!cached||!globalThis.YushinOrderCommercialDetails.canEdit(cached)){alert('這筆訂單已到貨、進入交付流程，或目前帳號無法修改。');renderOrdersList();return;}
+    if(field==='transactionType'&&!['直','借','扣'].includes(value)){alert('請選擇直、借或扣。');renderOrdersList();return;}
+    const uid=currentUser?.uid,role=currentUserRole,prior=cached[field]??'';
+    if(String(prior)===String(value??''))return;
+    const history={field,label:{transactionType:'修改交易方式',invoiceTitle:'修改發票抬頭',remarks:'修改訂單備註'}[field],before:prior,after:value??'',by:currentUserName||currentUser?.email||'未知使用者',at:new Date().toISOString()};
+    window.orderCommercialEditPending.add(orderId);renderOrdersList();
+    try{
+        const saved=await runRoleTransaction(async tx=>{
+            const ref=db.collection('orders').doc(orderId),snapshot=await tx.get(ref);
+            if(uid!==currentUser?.uid||role!==currentUserRole)throw Error('登入身分已變更，請重新開啟訂單。');
+            if(!snapshot.exists)throw Error('找不到這筆訂單。');
+            const order=snapshot.data();
+            if((order[field]??'')===value)return order;
+            if(!globalThis.YushinOrderCommercialDetails.canEdit(order))throw Object.assign(Error('訂單已到貨或進入交付流程，不能修改。'),{latestOrder:order});
+            if((order[field]??'')!==prior)throw Object.assign(Error('這個欄位已被其他人修改，已更新為最新資料，請重新確認。'),{latestOrder:order});
+            tx.update(ref,{[field]:value,fieldEditHistory:firebase.firestore.FieldValue.arrayUnion(history)});
+            return {...order,[field]:value,fieldEditHistory:[...(order.fieldEditHistory||[]),history]};
+        });
+        if(uid===currentUser?.uid&&role===currentUserRole){cached[field]=saved[field];cached.fieldEditHistory=saved.fieldEditHistory||[];showActionFeedback('訂單資料已儲存。');}
+    }catch(err){if(err.latestOrder&&uid===currentUser?.uid&&role===currentUserRole)Object.assign(cached,err.latestOrder);alert(productOperationErrorMessage('訂單資料更新',err));}
+    finally{window.orderCommercialEditPending.delete(orderId);if(uid===currentUser?.uid&&role===currentUserRole)renderOrdersList();}
+}
+
 window.updateOrderField = function(orderId, field, value) {
+    if(['transactionType','invoiceTitle','remarks'].includes(field))return updateOrderCommercialField(orderId,field,value);
     const o = ordersCache.find(x => x.id === orderId);
     if (!o || !canEditPage('orders.list')) return;
     if (field === 'costPrice' && (o.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER') {

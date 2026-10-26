@@ -290,7 +290,7 @@ for(const width of [1280,390])test('original Quick Purchase '+width+'px commits 
   await siteNav(page,'purchasing');
   await page.waitForFunction(orderId=>document.getElementById('purchasePendingBody')?.textContent?.includes(orderId),fixture.orderId);
   const row=page.locator('#purchasePendingBody tr').filter({hasText:fixture.orderId}).filter({hasText:fixture.keys[0]}).first();
-  await row.getByRole('button',{name:'已採購',exact:true}).click();
+  await row.getByRole('button',{name:'確認已下訂',exact:true}).click();
   await page.locator('#quickPurchaseConfirmationOverlay.active').waitFor({state:'visible'});
   assert.equal(await page.locator('#quickPurchaseQty').inputValue(),'3');
   await page.locator('#quickPurchaseSupplier').fill(fixture.supplierName);
