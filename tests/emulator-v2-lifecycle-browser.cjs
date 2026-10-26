@@ -942,7 +942,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   assert.equal(await page.locator('#formalPurchaseRecoveryPanel').isVisible(),false);
   await page.locator('#purchase-tab-history').click();
   const savedRow=page.locator('#poListBody tr').filter({hasText:commitIntent.poNo});
-  await savedRow.locator('button').filter({hasText:'載入'}).click();
+  await savedRow.locator('button').filter({hasText:'開啟採購單'}).click();
   await page.waitForFunction(()=>!poSaveInProgress&&poEditingId&&!poIncomingSyncPending);
   await page.evaluate(()=>{window.poPdfOutputs=[];printSavedPoDocument=async(poNo,vendor)=>window.poPdfOutputs.push({poNo,vendor});});
   await page.locator('#printPurchaseOrderBtn').click();
