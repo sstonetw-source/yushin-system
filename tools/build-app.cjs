@@ -15,6 +15,7 @@ const parts = [
   "src/features/products/frequent-products.js",
   "src/features/forecasts/forecast-head.js",
   "src/shared/action-feedback.js",
+  "src/shared/workspace-display.js",
   "src/services/order-creation.js",
   "src/features/forecasts/forecast-workspace.js",
   "src/features/quotations/quotation-workspace.js",

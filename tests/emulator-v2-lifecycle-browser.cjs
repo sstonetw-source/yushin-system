@@ -554,10 +554,10 @@ for(const width of [1280,390])test('original service case UI '+width+'px: four k
   for(const entry of items)assert.equal((await db.doc('inventory/'+entry.productId).get()).exists,false);
   assert.equal((await db.collection('supplyOrders').where('sourceId','==',orderId).get()).size,0);
   // Read the original server endpoint once, then show each sibling's progress
-  // beneath that exact product in the original desktop/mobile order renderer.
+  // in that exact item's progress block in the desktop/mobile order renderer.
   await page.locator('#verifyServiceOrderButton').click();
   await page.waitForFunction(()=>!!serviceCaseView?.summary);
-  const productLines=row.locator('.order-product-cell > div');
+  const productLines=row.locator('.order-progress-cell > .workflow-progress-item');
   for(const entry of items){
    const line=productLines.filter({hasText:entry.itemName});
    const hint=await line.locator('.service-case-verified-hint').textContent();
@@ -839,7 +839,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   const supplyCountBefore=(await db.collection('supplyOrders').get()).size;
   const pendingRow=page.locator('#purchasePendingBody tr').filter({hasText:fixture.sourceId});
   assert.equal(await pendingRow.count(),1);
-  await pendingRow.getByRole('button',{name:'產生採購單'}).click();
+  await pendingRow.getByRole('button',{name:'建立採購單'}).click();
   await page.locator('#poModalOverlay.active').waitFor({state:'visible'});
   await page.waitForFunction(()=>document.getElementById('poSaveStatus')?.textContent?.includes('尚未建立'));
   const proposal=await page.evaluate(()=>poItems.map(item=>({
@@ -942,7 +942,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   assert.equal(await page.locator('#formalPurchaseRecoveryPanel').isVisible(),false);
   await page.locator('#purchase-tab-history').click();
   const savedRow=page.locator('#poListBody tr').filter({hasText:commitIntent.poNo});
-  await savedRow.locator('button').filter({hasText:'載入'}).click();
+  await savedRow.locator('button').filter({hasText:'開啟採購單'}).click();
   await page.waitForFunction(()=>!poSaveInProgress&&poEditingId&&!poIncomingSyncPending);
   await page.evaluate(()=>{window.poPdfOutputs=[];printSavedPoDocument=async(poNo,vendor)=>window.poPdfOutputs.push({poNo,vendor});});
   await page.locator('#printPurchaseOrderBtn').click();
@@ -1382,7 +1382,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   assert.doesNotMatch(status,/讀取失敗/);
   const remainingRow=page.locator('#purchasePendingBody tr').filter({hasText:fixture.sourceId});
   assert.equal(await remainingRow.count(),1);
-  await remainingRow.getByRole('button',{name:'產生採購單'}).click();
+  await remainingRow.getByRole('button',{name:'建立採購單'}).click();
   await page.locator('#poModalOverlay.active').waitFor({state:'visible'});
   await page.waitForFunction(()=>poNoReady&&!poNoLoading);
   const remainingProposal=await page.evaluate(()=>poItems.map(row=>({
@@ -1846,7 +1846,7 @@ for(const width of [1280,390])test('full site '+width+'px original multi-item pu
   assert.deepEqual(firstOrdered.inventory.map(i=>i.incoming),[3,2]);
   assert.deepEqual(firstOrdered.stocks.map(i=>i.incoming),[3,0,2,0]);
   await pendingRow('I2').waitFor({state:'visible'});
-  await pendingRow('I2').getByRole('button',{name:'產生採購單'}).click();
+  await pendingRow('I2').getByRole('button',{name:'建立採購單'}).click();
   await page.locator('#poModalOverlay.active').waitFor({state:'visible'});
   await page.waitForFunction(()=>document.getElementById('poSaveStatus')?.textContent?.includes('尚未建立'));
   const secondPo=await purchaseCurrentDraft(['I2'],false);assert.notEqual(secondPo,firstPo);
@@ -2421,7 +2421,7 @@ for(const width of [1280,390])test('full site '+width+'px original UI gated PO p
   assert.equal((await db.collection('procurementDemands').doc(demandId).get()).data().remainingToOrderQty,3);
   await siteLogout(page);await siteLogin(page,accounts.purchaser,'purchaser');await siteNav(page,'purchasing');
   const pending=page.locator('#purchasePendingBody tr').filter({hasText:orderId});await pending.waitFor({state:'visible'});
-  await pending.getByRole('button',{name:'產生採購單'}).click();await page.locator('#poModalOverlay.active').waitFor({state:'visible'});
+  await pending.getByRole('button',{name:'建立採購單'}).click();await page.locator('#poModalOverlay.active').waitFor({state:'visible'});
   await page.waitForFunction(()=>poNoReady&&!poNoLoading&&!poDraftLoading);
   await page.evaluate(()=>{window.directPdfOutputs=[];printSavedPoDocument=async(poNo,vendor)=>window.directPdfOutputs.push({poNo,vendor});});
   await page.locator('#poVendorName').fill(tag+'供應商');await page.locator('#poVendorName').blur();

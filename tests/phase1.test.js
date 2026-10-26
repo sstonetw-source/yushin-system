@@ -2064,7 +2064,7 @@ test('ordered action belongs to purchasing while the order list only shows progr
     const purchasingStart = appSource.indexOf('function renderPendingPurchaseOrders');
     const purchasingEnd = appSource.indexOf('window.loadPendingPurchaseOrders =', purchasingStart);
     assert.match(appSource.slice(purchasingStart, purchasingEnd), /markPurchaseItemOrdered[\s\S]*?確認已下訂/);
-    assert.match(appSource.slice(purchasingStart, purchasingEnd), /openOrderPurchaseDraft[\s\S]*?產生採購單/);
+    assert.match(appSource.slice(purchasingStart, purchasingEnd), /openOrderPurchaseDraft[\s\S]*?建立採購單/);
     const saveStart = appSource.indexOf('window.printPurchaseOrder = async function()');
     const saveEnd = appSource.indexOf("window.addEventListener('afterprint'", saveStart);
     const save = appSource.slice(saveStart, saveEnd);
@@ -5359,7 +5359,7 @@ test('purchasing separates order work, stock replenishment and purchase history'
         assert.match(indexSource,new RegExp('id="'+id+'"'));
     }
     assert.match(indexSource,/安全庫存補貨/);
-    assert.match(indexSource,/業務訂單需求/);
+    assert.match(indexSource,/待採購品項/);
     assert.match(appSource,/replenishmentPanel.style.display=\(view==='ordering'\|\|view==='replenishment'\)&&canCreatePurchaseOrderCapability\(\)/);
     assert.match(appSource,/loadInventoryReplenishmentCenter\(false\)/);
 });
