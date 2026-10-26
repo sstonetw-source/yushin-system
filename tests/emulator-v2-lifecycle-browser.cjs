@@ -1058,7 +1058,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   // Original purchasing dispatch button prepares the nine held units. Its lost
   // reply survives reload without a second dispatch record or stock mutation.
   await siteNav(page,'purchasing');await page.locator('#purchase-card-dispatch').click();
-  const dispatchButton=()=>page.locator('#purchaseDispatchBody button[onclick*="'+fixture.sourceId+'"]');
+  const dispatchButton=()=>page.locator('#purchaseDispatchBody button[onclick^="markOrderItemDispatchPrepared"][onclick*="'+fixture.sourceId+'"]');
   await dispatchButton().click();
   await page.waitForFunction(id=>!pendingDispatchOrderIds.size&&!!pendingDispatchPreparation(id,'S'),fixture.sourceId,{timeout:45000});
   const prepared=await facts(fixture),dispatchIntent=calls.find(row=>row.name==='prepareV2OrderDispatch').data;
@@ -1939,7 +1939,7 @@ for(const width of [1280,390])test('full site '+width+'px original multi-item pu
   const receivedPhysical=await physical(),ids=['I1','I2','I3'],quantities=[3,2,2];
   await siteLogout(page);await siteLogin(page,x.accounts.purchaser,'purchaser');
   await siteNav(page,'purchasing');await page.locator('#purchase-card-dispatch').click();
-  const dispatchButton=id=>page.locator('#purchaseDispatchBody button[onclick*="'+x.orderId+'"][onclick*="'+id+'"]');
+  const dispatchButton=id=>page.locator('#purchaseDispatchBody button[onclick^="markOrderItemDispatchPrepared"][onclick*="'+x.orderId+'"][onclick*="'+id+'"]');
   dropLogistics.add('prepareV2OrderDispatch:I2');
   for(const id of ids){
    await dispatchButton(id).click();

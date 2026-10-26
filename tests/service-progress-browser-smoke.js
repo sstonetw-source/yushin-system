@@ -45,8 +45,8 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
   await page.locator('#verifyServiceOrderButton').click();
   await page.waitForFunction(()=>document.querySelectorAll('#ordersBody .order-progress-cell .service-case-verified-hint').length===2);
   const product=page.locator('#ordersBody .order-progress-cell');
-  assert.match(await product.locator(':scope > div').nth(0).innerText(),/檢測：上次查核完成 2\/2.*服務完成・待核銷/);
-  assert.match(await product.locator(':scope > div').nth(1).innerText(),/校正：上次查核完成 0\/2.*待服務處理/);
+  assert.match(await product.locator(':scope > .workflow-progress-item').nth(0).innerText(),/檢測：上次查核完成 2\/2.*服務完成・待核銷/);
+  assert.match(await product.locator(':scope > .workflow-progress-item').nth(1).innerText(),/校正：上次查核完成 0\/2.*待服務處理/);
   assert.equal(await page.locator('.order-money-cell .service-case-verified-hint').count(),0);
   assert.equal(await page.evaluate(()=>reads),1);
   await page.evaluate(()=>{renderOrdersList();renderOrdersList();});assert.equal(await page.evaluate(()=>reads),1);

@@ -13,7 +13,7 @@ function fn(name){const a=source.indexOf('function '+name+'('),b=source.indexOf(
   await page.evaluate(html=>{const d=new DOMParser().parseFromString(html,'text/html'),p=d.getElementById('purchasing-system');document.getElementById('appContainer').append(p);p.classList.add('active');p.style.display='block';},html);
   await page.addStyleTag({content:fs.readFileSync('styles.css','utf8')});
   await page.addScriptTag({content:`
-   let currentUserRole='purchaser';const order={id:'O',orderNo:'YS-20261026-1',orderDate:'2026-10-26',customerName:'客戶 <測試>',salesName:'負責業務',items:[{itemId:'I',itemName:'RNeasy Mini Kit (50) 長品名與規格測試',brand:'Qiagen',itemCode:'74104',qty:20,orderedQty:20,shortageQty:15,supplyOrderedQty:15,receivedQty:5,dispatchPreparedQty:10}]};
+   let currentUserRole='purchaser';const order={id:'O',orderNo:'YS-20261026-1',orderDate:'2026-10-26',customerName:'客戶 <測試>',salesName:'負責業務',transactionType:'直',invoiceTitle:'測試發票抬頭',totalPrice:2400,items:[{itemId:'I',itemName:'RNeasy Mini Kit (50) 長品名與規格測試',brand:'Qiagen',itemCode:'74104',unitPrice:120,qty:20,orderedQty:20,shortageQty:15,supplyOrderedQty:15,receivedQty:5,dispatchPreparedQty:10}]};
    let ordersCache=[order],purchasingDispatchCache=[],purchasingDispatchLoading=false,purchasingDispatchError='',purchasingDispatchHasMore=false,purchasingCompletedVisibleLimit=50;
    const pendingDispatchOrderIds=new Set(),selectedPendingPurchaseDemandIds=new Set();
    const procurementDemandCache=[{id:'D',sourceType:'SALES_ORDER',sourceId:'O',sourceItemId:'I',itemCode:'74104',remainingToOrderQty:5}];
@@ -41,13 +41,37 @@ function fn(name){const a=source.indexOf('function '+name+'('),b=source.indexOf(
    const id={ordering:'purchasePendingBody',dispatch:'purchaseDispatchBody',completed:'purchaseCompletedBody',receiving:'poListBody'}[view],row=page.locator('#'+id+' > tr').first();
    assert.match(await row.innerText(),/RNeasy Mini Kit/);assert.match(await row.innerText(),/74104/);assert.match(await row.innerText(),/YS-20261026-1/);assert.equal(await row.locator('測試').count(),0);
    const fields=await row.locator(':scope > td').evaluateAll(nodes=>nodes.map(n=>n.getAttribute('data-th')));
-   assert.ok(fields.findIndex(x=>/品項/.test(x))<fields.indexOf('負責業務'));assert.equal(await row.locator('.workflow-product .workflow-quantity').count(),0);assert.match(await row.locator('td[data-th="數量"]').innerText(),/\d/);
+   assert.ok(fields.indexOf('產品資訊')<fields.indexOf('負責業務'));assert.equal(await row.locator('.workflow-product .workflow-quantity').count(),0);assert.match(await row.locator('td[data-th="進度"]').innerText(),/\d/);
+   assert.match(await row.locator('td[data-th="銷售金額"]').innerText(),/120 × 20[\s\S]*2,400/);
+   assert.match(await row.locator('td[data-th="交易／開票資料"]').innerText(),/交易方式：直[\s\S]*測試發票抬頭/);
+   await row.locator('.order-detail-panel > summary').click();
+   await row.locator('dialog[open]').waitFor({state:'visible'});
+   assert.equal(await row.locator('dialog').evaluate(e=>e.open),true);
+   assert.match(await row.locator('dialog').innerText(),/全部訂單品項/);
+   await row.locator('[data-order-drawer-close]').click();
+   if(view==='dispatch') assert.equal(await row.locator('button[onclick^="markOrderItemDispatchPrepared"]').isVisible(),true);
    const reference=row.locator('.workflow-record time');assert.equal(await reference.evaluate(e=>e.getClientRects().length),1);
-   if(width===390){assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,view+' page overflow');assert.ok(await row.locator('button').evaluateAll(nodes=>nodes.every(e=>e.getBoundingClientRect().height>=44)));}
+   if(width===390){assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,view+' page overflow');assert.ok(await page.locator('#purchaseWorkSearch').evaluate(e=>e.getBoundingClientRect().height<=60));assert.ok(await row.locator('button:visible').evaluateAll(nodes=>nodes.every(e=>e.getBoundingClientRect().height>=44)));}
    await page.locator('#purchaseWorkSearch').fill('不存在的產品');assert.equal(await page.locator('#'+id+' > tr').count(),0);
    await page.locator('#purchaseWorkSearch').fill('74104');assert.equal(await page.locator('#'+id+' > tr').count(),1);
    if(process.env.WORKSPACE_SCREENSHOT_DIR){fs.mkdirSync(process.env.WORKSPACE_SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:process.env.WORKSPACE_SCREENSHOT_DIR+'/'+view+'-'+width+'.png',fullPage:true});}
   }
+  await page.evaluate(()=>{
+   document.getElementById('purchaseDispatchPanel').style.display='block';
+   document.getElementById('poListPanel').style.display='none';
+   order.items.push({itemId:'OTHER',itemName:'同張訂單另一品項',qty:3,unitPrice:50});
+   document.getElementById('purchaseWorkSearch').value='74104';renderPurchasingDispatchOrders();
+  });
+  const detail=page.locator('#purchaseDispatchBody .order-detail-panel');
+  await detail.locator(':scope > summary').click();await detail.locator('dialog[open]').waitFor();
+  assert.match(await detail.innerText(),/同張訂單另一品項/);
+  assert.match(await detail.innerText(),/50 × 3[\s\S]*150/);
+  await detail.locator('[data-order-drawer-close]').click();
+  await page.evaluate(()=>order.items.pop());
+  assert.match(await page.evaluate(()=>workflowSalesAmount(order,{qty:5})),/待確認/);
+  assert.match(await page.evaluate(()=>workflowSalesAmount(order,{qty:5,unitPrice:null})),/待確認/);
+  assert.match(await page.evaluate(()=>workflowSalesAmount(order,{qty:5,unitPrice:0})),/NT\$ 0/);
+  assert.match(await page.evaluate(()=>workflowCommercialSummary({})),/未填寫/);
   await page.addScriptTag({content:`
    const purchasingView='history',poHistorySearchActive=false,poHistorySearchLoading=false,poHistorySearchResults=[],companyData={};
    const poListCache=[{id:'PO1',poNo:'PO-1',poDate:'2026-10-26',vendorName:'供應商',buyerName:'採購',status:'CONFIRMED',items:[{itemName:'採購品項',itemCode:'74104',qty:3,unitPrice:100}]}];
@@ -58,7 +82,7 @@ function fn(name){const a=source.indexOf('function '+name+'('),b=source.indexOf(
   assert.equal(await page.locator('#poListBody .workflow-product .workflow-quantity').count(),0);assert.match(await page.locator('#poListBody td[data-th="品項金額"]').innerText(),/105 × 3[\s\S]*315/);
   for(const role of ['sales','engineer','warehouse','purchaser','admin']){
    await page.evaluate(role=>{currentUserRole=role;renderPurchasingDispatchOrders();},role);
-   assert.equal(await page.locator('#purchaseDispatchBody button').count(),['purchaser','admin'].includes(role)?1:0);
+   assert.equal(await page.locator('#purchaseDispatchBody button[onclick^="markOrderItemDispatchPrepared"]').count(),['purchaser','admin'].includes(role)?1:0);
   }
   await page.evaluate(()=>{ordersCache=[];purchasingDispatchCache=[];renderPurchasingDispatchOrders();});assert.equal(await page.locator('#purchaseDispatchBody tr').count(),0);assert.match(await page.locator('#purchaseDispatchStatus').textContent(),/目前沒有/);
   assert.deepEqual(errors,[]);console.log('Unified work lists '+width+'px: four actual queues, escaped references, product quantities, five-role actions, empty state and no database reads.');await page.close();
