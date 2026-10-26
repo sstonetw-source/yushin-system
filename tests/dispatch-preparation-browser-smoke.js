@@ -47,13 +47,13 @@ const scripts=[read('src/shared/workspace-display.js'),read('modules/fulfillment
   docs.get('orders/O').items[0].reservedQty=5;
   await load();assert.match(await page.locator('#orderActions button').first().textContent(),/確認打單結果/);
   await page.evaluate(()=>{document.getElementById('order-system').classList.remove('active');document.getElementById('purchasing-system').classList.add('active');});
-  await page.locator('#purchaseDispatchBody button').first().click();await page.waitForFunction(()=>!pendingDispatchPreparation('O','I'));
+  await page.locator('#purchaseDispatchBody button[onclick^="markOrderItemDispatchPrepared"]').first().click();await page.waitForFunction(()=>!pendingDispatchPreparation('O','I'));
   assert.equal(docs.get('orders/O').items[0].dispatchPreparedQty,3);
   assert.equal([...docs.keys()].filter(p=>p.startsWith('dispatchRecords/')).length,1);
-  await page.locator('#purchaseDispatchBody button').first().click();await page.waitForFunction(()=>ordersCache[0].items[0].dispatchPreparedQty===5);
+  await page.locator('#purchaseDispatchBody button[onclick^="markOrderItemDispatchPrepared"]').first().click();await page.waitForFunction(()=>ordersCache[0].items[0].dispatchPreparedQty===5);
   assert.equal([...docs.keys()].filter(p=>p.startsWith('dispatchRecords/')).length,2);
-  for(const role of ['sales','engineer','warehouse']){await page.evaluate(r=>{currentUserRole=r;renderOrdersList();renderPurchasingView();},role);assert.equal(await page.locator('#orderActions button').count(),0);assert.equal(await page.locator('#purchaseDispatchBody button').count(),0);}
-  await page.evaluate(()=>{currentUserRole='admin';renderOrdersList();renderPurchasingView();});assert.equal(await page.locator('#purchaseDispatchBody button').count(),1);
+  for(const role of ['sales','engineer','warehouse']){await page.evaluate(r=>{currentUserRole=r;renderOrdersList();renderPurchasingView();},role);assert.equal(await page.locator('#orderActions button').count(),0);assert.equal(await page.locator('#purchaseDispatchBody button[onclick^="markOrderItemDispatchPrepared"]').count(),0);}
+  await page.evaluate(()=>{currentUserRole='admin';renderOrdersList();renderPurchasingView();});assert.equal(await page.locator('#purchaseDispatchBody button[onclick^="markOrderItemDispatchPrepared"]').count(),1);
   assert.deepEqual(errors,[]);console.log(`Dispatch ${width}px: real renderers -> shared Service/Core, lost reply, reload, cross-page retry, new arrival and five-role visibility passed.`);await page.close();
  }
  for(const width of [1280,390]){
@@ -77,7 +77,7 @@ const scripts=[read('src/shared/workspace-display.js'),read('modules/fulfillment
   await loadV2();assert.match(await page.locator('#orderActions button').first().textContent(),/× 2/);await page.locator('#orderActions button').first().click();await page.waitForFunction(()=>alerts.length===1);
   const id=calls[0].operationId;docs.get('orders/O').items[0].reservedQty=4;await loadV2();assert.match(await page.locator('#orderActions button').first().textContent(),/確認打單結果/);
   await page.evaluate(()=>{document.getElementById('order-system').classList.remove('active');document.getElementById('purchasing-system').classList.add('active');});
-  await page.locator('#purchaseDispatchBody button').first().click();await page.waitForFunction(()=>!pendingDispatchPreparation('O','I'));
+  await page.locator('#purchaseDispatchBody button[onclick^="markOrderItemDispatchPrepared"]').first().click();await page.waitForFunction(()=>!pendingDispatchPreparation('O','I'));
   assert.equal(calls.length,2);assert.equal(calls[1].operationId,id);assert.equal(docs.get('orders/O').items[0].dispatchPreparedQty,3);assert.equal([...docs.keys()].filter(k=>k.startsWith('dispatchRecords/')).length,1);
   assert.equal(await page.evaluate(()=>itemDispatchState(ordersCache[0],ordersCache[0].items[0]).pending),2);assert.deepEqual(errors,[]);
   console.log(`V2 dispatch ${width}px: original two-page UI, physical shipment Core, frozen sync/baseline and cross-page uncertain reply retry passed (scripted local transport).`);await page.close();
