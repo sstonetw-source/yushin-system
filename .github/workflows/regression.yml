@@ -57,6 +57,8 @@ jobs:
         run: npm install --no-save --no-package-lock @firebase/rules-unit-testing firebase firebase-admin@14.2.0 playwright-core@1.56.0 esbuild@0.25.0 html2canvas@1.4.1 jspdf@2.5.2
       - name: Check shared buttons in desktop and mobile Chrome
         run: node tests/ui-control-browser-smoke.js
+      - name: Check numeric wheel input and scroll behavior
+        run: node tests/number-wheel-browser-smoke.js
       - name: Check per-item service progress in desktop and mobile Chrome
         run: node tests/service-progress-browser-smoke.js
       - name: Check warm sand typography and page alignment
