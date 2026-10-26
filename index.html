@@ -14,7 +14,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261026-296">
+        <link rel="stylesheet" href="styles.css?v=20261026-298">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -1120,8 +1120,8 @@
                 <div><label for="orderTransactionType">交易方式 <span aria-hidden="true">*</span></label><select id="orderTransactionType" required aria-required="true" onchange="document.getElementById('orderInvoiceTitle').disabled = this.value !== '直'"><option value="">請選擇交易方式</option><option value="直">直（開發票）</option><option value="借">借（不開發票）</option><option value="扣">扣（扣寄款）</option></select></div>
                 <div><label>發票抬頭</label><input type="text" id="orderInvoiceTitle" disabled></div>
             </div></details>
-            <details class="order-entry-details"><summary>日期與備註</summary><div class="form-grid">
-                <div><label>訂單日期</label><input type="date" id="orderDateInput"></div>
+            <details class="order-entry-details"><summary>備註</summary><div class="form-grid">
+                <input type="hidden" id="orderDateInput">
 
                 <div class="order-entry-wide"><label for="orderRemarks">備註</label><textarea id="orderRemarks" rows="2"></textarea></div>
             </div></details>
@@ -1705,7 +1705,7 @@
     <script src="modules/order-commercial-details.js?v=20261025-1"></script>
     <script src="modules/order-entry-core.js?v=20261026-296"></script>
 <script src="modules/service-work-core.js?v=20261023-2"></script>
-    <script src="app.js?v=20261026-296"></script>
+    <script src="app.js?v=20261026-298"></script>
     <script src="modules/order-self-order-required.js?v=20261013-1"></script>
     <script src="modules/customer-cancellations.js?v=20261021-3"></script>
     <script src="modules/free-stock-recovery.js?v=20261014-9"></script>

@@ -1682,6 +1682,40 @@ window.onProductSearchBrandChange = function() {
     return loadFrequentProducts(document.getElementById('productManagementSearchBrand')?.value);
 };
 
+// Discover only quick-created products, one bounded page when Other is opened.
+const quickProductBrowserBrands = { key:'', rows:[], cursor:null, hasMore:true, loaded:false, loading:false, error:'' };
+function resetQuickProductBrowserBrands() {
+    const key=[currentUser?.uid||'',currentUserRole,sessionDataGeneration].join(':');
+    if (quickProductBrowserBrands.key!==key) Object.assign(quickProductBrowserBrands,{key,rows:[],cursor:null,hasMore:true,loaded:false,loading:false,error:''});
+    return quickProductBrowserBrands;
+}
+async function loadQuickProductBrowserBrands(more=false) {
+    if (!canAccessPage('products')) return;
+    const state=resetQuickProductBrowserBrands();
+    if(state.loading||(!more&&state.loaded)||(more&&!state.hasMore))return;
+    const key=state.key;state.loading=true;state.error='';renderProductBrandBrowser();
+    try {
+        let query=db.collection('products').where('source','==','QUICK_CREATE').limit(50);
+        if(state.cursor)query=query.startAfter(state.cursor);
+        const page=await firestoreReadWithTimeout(query.get(),'其他廠牌');
+        if(resetQuickProductBrowserBrands().key!==key)return;
+        state.rows.push(...page.docs.map(doc=>({id:doc.id,...doc.data()})));
+        state.cursor=page.docs.at(-1)||state.cursor;state.hasMore=page.size===50;state.loaded=true;
+    } catch(err) {
+        if(state.key===key)state.error='其他廠牌載入失敗，請重試。';
+    } finally { if(state.key===key){state.loading=false;renderProductBrandBrowser();} }
+}
+function productBrowserBrandEntries() {
+    const entries=new Map(getUnifiedBrandEntries(false).filter(entry=>entry?.name&&entry.active!==false).map(entry=>[normalizeBrandLookupKey(entry.name),entry]));
+    const state=resetQuickProductBrowserBrands();
+    [...state.rows,...productManagementResults].forEach(product=>{
+        if(product.active===false||product.status==='INACTIVE')return;
+        const name=resolveBrandName(product.brandName||product.brand||'');
+        const key=normalizeBrandLookupKey(name);
+        if(key&&!entries.has(key))entries.set(key,{name,active:true});
+    });
+    return [...entries.values()].sort((a,b)=>a.name.localeCompare(b.name,'zh-Hant'));
+}
 let productSearchOtherBrandsExpanded = false;
 window.selectProductSearchBrand = function(brand) {
     const field = document.getElementById('productManagementSearchBrand');
@@ -1692,23 +1726,29 @@ window.selectProductSearchBrand = function(brand) {
 window.toggleProductSearchOtherBrands = function() {
     productSearchOtherBrandsExpanded = !productSearchOtherBrandsExpanded;
     renderProductBrandBrowser();
+    if(productSearchOtherBrandsExpanded)void loadQuickProductBrowserBrands();
 };
 window.renderProductBrandBrowser = function() {
     const container = document.getElementById('productSearchBrandButtons');
     const selected = document.getElementById('productManagementSearchBrand')?.value || '';
     updateProductSearchControls();
     if (!container) return;
-    const entries = getUnifiedBrandEntries(false).filter(entry => entry?.name && entry.active !== false)
-        .sort((a,b) => a.name.localeCompare(b.name, 'zh-Hant'));
+    const entries = productBrowserBrandEntries();
     const primaryKeys = new Set(getPrimaryBrandNames().map(normalizeBrandLookupKey));
     const primary = entries.filter(entry => primaryKeys.has(normalizeBrandLookupKey(entry.name)));
     const others = entries.filter(entry => !primaryKeys.has(normalizeBrandLookupKey(entry.name)));
     const button = entry => `<button type="button" class="product-brand-button${entry.name === selected ? ' active' : ''}" aria-pressed="${entry.name === selected}" onclick="selectProductSearchBrand(${inlineJsValue(entry.name)})">${escapeHtml(entry.name)}</button>`;
     let html = primary.map(button).join('');
-    if (others.length) {
+    {
         const selectedOther = others.some(entry => entry.name === selected);
         html += `<button type="button" class="product-brand-button${selectedOther ? ' active' : ''}" aria-expanded="${productSearchOtherBrandsExpanded}" onclick="toggleProductSearchOtherBrands()">其他${productSearchOtherBrandsExpanded ? ' ▲' : ' ▼'}${selectedOther && !productSearchOtherBrandsExpanded ? '：' + escapeHtml(selected) : ''}</button>`;
-        if (productSearchOtherBrandsExpanded) html += others.map(button).join('');
+        if (productSearchOtherBrandsExpanded) {
+            html += others.map(button).join('');
+            const state=resetQuickProductBrowserBrands();
+            if(state.loading)html+='<span role="status">正在載入其他廠牌…</span>';
+            else if(state.error)html+=`<button type="button" class="btn-secondary" onclick="loadQuickProductBrowserBrands(true)">${escapeHtml(state.error)}</button>`;
+            else if(state.loaded&&state.hasMore)html+='<button type="button" class="btn-secondary" onclick="loadQuickProductBrowserBrands(true)">載入更多其他廠牌</button>';
+        }
     }
     container.innerHTML = html || '<span>目前沒有可選擇的廠牌。</span>';
 };
@@ -2721,6 +2761,13 @@ async function findDuplicateProductMaster(brand, code, excludeId = '') {
 }
 
 function syncSavedProductMaster(productId, record) {
+    if (typeof resetQuickProductBrowserBrands==='function') {
+        const state=resetQuickProductBrowserBrands(),prior=state.rows.find(row=>row.id===productId);
+        if(record.source==='QUICK_CREATE'||prior){
+            state.rows=state.rows.filter(row=>row.id!==productId);
+            state.rows.push({...prior,...record,id:productId});
+        }
+    }
     invalidateProductFrequentCache();
     cacheProductLookupItem(productMasterDocToPriceItem({id:productId,data:()=>record}));
     productManagementSearchCache.clear();
@@ -2733,6 +2780,7 @@ function syncSavedProductMaster(productId, record) {
     if(index>=0)productManagementResults[index]=next;
     else productManagementResults.unshift(next);
     renderProductManagementResults();
+    if (typeof renderProductBrandBrowser==='function') renderProductBrandBrowser();
     updateProductSearchControls();
     updateProductManagementMoreButton();
 }
@@ -3105,6 +3153,36 @@ function actionButtonFromEventOrSelector(selector = '') {
     return eventButton || (selector ? document.querySelector(selector) : null);
 }
 
+// Numeric edits are explicit. Wheel/trackpad gestures scroll without stepping or blur.
+;(function installNumberWheelGuard() {
+    if (typeof document==='undefined') return;
+    document.addEventListener('wheel', event => {
+        const input=event.target;
+        if (!(input instanceof HTMLInputElement) || input.type!=='number'
+            || document.activeElement!==input || input.disabled || input.readOnly
+            || event.ctrlKey || event.defaultPrevented || !event.cancelable) return;
+        event.preventDefault();
+        const style=getComputedStyle(input);
+        const scale=event.deltaMode===1 ? (parseFloat(style.lineHeight)||parseFloat(style.fontSize)*1.2||16)
+            : event.deltaMode===2 ? window.innerHeight : 1;
+        let dx=event.deltaX*(event.deltaMode===2?window.innerWidth:scale),dy=event.deltaY*scale;
+        const root=document.scrollingElement;
+        const boundary=input.closest('dialog[open],.eq-modal-overlay,.modal-overlay,.password-modal-overlay,[aria-modal="true"]');
+        for(let node=input.parentElement;node&&node!==root;node=node.parentElement){
+            const css=getComputedStyle(node);
+            const scrollX=/auto|scroll|overlay/.test(css.overflowX),scrollY=/auto|scroll|overlay/.test(css.overflowY);
+            const beforeX=node.scrollLeft,beforeY=node.scrollTop;
+            if(scrollX||scrollY)node.scrollBy({left:scrollX?dx:0,top:scrollY?dy:0,behavior:'instant'});
+            dx-=node.scrollLeft-beforeX;dy-=node.scrollTop-beforeY;
+            if(scrollX&&/contain|none/.test(css.overscrollBehaviorX))dx=0;
+            if(scrollY&&/contain|none/.test(css.overscrollBehaviorY))dy=0;
+            if(node===boundary)return;
+            if(Math.abs(dx)<0.01&&Math.abs(dy)<0.01)return;
+        }
+        // Let modal scroll boundaries contain the gesture, as native scrolling does.
+        if(!boundary&&root)root.scrollBy({left:dx,top:dy,behavior:'instant'});
+    },{capture:true,passive:false});
+})();
 // Shared order/purchase presentation; uses only the already loaded record.
 function purchaseProductSummary(item, quantity, quantityLabel = '數量') {
     const name = item.itemName || item.name || item.itemCode || item.itemId || '未命名品項';
@@ -21974,6 +22052,11 @@ const ORDER_DRAFT_STORAGE_PREFIX = 'order_draft_v2';
 let requestedOrderOwnerUid = '';
 let orderModalOpenGeneration = 0;
 
+// A new order uses the local creation day, never a date restored from a draft.
+function currentOrderCreationDate(now = new Date()) {
+    return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+}
+
 function populateOrderOwnerSelect() {
     const wrap = document.getElementById('orderOwnerWrap');
     const select = document.getElementById('orderOwnerUid');
@@ -22022,7 +22105,7 @@ function collectOrderDraft() {
     return {
         savedAt:new Date().toISOString(),
         ownerUid:orderDraftFieldValue('orderOwnerUid'),
-        date:orderDraftFieldValue('orderDateInput'),customerName:orderDraftFieldValue('orderCustomer'),
+        date:currentOrderCreationDate(),customerName:orderDraftFieldValue('orderCustomer'),
         itemCode:orderDraftFieldValue('orderItemCode'),itemName:orderDraftFieldValue('orderItemName'),itemNameEn:orderDraftFieldValue('orderItemNameEn'),productLine:orderDraftFieldValue('orderProductLine'),spec:orderDraftFieldValue('orderSpec'),
         brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:orderDraftFieldValue('orderQty'),
         supplier:orderDraftFieldValue('orderSelfSupplier'),unitPrice:orderDraftFieldValue('orderUnitPrice'),costPrice:orderDraftFieldValue('orderCostPrice'),
@@ -22106,7 +22189,7 @@ function restoreSavedOrderDraft(){
         window._orderModalQuoteContext = draft.quoteContext || null;
         window._orderModalForecastContext = draft.forecastContext || null;
         populateOrderOwnerSelect();
-        document.getElementById('orderDateInput').value=draft.date||'';
+        document.getElementById('orderDateInput').value=currentOrderCreationDate();
         document.getElementById('orderCustomer').value=draft.customerName||'';
         const remarks=document.getElementById('orderRemarks');if(remarks)remarks.value=draft.remarks||'';
         setOrderModalItem(draft);
@@ -22330,8 +22413,7 @@ window.openOrderModal = function(source = null) {
     window.setOrderShippingInstructions?.(source?.shippingInstructions||{});
     const title = document.getElementById('orderModalTitle');
     if (title) title.innerText = source?.sourceType === DOCUMENT_TYPES.FORECAST ? 'Forecast 轉訂單' : '新增訂單';
-    const today = new Date();
-    document.getElementById('orderDateInput').value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    document.getElementById('orderDateInput').value = currentOrderCreationDate();
     ['orderCustomer', 'orderBrand', 'orderBrandOther', 'orderItemCode', 'orderItemName', 'orderItemNameEn', 'orderProductLine', 'orderSpec', 'orderInvoiceTitle'].forEach(id => {
         const field = document.getElementById(id);
         if (field) field.value = '';
@@ -22661,7 +22743,7 @@ window.saveNewOrder = function() {
     const itemCode = firstItem.itemCode;
     let data = {
         shippingInstructions:shippingInstructions||{},
-        orderDate: document.getElementById('orderDateInput').value,
+        orderDate: currentOrderCreationDate(),
         createdAt: new Date().toISOString(),
         ...commercialCreatorFields(),
         company: window._orderModalQuoteContext?.company || '',

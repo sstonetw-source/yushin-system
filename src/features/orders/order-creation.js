@@ -1,3 +1,8 @@
+// A new order uses the local creation day, never a date restored from a draft.
+function currentOrderCreationDate(now = new Date()) {
+    return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+}
+
 function populateOrderOwnerSelect() {
     const wrap = document.getElementById('orderOwnerWrap');
     const select = document.getElementById('orderOwnerUid');
@@ -46,7 +51,7 @@ function collectOrderDraft() {
     return {
         savedAt:new Date().toISOString(),
         ownerUid:orderDraftFieldValue('orderOwnerUid'),
-        date:orderDraftFieldValue('orderDateInput'),customerName:orderDraftFieldValue('orderCustomer'),
+        date:currentOrderCreationDate(),customerName:orderDraftFieldValue('orderCustomer'),
         itemCode:orderDraftFieldValue('orderItemCode'),itemName:orderDraftFieldValue('orderItemName'),itemNameEn:orderDraftFieldValue('orderItemNameEn'),productLine:orderDraftFieldValue('orderProductLine'),spec:orderDraftFieldValue('orderSpec'),
         brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:orderDraftFieldValue('orderQty'),
         supplier:orderDraftFieldValue('orderSelfSupplier'),unitPrice:orderDraftFieldValue('orderUnitPrice'),costPrice:orderDraftFieldValue('orderCostPrice'),
@@ -130,7 +135,7 @@ function restoreSavedOrderDraft(){
         window._orderModalQuoteContext = draft.quoteContext || null;
         window._orderModalForecastContext = draft.forecastContext || null;
         populateOrderOwnerSelect();
-        document.getElementById('orderDateInput').value=draft.date||'';
+        document.getElementById('orderDateInput').value=currentOrderCreationDate();
         document.getElementById('orderCustomer').value=draft.customerName||'';
         const remarks=document.getElementById('orderRemarks');if(remarks)remarks.value=draft.remarks||'';
         setOrderModalItem(draft);
@@ -354,8 +359,7 @@ window.openOrderModal = function(source = null) {
     window.setOrderShippingInstructions?.(source?.shippingInstructions||{});
     const title = document.getElementById('orderModalTitle');
     if (title) title.innerText = source?.sourceType === DOCUMENT_TYPES.FORECAST ? 'Forecast 轉訂單' : '新增訂單';
-    const today = new Date();
-    document.getElementById('orderDateInput').value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    document.getElementById('orderDateInput').value = currentOrderCreationDate();
     ['orderCustomer', 'orderBrand', 'orderBrandOther', 'orderItemCode', 'orderItemName', 'orderItemNameEn', 'orderProductLine', 'orderSpec', 'orderInvoiceTitle'].forEach(id => {
         const field = document.getElementById(id);
         if (field) field.value = '';
@@ -685,7 +689,7 @@ window.saveNewOrder = function() {
     const itemCode = firstItem.itemCode;
     let data = {
         shippingInstructions:shippingInstructions||{},
-        orderDate: document.getElementById('orderDateInput').value,
+        orderDate: currentOrderCreationDate(),
         createdAt: new Date().toISOString(),
         ...commercialCreatorFields(),
         company: window._orderModalQuoteContext?.company || '',
