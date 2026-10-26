@@ -12,7 +12,7 @@ const fs=require('node:fs'),assert=require('node:assert/strict'),{spawnSync}=req
    await page.setContent('<html lang="zh-Hant"><meta name="viewport" content="width=device-width,initial-scale=1"><body><div id="appContainer">'+fragment+'</div></body></html>');
    await page.addStyleTag({content:fs.readFileSync('styles.css','utf8')});
    await page.addScriptTag({content:`
-    let currentUser={uid:'U'},currentUserRole='admin',trueUserRole='admin';
+    let currentUser={uid:'U'},currentUserRole='admin',trueUserRole='admin',sessionDataGeneration=1;
     const canAccessPage=()=>true,canEditPage=()=>true,resolveBrandName=x=>x,normalizeBrandLookupKey=x=>x.toLowerCase(),normalizeItemCodeLoose=x=>x.toLowerCase();
     const escapeHtml=x=>String(x??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;'),escapeAttr=escapeHtml;
     const inlineJsValue=x=>escapeHtml(JSON.stringify(x));
