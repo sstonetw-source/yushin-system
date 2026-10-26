@@ -3338,6 +3338,26 @@ test('typed reservation results reject a foreign live sibling even when its nume
   await assertSucceeds(operationalReserveBatch(uid).commit());
  }
 });
+test('primary cross-warehouse proof validates a fifth nonlocal sibling even when its stock delta is zero',async()=>{
+ for(const [uid,role] of [['buyer1','purchaser'],['wh1','warehouse']]){
+  const sibling='unchanged-sibling-'+uid;
+  const f=await crossWarehouseEvidenceFixture(uid,role,4,{mutate:(path,data)=>{
+   const key=data.stockEvidence?'stockEvidence':data.reservationStockEvidence?'reservationStockEvidence':'';
+   return key?{...data,[key]:{...data[key],reservationIds:[...data[key].reservationIds,sibling]}}:data;
+  }});
+  // Control: an unchanged sibling of the same product contributes a valid zero.
+  const held={productKey:f.productKey,warehouseId:'A',quantity:1};
+  await seed('inventoryReservations/'+sibling,held);
+  await assertSucceeds(f.run([1,2,1,2]));
+  // Only its product identity changes; quantities, proof size and access count stay identical.
+  await seed('inventoryReservations/'+sibling,{...held,productKey:'OTHER'});
+  const before=await f.snapshot();
+  await assertFails(f.run([2,3,2,3]));
+  assert.deepEqual(await f.snapshot(),before);
+  for(const warehouseId of ['A','B'])
+   assert.equal((await getDoc(doc(db('admin'),'inventoryMovements/'+f.id+'-2-'+warehouseId))).exists(),false);
+ }
+});
 test('missing-document probes still reject inactive and unauthenticated profiles with typed map readers',async()=>{
  await seed('users/off-probe',{role:'purchaser',active:false});
  await seed('users/disabled-probe',{role:'warehouse',active:true,disabled:true});

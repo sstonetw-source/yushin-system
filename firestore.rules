@@ -878,6 +878,45 @@ service cloud.firestore {
         && proof.get('reservationIds', []).size() == e.reservationIds.size()
         && proof.get('reservationIds', []).hasAll(e.reservationIds);
     }
+    // Evaluate each primary reservation snapshot once for both stock totals.
+    // A local contribution must keep its warehouse; each changed reservation's
+    // own movement witness also requires membership in this local ID set.
+    function primaryReservationDeltaAt(id, productKey, warehouseId, localIds) {
+      let path = /databases/$(database)/documents/inventoryReservations/$(id);
+      let previous = get(path);
+      let before = previous == null ? {} : previous.data;
+      let after = getAfter(path).data;
+      let oldQty = before.get('quantity', 0);
+      let qty = after.get('quantity', 0);
+      let local = id in localIds;
+      let delta = qty - oldQty;
+      return {
+        'valid': after.productKey == productKey && before.get('productKey', productKey) == productKey
+          && (!local || (qty == 0 && oldQty == 0) || (after.warehouseId == warehouseId
+            && (oldQty == 0 || before.get('warehouseId', warehouseId) == warehouseId))),
+        'company': delta, 'warehouse': local ? delta : 0
+      };
+    }
+    function combinedPrimaryReservationDelta(a, b, c, d, e) {
+      return {'valid': a.valid && b.valid && c.valid && d.valid && e.valid,
+        'company': a.company + b.company + c.company + d.company + e.company,
+        'warehouse': a.warehouse + b.warehouse + c.warehouse + d.warehouse + e.warehouse};
+    }
+    function primaryReservationStocks(e, productKey, warehouseId) {
+      let ids = e.reservationIds;
+      let localIds = e.warehouseReservationIds;
+      let zero = {'valid': true, 'company': 0, 'warehouse': 0};
+      let delta = combinedPrimaryReservationDelta(
+        primaryReservationDeltaAt(ids[0], productKey, warehouseId, localIds),
+        ids.size() > 1 ? primaryReservationDeltaAt(ids[1], productKey, warehouseId, localIds) : zero,
+        ids.size() > 2 ? primaryReservationDeltaAt(ids[2], productKey, warehouseId, localIds) : zero,
+        ids.size() > 3 ? primaryReservationDeltaAt(ids[3], productKey, warehouseId, localIds) : zero,
+        ids.size() > 4 ? primaryReservationDeltaAt(ids[4], productKey, warehouseId, localIds) : zero);
+      return operationalReservedStockMatches(/databases/$(database)/documents/inventory/$(e.inventoryId),
+          {'valid': delta.valid, 'quantity': delta.company}, productKey, '')
+        && operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId),
+          {'valid': delta.valid, 'quantity': delta.warehouse}, productKey, warehouseId);
+    }
     function crossWarehouseReservationStocks(e, productKey, warehouseId) {
       return e.get('companyMovementId', '') is string && e.get('companyMovementId', '') != ''
         && e.warehouseReservationIds is list && e.warehouseReservationIds.size() > 0
@@ -885,10 +924,10 @@ service cloud.firestore {
         && e.warehouseReservationIds.toSet().size() == e.warehouseReservationIds.size()
         && e.reservationIds.hasAll(e.warehouseReservationIds)
         && (e.companyMovementId == e.movementId
-          ? operationalReservedStockMatches(/databases/$(database)/documents/inventory/$(e.inventoryId), operationalStockDelta(e, productKey, ''), productKey, '')
-          : linkedCompanyReservationProof(e, productKey, warehouseId))
-        && operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId),
-          sameWarehouseReservationTotal(e.warehouseReservationIds, productKey, warehouseId), productKey, warehouseId);
+          ? primaryReservationStocks(e, productKey, warehouseId)
+          : linkedCompanyReservationProof(e, productKey, warehouseId)
+            && operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId),
+              sameWarehouseReservationTotal(e.warehouseReservationIds, productKey, warehouseId), productKey, warehouseId));
     }
     function operationalReservationStockEvidence(id) {
       let data = request.resource.data;
