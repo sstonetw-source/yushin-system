@@ -4461,3 +4461,102 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
  #appContainer .workflow-page-heading #purchaseDirectPanel { margin:0; }
  #appContainer .workflow-page-heading .workspace-page-title { margin-block:16px; }
 }
+
+/* Shared live work lists: one information order and one responsive rhythm. */
+@media screen {
+ #appContainer .workflow-search-region { display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; padding:12px; margin:16px 0; border:1px solid var(--ys-border); border-radius:var(--ys-control-radius); background:var(--ys-surface); }
+ #appContainer .workflow-search-region :is(.order-period-toolbar,.order-primary-toolbar) { display:contents; }
+ #appContainer .workflow-search-region #orderSearch { flex:1 1 300px; min-width:180px; }
+ #appContainer .workflow-search-region :is(select,input,button) { margin:0; }
+ #appContainer .workflow-search-region #orderHistorySearchStatus:empty { display:none; }
+ #appContainer .workflow-filters { gap:10px; align-items:center; }
+ #appContainer .workflow-list-table { table-layout:auto; width:100%; border:0; }
+ #appContainer .workflow-list-table :is(th,td) { padding:12px; text-align:left; border:0; border-bottom:1px solid var(--ys-border); line-height:1.5; }
+ #appContainer .workflow-list-table th { background:var(--ys-table-head); white-space:nowrap; color:var(--ys-text); }
+ #appContainer .workflow-list-table td { background:var(--ys-surface); }
+ @media (hover:hover) and (min-width:769px) { #appContainer .workflow-list-table tr:hover > td { background:var(--ys-selected); } }
+ #appContainer .workflow-list-table :is(.order-money-cell,.workflow-money) { text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
+ #appContainer .workflow-record { min-width:96px; font-variant-numeric:tabular-nums; }
+ #appContainer .workflow-record :is(strong,time) { display:block; white-space:nowrap; }
+ #appContainer .workflow-record strong { color:var(--ys-text); font-size:13px; }
+ #appContainer .workflow-record strong + time { color:var(--ys-muted); font-size:12px; margin-top:4px; }
+ #appContainer .workflow-list-table .workflow-product { min-width:180px; max-width:360px; }
+ #appContainer .workflow-list-table .workflow-product :is(strong,small) { overflow-wrap:anywhere; }
+ #appContainer .workflow-product-item + .workflow-product-item,
+ #appContainer .workflow-progress-item + .workflow-progress-item { padding-top:10px; margin-top:10px; border-top:1px solid var(--ys-border); }
+ #appContainer .workflow-list-table .order-progress-cell { min-width:150px; max-width:240px; }
+ #appContainer .workflow-list-table .order-progress-cell small { display:block; color:var(--ys-muted); font-size:12px; }
+ #appContainer .content-section .workflow-list-table .workflow-customer-link { padding:0; margin:0; width:auto; white-space:normal; text-align:left; background:transparent; border:0; color:var(--ys-primary-hover); font-weight:600; }
+ #appContainer .workflow-list-table .order-detail-panel { min-width:150px; margin-bottom:8px; }
+ #appContainer .workflow-list-table .order-detail-panel summary { display:flex; align-items:center; min-height:44px; cursor:pointer; color:var(--ys-primary-hover); }
+ #appContainer .workflow-list-table .order-detail-panel { position:relative; }
+ #appContainer .workflow-list-table .order-detail-panel[open] .order-detail-content { position:absolute; right:0; z-index:30; width:min(420px,calc(100vw - 48px)); max-height:65vh; overflow:auto; box-sizing:border-box; padding:16px; border:1px solid var(--ys-border); border-radius:var(--ys-control-radius); background:var(--ys-surface); }
+ #appContainer .workflow-list-table .order-customer-cell { min-width:110px; }
+ #appContainer .workflow-price-breakdown small { display:block; margin:4px 0; color:var(--ys-text); }
+ #appContainer .workflow-more summary { display:inline-flex; align-items:center; padding:8px 12px; border:1px solid var(--ys-border); border-radius:var(--ys-control-radius); background:var(--ys-surface); color:var(--ys-muted); }
+ #appContainer .workflow-more .danger-menu-item { background:var(--ys-surface); color:var(--ys-danger); }
+ #appContainer #purchasePendingPanel { padding:0; border:0; background:transparent; }
+ #appContainer #purchasePendingPanel > .purchase-section-heading { padding:12px 0; }
+ #appContainer #purchaseReplenishmentPanel.is-empty { padding:10px 12px; }
+ #appContainer #purchaseReplenishmentPanel.is-empty .purchase-replenishment-heading { align-items:center; }
+ #appContainer #purchaseReplenishmentPanel.is-empty .purchase-replenishment-heading > div:first-child { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+ #appContainer #purchaseReplenishmentPanel.is-empty strong { font-size:14px; }
+ #appContainer #purchaseReplenishmentPanel.is-empty #purchaseReplenishmentStatus { font-size:13px; color:var(--ys-muted); }
+}
+@media screen and (min-width:769px) {
+ #appContainer #ordersTable .order-sales-cell { min-width:80px; }
+ #appContainer #ordersTable .order-money-cell { min-width:105px; }
+ #appContainer #ordersTable .order-product-cell { width:28%; }
+ #appContainer .workflow-list-table td[data-th="操作"] { min-width:155px; }
+}
+@media screen and (max-width:768px) {
+ #appContainer .workflow-search-region { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+ #appContainer .workflow-search-region :is(#orderSearch,.order-custom-period,.order-export-tools,#orderHistorySearchStatus) { grid-column:1/-1; min-width:0; width:100%; }
+ #appContainer .workflow-search-region select { width:100%; min-width:0; box-sizing:border-box; }
+ #appContainer .workflow-search-region .order-scope-filters { display:contents; }
+ #appContainer .workflow-list-table { display:block; border:0; min-width:0; }
+ #appContainer .workflow-list-table thead { display:none; }
+ #appContainer .workflow-list-table tbody { display:block; padding:0; background:transparent; }
+ #appContainer .workflow-list-table tbody > tr { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 12px; padding:12px; margin:0 0 12px; border:1px solid var(--ys-border); border-radius:var(--ys-control-radius); background:var(--ys-surface); box-shadow:none; }
+ #appContainer .workflow-list-table tbody > tr > td { display:block; min-width:0; width:auto; max-width:none; padding:8px 0; white-space:normal; background:transparent; }
+ #appContainer .workflow-list-table td[data-th]::before { content:attr(data-th); display:block; color:var(--ys-muted); font-size:12px; margin-bottom:4px; }
+ #appContainer .workflow-list-table td:is([data-th="客戶"],[data-th="客戶／用途"],[data-th="客戶名稱"],[data-th="待採購品項"],[data-th="待到貨品項"],[data-th="待打單品項"],[data-th="已完成採購品項"],[data-th="產品資訊"],[data-th="進度"],[data-th="到貨進度"],[data-th="操作"],[colspan]) { grid-column:1/-1; }
+ #appContainer .workflow-list-table td[data-th="操作"] { border-bottom:0; }
+ #appContainer .workflow-list-table td[data-th="操作"]::before { display:none; }
+ #appContainer .workflow-list-table :is(.workflow-product,.order-detail-panel[open]) { min-width:0; width:100%; max-width:none; }
+ #appContainer .workflow-list-table button { min-height:44px; max-width:100%; white-space:normal; }
+ #appContainer .workflow-list-table .order-progress-cell { min-width:0; max-width:none; }
+ #appContainer .workflow-list-table .order-detail-panel[open] .order-detail-content { position:static; width:100%; max-height:none; margin-top:8px; }
+ #appContainer .workflow-list-table tbody > tr > td { background:transparent !important; }
+ #appContainer .workflow-list-table tbody { background:transparent !important; }
+ #appContainer .workflow-list-table .order-money-cell { display:block; text-align:left; }
+ #appContainer .workflow-list-table .order-money-cell small { margin:4px 0 0; }
+}
+@media screen {
+ #appContainer :is(.workflow-search-region input[type="search"],#purchaseWorkSearch,#poListSearch) { box-sizing:border-box; padding:10px 12px; min-height:var(--ys-control-height); border:1px solid var(--ys-border); border-radius:var(--ys-control-radius); background:var(--ys-surface); color:var(--ys-text); font:inherit; font-size:14px; }
+ #appContainer #purchaseWorkSearch { flex:1 1 300px; min-width:180px; margin:0; }
+ #appContainer #purchaseWorkSearch[hidden],#appContainer #poListSearch[hidden] { display:none; }
+}
+@media screen and (max-width:768px) { #appContainer #purchaseWorkSearch { width:100%; min-width:0; } }
+@media screen and (max-width:768px) {
+ #appContainer :is(#ordersBody,#purchasePendingBody,#purchaseDispatchBody,#purchaseCompletedBody,#poListBody) > tr { box-shadow:none; background:var(--ys-surface); border-color:var(--ys-border); }
+ #appContainer #ordersBody > tr { grid-template-areas:"customer customer" "reference owner" "product product" "money money" "progress progress" "actions actions"; }
+ #appContainer #ordersBody .order-customer-cell { grid-area:customer; }
+ #appContainer #ordersBody .order-date-cell { grid-area:reference; }
+ #appContainer #ordersBody .order-sales-cell { grid-area:owner; }
+ #appContainer #ordersBody .order-product-cell { grid-area:product; }
+ #appContainer #ordersBody .order-money-cell { grid-area:money; }
+ #appContainer #ordersBody .order-progress-cell { grid-area:progress; }
+ #appContainer #ordersBody td[data-th="操作"] { grid-area:actions; }
+ #appContainer :is(#purchaseDispatchBody,#purchaseCompletedBody,#poListBody) td[data-th="客戶"] { grid-row:1; }
+ #appContainer :is(#purchaseDispatchBody,#purchaseCompletedBody,#poListBody) td[data-th="訂單日期"] { grid-row:2; grid-column:1; }
+ #appContainer :is(#purchaseDispatchBody,#purchaseCompletedBody,#poListBody) td[data-th="負責業務"] { grid-row:2; grid-column:2; }
+ #appContainer :is(#purchaseDispatchBody,#purchaseCompletedBody,#poListBody) td:is([data-th="待到貨品項"],[data-th="待打單品項"],[data-th="已完成採購品項"]) { grid-row:3; }
+}
+@media screen {
+ #appContainer .workflow-heading-actions { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:8px; margin-left:auto; }
+ #appContainer #ordersTable .workflow-customer-link { border:0 !important; background:transparent !important; padding:0 !important; font-size:14px !important; text-decoration:underline; text-underline-offset:3px; }
+ #appContainer #ordersTable .order-more-menu > summary { display:inline-flex; align-items:center; justify-content:center; min-height:44px; min-width:44px; box-sizing:border-box; padding:8px; border:1px solid var(--ys-border); border-radius:var(--ys-control-radius); background:var(--ys-surface); color:var(--ys-muted); }
+ #appContainer #ordersTable .order-compact-actions { justify-content:flex-start; flex-wrap:wrap; }
+}
+@media screen and (max-width:768px) { #appContainer .workflow-heading-actions { width:100%; } }

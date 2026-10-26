@@ -101,7 +101,7 @@ test('business shipping action requires item-level form for multi-item and parti
     assert.equal(needsForm([{itemId:'A'}],{remaining:5},{shippable:5}),false);
     assert.match(app,/const useBatchDelivery = orderDeliveryRequiresItemForm\(allOrderItems, deliveryProgress, fulfillmentProgress\)/);
     assert.match(app,/useBatchDelivery \? 'openPartialDeliveryForOrder' : 'quickCompleteDelivery'/);
-    assert.match(app,/useBatchDelivery \? '已送貨（分批）' : '已送貨'/);
+    assert.match(app,/useBatchDelivery \? '確認分批送達' : '確認送達'/);
 });
 
 function deliveryTestHarness(selectedItem, recordToEdit=null, single=false) {

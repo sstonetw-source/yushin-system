@@ -837,11 +837,12 @@
         <div id="orderListPanel">
         <div class="module-header no-print">
             <h2 class="workspace-page-title">訂單 <button type="button" class="page-help-trigger no-print" data-page-help="order-system" aria-label="訂單功能與注意事項" aria-haspopup="dialog" aria-controls="pageHelpDialog">!</button></h2>
-            <button onclick="openOrderModal()">＋ 新增訂單</button>
-            <button type="button" id="serviceCaseEntry" class="btn-secondary" hidden onclick="openServiceCases()">服務案件</button>
+            <div class="workflow-heading-actions"><button onclick="openOrderModal()">＋ 新增訂單</button>
+            <button type="button" id="serviceCaseEntry" class="btn-secondary" hidden onclick="openServiceCases()">服務案件</button></div>
         </div>
         <div id="orderWorkCards" class="order-work-cards no-print"></div>
-        <div class="order-period-toolbar no-print">
+        <div class="workflow-search-region no-print">
+        <div class="order-period-toolbar workflow-filters no-print">
             <span id="purchaserOrderFilters" class="order-scope-filters" style="display:none;">
                 <select id="orderSalesFilter" aria-label="訂單負責業務" onchange="renderOrdersList()"><option value="">全部負責業務</option></select>
             </span>
@@ -864,7 +865,7 @@
 
         </div>
         <div class="toolbar no-print order-primary-toolbar">
-            <input type="text" id="orderSearch" placeholder="搜尋全部歷史：客戶 / 廠牌 / 貨號 / 品名 / 單號" oninput="scheduleOrderHistorySearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();searchAllOrderHistory();}">
+            <input type="search" aria-label="搜尋訂單" id="orderSearch" placeholder="搜尋全部歷史：客戶 / 廠牌 / 貨號 / 品名 / 單號" oninput="scheduleOrderHistorySearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();searchAllOrderHistory();}">
             <button type="button" class="btn-secondary" onclick="clearOrderHistorySearch()">清除搜尋</button>
             <span id="orderHistorySearchStatus" style="font-size:12px;color:#666;"></span>
             <details class="order-export-tools">
@@ -878,15 +879,16 @@
                 </div>
             </details>
         </div>
-        <table id="ordersTable">
+        </div>
+        <table id="ordersTable" class="workflow-list-table">
             <thead>
                 <tr>
                      <th>訂單日期</th>
             <th>客戶名稱</th>
-            <th>負責業務</th> <!-- 新增 -->
             <th>產品資訊</th>
+            <th>負責業務</th>
             <th>訂單金額</th>
-            <th id="orderCostHeader">明細</th>
+            <th id="orderCostHeader">進度</th>
             <th class="no-print">操作</th>
                 </tr>
             </thead>
@@ -933,7 +935,7 @@
             <button type="button" onclick="switchPurchasingView('receiving')" data-purchase-stage="receiving">未到齊／收貨</button>
             <button type="button" onclick="switchPurchasingView('history')" data-purchase-stage="history">全部採購單</button>
         </div>
-        <div id="purchaseFilterToolbar" class="order-period-toolbar no-print" aria-label="採購篩選條件">
+        <div id="purchaseFilterToolbar" class="order-period-toolbar workflow-filters no-print" aria-label="採購篩選條件">
             <select id="purchaseSalesFilter" aria-label="採購負責業務" onchange="renderPurchasingView()"><option value="">全部負責業務</option></select>
             <select id="purchaseBrandFilter" aria-label="採購廠牌" onchange="renderPurchasingView()"><option value="">全部廠牌</option></select>
             <label for="poPeriodFilter">統計期間</label>
@@ -945,6 +947,7 @@
                 <span>至</span>
                 <input type="date" id="purchasePeriodEnd" aria-label="採購統計結束日期" onchange="renderPurchasingView()">
             </div>
+            <input type="search" id="purchaseWorkSearch" aria-label="搜尋目前採購工作" placeholder="搜尋目前工作：單號 / 客戶 / 廠牌 / 貨號 / 品名" oninput="renderPurchasingView()">
 
         </div>
 
@@ -960,7 +963,7 @@
                 </div>
             </div>
             <div id="purchaseReplenishmentDetails" class="table-wrap purchase-replenishment-details">
-                <table>
+                <table class="workflow-list-table">
                     <thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>現有</th><th>預留</th><th>可用</th><th>在途</th><th>預計</th><th>安全庫存</th><th>建議補貨</th><th>操作</th></tr></thead>
                     <tbody id="purchaseReplenishmentBody"><tr><td colspan="11" style="color:#777;">自動檢查中…</td></tr></tbody>
                 </table>
@@ -969,15 +972,14 @@
 
         <div id="purchasePendingPanel" class="panel purchase-function-panel">
             <div class="purchase-section-heading no-print">
-                <strong>業務訂單需求</strong>
-                <span>只處理客戶訂單中需要採購的品項。</span>
+                <strong>待採購品項</strong>
             </div>
             <div class="toolbar no-print">
                 <button type="button" id="purchasePendingBatchPoBtn" class="btn-secondary" onclick="openSelectedPurchaseDraft()" disabled>合併產生採購單</button>
                 <span id="purchasePendingStatus" role="status"></span>
             </div>
-            <div class="table-wrap"><table>
-                <thead><tr><th class="no-print">合併</th><th>需求日期</th><th>客戶／用途</th><th>負責業務</th><th>待採購品項</th><th>操作</th></tr></thead>
+            <div class="table-wrap"><table class="workflow-list-table">
+                <thead><tr><th class="no-print">合併</th><th>需求日期</th><th>客戶／用途</th><th>待採購品項</th><th>負責業務</th><th>操作</th></tr></thead>
                 <tbody id="purchasePendingBody"></tbody>
             </table></div>
             <div class="po-load-more-row no-print"><button type="button" id="purchasePendingMoreBtn" class="btn-secondary" style="display:none" onclick="loadPendingPurchaseOrders(false)">載入更多（每次 50 筆）</button></div>
@@ -985,10 +987,10 @@
         <!-- 採購訂單：列出所有已經產生過的採購單（發給廠商下單用的那種），只有採購／管理員看得到 -->
         <div id="poListPanel" style="display:none">
             <div class="toolbar no-print">
-                <input type="text" id="poListSearch" placeholder="搜尋全部採購單：單號 / 供應商 / 採購人員 / 品項" oninput="schedulePurchaseOrderHistorySearch()">
+                <input type="search" aria-label="搜尋採購單" id="poListSearch" placeholder="搜尋全部採購單：單號 / 供應商 / 採購人員 / 品項" oninput="schedulePurchaseOrderHistorySearch()">
                 <span id="poHistorySearchStatus" role="status"></span>
             </div>
-            <table>
+            <table class="workflow-list-table">
                 <thead><tr id="poListHeadRow"><th>單號</th><th>公司</th><th>供應商</th><th>採購人員</th><th>採購日期</th><th>預計到貨</th><th>等待天數</th><th>品項數</th><th>總計金額</th><th>到貨進度</th><th class="no-print">操作</th></tr></thead>
                 <tbody id="poListBody"></tbody>
             </table>
@@ -1000,8 +1002,8 @@
                 <span id="purchaseDispatchStatus" role="status"></span>
             </div>
 
-            <div class="table-wrap"><table>
-                <thead><tr><th>訂單日期</th><th>客戶</th><th>負責業務</th><th>待打單品項</th><th>操作</th></tr></thead>
+            <div class="table-wrap"><table class="workflow-list-table">
+                <thead><tr><th>訂單日期</th><th>客戶</th><th>待打單品項</th><th>負責業務</th><th>操作</th></tr></thead>
                 <tbody id="purchaseDispatchBody"></tbody>
             </table></div>
             <div class="po-load-more-row no-print"><button type="button" id="purchaseDispatchMoreBtn" class="btn-secondary" style="display:none" onclick="loadPurchasingDispatchOrders(false)">載入更多（每次 50 筆）</button></div>
@@ -1009,7 +1011,7 @@
         <div id="purchaseCompletedPanel" style="display:none">
             <div class="toolbar no-print"><span id="purchaseCompletedStatus" role="status"></span></div>
 
-            <div class="table-wrap"><table><thead><tr><th>訂單日期</th><th>客戶</th><th>負責業務</th><th>已完成採購品項</th><th>操作</th></tr></thead><tbody id="purchaseCompletedBody"></tbody></table></div>
+            <div class="table-wrap"><table class="workflow-list-table"><thead><tr><th>訂單日期</th><th>客戶</th><th>已完成採購品項</th><th>負責業務</th><th>操作</th></tr></thead><tbody id="purchaseCompletedBody"></tbody></table></div>
             <div class="po-load-more-row no-print"><button type="button" id="purchaseCompletedMoreBtn" class="btn-secondary" style="display:none" onclick="loadMorePurchasingCompleted()">載入更多（每次 50 筆）</button></div>
         </div>
         <div id="purchaseSupplierPanel" style="display:none">
@@ -1033,7 +1035,7 @@
                 </div>
                 <div id="supplierSettingStatus" class="inline-status" role="status" aria-live="polite"></div>
                 <div class="table-wrap" style="margin-top:12px;">
-                    <table>
+                    <table class="workflow-list-table">
                         <thead><tr><th>廠牌</th><th>產品線</th><th>供應商</th><th>採購單抬頭</th><th>預設交期</th><th>操作</th></tr></thead>
                         <tbody id="supplierSettingsBody"></tbody>
                     </table>
