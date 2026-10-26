@@ -17,7 +17,7 @@
     function deliveryLabel(item={},fallback={}) {
         if(item.fulfillmentType==='DIRECT_SHIP')return '原廠直送客戶';
         const mode=(item.deliveryPlan||fallback).mode;
-        return {PICKUP:'我送・主倉自領',SALES_SHIP:'我送・寄給負責業務',CUSTOMER_SHIP:'倉庫寄客戶'}[mode]||'待設定交付';
+        return {PICKUP:'業務送・主倉自領',SALES_SHIP:'業務送・寄給負責業務',CUSTOMER_SHIP:'倉庫寄客戶'}[mode]||'待設定交付';
     }
     function sameDraftItem(a,b) {
         return a.productId===b.productId && a.unitPrice===b.unitPrice && a.procurementType===b.procurementType

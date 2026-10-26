@@ -4721,3 +4721,53 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
     #appContainer #ordersTable .order-compact-actions > .order-billing-action { grid-column:1; }
     #appContainer #ordersTable .order-compact-actions > .order-more-menu { grid-column:2; justify-self:end; }
 }
+/* Shared order/purchasing information and action rhythm. Screen only. */
+@media screen {
+    #appContainer .workflow-inline-actions, #appContainer #purchasing-system .po-list-action-row {
+        display:flex; align-items:center; flex-wrap:wrap; gap:8px;
+    }
+    #appContainer #ordersTable .order-compact-actions { display:contents; }
+    #appContainer #ordersTable .order-detail-panel { margin:0; flex:0 0 auto; width:auto; }
+    #appContainer #ordersTable .order-detail-panel > summary,
+    #appContainer .order-detail-drawer :is(.order-commercial-editor > summary,.order-drawer-section > summary) {
+        display:inline-flex; align-items:center; box-sizing:border-box; min-height:44px;
+        padding:8px 12px; border:1px solid var(--ys-border); border-radius:var(--ys-control-radius);
+        background:var(--ys-surface); color:var(--ys-muted); font:inherit; cursor:pointer;
+    }
+    #appContainer #ordersTable .order-compact-actions > button { width:auto; text-align:center; }
+    #appContainer :is(#order-system,#purchasing-system) .workflow-amount { margin-bottom:8px; line-height:1.5; white-space:normal; }
+    #appContainer .workflow-amount :is(small,strong) { display:block; overflow-wrap:anywhere; }
+    #appContainer .workflow-order-total { border-top:1px solid var(--ys-border); padding-top:8px; }
+    #appContainer .order-drawer-section:has(.order-commercial-editor[open]) > .order-commercial-summary { display:none; }
+    #appContainer .is-current-work-item { border-left:3px solid var(--ys-primary); padding-left:12px !important; }
+    #appContainer .order-current-item-label { color:var(--ys-primary-hover); }
+    #appContainer .order-detail-drawer :is(button,.order-commercial-editor > summary,.order-drawer-section > summary) { font-size:14px; font-weight:400; }
+}
+@media screen and (min-width:769px) {
+    #appContainer #ordersTable :is(th,td):nth-child(3) { width:24%; }
+    #appContainer #ordersTable :is(th,td):nth-child(7) { width:19%; }
+    #appContainer #ordersTable .workflow-inline-actions { flex-wrap:nowrap; }
+    #appContainer #ordersTable .workflow-inline-actions:has(.order-compact-actions > button:not(.order-billing-action)) { flex-wrap:wrap; }
+}
+@media screen and (max-width:768px) {
+    #appContainer #purchasing-system .workflow-list-table td[data-th="數量"] { grid-column:1/-1; }
+}
+@media screen and (min-width:769px) {
+    #appContainer #ordersTable :is(th,td):nth-child(3) { width:21%; }
+    #appContainer #ordersTable :is(th,td):nth-child(7) { width:22%; }
+    #appContainer #ordersTable .order-compact-actions > .order-billing-action {
+        flex:0 0 auto; min-width:max-content; white-space:nowrap; padding:8px 10px; line-height:20px;
+    }
+}
+@media screen and (min-width:769px) {
+    #appContainer #purchasing-system :is(.workflow-inline-actions,.po-list-action-row) { flex-wrap:nowrap; }
+}
+@media screen {
+    #appContainer :is(#order-system,#purchasing-system) .workflow-inline-actions > button,
+    #appContainer #purchasing-system .po-list-action-row > button { min-height:44px; margin:0; }
+}
+@media screen and (min-width:769px) {
+    #appContainer #ordersTable :is(th,td):nth-child(3) { width:18%; }
+    #appContainer #ordersTable :is(th,td):nth-child(5) { width:16%; }
+    #appContainer #ordersTable :is(th,td):nth-child(6) { width:15%; }
+}

@@ -61,6 +61,8 @@ jobs:
         run: node tests/number-wheel-browser-smoke.js
       - name: Check per-item service progress in desktop and mobile Chrome
         run: node tests/service-progress-browser-smoke.js
+      - name: Check quick-created product brand discovery
+        run: node tests/quick-brand-browser-smoke.js
       - name: Check warm sand typography and page alignment
         run: node tests/warm-sand-browser-smoke.js
       - name: Check unified order and purchasing work-list presentation

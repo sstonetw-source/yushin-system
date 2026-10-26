@@ -710,7 +710,7 @@ function renderSupplierMasterAdmin() {
             <td>
                 <button type="button" class="btn-small btn-secondary" onclick="loadSupplierMasterToEditor(${inlineJsValue(supplierId)})">編輯</button>
                 <button type="button" class="btn-small btn-danger" onclick="disableSupplierMaster(${inlineJsValue(supplierId)})">停用</button>
-            </td>
+            </div></td>
         </tr>`;
     }).join(''):'<tr><td colspan="6" style="color:#888;">尚未建立供應商。</td></tr>';
 }
@@ -754,7 +754,7 @@ function renderSupplierSettingsAdmin() {
             <td>${escapeHtml(supplier.supplierName||'找不到供應商')}</td>
             <td>${escapeHtml(supplier.purchaseHeaderName||supplier.supplierName||'')}</td>
             <td>${leadTimeDays?leadTimeDays+' 天':'－'}</td>
-            <td>
+            <td><div class="workflow-inline-actions">
                 <button type="button" class="btn-small btn-secondary" onclick="loadSupplierSettingToEditor(${inlineJsValue(mapping.id||mapping.mappingId||'')})">編輯</button>
                 <button type="button" class="btn-small btn-danger" onclick="disableSupplierSetting(${inlineJsValue(mapping.id||mapping.mappingId||'')})">停用</button>
             </td>

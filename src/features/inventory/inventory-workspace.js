@@ -617,7 +617,7 @@ function renderInventoryReplenishmentCenter() {
         <td data-th="預計"><strong>${plan.projected}</strong></td>
         <td data-th="安全庫存">${plan.safetyStock}</td>
         <td data-th="建議補貨"><strong>${plan.suggestedQty}</strong></td>
-        <td data-th="操作" class="no-print">${canEditPage('orders.po') ? `<button type="button" class="btn-small" onclick="openInventoryReplenishment(${inlineJsValue(item.id)})">建立採購單</button>${canManageInventoryStockPolicy() ? ` <button type="button" class="btn-small btn-danger" onclick="removeInventoryReplenishmentReminder(${inlineJsValue(item.id)})">停止安全庫存提醒</button>` : ''}` : '僅可查看'}</td>
+        <td data-th="操作" class="no-print"><div class="workflow-inline-actions">${canEditPage('orders.po') ? `<button type="button" class="btn-small" onclick="openInventoryReplenishment(${inlineJsValue(item.id)})">建立採購單</button>${canManageInventoryStockPolicy() ? ` <button type="button" class="btn-small btn-danger" onclick="removeInventoryReplenishmentReminder(${inlineJsValue(item.id)})">停止安全庫存提醒</button>` : ''}` : '僅可查看'}</div></td>
       </tr>`).join('');
 }
 window.removeInventoryReplenishmentReminder = async function(inventoryId) {

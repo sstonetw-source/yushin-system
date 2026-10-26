@@ -1682,6 +1682,40 @@ window.onProductSearchBrandChange = function() {
     return loadFrequentProducts(document.getElementById('productManagementSearchBrand')?.value);
 };
 
+// Discover only quick-created products, one bounded page when Other is opened.
+const quickProductBrowserBrands = { key:'', rows:[], cursor:null, hasMore:true, loaded:false, loading:false, error:'' };
+function resetQuickProductBrowserBrands() {
+    const key=[currentUser?.uid||'',currentUserRole,sessionDataGeneration].join(':');
+    if (quickProductBrowserBrands.key!==key) Object.assign(quickProductBrowserBrands,{key,rows:[],cursor:null,hasMore:true,loaded:false,loading:false,error:''});
+    return quickProductBrowserBrands;
+}
+async function loadQuickProductBrowserBrands(more=false) {
+    if (!canAccessPage('products')) return;
+    const state=resetQuickProductBrowserBrands();
+    if(state.loading||(!more&&state.loaded)||(more&&!state.hasMore))return;
+    const key=state.key;state.loading=true;state.error='';renderProductBrandBrowser();
+    try {
+        let query=db.collection('products').where('source','==','QUICK_CREATE').limit(50);
+        if(state.cursor)query=query.startAfter(state.cursor);
+        const page=await firestoreReadWithTimeout(query.get(),'其他廠牌');
+        if(resetQuickProductBrowserBrands().key!==key)return;
+        state.rows.push(...page.docs.map(doc=>({id:doc.id,...doc.data()})));
+        state.cursor=page.docs.at(-1)||state.cursor;state.hasMore=page.size===50;state.loaded=true;
+    } catch(err) {
+        if(state.key===key)state.error='其他廠牌載入失敗，請重試。';
+    } finally { if(state.key===key){state.loading=false;renderProductBrandBrowser();} }
+}
+function productBrowserBrandEntries() {
+    const entries=new Map(getUnifiedBrandEntries(false).filter(entry=>entry?.name&&entry.active!==false).map(entry=>[normalizeBrandLookupKey(entry.name),entry]));
+    const state=resetQuickProductBrowserBrands();
+    [...state.rows,...productManagementResults].forEach(product=>{
+        if(product.active===false||product.status==='INACTIVE')return;
+        const name=resolveBrandName(product.brandName||product.brand||'');
+        const key=normalizeBrandLookupKey(name);
+        if(key&&!entries.has(key))entries.set(key,{name,active:true});
+    });
+    return [...entries.values()].sort((a,b)=>a.name.localeCompare(b.name,'zh-Hant'));
+}
 let productSearchOtherBrandsExpanded = false;
 window.selectProductSearchBrand = function(brand) {
     const field = document.getElementById('productManagementSearchBrand');
@@ -1692,23 +1726,29 @@ window.selectProductSearchBrand = function(brand) {
 window.toggleProductSearchOtherBrands = function() {
     productSearchOtherBrandsExpanded = !productSearchOtherBrandsExpanded;
     renderProductBrandBrowser();
+    if(productSearchOtherBrandsExpanded)void loadQuickProductBrowserBrands();
 };
 window.renderProductBrandBrowser = function() {
     const container = document.getElementById('productSearchBrandButtons');
     const selected = document.getElementById('productManagementSearchBrand')?.value || '';
     updateProductSearchControls();
     if (!container) return;
-    const entries = getUnifiedBrandEntries(false).filter(entry => entry?.name && entry.active !== false)
-        .sort((a,b) => a.name.localeCompare(b.name, 'zh-Hant'));
+    const entries = productBrowserBrandEntries();
     const primaryKeys = new Set(getPrimaryBrandNames().map(normalizeBrandLookupKey));
     const primary = entries.filter(entry => primaryKeys.has(normalizeBrandLookupKey(entry.name)));
     const others = entries.filter(entry => !primaryKeys.has(normalizeBrandLookupKey(entry.name)));
     const button = entry => `<button type="button" class="product-brand-button${entry.name === selected ? ' active' : ''}" aria-pressed="${entry.name === selected}" onclick="selectProductSearchBrand(${inlineJsValue(entry.name)})">${escapeHtml(entry.name)}</button>`;
     let html = primary.map(button).join('');
-    if (others.length) {
+    {
         const selectedOther = others.some(entry => entry.name === selected);
         html += `<button type="button" class="product-brand-button${selectedOther ? ' active' : ''}" aria-expanded="${productSearchOtherBrandsExpanded}" onclick="toggleProductSearchOtherBrands()">其他${productSearchOtherBrandsExpanded ? ' ▲' : ' ▼'}${selectedOther && !productSearchOtherBrandsExpanded ? '：' + escapeHtml(selected) : ''}</button>`;
-        if (productSearchOtherBrandsExpanded) html += others.map(button).join('');
+        if (productSearchOtherBrandsExpanded) {
+            html += others.map(button).join('');
+            const state=resetQuickProductBrowserBrands();
+            if(state.loading)html+='<span role="status">正在載入其他廠牌…</span>';
+            else if(state.error)html+=`<button type="button" class="btn-secondary" onclick="loadQuickProductBrowserBrands(true)">${escapeHtml(state.error)}</button>`;
+            else if(state.loaded&&state.hasMore)html+='<button type="button" class="btn-secondary" onclick="loadQuickProductBrowserBrands(true)">載入更多其他廠牌</button>';
+        }
     }
     container.innerHTML = html || '<span>目前沒有可選擇的廠牌。</span>';
 };
@@ -2721,6 +2761,13 @@ async function findDuplicateProductMaster(brand, code, excludeId = '') {
 }
 
 function syncSavedProductMaster(productId, record) {
+    if (typeof resetQuickProductBrowserBrands==='function') {
+        const state=resetQuickProductBrowserBrands(),prior=state.rows.find(row=>row.id===productId);
+        if(record.source==='QUICK_CREATE'||prior){
+            state.rows=state.rows.filter(row=>row.id!==productId);
+            state.rows.push({...prior,...record,id:productId});
+        }
+    }
     invalidateProductFrequentCache();
     cacheProductLookupItem(productMasterDocToPriceItem({id:productId,data:()=>record}));
     productManagementSearchCache.clear();
@@ -2733,6 +2780,7 @@ function syncSavedProductMaster(productId, record) {
     if(index>=0)productManagementResults[index]=next;
     else productManagementResults.unshift(next);
     renderProductManagementResults();
+    if (typeof renderProductBrandBrowser==='function') renderProductBrandBrowser();
     updateProductSearchControls();
     updateProductManagementMoreButton();
 }
@@ -3139,7 +3187,7 @@ function actionButtonFromEventOrSelector(selector = '') {
 function purchaseProductSummary(item, quantity, quantityLabel = '數量') {
     const name = item.itemName || item.name || item.itemCode || item.itemId || '未命名品項';
     const reference = [item.brand || item.brandName, item.itemCode ? '貨號 ' + item.itemCode : ''].filter(Boolean).join(' · ');
-    return `<div class="workflow-product"><strong>${escapeHtml(name)}</strong><small class="purchase-item-description">${escapeHtml(reference)}</small><span class="workflow-quantity">${escapeHtml(quantityLabel)} ${Number(quantity || 0)}</span></div>`;
+    return `<div class="workflow-product"><strong>${escapeHtml(name)}</strong><small class="purchase-item-description">${escapeHtml(reference)}</small>${quantityLabel===null?'':`<span class="workflow-quantity">${escapeHtml(quantityLabel)} ${Number(quantity || 0)}</span>`}</div>`;
 }
 
 // Shared record reference. No extra reads and no synthetic document numbers.
@@ -3194,6 +3242,21 @@ function organizeOrderRowActions(row, stage) {
         button.classList.toggle('btn-secondary', button !== primary);
         button.classList.toggle('order-primary-action', button === primary);
     });
+}
+
+// Presentation only: quantities use their actual work-stage definition.
+function workflowQuantitySummary(quantity, label) {
+    return `<span class="workflow-quantity">${escapeHtml(label)} ${escapeHtml(Number(quantity||0))}</span>`;
+}
+function workflowAmountSummary(item, quantity, options = {}) {
+    const qty=Number(quantity||0),unit=Number(options.unit ?? item.unitPrice ?? 0);
+    const total=options.total ?? Math.round((unit*qty+Number.EPSILON)*100)/100;
+    const money=value=>escapeHtml(Number(value).toLocaleString('zh-TW',{maximumFractionDigits:2}));
+    return `<div class="workflow-amount"><small>${escapeHtml(options.label||'單價')} NT$ ${money(unit)} × ${escapeHtml(qty)}</small><strong>${escapeHtml(options.totalLabel||'品項小計')} NT$ ${money(total)}</strong></div>`;
+}
+
+function workflowWorkCategoryLabel(category) {
+    return {ordering:'待採購',arrival:'待到貨',dispatch:'待打單',shipping:'已打單',delivery:'待送達',billing:'待核銷',complete:'已完成',closed:'已結束'}[category] || category;
 }
 // One authoritative order document commit. Features own drafts, IDs and presentation;
 // inventory initialization and delayed quote/source synchronization remain checkpoints.
@@ -5230,7 +5293,7 @@ function renderSupplierMasterAdmin() {
             <td>
                 <button type="button" class="btn-small btn-secondary" onclick="loadSupplierMasterToEditor(${inlineJsValue(supplierId)})">編輯</button>
                 <button type="button" class="btn-small btn-danger" onclick="disableSupplierMaster(${inlineJsValue(supplierId)})">停用</button>
-            </td>
+            </div></td>
         </tr>`;
     }).join(''):'<tr><td colspan="6" style="color:#888;">尚未建立供應商。</td></tr>';
 }
@@ -5274,7 +5337,7 @@ function renderSupplierSettingsAdmin() {
             <td>${escapeHtml(supplier.supplierName||'找不到供應商')}</td>
             <td>${escapeHtml(supplier.purchaseHeaderName||supplier.supplierName||'')}</td>
             <td>${leadTimeDays?leadTimeDays+' 天':'－'}</td>
-            <td>
+            <td><div class="workflow-inline-actions">
                 <button type="button" class="btn-small btn-secondary" onclick="loadSupplierSettingToEditor(${inlineJsValue(mapping.id||mapping.mappingId||'')})">編輯</button>
                 <button type="button" class="btn-small btn-danger" onclick="disableSupplierSetting(${inlineJsValue(mapping.id||mapping.mappingId||'')})">停用</button>
             </td>
@@ -9144,7 +9207,7 @@ function renderInventoryReplenishmentCenter() {
         <td data-th="預計"><strong>${plan.projected}</strong></td>
         <td data-th="安全庫存">${plan.safetyStock}</td>
         <td data-th="建議補貨"><strong>${plan.suggestedQty}</strong></td>
-        <td data-th="操作" class="no-print">${canEditPage('orders.po') ? `<button type="button" class="btn-small" onclick="openInventoryReplenishment(${inlineJsValue(item.id)})">建立採購單</button>${canManageInventoryStockPolicy() ? ` <button type="button" class="btn-small btn-danger" onclick="removeInventoryReplenishmentReminder(${inlineJsValue(item.id)})">停止安全庫存提醒</button>` : ''}` : '僅可查看'}</td>
+        <td data-th="操作" class="no-print"><div class="workflow-inline-actions">${canEditPage('orders.po') ? `<button type="button" class="btn-small" onclick="openInventoryReplenishment(${inlineJsValue(item.id)})">建立採購單</button>${canManageInventoryStockPolicy() ? ` <button type="button" class="btn-small btn-danger" onclick="removeInventoryReplenishmentReminder(${inlineJsValue(item.id)})">停止安全庫存提醒</button>` : ''}` : '僅可查看'}</div></td>
       </tr>`).join('');
 }
 window.removeInventoryReplenishmentReminder = async function(inventoryId) {
@@ -12719,17 +12782,17 @@ window.renderOrdersList = function() {
         tr.innerHTML = `
             <td class="order-date-cell" data-th="訂單日期">${workflowRecordSummary(o, o.orderDate)}</td>
             <td class="order-customer-cell" data-th="客戶名稱">${o.customerName ? `<button type="button" class="btn-small btn-secondary workflow-customer-link" onclick="showCustomerOrderHistory(${inlineJsValue(o.customerName)})">${escapeHtml(o.customerName)}</button>` : ''}</td>
-            <td data-th="產品資訊" class="order-product-cell">${orderItems.map(item=>`<div class="workflow-product-item">${purchaseProductSummary(item, Number(item.orderedQty||item.qty||0), '訂購')}</div>`).join('')}</td>
+            <td data-th="產品資訊" class="order-product-cell">${orderItems.map(item=>`<div class="workflow-product-item">${purchaseProductSummary(item, Number(item.orderedQty||item.qty||0), null)}</div>`).join('')}</td>
             <td class="order-sales-cell" data-th="負責業務">${escapeHtml(stripPhoneSuffix(o.salesName))}</td>
 
-            <td data-th="訂單金額" class="order-money-cell"><strong>NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice ?? '').replace(/,/g, '')) || 0).toLocaleString())}</strong><small>${o.isBilled ? '已核銷' : '未核銷'}</small></td>
+            <td data-th="訂單金額" class="order-money-cell">${orderItems.map(item=>workflowAmountSummary(item,Number(item.orderedQty||item.qty||0))).join('')}${allOrderItems.length>1?`<small class="workflow-order-total">訂單總額 NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice??'').replace(/,/g,''))||0).toLocaleString())}</small>`:''}<small>${o.isBilled ? '已核銷' : '未核銷'}</small></td>
             <td data-th="進度" class="order-progress-cell">${orderItems.map((item,index)=>{const displayCategories=displayCategoriesByItem.get(item)||[];const primaryStatus=displayCategories[0]||'ordering';const itemStatus=['dispatch','shipping'].includes(activeOrderWorkFilter)&&displayCategories.includes(activeOrderWorkFilter)?activeOrderWorkFilter:primaryStatus;const itemStatusMap={ordering:'待採購',arrival:'待到貨',dispatch:'待打單',shipping:'已打單',billing:'待核銷',complete:'已完成',closed:lifecycle.label};const waiting=primaryStatus==='arrival'?waitingDaysFromDate(item.orderedAt):'';const state=dispatchStateByItem.get(item)||itemDispatchState(o,item);const receipt=primaryStatus==='arrival'?receivingWorkProgress(o,item):null;return `<div class="workflow-progress-item">${orderItems.length>1?`<strong>${escapeHtml(item.itemName||item.itemCode||'品項')}</strong>`:''}<small class="order-item-work-status">訂單狀態：<span class="order-progress-badge">${escapeHtml(((lifecycle.status==='normal'&&orderInventorySyncIncomplete(o)) ? (o.inventoryReservationStatus==='failed'?'庫存同步未完成':'庫存同步中…') : ((String(item.productType||'').trim().toUpperCase()==='SERVICE'&&lifecycle.status==='normal'&&primaryStatus==='delivery'?'待服務處理':(lifecycle.status==='normal'&&globalThis.YushinWarehouseLogistics?.shippingStatus(o,item,state)))||itemStatusMap[itemStatus]||'待採購')))}</span>${waiting?`・已等 ${escapeHtml(waiting)}`:''}${state.pending>0?`<span class="workflow-quantity">待打單 ${escapeHtml(state.pending)}</span>`:''}${receipt?`<span class="workflow-quantity">已到貨 ${escapeHtml(receipt.received)}／應到貨 ${escapeHtml(receipt.target)}・待到貨 ${escapeHtml(receipt.remaining)}</span>`:''}${state.shippable>0?`・已有 ${escapeHtml(state.shippable)} 可出貨`:''}</small>${window.serviceCaseVerifiedItemHint?.(o.id,item)||''}</div>`}).join('')}</td>
-            <td class="no-print" data-th="操作">
+            <td class="no-print" data-th="操作"><div class="workflow-inline-actions">
                 <details class="order-detail-panel" data-order-id="${escapeAttr(o.id)}" ${openedDetails.has(o.id)?'open':''}>
-                    <summary aria-haspopup="dialog" aria-expanded="false">查看明細${window.orderCommercialEditPending?.has(o.id)?'（儲存中…）':''}</summary>
-                    <dialog class="order-detail-drawer" aria-label="訂單明細"><header class="order-drawer-heading"><h3>訂單明細</h3><button type="button" class="btn-secondary" data-order-drawer-close autofocus>關閉</button></header><div class="order-detail-content"><section class="order-drawer-section"><h4>訂單摘要</h4><dl class="order-drawer-summary"><div><dt>單號</dt><dd>${escapeHtml(o.orderNo||'—')}</dd></div><div><dt>客戶</dt><dd>${escapeHtml(o.customerName||'—')}</dd></div><div><dt>負責業務</dt><dd>${escapeHtml(stripPhoneSuffix(o.salesName))}</dd></div><div><dt>訂單日期</dt><dd>${escapeHtml(o.orderDate||'—')}</dd></div><div><dt>訂單總額</dt><dd>NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice??'').replace(/,/g,''))||0).toLocaleString())}</dd></div></dl>${o.quoteNo?`<div class="record-reference">來源估價單 ${escapeHtml(o.quoteNo)}</div>`:''}</section><section class="order-drawer-section"><h4>目前分頁品項</h4><div class="order-drawer-progress"></div><div class="workflow-price-breakdown">${globalThis.YushinOrderCommercialDetails.amountLines(orderItems).map(line=>`<div><strong>${escapeHtml(line.name)}</strong><small>單價 NT$ ${escapeHtml(line.unit.toLocaleString())} × ${escapeHtml(line.qty)} ＝ NT$ ${escapeHtml(line.total.toLocaleString())}</small><small>品項小計 NT$ ${escapeHtml(line.total.toLocaleString())}</small></div>`).join('')}</div></section>${allOrderItems.some(item=>!orderItems.includes(item))?`<details class="order-drawer-section"><summary>同張訂單其他品項</summary><div class="workflow-price-breakdown">${globalThis.YushinOrderCommercialDetails.amountLines(allOrderItems.filter(item=>!orderItems.includes(item))).map(line=>`<div><strong>${escapeHtml(line.name)}</strong><small>品項小計 NT$ ${escapeHtml(line.total.toLocaleString())}</small></div>`).join('')}</div></details>`:''}<section class="order-drawer-section"><h4>交付資料</h4>
+                    <summary aria-haspopup="dialog" aria-expanded="false">明細${window.orderCommercialEditPending?.has(o.id)?'（儲存中…）':''}</summary>
+                    <dialog class="order-detail-drawer" aria-label="訂單明細"><header class="order-drawer-heading"><h3>訂單明細</h3><button type="button" class="btn-secondary" data-order-drawer-close autofocus>關閉</button></header><div class="order-detail-content"><section class="order-drawer-section"><h4>訂單摘要</h4><dl class="order-drawer-summary"><div><dt>單號</dt><dd>${escapeHtml(o.orderNo||'—')}</dd></div><div><dt>客戶</dt><dd>${escapeHtml(o.customerName||'—')}</dd></div><div><dt>負責業務</dt><dd>${escapeHtml(stripPhoneSuffix(o.salesName))}</dd></div><div><dt>訂單日期</dt><dd>${escapeHtml(o.orderDate||'—')}</dd></div><div><dt>訂單總額</dt><dd>NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice??'').replace(/,/g,''))||0).toLocaleString())}</dd></div></dl>${o.quoteNo?`<div class="record-reference">來源估價單 ${escapeHtml(o.quoteNo)}</div>`:''}</section><section class="order-drawer-section"><h4>全部訂單品項</h4><div class="workflow-price-breakdown">${allOrderItems.map(item=>`<div class="${orderItems.includes(item)?'is-current-work-item':''}"><strong>${escapeHtml(item.itemName||item.itemCode||'品項')}</strong>${orderItems.includes(item)?'<small class="order-current-item-label">目前分頁品項</small>':''}<small>${escapeHtml(lifecycle.status!=='normal'?lifecycle.label:(String(item.productType||'').toUpperCase()==='SERVICE'&&(displayCategoriesByItem.get(item)||[]).includes('delivery')?'待服務處理':globalThis.YushinWarehouseLogistics?.shippingStatus(o,item,dispatchStateByItem.get(item))||(displayCategoriesByItem.get(item)||[]).map(workflowWorkCategoryLabel).join('・')))}</small>${window.serviceCaseVerifiedItemHint?.(o.id,item)||''}${workflowAmountSummary(item,Number(item.orderedQty||item.qty||0))}</div>`).join('')}</div></section><section class="order-drawer-section"><h4>交付資料</h4>
                         <div class="order-item-prices">${allOrderItems.map(item => `<div><strong>${escapeHtml(item.itemName||item.itemCode||'品項')}</strong><div>採購方式：${escapeHtml(globalThis.YushinOrderCommercialDetails.procurementLabel(item))}</div><div>交付方式：${escapeHtml(globalThis.YushinOrderEntry.deliveryLabel({fulfillmentType:item.fulfillmentType,deliveryPlan:item.deliveryPlan||o.shippingInstructions||{}}))}</div>${canEditOrders&&lifecycle.status==='normal'&&!detailsLocked&&(currentUserRole==='admin'||o.ownerUid===currentUser?.uid||canReceiveInventoryCapability())&&!globalThis.YushinOrderCommercialDetails.itemMoved(item)?`<button type="button" class="btn-small btn-secondary" onclick="openWarehouseDeliveryPlan(${inlineJsValue(o.id)},${inlineJsValue(item.itemId)})">修改交付方式／地址</button>`:''}</div>`).join('')}</div>
-                        </section><section class="order-drawer-section"><h4>交易與備註</h4><dl class="order-drawer-summary"><div><dt>交易方式</dt><dd>${escapeHtml(o.transactionType||'未選擇')}</dd></div><div><dt>發票抬頭</dt><dd>${escapeHtml(o.invoiceTitle||'—')}</dd></div><div><dt>訂單備註</dt><dd>${escapeHtml(o.remarks||'—')}</dd></div></dl><details class="order-commercial-editor" ${openedEditors.has(o.id)?'open':''}><summary>編輯交易與備註</summary>${detailsLocked?'<small>已到貨或進入交付流程，訂單交付設定、交易方式及訂單備註已鎖定。</small>':''}
+                        </section><section class="order-drawer-section"><h4>交易與備註</h4><dl class="order-drawer-summary order-commercial-summary"><div><dt>交易方式</dt><dd>${escapeHtml(o.transactionType||'未選擇')}</dd></div><div><dt>發票抬頭</dt><dd>${escapeHtml(o.invoiceTitle||'—')}</dd></div><div><dt>訂單備註</dt><dd>${escapeHtml(o.remarks||'—')}</dd></div></dl><details class="order-commercial-editor" ${openedEditors.has(o.id)?'open':''}><summary>${detailsEditable?'編輯交易與備註':canManageOrderOps?'成本與交易設定':'查看交易設定'}</summary>${detailsLocked?'<small>已到貨或進入交付流程，訂單交付設定、交易方式及訂單備註已鎖定。</small>':''}
             ${canManageOrderOps ? `
             <div class="no-print order-cost-profit-cell"><label>單位成本</label><input type="number" step="0.01" class="order-cost-input" data-order-id="${o.id}" ${(o.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER' ? 'readonly title="標準成本由產品成本資料帶入"' : ''} value="${o.procurementType === 'SALES_SELF_ORDER' ? (o.costPrice == null ? '' : Number(Number(o.costPrice).toFixed(2))) : ''}" oninput="updateOrderProfitDisplay('${o.id}', this.value)" onchange="updateOrderField('${o.id}','costPrice', this.value === '' ? null : parseFloat(this.value))"><small>毛利：<span id="orderProfit_${o.id}">${formatProfitPercent(o.unitPrice, o.costPrice)}</span></small></div>` : ''}
             <div class="order-transaction-cell"><label>交易方式</label>
@@ -12743,7 +12806,7 @@ window.renderOrdersList = function() {
                 ${o.isBilled ? `<label class="order-invoice-date-label">核銷日期<input type="date" aria-label="核銷日期" ${allOrderItems.some(item=>String(item.productType||'').trim().toUpperCase()==='SERVICE')&&(!window.serviceBillingDateEnabled?.(o)||billingPending)?'disabled title="目前無法修改服務核銷日期"':''} value="${escapeAttr(orderBillingDate(o))}" onchange="updateOrderBillingDate('${o.id}',this.value)"></label>` : ''}
             </div>
             <label class="order-remarks-editor">訂單備註<input type="text" value="${escapeAttr(o.remarks || '')}" placeholder="訂單備註" onchange="updateOrderField('${o.id}','remarks',this.value)"></label>
-                    </details></section><details class="order-drawer-section"><summary>操作紀錄</summary><button type="button" class="btn-secondary" onclick="openOrderStatusHistory(${inlineJsValue(o.id)})">查看完整操作紀錄</button></details></div></dialog>
+                    </details></section><section class="order-drawer-section"><button type="button" class="btn-secondary" onclick="openOrderStatusHistory(${inlineJsValue(o.id)})">查看操作紀錄</button></section></div></dialog>
                 </details>
                 ${orderInventorySyncStatusHtml(o)}
                 <div class="order-compact-actions">
@@ -12762,7 +12825,7 @@ window.renderOrdersList = function() {
                             ${trueUserRole === 'admin' && currentUserRole === 'admin' ? `<button type="button" class="danger-menu-item" onclick="permanentlyDeleteOrder(${inlineJsValue(o.id)})" ${pendingLifecycleOrderIds.has(o.id) ? 'disabled aria-busy="true"' : ''}>${pendingLifecycleOrderIds.has(o.id) ? '處理中…' : '永久刪除'}</button>` : ''}
                         </div>
                     </details>
-                </div>
+                </div></div>
             </td>
         `;
         if (!detailsEditable) {
@@ -12778,7 +12841,6 @@ window.renderOrdersList = function() {
                 if (!action.includes('openOrderStatusHistory(')) button.remove();
             });
         }
-        tr.querySelector('.order-drawer-progress').innerHTML = tr.querySelector('.order-progress-cell').innerHTML;
         organizeOrderRowActions(tr, activeOrderWorkFilter);
         fragment.appendChild(tr);
     });
@@ -13459,7 +13521,7 @@ function renderPurchasingCompletedOrders(completedRows = null) {
     if (!body) return;
     const allRows = completedRows || purchasingCompletedRows();
     const rows = allRows.filter(({order,item})=>workflowLineMatchesSearch(order,item,document.getElementById('purchaseWorkSearch')?.value)).slice(0, purchasingCompletedVisibleLimit);
-    body.innerHTML = rows.map(({order, item, state}) => `<tr><td data-th="訂單日期">${workflowRecordSummary(order, order.orderDate)}</td><td data-th="客戶">${escapeHtml(order.customerName || order.customer || '')}</td><td data-th="已完成採購品項">${purchaseProductSummary(item, state.prepared || item.dispatchPreparedQty || item.qty, (item.fulfillmentType || order.fulfillmentType) === 'DIRECT_SHIP' ? '已到貨' : '已打單')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="操作" class="no-print"><button type="button" class="btn-small btn-secondary" onclick="openOrderStatusHistory(${inlineJsValue(order.id)})">查看紀錄</button></td></tr>`).join('');
+    body.innerHTML = rows.map(({order, item, state}) => `<tr><td data-th="訂單日期">${workflowRecordSummary(order, order.orderDate)}</td><td data-th="客戶">${escapeHtml(order.customerName || order.customer || '')}</td><td data-th="已完成採購品項">${purchaseProductSummary(item, state.prepared || item.dispatchPreparedQty || item.qty, null)}</td><td data-th="數量">${workflowQuantitySummary(state.prepared || item.dispatchPreparedQty || item.qty,(item.fulfillmentType || order.fulfillmentType) === 'DIRECT_SHIP' ? '已到貨' : '已打單')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="操作" class="no-print"><button type="button" class="btn-small btn-secondary" onclick="openOrderStatusHistory(${inlineJsValue(order.id)})">查看紀錄</button></td></tr>`).join('');
     if (status) status.textContent = rows.length
         ? `已顯示 ${rows.length} 筆採購已完成品項${purchasingDispatchHasMore || allRows.length > rows.length ? '；可載入更多' : ''}`
         : '目前沒有採購已完成品項';
@@ -13970,7 +14032,7 @@ function renderPurchasingDispatchOrders(normalizedItemsByOrder = null, filterCon
                 ? `<button type="button" class="btn-small" onclick="markOrderItemDispatchPrepared(${inlineJsValue(order.id)},${inlineJsValue(item.itemId)})" ${preparing?'disabled':''}>${preparing?'處理中…':(pendingDispatchPreparation(order.id,item.itemId)?'確認打單結果':`確認打單 ${state.pending} 件`)}</button>`
                 : '<span class="order-progress-badge">唯讀</span>';
             const tr=document.createElement('tr');
-            tr.innerHTML=`<td data-th="訂單日期">${workflowRecordSummary(order, order.orderDate)}</td><td data-th="客戶">${escapeHtml(order.customerName||order.customer||'')}</td><td data-th="待打單品項">${purchaseProductSummary(item, state.pending, '待打單')}</td><td data-th="負責業務">${escapeHtml(order.salesName||'')}</td><td data-th="操作">${action}</td>`;
+            tr.innerHTML=`<td data-th="訂單日期">${workflowRecordSummary(order, order.orderDate)}</td><td data-th="客戶">${escapeHtml(order.customerName||order.customer||'')}</td><td data-th="待打單品項">${purchaseProductSummary(item, state.pending, null)}</td><td data-th="數量">${workflowQuantitySummary(state.pending,'待打單')}</td><td data-th="負責業務">${escapeHtml(order.salesName||'')}</td><td data-th="操作"><div class="workflow-inline-actions">${action}</div></td>`;
             fragment.appendChild(tr);
             shown++;
         });
@@ -14123,7 +14185,7 @@ function renderPendingPurchaseOrders() {
 
         const row=document.createElement('tr');
         row.classList.add('procurement-demand-row');
-        row.innerHTML=`<td data-th="合併" class="no-print" style="text-align:center;">${selectionHtml}</td><td data-th="需求日期">${workflowRecordSummary(order, date)}</td><td data-th="客戶／用途">${escapeHtml(customer)}<div class="record-reference">${order?.orderNo ? `來源客戶訂單・${escapeHtml(order.orderNo)}` : order?.quoteNo ? `來源估價單・${escapeHtml(order.quoteNo)}` : '客戶訂單採購需求'}</div></td><td data-th="待採購品項">${purchaseProductSummary({...demand, itemName:demand.itemName || item.itemName, itemCode:demand.itemCode || item.itemCode, brand}, qty, '待採購')}<div style="font-size:11px;color:#667584;margin-top:3px;">${sourceType==='STOCK_REPLENISHMENT'?'備庫採購':'客戶訂單'}・${escapeHtml(statusLabel)}</div></td><td data-th="負責業務">${escapeHtml(salesName)}</td><td data-th="操作">${actionHtml}</td>`;
+        row.innerHTML=`<td data-th="合併" class="no-print" style="text-align:center;">${selectionHtml}</td><td data-th="需求日期">${workflowRecordSummary(order, date)}</td><td data-th="客戶／用途">${escapeHtml(customer)}<div class="record-reference">${order?.orderNo ? `來源客戶訂單・${escapeHtml(order.orderNo)}` : order?.quoteNo ? `來源估價單・${escapeHtml(order.quoteNo)}` : '客戶訂單採購需求'}</div></td><td data-th="待採購品項">${purchaseProductSummary({...demand, itemName:demand.itemName || item.itemName, itemCode:demand.itemCode || item.itemCode, brand}, qty, null)}<div style="font-size:11px;color:#667584;margin-top:3px;">${sourceType==='STOCK_REPLENISHMENT'?'備庫採購':'客戶訂單'}・${escapeHtml(statusLabel)}</div></td><td data-th="數量">${workflowQuantitySummary(qty,'待採購')}</td><td data-th="負責業務">${escapeHtml(salesName)}</td><td data-th="操作"><div class="workflow-inline-actions">${actionHtml}</div></td>`;
         fragment.appendChild(row);
         shown++;
     }
@@ -15112,7 +15174,7 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
     const workKeyword = inventory ? '' : document.getElementById('purchaseWorkSearch')?.value || '';
     const historySearch = !inventory && document.getElementById('poListSearch');
     if (historySearch) historySearch.hidden = true;
-    if (head) head.innerHTML = '<th>訂單日期</th><th>客戶</th><th>待到貨品項</th><th>負責業務</th><th>到貨進度</th><th class="no-print">操作</th>';
+    if (head) head.innerHTML = '<th>訂單日期</th><th>客戶</th><th>待到貨品項</th><th>數量</th><th>負責業務</th><th>到貨進度</th><th class="no-print">操作</th>';
     tbody.innerHTML = '';
     const fragment = document.createDocumentFragment();
 
@@ -15165,10 +15227,10 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
             tr.innerHTML = `
                 <td data-th="訂單日期">${workflowRecordSummary(order, order.orderDate)}</td>
                 <td data-th="客戶">${escapeHtml(order.customer || order.customerName || '')}</td>
-                <td data-th="待到貨品項">${purchaseProductSummary(item, progress.target, '應到貨')}</td>
+                <td data-th="待到貨品項">${purchaseProductSummary(item, progress.target, null)}</td><td data-th="數量">${workflowQuantitySummary(progress.target,'應到貨')}</td>
                 <td data-th="負責業務">${escapeHtml(order.salesName || '')}</td>
                 <td data-th="到貨進度"><span class="workflow-quantity">已到貨 ${progress.received}／應到貨 ${progress.target}</span><small class="purchase-item-description">待到貨 ${Math.max(0, progress.target-progress.received)}</small>${receivingWaitHtml(evidenceSupplies)}${receivingDueHtml(due)}${receivingPlanRiskHtml(planRisk)}</td>
-                <td data-th="操作" class="no-print">${actionHtml}</td>`;
+                <td data-th="操作" class="no-print"><div class="workflow-inline-actions">${actionHtml}</div></td>`;
             tr.dataset.receivingDueRank = String(due.sortRank);
             tr.dataset.receivingPlanRiskRank = String(planRisk.sortRank ?? 4);
             tr.dataset.receivingExpectedDate = due.expectedDate || '';
@@ -15228,10 +15290,10 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
         tr.innerHTML = `
             <td data-th="訂單日期">${workflowRecordSummary(sourceOrder, date)}</td>
             <td data-th="客戶">${escapeHtml(customerLabel)}</td>
-            <td data-th="待到貨品項">${purchaseProductSummary(supply, ordered, '應到貨')}</td>
+            <td data-th="待到貨品項">${purchaseProductSummary(supply, ordered, null)}</td><td data-th="數量">${workflowQuantitySummary(ordered,'應到貨')}</td>
             <td data-th="負責業務">${escapeHtml(salesName)}</td>
             <td data-th="到貨進度">${escapeHtml(sourceLabel)}｜已到貨 ${supplyProgress.receivedQty}／應到貨 ${ordered}<small class="purchase-item-description">待到貨 ${remaining}</small>${receivingWaitHtml([supply])}${receivingDueHtml(due)}</td>
-            <td data-th="操作" class="no-print">${sourceOrder && sourceStatus !== 'normal' && canCreatePurchaseOrderCapability() ? customerCancellationActions(supply) : actionHtml}</td>`;
+            <td data-th="操作" class="no-print"><div class="workflow-inline-actions">${sourceOrder && sourceStatus !== 'normal' && canCreatePurchaseOrderCapability() ? customerCancellationActions(supply) : actionHtml}</div></td>`;
         tr.dataset.receivingDueRank = String(due.sortRank);
         tr.dataset.receivingPlanRiskRank = '4';
         tr.dataset.receivingExpectedDate = due.expectedDate || '';
@@ -15287,7 +15349,7 @@ window.renderPoList = function(normalizedItemsByOrder = null, filterContext = nu
         return;
     }
     const head = document.getElementById('poListHeadRow');
-    if (head) head.innerHTML = '<th>單號</th><th>公司</th><th>供應商</th><th>採購人員</th><th>採購日期</th><th>預計到貨</th><th>等待天數</th><th>商品／訂購數量</th><th>品項金額</th><th>文件狀態</th><th>到貨進度</th><th class="no-print">操作</th>';
+    if (head) head.innerHTML = '<th>單號</th><th>公司</th><th>供應商</th><th>採購人員</th><th>採購日期</th><th>預計到貨</th><th>等待天數</th><th>產品資訊</th><th>品項金額</th><th>文件狀態</th><th>到貨進度</th><th class="no-print">操作</th>';
     const tbody = document.getElementById('poListBody');
     const searchInput = document.getElementById('poListSearch');
     if (!tbody || !searchInput) return;
@@ -15326,13 +15388,13 @@ window.renderPoList = function(normalizedItemsByOrder = null, filterContext = nu
                 <td data-th="採購日期">${escapeHtml(po.poDate || '')}</td>
                 <td data-th="預計到貨">${escapeHtml(po.expectedDate || po.scheduleDate || '—')}${(po.expectedDate||po.scheduleDate)&&receiptProgress.remainingQty>0&&(po.expectedDate||po.scheduleDate)<localDateString()?'・逾期':''}</td>
                 <td data-th="等待天數">${receiptProgress.remainingQty > 0 ? escapeHtml(poWaitingDays(po)||'—') : '已到貨'}</td>
-                <td data-th="商品／訂購數量">${purchaseProductSummary(item, ordered, '訂購')}</td>
-                <td data-th="品項金額" class="workflow-money">NT$ ${itemTotal.toLocaleString()}</td>
+                <td data-th="產品資訊">${purchaseProductSummary(item, ordered, null)}</td>
+                <td data-th="品項金額" class="workflow-money">${workflowAmountSummary(item,ordered,{unit:Number(item.unitPrice||0)*1.05,total:itemTotal,label:'含稅單價',totalLabel:'含稅品項小計'})}</td>
                 <td data-th="文件狀態">${escapeHtml(purchaseOrderDocumentStatusLabel(po))}</td>
                 <td data-th="到貨進度">${escapeHtml(receiptProgress.label)}</td>
                 <td data-th="操作" class="no-print">${itemIndex===0?`
                     <div class="po-list-action-row">
-                        <button type="button" class="btn-small" onclick="reprintPurchaseOrder(${inlineJsValue(po.id)})">開啟採購單</button>
+                        <button type="button" class="btn-small btn-secondary" onclick="reprintPurchaseOrder(${inlineJsValue(po.id)})">開啟採購單</button>
                         ${po.status==='DRAFT' && po.documentOnly===true && canCreatePurchaseOrderCapability() && canEditPage('orders.po') ? `<button type="button" class="btn-small" onclick="confirmSavedPurchaseOrder(${inlineJsValue(po.id)})">確認已採購</button>` : ''}
                         ${canCreatePurchaseOrderCapability() && canEditPage('orders.po') ? `<button type="button" class="btn-small btn-secondary" onclick="copySavedPurchaseOrderAsNew(${inlineJsValue(po.id)})">複製新採購</button>` : ''}
                     </div>`:'—'}</td>
@@ -21990,6 +22052,11 @@ const ORDER_DRAFT_STORAGE_PREFIX = 'order_draft_v2';
 let requestedOrderOwnerUid = '';
 let orderModalOpenGeneration = 0;
 
+// A new order uses the local creation day, never a date restored from a draft.
+function currentOrderCreationDate(now = new Date()) {
+    return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+}
+
 function populateOrderOwnerSelect() {
     const wrap = document.getElementById('orderOwnerWrap');
     const select = document.getElementById('orderOwnerUid');
@@ -22038,7 +22105,7 @@ function collectOrderDraft() {
     return {
         savedAt:new Date().toISOString(),
         ownerUid:orderDraftFieldValue('orderOwnerUid'),
-        date:orderDraftFieldValue('orderDateInput'),customerName:orderDraftFieldValue('orderCustomer'),
+        date:currentOrderCreationDate(),customerName:orderDraftFieldValue('orderCustomer'),
         itemCode:orderDraftFieldValue('orderItemCode'),itemName:orderDraftFieldValue('orderItemName'),itemNameEn:orderDraftFieldValue('orderItemNameEn'),productLine:orderDraftFieldValue('orderProductLine'),spec:orderDraftFieldValue('orderSpec'),
         brand:getBrandFieldValue('orderBrand','orderBrandOther'),qty:orderDraftFieldValue('orderQty'),
         supplier:orderDraftFieldValue('orderSelfSupplier'),unitPrice:orderDraftFieldValue('orderUnitPrice'),costPrice:orderDraftFieldValue('orderCostPrice'),
@@ -22122,7 +22189,7 @@ function restoreSavedOrderDraft(){
         window._orderModalQuoteContext = draft.quoteContext || null;
         window._orderModalForecastContext = draft.forecastContext || null;
         populateOrderOwnerSelect();
-        document.getElementById('orderDateInput').value=draft.date||'';
+        document.getElementById('orderDateInput').value=currentOrderCreationDate();
         document.getElementById('orderCustomer').value=draft.customerName||'';
         const remarks=document.getElementById('orderRemarks');if(remarks)remarks.value=draft.remarks||'';
         setOrderModalItem(draft);
@@ -22346,8 +22413,7 @@ window.openOrderModal = function(source = null) {
     window.setOrderShippingInstructions?.(source?.shippingInstructions||{});
     const title = document.getElementById('orderModalTitle');
     if (title) title.innerText = source?.sourceType === DOCUMENT_TYPES.FORECAST ? 'Forecast 轉訂單' : '新增訂單';
-    const today = new Date();
-    document.getElementById('orderDateInput').value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    document.getElementById('orderDateInput').value = currentOrderCreationDate();
     ['orderCustomer', 'orderBrand', 'orderBrandOther', 'orderItemCode', 'orderItemName', 'orderItemNameEn', 'orderProductLine', 'orderSpec', 'orderInvoiceTitle'].forEach(id => {
         const field = document.getElementById(id);
         if (field) field.value = '';
@@ -22677,7 +22743,7 @@ window.saveNewOrder = function() {
     const itemCode = firstItem.itemCode;
     let data = {
         shippingInstructions:shippingInstructions||{},
-        orderDate: document.getElementById('orderDateInput').value,
+        orderDate: currentOrderCreationDate(),
         createdAt: new Date().toISOString(),
         ...commercialCreatorFields(),
         company: window._orderModalQuoteContext?.company || '',
