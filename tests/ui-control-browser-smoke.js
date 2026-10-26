@@ -119,8 +119,8 @@ async function checkControls() {
                 if (primary) {
                     assert.equal(value.background, 'rgb(49, 92, 133)', `${label}: ${name} primary action`);
                 } else if (neutral) {
-                    assert.equal(value.background, 'rgb(253, 252, 251)', `${label}: ${name} neutral action`);
-                    assert.equal(value.border, 'rgb(231, 229, 225)', `${label}: ${name} neutral border`);
+                    assert.equal(value.background, 'rgb(233, 227, 216)', `${label}: ${name} neutral action`);
+                    assert.equal(value.border, 'rgb(181, 173, 160)', `${label}: ${name} neutral border`);
                 } else if (danger) {
                     assert.equal(value.background, 'rgb(152, 84, 79)', `${label}: ${name} destructive action`);
                 } else {

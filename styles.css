@@ -3854,21 +3854,31 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
     --ys-primary: #315C85;
     --ys-primary-hover: #264A6B;
     --ys-selected: #EDF2F6;
-    --ys-page: #F6F5F2;
-    --ys-surface: #FDFCFB;
-    --ys-text: #292D32;
-    --ys-muted: #626A76;
-    --ys-border: #E7E5E1;
+    --ys-page: #D8D0C3;
+    --ys-surface: #E9E3D8;
+    --ys-text: #2D3336;
+    --ys-muted: #3F494F;
+    --ys-border: #B5ADA0;
     --ys-success: #41674C;
     --ys-warning: #825B23;
     --ys-danger: #98544F;
     --ys-neutral: #64748B;
-    --ys-nav: #EEEDE9;
-    --ys-table-head: #F3F2F0;
+    --ys-nav: #C9C0B2;
+    --ys-table-head: #DFD7C9;
     --ys-success-soft: #EAF3EB;
     --ys-warning-soft: #FFF3E4;
     --ys-danger-soft: #FCEDEB;
     --ys-neutral-soft: #F2F2EF;
+    --ys-field: #F0EBE2;
+    --ys-font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+    --ys-font-body: 14px;
+    --ys-font-title: 24px;
+    --ys-font-section: 18px;
+    --ys-font-label: 14px;
+    --ys-font-caption: 12px;
+    --ys-line-height: 1.5;
+    --ys-page-padding: 20px;
+    --ys-heading-gap: 16px;
     --ys-control-radius: 8px;
     --ys-control-height: 44px;
 }
@@ -3882,7 +3892,7 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
     body {
         color: var(--ys-text);
         background-color: var(--ys-page);
-        font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+        font-family: var(--ys-font-family);
     }
     #appContainer .nav-tabs { background-color: var(--ys-nav); color: var(--ys-text); }
     #appContainer .nav-tab { background: transparent; color: var(--ys-muted); border-radius: 8px 8px 0 0; }
@@ -4560,3 +4570,93 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
  #appContainer #ordersTable .order-compact-actions { justify-content:flex-start; flex-wrap:wrap; }
 }
 @media screen and (max-width:768px) { #appContainer .workflow-heading-actions { width:100%; } }
+
+/* Warm-sand workspace: one screen system, independent of formal PDF/print documents. */
+@media screen {
+    #appContainer { font-size:var(--ys-font-body); line-height:var(--ys-line-height); }
+    #appContainer .content-section { padding:var(--ys-page-padding); }
+    #appContainer .content-section h2.workspace-page-title {
+        margin:0 0 var(--ys-heading-gap); min-height:44px;
+        font:650 var(--ys-font-title)/1.4 var(--ys-font-family); color:var(--ys-text);
+    }
+    #appContainer .content-section > :is(.module-header,.workflow-page-heading) {
+        min-height:44px; margin:0 0 var(--ys-heading-gap); align-items:center;
+    }
+    #appContainer .content-section :is(.module-header,.workflow-page-heading) .workspace-page-title { margin:0; }
+    #appContainer .content-section :is(h3,h4):not(:where(#printablePO *, .quote-pdf-stage *, .comparison-quote-page *)) {
+        font-family:var(--ys-font-family); color:var(--ys-text); line-height:1.4;
+    }
+    #appContainer .content-section h3 { font-size:var(--ys-font-section); }
+    #appContainer :is(button,input,select,textarea):not(:where(#printablePO *, .quote-pdf-stage *, .comparison-quote-page *)) {
+        font-family:var(--ys-font-family);
+    }
+    #appContainer .content-section :is(input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([type=file]),select,textarea):not(:where(#printablePO *)) {
+        background-color:var(--ys-field); color:var(--ys-text); border-color:var(--ys-border);
+        font-size:var(--ys-font-body); line-height:var(--ys-line-height);
+    }
+    #appContainer .content-section :is(input,select,textarea):focus-visible {
+        outline:2px solid var(--ys-primary); outline-offset:2px;
+    }
+    #appContainer .content-section :is(.panel,.toolbar,.sales-stat-card,.trade-analysis-card,.product-360-card) {
+        background-color:var(--ys-surface); border-color:var(--ys-border); box-shadow:none;
+    }
+    #appContainer .content-section table:not(:where(#printablePO *)) :is(th,td) {
+        border:0; border-bottom:1px solid var(--ys-border);
+        font-size:var(--ys-font-body); line-height:var(--ys-line-height);
+    }
+    #appContainer .content-section table:not(:where(#printablePO *)) th {
+        background:var(--ys-table-head); color:var(--ys-text);
+    }
+    #appContainer .content-section table:not(:where(#printablePO *,#itemTable)) td { background-color:var(--ys-surface); }
+    /* Quotation editing is a workspace; export uses the independent quote-pdf-stage. */
+    #appContainer #printableQuote {
+        background:var(--ys-surface); color:var(--ys-text); padding:16px;
+        border:1px solid var(--ys-border); border-radius:var(--ys-control-radius);
+        font-family:var(--ys-font-family); box-sizing:border-box;
+    }
+    #appContainer #printableQuote .header-container { border-color:var(--ys-border); margin-bottom:16px; }
+    #appContainer #printableQuote .meta-section { font-size:var(--ys-font-label); margin-bottom:16px; }
+    #appContainer #printableQuote :is(.meta-row,.meta-row-three) { gap:12px; margin-block:10px; }
+    #appContainer #printableQuote :is(input:not([type=checkbox]):not([type=hidden]),select,textarea) {
+        background:var(--ys-field) !important; color:var(--ys-text); border:1px solid var(--ys-border);
+        border-radius:var(--ys-control-radius); padding:8px; min-height:44px;
+        font:400 var(--ys-font-body)/var(--ys-line-height) var(--ys-font-family);
+    }
+    #appContainer #printableQuote :is(.item-input-group,.field-row,.item-row-pair,.quote-extra-grid label,.quote-extra-fields summary,.footer-note,.total-section) {
+        font-size:var(--ys-font-body); line-height:var(--ys-line-height); color:var(--ys-text);
+    }
+    #appContainer #printableQuote :is(.field-row,.item-row-pair) { gap:8px; margin-bottom:8px; }
+    #appContainer #printableQuote #itemTable :is(th,td) { padding:12px 8px; border-color:var(--ys-border); }
+    #appContainer #printableQuote #itemTable td { background:transparent; }
+    #appContainer #printableQuote .quote-summary-block { margin-top:16px; }
+    #appContainer #printableQuote .total-section p { font-size:var(--ys-font-body); color:var(--ys-text); }
+    #appContainer #printableQuote #validDays { width:64px !important; }
+    #appContainer :is(.quote-create-more-menu,.quote-brand-suggestions,.order-more-menu-popover) {
+        background:var(--ys-surface); color:var(--ys-text); border-color:var(--ys-border);
+    }
+}
+@media screen and (max-width:768px) {
+    :root { --ys-font-title:22px; --ys-page-padding:16px 12px; --ys-heading-gap:12px; }
+    #appContainer .content-section > :is(.module-header,.workflow-page-heading) { align-items:stretch; }
+    #appContainer #printableQuote { padding:12px; }
+    #appContainer #printableQuote :is(input:not([type=checkbox]):not([type=hidden]),select,textarea) { font-size:16px; }
+    #appContainer #printableQuote .meta-row-three { flex-direction:column; }
+    #appContainer #printableQuote .meta-row-three > div { width:100%; min-width:0; }
+    #appContainer #printableQuote :is(.meta-row input,.meta-row-three input,.meta-row-three select) { min-width:0; }
+}
+@media screen {
+    /* Output stages inherit the pre-existing document metrics, never workspace typography. */
+    .quote-pdf-stage, .po-pdf-stage, #printablePO { font-size:16px; line-height:normal; }
+    #appContainer #printableQuote #itemTable { border:0; background:transparent; }
+    #appContainer #printableQuote #itemTable th { white-space:nowrap; }
+}
+@media screen and (max-width:768px) {
+    #appContainer #printableQuote #itemTable :is(tbody,tr,td) { box-sizing:border-box; min-width:0; max-width:100%; }
+    #appContainer #printableQuote #itemTable tr {
+        background:var(--ys-surface) !important; border:1px solid var(--ys-border) !important;
+        border-radius:var(--ys-control-radius); box-shadow:none; padding:12px;
+    }
+    #appContainer #printableQuote #itemTable td { padding:10px 0; }
+    #appContainer #printableQuote #itemTable td[data-th]::before { color:var(--ys-muted); font-size:var(--ys-font-caption); }
+    #appContainer #printableQuote :is(.item-input-group,.field-row,.item-row-pair,.item-row-pair > div) { min-width:0; max-width:100%; }
+}

@@ -21,10 +21,10 @@ test('secondary text meets AA on shared navigation page card and selected backgr
 test('shared UI tokens follow project palette without touching printable documents', () => {
     const palette = {
         primary: '#315C85', 'primary-hover': '#264A6B', selected: '#EDF2F6',
-        page: '#F6F5F2', surface: '#FDFCFB', text: '#292D32',
-        muted: '#626A76', border: '#E7E5E1', success: '#41674C',
+        page: '#D8D0C3', surface: '#E9E3D8', text: '#2D3336',
+        muted: '#3F494F', border: '#B5ADA0', success: '#41674C',
         warning: '#825B23', danger: '#98544F', neutral: '#64748B',
-        nav: '#EEEDE9', 'table-head': '#F3F2F0',
+        nav: '#C9C0B2', 'table-head': '#DFD7C9',
         'success-soft': '#EAF3EB', 'warning-soft': '#FFF3E4',
         'danger-soft': '#FCEDEB', 'neutral-soft': '#F2F2EF'
     };
@@ -58,7 +58,7 @@ test('all working modules show one consistent page title', () => {
     assert.ok(css.includes('#appContainer #quote-system .quote-more-actions > summary'));
     assert.ok(css.includes('@media screen and (min-width: 769px)'));
     assert.ok(css.includes('html, body, #appContainer { background: var(--ys-page); }'));
-    assert.ok(html.includes('<meta name="theme-color" content="#EEEDE9">'));
+    assert.ok(html.includes('<meta name="theme-color" content="#C9C0B2">'));
 });
 
 test('secondary, destructive and disabled actions keep separate semantics', () => {
