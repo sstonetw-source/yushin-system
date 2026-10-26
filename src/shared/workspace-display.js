@@ -20,3 +20,41 @@ function workflowLineMatchesSearch(record, item, query) {
         item?.brand, item?.brandName].filter(Boolean).join(' ').toLocaleLowerCase().includes(keyword);
 }
 
+
+// Native modal owns focus/Escape; all business controls keep their original handlers.
+function bindOrderDetailDrawer(row) {
+    const panel = row.querySelector('.order-detail-panel');
+    const dialog = panel?.querySelector('.order-detail-drawer');
+    if (!dialog) return;
+    const trigger = panel.querySelector(':scope > summary');
+    const close = () => { if (dialog.open) dialog.close(); panel.open = false; trigger.setAttribute('aria-expanded', 'false'); };
+    panel.addEventListener('toggle', () => {
+        trigger.setAttribute('aria-expanded', String(panel.open));
+        if (panel.open && dialog.isConnected && !dialog.open) dialog.showModal();
+        else if (!panel.open && dialog.open) dialog.close();
+    });
+    dialog.addEventListener('cancel', event => { event.preventDefault(); close(); });
+    dialog.addEventListener('close', () => { if (!dialog.open) { panel.open = false; trigger.setAttribute('aria-expanded', 'false'); } });
+    dialog.addEventListener('click', event => {
+        if (event.target.closest('[data-order-drawer-close]')) close();
+        // Existing delivery/history forms are outside this modal. Release modal focus first.
+        else if (event.target.closest('button[onclick]')) close();
+        else if (event.target === dialog) {
+            const bounds = dialog.getBoundingClientRect();
+            if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) close();
+        }
+    });
+    if (panel.open && !dialog.open) dialog.showModal();
+}
+
+function organizeOrderRowActions(row, stage) {
+    const area = row.querySelector('.order-compact-actions');
+    if (!area) return;
+    const buttons = [...area.querySelectorAll(':scope > button')];
+    const preferred = {arrival:'openOrderDirectShipReceipt',ordering:'openSelfOrderModal',shipping:'Delivery',delivery:'Delivery',billing:'toggleOrderStatus'}[stage];
+    const primary = preferred ? buttons.find(button => (button.getAttribute('onclick') || '').includes(preferred)) : null;
+    buttons.forEach(button => {
+        button.classList.toggle('btn-secondary', button !== primary);
+        button.classList.toggle('order-primary-action', button === primary);
+    });
+}
