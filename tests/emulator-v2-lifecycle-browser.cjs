@@ -598,6 +598,7 @@ for(const width of [1280,390])test('original service case UI '+width+'px: four k
   // The original date editor is inside a collapsed details panel. Open it as a user would.
   // Date correction still uses the same Callable and recovery checkpoint; no new writer.
   await row.locator('details.order-detail-panel > summary').click();
+  await row.locator('.order-commercial-editor > summary').click();
   const dateEdit=row.locator('input[aria-label="核銷日期"]');assert.equal(await dateEdit.isDisabled(),false);
   const correctedBillingDate=new Date(Date.parse(billed.billingDate+'T00:00:00Z')-86400000).toISOString().slice(0,10);
   billingLose=true;await dateEdit.fill(correctedBillingDate);
