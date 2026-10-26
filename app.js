@@ -3258,6 +3258,45 @@ function workflowAmountSummary(item, quantity, options = {}) {
 function workflowWorkCategoryLabel(category) {
     return {ordering:'待採購',arrival:'待到貨',dispatch:'待打單',shipping:'已打單',delivery:'待送達',billing:'待核銷',complete:'已完成',closed:'已結束'}[category] || category;
 }
+
+// Read-only commercial context from the authorized source order; never infer missing prices.
+function workflowCommercialSummary(order) {
+    if (!order) return '<span class="record-reference">來源訂單待同步</span>';
+    return `<div class="workflow-commercial"><strong>交易方式：${escapeHtml(order.transactionType || '未填寫')}</strong><small>發票抬頭：${escapeHtml(order.invoiceTitle || '未填寫')}</small></div>`;
+}
+function workflowSalesAmount(order, item) {
+    if (!order || item.unitPrice === null || item.unitPrice === undefined || String(item.unitPrice).trim()==='' || !Number.isFinite(Number(item.unitPrice))) return '<span class="record-reference">銷售金額待確認</span>';
+    const qty=Number(item.orderedQty ?? item.qty);
+    if (!Number.isFinite(qty)) return '<span class="record-reference">訂購數量待確認</span>';
+    return workflowAmountSummary(item,qty,{label:'含稅單價',totalLabel:'品項小計（含稅）'});
+}
+function workflowPurchaseOrderDetails(order) {
+    if (!order) return '';
+    const field=(label,value)=>`<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value || '未填寫')}</dd></div>`;
+    const items=normalizedOrderItems(order);
+    return `<details class="order-detail-panel"><summary aria-haspopup="dialog" aria-expanded="false">明細</summary><dialog class="order-detail-drawer" aria-label="訂單明細"><header class="order-drawer-heading"><h3>訂單明細</h3><button type="button" class="btn-secondary" data-order-drawer-close autofocus>關閉</button></header><div class="order-detail-content"><section class="order-drawer-section"><h4>訂單摘要</h4><dl class="order-drawer-summary">${field('單號',order.orderNo)}${field('客戶',order.customerName||order.customer)}${field('負責業務',order.salesName)}${field('訂單日期',order.orderDate)}${field('訂單總額（含稅）',order.totalPrice==null?'待確認':'NT$ '+order.totalPrice)}</dl></section><section class="order-drawer-section"><h4>全部訂單品項</h4><div class="workflow-price-breakdown">${items.map(item=>`<div>${purchaseProductSummary(item,0,null)}${workflowSalesAmount(order,item)}<small>交付方式：${escapeHtml(globalThis.YushinOrderEntry?.deliveryLabel(item,order.shippingInstructions||{})||'未填寫')}</small></div>`).join('')}</div></section><section class="order-drawer-section"><h4>交易與備註</h4>${workflowCommercialSummary(order)}<dl class="order-drawer-summary">${field('訂單備註',order.remarks)}</dl></section><section class="order-drawer-section"><button type="button" class="btn-secondary" onclick="openOrderStatusHistory(${inlineJsValue(order.id)})">查看操作紀錄</button></section></div></dialog></details>`;
+}
+// Keep stage-specific action handlers and quantities; only reorganize the presentation.
+function organizePurchasingOrderRow(row, order, item) {
+    row.classList.add('workflow-order-context-row');
+    const cells=[...row.children],find=label=>cells.find(cell=>cell.dataset.th===label);
+    const product=cells.find(cell=>/品項$/.test(cell.dataset.th||''));
+    if (!product) return;
+    product.dataset.th='產品資訊';
+    const date=find('需求日期');if(date) date.dataset.th='訂單日期';
+    const customer=find('客戶／用途');if(customer) customer.dataset.th='客戶';
+    const quantity=find('數量'),progress=find('到貨進度');
+    if (progress) { progress.dataset.th='進度'; quantity?.remove(); }
+    else if (quantity) quantity.dataset.th='進度';
+    const money=document.createElement('td');money.dataset.th='銷售金額';money.className='order-money-cell';money.innerHTML=workflowSalesAmount(order,item);
+    const commercial=document.createElement('td');commercial.dataset.th='交易／開票資料';commercial.innerHTML=workflowCommercialSummary(order);
+    const actions=find('操作');
+    const area=actions?.querySelector('.workflow-inline-actions')||actions;
+    if (order&&area) area.insertAdjacentHTML('afterbegin',workflowPurchaseOrderDetails(order));
+    [find('合併'),find('訂單日期')||find('需求日期'),find('客戶')||find('客戶／用途'),product,find('負責業務'),money,commercial,progress||quantity,actions].filter(Boolean).forEach(cell=>row.appendChild(cell));
+    row.closest('table')?.classList.add('workflow-order-context-table');
+    bindOrderDetailDrawer(row);
+}
 // One authoritative order document commit. Features own drafts, IDs and presentation;
 // inventory initialization and delayed quote/source synchronization remain checkpoints.
 async function commitOrderCreation(orderId,data,{actorUid=currentUser?.uid,actorRole=currentUserRole,linkForecast=false,expectedForecastUpdatedAt=''}={}) {
@@ -12786,7 +12825,7 @@ window.renderOrdersList = function() {
             <td class="order-sales-cell" data-th="負責業務">${escapeHtml(stripPhoneSuffix(o.salesName))}</td>
 
             <td data-th="訂單金額" class="order-money-cell">${orderItems.map(item=>workflowAmountSummary(item,Number(item.orderedQty||item.qty||0))).join('')}${allOrderItems.length>1?`<small class="workflow-order-total">訂單總額 NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice??'').replace(/,/g,''))||0).toLocaleString())}</small>`:''}<small>${o.isBilled ? '已核銷' : '未核銷'}</small></td>
-            <td data-th="進度" class="order-progress-cell">${orderItems.map((item,index)=>{const displayCategories=displayCategoriesByItem.get(item)||[];const primaryStatus=displayCategories[0]||'ordering';const itemStatus=['dispatch','shipping'].includes(activeOrderWorkFilter)&&displayCategories.includes(activeOrderWorkFilter)?activeOrderWorkFilter:primaryStatus;const itemStatusMap={ordering:'待採購',arrival:'待到貨',dispatch:'待打單',shipping:'已打單',billing:'待核銷',complete:'已完成',closed:lifecycle.label};const waiting=primaryStatus==='arrival'?waitingDaysFromDate(item.orderedAt):'';const state=dispatchStateByItem.get(item)||itemDispatchState(o,item);const receipt=primaryStatus==='arrival'?receivingWorkProgress(o,item):null;return `<div class="workflow-progress-item">${orderItems.length>1?`<strong>${escapeHtml(item.itemName||item.itemCode||'品項')}</strong>`:''}<small class="order-item-work-status">訂單狀態：<span class="order-progress-badge">${escapeHtml(((lifecycle.status==='normal'&&orderInventorySyncIncomplete(o)) ? (o.inventoryReservationStatus==='failed'?'庫存同步未完成':'庫存同步中…') : ((String(item.productType||'').trim().toUpperCase()==='SERVICE'&&lifecycle.status==='normal'&&primaryStatus==='delivery'?'待服務處理':(lifecycle.status==='normal'&&globalThis.YushinWarehouseLogistics?.shippingStatus(o,item,state)))||itemStatusMap[itemStatus]||'待採購')))}</span>${waiting?`・已等 ${escapeHtml(waiting)}`:''}${state.pending>0?`<span class="workflow-quantity">待打單 ${escapeHtml(state.pending)}</span>`:''}${receipt?`<span class="workflow-quantity">已到貨 ${escapeHtml(receipt.received)}／應到貨 ${escapeHtml(receipt.target)}・待到貨 ${escapeHtml(receipt.remaining)}</span>`:''}${state.shippable>0?`・已有 ${escapeHtml(state.shippable)} 可出貨`:''}</small>${window.serviceCaseVerifiedItemHint?.(o.id,item)||''}</div>`}).join('')}</td>
+            <td data-th="進度" class="order-progress-cell">${workflowCommercialSummary(o)}${orderItems.map((item,index)=>{const displayCategories=displayCategoriesByItem.get(item)||[];const primaryStatus=displayCategories[0]||'ordering';const itemStatus=['dispatch','shipping'].includes(activeOrderWorkFilter)&&displayCategories.includes(activeOrderWorkFilter)?activeOrderWorkFilter:primaryStatus;const itemStatusMap={ordering:'待採購',arrival:'待到貨',dispatch:'待打單',shipping:'已打單',billing:'待核銷',complete:'已完成',closed:lifecycle.label};const waiting=primaryStatus==='arrival'?waitingDaysFromDate(item.orderedAt):'';const state=dispatchStateByItem.get(item)||itemDispatchState(o,item);const receipt=primaryStatus==='arrival'?receivingWorkProgress(o,item):null;return `<div class="workflow-progress-item">${orderItems.length>1?`<strong>${escapeHtml(item.itemName||item.itemCode||'品項')}</strong>`:''}<small class="order-item-work-status">訂單狀態：<span class="order-progress-badge">${escapeHtml(((lifecycle.status==='normal'&&orderInventorySyncIncomplete(o)) ? (o.inventoryReservationStatus==='failed'?'庫存同步未完成':'庫存同步中…') : ((String(item.productType||'').trim().toUpperCase()==='SERVICE'&&lifecycle.status==='normal'&&primaryStatus==='delivery'?'待服務處理':(lifecycle.status==='normal'&&globalThis.YushinWarehouseLogistics?.shippingStatus(o,item,state)))||itemStatusMap[itemStatus]||'待採購')))}</span>${waiting?`・已等 ${escapeHtml(waiting)}`:''}${state.pending>0?`<span class="workflow-quantity">待打單 ${escapeHtml(state.pending)}</span>`:''}${receipt?`<span class="workflow-quantity">已到貨 ${escapeHtml(receipt.received)}／應到貨 ${escapeHtml(receipt.target)}・待到貨 ${escapeHtml(receipt.remaining)}</span>`:''}${state.shippable>0?`・已有 ${escapeHtml(state.shippable)} 可出貨`:''}</small>${window.serviceCaseVerifiedItemHint?.(o.id,item)||''}</div>`}).join('')}</td>
             <td class="no-print" data-th="操作"><div class="workflow-inline-actions">
                 <details class="order-detail-panel" data-order-id="${escapeAttr(o.id)}" ${openedDetails.has(o.id)?'open':''}>
                     <summary aria-haspopup="dialog" aria-expanded="false">明細${window.orderCommercialEditPending?.has(o.id)?'（儲存中…）':''}</summary>
@@ -13522,6 +13561,7 @@ function renderPurchasingCompletedOrders(completedRows = null) {
     const allRows = completedRows || purchasingCompletedRows();
     const rows = allRows.filter(({order,item})=>workflowLineMatchesSearch(order,item,document.getElementById('purchaseWorkSearch')?.value)).slice(0, purchasingCompletedVisibleLimit);
     body.innerHTML = rows.map(({order, item, state}) => `<tr><td data-th="訂單日期">${workflowRecordSummary(order, order.orderDate)}</td><td data-th="客戶">${escapeHtml(order.customerName || order.customer || '')}</td><td data-th="已完成採購品項">${purchaseProductSummary(item, state.prepared || item.dispatchPreparedQty || item.qty, null)}</td><td data-th="數量">${workflowQuantitySummary(state.prepared || item.dispatchPreparedQty || item.qty,(item.fulfillmentType || order.fulfillmentType) === 'DIRECT_SHIP' ? '已到貨' : '已打單')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="操作" class="no-print"><button type="button" class="btn-small btn-secondary" onclick="openOrderStatusHistory(${inlineJsValue(order.id)})">查看紀錄</button></td></tr>`).join('');
+    [...body.children].forEach((row,index)=>organizePurchasingOrderRow(row,rows[index].order,rows[index].item));
     if (status) status.textContent = rows.length
         ? `已顯示 ${rows.length} 筆採購已完成品項${purchasingDispatchHasMore || allRows.length > rows.length ? '；可載入更多' : ''}`
         : '目前沒有採購已完成品項';
@@ -14033,6 +14073,7 @@ function renderPurchasingDispatchOrders(normalizedItemsByOrder = null, filterCon
                 : '<span class="order-progress-badge">唯讀</span>';
             const tr=document.createElement('tr');
             tr.innerHTML=`<td data-th="訂單日期">${workflowRecordSummary(order, order.orderDate)}</td><td data-th="客戶">${escapeHtml(order.customerName||order.customer||'')}</td><td data-th="待打單品項">${purchaseProductSummary(item, state.pending, null)}</td><td data-th="數量">${workflowQuantitySummary(state.pending,'待打單')}</td><td data-th="負責業務">${escapeHtml(order.salesName||'')}</td><td data-th="操作"><div class="workflow-inline-actions">${action}</div></td>`;
+            organizePurchasingOrderRow(tr,order,item);
             fragment.appendChild(tr);
             shown++;
         });
@@ -14186,6 +14227,7 @@ function renderPendingPurchaseOrders() {
         const row=document.createElement('tr');
         row.classList.add('procurement-demand-row');
         row.innerHTML=`<td data-th="合併" class="no-print" style="text-align:center;">${selectionHtml}</td><td data-th="需求日期">${workflowRecordSummary(order, date)}</td><td data-th="客戶／用途">${escapeHtml(customer)}<div class="record-reference">${order?.orderNo ? `來源客戶訂單・${escapeHtml(order.orderNo)}` : order?.quoteNo ? `來源估價單・${escapeHtml(order.quoteNo)}` : '客戶訂單採購需求'}</div></td><td data-th="待採購品項">${purchaseProductSummary({...demand, itemName:demand.itemName || item.itemName, itemCode:demand.itemCode || item.itemCode, brand}, qty, null)}<div style="font-size:11px;color:#667584;margin-top:3px;">${sourceType==='STOCK_REPLENISHMENT'?'備庫採購':'客戶訂單'}・${escapeHtml(statusLabel)}</div></td><td data-th="數量">${workflowQuantitySummary(qty,'待採購')}</td><td data-th="負責業務">${escapeHtml(salesName)}</td><td data-th="操作"><div class="workflow-inline-actions">${actionHtml}</div></td>`;
+        organizePurchasingOrderRow(row,order,item);
         fragment.appendChild(row);
         shown++;
     }
@@ -15174,7 +15216,7 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
     const workKeyword = inventory ? '' : document.getElementById('purchaseWorkSearch')?.value || '';
     const historySearch = !inventory && document.getElementById('poListSearch');
     if (historySearch) historySearch.hidden = true;
-    if (head) head.innerHTML = '<th>訂單日期</th><th>客戶</th><th>待到貨品項</th><th>數量</th><th>負責業務</th><th>到貨進度</th><th class="no-print">操作</th>';
+    if (head) head.innerHTML = inventory ? '<th>訂單日期</th><th>客戶</th><th>待到貨品項</th><th>數量</th><th>負責業務</th><th>到貨進度</th><th class="no-print">操作</th>' : '<th>訂單日期</th><th>客戶</th><th>產品資訊</th><th>負責業務</th><th>銷售金額</th><th>交易／開票資料</th><th>進度</th><th class="no-print">操作</th>';
     tbody.innerHTML = '';
     const fragment = document.createDocumentFragment();
 
@@ -15231,6 +15273,7 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
                 <td data-th="負責業務">${escapeHtml(order.salesName || '')}</td>
                 <td data-th="到貨進度"><span class="workflow-quantity">已到貨 ${progress.received}／應到貨 ${progress.target}</span><small class="purchase-item-description">待到貨 ${Math.max(0, progress.target-progress.received)}</small>${receivingWaitHtml(evidenceSupplies)}${receivingDueHtml(due)}${receivingPlanRiskHtml(planRisk)}</td>
                 <td data-th="操作" class="no-print"><div class="workflow-inline-actions">${actionHtml}</div></td>`;
+            if (!inventory) organizePurchasingOrderRow(tr,order,item);
             tr.dataset.receivingDueRank = String(due.sortRank);
             tr.dataset.receivingPlanRiskRank = String(planRisk.sortRank ?? 4);
             tr.dataset.receivingExpectedDate = due.expectedDate || '';
@@ -15294,6 +15337,11 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
             <td data-th="負責業務">${escapeHtml(salesName)}</td>
             <td data-th="到貨進度">${escapeHtml(sourceLabel)}｜已到貨 ${supplyProgress.receivedQty}／應到貨 ${ordered}<small class="purchase-item-description">待到貨 ${remaining}</small>${receivingWaitHtml([supply])}${receivingDueHtml(due)}</td>
             <td data-th="操作" class="no-print"><div class="workflow-inline-actions">${sourceOrder && sourceStatus !== 'normal' && canCreatePurchaseOrderCapability() ? customerCancellationActions(supply) : actionHtml}</div></td>`;
+        if (!inventory) organizePurchasingOrderRow(tr,sourceOrder,sourceOrder ? normalizedOrderItems(sourceOrder).find(item=>item.itemId===supply.itemId)||{} : {});
+        if (!inventory && !supply.orderId) {
+            tr.querySelector('[data-th="銷售金額"]').textContent='公司備庫・無銷售金額';
+            tr.querySelector('[data-th="交易／開票資料"]').textContent='公司備庫・無客戶開票資料';
+        }
         tr.dataset.receivingDueRank = String(due.sortRank);
         tr.dataset.receivingPlanRiskRank = '4';
         tr.dataset.receivingExpectedDate = due.expectedDate || '';

@@ -4690,7 +4690,7 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
     #appContainer .order-detail-drawer::backdrop { background:rgb(30 36 40 / 35%); }
     #appContainer .order-drawer-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px 20px; border-bottom:1px solid var(--ys-border); }
     #appContainer .order-drawer-heading h3 { margin:0; font-size:var(--ys-font-section); }
-    #appContainer #ordersTable .order-detail-panel[open] .order-detail-content {
+    #appContainer :is(#ordersTable,#purchasing-system) .order-detail-panel[open] .order-detail-content {
         position:static; width:100%; max-height:calc(100dvh - 78px); box-sizing:border-box;
         margin:0; padding:0 20px max(20px,env(safe-area-inset-bottom)); border:0; border-radius:0;
         overflow:auto; background:var(--ys-surface); text-align:left;
@@ -4770,4 +4770,52 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
     #appContainer #ordersTable :is(th,td):nth-child(3) { width:18%; }
     #appContainer #ordersTable :is(th,td):nth-child(5) { width:16%; }
     #appContainer #ordersTable :is(th,td):nth-child(6) { width:15%; }
+}
+
+/* Order-linked purchasing work uses the same commercial context and drawer controls. */
+@media screen {
+    #appContainer .workflow-commercial { line-height:1.6; overflow-wrap:anywhere; }
+    #appContainer .workflow-commercial small { display:block; color:var(--ys-muted); }
+    #appContainer #purchasing-system .order-detail-panel { margin:0; width:auto; flex:0 0 auto; }
+    #appContainer #purchasing-system .order-detail-panel > summary {
+        display:inline-flex; align-items:center; box-sizing:border-box; min-height:44px;
+        padding:8px 12px; border:1px solid var(--ys-border); border-radius:var(--ys-control-radius);
+        background:var(--ys-surface); color:var(--ys-muted); font:inherit; cursor:pointer;
+    }
+    #appContainer .workflow-order-context-row > td { overflow-wrap:anywhere; }
+}
+@media screen and (min-width:769px) {
+    #appContainer #purchasing-system table:has(.workflow-order-context-row) { table-layout:fixed; width:100%; }
+    #appContainer .workflow-order-context-row > td[data-th="產品資訊"] { width:20%; }
+    #appContainer .workflow-order-context-row > td[data-th="操作"] .workflow-inline-actions { flex-wrap:wrap; }
+}
+@media screen and (max-width:768px) {
+    #appContainer .workflow-order-context-row > td:is([data-th="銷售金額"],[data-th="交易／開票資料"]) { grid-column:1/-1; }
+}
+@media screen {
+    #appContainer #purchasing-system .workflow-order-context-row .workflow-product { min-width:0; max-width:none; }
+    #appContainer #purchasing-system .workflow-order-context-row .order-detail-panel { min-width:0; }
+}
+@media screen and (min-width:769px) {
+    #appContainer #purchasing-system table:has(.workflow-order-context-row) th:nth-last-child(8) { width:11%; }
+    #appContainer #purchasing-system table:has(.workflow-order-context-row) th:nth-last-child(7) { width:9%; }
+    #appContainer #purchasing-system table:has(.workflow-order-context-row) th:nth-last-child(6) { width:19%; }
+    #appContainer #purchasing-system table:has(.workflow-order-context-row) th:nth-last-child(5) { width:7%; }
+    #appContainer #purchasing-system table:has(.workflow-order-context-row) th:nth-last-child(4) { width:14%; }
+    #appContainer #purchasing-system table:has(.workflow-order-context-row) th:nth-last-child(3) { width:15%; }
+    #appContainer #purchasing-system table:has(.workflow-order-context-row) th:nth-last-child(2) { width:10%; }
+    #appContainer #purchasing-system table:has(.workflow-order-context-row) th:last-child { width:15%; }
+    #appContainer #purchasePendingPanel table:has(.workflow-order-context-row) th:first-child { width:4%; }
+}
+@media screen {
+    #appContainer .order-progress-cell > .workflow-commercial { margin-bottom:8px; padding-bottom:8px; border-bottom:1px solid var(--ys-border); }
+}
+@media screen {
+    #appContainer #purchasing-system .workflow-list-table tbody > .workflow-order-context-row { background:var(--ys-surface); }
+}
+@media screen and (min-width:769px) {
+    #appContainer #purchasing-system .workflow-order-context-row .workflow-inline-actions > button { flex:0 0 auto; white-space:nowrap; }
+}
+@media screen and (max-width:768px) {
+    #appContainer #purchaseWorkSearch { flex:none; height:var(--ys-control-height); }
 }
