@@ -32,7 +32,7 @@ test('pilot requested in emulator without valid Auth/Functions connection fails 
  const x=contextFor({environment:'emulator'});
  x.context.location={hostname:'localhost'};
  await assert.rejects(x.context.commitQuickPurchase('O','I',details,'buyer','purchaser'),
-  /僅限隔離的 demo Emulator/);
+  /手動採購後端.*未提交採購/);
  assert.equal(x.legacyCalls(),0);
 });
 
