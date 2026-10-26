@@ -13,8 +13,9 @@ test('saved customer addresses preserve separate recipients and discard duplicat
 });
 test('physical handoff and in-transit items lock commercial recipient edits, arrived items remain editable',()=>{
  const i={qty:5,deliveredQty:0,warehouseId:'MAIN',receivedQty:5};assert.equal(settings.editableItem(i),true);
- for(const patch of [{transferPendingId:'T'},{warehouseId:'custody-S'},{deliveredQty:5},{fulfillmentType:'DIRECT_SHIP'}])assert.equal(settings.editableItem({...i,...patch}),false);
+ for(const patch of [{transferPendingId:'T'},{warehouseId:'custody-S'},{deliveredQty:5}])assert.equal(settings.editableItem({...i,...patch}),false);
  assert.equal(settings.editableItem({...i,deliveredQty:2}),true);
+ assert.equal(settings.editableItem({...i,fulfillmentType:'DIRECT_SHIP'}),true);
 });
 test('branch collection routes to main without destroying the final recipient snapshot',()=>{
  const warehouses=[{id:'MAIN',warehouseName:'主倉',contact:'倉管',phone:'123',address:'主倉地址'},{id:'EXT',warehouseName:'分倉'}];

@@ -231,7 +231,7 @@ const BUSINESS_STATUS = Object.freeze({
     CANCELLED: 'cancelled',
     VOIDED: 'voided'
 });
-const MAX_ORDER_ITEMS = 30;
+const MAX_ORDER_ITEMS = 15;
 function assertOrderItemCount(items) {
     if (items.length > MAX_ORDER_ITEMS) throw new Error(`每張訂單最多 ${MAX_ORDER_ITEMS} 個品項；請分成多張訂單後再儲存，避免後續採購／倉庫作業無法處理。`);
 }
@@ -3143,6 +3143,7 @@ async function commitOrderCreation(orderId,data,{actorUid=currentUser?.uid,actor
             // facts, not a modified/stale form, and never overwrite fulfillment progress.
             savedData=live;return;
         }
+        if((snapshot.items || []).length>15)throw new Error('每張訂單最多 15 個品項；請分成多張訂單後再儲存。');
         const tradeValidation=globalThis.YushinOrderEntry.validateTrade(snapshot,{requireInvoiceTitle:false});
         if(!tradeValidation.valid)throw new Error(tradeValidation.message);
         let forecastRef=null;
@@ -12539,6 +12540,7 @@ window.renderOrdersList = function() {
     const searchInput = document.getElementById('orderSearch');
     if (!tbody || !searchInput) return;
 
+    const openedDetails=new Set([...tbody.querySelectorAll('details.order-detail-panel[open]')].map(panel=>panel.dataset.orderId));
     const canManageOrderOps = currentUserRole === 'purchaser' || currentUserRole === 'admin';
     const canEditOrders = canEditPage('orders.list');
     const canManageOrderLifecycle = canManageOrderLifecycleCapability();
@@ -12585,6 +12587,8 @@ window.renderOrdersList = function() {
 
     baseOrders.forEach(o => {
         const allOrderItems = normalizedItemsByOrder.get(o.id) || [];
+        const detailsEditable=globalThis.YushinOrderCommercialDetails.canEdit(o)&&!window.orderCommercialEditPending?.has(o.id);
+        const detailsLocked=!globalThis.YushinOrderCommercialDetails.beforeReceipt(o);
         const lifecycle = lifecyclesByOrder.get(o.id) || orderLifecycleInfo(o, allOrderItems);
         const dispatchStateByItem = dispatchStatesByOrder.get(o.id) || new Map();
         const displayCategoriesByItem = new Map(
@@ -12626,16 +12630,16 @@ window.renderOrdersList = function() {
             <td class="order-customer-cell" data-th="客戶名稱"><div class="record-reference">客戶訂單${o.orderNo ? `・${escapeHtml(o.orderNo)}` : o.quoteNo ? `・來源估價單 ${escapeHtml(o.quoteNo)}` : ''}</div>${o.customerName ? `<button type="button" class="btn-small btn-secondary" onclick="showCustomerOrderHistory(${inlineJsValue(o.customerName)})">${escapeHtml(o.customerName)}</button>` : ''}</td>
             <td class="order-sales-cell" data-th="負責業務">${escapeHtml(stripPhoneSuffix(o.salesName))}</td>
             <td data-th="產品資訊" class="order-product-cell">${orderItems.map((item,index)=>{const displayCategories=displayCategoriesByItem.get(item)||[];const primaryStatus=displayCategories[0]||'ordering';const itemStatus=['dispatch','shipping'].includes(activeOrderWorkFilter)&&displayCategories.includes(activeOrderWorkFilter)?activeOrderWorkFilter:primaryStatus;const itemStatusMap={ordering:'待採購',arrival:'待到貨',dispatch:'待打單',shipping:'已打單',billing:'待核銷',complete:'已完成',closed:lifecycle.label};const waiting=primaryStatus==='arrival'?waitingDaysFromDate(item.orderedAt):'';const state=dispatchStateByItem.get(item)||itemDispatchState(o,item);const parallelDispatch=primaryStatus!=='dispatch'&&state.pending>0;return `<div style="${index?'margin-top:5px;padding-top:5px;border-top:1px solid #eee;':''}"><strong>${escapeHtml(item.itemName || '－')}</strong><small>${escapeHtml(item.brand || '未分類')}${item.itemCode ? `・${escapeHtml(item.itemCode)}` : ''}・${activeOrderWorkFilter==='shipping'?`已打單 ${state.shippable}／訂單數量 ${Number(item.orderedQty||item.qty||0)}`:activeOrderWorkFilter==='dispatch'?`待打單 ${state.pending}／訂單數量 ${Number(item.orderedQty||item.qty||0)}`:Number(item.orderedQty||item.qty||0)}</small><small class="order-item-work-status">訂單狀態：<span class="order-progress-badge">${escapeHtml(((lifecycle.status==='normal'&&orderInventorySyncIncomplete(o)) ? (o.inventoryReservationStatus==='failed'?'庫存同步未完成':'庫存同步中…') : ((String(item.productType||'').trim().toUpperCase()==='SERVICE'&&lifecycle.status==='normal'&&primaryStatus==='delivery'?'待服務處理':(lifecycle.status==='normal'&&globalThis.YushinWarehouseLogistics?.shippingStatus(o,item,state)))||itemStatusMap[itemStatus]||'待採購')))}</span>${waiting?`・已等 ${escapeHtml(waiting)}`:''}${parallelDispatch&&itemStatus!=='dispatch'?`・另有 ${escapeHtml(state.pending)} 待打單`:''}${state.shippable>0?`・已有 ${escapeHtml(state.shippable)} 可出貨`:''}</small>${window.serviceCaseVerifiedItemHint?.(o.id,item)||''}</div>`}).join('')}</td>
-            <td data-th="訂單總額" class="order-money-cell"><strong>NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice ?? '').replace(/,/g, '')) || 0).toLocaleString())}</strong><small>${o.isBilled ? '已核銷' : '未核銷'}</small></td>
+            <td data-th="訂單金額" class="order-money-cell"><strong>NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice ?? '').replace(/,/g, '')) || 0).toLocaleString())}</strong>${globalThis.YushinOrderCommercialDetails.amountLines(allOrderItems).map(line=>`<small>${allOrderItems.length>1?escapeHtml(line.name)+'：':''}單價 NT$ ${escapeHtml(line.unit.toLocaleString())} × ${escapeHtml(line.qty)} ＝ NT$ ${escapeHtml(line.total.toLocaleString())}</small>`).join('')}<small>${o.isBilled ? '已核銷' : '未核銷'}</small></td>
             <td class="order-details-cell">
-                <div class="order-text-summary">${escapeHtml([o.transactionType ? `交易：${o.transactionType}` : '', o.invoiceTitle || '', o.isBilled && orderBillingDate(o) ? `核銷日期：${orderBillingDate(o)}` : '', o.remarks || ''].filter(Boolean).join('・'))}</div>
-                <details class="order-detail-panel">
-                    <summary>查看明細${canEditOrders ? '／編輯' : ''}</summary>
+                <details class="order-detail-panel" data-order-id="${escapeAttr(o.id)}" ${openedDetails.has(o.id)?'open':''}>
+                    <summary>查看明細${window.orderCommercialEditPending?.has(o.id)?'（儲存中…）':detailsEditable ? '／編輯' : ''}</summary>
                     <div class="order-detail-content">
-                        <div class="order-item-prices">${allOrderItems.map(item => `<div>${escapeHtml(item.itemName || item.itemCode || '品項')}：NT$ ${escapeHtml(Number(item.unitPrice || 0).toLocaleString())} × ${escapeHtml(Number(item.orderedQty || item.qty || 0))}</div>`).join('')}</div>
+                        <div class="order-item-prices">${allOrderItems.map(item => `<div><strong>${escapeHtml(item.itemName||item.itemCode||'品項')}</strong><div>採購方式：${escapeHtml(globalThis.YushinOrderCommercialDetails.procurementLabel(item))}</div><div>交付方式：${escapeHtml(globalThis.YushinOrderEntry.deliveryLabel({fulfillmentType:item.fulfillmentType,deliveryPlan:item.deliveryPlan||o.shippingInstructions||{}}))}</div>${canEditOrders&&lifecycle.status==='normal'&&!detailsLocked&&(currentUserRole==='admin'||o.ownerUid===currentUser?.uid||canReceiveInventoryCapability())&&!globalThis.YushinOrderCommercialDetails.itemMoved(item)?`<button type="button" class="btn-small btn-secondary" onclick="openWarehouseDeliveryPlan(${inlineJsValue(o.id)},${inlineJsValue(item.itemId)})">修改交付方式／地址</button>`:''}</div>`).join('')}</div>
+                        ${detailsLocked?'<small>已到貨或進入交付流程，訂單交付設定、交易方式及訂單備註已鎖定。</small>':''}
             ${canManageOrderOps ? `
             <div class="no-print order-cost-profit-cell"><label>單位成本</label><input type="number" step="0.01" class="order-cost-input" data-order-id="${o.id}" ${(o.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER' ? 'readonly title="標準成本由產品成本資料帶入"' : ''} value="${o.procurementType === 'SALES_SELF_ORDER' ? (o.costPrice == null ? '' : Number(Number(o.costPrice).toFixed(2))) : ''}" oninput="updateOrderProfitDisplay('${o.id}', this.value)" onchange="updateOrderField('${o.id}','costPrice', this.value === '' ? null : parseFloat(this.value))"><small>毛利：<span id="orderProfit_${o.id}">${formatProfitPercent(o.unitPrice, o.costPrice)}</span></small></div>` : ''}
-            <div class="order-transaction-cell"><label>交易資訊</label>
+            <div class="order-transaction-cell"><label>交易方式</label>
                 <select onchange="updateOrderField('${o.id}','transactionType',this.value)">
                     <option value="" ${!o.transactionType ? 'selected' : ''}>未選擇</option>
                     <option value="直" ${o.transactionType === '直' ? 'selected' : ''}>直</option>
@@ -12645,7 +12649,7 @@ window.renderOrdersList = function() {
                 ${o.transactionType === '直' ? `<input type="text" aria-label="發票抬頭" placeholder="發票抬頭" value="${escapeAttr(o.invoiceTitle || '')}" onchange="updateOrderField('${o.id}','invoiceTitle',this.value)">` : ''}
                 ${o.isBilled ? `<label class="order-invoice-date-label">核銷日期<input type="date" aria-label="核銷日期" ${allOrderItems.some(item=>String(item.productType||'').trim().toUpperCase()==='SERVICE')&&(!window.serviceBillingDateEnabled?.(o)||billingPending)?'disabled title="目前無法修改服務核銷日期"':''} value="${escapeAttr(orderBillingDate(o))}" onchange="updateOrderBillingDate('${o.id}',this.value)"></label>` : ''}
             </div>
-            <label class="order-remarks-editor">備註<input type="text" value="${escapeAttr(o.remarks || '')}" placeholder="備註" onchange="updateOrderField('${o.id}','remarks',this.value)"></label>
+            <label class="order-remarks-editor">訂單備註<input type="text" value="${escapeAttr(o.remarks || '')}" placeholder="訂單備註" onchange="updateOrderField('${o.id}','remarks',this.value)"></label>
                     </div>
                 </details>
             </td>
@@ -12670,11 +12674,14 @@ window.renderOrdersList = function() {
                 </div>
             </td>
         `;
-        if (!canEditOrders) {
-            tr.querySelectorAll('.order-transaction-cell select, .order-transaction-cell input, .order-remarks-editor input').forEach(control => {
+        if (!detailsEditable) {
+            tr.querySelectorAll('.order-transaction-cell select, .order-transaction-cell input:not([type="date"]), .order-remarks-editor input').forEach(control => {
                 control.disabled = true;
                 control.setAttribute('aria-readonly', 'true');
             });
+        }
+        if (!canEditOrders) {
+            tr.querySelectorAll('.order-transaction-cell input[type="date"]').forEach(control=>{control.disabled=true;});
             tr.querySelectorAll('.order-more-menu-popover button').forEach(button => {
                 const action = button.getAttribute('onclick') || '';
                 if (!action.includes('openOrderStatusHistory(')) button.remove();
@@ -12852,6 +12859,13 @@ window.retryOrderInventoryReservation = async function(orderId) {
         if(currentUser?.uid===uid){writeAppDataCache('orders',ordersCache);renderOrdersList();}
     }
 };
+
+// Shared purchase-line presentation; uses only the already loaded record.
+function purchaseProductSummary(item, quantity) {
+    const name = item.itemName || item.name || item.itemCode || item.itemId || '未命名品項';
+    const reference = [item.brand, item.itemCode].filter(Boolean).join(' · ');
+    return `<div class="workflow-product"><strong>${escapeHtml(name)}</strong><small class="purchase-item-description">${escapeHtml(reference)}</small><span class="workflow-quantity">數量 ${Number(quantity || 0)}</span></div>`;
+}
 
 // 採購主頁資料
 let poListCache = [];
@@ -13358,7 +13372,7 @@ function renderPurchasingCompletedOrders(completedRows = null) {
     if (!body) return;
     const allRows = completedRows || purchasingCompletedRows();
     const rows = allRows.slice(0, purchasingCompletedVisibleLimit);
-    body.innerHTML = rows.map(({order, item, state}) => `<tr><td data-th="訂單日期">${escapeHtml(order.orderDate || '')}</td><td data-th="客戶">${escapeHtml(order.customerName || order.customer || '')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="已完成採購品項"><strong>${escapeHtml(item.itemCode || item.itemName || item.itemId)} × ${Number(state.prepared || item.dispatchPreparedQty || item.qty || 0)}</strong><small class="purchase-item-description">${escapeHtml([item.itemCode ? item.itemName : '', item.brand].filter(Boolean).join('・'))}</small></td><td data-th="操作" class="no-print"><button type="button" class="btn-small btn-secondary" onclick="openOrderStatusHistory(${inlineJsValue(order.id)})">紀錄</button></td></tr>`).join('');
+    body.innerHTML = rows.map(({order, item, state}) => `<tr><td data-th="訂單日期">${escapeHtml(order.orderDate || '')}</td><td data-th="客戶">${escapeHtml(order.customerName || order.customer || '')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="已完成採購品項">${purchaseProductSummary(item, state.prepared || item.dispatchPreparedQty || item.qty)}</td><td data-th="操作" class="no-print"><button type="button" class="btn-small btn-secondary" onclick="openOrderStatusHistory(${inlineJsValue(order.id)})">查看明細</button></td></tr>`).join('');
     if (status) status.textContent = rows.length
         ? `已顯示 ${rows.length} 筆採購已完成品項${purchasingDispatchHasMore || allRows.length > rows.length ? '；可載入更多' : ''}`
         : '目前沒有採購已完成品項';
@@ -13863,10 +13877,10 @@ function renderPurchasingDispatchOrders(normalizedItemsByOrder = null, filterCon
             const canPrepareDispatch = currentUserRole === 'purchaser' || currentUserRole === 'admin';
             const preparing = pendingDispatchOrderIds.has(order.id+'__'+item.itemId);
             const action = canPrepareDispatch
-                ? `<button type="button" class="btn-small" onclick="markOrderItemDispatchPrepared(${inlineJsValue(order.id)},${inlineJsValue(item.itemId)})" ${preparing?'disabled':''}>${preparing?'處理中…':(pendingDispatchPreparation(order.id,item.itemId)?'確認打單結果':`已打單 × ${state.pending}`)}</button>`
+                ? `<button type="button" class="btn-small" onclick="markOrderItemDispatchPrepared(${inlineJsValue(order.id)},${inlineJsValue(item.itemId)})" ${preparing?'disabled':''}>${preparing?'處理中…':(pendingDispatchPreparation(order.id,item.itemId)?'確認打單結果':`確認已打單（${state.pending}）`)}</button>`
                 : '<span class="order-progress-badge">唯讀</span>';
             const tr=document.createElement('tr');
-            tr.innerHTML=`<td data-th="訂單日期">${escapeHtml(order.orderDate||'')}</td><td data-th="客戶">${escapeHtml(order.customerName||order.customer||'')}</td><td data-th="負責業務">${escapeHtml(order.salesName||'')}</td><td data-th="待打單品項"><strong>${escapeHtml(item.itemCode||item.itemName||item.itemId)} × ${state.pending}</strong><small class="purchase-item-description">${escapeHtml([item.itemCode ? item.itemName : '', item.brand].filter(Boolean).join('・'))}</small></td><td data-th="操作">${action}</td>`;
+            tr.innerHTML=`<td data-th="訂單日期">${escapeHtml(order.orderDate||'')}</td><td data-th="客戶">${escapeHtml(order.customerName||order.customer||'')}</td><td data-th="負責業務">${escapeHtml(order.salesName||'')}</td><td data-th="待打單品項">${purchaseProductSummary(item, state.pending)}</td><td data-th="操作">${action}</td>`;
             fragment.appendChild(tr);
             shown++;
         });
@@ -14011,14 +14025,14 @@ function renderPendingPurchaseOrders() {
                     ? (canBusinessSelfOrder(order)
                         ? `<button type="button" class="btn-small btn-secondary" onclick="openSelfOrderModal(${inlineJsValue(order.id)},${inlineJsValue(demand.sourceItemId||item.itemId||'')})">${autoSelfOrder?'補登異常訂貨':'登記自行訂貨'}</button>`
                         : '<span class="order-progress-badge">自行訂貨・由訂單負責業務處理</span>')
-                    : `<button type="button" class="btn-small" onclick="markPurchaseItemOrdered(${inlineJsValue(order.id)},${inlineJsValue(demand.sourceItemId||item.itemId||'')},this)">已採購</button> <button type="button" class="btn-small btn-secondary" onclick="openOrderPurchaseDraft(${inlineJsValue(order.id)},${inlineJsValue(demand.sourceItemId||item.itemId||'')})">產生採購單</button>`;
+                    : `<button type="button" class="btn-small" onclick="markPurchaseItemOrdered(${inlineJsValue(order.id)},${inlineJsValue(demand.sourceItemId||item.itemId||'')},this)">確認已下訂</button> <button type="button" class="btn-small btn-secondary" onclick="openOrderPurchaseDraft(${inlineJsValue(order.id)},${inlineJsValue(demand.sourceItemId||item.itemId||'')})">產生採購單</button>`;
         }else{
             actionHtml='<span class="order-progress-badge">來源訂單待同步</span>';
         }
 
         const row=document.createElement('tr');
         row.classList.add('procurement-demand-row');
-        row.innerHTML=`<td data-th="合併" class="no-print" style="text-align:center;">${selectionHtml}</td><td data-th="需求日期">${escapeHtml(date)}</td><td data-th="客戶／用途">${escapeHtml(customer)}<div class="record-reference">${order?.orderNo ? `來源客戶訂單・${escapeHtml(order.orderNo)}` : order?.quoteNo ? `來源估價單・${escapeHtml(order.quoteNo)}` : '客戶訂單採購需求'}</div></td><td data-th="負責業務">${escapeHtml(salesName)}</td><td data-th="待採購品項"><strong>${escapeHtml(demand.itemCode||demand.itemName||demand.productKey||demand.demandId)} × ${qty}</strong><small class="purchase-item-description">${escapeHtml([demand.itemCode ? demand.itemName : '', demand.brand].filter(Boolean).join('・'))}</small><div style="font-size:11px;color:#667584;margin-top:3px;">${sourceType==='STOCK_REPLENISHMENT'?'備庫採購':'客戶訂單'}・${escapeHtml(statusLabel)}</div></td><td data-th="操作">${actionHtml}</td>`;
+        row.innerHTML=`<td data-th="合併" class="no-print" style="text-align:center;">${selectionHtml}</td><td data-th="需求日期">${escapeHtml(date)}</td><td data-th="客戶／用途">${escapeHtml(customer)}<div class="record-reference">${order?.orderNo ? `來源客戶訂單・${escapeHtml(order.orderNo)}` : order?.quoteNo ? `來源估價單・${escapeHtml(order.quoteNo)}` : '客戶訂單採購需求'}</div></td><td data-th="負責業務">${escapeHtml(salesName)}</td><td data-th="待採購品項">${purchaseProductSummary(demand, qty)}<div style="font-size:11px;color:#667584;margin-top:3px;">${sourceType==='STOCK_REPLENISHMENT'?'備庫採購':'客戶訂單'}・${escapeHtml(statusLabel)}</div></td><td data-th="操作">${actionHtml}</td>`;
         fragment.appendChild(row);
         shown++;
     }
@@ -14984,7 +14998,7 @@ function supplyCancelActionHtml(supply) {
     if (remaining <= 0) return '';
     const key = `supply:${supply.id}`;
     const pending = purchaseCancellationInProgress.has(key);
-    return `<button type="button" class="btn-small danger-menu-item" onclick="cancelSupplyOutstanding(${inlineJsValue(supply.id)})" ${pending ? 'disabled' : ''}>${pending ? '取消中…' : '取消未到貨'}</button>`;
+    return `<details class="workflow-more"><summary class="btn-small btn-secondary">更多</summary><button type="button" class="btn-small danger-menu-item" onclick="cancelSupplyOutstanding(${inlineJsValue(supply.id)})" ${pending ? 'disabled' : ''}>${pending ? '取消中…' : '取消未到貨'}</button></details>`;
 }
 
 function receivingWorkProgress(order, item) {
@@ -15057,8 +15071,8 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
                 <td data-th="訂單日期">${escapeHtml(order.orderDate || '')}</td>
                 <td data-th="客戶">${escapeHtml(order.customer || order.customerName || '')}</td>
                 <td data-th="負責業務">${escapeHtml(order.salesName || '')}</td>
-                <td data-th="待到貨品項">${escapeHtml(item.itemCode || item.itemName || item.itemId || '未命名品項')} × ${progress.target}</td>
-                <td data-th="到貨進度">${progress.received > 0 ? `部分到貨 ${progress.received}/${progress.target}` : `待到貨 0/${progress.target}`}${receivingWaitHtml(evidenceSupplies)}${receivingDueHtml(due)}${receivingPlanRiskHtml(planRisk)}</td>
+                <td data-th="待到貨品項">${purchaseProductSummary(item, progress.target)}</td>
+                <td data-th="到貨進度"><span class="workflow-quantity">已到貨 ${progress.received}／應到貨 ${progress.target}</span><small class="purchase-item-description">待到貨 ${Math.max(0, progress.target-progress.received)}</small>${receivingWaitHtml(evidenceSupplies)}${receivingDueHtml(due)}${receivingPlanRiskHtml(planRisk)}</td>
                 <td data-th="操作" class="no-print">${actionHtml}</td>`;
             tr.dataset.receivingDueRank = String(due.sortRank);
             tr.dataset.receivingPlanRiskRank = String(planRisk.sortRank ?? 4);
@@ -15119,8 +15133,8 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
             <td data-th="訂單日期">${escapeHtml(date)}</td>
             <td data-th="客戶">${escapeHtml(customerLabel)}</td>
             <td data-th="負責業務">${escapeHtml(salesName)}</td>
-            <td data-th="待到貨品項">${escapeHtml(supply.itemCode || supply.itemName || supply.id)} × ${ordered}</td>
-            <td data-th="到貨進度">${escapeHtml(sourceLabel)}｜${escapeHtml(supplyProgress.label)}${receivingWaitHtml([supply])}${receivingDueHtml(due)}</td>
+            <td data-th="待到貨品項">${purchaseProductSummary(supply, ordered)}</td>
+            <td data-th="到貨進度">${escapeHtml(sourceLabel)}｜已到貨 ${supplyProgress.receivedQty}／應到貨 ${ordered}<small class="purchase-item-description">待到貨 ${remaining}</small>${receivingWaitHtml([supply])}${receivingDueHtml(due)}</td>
             <td data-th="操作" class="no-print">${sourceOrder && sourceStatus !== 'normal' && canCreatePurchaseOrderCapability() ? customerCancellationActions(supply) : actionHtml}</td>`;
         tr.dataset.receivingDueRank = String(due.sortRank);
         tr.dataset.receivingPlanRiskRank = '4';
@@ -15215,7 +15229,7 @@ window.renderPoList = function(normalizedItemsByOrder = null, filterContext = nu
                 <td data-th="採購日期">${escapeHtml(po.poDate || '')}</td>
                 <td data-th="預計到貨">${escapeHtml(po.expectedDate || po.scheduleDate || '—')}${(po.expectedDate||po.scheduleDate)&&receiptProgress.remainingQty>0&&(po.expectedDate||po.scheduleDate)<localDateString()?'・逾期':''}</td>
                 <td data-th="等待天數">${receiptProgress.remainingQty > 0 ? escapeHtml(poWaitingDays(po)||'—') : '已到貨'}</td>
-                <td data-th="品項數">${escapeHtml(item.itemCode||item.itemName||'單一品項')} × ${ordered}</td>
+                <td data-th="品項數">${purchaseProductSummary(item, ordered)}</td>
                 <td data-th="總計金額">${itemTotal.toLocaleString()}</td>
                 <td data-th="文件狀態">${escapeHtml(purchaseOrderDocumentStatusLabel(po))}</td>
                 <td data-th="到貨進度">${escapeHtml(receiptProgress.label)}</td>
@@ -21780,7 +21794,36 @@ window.saveOrderLifecycleStatus = async function() {
 
 // Customer return mutations are owned by modules/customer-cancellations.js.
 
+window.orderCommercialEditPending=new Set();
+async function updateOrderCommercialField(orderId,field,value){
+    if(!['transactionType','invoiceTitle','remarks'].includes(field)||typeof value!=='string')return;
+    if(window.orderCommercialEditPending.has(orderId))return;
+    const cached=ordersCache.find(order=>order.id===orderId);
+    if(!cached||!globalThis.YushinOrderCommercialDetails.canEdit(cached)){alert('這筆訂單已到貨、進入交付流程，或目前帳號無法修改。');renderOrdersList();return;}
+    if(field==='transactionType'&&!['直','借','扣'].includes(value)){alert('請選擇直、借或扣。');renderOrdersList();return;}
+    const uid=currentUser?.uid,role=currentUserRole,prior=cached[field]??'';
+    if(String(prior)===String(value??''))return;
+    const history={field,label:{transactionType:'修改交易方式',invoiceTitle:'修改發票抬頭',remarks:'修改訂單備註'}[field],before:prior,after:value??'',by:currentUserName||currentUser?.email||'未知使用者',at:new Date().toISOString()};
+    window.orderCommercialEditPending.add(orderId);renderOrdersList();
+    try{
+        const saved=await runRoleTransaction(async tx=>{
+            const ref=db.collection('orders').doc(orderId),snapshot=await tx.get(ref);
+            if(uid!==currentUser?.uid||role!==currentUserRole)throw Error('登入身分已變更，請重新開啟訂單。');
+            if(!snapshot.exists)throw Error('找不到這筆訂單。');
+            const order=snapshot.data();
+            if((order[field]??'')===value)return order;
+            if(!globalThis.YushinOrderCommercialDetails.canEdit(order))throw Object.assign(Error('訂單已到貨或進入交付流程，不能修改。'),{latestOrder:order});
+            if((order[field]??'')!==prior)throw Object.assign(Error('這個欄位已被其他人修改，已更新為最新資料，請重新確認。'),{latestOrder:order});
+            tx.update(ref,{[field]:value,fieldEditHistory:firebase.firestore.FieldValue.arrayUnion(history)});
+            return {...order,[field]:value,fieldEditHistory:[...(order.fieldEditHistory||[]),history]};
+        });
+        if(uid===currentUser?.uid&&role===currentUserRole){cached[field]=saved[field];cached.fieldEditHistory=saved.fieldEditHistory||[];showActionFeedback('訂單資料已儲存。');}
+    }catch(err){if(err.latestOrder&&uid===currentUser?.uid&&role===currentUserRole)Object.assign(cached,err.latestOrder);alert(productOperationErrorMessage('訂單資料更新',err));}
+    finally{window.orderCommercialEditPending.delete(orderId);if(uid===currentUser?.uid&&role===currentUserRole)renderOrdersList();}
+}
+
 window.updateOrderField = function(orderId, field, value) {
+    if(['transactionType','invoiceTitle','remarks'].includes(field))return updateOrderCommercialField(orderId,field,value);
     const o = ordersCache.find(x => x.id === orderId);
     if (!o || !canEditPage('orders.list')) return;
     if (field === 'costPrice' && (o.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER') {
@@ -22163,7 +22206,7 @@ window.addCurrentOrderItemToDraft=function(){
     if(item.productMasterMatched!==true||!item.productId||orderItemProductStatus(item)!=='matched'){alert('正式訂單品項必須先對應產品主檔。請輸入既有貨號，或使用「快速新增產品」完成基本產品資料。');return;}
     const duplicateIndex=newOrderDraftItems.findIndex(existing=>globalThis.YushinOrderEntry.sameDraftItem(existing,item));
     if(duplicateIndex>=0){newOrderDraftItems[duplicateIndex]={...newOrderDraftItems[duplicateIndex],qty:Number(newOrderDraftItems[duplicateIndex].qty||0)+Number(item.qty||0)};newOrderDraftItems[duplicateIndex].totalPrice=Number(newOrderDraftItems[duplicateIndex].qty||0)*Number(newOrderDraftItems[duplicateIndex].unitPrice||0);}
-    else newOrderDraftItems.push(item);renderNewOrderDraftItems();
+    else {if(newOrderDraftItems.length>=MAX_ORDER_ITEMS){alert('每張訂單最多 15 個品項，請另建訂單。');return;}newOrderDraftItems.push(item);}renderNewOrderDraftItems();
     ['orderItemCode','orderItemName','orderItemNameEn','orderProductLine','orderSpec'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
     const nextCodeInput=document.getElementById('orderItemCode');
     if(nextCodeInput.dataset.autofillBrand){document.getElementById('orderBrand').value='';onOrderBrandSelectChange();}
