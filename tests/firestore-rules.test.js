@@ -3326,3 +3326,22 @@ test('commercial metadata cannot bypass the UI lock when only a line has shipmen
    await assertFails(updateDoc(doc(db(uid),'orders/line-shipment-lock'),patch));
  }
 });
+
+
+test('typed reservation results reject a foreign live sibling even when its numeric delta is zero',async()=>{
+ for(const uid of ['buyer1','wh1']){
+  await seedOperationalReserve();
+  await seed('inventoryReservations/foreign-live',{orderId:'OTHER',itemId:'X',productKey:'OTHER',warehouseId:'W1',quantity:1,ownerUid:'sales1',salesCode:'S01'});
+  await assertFails(operationalReserveBatch(uid,1,{ids:['evidence__I0','foreign-live']}).commit());
+  assert.equal((await getDoc(doc(db('admin'),'inventory/p-order'))).data().reserved,0);
+  assert.equal((await getDoc(doc(db('admin'),'warehouseStocks/W1__p-order'))).data().reserved,0);
+  await assertSucceeds(operationalReserveBatch(uid).commit());
+ }
+});
+test('missing-document probes still reject inactive and unauthenticated profiles with typed map readers',async()=>{
+ await seed('users/off-probe',{role:'purchaser',active:false});
+ await seed('users/disabled-probe',{role:'warehouse',active:true,disabled:true});
+ const clients=[db('off-probe'),db('disabled-probe'),env.unauthenticatedContext().firestore()];
+ for(const client of clients)for(const path of ['orders/none','procurementDemands/none','inventoryReservations/none','inventory/none','warehouseStocks/none'])
+  await assertFails(getDoc(doc(client,path)));
+});
