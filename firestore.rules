@@ -1793,15 +1793,18 @@ service cloud.firestore {
         && (resource.data.get('logisticsTransfersPending', 0) == 0 || request.resource.data.items == resource.data.items);
     }
 
+    function orderWithoutGlobalReceipt(order) {
+      return !order.get('isArrived', false) && !order.get('isDelivered', false) && !order.get('isBilled', false)
+        && order.get('receivedQty', 0) == 0 && order.get('deliveredQty', 0) == 0
+        && order.get('receiptEvents', []) == [] && order.get('deliveryRecords', []) == [];
+    }
     function receiptFreeGroup(a, b, c, d, e) {
       return [a.get('receivedQty', 0), a.get('receiptEvents', []), b.get('receivedQty', 0), b.get('receiptEvents', []), c.get('receivedQty', 0), c.get('receiptEvents', []), d.get('receivedQty', 0), d.get('receiptEvents', []), e.get('receivedQty', 0), e.get('receiptEvents', [])] == [0, [], 0, [], 0, [], 0, [], 0, []];
     }
     function orderBeforeFirstReceipt(order) {
       let items = order.get('items', []);
       let count = items.size();
-      return !order.get('isArrived', false) && !order.get('isDelivered', false) && !order.get('isBilled', false)
-        && order.get('receivedQty', 0) == 0 && order.get('deliveredQty', 0) == 0
-        && order.get('receiptEvents', []) == [] && order.get('deliveryRecords', []) == [] && count <= 30
+      return orderWithoutGlobalReceipt(order) && count <= 30
         && (count == 30
           // Legacy thirty-line orders still check every item's receipt status.
           ? (receiptFreeGroup(items[0], items[1], items[2], items[3], items[4])
@@ -1811,6 +1814,26 @@ service cloud.firestore {
             && receiptFreeGroup(items[20], items[21], items[22], items[23], items[24])
             && receiptFreeGroup(items[25], items[26], items[27], items[28], items[29]))
           : (count >= 5 ? receiptFreeGroup(items[0], items[1], items[2], items[3], items[4]) && (count >= 10 ? receiptFreeGroup(items[5], items[6], items[7], items[8], items[9]) && (count >= 15 ? receiptFreeGroup(items[10], items[11], items[12], items[13], items[14]) && (count >= 20 ? receiptFreeGroup(items[15], items[16], items[17], items[18], items[19]) && (count >= 25 ? receiptFreeGroup(items[20], items[21], items[22], items[23], items[24]) && (count >= 30 ? receiptFreeGroup(items[25], items[26], items[27], items[28], items[29]) && true : (count <= 25 ? true : [items[25].get('receivedQty', 0), items[25].get('receiptEvents', [])] == [0, []] && (count <= 26 ? true : [items[26].get('receivedQty', 0), items[26].get('receiptEvents', [])] == [0, []] && (count <= 27 ? true : [items[27].get('receivedQty', 0), items[27].get('receiptEvents', [])] == [0, []] && (count <= 28 ? true : [items[28].get('receivedQty', 0), items[28].get('receiptEvents', [])] == [0, []] && true))))) : (count <= 20 ? true : [items[20].get('receivedQty', 0), items[20].get('receiptEvents', [])] == [0, []] && (count <= 21 ? true : [items[21].get('receivedQty', 0), items[21].get('receiptEvents', [])] == [0, []] && (count <= 22 ? true : [items[22].get('receivedQty', 0), items[22].get('receiptEvents', [])] == [0, []] && (count <= 23 ? true : [items[23].get('receivedQty', 0), items[23].get('receiptEvents', [])] == [0, []] && true))))) : (count <= 15 ? true : [items[15].get('receivedQty', 0), items[15].get('receiptEvents', [])] == [0, []] && (count <= 16 ? true : [items[16].get('receivedQty', 0), items[16].get('receiptEvents', [])] == [0, []] && (count <= 17 ? true : [items[17].get('receivedQty', 0), items[17].get('receiptEvents', [])] == [0, []] && (count <= 18 ? true : [items[18].get('receivedQty', 0), items[18].get('receiptEvents', [])] == [0, []] && true))))) : (count <= 10 ? true : [items[10].get('receivedQty', 0), items[10].get('receiptEvents', [])] == [0, []] && (count <= 11 ? true : [items[11].get('receivedQty', 0), items[11].get('receiptEvents', [])] == [0, []] && (count <= 12 ? true : [items[12].get('receivedQty', 0), items[12].get('receiptEvents', [])] == [0, []] && (count <= 13 ? true : [items[13].get('receivedQty', 0), items[13].get('receiptEvents', [])] == [0, []] && true))))) : (count <= 5 ? true : [items[5].get('receivedQty', 0), items[5].get('receiptEvents', [])] == [0, []] && (count <= 6 ? true : [items[6].get('receivedQty', 0), items[6].get('receiptEvents', [])] == [0, []] && (count <= 7 ? true : [items[7].get('receivedQty', 0), items[7].get('receiptEvents', [])] == [0, []] && (count <= 8 ? true : [items[8].get('receivedQty', 0), items[8].get('receiptEvents', [])] == [0, []] && true))))) : (count <= 0 ? true : [items[0].get('receivedQty', 0), items[0].get('receiptEvents', [])] == [0, []] && (count <= 1 ? true : [items[1].get('receivedQty', 0), items[1].get('receiptEvents', [])] == [0, []] && (count <= 2 ? true : [items[2].get('receivedQty', 0), items[2].get('receiptEvents', [])] == [0, []] && (count <= 3 ? true : [items[3].get('receivedQty', 0), items[3].get('receiptEvents', [])] == [0, []] && true))))));
+    }
+
+    // Commercial metadata also locks on per-line shipment/delivery history.
+    function movementFreeGroup(a, b, c, d, e) {
+      // Keep quantity and event types separate while avoiding a repeated zero tuple.
+      return [a.get('receivedQty', 0), a.get('warehouseShippedQty', 0), a.get('deliveredQty', 0), b.get('receivedQty', 0), b.get('warehouseShippedQty', 0), b.get('deliveredQty', 0), c.get('receivedQty', 0), c.get('warehouseShippedQty', 0), c.get('deliveredQty', 0), d.get('receivedQty', 0), d.get('warehouseShippedQty', 0), d.get('deliveredQty', 0), e.get('receivedQty', 0), e.get('warehouseShippedQty', 0), e.get('deliveredQty', 0)].hasOnly([0])
+        && [a.get('receiptEvents', []), b.get('receiptEvents', []), c.get('receiptEvents', []), d.get('receiptEvents', []), e.get('receiptEvents', [])].hasOnly([[]]);
+    }
+    function orderBeforeFirstMovement(order) {
+      let original = order.get('items', []);
+      let count = original.size();
+      // Pad the final group only; every existing line is checked.
+      let items = original.concat([{}, {}, {}, {}]);
+      return orderWithoutGlobalReceipt(order) && count <= 30
+        && (count <= 0 || movementFreeGroup(items[0], items[1], items[2], items[3], items[4]))
+        && (count <= 5 || movementFreeGroup(items[5], items[6], items[7], items[8], items[9]))
+        && (count <= 10 || movementFreeGroup(items[10], items[11], items[12], items[13], items[14]))
+        && (count <= 15 || movementFreeGroup(items[15], items[16], items[17], items[18], items[19]))
+        && (count <= 20 || movementFreeGroup(items[20], items[21], items[22], items[23], items[24]))
+        && (count <= 25 || movementFreeGroup(items[25], items[26], items[27], items[28], items[29]));
     }
 
     function orderUpdateAllowed(id) {
@@ -1825,11 +1848,11 @@ service cloud.firestore {
         ? warehouseLogisticsOrderUpdate(id)
         : changed.hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId'])
         && changed.hasOnly(['items','logisticsPlanItemIndex','logisticsPlanActorUid','logisticsPlanEventId','logisticsHistory','updatedAt'])
-        ? warehouseDeliveryPlanUpdate() : detailsOnly ? (orderBeforeFirstReceipt(resource.data) && !orderIsCancelled(resource.data)
+        ? warehouseDeliveryPlanUpdate() : detailsOnly ? (orderBeforeFirstMovement(resource.data) && !orderIsCancelled(resource.data)
         && (!changed.hasAny(['transactionType']) || request.resource.data.get('transactionType', '') in ['直','借','扣'])
         && (userRole == 'admin' || userRole in ['sales','engineer']
           && (resource.data.get('ownerUid', '') == request.auth.uid || owns(resource.data))))
-        : (!changed.hasAny(['transactionType','invoiceTitle','remarks','shippingInstructions']) || (orderBeforeFirstReceipt(resource.data)
+        : (!changed.hasAny(['transactionType','invoiceTitle','remarks','shippingInstructions']) || (orderBeforeFirstMovement(resource.data)
           && (!changed.hasAny(['transactionType']) || request.resource.data.get('transactionType', '') in ['直','借','扣'])))
         && (changed.hasAny(['isBilled','billingDate']) ? validClientBillingUpdate() : true)
         && (!changed.hasAny(['status','orderStatus']) || validOrderCancellationTransition())

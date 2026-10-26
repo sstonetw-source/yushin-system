@@ -3295,3 +3295,16 @@ test('new orders cap line items at fifteen without blocking legacy metadata upda
  await seed('orders/legacy-sixteen',{...base,items:[...items,{...items[0]}]});
  await assertSucceeds(updateDoc(doc(db('sales1'),'orders/legacy-sixteen'),{remarks:'保留舊訂單'}));
 });
+
+
+test('commercial metadata cannot bypass the UI lock when only a line has shipment or delivery history',async()=>{
+ for(const count of [1,4,5,6,15,16,29,30])for(const uid of ['sales1','eng1','admin'])for(const field of ['warehouseShippedQty','deliveredQty']){
+  const items=Array.from({length:count},(_,i)=>({itemId:'I'+i,qty:3,receivedQty:0,...(i===count-1?{[field]:1}:{})}));
+  const owner=uid==='eng1'?'eng1':'sales1',salesCode=uid==='eng1'?'E01':'S01';
+  await seed('orders/line-shipment-lock',{ownerUid:owner,salesCode,status:'active',items:items.map(item=>({...item,[field]:0})),transactionType:'借',remarks:'old'});
+  await assertSucceeds(updateDoc(doc(db(uid),'orders/line-shipment-lock'),{remarks:'allowed before movement'}));
+  await seed('orders/line-shipment-lock',{ownerUid:owner,salesCode,status:'active',items,transactionType:'借',remarks:'old'});
+  for(const patch of [{remarks:'new'},{invoiceTitle:'公司'},{transactionType:'直'}])
+   await assertFails(updateDoc(doc(db(uid),'orders/line-shipment-lock'),patch));
+ }
+});
