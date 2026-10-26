@@ -24,8 +24,9 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
    const canEditPage=()=>true,canManageOrderLifecycleCapability=()=>false,populatePurchaserOrderFilters=()=>[],normalizedOrderItems=o=>o.items;
    const itemDispatchState=()=>({pending:0,shippable:0}),orderLifecycleInfo=()=>({status:'normal'}),renderOrderWorkCards=()=>{},orderItemDisplayCategories=(o,i)=>window.fixtureCategoriesByItem?.[i.itemId]||window.fixtureCategories||['delivery'],orderMatchesWorkPeriod=()=>true;
    const waitingDaysFromDate=()=> '0 天',receivingWorkProgress=()=>({received:0,target:30,remaining:30});
+   const orderBillingDate=()=> '2026-10-26';
    const deliveryProgressInfo=()=>({state:'pending'}),orderContextActionState=()=>({}),orderDeliveryRequiresItemForm=()=>false,bindListRowSelection=()=>{};
-   const stripPhoneSuffix=x=>x||'',orderInventorySyncIncomplete=()=>false,inlineJsValue=x=>JSON.stringify(x).replaceAll(String.fromCharCode(34),'&quot;'),canBusinessSelfOrder=()=>false;
+   const stripPhoneSuffix=x=>x||'',orderInventorySyncIncomplete=()=>false,inlineJsValue=x=>JSON.stringify(x).replaceAll(String.fromCharCode(34),'&quot;'),canBusinessSelfOrder=()=>!!window.fixtureCanBill;
    const orderDeliveryPlanSummary=()=>'',selfOrderActionHtml=()=>'',orderLifecycleActionButtons=()=>'',orderInventorySyncStatusHtml=()=>'',directShipReceiptActionHtml=()=>'';
    const escapeHtml=x=>String(x??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;'),escapeAttr=escapeHtml;
    const serviceCaseTransport=()=>({uid:'U',role:'sales'}),pendingServiceCaseIntent=()=>null;
@@ -58,7 +59,7 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
   const amount=page.locator('.order-money-cell');assert.equal(await amount.getAttribute('data-th'),'訂單金額');assert.match(await amount.innerText(),/NT\$ 339,000/);assert.equal(await page.locator('.workflow-price-breakdown').isVisible(),false);
   await page.locator('.order-detail-panel > summary').click();
   const drawer=page.locator('.order-detail-drawer');await drawer.waitFor({state:'visible'});assert.equal(await drawer.evaluate(d=>d.contains(document.activeElement)),true);await page.keyboard.press('Escape');assert.equal(await drawer.isVisible(),false);await page.locator('.order-detail-panel > summary').click();await drawer.waitFor({state:'visible'});
-  const details=page.locator('.order-detail-panel');assert.match(await details.innerText(),/11,300 × 30 ＝ NT\$ 339,000/);assert.match(await details.innerText(),/採購方式：採購統一訂貨/);assert.match(await details.innerText(),/交付方式：我送・主倉自領/);
+  const details=page.locator('.order-detail-panel');assert.match(await details.innerText(),/11,300 × 30[\s\S]*品項小計 NT\$ 339,000/);assert.match(await details.innerText(),/採購方式：採購統一訂貨/);assert.match(await details.innerText(),/交付方式：業務送・主倉自領/);
   await page.screenshot({path:'/tmp/order-drawer-'+width+'.png',fullPage:true});
   await details.locator('.order-commercial-editor > summary').click();
   assert.equal(await details.locator('.order-remarks-editor input').inputValue(),'冷藏配送');assert.equal(await details.locator('.order-transaction-cell select').isDisabled(),false);
@@ -73,6 +74,12 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
   assert.equal(await details.getByRole('button',{name:'修改交付方式／地址'}).count(),0);assert.match(await details.innerText(),/已鎖定/);
   if(width===390)assert.equal(await page.locator('#ordersTable').evaluate(el=>el.scrollWidth<=el.clientWidth+1),true);
   await page.locator('[data-order-drawer-close]').click();await page.mouse.move(0,0);await page.evaluate(()=>{document.getElementById('appContainer').scrollTop=0;window.scrollTo(0,0);});await page.screenshot({path:'/tmp/order-amount-details-'+width+'.png',fullPage:true});
+  assert.equal(await page.locator('.order-product-cell .workflow-quantity').count(),0);
+  assert.match(await amount.innerText(),/11,300 × 30/);
+  await page.evaluate(()=>{window.fixtureCanBill=true;ordersCache[0].isBilled=true;renderOrdersList();});
+  if(width>768){const ys=await page.locator('.order-detail-panel > summary,.order-billing-action,.order-more-menu > summary').evaluateAll(es=>es.map(e=>e.getBoundingClientRect().y));assert.ok(Math.max(...ys)-Math.min(...ys)<=1,'detail, billing and more share one desktop row '+JSON.stringify(await page.locator('.order-detail-panel > summary,.order-billing-action,.order-more-menu > summary').evaluateAll(es=>es.map(e=>({text:e.innerText,rect:e.getBoundingClientRect().toJSON(),display:getComputedStyle(e).display})))));}
+  await page.screenshot({path:'/tmp/order-inline-actions-'+width+'.png',fullPage:true});
+  await page.evaluate(()=>{window.fixtureCanBill=false;ordersCache[0].isBilled=false;renderOrdersList();});
   let columns;
   for(const stage of ['ordering','arrival','dispatch','shipping','billing','complete']){
    await page.evaluate(stage=>{window.fixtureCategories=['ordering','arrival','dispatch','shipping','billing','complete'];activeOrderWorkFilter=stage;renderOrdersList();},stage);
@@ -82,7 +89,7 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
   assert.equal(await page.locator('#ordersBody .order-product-cell').getByText('其他分頁測試品項',{exact:true}).count(),0);
   await page.locator('.order-detail-panel > summary').click();await drawer.waitFor({state:'visible'});
   assert.match(await drawer.innerText(),/目前分頁品項/);assert.match(await drawer.innerText(),/訂單總額/);assert.match(await drawer.innerText(),/品項小計/);
-  await drawer.getByText('同張訂單其他品項',{exact:true}).click();assert.match(await drawer.innerText(),/其他分頁測試品項/);
+  assert.equal(await drawer.getByText('同張訂單其他品項',{exact:true}).count(),0);assert.match(await drawer.innerText(),/其他分頁測試品項/);
   await page.evaluate(()=>{window.openWarehouseDeliveryPlan=()=>{window.deliveryEditorOpened=true;};});
   await drawer.getByRole('button',{name:'修改交付方式／地址'}).first().click();await drawer.waitFor({state:'hidden'});assert.equal(await page.evaluate(()=>window.deliveryEditorOpened),true);
   await page.evaluate(()=>{const row=document.createElement('tr');row.innerHTML='<td><div class="order-compact-actions"><button class="btn-secondary" onclick="openOrderDirectShipReceipt()">到貨</button><button onclick="toggleOrderStatus()">核銷</button></div></td>';organizeOrderRowActions(row,'arrival');window.fixtureActions=row;});assert.equal(await page.evaluate(()=>window.fixtureActions.querySelectorAll('.order-primary-action').length),1);assert.equal(await page.evaluate(()=>window.fixtureActions.querySelector('button[onclick="toggleOrderStatus()"]').classList.contains('btn-secondary')),true);

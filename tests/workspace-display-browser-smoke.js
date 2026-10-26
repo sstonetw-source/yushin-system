@@ -41,13 +41,21 @@ function fn(name){const a=source.indexOf('function '+name+'('),b=source.indexOf(
    const id={ordering:'purchasePendingBody',dispatch:'purchaseDispatchBody',completed:'purchaseCompletedBody',receiving:'poListBody'}[view],row=page.locator('#'+id+' > tr').first();
    assert.match(await row.innerText(),/RNeasy Mini Kit/);assert.match(await row.innerText(),/74104/);assert.match(await row.innerText(),/YS-20261026-1/);assert.equal(await row.locator('測試').count(),0);
    const fields=await row.locator(':scope > td').evaluateAll(nodes=>nodes.map(n=>n.getAttribute('data-th')));
-   assert.ok(fields.findIndex(x=>/品項/.test(x))<fields.indexOf('負責業務'));
+   assert.ok(fields.findIndex(x=>/品項/.test(x))<fields.indexOf('負責業務'));assert.equal(await row.locator('.workflow-product .workflow-quantity').count(),0);assert.match(await row.locator('td[data-th="數量"]').innerText(),/\d/);
    const reference=row.locator('.workflow-record time');assert.equal(await reference.evaluate(e=>e.getClientRects().length),1);
    if(width===390){assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,view+' page overflow');assert.ok(await row.locator('button').evaluateAll(nodes=>nodes.every(e=>e.getBoundingClientRect().height>=44)));}
    await page.locator('#purchaseWorkSearch').fill('不存在的產品');assert.equal(await page.locator('#'+id+' > tr').count(),0);
    await page.locator('#purchaseWorkSearch').fill('74104');assert.equal(await page.locator('#'+id+' > tr').count(),1);
    if(process.env.WORKSPACE_SCREENSHOT_DIR){fs.mkdirSync(process.env.WORKSPACE_SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:process.env.WORKSPACE_SCREENSHOT_DIR+'/'+view+'-'+width+'.png',fullPage:true});}
   }
+  await page.addScriptTag({content:`
+   const purchasingView='history',poHistorySearchActive=false,poHistorySearchLoading=false,poHistorySearchResults=[],companyData={};
+   const poListCache=[{id:'PO1',poNo:'PO-1',poDate:'2026-10-26',vendorName:'供應商',buyerName:'採購',status:'CONFIRMED',items:[{itemName:'採購品項',itemCode:'74104',qty:3,unitPrice:100}]}];
+   const purchaseItemsFromSavedPo=p=>p.items,purchaseOrderSupplierContact=()=>'',purchaseHistoryItemReceiptProgress=()=>({remainingQty:0,label:'已到貨'}),poWaitingDays=()=>'',purchaseOrderDocumentStatusLabel=()=> '已確認',canEditPage=()=>true,localDateString=()=> '2026-10-26';
+  `});
+  const listStart=source.indexOf('window.renderPoList = function('),listEnd=source.indexOf('\n};',listStart)+3;await page.addScriptTag({content:source.slice(listStart,listEnd)});
+  await page.evaluate(()=>{document.getElementById('poListSearch').value='';document.getElementById('poListPanel').style.display='block';renderPoList();});
+  assert.equal(await page.locator('#poListBody .workflow-product .workflow-quantity').count(),0);assert.match(await page.locator('#poListBody td[data-th="品項金額"]').innerText(),/105 × 3[\s\S]*315/);
   for(const role of ['sales','engineer','warehouse','purchaser','admin']){
    await page.evaluate(role=>{currentUserRole=role;renderPurchasingDispatchOrders();},role);
    assert.equal(await page.locator('#purchaseDispatchBody button').count(),['purchaser','admin'].includes(role)?1:0);
