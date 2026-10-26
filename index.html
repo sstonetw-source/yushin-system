@@ -14,7 +14,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261026-295-2">
+        <link rel="stylesheet" href="styles.css?v=20261026-296">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -979,7 +979,7 @@
                 <span id="purchasePendingStatus" role="status"></span>
             </div>
             <div class="table-wrap"><table class="workflow-list-table">
-                <thead><tr><th class="no-print">合併</th><th>需求日期</th><th>客戶／用途</th><th>待採購品項</th><th>負責業務</th><th>操作</th></tr></thead>
+                <thead><tr><th class="no-print">合併</th><th>需求日期</th><th>客戶／用途</th><th>待採購品項</th><th>數量</th><th>負責業務</th><th>操作</th></tr></thead>
                 <tbody id="purchasePendingBody"></tbody>
             </table></div>
             <div class="po-load-more-row no-print"><button type="button" id="purchasePendingMoreBtn" class="btn-secondary" style="display:none" onclick="loadPendingPurchaseOrders(false)">載入更多（每次 50 筆）</button></div>
@@ -1003,7 +1003,7 @@
             </div>
 
             <div class="table-wrap"><table class="workflow-list-table">
-                <thead><tr><th>訂單日期</th><th>客戶</th><th>待打單品項</th><th>負責業務</th><th>操作</th></tr></thead>
+                <thead><tr><th>訂單日期</th><th>客戶</th><th>待打單品項</th><th>數量</th><th>負責業務</th><th>操作</th></tr></thead>
                 <tbody id="purchaseDispatchBody"></tbody>
             </table></div>
             <div class="po-load-more-row no-print"><button type="button" id="purchaseDispatchMoreBtn" class="btn-secondary" style="display:none" onclick="loadPurchasingDispatchOrders(false)">載入更多（每次 50 筆）</button></div>
@@ -1011,7 +1011,7 @@
         <div id="purchaseCompletedPanel" style="display:none">
             <div class="toolbar no-print"><span id="purchaseCompletedStatus" role="status"></span></div>
 
-            <div class="table-wrap"><table class="workflow-list-table"><thead><tr><th>訂單日期</th><th>客戶</th><th>已完成採購品項</th><th>負責業務</th><th>操作</th></tr></thead><tbody id="purchaseCompletedBody"></tbody></table></div>
+            <div class="table-wrap"><table class="workflow-list-table"><thead><tr><th>訂單日期</th><th>客戶</th><th>已完成採購品項</th><th>數量</th><th>負責業務</th><th>操作</th></tr></thead><tbody id="purchaseCompletedBody"></tbody></table></div>
             <div class="po-load-more-row no-print"><button type="button" id="purchaseCompletedMoreBtn" class="btn-secondary" style="display:none" onclick="loadMorePurchasingCompleted()">載入更多（每次 50 筆）</button></div>
         </div>
         <div id="purchaseSupplierPanel" style="display:none">
@@ -1106,7 +1106,7 @@
                 </div>
                 <div class="order-shipping-details">
                 <h5>交付方式</h5>
-                <label for="orderDeliveryChoice">由誰送客戶</label><select id="orderDeliveryChoice" onchange="onOrderDeliveryChoiceChange()"><option value="BUSINESS">我送客戶</option><option value="CUSTOMER">倉庫寄客戶</option><option value="DIRECT">原廠直接送客戶</option></select>
+                <label for="orderDeliveryChoice">由誰送客戶</label><select id="orderDeliveryChoice" onchange="onOrderDeliveryChoiceChange()"><option value="BUSINESS">業務送客戶</option><option value="CUSTOMER">倉庫寄客戶</option><option value="DIRECT">原廠直接送客戶</option></select>
                 <input type="hidden" id="orderFulfillmentType" value="WAREHOUSE"><input type="hidden" id="orderWarehouse" value="">
                 <div id="orderEntryDeliverySummary" class="order-entry-summary" aria-live="polite"></div>
                 <details class="order-entry-details" id="orderRecipientDetails"><summary>收件資訊</summary><div id="orderShippingFields"></div></details>
@@ -1703,9 +1703,9 @@
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261013-file-share"></script>
     <script src="modules/order-commercial-details.js?v=20261025-1"></script>
-    <script src="modules/order-entry-core.js?v=20261025-3"></script>
+    <script src="modules/order-entry-core.js?v=20261026-296"></script>
 <script src="modules/service-work-core.js?v=20261023-2"></script>
-    <script src="app.js?v=20261026-295-2"></script>
+    <script src="app.js?v=20261026-296"></script>
     <script src="modules/order-self-order-required.js?v=20261013-1"></script>
     <script src="modules/customer-cancellations.js?v=20261021-3"></script>
     <script src="modules/free-stock-recovery.js?v=20261014-9"></script>
