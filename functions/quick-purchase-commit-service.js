@@ -90,6 +90,18 @@ async function commitV2QuickPurchase(db,uid,data){
      ||!item.orderEvents.some(e=>e.id==='quick-'+intent.operationId
        &&e.type==='PURCHASING_MANUAL'&&e.qty===intent.qty))
     fail('failed-precondition','重送採購的來源訂單憑證不一致');
+   // An operation checkpoint cannot acknowledge a purchase whose authoritative
+   // Demand has been deleted or relinked after the original atomic commit.
+   // Check immutable identity only: later valid receipts/cancellations may
+   // legitimately change demand quantities and status.
+   const demandProof=await tx.get(ref('procurementDemands',encodeURIComponent(demandId)));
+   const demandData=demandProof.exists?demandProof.data():null;
+   if(!demandData||demandData.demandId!==demandId
+     ||demandData.sourceType!=='SALES_ORDER'
+     ||demandData.sourceId!==intent.orderId||demandData.sourceItemId!==intent.itemId
+     ||demandData.productId!==supply.productId||demandData.productKey!==supply.productKey
+     ||demandData.ownerUid!==sourceData.ownerUid||demandData.salesCode!==sourceData.salesCode)
+    fail('failed-precondition','重送採購的權威需求憑證不一致');
    if(!directShip){
     const movement=await tx.get(movementRef),ledger=movement.exists?movement.data():null;
     if(!ledger||ledger.type!=='purchase_incoming'||ledger.qty!==intent.qty
