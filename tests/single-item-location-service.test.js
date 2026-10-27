@@ -61,7 +61,7 @@ test('whole-order intent is bounded, canonical and never accepts caller quantiti
  const first=normalizeOrderCommitIntent(data);
  assert.deepEqual(first.itemIds,['I1','I2']);
  assert.equal(first.hash,normalizeOrderCommitIntent({...data,itemIds:['I1','I2'],warehouseIds:['A','B']}).hash);
- for(const bad of [{...data,itemIds:[]},{...data,itemIds:['I1','I1']},{...data,itemIds:['I1','I2','I3','I4','I5','I6']},
+ for(const bad of [{...data,itemIds:[]},{...data,itemIds:['I1','I1']},{...data,itemIds:Array.from({length:16},(_,i)=>'I'+i)},
   {...data,itemIds:['I/1']},{...data,quantity:100},{...data,actorUid:'admin'},{...data,actorRole:'admin'}])
   assert.throws(()=>normalizeOrderCommitIntent(bad));
  assert.notEqual(first.hash,normalizeOrderCommitIntent({...data,itemIds:['I1']}).hash);
@@ -92,4 +92,12 @@ test('whole-order lifecycle intent covers all ids canonically and refuses mixed 
  for(const patch of [{itemIds:[]},{itemIds:['I1','I1']},{itemIds:['1','2','3','4','5','6']},{itemId:'I1'},{actorRole:'admin'},{quantity:99}])
   assert.throws(()=>normalizeOrderLifecycleIntent({...data,...patch}));
  return assert.rejects(commitOrderLocationLifecycle({projectId:'production'},'actor',data),/僅允許/);
+});
+
+test('whole-order fifteen-line contract binds every item without changing source-order priority',()=>{
+ const {normalizeOrderCommitIntent}=require('../functions/single-item-location-service');
+ const input={orderId:'O',itemIds:Array.from({length:15},(_,i)=>'I'+i),warehouseIds:['A','B'],attemptId:'fifteen_init_12345',syncAttemptId:'sync_fifteen_12345'};
+ assert.equal(normalizeOrderCommitIntent(input).itemIds.length,15);
+ assert.equal(normalizeOrderCommitIntent(input).hash,normalizeOrderCommitIntent({...input,itemIds:[...input.itemIds].reverse()}).hash);
+ assert.notEqual(normalizeOrderCommitIntent(input).hash,normalizeOrderCommitIntent({...input,itemIds:input.itemIds.slice(0,14)}).hash);
 });
