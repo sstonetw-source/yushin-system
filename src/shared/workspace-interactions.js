@@ -5,10 +5,21 @@
   if(root.workspaceMenusInitialized)return;root.workspaceMenusInitialized=true;
   const selector='.order-more-menu,.quote-more-menu,.po-more-menu,.inventory-more-menu';
   let active=null;
+  // Browsers can restore <details open> after refresh without user interaction.
+  // Only an explicit summary activation may open the shared action dialog.
+  const userActivatedMenus=new WeakSet();
+  document.addEventListener('click',event=>{
+   const summary=event.target.closest?.('summary');
+   const menu=summary?.parentElement;
+   if(menu?.matches(selector))userActivatedMenus.add(menu);
+  },true);
   function close(){if(!active)return;const {menu,panel,dialog,trigger}=active;active=null;menu.append(panel);menu.open=false;if(dialog.open)dialog.close();dialog.remove();if(trigger.isConnected)trigger.focus({preventScroll:true});}
   document.addEventListener('toggle',event=>{
    const menu=event.target;if(!menu.matches?.(selector))return;
-   if(!menu.open){if(active?.menu===menu)close();return;}if(active?.menu===menu)return;close();
+   if(!menu.open){userActivatedMenus.delete(menu);if(active?.menu===menu)close();return;}
+   if(!userActivatedMenus.has(menu)){menu.open=false;return;}
+   userActivatedMenus.delete(menu);
+   if(active?.menu===menu)return;close();
    const panel=menu.querySelector('[class$="-menu-popover"]');if(!panel)return;
    const row=menu.closest('tr'),dialog=document.createElement('dialog');dialog.className='workspace-menu-dialog';dialog.workspaceSourceSection=menu.closest('.content-section');dialog.setAttribute('aria-label','更多操作');
    const header=document.createElement('header'),title=document.createElement('strong'),context=document.createElement('p'),button=document.createElement('button');
