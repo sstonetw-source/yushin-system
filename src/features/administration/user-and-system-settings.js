@@ -111,7 +111,7 @@ window.reloadSalesFromUsers = function() {
         if (generation !== sessionDataGeneration) return;
         salesList = rows
             .filter(d => d.name && d.code)
-            .map(d => ({ uid:d.id, code:d.code, name:d.name, phone:d.phone || '', role:d.role || 'sales', active:d.active !== false }))
+            .map(d => ({ uid:d.id, code:d.code, name:d.name, phone:d.phone || '', deliveryDefaults:d.deliveryDefaults || {}, role:d.role || 'sales', active:d.active !== false }))
             .sort((a,b)=>String(a.code||'').localeCompare(String(b.code||'')));
 
         allUsersCache = rows.map(d => ({

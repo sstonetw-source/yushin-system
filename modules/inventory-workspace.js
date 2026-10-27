@@ -66,7 +66,7 @@
       receive.textContent=error?'收貨（—）':!ready?'收貨（…）':`收貨（${purchaseRows(supplyReceivingCache).length+returnRows(customerReturnOrders).length+transferCount}）`;
       receive.title=error?'部分收貨資料讀取失敗':!ready?'收貨資料讀取中':'';
     }
-    if(ship)ship.textContent=orderWorkQueueError?'出貨（—）':!orderWorkQueueReady?'出貨（…）':`出貨（${currentShippingRows().filter(r=>['CUSTOMER_SHIP','SALES_SHIP'].includes(root.YushinWarehouseLogistics.plan(r.item.deliveryPlan||r.order.shippingInstructions||{}).mode)).length}）`;
+    if(ship)ship.textContent=orderWorkQueueError?'出貨（寄貨—）':!orderWorkQueueReady?'出貨（寄貨…）':`出貨（寄貨 ${currentShippingRows().filter(r=>['CUSTOMER_SHIP','SALES_SHIP'].includes(root.YushinWarehouseLogistics.plan(r.item.deliveryPlan||r.order.shippingInstructions||{}).mode)).length}）`;
     renderWorkCards();
     renderWorkspaceErrors();
     if(!operational&&view!=='stock')switchInventoryWorkView('stock');
@@ -101,6 +101,7 @@
   root.renderInventoryPurchaseReceiving=function(){
     const body=el('inventoryReceivingBody');if(!body)return;
     const rows=purchaseRows(supplyReceivingCache).sort((a,b)=>String(a.supplierName||a.supplier||'').localeCompare(String(b.supplierName||b.supplier||''),'zh-Hant')||String(a.purchaseDocumentNo||a.purchaseOrderNo||'').localeCompare(String(b.purchaseDocumentNo||b.purchaseOrderNo||'')));
+    const empty=rows.length===0&&activeReceivingSupplyReady&&!activeReceivingSupplyError;const table=body.closest?.('.inventory-work-table');if(table)table.hidden=empty;
     el('inventoryReceivingHead').innerHTML='<th>來源／採購單</th><th>供應商</th><th>品項</th><th>收貨倉庫</th><th>採購／已收／待收數量</th><th>採購單價／待收金額</th><th>操作</th>';
     body.innerHTML=rows.slice(0,50).map(s=>{
       const wh=warehouseMasterCache.find(w=>w.id===s.warehouseId);
@@ -152,7 +153,7 @@
       const button=el({stock:'inventoryStockTabBtn',receiving:'inventoryReceivingTabBtn',shipping:'inventoryShippingTabBtn'}[key]);
       button?.classList.toggle('active',key===view);button?.setAttribute('aria-pressed',String(key===view));
     }
-    if(next==='stock'){if(canReceiveInventoryCapability()){await root.loadFreeStockRecovery?.();await loadWarehouseMaster();await loadOrderWorkQueue();await root.loadMainTransferRequests?.();root.renderMainTransferRequests?.();}return;}
+    if(next==='stock'){if(canReceiveInventoryCapability()){await root.loadFreeStockRecovery?.();await loadWarehouseMaster();}return;}
     if(next==='receiving'){
       switchInventoryReceivingKind(receivingKind);
       await loadInventoryWorkspace();
@@ -168,6 +169,14 @@
     root.renderWarehouseTransfers?.();
     if(receivingKind==='transfers')root.loadWarehouseTransferQueue?.(true);
     renderWorkCards();renderWorkspaceErrors();
+  };
+  root.switchInventoryShippingScope=async function(scope){
+    if(!canReceiveInventoryCapability())return;
+    const transfer=scope==='transfer';
+    el('inventoryCustomerShippingPanel').style.display=transfer?'none':'';
+    el('inventoryTransferShippingPanel').style.display=transfer?'':'none';
+    if(transfer){await loadInventoryWorkspace();await root.loadMainTransferRequests?.();root.renderMainTransferRequests?.();}
+    else renderInventoryShipping();
   };
   root.switchInventoryShippingKind=function(kind){
     shippingKind=kind==='branch'?'branch':'main';shippingLimit=50;renderInventoryShipping();
@@ -208,6 +217,9 @@
     }).join('');
     el('inventoryShippingMoreBtn').style.display=rows.length>shippingLimit?'':'none';
     el('inventoryShippingStatus').textContent=orderWorkQueueError?'出貨資料尚未確認，請重試；以下若有清單，為上次讀取的資料。':!orderWorkQueueReady?'正在讀取已打單待出貨品項…':`${rows.length} 筆待寄貨品項。`;
+    const empty=orderWorkQueueReady&&!orderWorkQueueError&&rows.length===0;
+    const table=body.closest?.('.inventory-work-table');if(table)table.hidden=empty;
+    const batch=document.querySelector?.('.inventory-shipping-batch-actions');if(batch)batch.hidden=empty;
     root.renderMainTransferRequests?.();
     updateBadges();
   };

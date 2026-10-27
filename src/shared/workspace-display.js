@@ -94,6 +94,8 @@ function workflowPurchaseOrderDetails(order) {
 // Keep stage-specific action handlers and quantities; only reorganize the presentation.
 function organizePurchasingOrderRow(row, order, item) {
     row.classList.add('workflow-order-context-row');
+    row.dataset.menuTitle=[order?.customerName,order?.orderNo,order?.orderDate].filter(Boolean).join(' · ');
+    row.dataset.menuScope='整張訂單操作';
     const cells=[...row.children],find=label=>cells.find(cell=>cell.dataset.th===label);
     const product=cells.find(cell=>/品項$/.test(cell.dataset.th||''));
     if (!product) return;
@@ -112,3 +114,24 @@ function organizePurchasingOrderRow(row, order, item) {
     row.closest('table')?.classList.add('workflow-order-context-table');
     bindOrderDetailDrawer(row);
 }
+
+// Compact stock list, with complete warehouse/lot evidence retained in a modal.
+window.organizeInventoryList=function(body,chosenWarehouse){
+ const table=body.closest('table');if(table?.tHead)table.tHead.rows[0].innerHTML='<th>產品資訊</th><th>倉庫</th><th>現有庫存</th><th>已預留</th><th>可用庫存</th><th>在途</th><th>操作</th>';
+ for(const row of body.children){
+  const cells=[...row.children];if(cells.length!==13)continue;
+  const title=[cells[1].querySelector('strong')?.textContent,cells[0].textContent].filter(Boolean).join(' · ');
+  row.dataset.menuTitle=title+' · '+(chosenWarehouse?(document.getElementById('inventoryWarehouseFilter')?.selectedOptions[0]?.textContent||'所選倉庫'):'全部倉庫合計');row.dataset.menuScope='庫存品項操作';
+  const details=document.createElement('dialog');details.className='order-detail-drawer inventory-detail-dialog';details.setAttribute('aria-label','庫存明細');
+  details.innerHTML=`<header class="order-drawer-heading"><h3>庫存明細</h3><button type="button" class="btn-secondary" onclick="this.closest('dialog').close()">關閉</button></header><div class="order-detail-content"><section class="order-drawer-section"><h4>${escapeHtml(title)}</h4><dl class="order-drawer-summary"></dl></section></div>`;
+  const list=details.querySelector('dl');for(const cell of cells.slice(3,12)){const group=document.createElement('div'),term=document.createElement('dt'),value=document.createElement('dd');term.textContent=cell.dataset.th;while(cell.firstChild)value.append(cell.firstChild);group.append(term,value);list.append(group);}
+  // Restore metrics to visible cells while originals remain in the evidence drawer.
+  for(const index of [4,5,6,9])cells[index].innerHTML=list.children[index-3].querySelector('dd').innerHTML;
+  const product=cells[1];product.dataset.th='產品資訊';product.querySelectorAll('.inventory-mobile-summary,.inventory-mobile-brand').forEach(el=>el.remove());product.insertAdjacentHTML('beforeend',`<small>${escapeHtml(cells[2].textContent)} · 貨號 ${escapeHtml(cells[0].textContent)}</small>`);
+  const warehouse=document.createElement('td');warehouse.dataset.th='倉庫';warehouse.textContent=chosenWarehouse?(document.getElementById('inventoryWarehouseFilter')?.selectedOptions[0]?.textContent||'所選倉庫'):'全部倉庫合計';
+  const actions=cells[12],area=actions.querySelector('.inventory-row-actions');
+  if(area){const more=document.createElement('details');more.className='inventory-more-menu';more.innerHTML='<summary>更多</summary><div class="inventory-more-menu-popover"></div>';for(const control of [...area.children])if(!control.classList.contains('inventory-details-toggle'))more.lastElementChild.append(control);if(more.lastElementChild.children.length)area.append(more);area.append(details);}
+  if(row.dataset.warehousePending==='true'){for(const i of [4,5,6,9]){cells[i].textContent='待確認';list.children[i-3].querySelector('dd').textContent='待確認';}warehouse.append('（資料待確認）');}
+  row.replaceChildren(product,warehouse,cells[4],cells[5],cells[6],cells[9],actions);row.classList.add('inventory-compact-row');
+ }
+};

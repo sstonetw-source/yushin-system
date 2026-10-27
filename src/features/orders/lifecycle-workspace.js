@@ -6,7 +6,7 @@ function confirmOrderCancellation(order) {
         const incoming=items.reduce((sum,item)=>sum+Math.max(0,Number(item.supplyOrderedQty||0)-Number(item.receivedQty||0)),0);
         const documents=[...new Set(items.flatMap(item=>item.purchaseDocumentNos||[]))];
         const action=progress.delivered>0?'取消剩餘未送貨數量':'取消訂單';
-        const message=[`${action}：${progress.remaining} 個。`, `釋放庫存預留：${reserved} 個；已到貨的貨仍留在庫存。`,
+        const message=[`客戶：${order.customerName||order.customer||'未填寫'}｜訂單：${order.orderNo||order.quoteNo||'未編單號'}`,`${action}：${progress.remaining} 個。`, `釋放庫存預留：${reserved} 個；已到貨的貨仍留在庫存。`,
             incoming>0?`尚有 ${incoming} 個採購未到貨；已建立採購單不會自動取消，請到採購待到貨確認：供應商同意取消，或保留採購轉庫存。`:'',
             documents.length?`關聯採購單：${documents.join('、')}`:'',
             progress.delivered>0?'已送貨與退貨紀錄保留，已送出的貨不會自動退回庫存。':''].filter(Boolean).join('\n\n');

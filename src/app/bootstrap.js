@@ -338,7 +338,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     // 僅查看模式：保留搜尋、篩選、重新整理與開啟明細，攔截會改動資料的控制項。
     const blockReadonlyEdit = event => {
-        const section = event.target.closest?.('.content-section');
+        const section = event.target.closest?.('.content-section') || event.target.closest?.('.workspace-menu-dialog')?.workspaceSourceSection;
         if (!section || !section.classList.contains('active')) return;
         const pageKey = getActivePermissionPage();
         if (!pageKey || canEditPage(pageKey)) return;
@@ -369,67 +369,7 @@ window.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('change', blockReadonlyEdit, true);
     document.addEventListener('input', blockReadonlyEdit, true);
 
-    // 訂單／估價單／採購單的「更多」選單共用同一組事件代理：
-    // 全站同一時間只開一個；點擊外部、完成選擇或按 Esc 都會收起。
-    const moreMenuSelector = '.order-more-menu, .quote-more-menu, .po-more-menu';
-    const openMoreMenuSelector = '.order-more-menu[open], .quote-more-menu[open], .po-more-menu[open]';
-    const orderMenuMobile = window.matchMedia('(max-width: 640px)');
-    let orderMenuScrollLock = null;
-    function syncOrderMenuViewport() {
-        const openOrderMenu = document.querySelector('#ordersBody .order-more-menu[open]');
-        const lock = orderMenuMobile.matches && !!openOrderMenu;
-        if (lock && !orderMenuScrollLock) {
-            const body = document.body;
-            orderMenuScrollLock = { y: window.scrollY, position: body.style.position, top: body.style.top, left: body.style.left, right: body.style.right };
-            body.style.position = 'fixed';
-            body.style.top = `-${orderMenuScrollLock.y}px`;
-            body.style.left = '0';
-            body.style.right = '0';
-            body.classList.add('order-menu-open');
-        } else if (!lock && orderMenuScrollLock) {
-            const saved = orderMenuScrollLock;
-            orderMenuScrollLock = null;
-            const body = document.body;
-            body.classList.remove('order-menu-open');
-            ['position', 'top', 'left', 'right'].forEach(key => { body.style[key] = saved[key]; });
-            window.scrollTo(0, saved.y);
-        }
-        if (lock) {
-            const viewport = window.visualViewport;
-            const height = viewport?.height || window.innerHeight;
-            const bottom = Math.max(0, window.innerHeight - height - (viewport?.offsetTop || 0));
-            openOrderMenu.style.setProperty('--order-menu-bottom', `${bottom + 16}px`);
-            openOrderMenu.style.setProperty('--order-menu-height', `${height}px`);
-        }
-    }
-    window.visualViewport?.addEventListener('resize', syncOrderMenuViewport);
-    window.visualViewport?.addEventListener('scroll', syncOrderMenuViewport);
-    window.addEventListener('resize', syncOrderMenuViewport);
-    document.addEventListener('toggle', event => {
-        const openedMenu = event.target.closest?.(moreMenuSelector);
-        if (!openedMenu?.open) { syncOrderMenuViewport(); return; }
-        document.querySelectorAll(openMoreMenuSelector).forEach(menu => {
-            if (menu !== openedMenu) menu.open = false;
-        });
-        syncOrderMenuViewport();
-    }, true);
-    document.addEventListener('click', event => {
-        const menu = event.target.closest?.(moreMenuSelector);
-        if (!menu) {
-            document.querySelectorAll(openMoreMenuSelector).forEach(openMenu => { openMenu.open = false; });
-            syncOrderMenuViewport();
-            return;
-        }
-        if (event.target.closest('.order-more-menu-popover button, .quote-more-menu-popover button, .po-more-menu-popover button')) {
-            menu.open = false;
-            syncOrderMenuViewport();
-        }
-    });
-    document.addEventListener('keydown', event => {
-        if (event.key !== 'Escape') return;
-        document.querySelectorAll(openMoreMenuSelector).forEach(menu => { menu.open = false; });
-        syncOrderMenuViewport();
-    });
+    window.initializeWorkspaceMenus?.();
 
     // 估價單表單的草稿自動儲存：只要在「建立估價單」區塊裡打字/選擇/切換任何東西，
     // 都會（debounce 一下）把目前整份內容存到本機瀏覽器，這樣關掉分頁重開也不會不見。

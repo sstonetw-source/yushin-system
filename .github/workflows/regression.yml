@@ -65,6 +65,8 @@ jobs:
         run: node tests/quick-brand-browser-smoke.js
       - name: Check warm sand typography and page alignment
         run: node tests/warm-sand-browser-smoke.js
+      - name: Check four workspace improvements in desktop and mobile Chrome
+        run: node tests/workspace-four-improvements-browser-smoke.js
       - name: Check unified order and purchasing work-list presentation
         run: node tests/workspace-display-browser-smoke.js
       - name: Check order entry in desktop and mobile Chrome

@@ -1181,12 +1181,31 @@ service cloud.firestore {
         && record.receiptId == id && record.qty == data.qty;
     }
 
+    // Personal defaults: only the authenticated active member's future-order defaults.
+    function validPersonalDefaults(p) {
+      return p is map && p.keys().hasOnly(['mode','warehouseId','contact','phone','address','packages','notes'])
+        && p.keys().hasAll(['mode','warehouseId','contact','phone','address','packages','notes'])
+        && p.mode in ['PICKUP','SALES_SHIP'] && p.warehouseId == '' && p.packages == 1
+        && p.contact is string && p.contact.size() <= 1000
+        && p.phone is string && p.phone.size() <= 1000
+        && p.address is string && p.address.size() <= 1000
+        && p.notes is string && p.notes.size() <= 1000
+        && (p.mode == 'PICKUP' || (p.contact.size() > 0 && p.phone.size() > 0 && p.address.size() > 0));
+    }
+    function validPersonalSettingsUpdate(id) {
+      return active() && id == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['phone','deliveryDefaults','updatedAt'])
+        && request.resource.data.phone is string && request.resource.data.phone.size() <= 100
+        && validPersonalDefaults(request.resource.data.deliveryDefaults)
+        && request.resource.data.updatedAt == request.time;
+    }
+
     match /users/{id} {
       allow read: if signedIn() && (id == request.auth.uid || active());
       allow create: if admin();
       // A signed-in member may sync only their own token email, never role,
       // ownership code, activation or delivery preferences.
-      allow update: if admin() || (active() && id == request.auth.uid
+      allow update: if admin() || validPersonalSettingsUpdate(id) || (active() && id == request.auth.uid
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['email'])
         && request.resource.data.get('email', '') is string
         && request.resource.data.email.size() > 0 && request.resource.data.email.size() <= 320

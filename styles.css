@@ -4819,3 +4819,70 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
 @media screen and (max-width:768px) {
     #appContainer #purchaseWorkSearch { flex:none; height:var(--ys-control-height); }
 }
+/* Shared workspace hierarchy and modal ownership; formal documents are unchanged. */
+@media screen {
+ #appContainer :is(#ordersTable,.workflow-list-table,#inventoryListTable,.inventory-work-table table) { font-size:15px; }
+ #appContainer :is(#ordersTable,.workflow-list-table,#inventoryListTable,.inventory-work-table table) th { font-size:16px; font-weight:700; color:var(--ys-text); background:var(--ys-table-head,var(--ys-surface)); border-color:var(--ys-border); }
+ #appContainer :is(#ordersTable,.workflow-list-table,#inventoryListTable,.inventory-work-table table) td { font-size:15px; border-color:var(--ys-border); text-align:left; vertical-align:top; }
+ #appContainer :is(#ordersTable,.workflow-list-table) .workflow-amount small { font-size:15px; color:var(--ys-text); }
+ #appContainer :is(#ordersTable,.workflow-list-table) .workflow-amount strong { font-size:15px; }
+ #appContainer :is(#ordersTable,.workflow-list-table) :is(.workflow-product strong,.workflow-commercial strong) { font-size:15px; }
+ #appContainer :is(#ordersTable,.workflow-list-table) .workflow-order-total { font-size:15px; font-weight:700; }
+ #appContainer :is(#ordersTable,.workflow-list-table) :is(.workflow-product small,.workflow-commercial small) { font-size:14px; }
+ #appContainer #ordersTable tbody > tr { background:var(--ys-surface)!important; border-color:var(--ys-border)!important; }
+ #appContainer #ordersTable td { border-color:var(--ys-border)!important; }
+ #appContainer #inventoryListTable { min-width:0; width:100%; table-layout:auto; }
+ #appContainer #inventoryListTable .inventory-compact-row > td { white-space:normal; min-width:0; max-width:360px; text-align:left; }
+ #appContainer #inventoryListTable .inventory-compact-row small { display:block; font-size:14px; color:var(--ys-muted); margin-top:4px; }
+ #appContainer .inventory-compact-row .inventory-row-actions { display:flex; flex-wrap:wrap; gap:8px; }
+ #appContainer .inventory-compact-row .inventory-row-actions > button { display:inline-flex; min-height:44px; }
+ #appContainer .inventory-compact-row .inventory-more-menu summary { display:inline-flex; align-items:center; min-height:44px; padding:8px 12px; border:1px solid var(--ys-border); border-radius:var(--ys-control-radius); background:var(--ys-surface); box-sizing:border-box; cursor:pointer; }
+ #appContainer .inventory-compact-row .inventory-more-menu-popover { display:none; }
+ #appContainer .inventory-detail-dialog .order-detail-content { padding:0 20px 20px; overflow:auto; max-height:calc(100dvh - 90px); }
+ #appContainer .inventory-detail-dialog dd { font-weight:400; }
+ .workspace-menu-dialog { width:min(480px,calc(100vw - 32px)); max-height:85dvh; padding:0; border:1px solid var(--ys-border); border-radius:var(--ys-control-radius); background:var(--ys-surface); color:var(--ys-text); overflow:auto; overscroll-behavior:contain; }
+ .workspace-menu-dialog::backdrop { background:rgb(30 36 40 / 35%); }
+ .workspace-menu-dialog > header { position:sticky; top:0; background:var(--ys-surface); border-bottom:1px solid var(--ys-border); padding:16px; display:grid; grid-template-columns:1fr auto; gap:8px; z-index:1; }
+ .workspace-menu-dialog > header strong { font-size:16px; }
+ .workspace-menu-dialog > header p { grid-column:1; margin:0; font-size:15px; overflow-wrap:anywhere; }
+ .workspace-menu-dialog > header button { grid-column:2; grid-row:1/3; }
+ .workspace-menu-dialog [class$="-menu-popover"] { display:flex!important; position:static!important; flex-direction:column; box-sizing:border-box; width:100%!important; min-width:0!important; max-height:none!important; margin:0!important; padding:12px!important; gap:8px; border:0!important; box-shadow:none!important; background:var(--ys-surface)!important; }
+ .workspace-menu-dialog button { min-height:44px; padding:10px 14px; border:1px solid var(--ys-border); border-radius:var(--ys-control-radius); background:var(--ys-surface); color:var(--ys-text); font:inherit; text-align:left; cursor:pointer; }
+ .workspace-menu-dialog .danger-menu-item,.workspace-menu-dialog .btn-danger { color:var(--ys-danger); border-color:var(--ys-danger); }
+ .workspace-menu-dialog .danger-menu-item:last-child { margin-top:12px; }
+ #deliverySettingsOverlay .warehouse-logistics-modal { max-height:85dvh; overflow:auto; overscroll-behavior:contain; }
+ #personalSettingsForm section { border-top:1px solid var(--ys-border); padding:12px 0; }
+ #personalSettingsForm label { display:block; margin:8px 0; }
+ #personalSettingsForm :is(input,select) { width:100%; box-sizing:border-box; min-height:44px; font:inherit; }
+ .inventory-work-table[hidden],.inventory-shipping-batch-actions[hidden] { display:none!important; }
+}
+@media screen and (max-width:768px) {
+ #appContainer :is(#ordersTable,.workflow-list-table,.inventory-work-table table) td[data-th]::before { font-size:16px; font-weight:700; color:var(--ys-text); margin-bottom:8px; }
+ #appContainer #ordersTable tbody > tr > td { font-size:15px; }
+ #appContainer #ordersTable .order-money-cell small { font-size:15px; }
+ #appContainer #inventoryListTable .inventory-compact-row { display:grid; grid-template-columns:1fr 1fr; background:var(--ys-surface); border:1px solid var(--ys-border); padding:12px; gap:8px 16px; }
+ #appContainer #inventoryListTable .inventory-compact-row > td { display:block; width:auto; max-width:none; padding:8px 0; border-color:var(--ys-border); }
+ #appContainer #inventoryListTable .inventory-compact-row > td:is([data-th="產品資訊"],[data-th="倉庫"],[data-th="操作"]) { grid-column:1/-1; }
+ #appContainer #inventoryListTable .inventory-compact-row > td::before { display:block; content:attr(data-th); font-size:16px; font-weight:700; margin-bottom:8px; }
+ .workspace-menu-dialog { margin:auto 8px 8px; width:calc(100vw - 16px); max-height:80dvh; }
+}
+@media screen {
+ #appContainer .inventory-work-subtabs { display:flex; flex-wrap:wrap; gap:8px; }
+ #appContainer .inventory-work-subtabs .order-work-card { flex:1; min-width:140px; min-height:44px; padding:10px 14px; }
+ #appContainer .inventory-work-subtabs .order-work-card strong { font-size:15px; }
+ #appContainer .inventory-maintenance { margin:12px 0; }
+ #appContainer .inventory-maintenance > summary { min-height:44px; display:flex; align-items:center; cursor:pointer; color:var(--ys-muted); }
+ #appContainer #inventoryShippingPanel .toolbar { margin:12px 0; }
+ #appContainer #inventoryTransferShippingPanel .section-header h3 { font-size:18px; }
+}
+@media screen {
+ #appContainer #inventoryListBody .inventory-compact-row .inventory-details-toggle { display:inline-flex!important; min-height:44px; }
+}
+@media screen {
+ #appContainer #inventoryListTable th { text-align:left; font-size:16px; font-weight:700; }
+ #appContainer #inventoryListBody .inventory-compact-row .inventory-actions-cell { width:160px; min-width:0; }
+ #appContainer #inventoryListBody .inventory-compact-row .inventory-row-actions > button { width:auto; }
+ #appContainer .inventory-toolbar :is(input[type="search"],select) { min-height:44px; font-size:15px; font-family:var(--ys-font-family); border:1px solid var(--ys-border); border-radius:var(--ys-control-radius); background:var(--ys-surface); color:var(--ys-text); padding:8px 12px; box-sizing:border-box; }
+ #appContainer .inventory-secondary-list { margin:12px 0; }
+ #appContainer .inventory-secondary-list > summary { min-height:44px; display:flex; align-items:center; color:var(--ys-muted); cursor:pointer; }
+}
