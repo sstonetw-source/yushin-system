@@ -17,4 +17,8 @@ test('Preview backend errors never fall back to legacy browser transaction',asyn
  assert.equal(ctx.quickPurchaseBackendPilotEnabled(),true);
  ctx.APP_ENVIRONMENT='production';
  assert.equal(ctx.quickPurchaseBackendPilotEnabled(),false);
+ ctx.YUSHIN_PRODUCTION_QUICK_PURCHASE=true;
+ assert.equal(ctx.quickPurchaseBackendPilotEnabled(),true);
+ await assert.rejects(ctx.commitQuickPurchase('O','I',data,'buyer','purchaser'),/backend unavailable/);
+ assert.equal(writes,0);
 });

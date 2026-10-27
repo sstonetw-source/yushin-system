@@ -1,5 +1,5 @@
 'use strict';
-// A production deployment cannot activate this pilot with a flag alone.
+// Quick Purchase has independent rollout gates for Emulator, Preview and production.
 const {projectIdFromEnvironment}=require('./grouped-reservation-gate');
 const {commitV2QuickPurchase}=require('./quick-purchase-commit-service');
 function allowQuickPurchaseEmulator(env=process.env){
@@ -10,24 +10,34 @@ function allowQuickPurchaseEmulator(env=process.env){
   && local(env.FIRESTORE_EMULATOR_HOST)
   && local(env.FIREBASE_AUTH_EMULATOR_HOST);
 }
-// Only a separately authorized preview project can use the backend; production stays disabled.
+// Preview has an independent opt-in, never reused to enable production.
 function allowPreviewQuickPurchase(env=process.env){
  return env.ENABLE_PREVIEW_QUICK_PURCHASE==='true'
   && projectIdFromEnvironment(env)==='preview-20135'
   && !env.FUNCTIONS_EMULATOR && !env.FIRESTORE_EMULATOR_HOST
   && !env.FIREBASE_AUTH_EMULATOR_HOST;
 }
+// Production requires its own explicit server opt-in, and must never use
+// Emulator credentials or a Preview flag to write to the live database.
+function allowProductionQuickPurchase(env=process.env){
+ return env.ENABLE_PRODUCTION_QUICK_PURCHASE==='true'
+  && projectIdFromEnvironment(env)==='yu-shing-company'
+  && !env.FUNCTIONS_EMULATOR
+  && !env.FIRESTORE_EMULATOR_HOST
+  && !env.FIREBASE_AUTH_EMULATOR_HOST;
+}
 function createQuickPurchaseCallable({onCall,HttpsError,getDatabase,env=process.env}){
  return onCall({region:'asia-east1'},async request=>{
   const emulatorAllowed=allowQuickPurchaseEmulator(env);
   const previewAllowed=allowPreviewQuickPurchase(env);
-  if(!emulatorAllowed&&!previewAllowed)
+  const productionAllowed=allowProductionQuickPurchase(env);
+  if(!emulatorAllowed&&!previewAllowed&&!productionAllowed)
    throw new HttpsError('failed-precondition','手動採購後端未獲准在此專案啟用');
   if(!request.auth?.uid)throw new HttpsError('unauthenticated','請先登入');
   const db=getDatabase();
-  const project=emulatorAllowed?'demo-yushin':'preview-20135';
+  const project=emulatorAllowed?'demo-yushin':previewAllowed?'preview-20135':'yu-shing-company';
   if(db.projectId!==project)
-   throw new HttpsError('failed-precondition','採購資料庫與授權的測試專案不一致');
+   throw new HttpsError('failed-precondition','採購資料庫與授權的專案不一致');
   try{return await commitV2QuickPurchase(db,request.auth.uid,request.data);}
   catch(error){
    if(['invalid-argument','permission-denied','failed-precondition','not-found','already-exists'].includes(error.code))
@@ -37,4 +47,4 @@ function createQuickPurchaseCallable({onCall,HttpsError,getDatabase,env=process.
   }
  });
 }
-module.exports={allowQuickPurchaseEmulator,allowPreviewQuickPurchase,createQuickPurchaseCallable};
+module.exports={allowQuickPurchaseEmulator,allowPreviewQuickPurchase,allowProductionQuickPurchase,createQuickPurchaseCallable};

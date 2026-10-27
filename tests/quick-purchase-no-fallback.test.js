@@ -28,6 +28,14 @@ test('pilot requested outside isolated emulator fails closed; never falls back t
   /禁止改用舊交易/);
  assert.equal(x.legacyCalls(),0);
 });
+test('explicit production backend flag prevents any legacy retry when Callable cannot be reached',async()=>{
+ const x=contextFor({environment:'production',pilot:false});
+ x.context.YUSHIN_PRODUCTION_QUICK_PURCHASE=true;
+ x.context.location={hostname:'sstonetw-source.github.io',pathname:'/yushin-system/'};
+ await assert.rejects(x.context.commitQuickPurchase('O','I',details,'buyer','purchaser'),
+  /後端尚未在此授權專案及網站啟用/);
+ assert.equal(x.legacyCalls(),0);
+});
 test('pilot requested in emulator without valid Auth/Functions connection fails closed',async()=>{
  const x=contextFor({environment:'emulator'});
  x.context.location={hostname:'localhost'};

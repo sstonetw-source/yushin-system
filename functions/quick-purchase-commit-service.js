@@ -1,6 +1,6 @@
 'use strict';
-// Emulator-only migration candidate for the existing manual Quick Purchase.
-// No client Rules bypass is used in production. All authority is rechecked
+// Guarded backend writer for manual Quick Purchase.
+// No production entry is enabled without explicit server authorization. All authority is rechecked
 // inside one server Firestore transaction, reusing the formal PO demand guard.
 const {createHash}=require('node:crypto');
 const demandCore=require('./shared/procurement-demand-core');
