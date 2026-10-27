@@ -116,3 +116,22 @@ test('Preview receipt requires matching Auth, Functions, default app and actual 
  const demo=transport();demo.c.db.app={options:{projectId:'preview-20135'}};
  await assert.rejects(demo.receive());assert.equal(demo.calls.length,0);
 });
+
+test('shared PO receipt witness follows unique supply link and rejects draft, terminal, wrong source and fulfillment',async()=>{
+ const create=require('../functions/shared/receiving-runtime');
+ const supply={id:'SUP',productId:'P',qty:3,purchaseDocumentId:'PO',orderItemIndex:999};
+ const expected={orderId:'O',itemId:'I',productId:'P',warehouseId:'',fulfillmentType:'DIRECT_SHIP'};
+ const original={status:'ORDERED',supplyOrderIds:['OTHER','SUP'],items:[{}, {...expected,qty:3}]};
+ let record=structuredClone(original),reads=0;
+ const db={collection:()=>({doc:id=>({id})})},tx={get:async ref=>{assert.equal(ref.id,'PO');reads++;return {exists:true,data:()=>record};}};
+ const runtime=create({db,cores:{}});
+ await runtime.validateReceiptPurchaseDocument(tx,supply,expected);assert.equal(reads,1);
+ for(const change of [
+  r=>r.status='CANCELLED',r=>r.status='CLOSED',r=>r.status='DRAFT',r=>r.documentOnly=true,
+  r=>r.supplyOrderIds=['SUP','SUP'],r=>r.supplyOrderIds=['OTHER'],
+  r=>r.items[1].orderId='OTHER',r=>r.items[1].itemId='OTHER',r=>r.items[1].productId='OTHER',
+  r=>r.items[1].qty=4,r=>r.items[1].warehouseId='W',r=>r.items[1].fulfillmentType='WAREHOUSE'
+ ]){record=structuredClone(original);change(record);await assert.rejects(runtime.validateReceiptPurchaseDocument(tx,supply,expected),/採購單憑證/);}
+ record=structuredClone(original);
+ await assert.rejects(runtime.validateReceiptPurchaseDocument(tx,{...supply,productId:'OTHER'},expected),/採購單憑證/);
+});

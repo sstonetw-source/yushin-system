@@ -119,6 +119,13 @@ async function receiveV2Supply(db,uid,input,env=process.env){
    fail('failed-precondition','原收貨憑證不是 v2 格式');
   if(!previous.exists&&(!Array.isArray(order.items)||order.items.length<1||order.items.length>(directShip?5:15)||order.status!=='active'||order.orderStatus!=='normal'))
    fail('failed-precondition',`收貨登入試點僅支援正常 1–${directShip?5:15} 品項來源；取消尚未開放`);
+  if(!previous.exists&&directShip&&supply.type==='PURCHASING_PO'){
+   const selected=order.items.filter(row=>row?.itemId===supply.itemId);
+   if(selected.length!==1||supply.warehouseId||selected[0].warehouseId)
+    fail('failed-precondition','直送來源品項或倉庫資料不一致');
+   await runtime.validateReceiptPurchaseDocument({get},{...supply,id:intent.supplyId},{orderId:supply.orderId,itemId:supply.itemId,
+    productId:selected[0].productId,warehouseId:'',fulfillmentType:'DIRECT_SHIP'});
+  }
   const orderPatches=[];
   const adapter={get,update(reference,data){
    staged.update(reference,data);

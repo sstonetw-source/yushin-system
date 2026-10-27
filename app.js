@@ -17095,6 +17095,27 @@ async function assertV2ReceiptActor(transaction, actorUid, actorRole) {
         ||actor.data().role!==actorRole||!['admin','purchaser','warehouse'].includes(actorRole))
         throw new Error('真實登入角色無此多倉收貨權限。');
 }
+// One PO witness check for physical receiving and backend direct arrival.
+// Follow the saved supply ID link, never a client-provided row index.
+async function validateReceiptPurchaseDocument(transaction,supply,{orderId,itemId,productId,warehouseId,fulfillmentType}) {
+    const reject=()=>{
+        const error=new Error('收貨缺少有效供應商採購單憑證，尚未入帳；請由採購確認原單後，使用原資料重試。');
+        error.code='failed-precondition';throw error;
+    };
+    const documentId=supply.purchaseDocumentId;
+    if(typeof documentId!=='string'||!documentId||documentId!==documentId.trim()||documentId.includes('/')||documentId.length>160)
+        reject();
+    const po=await transaction.get(db.collection('purchaseOrders').doc(documentId));
+    const record=po.exists?po.data():{},links=record.supplyOrderIds;
+    const index=Array.isArray(links)?links.indexOf(supply.id):-1;
+    const line=Array.isArray(record.items)?record.items[index]:null;
+    if(index<0||links.filter(key=>key===supply.id).length!==1||!line
+        ||line.orderId!==orderId||line.itemId!==itemId||line.productId!==productId||supply.productId!==productId
+        ||Number(line.qty)!==supply.qty||(line.warehouseId||'')!==warehouseId
+        ||(line.fulfillmentType||'WAREHOUSE')!==fulfillmentType
+        ||record.status==='DRAFT'||record.documentOnly===true||isPurchaseTerminalStatus(record.status))
+        reject();
+}
 async function validateV2ReceiptSource(transaction, {order,supply,reservation,item,inventory,warehouseStock,demand,actorUid,actorRole,qty}) {
     await assertV2ReceiptActor(transaction,actorUid,actorRole);
     const integer=(value,label)=>{
@@ -17277,15 +17298,7 @@ async function validateV2ReceiptSource(transaction, {order,supply,reservation,it
         ||inventory.reserved+integer(inventory.transferFreeInTransit??0,'公司途中')>integer(inventory.onHand,'公司實貨'))
         throw new Error('公司多倉庫存帳異常。');
     if(supply.type==='PURCHASING_PO'){
-        const po=await transaction.get(db.collection('purchaseOrders').doc(id(supply.purchaseDocumentId)));
-        const record=po.exists?po.data():{},links=record.supplyOrderIds;
-        // Match the actual immutable PO-line link, not a supplied array index.
-        const index=Array.isArray(links)?links.indexOf(supply.id):-1;
-        const line=Array.isArray(record.items)?record.items[index]:null;
-        if(index<0||links.filter(key=>key===supply.id).length!==1||!line
-            ||line.orderId!==orderId||line.itemId!==itemId||line.productId!==item.productId
-            ||Number(line.qty)!==supply.qty||line.warehouseId!==warehouseId
-            ||isPurchaseTerminalStatus(record.status))throw new Error('多倉收貨缺少有效供應商採購單憑證。');
+        await validateReceiptPurchaseDocument(transaction,supply,{orderId,itemId,productId:item.productId,warehouseId,fulfillmentType:'WAREHOUSE'});
     }else if(!['PURCHASING_MANUAL','SALES_SELF_ORDER'].includes(supply.type))throw new Error('不支援的多倉供應來源。');
     return warehouseShipmentContext;
 }
