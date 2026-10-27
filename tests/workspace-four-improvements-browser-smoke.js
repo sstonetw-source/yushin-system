@@ -24,6 +24,9 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','chrom
  const escapeHtml=x=>String(x??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;'),escapeAttr=escapeHtml;
  const firestoreReadWithTimeout=p=>p,beginActionButton=(b)=>{b.disabled=true;return {};},endActionButton=b=>b.disabled=false;
  window.writes=[];window.failSave=false;window.savedOrder={deliveryPlan:{mode:'SALES_SHIP',address:'原地址'}};
+ const profileCache={SELF:{role:'sales',name:'本人',code:'S1',phone:'old'}};
+ const readCachedUserProfile=uid=>profileCache[uid]||null;
+ const writeCachedUserProfile=(uid,data)=>{profileCache[uid]={...data};};
  const db={collection:name=>{if(name!=='users')throw Error('unexpected collection');return {doc:uid=>{if(uid!=='SELF')throw Error('other user access');return {get:async()=>({exists:true,data:()=>({name:'本人',code:'S1',email:'me@example.com',phone:'old',role:'sales'})}),update:async data=>{if(window.failSave)throw Error('測試離線');window.writes.push({uid,data});}};}};}};
  const firebase={firestore:{FieldValue:{serverTimestamp:()=> 'SERVER_TIMESTAMP'}}};
  `});
@@ -31,11 +34,15 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','chrom
  await page.evaluate(()=>openPersonalSettings());await page.locator('#personalMode').waitFor();assert.equal(await page.locator('#personalSettingsForm input').count(),4);
  await page.locator('#personalMode').selectOption('SALES_SHIP');await page.locator('#personalPhone').fill('0912345678');
  await page.locator('#personalContact').fill('本人收件');await page.locator('#personalDeliveryPhone').fill('0912345678');await page.locator('#personalAddress').fill('台北市測試地址');
- page.on('dialog',dialog=>dialog.accept());await page.locator('#personalSettingsForm [type=submit]').click();await page.waitForFunction(()=>writes.length===1);
+ const confirmations=[];page.on('dialog',dialog=>{confirmations.push(dialog.message());dialog.accept();});await page.locator('#personalSettingsForm [type=submit]').click();await page.waitForFunction(()=>writes.length===1);
  assert.deepEqual(await page.evaluate(()=>Object.keys(writes[0].data).sort()),['deliveryDefaults','phone','updatedAt']);assert.equal(await page.evaluate(()=>writes[0].uid),'SELF');
  assert.equal(await page.evaluate(()=>savedOrder.deliveryPlan.address),'原地址');assert.equal(await page.evaluate(()=>salesList[0].deliveryDefaults.address),'台北市測試地址');
- await page.evaluate(()=>window.failSave=true);await page.locator('#personalSettingsForm [type=submit]').click();await page.waitForFunction(()=>document.getElementById('personalSettingsStatus').textContent.includes('儲存失敗'));
- assert.equal(await page.evaluate(()=>writes.length),1);await page.evaluate(()=>closeDeliverySettings());await page.waitForFunction(()=>document.body.style.position!=='fixed');
+ assert.match(confirmations[0],/聯絡電話：0912345678/);
+ assert.equal(await page.evaluate(()=>readCachedUserProfile('SELF').phone),'0912345678');
+ assert.equal(await page.evaluate(()=>currentUserPhone),'0912345678');
+ await page.evaluate(()=>window.failSave=true);await page.locator('#personalPhone').fill('0900000000');await page.locator('#personalSettingsForm [type=submit]').click();await page.waitForFunction(()=>document.getElementById('personalSettingsStatus').textContent.includes('儲存失敗'));
+ assert.equal(await page.evaluate(()=>writes.length),1);assert.equal(await page.evaluate(()=>readCachedUserProfile('SELF').phone),'0912345678');
+ assert.equal(await page.evaluate(()=>currentUserPhone),'0912345678');await page.evaluate(()=>closeDeliverySettings());await page.waitForFunction(()=>document.body.style.position!=='fixed');
  // Actual stock row organizer retains lots, metrics and original handlers in the drawer.
  await page.addScriptTag({content:read('src/shared/workspace-display.js')});
  await page.evaluate(()=>{
