@@ -1868,12 +1868,12 @@ test('engineer list and history search include only its own assisted quotes',asy
   await assertFails(getDoc(doc(db('eng1'),'quotes/other-assistant')));
 });
 
-test('operational line validation supports thirty lines without losing commercial protection',async()=>{
-  const items=Array.from({length:30},(_,i)=>({itemId:'i'+i,productId:'p1',qty:1,unitPrice:100,receivedQty:0}));
-  await seed('orders/thirty-lines',{ownerUid:'sales1',salesCode:'S01',items});
-  await assertSucceeds(updateDoc(doc(db('buyer1'),'orders/thirty-lines'),{items:items.map(row=>({...row,receivedQty:1}))}));
-  await assertSucceeds(updateDoc(doc(db('wh1'),'orders/thirty-lines'),{items:items.map(row=>({...row,receivedQty:2}))}));
-  await assertFails(updateDoc(doc(db('buyer1'),'orders/thirty-lines'),{items:items.map((row,i)=>({...row,unitPrice:i===29?1:100}))}));
+test('operational line validation supports fifteen lines without losing commercial protection',async()=>{
+  const items=Array.from({length:15},(_,i)=>({itemId:'i'+i,productId:'p1',qty:1,unitPrice:100,receivedQty:0}));
+  await seed('orders/fifteen-operational-lines',{ownerUid:'sales1',salesCode:'S01',items});
+  await assertSucceeds(updateDoc(doc(db('buyer1'),'orders/fifteen-operational-lines'),{items:items.map(row=>({...row,receivedQty:1}))}));
+  await assertSucceeds(updateDoc(doc(db('wh1'),'orders/fifteen-operational-lines'),{items:items.map(row=>({...row,receivedQty:2}))}));
+  await assertFails(updateDoc(doc(db('buyer1'),'orders/fifteen-operational-lines'),{items:items.map((row,i)=>({...row,unitPrice:i===14?1:100}))}));
 });
 
 test('multi-product reservation uses the matching product movement for each stock witness',async()=>{
@@ -3030,7 +3030,7 @@ test('service non-financial updates and ordinary Goods billing retain existing a
  for(const uid of ['admin','sales1','eng1']){
   const code={admin:'ADM',sales1:'S01',eng1:'E01'}[uid];
   const base={ownerUid:uid,salesCode:code,status:'active',isBilled:false,billingDate:''};
-  const goods=Array.from({length:30},(_,i)=>({itemId:'I'+i,productId:'p-order',productType:'Goods',qty:1}));
+  const goods=Array.from({length:15},(_,i)=>({itemId:'I'+i,productId:'p-order',productType:'Goods',qty:1}));
   const ref=doc(db(uid),'orders/finance-compat-'+uid);
   await seed('orders/'+ref.id,{...base,items:goods});
   await assertSucceeds(updateDoc(ref,{isBilled:true,billingDate:'2026-10-23'}));
@@ -3274,14 +3274,14 @@ test('cross-warehouse proof rejects unrelated product ids instead of treating a 
  }
 });
 
-test('commercial order details allow owners before first receipt and lock all metadata on the last of thirty items',async()=>{
- const items=Array.from({length:30},(_,i)=>({itemId:'I'+i,qty:3,unitPrice:100,receivedQty:0}));
+test('commercial order details allow owners before first receipt and lock all metadata on the last of fifteen items',async()=>{
+ const items=Array.from({length:15},(_,i)=>({itemId:'I'+i,qty:3,unitPrice:100,receivedQty:0}));
  for(const [uid,owner,code,allowed] of [['sales1','sales1','S01',true],['eng1','eng1','E01',true],['sales2','sales1','S01',false],['buyer1','sales1','S01',false],['wh1','sales1','S01',false],['admin','sales1','S01',true]]){
   const id='commercial-timing-'+uid;
   await seed('orders/'+id,{ownerUid:owner,salesCode:code,status:'active',items,transactionType:'借',remarks:'old'});
   const patch={transactionType:'直',remarks:'new',invoiceTitle:'公司'};
   await (allowed?assertSucceeds:assertFails)(updateDoc(doc(db(uid),'orders/'+id),patch));
-  const received=items.map((item,i)=>i===29?{...item,receivedQty:1,receiptEvents:[{qty:1}]}:item);
+  const received=items.map((item,i)=>i===14?{...item,receivedQty:1,receiptEvents:[{qty:1}]}:item);
   await seed('orders/'+id,{ownerUid:owner,salesCode:code,status:'active',items:received,transactionType:'借',remarks:'old'});
   for(const patch of [{transactionType:'直'},{remarks:'new'},{invoiceTitle:'公司'},{shippingInstructions:{mode:'PICKUP'}},{remarks:'bypass',items}])
    await assertFails(updateDoc(doc(db(uid),'orders/'+id),patch));
@@ -3294,9 +3294,9 @@ test('business delivery plan requires first receipt boundary while warehouse sco
  const next={...p,mode:'CUSTOMER_SHIP',contact:'C',phone:'123',address:'台北'};
  const change=(uid,current)=>({items:[{...current,deliveryPlan:next}],logisticsPlanItemIndex:0,logisticsPlanActorUid:uid,logisticsPlanEventId:'edit',logisticsHistory:[{id:'edit',action:'交付設定'}],updatedAt:'T'});
  await seed('orders/timing-plan',original);await assertSucceeds(updateDoc(doc(db('sales1'),'orders/timing-plan'),change('sales1',item)));
- const thirty=Array.from({length:30},(_,i)=>({...item,itemId:'I'+i}));
- await seed('orders/timing-plan',{...original,items:thirty});
- await assertSucceeds(updateDoc(doc(db('sales1'),'orders/timing-plan'),{...change('sales1',thirty[0]),items:[{...thirty[0],deliveryPlan:next},...thirty.slice(1)]}));
+ const fifteen=Array.from({length:15},(_,i)=>({...item,itemId:'I'+i}));
+ await seed('orders/timing-plan',{...original,items:fifteen});
+ await assertSucceeds(updateDoc(doc(db('sales1'),'orders/timing-plan'),{...change('sales1',fifteen[0]),items:[{...fifteen[0],deliveryPlan:next},...fifteen.slice(1)]}));
  const arrived={...item,receivedQty:1,receiptEvents:[{qty:1}]};
  await seed('orders/timing-plan',{...original,items:[arrived]});
  await assertFails(updateDoc(doc(db('sales1'),'orders/timing-plan'),change('sales1',arrived)));
@@ -3305,18 +3305,18 @@ test('business delivery plan requires first receipt boundary while warehouse sco
  await assertSucceeds(updateDoc(doc(db('buyer1'),'orders/timing-plan'),change('buyer1',arrived)));
 });
 
-test('new orders cap line items at fifteen without blocking legacy metadata updates',async()=>{
+test('orders cap at fifteen and reject legacy sixteen-line metadata updates',async()=>{
  const base={...validOrderProduct,ownerUid:'sales1',salesCode:'S01'};
  const items=Array.from({length:15},()=>({productId:base.productId,qty:1}));
  await assertSucceeds(setDoc(doc(db('sales1'),'orders/fifteen-lines'),{...base,items}));
  await assertFails(setDoc(doc(db('sales1'),'orders/sixteen-lines'),{...base,items:[...items,{...items[0]}]}));
  await seed('orders/legacy-sixteen',{...base,items:[...items,{...items[0]}]});
- await assertSucceeds(updateDoc(doc(db('sales1'),'orders/legacy-sixteen'),{remarks:'保留舊訂單'}));
+ await assertFails(updateDoc(doc(db('sales1'),'orders/legacy-sixteen'),{remarks:'不再支援超過十五筆'}));
 });
 
 
 test('commercial metadata cannot bypass the UI lock when only a line has shipment or delivery history',async()=>{
- for(const count of [1,4,5,6,15,16,29,30])for(const uid of ['sales1','eng1','admin'])for(const field of ['warehouseShippedQty','deliveredQty']){
+ for(const count of [1,4,5,6,15])for(const uid of ['sales1','eng1','admin'])for(const field of ['warehouseShippedQty','deliveredQty']){
   const items=Array.from({length:count},(_,i)=>({itemId:'I'+i,qty:3,receivedQty:0,...(i===count-1?{[field]:1}:{})}));
   const owner=uid==='eng1'?'eng1':'sales1',salesCode=uid==='eng1'?'E01':'S01';
   await seed('orders/line-shipment-lock',{ownerUid:owner,salesCode,status:'active',items:items.map(item=>({...item,[field]:0})),transactionType:'借',remarks:'old'});
