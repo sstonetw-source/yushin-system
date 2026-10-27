@@ -54,6 +54,15 @@ async function seedFifteenReceivingSource(db,ownerUid,tag,count,{service=false,d
   }
   return {fixed,...extra};
  };
- return {orderId,keys,warehouses,items,supplies,demands,input,snapshot};
+ const cleanup=async()=>{
+  // Only this fixture's explicitly captured paths and generated records. Never
+  // close supplier obligations just to hide them from another test's queue.
+  if(!process.env.FIRESTORE_EMULATOR_HOST||db.projectId!=='demo-yushin')throw Error('Receiving cleanup requires demo-yushin Emulator');
+  const saved=await snapshot(),remove=new Set(saved.fixed.map(([path])=>path));
+  for(const [name,rows] of Object.entries(saved))if(name!=='fixed')for(const [id] of rows)remove.add(name+'/'+id);
+  const references=[...remove];
+  for(let start=0;start<references.length;start+=400){const batch=db.batch();for(const path of references.slice(start,start+400))batch.delete(db.doc(path));await batch.commit();}
+ };
+ return {orderId,keys,warehouses,items,supplies,demands,input,snapshot,cleanup};
 }
 module.exports={seedFifteenReceivingSource};

@@ -9,13 +9,13 @@ const {getFunctions,connectFunctionsEmulator,httpsCallable}=require('firebase/fu
 const {seedFifteenReceivingSource}=require('./fixtures/fifteen-receiving-source.cjs');
 const {receiveV2Supply}=require('../functions/supply-receipt-service');
 const limits=require('../functions/receipt-transaction');
-const clients=[];let server,db,accounts;
+const clients=[],fixtures=[];let server,db,accounts;
 test.before(()=>{
  for(const key of ['FIRESTORE_EMULATOR_HOST','FIREBASE_AUTH_EMULATOR_HOST'])assert.match(process.env[key]||'',/^(127\.0\.0\.1|localhost):\d+$/);
  assert.equal(process.env.GCLOUD_PROJECT||process.env.GCP_PROJECT,'demo-yushin');
  server=admin.initializeApp({projectId:'demo-yushin'},'receiving-fifteen');db=getFirestore(server);accounts=adminAuth(server);
 });
-test.after(async()=>{await Promise.all(clients.map(deleteApp));await server?.delete();});
+test.after(async()=>{try{for(const fixture of fixtures)await fixture.cleanup();}finally{await Promise.all(clients.map(deleteApp));await server?.delete();}});
 async function actor(tag,role){
  const uid='receipt15-'+tag,email=uid+'@example.test';
  await accounts.createUser({uid,email,password:'EmulatorOnly!123456'});
@@ -28,7 +28,8 @@ async function actor(tag,role){
 }
 async function fixture(tag,count,{role='warehouse',...options}={}){
  const receiver=await actor(tag,role);
- return {...await seedFifteenReceivingSource(db,receiver.uid,tag,count,options),receiver,receive:receiver.receive};
+ const source=await seedFifteenReceivingSource(db,receiver.uid,tag,count,options);fixtures.push(source);
+ return {...source,receiver,receive:receiver.receive};
 }
 test('real Auth six and fifteen source lines receive first and last siblings exactly once across two warehouses',{timeout:180000},async()=>{
  for(const count of [6,15]){
