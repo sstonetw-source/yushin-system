@@ -1,17 +1,24 @@
-// Demo and Preview use one backend transaction core; production is not enabled.
+// Emulator, Preview and explicitly authorized production share one backend writer.
 function quickPurchaseBackendPilotEnabled() {
     return typeof APP_ENVIRONMENT !== 'undefined'
         && ((APP_ENVIRONMENT === 'emulator' && globalThis.YUSHIN_QUICK_PURCHASE_EMULATOR === true)
-            || (APP_ENVIRONMENT === 'preview' && globalThis.YUSHIN_PREVIEW_QUICK_PURCHASE === true));
+            || (APP_ENVIRONMENT === 'preview' && globalThis.YUSHIN_PREVIEW_QUICK_PURCHASE === true)
+            || (APP_ENVIRONMENT === 'production' && globalThis.YUSHIN_PRODUCTION_QUICK_PURCHASE === true));
 }
 async function commitQuickPurchaseBackendPilot(orderId,itemId,details,actorUid,assertActor) {
     const local=host=>['localhost','127.0.0.1'].includes(host);
     const host=String(globalThis.location?.hostname||'').toLowerCase();
+    const pathname=String(globalThis.location?.pathname||'');
     const isDemo=typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='emulator'
         && globalThis.YUSHIN_QUICK_PURCHASE_EMULATOR===true;
     const isPreview=typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='preview'
         && globalThis.YUSHIN_PREVIEW_QUICK_PURCHASE===true;
-    const project=isDemo?'demo-yushin':'preview-20135';
+    const isProduction=typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='production'
+        && globalThis.YUSHIN_PRODUCTION_QUICK_PURCHASE===true;
+    const productionSite=['yu-shing-company.web.app','yu-shing-company.firebaseapp.com'].includes(host)
+        || (host==='sstonetw-source.github.io'
+            && (pathname==='/yushin-system'||pathname.startsWith('/yushin-system/')));
+    const project=isDemo?'demo-yushin':isPreview?'preview-20135':'yu-shing-company';
     if(!quickPurchaseBackendPilotEnabled()
         || typeof firebase==='undefined' || !firebase.auth || !firebase.app
         || firebase.app().options?.projectId!==project
@@ -19,7 +26,8 @@ async function commitQuickPurchaseBackendPilot(orderId,itemId,details,actorUid,a
         || (isDemo && (!local(host) || !local(firebase.auth().emulatorConfig?.host)
             || firebase.auth().emulatorConfig?.port!==9099))
         || (isPreview && (!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(host)
-            || !!firebase.auth().emulatorConfig)))
+            || !!firebase.auth().emulatorConfig))
+        || (isProduction && (!productionSite || !!firebase.auth().emulatorConfig)))
         throw new Error('手動採購後端尚未在此授權專案及網站啟用，未提交採購。');
     if(!Number.isSafeInteger(details.expectedQty) || details.expectedQty<=0 || details.expectedQty>1000000)
         throw new Error('手動採購數量不正確，未提交採購。');
@@ -106,6 +114,7 @@ async function commitQuickPurchase(orderId, itemId, purchaseDetails, actorUid=cu
         assertActor();
         if(globalThis.YUSHIN_QUICK_PURCHASE_EMULATOR===true
             || globalThis.YUSHIN_PREVIEW_QUICK_PURCHASE===true
+            || globalThis.YUSHIN_PRODUCTION_QUICK_PURCHASE===true
             || (typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='preview')) {
             if(!quickPurchaseBackendPilotEnabled())
                 throw new Error('手動採購後端尚未在目前環境啟用，禁止改用舊交易。');
