@@ -3759,8 +3759,8 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
         width: 100%;
         box-sizing: border-box;
         background: var(--workspace-background);
-        padding: 10px;
-        border-radius: var(--workspace-radius);
+        padding: 0;
+        border-radius: 0;
     }
     #appContainer :is(#ordersTable tbody, #purchasePendingBody, #purchaseDispatchBody,
         #purchaseCompletedBody, #inventoryShippingBody, #inventoryReceivingBody,
@@ -3771,10 +3771,10 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
         width: 100%;
         margin: 0 0 16px;
         padding: 16px;
-        border: 1px solid var(--workspace-border);
+        border: 1px solid var(--ys-border);
         border-radius: var(--workspace-radius);
-        background: #fff;
-        box-shadow: 0 2px 4px rgba(20,45,70,.1);
+        background: var(--ys-record);
+        box-shadow: none;
     }
     #appContainer :is(#ordersTable tbody, #purchasePendingBody, #purchaseDispatchBody,
         #purchaseCompletedBody, #inventoryShippingBody, #inventoryReceivingBody,
@@ -3791,6 +3791,7 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
         #inventoryTransferReceivingBody, #myQuotesBody, #forecastTable,
         #poListBody, #inventoryListBody, #eqListTable, .product-management-table, #businessProductSearchResults) td[data-th] {
         border-bottom-color: #d1dbe5;
+        background-color: transparent;
         text-align: left;
         line-height: 1.5;
         overflow-wrap: anywhere;
@@ -3870,6 +3871,7 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
     --ys-danger-soft: #FCEDEB;
     --ys-neutral-soft: #F2F2EF;
     --ys-field: #F0EBE2;
+    --ys-record: #FDFCFB;
     --ys-font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
     --ys-font-body: 14px;
     --ys-font-title: 24px;
@@ -4103,7 +4105,7 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
 
 /* UI／UX 1.0 follow-up: finish the quotation workspace without changing printableQuote. */
 @media screen {
-    #appContainer { --workspace-background: var(--ys-selected); --workspace-border: var(--ys-border); --workspace-label: var(--ys-muted); --workspace-radius: 12px; }
+    #appContainer { --workspace-background: transparent; --workspace-border: var(--ys-border); --workspace-label: var(--ys-muted); --workspace-radius: 12px; }
     /* 估價單兩組切換各自維持既有欄數；外觀由共用工作分頁控制。 */
     #appContainer #quote-system > .quote-module-nav,
     #appContainer #quoteCreatePanel > .company-sub-nav {
@@ -4311,8 +4313,8 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
     #appContainer .auth-status, #authUserLabel { color: var(--ys-text); }
     .auth-starting-nav { background: var(--ys-nav); color: var(--ys-text); }
     #appContainer :is(.modal, .modal-box, .eq-modal-box, .password-modal, .product-selection-bar, .delivery-settings-section, .sales-stat-card) { background-color: var(--ys-surface); border-color: var(--ys-border); }
-    #appContainer :is(#inventoryListBody, #poListBody, #ordersBody, #forecastListBody, #eqListBody, #productManagementBody, #myQuotesBody, #purchasePendingBody, #purchaseDispatchBody, #purchaseCompletedBody, #inventoryReceivingBody, #inventoryTransferReceivingBody, #inventoryShippingBody) > tr { background-color: var(--ys-surface); }
-    #appContainer .inventory-mobile-summary > div { background: var(--ys-selected); border-color: var(--ys-border); color: var(--ys-text); }
+    #appContainer :is(#inventoryListBody, #poListBody, #ordersBody, #forecastListBody, #eqListBody, #productManagementBody, #myQuotesBody, #purchasePendingBody, #purchaseDispatchBody, #purchaseCompletedBody, #inventoryReceivingBody, #inventoryTransferReceivingBody, #inventoryShippingBody) > tr { background-color: var(--ys-record); }
+    #appContainer .inventory-mobile-summary > div { background: var(--ys-neutral-soft); border-color: var(--ys-border); color: var(--ys-text); }
     #appContainer .inventory-mobile-summary span { color: var(--ys-muted); }
     #appContainer .content-section :is(.toolbar, .module-header, .section-header) > button:not([class]),
     #appContainer #productManagementSearchBtn, #appContainer #purchaseDirectOrderBtn { background-color: var(--ys-primary); color: #FFFFFF; }
@@ -4527,7 +4529,7 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
  #appContainer .workflow-list-table { display:block; border:0; min-width:0; }
  #appContainer .workflow-list-table thead { display:none; }
  #appContainer .workflow-list-table tbody { display:block; padding:0; background:transparent; }
- #appContainer .workflow-list-table tbody > tr { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 12px; padding:12px; margin:0 0 12px; border:1px solid var(--ys-border); border-radius:var(--ys-control-radius); background:var(--ys-surface); box-shadow:none; }
+  #appContainer .workflow-list-table tbody > tr { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 12px; padding:12px; margin:0 0 12px; border:1px solid var(--ys-border); border-radius:var(--ys-control-radius); background:var(--ys-record); box-shadow:none; }
  #appContainer .workflow-list-table tbody > tr > td { display:block; min-width:0; width:auto; max-width:none; padding:8px 0; white-space:normal; background:transparent; }
  #appContainer .workflow-list-table td[data-th]::before { content:attr(data-th); display:block; color:var(--ys-muted); font-size:12px; margin-bottom:4px; }
  #appContainer .workflow-list-table td:is([data-th="客戶"],[data-th="客戶／用途"],[data-th="客戶名稱"],[data-th="待採購品項"],[data-th="待到貨品項"],[data-th="待打單品項"],[data-th="已完成採購品項"],[data-th="產品資訊"],[data-th="進度"],[data-th="到貨進度"],[data-th="操作"],[colspan]) { grid-column:1/-1; }
@@ -4607,7 +4609,7 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
     #appContainer .content-section table:not(:where(#printablePO *)) th {
         background:var(--ys-table-head); color:var(--ys-text);
     }
-    #appContainer .content-section table:not(:where(#printablePO *,#itemTable)) td { background-color:var(--ys-surface); }
+    #appContainer .content-section table:not(:where(#printablePO *,#itemTable)) td { background-color:var(--ys-record); }
     /* Quotation editing is a workspace; export uses the independent quote-pdf-stage. */
     #appContainer #printableQuote {
         background:var(--ys-surface); color:var(--ys-text); padding:16px;
@@ -4832,7 +4834,7 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
         display:grid; grid-template-columns:minmax(0,1.45fr) minmax(0,1fr) minmax(220px,.9fr);
         grid-template-areas:"customer owner select" "product date actions" "product money actions" "product progress actions";
         gap:4px 16px; padding:16px; margin-bottom:12px; border:1px solid var(--ys-border);
-        border-radius:var(--ys-control-radius); background:var(--ys-surface);
+        border-radius:var(--ys-control-radius); background:var(--ys-record);
     }
     #appContainer #purchasing-system :is(#purchaseDispatchPanel,#purchaseCompletedPanel) .workflow-list-table tbody > tr {
         grid-template-areas:"customer owner actions" "product date actions" "product money actions" "product progress actions";
@@ -4871,7 +4873,7 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
  #appContainer :is(#ordersTable,.workflow-list-table) :is(.workflow-product strong,.workflow-commercial strong) { font-size:15px; }
  #appContainer :is(#ordersTable,.workflow-list-table) .workflow-order-total { font-size:15px; font-weight:700; }
  #appContainer :is(#ordersTable,.workflow-list-table) :is(.workflow-product small,.workflow-commercial small) { font-size:14px; }
- #appContainer #ordersTable tbody > tr { background:var(--ys-surface)!important; border-color:var(--ys-border)!important; }
+  #appContainer #ordersTable tbody > tr { background:var(--ys-record)!important; border-color:var(--ys-border)!important; }
  #appContainer #ordersTable td { border-color:var(--ys-border)!important; }
  #appContainer #inventoryListTable { min-width:0; width:100%; table-layout:auto; }
  #appContainer #inventoryListTable .inventory-compact-row > td { white-space:normal; min-width:0; max-width:360px; text-align:left; }
@@ -4902,7 +4904,7 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
  #appContainer :is(#ordersTable,.workflow-list-table,.inventory-work-table table) td[data-th]::before { font-size:16px; font-weight:700; color:var(--ys-text); margin-bottom:8px; }
  #appContainer #ordersTable tbody > tr > td { font-size:15px; }
  #appContainer #ordersTable .order-money-cell small { font-size:15px; }
- #appContainer #inventoryListTable .inventory-compact-row { display:grid; grid-template-columns:1fr 1fr; background:var(--ys-surface); border:1px solid var(--ys-border); padding:12px; gap:8px 16px; }
+  #appContainer #inventoryListTable .inventory-compact-row { display:grid; grid-template-columns:1fr 1fr; background:var(--ys-record); border:1px solid var(--ys-border); padding:12px; gap:8px 16px; }
  #appContainer #inventoryListTable .inventory-compact-row > td { display:block; width:auto; max-width:none; padding:8px 0; border-color:var(--ys-border); }
  #appContainer #inventoryListTable .inventory-compact-row > td:is([data-th="產品資訊"],[data-th="倉庫"],[data-th="操作"]) { grid-column:1/-1; }
  #appContainer #inventoryListTable .inventory-compact-row > td::before { display:block; content:attr(data-th); font-size:16px; font-weight:700; margin-bottom:8px; }
