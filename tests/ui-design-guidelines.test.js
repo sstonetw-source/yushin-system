@@ -68,3 +68,16 @@ test('secondary, destructive and disabled actions keep separate semantics', () =
     assert.match(css, /#appContainer \.status-badge\.status-soon \{ background: var\(--ys-warning-soft\); color: var\(--ys-warning\); \}/);
 });
 
+test('mobile record lists use one white card layer without a blue outer well or beige cells', () => {
+    assert.match(css, /--ys-record: #FDFCFB;/);
+    assert.match(css, /#appContainer \{ --workspace-background: transparent;/);
+    assert.match(css, /#businessProductSearchBody\) \{\s*display: block;[\s\S]*?background: var\(--workspace-background\);\s*padding: 0;\s*border-radius: 0;/);
+    assert.match(css, /#businessProductSearchBody\) > tr \{[\s\S]*?background: var\(--ys-record\);\s*box-shadow: none;/);
+    assert.match(css, /table:not\(:where\(#printablePO \*,#itemTable\)\) td \{ background-color:var\(--ys-record\); \}/);
+    assert.match(css, /#inventoryListTable \.inventory-compact-row \{[^\n]*background:var\(--ys-record\)/);
+    assert.match(css, /#ordersTable tbody > tr \{ background:var\(--ys-record\)!important;/);
+    assert.match(css, /#appContainer \.inventory-mobile-summary > div \{ background: var\(--ys-neutral-soft\);/);
+    assert.match(css, /#appContainer #printableQuote \{\s*background:var\(--ys-surface\);/);
+    assert.match(html, /styles\.css\?v=20261027-305/);
+});
+
