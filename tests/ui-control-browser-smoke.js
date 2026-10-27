@@ -47,18 +47,19 @@ const fixture = `<!DOCTYPE html>
 <div id="appContainer" style="display:block">
   <div id="quote-system" class="content-section active">
     <div class="sub-nav quote-module-nav"><div class="sub-tab active" role="button" id="qsub-create">建立估價單</div><div class="sub-tab" role="button" id="qsub-my">全部估價單</div></div>
-    <div id="quoteCreatePanel"><div class="sub-nav company-sub-nav"><div class="sub-tab active" role="button" id="sub-yushin">又鑫 (YS)</div><div class="sub-tab" role="button">辰星 (MS)</div><div class="sub-tab" role="button">鼎新 (DS)</div></div></div>
+    <div id="quoteCreatePanel"><div class="sub-nav company-sub-nav"><div class="sub-tab active" role="button" id="sub-yushin">又鑫 (YS)</div><div class="sub-tab" role="button">辰星 (MS)</div><div class="sub-tab" role="button">鼎新 (DS)</div></div><div id="printableQuote">估價單編輯表單</div></div>
   </div>
-  <div id="forecast-system" class="content-section active"><div class="toolbar forecast-toolbar"><button id="forecastCreateProbe">新增 Forecast</button></div></div>
-  <div id="product-system" class="content-section active"><div id="productSearchBrandButtons" class="product-brand-browser-list"><button class="product-brand-button active" id="productBrandProbe">廠牌</button><button class="product-brand-button">另一廠牌</button></div></div>
-  <div id="order-system" class="content-section active"><div class="order-work-cards"><button class="order-work-card active" id="orderWorkProbe">待送貨</button><button class="order-work-card">其他狀態</button></div></div>
-  <div id="purchasing-system" class="content-section active"><div class="purchase-view-tabs"><button class="active" id="purchase-tab-work">採購需求</button><button>採購單</button></div></div>
+  <div id="forecast-system" class="content-section active"><div class="toolbar forecast-toolbar"><button id="forecastCreateProbe">新增 Forecast</button></div><table id="forecastTable"><tbody><tr><td data-th="客戶">Forecast 範例</td></tr></tbody></table></div>
+  <div id="product-system" class="content-section active"><div id="productSearchBrandButtons" class="product-brand-browser-list"><button class="product-brand-button active" id="productBrandProbe">廠牌</button><button class="product-brand-button">另一廠牌</button></div><table class="product-management-table"><tbody><tr><td data-th="產品">產品範例</td></tr></tbody></table></div>
+  <div id="order-system" class="content-section active"><div class="order-work-cards"><button class="order-work-card active" id="orderWorkProbe">待送貨</button><button class="order-work-card">其他狀態</button></div><table id="ordersTable"><tbody id="ordersBody"><tr><td data-th="客戶">訂單範例</td></tr></tbody></table></div>
+  <div id="purchasing-system" class="content-section active"><div class="purchase-view-tabs"><button class="active" id="purchase-tab-work">採購需求</button><button>採購單</button></div><table class="workflow-list-table"><tbody id="purchasePendingBody"><tr><td data-th="客戶">採購範例</td></tr></tbody></table></div>
   <div id="inventory-system" class="content-section active">
     <div class="purchase-view-tabs inventory-work-tabs"><button class="active" id="inventoryStockTabBtn">庫存清單</button><button>收貨</button><button>出貨</button></div>
     <div class="order-work-cards inventory-work-subtabs"><button class="order-work-card active" id="inventoryReceiveProbe">採購收貨</button><button class="order-work-card">退貨收貨</button></div>
     <div class="inventory-shipping-tabs"><button class="order-work-card active" id="inventoryShippingMainBtn">主倉庫出貨</button><button class="order-work-card">其他倉庫出貨</button></div>
+    <div id="inventoryStockPanel"><div class="table-wrap"><table id="inventoryListTable"><tbody id="inventoryListBody"><tr class="inventory-compact-row"><td data-th="產品資訊">庫存範例</td></tr></tbody></table></div></div>
   </div>
-  <div id="equipment-system" class="content-section active"><div class="toolbar"><button id="equipmentCreateProbe">新增儀器</button><button class="btn-secondary" id="equipmentExportProbe">匯出</button><button class="btn-danger" id="equipmentDeleteProbe">刪除</button></div></div>
+  <div id="equipment-system" class="content-section active"><div class="toolbar"><button id="equipmentCreateProbe">新增儀器</button><button class="btn-secondary" id="equipmentExportProbe">匯出</button><button class="btn-danger" id="equipmentDeleteProbe">刪除</button></div><table id="eqListTable"><tbody><tr><td data-th="編號">儀器範例</td></tr></tbody></table></div>
   <div id="admin-system" class="content-section active"><div class="sub-nav"><div class="sub-tab active" role="button" id="admin-sub-sales">人員名單</div><div class="sub-tab" role="button">廠牌管理</div></div><div id="admin-statistics"><div class="sub-tabs"><button class="active" id="analyticsTabProbe">銷售分析</button><button>採購分析</button></div></div></div>
   <div id="deliveryModalOverlay"><div class="order-progress-tabs"><button aria-selected="true" id="orderProgressProbe">進行中</button><button aria-selected="false">已完成</button></div></div>
 </div>
@@ -132,6 +133,31 @@ async function checkControls() {
                     assert.ok(value.right <= report.width + 1,
                         `${label}: ${name} overflows viewport ${value.right} > ${report.width}`);
                 }
+            }
+            if (label === 'mobile') {
+                const recordStyles = await page.evaluate(() => {
+                    const rows = ['#forecastTable', '.product-management-table', '#ordersTable',
+                        '#purchasing-system .workflow-list-table', '#inventoryListTable', '#eqListTable'];
+                    return rows.map(selector => {
+                        const tbody = document.querySelector(`${selector} tbody`);
+                        const tr = tbody.querySelector('tr');
+                        const cell = tr.querySelector('td');
+                        return { selector, well: getComputedStyle(tbody).backgroundColor,
+                            padding: getComputedStyle(tbody).paddingTop,
+                            card: getComputedStyle(tr).backgroundColor,
+                            cell: getComputedStyle(cell).backgroundColor,
+                            right: tr.getBoundingClientRect().right };
+                    });
+                });
+                for (const row of recordStyles) {
+                    assert.equal(row.well, 'rgba(0, 0, 0, 0)', `${row.selector}: no colored list well`);
+                    assert.equal(row.padding, '0px', `${row.selector}: no extra wrapper padding`);
+                    assert.equal(row.card, 'rgb(253, 252, 251)', `${row.selector}: warm white card`);
+                    assert.ok(['rgba(0, 0, 0, 0)', 'rgb(253, 252, 251)'].includes(row.cell), `${row.selector}: no beige cell`);
+                    assert.ok(row.right <= width + 1, `${row.selector}: card overflow`);
+                }
+                const quoteBackground = await page.locator('#printableQuote').evaluate(node => getComputedStyle(node).backgroundColor);
+                assert.equal(quoteBackground, 'rgb(233, 227, 216)', 'quotation editor stays warm sand');
             }
             console.log(`UI browser smoke ${label} ${report.width}px: ${Object.keys(report.checks).length} control types passed`);
             // A sticky environment notice must not intercept dialog actions,
