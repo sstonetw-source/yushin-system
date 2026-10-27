@@ -14,7 +14,7 @@ function transport(){
  const jobs=[{ownerUid:'buyer',actorRole:'purchaser',supplyId:'SUP',operationBase:'receipt_1',entries:[{itemIndex:0,qty:2,lotNo:'LOT',expiryDate:'2028-01-01'}]}];
  const c=vm.createContext({APP_ENVIRONMENT:'emulator',YUSHIN_V2_RECEIVING_EMULATOR:true,location:{hostname:'localhost'},currentUser:{uid:'buyer'},currentUserRole:'purchaser',canReceiveInventoryCapability:()=>true,
   firebase:{auth:()=>auth,functions:()=>functions,app:()=>({options,functions:()=>functions})},sessionStorage:{getItem:()=>JSON.stringify(jobs)},
-  db:{collection:()=>({doc:()=>({get:async()=>({exists:true,data:()=>proof})})})}});
+  db:{app:{options},collection:()=>({doc:()=>({get:async()=>({exists:true,data:()=>proof})})})}});
  vm.runInContext(fs.readFileSync('src/services/receiving-transport.js','utf8'),c);
  const receive=()=>c.receiveV2SupplyEmulator(input.supplyId,input.qty,input.lotNo,input.expiryDate,input.operationId,{actorUid:'buyer',actorRole:'purchaser'});
  return {c,input,calls,auth,proof,functions,jobs,receive};
@@ -91,4 +91,28 @@ test('legacy browser receipt keeps five-line default while the generated server 
  await assert.rejects(c.validateV2ReceiptSource({},input),/已完成初始化/);
  // Caller payload cannot change either cap; only the dependency-bound backend context opts in.
  assert.match(fs.readFileSync('functions/supply-receipt-service.js','utf8'),/receivingSourceItemLimit:15/);
+});
+
+function previewTransport(){
+ const x=transport();x.c.APP_ENVIRONMENT='preview';x.c.YUSHIN_PREVIEW_RECEIVING=true;
+ x.c.location.hostname='preview-20135.web.app';x.auth.app.options.projectId='preview-20135';
+ delete x.auth.emulatorConfig;
+ x.c.db.app={options:{projectId:'preview-20135'}};
+ return x;
+}
+test('Preview receipt requires matching Auth, Functions, default app and actual Firestore binding before any RPC',async()=>{
+ const good=previewTransport();assert.deepEqual([...await good.receive()],['O']);
+ assert.equal(good.calls.some(call=>call.host),false);
+ for(const change of [
+  x=>x.c.db.app={options:{projectId:'demo-yushin'}},
+  x=>delete x.c.db.app,
+  x=>x.functions.app={options:{projectId:'yu-shing-company'}},
+  x=>x.auth.emulatorConfig={host:'127.0.0.1',port:9099},
+  x=>x.c.location.hostname='yu-shing-company.web.app',
+  x=>x.c.YUSHIN_PREVIEW_RECEIVING=false
+ ]){
+  const x=previewTransport();change(x);await assert.rejects(x.receive());assert.equal(x.calls.length,0);
+ }
+ const demo=transport();demo.c.db.app={options:{projectId:'preview-20135'}};
+ await assert.rejects(demo.receive());assert.equal(demo.calls.length,0);
 });

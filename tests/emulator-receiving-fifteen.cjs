@@ -88,11 +88,38 @@ test('fifteen mixed source retains service state and fits measured per-attempt d
    update:(...args)=>{stats.writes++;return native.update(...args);},set:(...args)=>{stats.writes++;return native.set(...args);}});
  })};
  const input=x.input(13,2),beforeService=structuredClone(x.items[14]);
- await receiveV2Supply(instrumented,x.receiver.uid,input);
+ // Direct measurement models the function process explicitly; the Node test
+ // runner itself is not the Functions Emulator child process.
+ await receiveV2Supply(instrumented,x.receiver.uid,input,{...process.env,FUNCTIONS_EMULATOR:'true'});
  for(const stats of attempts){assert.ok(stats.documents<=limits.MAX_READ_DOCUMENTS);assert.ok(stats.requests<=limits.MAX_READ_REQUESTS);assert.ok(stats.writes<=limits.MAX_WRITES);}
  assert.ok(attempts.length);console.log('mixed15 receipt transaction attempts',JSON.stringify(attempts));
  const order=(await db.doc('orders/'+x.orderId).get()).data();assert.deepEqual(order.items[14],beforeService);
  assert.equal(order.items[13].receivedQty,2);assert.ok(Array.isArray(order.workCategories));
  const after=await x.snapshot();await x.receive(input);assert.deepEqual(await x.snapshot(),after);
  assert.equal(after.serviceCases.length,0);assert.equal(after.receipts.length,1);
+});
+
+test('Preview-gated handler completes the fifteen-line shared writer on an explicitly emulator-backed project facade',{timeout:180000},async()=>{
+ // This facade tests the Preview authorization branch against real Emulator
+ // transactions. It is deliberately NOT a deployed Preview/Auth acceptance test.
+ const x=await fixture('preview-facade',15,{service:true,role:'purchaser'});
+ const {createSupplyReceiptCallable}=require('../functions/supply-receipt-callable');
+ let reads=0,writes=0;
+ const binding={projectId:'preview-20135',collection:name=>{reads++;return db.collection(name);},runTransaction:fn=>db.runTransaction(async native=>fn({
+  get:ref=>native.get(ref),set:(...args)=>{writes++;return native.set(...args);},update:(...args)=>{writes++;return native.update(...args);}}))};
+ class HttpsError extends Error{constructor(code,message){super(message);this.code=code;}}
+ const env={GCLOUD_PROJECT:'preview-20135',ENABLE_PREVIEW_RECEIVING:'true'};
+ const handler=(environment=env,database=binding)=>createSupplyReceiptCallable({env:environment,onCall:(_opts,callback)=>callback,HttpsError,getDatabase:()=>database});
+ const request={auth:{uid:x.receiver.uid},data:x.input(13,2)};
+ const reply=await handler()(request);assert.equal(reply.status,'confirmed');assert.ok(writes>0);
+ const after=await x.snapshot(),committedWrites=writes;
+ await handler()(request);assert.equal(writes,committedWrites);assert.deepEqual(await x.snapshot(),after);
+ for(const bad of [{...env,ENABLE_PREVIEW_RECEIVING:'false'},{...env,GCLOUD_PROJECT:'yu-shing-company'},
+  {...env,FIRESTORE_EMULATOR_HOST:'127.0.0.1:8080'},{...env,FIREBASE_AUTH_EMULATOR_HOST:'127.0.0.1:9099'}]){
+  const previousReads=reads;await assert.rejects(handler(bad)(request),{code:'failed-precondition'});assert.equal(reads,previousReads);
+ }
+ const previousReads=reads;await assert.rejects(handler(env,{...binding,projectId:'yu-shing-company'})(request),{code:'failed-precondition'});assert.equal(reads,previousReads);
+ await assert.rejects(handler()({data:request.data}),{code:'unauthenticated'});
+ await db.doc('users/'+x.receiver.uid).update({disabled:true});
+ await assert.rejects(handler()({...request,data:x.input(13,1,'later')}),{code:'permission-denied'});assert.deepEqual(await x.snapshot(),after);
 });

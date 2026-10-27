@@ -16911,6 +16911,7 @@ async function receiveV2SupplyEmulator(supplyId,qty,lotNo,expiryDate,operationId
     const project=emulator?'demo-yushin':'preview-20135';
     if(auth.app?.options?.projectId!==project||functions.app?.options?.projectId!==project
         ||firebase.app().options?.projectId!==project
+        ||typeof db==='undefined'||db.app?.options?.projectId!==project
         ||(emulator&&(!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099))
         ||(preview&&!!auth.emulatorConfig))
         throw Error('收貨 Auth、Functions 與資料庫專案不一致，未提交收貨。');
