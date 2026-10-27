@@ -330,3 +330,11 @@ test('warehouse shipment context rejects stale projections and unsupported retur
  for(const patch of [{reservedQty:11},{deliveredQty:1},{warehouseShippedQty:1},
   {returnedQty:1},{fulfillmentType:'DIRECT_SHIP'},{qty:10.5}])assert.throws(()=>workflow.projectItem({...input,...patch}));
 });
+
+test('direct workflow has no warehouse hold or shortage while procurement and delivery retain their own quantities',()=>{
+ for(const stockHints of [{},{reservedQty:0,shortageQty:0},{shortageQty:4}]){
+  const p=w.projectItem({orderedQty:5,fulfillmentType:'DIRECT_SHIP',supplyOrderedQty:6,receivedQty:3,deliveredQty:3,grossDeliveredQty:3,returnedQty:1,...stockHints});
+  assert.equal(p.reservedQty,0);assert.equal(p.shortageQty,0);assert.equal(p.requiredSupplyQty,6);
+  assert.equal(p.remainingToOrderQty,0);assert.equal(p.inTransitQty,3);assert.equal(p.outstandingQty,3);
+ }
+});

@@ -2450,7 +2450,7 @@ for(const width of [1280,390])test('full site '+width+'px original UI gated PO p
    if(total===1){
     await page.waitForFunction(id=>receiptTaskJobs.get(receiptTaskKey(id))?.state==='error',supplyId,{timeout:45000});
     const partial=(await db.collection('orders').doc(orderId).get()).data(),intent=receiptCalls[0];
-    assert.equal(partial.items[0].receivedQty,1);assert.equal(partial.deliveryRecords.length,1);
+    assert.equal(partial.items[0].receivedQty,1);assert.equal(partial.items[0].shortageQty,0);assert.equal(partial.items[0].reservedQty,0);assert.equal(partial.deliveryRecords.length,1);
     const proof=(await db.collection('receipts').doc(intent.operationId).get()).data();
     assert.equal(proof.fulfillmentType,'DIRECT_SHIP');assert.equal(proof.lotNo,undefined);assert.equal(proof.expiryDate,undefined);
     assert.deepEqual(await physical(),before);
@@ -2467,7 +2467,7 @@ for(const width of [1280,390])test('full site '+width+'px original UI gated PO p
    assert.deepEqual(await physical(),before);
   }
   const done=(await db.collection('orders').doc(orderId).get()).data();
-  assert.equal(done.deliveredQty,3);assert.equal(done.isDelivered,true);assert.equal(done.items[0].receivedQty,3);
+  assert.equal(done.deliveredQty,3);assert.equal(done.isDelivered,true);assert.equal(done.items[0].receivedQty,3);assert.equal(done.items[0].shortageQty,0);
   assert.equal(done.deliveryRecords.length,2);assert.ok(done.deliveryRecords.every(r=>r.sourceType==='DIRECT_SHIP_RECEIPT'&&r.sourceId===supplyId));
   assert.equal((done.warehouseShipmentRecords||[]).length,0);assert.equal(done.items[0].reservedQty,0);
   const demand=(await db.collection('procurementDemands').doc(demandId).get()).data();

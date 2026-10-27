@@ -1755,11 +1755,11 @@ test('direct arrival validates actual PO source before every new receipt, preser
   await assert.rejects(x.receive(x.input(1,'first'),x.buyer),code('permission-denied'));assert.deepEqual(await x.snapshot(),before);
   await assert.rejects(x.receive({...x.input(1,'first'),lotNo:'INVALID'}));assert.deepEqual(await x.snapshot(),before);
   await Promise.all([x.receive(x.input(1,'first')),x.receive(x.input(1,'first'))]);const partial=await x.snapshot();
-  assert.equal(partial.receipts.length,1);assert.equal(partial.order.deliveredQty,1);assert.equal(partial.demand.receivedQty,1);
+  assert.equal(partial.receipts.length,1);assert.equal(partial.order.deliveredQty,1);assert.equal(partial.demand.receivedQty,1);assert.equal(partial.order.items[0].shortageQty,0);assert.equal(partial.order.items[0].reservedQty,0);
   await poRef.update({status:'CANCELLED'});await x.receive(x.input(1,'first'));assert.deepEqual(await x.snapshot(),partial,'existing receipt recovers despite later PO cancellation');
   await assert.rejects(x.receive(x.input(1,'later')));assert.deepEqual(await x.snapshot(),partial);await poRef.set(po);
   const admin=await identity('direct-proof-admin-'+ownerRole,'admin');await x.receive(x.input(2,'final'),admin);const complete=await x.snapshot();
-  assert.equal(complete.receipts.length,2);assert.equal(complete.order.deliveredQty,3);assert.equal(complete.supply.receivedQty,3);assert.equal(complete.demand.receivedQty,3);
+  assert.equal(complete.receipts.length,2);assert.equal(complete.order.deliveredQty,3);assert.equal(complete.supply.receivedQty,3);assert.equal(complete.demand.receivedQty,3);assert.equal(complete.order.items[0].shortageQty,0);assert.equal(complete.order.items[0].reservedQty,0);
   for(const field of ['inventory','stock','inventoryLots','inventoryLotCosts','inventoryMovements','inventoryReservations'])assert.deepEqual(complete[field],before[field]);
   assert.ok(complete.receipts.every(([,r])=>r.fulfillmentType==='DIRECT_SHIP'&&r.warehouseId===''&&!r.lotNo&&!r.expiryDate));
   assert.equal(JSON.stringify(complete.receipts).includes('unitCost'),false);

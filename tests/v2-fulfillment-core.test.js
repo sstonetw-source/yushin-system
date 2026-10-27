@@ -198,3 +198,15 @@ test('15-line whole-order projection validates same-product lots, independent ev
 test('whole-order aggregate cannot overflow otherwise valid per-item integer quantities',()=>{
  assert.throws(()=>f.projectOrderShipmentReturns({orderId:'O',items:[{itemId:'I1',productId:'P',qty:Number.MAX_SAFE_INTEGER},{itemId:'I2',productId:'Q',qty:1}]}),/安全數量/);
 });
+
+test('factory-direct normalization never turns outstanding delivery into warehouse shortage',()=>{
+ for(const deliveredQty of [0,2,5]){
+  const input={qty:5,fulfillmentType:'DIRECT_SHIP',reservedQty:0,shortageQty:999,supplyOrderedQty:6,receivedQty:deliveredQty,deliveredQty};
+  const result=f.normalizeItem(input);
+  assert.equal(result.shortageQty,0);assert.equal(result.reservedQty,0);
+  assert.equal(result.supplyOrderedQty,6);assert.equal(result.receivedQty,deliveredQty);assert.equal(result.deliveredQty,deliveredQty);
+  assert.equal(input.shortageQty,999,'pure projection never rewrites original source');
+ }
+ assert.equal(f.normalizeItem({qty:5,reservedQty:2}).shortageQty,3);
+ assert.equal(f.normalizeItem({qty:5,fulfillmentType:'DIRECT_SHIP',reservedQty:2}).reservedQty,2,'source validator must still see a recorded invalid hold');
+});
