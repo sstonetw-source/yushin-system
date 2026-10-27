@@ -78,6 +78,19 @@ test('mobile record lists use one white card layer without a blue outer well or 
     assert.match(css, /#ordersTable tbody > tr \{ background:var\(--ys-record\)!important;/);
     assert.match(css, /#appContainer \.inventory-mobile-summary > div \{ background: var\(--ys-neutral-soft\);/);
     assert.match(css, /#appContainer #printableQuote \{\s*background:var\(--ys-surface\);/);
-    assert.match(html, /styles\.css\?v=20261027-305/);
+    assert.match(html, /styles\.css\?v=20261027-306/);
+});
+
+
+test('purchasing queues use laptop-width cards while preserving their action and fallback content', () => {
+    assert.match(css, /@media screen and \(min-width:769px\) and \(max-width:1440px\)/);
+    for (const id of ['purchasePendingPanel', 'purchaseDispatchPanel', 'purchaseCompletedPanel']) {
+        assert.ok(css.includes('#purchasePendingPanel,#purchaseDispatchPanel,#purchaseCompletedPanel'), id);
+        assert.ok(html.includes(`id="${id}"`), id);
+    }
+    assert.match(css, /grid-template-areas:"customer owner select"/);
+    assert.match(css, /grid-area:actions; min-width:0;/);
+    assert.match(css, /:has\(\.order-detail-panel\) > td\[data-th="交易／開票資料"\] \{ display:none; \}/);
+    assert.match(css, /:not\(:has\(\.order-detail-panel\)\) > td\[data-th="交易／開票資料"\] \{ grid-column:1\/-1; \}/);
 });
 
