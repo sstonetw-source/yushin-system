@@ -44,6 +44,18 @@ function fn(name){const a=source.indexOf('function '+name+'('),b=source.indexOf(
    assert.ok(fields.indexOf('產品資訊')<fields.indexOf('負責業務'));assert.equal(await row.locator('.workflow-product .workflow-quantity').count(),0);assert.match(await row.locator('td[data-th="進度"]').innerText(),/\d/);
    assert.match(await row.locator('td[data-th="銷售金額"]').innerText(),/120 × 20[\s\S]*2,400/);
    assert.match(await row.locator('td[data-th="交易／開票資料"]').innerText(),/交易方式：直[\s\S]*測試發票抬頭/);
+   if(width>=769&&view!=='receiving'){
+    const layout=await row.evaluate(element=>({
+     display:getComputedStyle(element).display,
+     columnCount:getComputedStyle(element).gridTemplateColumns.split(' ').length,
+     overflow:document.documentElement.scrollWidth-innerWidth,
+     commercialVisible:getComputedStyle(element.querySelector('[data-th="交易／開票資料"]')).display!=='none'
+    }));
+    assert.equal(layout.display,'grid',view+' laptop layout');
+    assert.equal(layout.columnCount,3,view+' laptop columns');
+    assert.ok(layout.overflow<=1,view+' laptop page overflow: '+layout.overflow);
+    assert.equal(layout.commercialVisible,false,view+' commercial details stay in drawer');
+   }
    await row.locator('.order-detail-panel > summary').click();
    await row.locator('dialog[open]').waitFor({state:'visible'});
    assert.equal(await row.locator('dialog').evaluate(e=>e.open),true);

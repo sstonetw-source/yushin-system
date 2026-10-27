@@ -380,8 +380,22 @@ service cloud.firestore {
     function operationalItemsOnly(allowed) {
       let before = resource.data.get('items', []);
       let after = request.resource.data.get('items', []);
-      return before == after || (before.size() == after.size() && before.size() <= 30
-        && (before.size() <= 0 ? true : after[0].diff(before[0]).affectedKeys().hasOnly(allowed) && (before.size() <= 1 ? true : after[1].diff(before[1]).affectedKeys().hasOnly(allowed) && (before.size() <= 2 ? true : after[2].diff(before[2]).affectedKeys().hasOnly(allowed) && (before.size() <= 3 ? true : after[3].diff(before[3]).affectedKeys().hasOnly(allowed) && (before.size() <= 4 ? true : after[4].diff(before[4]).affectedKeys().hasOnly(allowed) && (before.size() <= 5 ? true : after[5].diff(before[5]).affectedKeys().hasOnly(allowed) && (before.size() <= 6 ? true : after[6].diff(before[6]).affectedKeys().hasOnly(allowed) && (before.size() <= 7 ? true : after[7].diff(before[7]).affectedKeys().hasOnly(allowed) && (before.size() <= 8 ? true : after[8].diff(before[8]).affectedKeys().hasOnly(allowed) && (before.size() <= 9 ? true : after[9].diff(before[9]).affectedKeys().hasOnly(allowed) && (before.size() <= 10 ? true : after[10].diff(before[10]).affectedKeys().hasOnly(allowed) && (before.size() <= 11 ? true : after[11].diff(before[11]).affectedKeys().hasOnly(allowed) && (before.size() <= 12 ? true : after[12].diff(before[12]).affectedKeys().hasOnly(allowed) && (before.size() <= 13 ? true : after[13].diff(before[13]).affectedKeys().hasOnly(allowed) && (before.size() <= 14 ? true : after[14].diff(before[14]).affectedKeys().hasOnly(allowed) && (before.size() <= 15 ? true : after[15].diff(before[15]).affectedKeys().hasOnly(allowed) && (before.size() <= 16 ? true : after[16].diff(before[16]).affectedKeys().hasOnly(allowed) && (before.size() <= 17 ? true : after[17].diff(before[17]).affectedKeys().hasOnly(allowed) && (before.size() <= 18 ? true : after[18].diff(before[18]).affectedKeys().hasOnly(allowed) && (before.size() <= 19 ? true : after[19].diff(before[19]).affectedKeys().hasOnly(allowed) && (before.size() <= 20 ? true : after[20].diff(before[20]).affectedKeys().hasOnly(allowed) && (before.size() <= 21 ? true : after[21].diff(before[21]).affectedKeys().hasOnly(allowed) && (before.size() <= 22 ? true : after[22].diff(before[22]).affectedKeys().hasOnly(allowed) && (before.size() <= 23 ? true : after[23].diff(before[23]).affectedKeys().hasOnly(allowed) && (before.size() <= 24 ? true : after[24].diff(before[24]).affectedKeys().hasOnly(allowed) && (before.size() <= 25 ? true : after[25].diff(before[25]).affectedKeys().hasOnly(allowed) && (before.size() <= 26 ? true : after[26].diff(before[26]).affectedKeys().hasOnly(allowed) && (before.size() <= 27 ? true : after[27].diff(before[27]).affectedKeys().hasOnly(allowed) && (before.size() <= 28 ? true : after[28].diff(before[28]).affectedKeys().hasOnly(allowed) && (before.size() <= 29 ? true : after[29].diff(before[29]).affectedKeys().hasOnly(allowed) && true)))))))))))))))))))))))))))))));
+      return before == after || (before.size() == after.size() && before.size() <= 15
+        && (before.size() <= 0 || after[0].diff(before[0]).affectedKeys().hasOnly(allowed))
+        && (before.size() <= 1 || after[1].diff(before[1]).affectedKeys().hasOnly(allowed))
+        && (before.size() <= 2 || after[2].diff(before[2]).affectedKeys().hasOnly(allowed))
+        && (before.size() <= 3 || after[3].diff(before[3]).affectedKeys().hasOnly(allowed))
+        && (before.size() <= 4 || after[4].diff(before[4]).affectedKeys().hasOnly(allowed))
+        && (before.size() <= 5 || after[5].diff(before[5]).affectedKeys().hasOnly(allowed))
+        && (before.size() <= 6 || after[6].diff(before[6]).affectedKeys().hasOnly(allowed))
+        && (before.size() <= 7 || after[7].diff(before[7]).affectedKeys().hasOnly(allowed))
+        && (before.size() <= 8 || after[8].diff(before[8]).affectedKeys().hasOnly(allowed))
+        && (before.size() <= 9 || after[9].diff(before[9]).affectedKeys().hasOnly(allowed))
+        && (before.size() <= 10 || after[10].diff(before[10]).affectedKeys().hasOnly(allowed))
+        && (before.size() <= 11 || after[11].diff(before[11]).affectedKeys().hasOnly(allowed))
+        && (before.size() <= 12 || after[12].diff(before[12]).affectedKeys().hasOnly(allowed))
+        && (before.size() <= 13 || after[13].diff(before[13]).affectedKeys().hasOnly(allowed))
+        && (before.size() <= 14 || after[14].diff(before[14]).affectedKeys().hasOnly(allowed)));
     }
     function purchasingItemFields() {
       return ['orderedQty', 'reservedQty', 'shortageQty', 'dispatchPreparedQty',
@@ -1328,7 +1342,7 @@ service cloud.firestore {
     function validNewOrderProductMaster(data) {
       let productId = data.get('productId', '');
       return data.get('productMasterMatched', false) == true
-        && data.get('items', []) is list && data.get('items', []).size() <= 30
+        && data.get('items', []) is list && data.get('items', []).size() <= 15
         && productId != ''
         && exists(productPath(productId));
     }
@@ -1340,7 +1354,7 @@ service cloud.firestore {
     }
     function validOrderEmbeddedCost(data) {
       let items = data.get('items', []);
-      return items is list && items.size() <= 30
+      return items is list && items.size() <= 15
         && validNewItemCost(data, 'PURCHASING_PO')
         && (items.size() <= 0 || validNewItemCost(items[0], data.get('procurementType', 'PURCHASING_PO')))
         && (items.size() <= 1 || validNewItemCost(items[1], data.get('procurementType', 'PURCHASING_PO')))
@@ -1356,22 +1370,7 @@ service cloud.firestore {
         && (items.size() <= 11 || validNewItemCost(items[11], data.get('procurementType', 'PURCHASING_PO')))
         && (items.size() <= 12 || validNewItemCost(items[12], data.get('procurementType', 'PURCHASING_PO')))
         && (items.size() <= 13 || validNewItemCost(items[13], data.get('procurementType', 'PURCHASING_PO')))
-        && (items.size() <= 14 || validNewItemCost(items[14], data.get('procurementType', 'PURCHASING_PO')))
-        && (items.size() <= 15 || validNewItemCost(items[15], data.get('procurementType', 'PURCHASING_PO')))
-        && (items.size() <= 16 || validNewItemCost(items[16], data.get('procurementType', 'PURCHASING_PO')))
-        && (items.size() <= 17 || validNewItemCost(items[17], data.get('procurementType', 'PURCHASING_PO')))
-        && (items.size() <= 18 || validNewItemCost(items[18], data.get('procurementType', 'PURCHASING_PO')))
-        && (items.size() <= 19 || validNewItemCost(items[19], data.get('procurementType', 'PURCHASING_PO')))
-        && (items.size() <= 20 || validNewItemCost(items[20], data.get('procurementType', 'PURCHASING_PO')))
-        && (items.size() <= 21 || validNewItemCost(items[21], data.get('procurementType', 'PURCHASING_PO')))
-        && (items.size() <= 22 || validNewItemCost(items[22], data.get('procurementType', 'PURCHASING_PO')))
-        && (items.size() <= 23 || validNewItemCost(items[23], data.get('procurementType', 'PURCHASING_PO')))
-        && (items.size() <= 24 || validNewItemCost(items[24], data.get('procurementType', 'PURCHASING_PO')))
-        && (items.size() <= 25 || validNewItemCost(items[25], data.get('procurementType', 'PURCHASING_PO')))
-        && (items.size() <= 26 || validNewItemCost(items[26], data.get('procurementType', 'PURCHASING_PO')))
-        && (items.size() <= 27 || validNewItemCost(items[27], data.get('procurementType', 'PURCHASING_PO')))
-        && (items.size() <= 28 || validNewItemCost(items[28], data.get('procurementType', 'PURCHASING_PO')))
-        && (items.size() <= 29 || validNewItemCost(items[29], data.get('procurementType', 'PURCHASING_PO')));
+        && (items.size() <= 14 || validNewItemCost(items[14], data.get('procurementType', 'PURCHASING_PO')));
     }
     // Ordinary operational changes use the existing cheap path. Only changes to
     // cost or identity enter the additional Service binding validation.
@@ -1394,37 +1393,22 @@ service cloud.firestore {
       let after = request.resource.data.get('items', []);
       return request.resource.data.get('procurementType', 'PURCHASING_PO') == resource.data.get('procurementType', 'PURCHASING_PO')
         && commercialItemIdentityAndCostProtected(resource.data, request.resource.data, 'PURCHASING_PO')
-        && (before == after ? true : (before is list && after is list && before.size() == after.size() && before.size() <= 30
-        && (before.size() <= 0 || commercialItemIdentityAndCostProtected(before[0], after[0], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 1 || commercialItemIdentityAndCostProtected(before[1], after[1], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 2 || commercialItemIdentityAndCostProtected(before[2], after[2], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 3 || commercialItemIdentityAndCostProtected(before[3], after[3], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 4 || commercialItemIdentityAndCostProtected(before[4], after[4], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 5 || commercialItemIdentityAndCostProtected(before[5], after[5], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 6 || commercialItemIdentityAndCostProtected(before[6], after[6], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 7 || commercialItemIdentityAndCostProtected(before[7], after[7], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 8 || commercialItemIdentityAndCostProtected(before[8], after[8], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 9 || commercialItemIdentityAndCostProtected(before[9], after[9], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 10 || commercialItemIdentityAndCostProtected(before[10], after[10], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 11 || commercialItemIdentityAndCostProtected(before[11], after[11], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 12 || commercialItemIdentityAndCostProtected(before[12], after[12], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 13 || commercialItemIdentityAndCostProtected(before[13], after[13], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 14 || commercialItemIdentityAndCostProtected(before[14], after[14], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 15 || commercialItemIdentityAndCostProtected(before[15], after[15], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 16 || commercialItemIdentityAndCostProtected(before[16], after[16], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 17 || commercialItemIdentityAndCostProtected(before[17], after[17], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 18 || commercialItemIdentityAndCostProtected(before[18], after[18], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 19 || commercialItemIdentityAndCostProtected(before[19], after[19], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 20 || commercialItemIdentityAndCostProtected(before[20], after[20], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 21 || commercialItemIdentityAndCostProtected(before[21], after[21], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 22 || commercialItemIdentityAndCostProtected(before[22], after[22], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 23 || commercialItemIdentityAndCostProtected(before[23], after[23], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 24 || commercialItemIdentityAndCostProtected(before[24], after[24], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 25 || commercialItemIdentityAndCostProtected(before[25], after[25], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 26 || commercialItemIdentityAndCostProtected(before[26], after[26], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 27 || commercialItemIdentityAndCostProtected(before[27], after[27], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 28 || commercialItemIdentityAndCostProtected(before[28], after[28], resource.data.get('procurementType', 'PURCHASING_PO')))
-        && (before.size() <= 29 || commercialItemIdentityAndCostProtected(before[29], after[29], resource.data.get('procurementType', 'PURCHASING_PO')))));
+        && (before == after || (before is list && after is list && before.size() == after.size() && before.size() <= 15
+          && (before.size() <= 0 || commercialItemIdentityAndCostProtected(before[0], after[0], resource.data.get('procurementType', 'PURCHASING_PO')))
+          && (before.size() <= 1 || commercialItemIdentityAndCostProtected(before[1], after[1], resource.data.get('procurementType', 'PURCHASING_PO')))
+          && (before.size() <= 2 || commercialItemIdentityAndCostProtected(before[2], after[2], resource.data.get('procurementType', 'PURCHASING_PO')))
+          && (before.size() <= 3 || commercialItemIdentityAndCostProtected(before[3], after[3], resource.data.get('procurementType', 'PURCHASING_PO')))
+          && (before.size() <= 4 || commercialItemIdentityAndCostProtected(before[4], after[4], resource.data.get('procurementType', 'PURCHASING_PO')))
+          && (before.size() <= 5 || commercialItemIdentityAndCostProtected(before[5], after[5], resource.data.get('procurementType', 'PURCHASING_PO')))
+          && (before.size() <= 6 || commercialItemIdentityAndCostProtected(before[6], after[6], resource.data.get('procurementType', 'PURCHASING_PO')))
+          && (before.size() <= 7 || commercialItemIdentityAndCostProtected(before[7], after[7], resource.data.get('procurementType', 'PURCHASING_PO')))
+          && (before.size() <= 8 || commercialItemIdentityAndCostProtected(before[8], after[8], resource.data.get('procurementType', 'PURCHASING_PO')))
+          && (before.size() <= 9 || commercialItemIdentityAndCostProtected(before[9], after[9], resource.data.get('procurementType', 'PURCHASING_PO')))
+          && (before.size() <= 10 || commercialItemIdentityAndCostProtected(before[10], after[10], resource.data.get('procurementType', 'PURCHASING_PO')))
+          && (before.size() <= 11 || commercialItemIdentityAndCostProtected(before[11], after[11], resource.data.get('procurementType', 'PURCHASING_PO')))
+          && (before.size() <= 12 || commercialItemIdentityAndCostProtected(before[12], after[12], resource.data.get('procurementType', 'PURCHASING_PO')))
+          && (before.size() <= 13 || commercialItemIdentityAndCostProtected(before[13], after[13], resource.data.get('procurementType', 'PURCHASING_PO')))
+          && (before.size() <= 14 || commercialItemIdentityAndCostProtected(before[14], after[14], resource.data.get('procurementType', 'PURCHASING_PO')))));
     }
 
     function supplierCancellationResolution(userRole) {
@@ -1724,14 +1708,42 @@ service cloud.firestore {
     function logisticsLocationProtected() {
       let before = resource.data;
       let after = request.resource.data;
-      return before.get('warehouseLogisticsId', '') == '' || before.get('items', []) == after.get('items', []) || (before.items.size() <= 30
+      return before.get('warehouseLogisticsId', '') == '' || before.get('items', []) == after.get('items', []) || (before.items.size() <= 15
         && before.items.size() == after.items.size()
-        && logisticsItemProtected(before.items, after.items, 0) && logisticsItemProtected(before.items, after.items, 1) && logisticsItemProtected(before.items, after.items, 2) && logisticsItemProtected(before.items, after.items, 3) && logisticsItemProtected(before.items, after.items, 4) && logisticsItemProtected(before.items, after.items, 5) && logisticsItemProtected(before.items, after.items, 6) && logisticsItemProtected(before.items, after.items, 7) && logisticsItemProtected(before.items, after.items, 8) && logisticsItemProtected(before.items, after.items, 9) && logisticsItemProtected(before.items, after.items, 10) && logisticsItemProtected(before.items, after.items, 11) && logisticsItemProtected(before.items, after.items, 12) && logisticsItemProtected(before.items, after.items, 13) && logisticsItemProtected(before.items, after.items, 14) && logisticsItemProtected(before.items, after.items, 15) && logisticsItemProtected(before.items, after.items, 16) && logisticsItemProtected(before.items, after.items, 17) && logisticsItemProtected(before.items, after.items, 18) && logisticsItemProtected(before.items, after.items, 19) && logisticsItemProtected(before.items, after.items, 20) && logisticsItemProtected(before.items, after.items, 21) && logisticsItemProtected(before.items, after.items, 22) && logisticsItemProtected(before.items, after.items, 23) && logisticsItemProtected(before.items, after.items, 24) && logisticsItemProtected(before.items, after.items, 25) && logisticsItemProtected(before.items, after.items, 26) && logisticsItemProtected(before.items, after.items, 27) && logisticsItemProtected(before.items, after.items, 28) && logisticsItemProtected(before.items, after.items, 29));
+        && logisticsItemProtected(before.items, after.items, 0)
+        && logisticsItemProtected(before.items, after.items, 1)
+        && logisticsItemProtected(before.items, after.items, 2)
+        && logisticsItemProtected(before.items, after.items, 3)
+        && logisticsItemProtected(before.items, after.items, 4)
+        && logisticsItemProtected(before.items, after.items, 5)
+        && logisticsItemProtected(before.items, after.items, 6)
+        && logisticsItemProtected(before.items, after.items, 7)
+        && logisticsItemProtected(before.items, after.items, 8)
+        && logisticsItemProtected(before.items, after.items, 9)
+        && logisticsItemProtected(before.items, after.items, 10)
+        && logisticsItemProtected(before.items, after.items, 11)
+        && logisticsItemProtected(before.items, after.items, 12)
+        && logisticsItemProtected(before.items, after.items, 13)
+        && logisticsItemProtected(before.items, after.items, 14));
     }
     function noCustodyForCancellation() {
       let before = resource.data;
-      return before.get('warehouseLogisticsId', '') == '' || (before.get('items', []).size() <= 30
-        && custodyItemClear(before.get('items', []), 0) && custodyItemClear(before.get('items', []), 1) && custodyItemClear(before.get('items', []), 2) && custodyItemClear(before.get('items', []), 3) && custodyItemClear(before.get('items', []), 4) && custodyItemClear(before.get('items', []), 5) && custodyItemClear(before.get('items', []), 6) && custodyItemClear(before.get('items', []), 7) && custodyItemClear(before.get('items', []), 8) && custodyItemClear(before.get('items', []), 9) && custodyItemClear(before.get('items', []), 10) && custodyItemClear(before.get('items', []), 11) && custodyItemClear(before.get('items', []), 12) && custodyItemClear(before.get('items', []), 13) && custodyItemClear(before.get('items', []), 14) && custodyItemClear(before.get('items', []), 15) && custodyItemClear(before.get('items', []), 16) && custodyItemClear(before.get('items', []), 17) && custodyItemClear(before.get('items', []), 18) && custodyItemClear(before.get('items', []), 19) && custodyItemClear(before.get('items', []), 20) && custodyItemClear(before.get('items', []), 21) && custodyItemClear(before.get('items', []), 22) && custodyItemClear(before.get('items', []), 23) && custodyItemClear(before.get('items', []), 24) && custodyItemClear(before.get('items', []), 25) && custodyItemClear(before.get('items', []), 26) && custodyItemClear(before.get('items', []), 27) && custodyItemClear(before.get('items', []), 28) && custodyItemClear(before.get('items', []), 29));
+      return before.get('warehouseLogisticsId', '') == '' || (before.get('items', []).size() <= 15
+        && custodyItemClear(before.get('items', []), 0)
+        && custodyItemClear(before.get('items', []), 1)
+        && custodyItemClear(before.get('items', []), 2)
+        && custodyItemClear(before.get('items', []), 3)
+        && custodyItemClear(before.get('items', []), 4)
+        && custodyItemClear(before.get('items', []), 5)
+        && custodyItemClear(before.get('items', []), 6)
+        && custodyItemClear(before.get('items', []), 7)
+        && custodyItemClear(before.get('items', []), 8)
+        && custodyItemClear(before.get('items', []), 9)
+        && custodyItemClear(before.get('items', []), 10)
+        && custodyItemClear(before.get('items', []), 11)
+        && custodyItemClear(before.get('items', []), 12)
+        && custodyItemClear(before.get('items', []), 13)
+        && custodyItemClear(before.get('items', []), 14));
     }
 
     function commercialKeepsPendingTransfer() {
@@ -1752,16 +1764,22 @@ service cloud.firestore {
     function orderBeforeFirstReceipt(order) {
       let items = order.get('items', []);
       let count = items.size();
-      return orderWithoutGlobalReceipt(order) && count <= 30
-        && (count == 30
-          // Legacy thirty-line orders still check every item's receipt status.
-          ? (receiptFreeGroup(items[0], items[1], items[2], items[3], items[4])
-            && receiptFreeGroup(items[5], items[6], items[7], items[8], items[9])
-            && receiptFreeGroup(items[10], items[11], items[12], items[13], items[14])
-            && receiptFreeGroup(items[15], items[16], items[17], items[18], items[19])
-            && receiptFreeGroup(items[20], items[21], items[22], items[23], items[24])
-            && receiptFreeGroup(items[25], items[26], items[27], items[28], items[29]))
-          : (count >= 5 ? receiptFreeGroup(items[0], items[1], items[2], items[3], items[4]) && (count >= 10 ? receiptFreeGroup(items[5], items[6], items[7], items[8], items[9]) && (count >= 15 ? receiptFreeGroup(items[10], items[11], items[12], items[13], items[14]) && (count >= 20 ? receiptFreeGroup(items[15], items[16], items[17], items[18], items[19]) && (count >= 25 ? receiptFreeGroup(items[20], items[21], items[22], items[23], items[24]) && (count >= 30 ? receiptFreeGroup(items[25], items[26], items[27], items[28], items[29]) && true : (count <= 25 ? true : [items[25].get('receivedQty', 0), items[25].get('receiptEvents', [])] == [0, []] && (count <= 26 ? true : [items[26].get('receivedQty', 0), items[26].get('receiptEvents', [])] == [0, []] && (count <= 27 ? true : [items[27].get('receivedQty', 0), items[27].get('receiptEvents', [])] == [0, []] && (count <= 28 ? true : [items[28].get('receivedQty', 0), items[28].get('receiptEvents', [])] == [0, []] && true))))) : (count <= 20 ? true : [items[20].get('receivedQty', 0), items[20].get('receiptEvents', [])] == [0, []] && (count <= 21 ? true : [items[21].get('receivedQty', 0), items[21].get('receiptEvents', [])] == [0, []] && (count <= 22 ? true : [items[22].get('receivedQty', 0), items[22].get('receiptEvents', [])] == [0, []] && (count <= 23 ? true : [items[23].get('receivedQty', 0), items[23].get('receiptEvents', [])] == [0, []] && true))))) : (count <= 15 ? true : [items[15].get('receivedQty', 0), items[15].get('receiptEvents', [])] == [0, []] && (count <= 16 ? true : [items[16].get('receivedQty', 0), items[16].get('receiptEvents', [])] == [0, []] && (count <= 17 ? true : [items[17].get('receivedQty', 0), items[17].get('receiptEvents', [])] == [0, []] && (count <= 18 ? true : [items[18].get('receivedQty', 0), items[18].get('receiptEvents', [])] == [0, []] && true))))) : (count <= 10 ? true : [items[10].get('receivedQty', 0), items[10].get('receiptEvents', [])] == [0, []] && (count <= 11 ? true : [items[11].get('receivedQty', 0), items[11].get('receiptEvents', [])] == [0, []] && (count <= 12 ? true : [items[12].get('receivedQty', 0), items[12].get('receiptEvents', [])] == [0, []] && (count <= 13 ? true : [items[13].get('receivedQty', 0), items[13].get('receiptEvents', [])] == [0, []] && true))))) : (count <= 5 ? true : [items[5].get('receivedQty', 0), items[5].get('receiptEvents', [])] == [0, []] && (count <= 6 ? true : [items[6].get('receivedQty', 0), items[6].get('receiptEvents', [])] == [0, []] && (count <= 7 ? true : [items[7].get('receivedQty', 0), items[7].get('receiptEvents', [])] == [0, []] && (count <= 8 ? true : [items[8].get('receivedQty', 0), items[8].get('receiptEvents', [])] == [0, []] && true))))) : (count <= 0 ? true : [items[0].get('receivedQty', 0), items[0].get('receiptEvents', [])] == [0, []] && (count <= 1 ? true : [items[1].get('receivedQty', 0), items[1].get('receiptEvents', [])] == [0, []] && (count <= 2 ? true : [items[2].get('receivedQty', 0), items[2].get('receiptEvents', [])] == [0, []] && (count <= 3 ? true : [items[3].get('receivedQty', 0), items[3].get('receiptEvents', [])] == [0, []] && true))))));
+      return orderWithoutGlobalReceipt(order) && count <= 15
+        && (count <= 0 || (items[0].get('receivedQty', 0) == 0 && items[0].get('receiptEvents', []) == []))
+        && (count <= 1 || (items[1].get('receivedQty', 0) == 0 && items[1].get('receiptEvents', []) == []))
+        && (count <= 2 || (items[2].get('receivedQty', 0) == 0 && items[2].get('receiptEvents', []) == []))
+        && (count <= 3 || (items[3].get('receivedQty', 0) == 0 && items[3].get('receiptEvents', []) == []))
+        && (count <= 4 || (items[4].get('receivedQty', 0) == 0 && items[4].get('receiptEvents', []) == []))
+        && (count <= 5 || (items[5].get('receivedQty', 0) == 0 && items[5].get('receiptEvents', []) == []))
+        && (count <= 6 || (items[6].get('receivedQty', 0) == 0 && items[6].get('receiptEvents', []) == []))
+        && (count <= 7 || (items[7].get('receivedQty', 0) == 0 && items[7].get('receiptEvents', []) == []))
+        && (count <= 8 || (items[8].get('receivedQty', 0) == 0 && items[8].get('receiptEvents', []) == []))
+        && (count <= 9 || (items[9].get('receivedQty', 0) == 0 && items[9].get('receiptEvents', []) == []))
+        && (count <= 10 || (items[10].get('receivedQty', 0) == 0 && items[10].get('receiptEvents', []) == []))
+        && (count <= 11 || (items[11].get('receivedQty', 0) == 0 && items[11].get('receiptEvents', []) == []))
+        && (count <= 12 || (items[12].get('receivedQty', 0) == 0 && items[12].get('receiptEvents', []) == []))
+        && (count <= 13 || (items[13].get('receivedQty', 0) == 0 && items[13].get('receiptEvents', []) == []))
+        && (count <= 14 || (items[14].get('receivedQty', 0) == 0 && items[14].get('receiptEvents', []) == []));
     }
 
     // Commercial metadata also locks on per-line shipment/delivery history.
@@ -1773,15 +1791,11 @@ service cloud.firestore {
     function orderBeforeFirstMovement(order) {
       let original = order.get('items', []);
       let count = original.size();
-      // Pad the final group only; every existing line is checked.
       let items = original.concat([{}, {}, {}, {}]);
-      return orderWithoutGlobalReceipt(order) && count <= 30
+      return orderWithoutGlobalReceipt(order) && count <= 15
         && (count <= 0 || movementFreeGroup(items[0], items[1], items[2], items[3], items[4]))
         && (count <= 5 || movementFreeGroup(items[5], items[6], items[7], items[8], items[9]))
-        && (count <= 10 || movementFreeGroup(items[10], items[11], items[12], items[13], items[14]))
-        && (count <= 15 || movementFreeGroup(items[15], items[16], items[17], items[18], items[19]))
-        && (count <= 20 || movementFreeGroup(items[20], items[21], items[22], items[23], items[24]))
-        && (count <= 25 || movementFreeGroup(items[25], items[26], items[27], items[28], items[29]));
+        && (count <= 10 || movementFreeGroup(items[10], items[11], items[12], items[13], items[14]));
     }
 
     function orderUpdateAllowed(id) {
@@ -1936,8 +1950,22 @@ service cloud.firestore {
     }
     function clientGoodsBillingData(data) {
       let items = data.get('items', []);
-      return !isServiceBillingItem(data) && items is list && items.size() <= 30
-        && (items.size() <= 0 ? true : !items[0].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 1 ? true : !items[1].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 2 ? true : !items[2].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 3 ? true : !items[3].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 4 ? true : !items[4].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 5 ? true : !items[5].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 6 ? true : !items[6].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 7 ? true : !items[7].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 8 ? true : !items[8].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 9 ? true : !items[9].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 10 ? true : !items[10].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 11 ? true : !items[11].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 12 ? true : !items[12].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 13 ? true : !items[13].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 14 ? true : !items[14].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 15 ? true : !items[15].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 16 ? true : !items[16].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 17 ? true : !items[17].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 18 ? true : !items[18].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 19 ? true : !items[19].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 20 ? true : !items[20].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 21 ? true : !items[21].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 22 ? true : !items[22].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 23 ? true : !items[23].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 24 ? true : !items[24].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 25 ? true : !items[25].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 26 ? true : !items[26].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 27 ? true : !items[27].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 28 ? true : !items[28].get('productType', '').matches('(?i)\\s*service\\s*') && (items.size() <= 29 ? true : !items[29].get('productType', '').matches('(?i)\\s*service\\s*') && true))))))))))))))))))))))))))))));
+      return !isServiceBillingItem(data) && items is list && items.size() <= 15
+        && (items.size() <= 0 || !items[0].get('productType', '').matches('(?i)\\s*service\\s*'))
+        && (items.size() <= 1 || !items[1].get('productType', '').matches('(?i)\\s*service\\s*'))
+        && (items.size() <= 2 || !items[2].get('productType', '').matches('(?i)\\s*service\\s*'))
+        && (items.size() <= 3 || !items[3].get('productType', '').matches('(?i)\\s*service\\s*'))
+        && (items.size() <= 4 || !items[4].get('productType', '').matches('(?i)\\s*service\\s*'))
+        && (items.size() <= 5 || !items[5].get('productType', '').matches('(?i)\\s*service\\s*'))
+        && (items.size() <= 6 || !items[6].get('productType', '').matches('(?i)\\s*service\\s*'))
+        && (items.size() <= 7 || !items[7].get('productType', '').matches('(?i)\\s*service\\s*'))
+        && (items.size() <= 8 || !items[8].get('productType', '').matches('(?i)\\s*service\\s*'))
+        && (items.size() <= 9 || !items[9].get('productType', '').matches('(?i)\\s*service\\s*'))
+        && (items.size() <= 10 || !items[10].get('productType', '').matches('(?i)\\s*service\\s*'))
+        && (items.size() <= 11 || !items[11].get('productType', '').matches('(?i)\\s*service\\s*'))
+        && (items.size() <= 12 || !items[12].get('productType', '').matches('(?i)\\s*service\\s*'))
+        && (items.size() <= 13 || !items[13].get('productType', '').matches('(?i)\\s*service\\s*'))
+        && (items.size() <= 14 || !items[14].get('productType', '').matches('(?i)\\s*service\\s*'));
     }
     function validClientBillingCreate(data) {
       return data.get('isBilled', false) == false && data.get('billingDate', '') == '';
@@ -1960,9 +1988,22 @@ service cloud.firestore {
       let after = request.resource.data.get('items', []);
       return (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['productId','productType','serviceKind'])
           || !isServiceBillingItem(resource.data) && !isServiceBillingItem(request.resource.data))
-        && (before == after ? true : (before is list && after is list
-          && before.size() <= 30 && after.size() <= 30
-          && (before.size() <= 0 && after.size() <= 0 ? true : serviceBillingBindingAt(before, after, 0) && (before.size() <= 1 && after.size() <= 1 ? true : serviceBillingBindingAt(before, after, 1) && (before.size() <= 2 && after.size() <= 2 ? true : serviceBillingBindingAt(before, after, 2) && (before.size() <= 3 && after.size() <= 3 ? true : serviceBillingBindingAt(before, after, 3) && (before.size() <= 4 && after.size() <= 4 ? true : serviceBillingBindingAt(before, after, 4) && (before.size() <= 5 && after.size() <= 5 ? true : serviceBillingBindingAt(before, after, 5) && (before.size() <= 6 && after.size() <= 6 ? true : serviceBillingBindingAt(before, after, 6) && (before.size() <= 7 && after.size() <= 7 ? true : serviceBillingBindingAt(before, after, 7) && (before.size() <= 8 && after.size() <= 8 ? true : serviceBillingBindingAt(before, after, 8) && (before.size() <= 9 && after.size() <= 9 ? true : serviceBillingBindingAt(before, after, 9) && (before.size() <= 10 && after.size() <= 10 ? true : serviceBillingBindingAt(before, after, 10) && (before.size() <= 11 && after.size() <= 11 ? true : serviceBillingBindingAt(before, after, 11) && (before.size() <= 12 && after.size() <= 12 ? true : serviceBillingBindingAt(before, after, 12) && (before.size() <= 13 && after.size() <= 13 ? true : serviceBillingBindingAt(before, after, 13) && (before.size() <= 14 && after.size() <= 14 ? true : serviceBillingBindingAt(before, after, 14) && (before.size() <= 15 && after.size() <= 15 ? true : serviceBillingBindingAt(before, after, 15) && (before.size() <= 16 && after.size() <= 16 ? true : serviceBillingBindingAt(before, after, 16) && (before.size() <= 17 && after.size() <= 17 ? true : serviceBillingBindingAt(before, after, 17) && (before.size() <= 18 && after.size() <= 18 ? true : serviceBillingBindingAt(before, after, 18) && (before.size() <= 19 && after.size() <= 19 ? true : serviceBillingBindingAt(before, after, 19) && (before.size() <= 20 && after.size() <= 20 ? true : serviceBillingBindingAt(before, after, 20) && (before.size() <= 21 && after.size() <= 21 ? true : serviceBillingBindingAt(before, after, 21) && (before.size() <= 22 && after.size() <= 22 ? true : serviceBillingBindingAt(before, after, 22) && (before.size() <= 23 && after.size() <= 23 ? true : serviceBillingBindingAt(before, after, 23) && (before.size() <= 24 && after.size() <= 24 ? true : serviceBillingBindingAt(before, after, 24) && (before.size() <= 25 && after.size() <= 25 ? true : serviceBillingBindingAt(before, after, 25) && (before.size() <= 26 && after.size() <= 26 ? true : serviceBillingBindingAt(before, after, 26) && (before.size() <= 27 && after.size() <= 27 ? true : serviceBillingBindingAt(before, after, 27) && (before.size() <= 28 && after.size() <= 28 ? true : serviceBillingBindingAt(before, after, 28) && (before.size() <= 29 && after.size() <= 29 ? true : serviceBillingBindingAt(before, after, 29) && true))))))))))))))))))))))))))))))));
+        && (before == after || (before is list && after is list && before.size() <= 15 && after.size() <= 15
+          && (before.size() <= 0 && after.size() <= 0 || serviceBillingBindingAt(before, after, 0))
+          && (before.size() <= 1 && after.size() <= 1 || serviceBillingBindingAt(before, after, 1))
+          && (before.size() <= 2 && after.size() <= 2 || serviceBillingBindingAt(before, after, 2))
+          && (before.size() <= 3 && after.size() <= 3 || serviceBillingBindingAt(before, after, 3))
+          && (before.size() <= 4 && after.size() <= 4 || serviceBillingBindingAt(before, after, 4))
+          && (before.size() <= 5 && after.size() <= 5 || serviceBillingBindingAt(before, after, 5))
+          && (before.size() <= 6 && after.size() <= 6 || serviceBillingBindingAt(before, after, 6))
+          && (before.size() <= 7 && after.size() <= 7 || serviceBillingBindingAt(before, after, 7))
+          && (before.size() <= 8 && after.size() <= 8 || serviceBillingBindingAt(before, after, 8))
+          && (before.size() <= 9 && after.size() <= 9 || serviceBillingBindingAt(before, after, 9))
+          && (before.size() <= 10 && after.size() <= 10 || serviceBillingBindingAt(before, after, 10))
+          && (before.size() <= 11 && after.size() <= 11 || serviceBillingBindingAt(before, after, 11))
+          && (before.size() <= 12 && after.size() <= 12 || serviceBillingBindingAt(before, after, 12))
+          && (before.size() <= 13 && after.size() <= 13 || serviceBillingBindingAt(before, after, 13))
+          && (before.size() <= 14 && after.size() <= 14 || serviceBillingBindingAt(before, after, 14))));
     }
 
     // New orders require an explicit commercial transaction choice. Legacy
