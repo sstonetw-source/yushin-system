@@ -78,3 +78,15 @@ test('generated receiving Service resolves its terminal PO dependency before any
  await assert.rejects(create(c).receiveSupplyOrderRecord('S',2,'LOT','2028-01-01','receipt_test'),error=>!(error instanceof ReferenceError)&&/取消/.test(error.message));
  assert.equal(writes,0);
 });
+
+test('legacy browser receipt keeps five-line default while the generated server explicitly opts into fifteen',async()=>{
+ const c=vm.createContext({});vm.runInContext(fs.readFileSync('src/services/receiving.js','utf8'),c);
+ c.assertV2ReceiptActor=async()=>{};c.normalizedOrderStatus=()=> 'normal';
+ const input={supply:{orderId:'O',itemId:'I',productKey:'P',warehouseId:'W'},item:{},
+  order:{items:Array.from({length:15},(_,i)=>({itemId:i?'I'+i:'I'})),ownerUid:'U',salesCode:'S',status:'active',orderStatus:'normal',inventoryReservationStatus:'pending'}};
+ await assert.rejects(c.validateV2ReceiptSource({},input),/1–5/);
+ vm.runInContext('const RECEIVING_SOURCE_ITEM_LIMIT=15;',c);
+ await assert.rejects(c.validateV2ReceiptSource({},input),/已完成初始化/);
+ // Caller payload cannot change either cap; only the dependency-bound backend context opts in.
+ assert.match(fs.readFileSync('functions/supply-receipt-service.js','utf8'),/receivingSourceItemLimit:15/);
+});

@@ -106,15 +106,16 @@ async function receiveV2Supply(db,uid,input){
    const ledger=await get(db.collection('inventoryReservations').doc(supply.orderId+'__'+supply.itemId));
    if(!ledger.exists||ledger.data().locationSchemaVersion!==2)fail('failed-precondition','來源未完成 v2 預留');
   }
-  // Normal 1–5-item source. The existing Receiving Service validates every
+  // Warehouse source: 1–15 items; direct shipping retains its 1–5 pilot.
+  // The existing Receiving Service validates every
   // immutable shipment/return proof and current outstanding demand, including
   // sibling reservation and receipts after partial fulfillment. Cancellation stays gated.
   // The existing Service remains authoritative for quantities and all writes.
   const previous=await get(db.collection('receipts').doc(intent.operationId));
   if(previous.exists&&!directShip&&previous.data().reservationLocationSchemaVersion!==2)
    fail('failed-precondition','原收貨憑證不是 v2 格式');
-  if(!previous.exists&&(!Array.isArray(order.items)||order.items.length<1||order.items.length>5||order.status!=='active'||order.orderStatus!=='normal'))
-   fail('failed-precondition','收貨登入試點僅支援正常 1–5 品項來源；取消尚未開放');
+  if(!previous.exists&&(!Array.isArray(order.items)||order.items.length<1||order.items.length>(directShip?5:15)||order.status!=='active'||order.orderStatus!=='normal'))
+   fail('failed-precondition',`收貨登入試點僅支援正常 1–${directShip?5:15} 品項來源；取消尚未開放`);
   const orderPatches=[];
   const adapter={get,update(reference,data){
    staged.update(reference,data);
@@ -130,7 +131,7 @@ async function receiveV2Supply(db,uid,input){
   staged.flush();
   return result;
  });
- const runtime=createReceivingService({db,currentUser:{uid},currentUserRole:role,currentUserCode:String(profile.data().code||''),permissionRulesReady:false,cores,
+ const runtime=createReceivingService({db,currentUser:{uid},currentUserRole:role,currentUserCode:String(profile.data().code||''),permissionRulesReady:false,cores,receivingSourceItemLimit:15,
   runRoleTransaction,canConfirmSupplyReceipt:()=>true,deliveryActor:()=>actor,
   localDateString:()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()),
   firestoreReadWithTimeout:promise=>promise,

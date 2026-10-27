@@ -5,8 +5,9 @@ const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{spa
 const root=path.resolve(__dirname,'..');
 // Local iteration may select a layer. CI deliberately calls with no arguments.
 const suites={
- all:['tests/emulator-v2-return-callable.cjs','tests/emulator-v2-lifecycle-browser.cjs'],
- callable:['tests/emulator-v2-return-callable.cjs'],
+ all:['tests/emulator-v2-return-callable.cjs','tests/emulator-receiving-fifteen.cjs','tests/emulator-v2-lifecycle-browser.cjs'],
+ callable:['tests/emulator-v2-return-callable.cjs','tests/emulator-receiving-fifteen.cjs'],
+ receiving:['tests/emulator-receiving-fifteen.cjs'],
  browser:['tests/emulator-v2-lifecycle-browser.cjs']
 };
 const args=process.argv.slice(2),selection=args.filter(arg=>arg.startsWith('--suite='));
@@ -14,7 +15,7 @@ const suite=selection[0]?.slice('--suite='.length)||'all';
 if(selection.length>1||!Object.hasOwn(suites,suite)
  ||args.some(arg=>arg!=='--list'&&!arg.startsWith('--suite='))
  ||selection.some(arg=>arg==='--suite=')){
- console.error('Usage: node tools/run-v2-return-auth-emulator.cjs [--suite=all|callable|browser] [--list]');
+ console.error('Usage: node tools/run-v2-return-auth-emulator.cjs [--suite=all|callable|receiving|browser] [--list]');
  process.exit(2);
 }
 const testFiles=suites[suite].map(file=>path.join(root,file));

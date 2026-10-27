@@ -17090,14 +17090,15 @@ async function validateV2ReceiptSource(transaction, {order,supply,reservation,it
     };
     const orderId=id(supply.orderId),itemId=id(supply.itemId),productKey=id(supply.productKey),warehouseId=id(supply.warehouseId);
     const status=normalizedOrderStatus(order),cancelled=status==='cancelled';
-    if(!Array.isArray(order.items)||!order.items.length||order.items.length>5
+    const sourceItemLimit=typeof RECEIVING_SOURCE_ITEM_LIMIT==='number'?RECEIVING_SOURCE_ITEM_LIMIT:5;
+    if(!Array.isArray(order.items)||!order.items.length||order.items.length>sourceItemLimit
         ||order.items.filter(row=>row?.itemId===itemId).length!==1
         ||!order.ownerUid||!order.salesCode||!['normal','cancelled'].includes(status)
         ||(cancelled?order.status!=='cancelled':!['active','normal'].includes(order.status))
         ||!['normal','active','cancelled','',undefined].includes(order.orderStatus)
         ||order.returnPending===true||item.transferPendingId||item.custodyTransferId
         ||integer(order.logisticsTransfersPending??0,'調撥途中')!==0)
-        throw new Error('多倉收貨只支援來源完整且無調撥的 1–5 品項訂單。');
+        throw new Error(`多倉收貨只支援來源完整且無調撥的 1–${sourceItemLimit} 品項訂單。`);
     for(const field of ['warehouseShipmentRecords','deliveryRecords','returnRecords','returnHistory']){
         if(!Array.isArray(order[field]??[]))throw new Error('多倉收貨履約紀錄格式不正確。');
     }
