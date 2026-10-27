@@ -16889,13 +16889,22 @@ async function commitFormalPurchaseOrder(poRecord, {actorUid=currentUser?.uid,ac
 // Transport only. All receipt quantities and writes remain in the same receiving Service.
 async function receiveV2SupplyEmulator(supplyId,qty,lotNo,expiryDate,operationId,options) {
     const local=host=>['localhost','127.0.0.1'].includes(host);
-    if(typeof APP_ENVIRONMENT==='undefined'||APP_ENVIRONMENT!=='emulator'
-        ||!local(globalThis.location?.hostname)||typeof firebase==='undefined'||!firebase.functions)
-        throw Error('多倉收貨後端僅限本機 Emulator。');
+    const emulator=typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='emulator'
+        &&globalThis.YUSHIN_V2_RECEIVING_EMULATOR===true;
+    const preview=typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'
+        &&globalThis.YUSHIN_PREVIEW_RECEIVING===true;
+    const host=String(globalThis.location?.hostname||'').toLowerCase();
+    if((!emulator&&!preview)||typeof firebase==='undefined'||!firebase.functions
+        ||(emulator&&!local(host))
+        ||(preview&&!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(host)))
+        throw Error('收貨後端尚未在目前授權的測試環境啟用，禁止改用舊交易。');
     const auth=firebase.auth(),functions=firebase.app().functions('asia-east1');
-    if(auth.app?.options?.projectId!=='demo-yushin'||functions.app?.options?.projectId!=='demo-yushin'
-        ||!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099)
-        throw Error('多倉收貨必須使用 demo-yushin 本機登入與 Functions。');
+    const project=emulator?'demo-yushin':'preview-20135';
+    if(auth.app?.options?.projectId!==project||functions.app?.options?.projectId!==project
+        ||firebase.app().options?.projectId!==project
+        ||(emulator&&(!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099))
+        ||(preview&&!!auth.emulatorConfig))
+        throw Error('收貨 Auth、Functions 與資料庫專案不一致，未提交收貨。');
     const uid=options.actorUid??currentUser?.uid,role=options.actorRole??currentUserRole;
     const check=()=>{
         if(!uid||auth.currentUser?.uid!==uid||currentUser?.uid!==uid||currentUserRole!==role
@@ -16908,7 +16917,7 @@ async function receiveV2SupplyEmulator(supplyId,qty,lotNo,expiryDate,operationId
     const job=Array.isArray(jobs)&&jobs.find(job=>job.ownerUid===uid&&job.actorRole===role&&job.supplyId===supplyId
         &&job.entries?.some(entry=>`${job.operationBase}-${entry.itemIndex}`===operationId&&entry.qty===qty&&entry.lotNo===lotNo&&entry.expiryDate===expiryDate));
     if(!job)throw Error('收貨原始作業尚未安全保存，請保留原資料並重新確認。');
-    functions.useEmulator('127.0.0.1',5001);
+    if(emulator)functions.useEmulator('127.0.0.1',5001);
     const response=await functions.httpsCallable('receiveV2Supply')({supplyId,qty,lotNo,expiryDate,operationId});check();
     const result=response?.data;
     if(result?.status!=='confirmed'||result.supplyId!==supplyId||result.operationId!==operationId
@@ -17263,7 +17272,9 @@ async function validateV2ReceiptSource(transaction, {order,supply,reservation,it
 }
 
 async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',operationId='',options={}) {
-    if(globalThis.YUSHIN_V2_RECEIVING_EMULATOR===true)
+    if(globalThis.YUSHIN_V2_RECEIVING_EMULATOR===true
+        ||globalThis.YUSHIN_PREVIEW_RECEIVING===true
+        ||(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'))
         return receiveV2SupplyEmulator(supplyId,qty,lotNo,expiryDate,operationId,options);
     const actorUid=options.actorUid??currentUser?.uid,actorRole=options.actorRole??currentUserRole;
     const assertActor=(supply=null)=>{

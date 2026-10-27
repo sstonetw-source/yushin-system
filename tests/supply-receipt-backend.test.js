@@ -12,8 +12,8 @@ function transport(){
  const proof={supplyOrderId:'SUP',qty:2,lotNo:'LOT',expiryDate:'2028-01-01',createdByUid:'buyer',createdByRole:'purchaser',reservationLocationSchemaVersion:2,productKey:'P',warehouseId:'W'};
  const functions={app:{options},useEmulator:(host,port)=>calls.push({host,port}),httpsCallable:name=>async data=>{calls.push({name,data});return {data:{status:'confirmed',supplyId:data.supplyId,operationId:data.operationId,affectedOrderIds:['O']}};}};
  const jobs=[{ownerUid:'buyer',actorRole:'purchaser',supplyId:'SUP',operationBase:'receipt_1',entries:[{itemIndex:0,qty:2,lotNo:'LOT',expiryDate:'2028-01-01'}]}];
- const c=vm.createContext({APP_ENVIRONMENT:'emulator',location:{hostname:'localhost'},currentUser:{uid:'buyer'},currentUserRole:'purchaser',canReceiveInventoryCapability:()=>true,
-  firebase:{auth:()=>auth,functions:()=>functions,app:()=>({functions:()=>functions})},sessionStorage:{getItem:()=>JSON.stringify(jobs)},
+ const c=vm.createContext({APP_ENVIRONMENT:'emulator',YUSHIN_V2_RECEIVING_EMULATOR:true,location:{hostname:'localhost'},currentUser:{uid:'buyer'},currentUserRole:'purchaser',canReceiveInventoryCapability:()=>true,
+  firebase:{auth:()=>auth,functions:()=>functions,app:()=>({options,functions:()=>functions})},sessionStorage:{getItem:()=>JSON.stringify(jobs)},
   db:{collection:()=>({doc:()=>({get:async()=>({exists:true,data:()=>proof})})})}});
  vm.runInContext(fs.readFileSync('src/services/receiving-transport.js','utf8'),c);
  const receive=()=>c.receiveV2SupplyEmulator(input.supplyId,input.qty,input.lotNo,input.expiryDate,input.operationId,{actorUid:'buyer',actorRole:'purchaser'});
@@ -66,7 +66,9 @@ test('direct receipt proof still rejects wrong identity, quantities and any ware
 test('generated server receipt runtime stays identical to src and is not a runtime VM or second writer',()=>{
  require('node:child_process').execFileSync(process.execPath,['tools/build-receiving-runtime.cjs','--check']);
  const source=fs.readFileSync('functions/supply-receipt-service.js','utf8');assert.doesNotMatch(source,/node:vm|new Function|\.update\([^\n]*(receivedQty|onHand|reserved)/);
- assert.doesNotMatch(fs.readFileSync('functions/index.js','utf8'),/receiveV2Supply/);
+ const exported=fs.readFileSync('functions/index.js','utf8');
+ assert.match(exported,/exports\.receiveV2Supply=createSupplyReceiptCallable/);
+ assert.match(fs.readFileSync('functions/supply-receipt-callable.js','utf8'),/receiptBackendProject/);
 });
 test('generated receiving Service resolves its terminal PO dependency before any database write',async()=>{
  const create=require('../functions/shared/receiving-runtime'),supply={type:'PURCHASING_PO',qty:4,receivedQty:0,status:'CANCELLED',fulfillmentType:'WAREHOUSE',productKey:'P',warehouseId:'W'};

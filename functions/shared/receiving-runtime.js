@@ -660,7 +660,9 @@ async function validateV2ReceiptSource(transaction, {order,supply,reservation,it
 }
 
 async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',operationId='',options={}) {
-    if(globalThis.YUSHIN_V2_RECEIVING_EMULATOR===true)
+    if(globalThis.YUSHIN_V2_RECEIVING_EMULATOR===true
+        ||globalThis.YUSHIN_PREVIEW_RECEIVING===true
+        ||(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'))
         return receiveV2SupplyEmulator(supplyId,qty,lotNo,expiryDate,operationId,options);
     const actorUid=options.actorUid??currentUser?.uid,actorRole=options.actorRole??currentUserRole;
     const assertActor=(supply=null)=>{
