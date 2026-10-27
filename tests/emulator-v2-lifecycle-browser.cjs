@@ -2486,3 +2486,80 @@ for(const width of [1280,390])test('full site '+width+'px original UI gated PO p
    tasks:typeof receiptTaskJobs==='undefined'?[]:[...receiptTaskJobs.values()],orders:typeof ordersCache==='undefined'?[]:ordersCache.filter(o=>o.id.includes('direct-entry'))}))),JSON.stringify({errors,dialogs,functions}));throw error;
  }finally{await context.close();}
 });
+
+// Fifteen-line receipt acceptance only. Source initialization / PO / incoming
+// are explicit Admin fixtures; every receiving action below uses original UI.
+for(const width of [1280,390])test('full site '+width+'px fifteen-line original receipt survives lost replies without sibling or service writes',{timeout:240000},async()=>{
+ const accounts={},tag='site-fifteen-'+width;
+ for(const role of ['sales','warehouse']){
+  const uid=tag+'-'+role,email=uid+'@example.test';await auth.createUser({uid,email,password});
+  await db.collection('users').doc(uid).set({role,active:true,name:role,email,code:'R15'});accounts[role]={uid,email};
+ }
+ const x=await require('./fixtures/fifteen-receiving-source.cjs').seedFifteenReceivingSource(db,accounts.sales.uid,tag,15,{service:true});
+ const prepare=db.batch();
+ for(const id of x.supplies){
+  const ref=db.collection('supplyOrders').doc(id),record=(await ref.get()).data();
+  const patch={orderDate:'2026-10-27',createdAt:'2026-10-27T00:00:00.000Z',itemCode:record.itemId,itemName:'十五品項收貨 '+record.itemId,
+   orderNo:x.orderId,purchaseDocumentNo:x.orderId+'-PO'};
+  prepare.update(ref,patch);prepare.set(db.collection('receivingSupplyOrders').doc(id),require('../modules/stock-permissions').sanitizeSupply({...record,...patch}));
+ }
+ await prepare.commit();
+ const context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
+ const calls=[],errors=[],external=[];let drop=false;
+ await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_V2_RECEIVING_EMULATOR=true;});
+ page.on('pageerror',error=>errors.push(error.message));page.on('dialog',dialog=>dialog.type()==='confirm'?dialog.accept():dialog.dismiss());
+ await context.route('**/*',async route=>{
+  const request=route.request(),url=new URL(request.url());
+  if(!['localhost','127.0.0.1'].includes(url.hostname)){external.push(url.hostname);await route.abort();return;}
+  if(url.port==='5001'&&request.method()==='POST'&&url.pathname.endsWith('/receiveV2Supply')){
+   assert.ok((await request.allHeaders()).authorization?.startsWith('Bearer '));
+   const data=request.postDataJSON().data;assert.equal(data.actorUid,undefined);assert.equal(data.actorRole,undefined);calls.push(data);
+   if(drop){drop=false;const response=await route.fetch();assert.equal(response.status(),200);await route.abort('failed');return;}
+  }
+  await route.continue();
+ });
+ try{
+  const initial=await x.snapshot(),before=(await db.doc('orders/'+x.orderId).get()).data();
+  await siteOpen(page);await siteLogin(page,accounts.warehouse,'warehouse');await siteNav(page,'inventory');await page.locator('#inventoryReceivingTabBtn').click();
+  const button=index=>page.locator('#inventoryReceivingBody button[data-receipt-supply="'+x.supplies[index]+'"]').first();
+  await button(13).waitFor({state:'visible'});
+  assert.match(await page.locator('#inventoryReceivingBody').textContent(),/依權限不顯示成本/);
+  async function submit(index,qty,lose){
+   await button(index).click();await page.locator('#poReceiptBatchBody .po-receive-qty').fill(String(qty));
+   await page.locator('#poReceiptBatchBody .po-receive-lot').fill('SITE15-'+index+'-'+qty);await page.locator('#poReceiptBatchBody .po-receive-expiry').fill('2028-01-01');
+   drop=lose;await page.locator('#savePoReceiptBatchBtn').click();
+   await page.waitForFunction(({id,lose})=>lose?receiptTaskJobs.get(receiptTaskKey(id))?.state==='error':!receiptTaskJobs.has(receiptTaskKey(id)),{id:x.supplies[index],lose},{timeout:45000});
+   return calls.at(-1);
+  }
+  async function restore(index,intent,saved){
+   await siteOpen(page,'warehouse');await siteNav(page,'inventory');
+   await page.locator('#receiptTaskStatus button').filter({hasText:'用原資料重試'}).click();
+   await page.waitForFunction(id=>!receiptTaskJobs.has(receiptTaskKey(id)),x.supplies[index],{timeout:45000});
+   assert.deepEqual(calls.at(-1),intent,'refresh must keep the original supply/operation/qty/lot/expiry');
+   assert.deepEqual(await x.snapshot(),saved,'retry never changes any receipt, lot, cost, demand or stock twice');
+   await page.locator('#inventoryReceivingTabBtn').click();
+  }
+  const first=await submit(0,1,true),partial=await x.snapshot();await restore(0,first,partial);
+  await submit(13,3,false);const adjacent=(await db.doc('orders/'+x.orderId).get()).data();
+  assert.equal(adjacent.items[13].receivedQty,3);assert.equal(adjacent.items[0].receivedQty,1);
+  const last=await submit(0,2,true),complete=await x.snapshot();assert.notEqual(last.operationId,first.operationId);
+  await restore(0,last,complete);
+  const order=(await db.doc('orders/'+x.orderId).get()).data();
+  for(let index=0;index<15;index++){
+   if(index===0||index===13){assert.equal(order.items[index].receivedQty,3);assert.equal(order.items[index].reservedQty,3);assert.equal(order.items[index].shortageQty,0);}
+   else assert.deepEqual(order.items[index],before.items[index],'unselected source lines and service stay identical');
+  }
+  assert.deepEqual(complete.serviceCases,initial.serviceCases);assert.equal(complete.receipts.length,3);assert.equal(complete.inventoryLots.length,3);assert.equal(complete.inventoryLotCosts.length,3);
+  assert.deepEqual(order.deliveryRecords,[]);assert.deepEqual(order.returnRecords,[]);assert.equal(order.deliveredQty,0);assert.equal(order.isDelivered,false);
+  for(const [index,key] of x.keys.entries()){
+   const stock=(await db.doc('inventory/'+key).get()).data();assert.equal(stock.onHand,3);assert.equal(stock.reserved,3);assert.equal(stock.incoming,18);
+   for(const [localIndex,warehouse] of x.warehouses.entries()){
+    const local=(await db.doc('warehouseStocks/'+warehouse+'__'+key).get()).data();
+    assert.equal(local.onHand,index===localIndex?3:0);assert.equal(local.reserved,index===localIndex?3:0);assert.equal(local.incoming,index===localIndex?18:0);
+   }
+  }
+  assert.equal(calls.length,5);assert.equal(await button(0).count(),0);assert.equal(await button(13).count(),0);await button(1).waitFor({state:'visible'});
+  assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
+  console.log('Full site '+width+'px fifteen-line receipt: original warehouse UI, two actual warehouses, first/final HTTP replies aborted after commit, refresh retries original ID, three receipts/lots/costs and six units held once; twelve untouched goods lines and service identical. Admin source fixture; no >5-line PO/initialization or production acceptance claim.');
+ }finally{await context.close();}
+});
