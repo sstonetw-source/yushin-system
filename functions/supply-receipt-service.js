@@ -8,6 +8,7 @@ const cores=Object.fromEntries(Object.entries(coreNames).map(([key,name])=>[key,
 
 const {createHash}=require('node:crypto');
 const demandCore=require('./shared/procurement-demand-core');
+const {receiptBackendProject}=require('./supply-receipt-gate');
 // Quick Purchase uses the same Receiving writer as formal PO, but has a
 // different immutable purchase witness. Verify the existing single-writer
 // operation and incoming debit before permitting any receipt-side mutation.
@@ -73,9 +74,11 @@ function receiptIntent(input){
  if(typeof input.expiryDate!=='string'||(input.expiryDate!==''&&(!/^\d{4}-\d{2}-\d{2}$/.test(input.expiryDate)||!Number.isFinite(Date.parse(input.expiryDate+'T00:00:00Z'))||new Date(input.expiryDate+'T00:00:00Z').toISOString().slice(0,10)!==input.expiryDate)))fail('invalid-argument','效期不正確');
  return {...input};
 }
-async function receiveV2Supply(db,uid,input){
+async function receiveV2Supply(db,uid,input,env=process.env){
  const intent=receiptIntent(input);
- if(!process.env.FIRESTORE_EMULATOR_HOST||db.projectId!=='demo-yushin')fail('failed-precondition','收貨後端僅允許 demo-yushin Emulator');
+ const project=receiptBackendProject(env);
+ if(!project||db.projectId!==project)
+  fail('failed-precondition','收貨後端尚未在此授權專案啟用');
  if(typeof uid!=='string'||!uid||uid.includes('/'))fail('permission-denied','登入身分不正確');
  const userRef=db.collection('users').doc(uid),profile=await userRef.get();
  const allowed=data=>data&&data.active!==false&&data.disabled!==true&&['admin','purchaser','warehouse','sales','engineer'].includes(data.role);
