@@ -17070,8 +17070,16 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
 // Reuse this receiving Service for the v2 trial; never create another receipt
 // writer. The browser path stays closed until its backend/Rules adapters exist.
 async function assertV2ReceiptActor(transaction, actorUid, actorRole) {
-    if(typeof process==='undefined'||!process.env?.FIRESTORE_EMULATOR_HOST||db.projectId!=='demo-yushin')
-        throw new Error('多倉收貨目前僅允許 demo-yushin Emulator，尚未開放正式入口。');
+    // The backend Callable separately verifies its Firebase project and feature
+    // gate. Keep the isolated Emulator route for existing integration coverage;
+    // never infer Preview authorization from a browser-provided flag.
+    const backendAuthorized=typeof context!=='undefined'
+        &&typeof context.authorizeV2ReceiptActor==='function'
+        &&context.authorizeV2ReceiptActor()===true;
+    const demoAuthorized=typeof process!=='undefined'
+        &&!!process.env?.FIRESTORE_EMULATOR_HOST&&db.projectId==='demo-yushin';
+    if(!backendAuthorized&&!demoAuthorized)
+        throw new Error('多倉收貨後端尚未在此環境授權啟用。');
     const actor=await transaction.get(db.collection('users').doc(actorUid));
     if(!actor.exists||actor.data().active===false||actor.data().disabled===true
         ||actor.data().role!==actorRole||!['admin','purchaser','warehouse'].includes(actorRole))

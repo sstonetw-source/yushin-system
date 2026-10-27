@@ -137,6 +137,7 @@ async function receiveV2Supply(db,uid,input,env=process.env){
   return result;
  });
  const runtime=createReceivingService({db,currentUser:{uid},currentUserRole:role,currentUserCode:String(profile.data().code||''),permissionRulesReady:false,cores,
+  authorizeV2ReceiptActor:()=>receiptBackendProject(env)===db.projectId,
   runRoleTransaction,canConfirmSupplyReceipt:()=>true,deliveryActor:()=>actor,
   localDateString:()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()),
   firestoreReadWithTimeout:promise=>promise,

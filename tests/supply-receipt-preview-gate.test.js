@@ -40,6 +40,27 @@ test('receiving Callable rejects missing auth, wrong database and unauthorized p
   ({auth:{uid:'buyer'},data:input}),{code:'permission-denied'});
  assert.deepEqual(logs,['users/buyer']);
 });
+test('shared Receiving authorizes only a gated backend project and still checks the live actor profile',async()=>{
+ const source=fs.readFileSync('src/services/receiving.js','utf8');
+ const start=source.indexOf('async function assertV2ReceiptActor(');
+ const end=source.indexOf('\nasync function validateV2ReceiptSource(',start);
+ assert.ok(start>=0&&end>start);
+ assert.match(fs.readFileSync('functions/supply-receipt-service.js','utf8'),/authorizeV2ReceiptActor:\(\)=>receiptBackendProject\(env\)===db\.projectId/);
+ const context={authorizeV2ReceiptActor:()=>true};
+ const db={projectId:'preview-20135',collection:name=>({doc:id=>({path:name+'/'+id})})};
+ const sandbox={context,db,process:{env:{}},Error};
+ vm.createContext(sandbox);
+ vm.runInContext(source.slice(start,end)+'; this.assertActor=assertV2ReceiptActor;',sandbox);
+ const user={role:'purchaser',active:true};
+ const tx={get:async()=>({exists:true,data:()=>user})};
+ await sandbox.assertActor(tx,'buyer','purchaser');
+ for(const invalid of [()=>context.authorizeV2ReceiptActor=()=>false,
+  ()=>user.role='sales',()=>user.active=false]){
+  context.authorizeV2ReceiptActor=()=>true;user.role='purchaser';user.active=true;
+  invalid();await assert.rejects(sandbox.assertActor(tx,'buyer','purchaser'));
+ }
+ assert.equal(receiptBackendProject({...preview,GCLOUD_PROJECT:'yu-shing-company'}),'');
+});
 test('Preview receiving is fail-closed; no legacy Firestore transaction on absent gate or transport failure',async()=>{
  const context={APP_ENVIRONMENT:'preview',location:{hostname:'preview-20135.web.app'},
   YUSHIN_PREVIEW_RECEIVING:false,globalThis:null,runRoleTransaction:()=>{throw Error('LEGACY_WRITE');}};
