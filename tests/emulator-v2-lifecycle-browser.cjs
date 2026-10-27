@@ -557,9 +557,11 @@ for(const width of [1280,390])test('original service case UI '+width+'px: four k
   // in that exact item's progress block in the desktop/mobile order renderer.
   await page.locator('#verifyServiceOrderButton').click();
   await page.waitForFunction(()=>!!serviceCaseView?.summary);
-  const productLines=row.locator('.order-progress-cell > .workflow-progress-item');
+  const productRows=page.locator('#ordersBody > tr').filter({hasText:tag+'客戶'});
   for(const entry of items){
-   const line=productLines.filter({hasText:entry.itemName});
+   const itemRow=productRows.filter({has:page.locator('.order-product-cell').getByText(entry.itemName,{exact:true})});
+   assert.equal(await itemRow.count(),1,'each service item has its own order row');
+   const line=itemRow.locator('.order-progress-cell > .workflow-progress-item');
    const hint=await line.locator('.service-case-verified-hint').textContent();
    assert.ok(hint.includes(entry.itemId==='BIOPLEX_LAB'?'1/2':'2/2'));
    assert.ok(hint.includes(entry.itemId==='BIOPLEX_LAB'?'待服務處理':'服務完成・待核銷'));
