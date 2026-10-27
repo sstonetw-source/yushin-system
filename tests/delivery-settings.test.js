@@ -60,7 +60,7 @@ test('admin personnel reload and shared cache retain every salesperson delivery 
 function uiFixture(){
  const nodes=new Map(),reads=[];
  const node=id=>{if(!nodes.has(id))nodes.set(id,{id,value:'',textContent:'',style:{display:'',setProperty(k,v){this[k]=v;}},closest(){return {style:this.style,querySelector:()=>null};},classList:{add(){},remove(){}},remove(){nodes.delete(id);},prepend(){},set innerHTML(html){this.html=html;for(const m of html.matchAll(/id="([^"]+)"/g))node(m[1]);},get innerHTML(){return this.html||'';}});return nodes.get(id);};
- const context={document:{getElementById:id=>nodes.get(id)||null,createElement:()=>node('generated')},currentUser:{uid:'S'},currentUserRole:'sales',salesList:[{uid:'S',name:'Sales',phone:'123',deliveryDefaults:{mode:'SALES_SHIP',address:'業務地址'}}],
+ const context={document:{getElementById:id=>nodes.get(id)||null,createElement:()=>node('generated'),body:{appendChild(){}}},currentUser:{uid:'S'},currentUserRole:'sales',salesList:[{uid:'S',name:'Sales',phone:'123',deliveryDefaults:{mode:'SALES_SHIP',address:'業務地址'}}],
   defaultWarehouse:()=>({id:'MAIN'}),customerIdForName:n=>n.trim().toLowerCase(),escapeHtml:String,escapeAttr:String,YushinWarehouseLogistics:logistics,
   firestoreReadWithTimeout:p=>p,db:{collection:()=>({doc:key=>({get:()=>new Promise(resolve=>reads.push({key,resolve}))})})},
   setOrderShippingInstructions(p){for(const key of ['mode','warehouseId','contact','phone','address','packages','condition','tracking','notes'])node('orderShipping'+({warehouseId:'Warehouse'}[key]||key[0].toUpperCase()+key.slice(1))).value=String(p[key]??(key==='packages'?1:''));},
@@ -108,4 +108,36 @@ test('order snapshot survives later defaults changes and feeds shipment exports 
  const executed=logistics.executionPlan(row,[{id:'MAIN'}],'MAIN');assert.equal(executed.address,'訂單獨立地址');
  const csv=logistics.csvDocument(logistics.partition([row],()=>executed));assert.match(csv,/訂單獨立地址/);assert.doesNotMatch(csv,/個人新地址/);
  for(const key of ['contact','phone','address'])assert.throws(()=>logistics.validatePlan({...saved,[key]:'  '},true),/完整收件地址/);
+});
+
+test('personal phone save refreshes own profile cache only after Firestore confirms success',async()=>{
+ const f=uiFixture(),writes=[],confirmations=[],cached={role:'sales',name:'Sales',code:'S1',phone:'old'};
+ f.c.currentUser={uid:'S',email:'sales@example.com'};
+ f.c.currentUserPhone='old';
+ f.c.allUsersCache=[{uid:'S',phone:'old'}];
+ f.c.salesList=[{uid:'S',name:'Sales',phone:'old'}];
+ f.c.db={collection:name=>({doc:uid=>({
+  get:async()=>({exists:true,data:()=>({name:'Sales',code:'S1',email:'sales@example.com',phone:'old',role:'sales',deliveryDefaults:{mode:'PICKUP'}})}),
+  update:async patch=>{if(f.c.failSave)throw Error('offline');writes.push({name,uid,patch});}
+ })})};
+ f.c.firebase={firestore:{FieldValue:{serverTimestamp:()=> 'SERVER_TIMESTAMP'}}};
+ f.c.beginActionButton=()=>({});f.c.endActionButton=()=>{};
+ f.c.confirm=message=>{confirmations.push(message);return true;};
+ f.c.readCachedUserProfile=()=>({...cached});
+ f.c.writeCachedUserProfile=(_uid,data)=>Object.assign(cached,data);
+ await f.c.openPersonalSettings();
+ f.node('personalPhone').value=' 0988123456 ';
+ f.node('personalMode').value='PICKUP';
+ for(const id of ['personalContact','personalDeliveryPhone','personalAddress'])f.node(id).value='';
+ await f.c.savePersonalSettings({});
+ assert.equal(writes.length,1);assert.equal(writes[0].name,'users');assert.equal(writes[0].uid,'S');
+ assert.deepEqual(Object.keys(writes[0].patch).sort(),['deliveryDefaults','phone','updatedAt']);
+ assert.equal(writes[0].patch.phone,'0988123456');
+ assert.match(confirmations[0],/聯絡電話：0988123456/);
+ assert.equal(cached.phone,'0988123456');assert.equal(cached.role,'sales');
+ assert.equal(f.c.currentUserPhone,'0988123456');assert.equal(f.c.allUsersCache[0].phone,'0988123456');
+ f.c.failSave=true;f.node('personalPhone').value='0900000000';
+ await f.c.savePersonalSettings({});
+ assert.equal(writes.length,1);assert.equal(cached.phone,'0988123456');assert.equal(f.c.currentUserPhone,'0988123456');
+ assert.match(f.node('personalSettingsStatus').textContent,/儲存失敗/);
 });
