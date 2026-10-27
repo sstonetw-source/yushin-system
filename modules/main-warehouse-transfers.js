@@ -46,16 +46,17 @@
     }catch(err){showActionFeedback('匯出未完成：'+err.message,'warning');}finally{endActionButton(button,state);}
   };
   root.renderMainTransferRequests=function(){
-    const panel=document.getElementById('mainTransferRequestPanel'),body=document.getElementById('mainTransferRequestBody');if(!panel||!body)return;panel.hidden=!operational();if(panel.hidden||document.getElementById('inventoryStockPanel')?.style.display==='none')return;
+    const panel=document.getElementById('mainTransferRequestPanel'),body=document.getElementById('mainTransferRequestBody');if(!panel||!body)return;panel.hidden=!operational();if(panel.hidden||document.getElementById('inventoryTransferShippingPanel')?.style.display==='none')return;
     const needs=root.YushinWarehouseLogistics.transferRequirements(orderWorkQueueCache,warehouseMasterCache,mainId(),{status:normalizedOrderStatus,incomplete:orderInventorySyncIncomplete,items:normalizedOrderItems,dispatch:itemDispatchState});
     const retry=document.getElementById('mainTransferRetry');if(retry)retry.hidden=!error;
     const name=id=>warehouseMasterCache.find(w=>w.id===id)?.warehouseName||id;
-    const orderRows=needs.map(r=>({source:`訂單需求｜${r.order.orderNo||r.order.id}｜${r.order.salesName||''}`,warehouseId:r.warehouseId,item:r.item,qty:r.qty,action:`<button type="button" onclick="startOrderWarehouseTransfer(${inlineJsValue(r.order.id)},${inlineJsValue(r.item.itemId)},this)" ${r.readyQty<r.qty?'disabled':''}>已出貨</button>${r.readyQty<r.qty?'<small>待品項到齊並打單</small>':''}`}));
-    const stockRows=pendingRequests.map(r=>({source:'主倉備貨',warehouseId:r.fromWarehouseId,item:r,qty:r.qty,action:`<button type="button" onclick="dispatchMainTransferRequest(${inlineJsValue(r.id)},this)">已出貨</button>${purchasing()?`<button type="button" class="btn-danger" onclick="cancelMainTransferRequest(${inlineJsValue(r.id)},this)">取消需求</button>`:''}`}));
+    const orderRows=needs.map(r=>({source:`訂單需求｜${r.order.orderNo||r.order.quoteNo||'未編單號'}｜${r.order.salesName||''}｜${r.order.customerName||''}`,warehouseId:r.warehouseId,item:r.item,qty:r.qty,action:`<button type="button" onclick="startOrderWarehouseTransfer(${inlineJsValue(r.order.id)},${inlineJsValue(r.item.itemId)},this)" ${r.readyQty<r.qty?'disabled':''}>登記出貨</button>${r.readyQty<r.qty?'<small>待品項到齊並打單</small>':''}`}));
+    const stockRows=pendingRequests.map(r=>({source:'主倉備貨',warehouseId:r.fromWarehouseId,item:r,qty:r.qty,action:`<button type="button" onclick="dispatchMainTransferRequest(${inlineJsValue(r.id)},this)">登記出貨</button>${purchasing()?`<button type="button" class="btn-danger" onclick="cancelMainTransferRequest(${inlineJsValue(r.id)},this)">取消需求</button>`:''}`}));
     body.innerHTML=[...orderRows,...stockRows].map(r=>`<tr><td data-th="來源">${escapeHtml(r.source)}</td><td data-th="分倉">${escapeHtml(name(r.warehouseId))} → ${escapeHtml(name(mainId()))}</td><td data-th="品項">${escapeHtml(r.item.itemCode)}<br>${escapeHtml(r.item.itemName)}</td><td data-th="調回數量">${r.qty}</td><td data-th="操作">${r.action}</td></tr>`).join('');
-    document.getElementById('mainTransferRequestStatus').textContent=error||`${orderRows.length} 筆訂單需求、${stockRows.length} 筆主倉備貨${pendingRequests.length>=50?'（備貨先顯示 50 筆）':''}；實際寄出後按已出貨，主倉收到後在調撥收貨按已收貨。`;
+    const table=body.closest?.('.inventory-work-table');if(table)table.hidden=ready&&!orderRows.length&&!stockRows.length&&!error;
+    document.getElementById('mainTransferRequestStatus').textContent=error||(!ready?'正在讀取調撥出貨工作…':`${orderRows.length} 筆訂單需求、${stockRows.length} 筆主倉備貨${pendingRequests.length>=50?'（備貨先顯示 50 筆）':''}；實際寄出後按登記出貨，主倉收到後在調撥收貨按已收貨。`);
   };
   const original=root.renderInventoryList;
-  root.renderInventoryList=function(){const result=original?.apply(this,arguments);if(operational()){root.renderMainTransferRequests();root.loadMainTransferRequests();}return result;};
+  root.renderInventoryList=function(){const result=original?.apply(this,arguments);if(operational()&&document.getElementById('inventoryTransferShippingPanel')?.style.display!=='none'){root.renderMainTransferRequests();root.loadMainTransferRequests();}return result;};
 })(globalThis);
 

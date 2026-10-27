@@ -9,7 +9,7 @@
   if(typeof module==='object'&&module.exports)module.exports=api;
   if(typeof document==='undefined')return;
   const $=id=>document.getElementById(id);let customerGeneration=0,customerRows=[],customerKey='',changed=false,profileUid='';
-  root.resetDeliverySettings=function(){customerGeneration++;customerRows=[];customerKey='';changed=false;profileUid='';$('deliverySettingsOverlay')?.remove();};
+  root.resetDeliverySettings=function(){customerGeneration++;customerRows=[];customerKey='';changed=false;profileUid='';personalActor=null;$('deliverySettingsOverlay')?.remove();};
   const previousSet=root.setOrderShippingInstructions;
   const owner=()=>salesList.find(s=>s.uid===(currentUserRole==='purchaser'?$('orderOwnerUid')?.value:currentUser?.uid));
   function replaceRecipient(p){for(const key of ['contact','phone','address'])if($('orderShipping'+key[0].toUpperCase()+key.slice(1)))$('orderShipping'+key[0].toUpperCase()+key.slice(1)).value=p[key]||'';}
@@ -75,7 +75,7 @@
   }
   root.saveOrderCustomerAddress=button=>saveAddress(button,false);root.setDefaultOrderCustomerAddress=button=>saveAddress(button,true);
   function overlay(html){let el=$('deliverySettingsOverlay');if(!el){el=document.createElement('div');el.id='deliverySettingsOverlay';el.className='eq-modal-overlay no-print';document.body.appendChild(el);}el.innerHTML='<div class="eq-modal-box warehouse-logistics-modal">'+html+'</div>';el.classList.add('active');}
-  root.closeDeliverySettings=()=>{$('deliverySettingsOverlay')?.classList.remove('active');};
+  root.closeDeliverySettings=()=>{customerGeneration++;personalActor=null;$('deliverySettingsOverlay')?.classList.remove('active');};
   root.openSalesDeliveryDefaults=async function(uid){
     if(currentUserRole!=='admin')return;await loadWarehouseMaster();const user=allUsersCache.find(u=>u.uid===uid);if(!user)return;profileUid=uid;const p=salespersonPlan(user,defaultWarehouse()?.id||'');
     overlay(`<h3>${escapeHtml(user.name||user.code||'業務')}・領貨與常用地址</h3><p>供新訂單自動帶入；本次訂單可另外調整。</p><div class="form-grid"><label>領貨方式<select id="salesDeliveryMode"><option value="PICKUP">主倉自行領貨</option><option value="SALES_SHIP">寄到業務地址</option></select></label><label>收件人<input id="salesDeliveryContact" value="${escapeAttr(p.contact)}"></label><label>電話<input id="salesDeliveryPhone" value="${escapeAttr(p.phone)}"></label><label class="logistics-wide">業務收貨地址<input id="salesDeliveryAddress" value="${escapeAttr(p.address)}"></label></div><div class="toolbar"><button onclick="saveSalesDeliveryDefaults(this)">儲存</button><button class="btn-secondary" onclick="closeDeliverySettings()">關閉</button></div>`);$('salesDeliveryMode').value=p.mode;
@@ -84,6 +84,32 @@
     if(currentUserRole!=='admin'||!profileUid)return;const uid=profileUid,actor=currentUser.uid;let p;
     try{p=root.YushinWarehouseLogistics.validatePlan({mode:$('salesDeliveryMode').value,contact:$('salesDeliveryContact').value,phone:$('salesDeliveryPhone').value,address:$('salesDeliveryAddress').value},true);}catch(err){return alert(err.message);}
     const bs=beginActionButton(button,'儲存中…');try{await db.collection('users').doc(uid).set({deliveryDefaults:p,updatedAt:new Date().toISOString()},{merge:true});if(currentUser.uid!==actor)return;const user=allUsersCache.find(u=>u.uid===uid);if(user)user.deliveryDefaults=p;applySalesRows(allUsersCache.map(u=>({id:u.uid,...u})));renderAdminSalesTable();root.closeDeliverySettings();showActionFeedback('業務領貨與地址設定已儲存。');}catch(err){showActionFeedback('儲存失敗：'+err.message,'warning');}finally{endActionButton(button,bs);}
+  };
+  let personalActor=null,personalBusy=false;
+  root.openPersonalSettings=async function(){
+    const uid=currentUser?.uid,role=currentUserRole;if(!uid)return;
+    const generation=++customerGeneration;
+    overlay('<h3>個人設定</h3><p role="status">正在讀取設定…</p><button class="btn-secondary" onclick="closeDeliverySettings()">關閉</button>');
+    try{
+      const snap=await firestoreReadWithTimeout(db.collection('users').doc(uid).get(),'個人設定');
+      if(uid!==currentUser?.uid||role!==currentUserRole||generation!==customerGeneration)return;
+      if(!snap.exists)throw Error('找不到帳號資料，請聯絡管理員。');
+      const user=snap.data(),p=salespersonPlan(user,defaultWarehouse()?.id||'');personalActor={uid,role};
+      overlay(`<h3>個人設定</h3><p>${escapeHtml(user.name||'')} · ${escapeHtml(user.code||'')} · ${escapeHtml(user.email||currentUser.email||'')} · ${escapeHtml(user.role||'')}</p><form id="personalSettingsForm" onsubmit="event.preventDefault();savePersonalSettings(this.querySelector('[type=submit]'))"><section><h4>聯絡資料</h4><label>聯絡電話<input id="personalPhone" maxlength="100" value="${escapeAttr(user.phone||'')}"></label></section><section><h4>領貨與寄送</h4><div class="form-grid"><label>預設領貨方式<select id="personalMode"><option value="PICKUP">主倉自領</option><option value="SALES_SHIP">寄給業務</option></select></label><label>收件人<input id="personalContact" maxlength="1000" value="${escapeAttr(p.contact)}"></label><label>收件電話<input id="personalDeliveryPhone" maxlength="1000" value="${escapeAttr(p.phone)}"></label><label class="logistics-wide">業務收件地址<input id="personalAddress" maxlength="1000" value="${escapeAttr(p.address)}"></label></div><p class="record-reference">只供之後的新訂單帶入；既有訂單及客戶地址不會變更。</p></section><p id="personalSettingsStatus" role="status"></p><div class="toolbar"><button type="submit">儲存設定</button><button type="button" class="btn-secondary" onclick="closeDeliverySettings()">關閉</button><button type="button" class="btn-secondary" onclick="closeDeliverySettings();openChangePasswordModal()">修改密碼</button></div></form>`);$('personalMode').value=p.mode;
+    }catch(err){if(uid===currentUser?.uid&&generation===customerGeneration)overlay('<h3>個人設定</h3><p role="alert">設定讀取失敗：'+escapeHtml(err.message)+'</p><button class="btn-secondary" onclick="openPersonalSettings()">重試</button><button class="btn-secondary" onclick="closeDeliverySettings()">關閉</button>');}
+  };
+  root.savePersonalSettings=async function(button){
+    const actor=personalActor;if(personalBusy||!actor||actor.uid!==currentUser?.uid||actor.role!==currentUserRole)return;
+    let p;try{p=root.YushinWarehouseLogistics.validatePlan({mode:$('personalMode').value,contact:$('personalContact').value,phone:$('personalDeliveryPhone').value,address:$('personalAddress').value},true);}catch(err){$('personalSettingsStatus').textContent=err.message;return;}
+    const generation=customerGeneration,phone=$('personalPhone').value.trim();if(phone.length>100)return;
+    if(!confirm('請核對個人領貨設定：\n'+(p.mode==='PICKUP'?'主倉自領':[p.contact,p.phone,p.address].join('\n'))+'\n只套用至之後的新訂單。'))return;
+    personalBusy=true;const bs=beginActionButton(button,'儲存中…');
+    try{await db.collection('users').doc(actor.uid).update({phone,deliveryDefaults:p,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});
+      if(actor.uid!==currentUser?.uid||actor.role!==currentUserRole)return;
+      for(const list of [allUsersCache,salesList]){const user=list.find(u=>(u.uid||u.id)===actor.uid);if(user)Object.assign(user,{phone,deliveryDefaults:p});}
+      currentUserPhone=phone;
+      if(generation===customerGeneration&&$('personalSettingsStatus'))$('personalSettingsStatus').textContent='設定已儲存；既有訂單維持原設定。';
+    }catch(err){if(actor.uid===currentUser?.uid&&generation===customerGeneration&&$('personalSettingsStatus'))$('personalSettingsStatus').textContent=err.code==='permission-denied'?'個人設定儲存失敗：請通知管理員同步最新權限設定後重試；目前資料尚未變更。':'個人設定儲存失敗：請檢查連線後重試；目前資料尚未變更。';}finally{personalBusy=false;endActionButton(button,bs);}
   };
   root.renderOrderDeliverySettingsButton=function(order){
     let summary=$('orderDeliveryRecipientSummary');

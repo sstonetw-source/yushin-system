@@ -15,7 +15,7 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
   await page.addScriptTag({content:`
    let currentUser={uid:'U'},currentUserRole='sales',trueUserRole='sales',sessionDataGeneration=1;
    globalThis.YUSHIN_SERVICE_CASE_EMULATOR=true;
-   const items=[{itemId:'I',itemName:'檢測',productType:'SERVICE',qty:2,orderedQty:2},{itemId:'J',itemName:'校正',productType:'SERVICE',qty:2,orderedQty:2}];
+   const items=[{itemId:'I',itemName:'檢測',unitPrice:100,productType:'SERVICE',qty:2,orderedQty:2},{itemId:'J',itemName:'校正',unitPrice:200,productType:'SERVICE',qty:2,orderedQty:2}];
    let ordersCache=[{id:'O',orderNo:'YS-1',customerName:'驗收客戶',items,totalPrice:400,isBilled:false}],activeOrderWorkFilter='all';
    const orderHistorySearchActive=false,orderHistorySearchResults=[],orderHistorySearchLoading=false,orderWorkQueueReady=true,orderWorkQueueError='';
    const pendingDeliveryOrderIds=new Set(),pendingOrderStatusKeys=new Set(),pendingLifecycleOrderIds=new Set();
@@ -41,7 +41,10 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
   await page.addScriptTag({content:renderer});
   await page.evaluate(()=>{renderOrdersList();});
   assert.equal(await page.locator('.service-case-verified-hint').count(),0);
-  await page.locator('#ordersBody button').filter({hasText:'服務案件'}).click();
+  assert.equal(await page.locator('#ordersBody > tr').count(),2);
+  assert.match(await page.locator('#ordersBody > tr').nth(0).locator('.order-money-cell').innerText(),/100 × 2[\s\S]*200/);
+  assert.match(await page.locator('#ordersBody > tr').nth(1).locator('.order-money-cell').innerText(),/200 × 2[\s\S]*400/);
+  await page.locator('#ordersBody button').filter({hasText:'服務案件'}).first().click();
   await page.locator('#verifyServiceOrderButton').click();
   await page.waitForFunction(()=>document.querySelectorAll('#ordersBody .order-progress-cell .service-case-verified-hint').length===2);
   const product=page.locator('#ordersBody .order-progress-cell');
@@ -51,7 +54,7 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
   assert.equal(await page.evaluate(()=>reads),1);
   await page.evaluate(()=>{renderOrdersList();renderOrdersList();});assert.equal(await page.evaluate(()=>reads),1);
   await page.locator('button[onclick="closeServiceCases()"]').click();
-  assert.equal(await product.evaluate(el=>el.scrollWidth<=el.clientWidth),true);
+  assert.equal(await product.evaluateAll(es=>es.every(el=>el.scrollWidth<=el.clientWidth)),true);
   await page.evaluate(()=>{
    ordersCache=[{id:'G',orderNo:'YS-20261026-1',orderDate:'2026-10-26',ownerUid:'U',salesName:'業務',customerName:'金額驗收',totalPrice:339000,transactionType:'直',remarks:'冷藏配送',status:'active',
     items:[{itemId:'G1',itemName:'RNeasy Mini Kit',itemCode:'74104',brand:'Qiagen',qty:30,orderedQty:30,unitPrice:11300,receivedQty:0,procurementType:'PURCHASING_PO',deliveryPlan:{mode:'PICKUP'}}]}];renderOrdersList();
@@ -59,7 +62,7 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
   const amount=page.locator('.order-money-cell');assert.equal(await amount.getAttribute('data-th'),'訂單金額');assert.match(await amount.innerText(),/NT\$ 339,000/);assert.equal(await page.locator('.workflow-price-breakdown').isVisible(),false);
   await page.locator('.order-detail-panel > summary').click();
   const drawer=page.locator('.order-detail-drawer');await drawer.waitFor({state:'visible'});assert.equal(await drawer.evaluate(d=>d.contains(document.activeElement)),true);await page.keyboard.press('Escape');assert.equal(await drawer.isVisible(),false);await page.locator('.order-detail-panel > summary').click();await drawer.waitFor({state:'visible'});
-  const details=page.locator('.order-detail-panel');assert.match(await details.innerText(),/11,300 × 30[\s\S]*品項小計 NT\$ 339,000/);assert.match(await details.innerText(),/採購方式：採購統一訂貨/);assert.match(await details.innerText(),/交付方式：業務送・主倉自領/);
+  const details=page.locator('.order-detail-panel');assert.match(await details.innerText(),/11,300 × 30[\s\S]*品項小計（含稅） NT\$ 339,000/);assert.match(await details.innerText(),/採購方式：採購統一訂貨/);assert.match(await details.innerText(),/交付方式：業務送・主倉自領/);
   await page.screenshot({path:'/tmp/order-drawer-'+width+'.png',fullPage:true});
   await details.locator('.order-commercial-editor > summary').click();
   assert.equal(await details.locator('.order-remarks-editor input').inputValue(),'冷藏配送');assert.equal(await details.locator('.order-transaction-cell select').isDisabled(),false);

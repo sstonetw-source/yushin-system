@@ -762,7 +762,7 @@ window.permanentlyDeleteOrder = async function(orderId) {
     if(!order)return alert('找不到這筆訂單，請重新整理。');
     try{assertOrderEligibleForPermanentDelete(order);}
     catch(error){return alert('無法永久刪除：'+error.message);}
-    if(!confirm(`永久刪除訂單「${order.orderNo||orderId}」？將在同一交易中釋放庫存並清除訂單、預留及未採購的需求。此操作無法復原。`))return;
+    if(!confirm(`客戶「${order.customerName||order.customer||'未填寫'}」：永久刪除整張訂單「${order.orderNo||orderId}」？將在同一交易中釋放庫存並清除訂單、預留及未採購的需求。此操作無法復原。`))return;
     const button=actionButtonFromEventOrSelector();
     const buttonState=beginActionButton(button,'刪除中…');
     pendingLifecycleOrderIds.add(orderId);

@@ -356,7 +356,7 @@ test('purchaser order form assigns a salesperson while preserving creator identi
 
 test('low-stock inventory can hand off to formal replenishment purchase flow without duplicating incoming stock', () => {
     assert.match(appSource, /openInventoryReplenishment/);
-    assert.match(appSource, /plan=inventoryReplenishmentPlan\(x,n\)/);
+    assert.match(appSource, /plan=inventoryReplenishmentPlan\(x,aggregate\)/);
     assert.match(indexSource,/id="purchaseReplenishmentPanel"/);
     assert.doesNotMatch(indexSource,/id="inventoryReplenishmentPanel"/);
     const start=appSource.indexOf('window.openInventoryReplenishment');
@@ -378,7 +378,7 @@ test('inventory page owns stock policy and safety-stock replenishment only appli
     assert.match(indexSource,/>不備庫</);
     assert.match(indexSource,/>安全庫存</);
     assert.match(indexSource,/>依訂單採購</);
-    assert.match(indexSource,/<th>庫存策略<\/th>/);
+    assert.match(indexSource,/庫存策略/);
     assert.match(indexSource,/由客戶訂單缺口進入既有採購需求流程/);
 
     assert.match(appSource,/const INVENTORY_STOCK_POLICIES = YushinInventory\.STOCK_POLICIES/);
@@ -406,7 +406,7 @@ test('inventory page owns stock policy and safety-stock replenishment only appli
     assert.match(renderSource,/inventoryStockPolicyBadge\(x\)/);
     assert.match(renderSource,/openInventoryPolicySettings/);
     assert.match(renderSource,/policyFilter&&stockPolicy!==policyFilter/);
-    assert.match(renderSource,/plan=inventoryReplenishmentPlan\(x,n\)/);
+    assert.match(renderSource,/plan=inventoryReplenishmentPlan\(x,aggregate\)/);
     assert.match(renderSource,/if\(stateFilter==='low'&&!plan\.needsReplenishment\)return/);
 });
 
@@ -4641,19 +4641,14 @@ test('mobile navigation resets toggle state after selecting a workspace', () => 
 });
 
 
-test('more menus share one delegated listener set', () => {
-    const start=appSource.indexOf("const moreMenuSelector = '.order-more-menu, .quote-more-menu, .po-more-menu'");
-    const end=appSource.indexOf('// 估價單表單的草稿自動儲存',start);
-    const source=appSource.slice(start,end);
-    assert.ok(start>=0&&end>start);
-    assert.match(source,/const openMoreMenuSelector = '\.order-more-menu\[open\], \.quote-more-menu\[open\], \.po-more-menu\[open\]'/);
+test('more menus share one guarded modal initializer', () => {
+    const source=fs.readFileSync(path.join(__dirname,'../src/shared/workspace-interactions.js'),'utf8');
+    assert.match(appSource,/initializeWorkspaceMenus/);
+    assert.match(source,/if\(root.workspaceMenusInitialized\)return/);
     assert.equal((source.match(/document\.addEventListener\('toggle'/g)||[]).length,1);
-    assert.equal((source.match(/document\.addEventListener\('click'/g)||[]).length,1);
-    assert.equal((source.match(/document\.addEventListener\('keydown'/g)||[]).length,1);
-    assert.match(source,/querySelectorAll\(openMoreMenuSelector\)/);
-    assert.match(source,/order-more-menu-popover button, \.quote-more-menu-popover button, \.po-more-menu-popover button/);
+    for(const name of ['order-more-menu','quote-more-menu','po-more-menu','inventory-more-menu'])assert.ok(source.includes(name));
+    assert.match(source,/dialog.showModal\(\)/);
 });
-
 
 test('primary work lists keep the default 50-row pagination guard', () => {
     const forecastStart=appSource.indexOf('window.loadForecasts = async function');
@@ -5063,7 +5058,7 @@ test('inventory projected stock and replenishment center avoid duplicate repleni
     assert.match(appSource,/await loadWarehouseStocksForInventoryPage\(\[item\]\)/);
     assert.match(indexSource,/id="purchaseReplenishmentBody"/);
     assert.match(indexSource,/預計庫存 = 可用庫存 \+ 在途/);
-    assert.match(indexSource,/<th>預計庫存<\/th>/);
+    assert.match(indexSource,/預計庫存/);
     assert.match(indexSource,/需補貨（預計庫存不足）/);
 });
 

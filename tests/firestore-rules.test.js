@@ -3365,3 +3365,21 @@ test('missing-document probes still reject inactive and unauthenticated profiles
  for(const client of clients)for(const path of ['orders/none','procurementDemands/none','inventoryReservations/none','inventory/none','warehouseStocks/none'])
   await assertFails(getDoc(doc(client,path)));
 });
+
+test('active members update only their own bounded personal phone and delivery defaults',async()=>{
+ const plan={mode:'SALES_SHIP',warehouseId:'',packages:1,contact:'業務',phone:'0912345678',address:'台北市',notes:''};
+ const patch={phone:'0912345678',deliveryDefaults:plan,updatedAt:require('firebase/firestore').serverTimestamp()};
+ for(const uid of ['sales1','eng1','buyer1','wh1']){
+  await assertSucceeds(updateDoc(doc(db(uid),'users/'+uid),patch));
+  await assertFails(updateDoc(doc(db(uid),'users/sales2'),patch));
+  for(const extra of [{role:'admin'},{active:false},{salesCode:'OTHER'},{capabilities:['admin']},{email:'x@test.com'},{mustChangePassword:false}])
+   await assertFails(updateDoc(doc(db(uid),'users/'+uid),{...patch,...extra}));
+  for(const bad of [{...plan,mode:'CUSTOMER_SHIP'},{...plan,address:''},{...plan,address:'x'.repeat(1001)},{...plan,extra:true},{...plan,packages:2},{...plan,warehouseId:'OTHER'}])
+   await assertFails(updateDoc(doc(db(uid),'users/'+uid),{...patch,deliveryDefaults:bad}));
+  await assertFails(updateDoc(doc(db(uid),'users/'+uid),{...patch,phone:'x'.repeat(101)}));
+  await assertFails(updateDoc(doc(db(uid),'users/'+uid),{...patch,updatedAt:'yesterday'}));
+ }
+ await assertFails(updateDoc(doc(db('off1'),'users/off1'),patch));
+ await assertFails(setDoc(doc(db('new-user'),'users/new-user'),{role:'sales',...patch}));
+ await assertFails(updateDoc(doc(env.unauthenticatedContext().firestore(),'users/sales1'),patch));
+});

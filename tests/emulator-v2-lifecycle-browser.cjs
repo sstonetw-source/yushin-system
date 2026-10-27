@@ -408,7 +408,7 @@ for(const width of [1280,390])test('mixed service and Goods original UI '+width+
   await page.locator('#deliveryFormPanel button[onclick="saveDeliveryRecord()"]').click();
   await page.waitForFunction(id=>!pendingDeliveryOrderIds.has(id)&&ordersCache.find(o=>o.id===id)?.deliveredQty===1,orderId);
   await page.locator('#deliveryModalOverlay button[onclick="closeDeliveryModal()"]').click();
-  const row=page.locator('#ordersBody > tr').filter({hasText:orderNo});
+  const row=page.locator('#ordersBody > tr').filter({hasText:orderNo}).first();
   await row.getByRole('button',{name:'核銷',exact:true}).click();await page.waitForFunction(()=>!pendingOrderStatusKeys.size);
   assert.equal((await db.doc('orders/'+orderId).get()).data().isBilled,false);assert.ok(dialogs.some(s=>s.includes('尚未全數完成')));
   await siteLogout(page);await siteLogin(page,accounts.engineer,'engineer');await siteNav(page,'orders');
@@ -499,7 +499,7 @@ for(const width of [1280,390])test('original service case UI '+width+'px: four k
  };
  try{
   await siteOpen(page);await siteLogin(page,accounts.sales,'sales');await siteNav(page,'orders');
-  const row=page.locator('#ordersBody > tr').filter({hasText:tag+'客戶'});await row.waitFor({state:'visible'});
+  const row=page.locator('#ordersBody > tr').filter({hasText:tag+'客戶'}).first();await row.waitFor({state:'visible'});
   await row.getByRole('button',{name:'服務案件',exact:true}).click();
   await page.locator('#serviceNewCaseId').waitFor({state:'visible'});
   // Delay the real authorized HTTP lookup, leaving the original handlers intact.
@@ -704,8 +704,8 @@ async function siteOrderAction(page,fixture,label){
  await siteNav(page,'orders');
  await page.evaluate(()=>ensureBrandSettingsLoaded());
  await page.waitForFunction(()=>!mainPageLoads.has('orders.list')&&!orderPageLoading);
- const row=page.locator('#ordersBody > tr').filter({hasText:fixture.sourceId});await row.waitFor({state:'visible'});
- await row.locator('.order-more-menu > summary').click();await row.locator('button').filter({hasText:label}).click();
+ const row=page.locator('#ordersBody > tr').filter({hasText:fixture.sourceId}).first();await row.waitFor({state:'visible'});
+ await row.locator('.order-more-menu > summary').click();await page.locator('.workspace-menu-dialog[open]').getByRole('button',{name:label,exact:true}).click();
 }
 for(const width of [1280,390])test('full site '+width+'px original PO receipt shipment acknowledgements and same-source return transport',{timeout:360000},async()=>{
  const fixture=await seed(width,'site'),context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
@@ -1736,7 +1736,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   assert.equal(completedProjection.closedQty,4);assert.equal(completedProjection.outstandingQty,0);
   assert.equal(completedProjection.pendingDeliveryQty,0);assert.equal(completedProjection.isDelivered,true);
   assert.equal(await page.locator('#openPartialDeliveryBtn').isVisible(),false);
-  const finalRow=page.locator('#ordersBody > tr').filter({hasText:fixture.sourceId});
+  const finalRow=page.locator('#ordersBody > tr').filter({hasText:fixture.sourceId}).first();
   assert.equal(await finalRow.locator('button').filter({hasText:'分批交貨'}).count(),0);
   console.log('Full site '+width+'px: final original dispatch three, source-warehouse shipment three and owner delivery three each lost a successful reply and reloaded the same intent; one final debit, six total confirmations, four CLOSE returns preserved and original order commercially fulfilled with no remaining quota.');
 
@@ -2270,7 +2270,7 @@ for(const multi of [false,true])for(const width of [1280,390])test('full site '+
   assert.equal((await db.collection('supplyOrders').where('sourceId','==',orderId).get()).size,0);
   assert.deepEqual(order.deliveryRecords||[],[]);assert.deepEqual(order.returnRecords||[],[]);assert.equal(order.isDelivered,false);
   await siteOpen(page,'sales');await siteNav(page,'orders');
-  await page.locator('#ordersBody > tr').filter({hasText:tag+'客戶'}).waitFor({state:'visible'});
+  await page.locator('#ordersBody > tr').filter({hasText:tag+'客戶'}).first().waitFor({state:'visible'});
   assert.equal((await db.collection('orders').where('createdByUid','==',uid).get()).size,1);
   assert.deepEqual((await db.collection('orders').doc(orderId).get()).data(),order);assert.deepEqual(await physical(),held);
   assert.deepEqual(functions,[],'manual production path does not use isolated v2 callables');
@@ -2354,7 +2354,7 @@ for(const mixed of [false,true])for(const width of [1280,390])test('full site '+
    assert.equal((await db.collection('inventoryLots').doc(tag+'-lot').get()).data().remainingQty,3);
   }
   await siteOpen(page,'sales');await siteNav(page,'orders');
-  await page.locator('#ordersBody > tr').filter({hasText:tag+'客戶'}).waitFor({state:'visible'});
+  await page.locator('#ordersBody > tr').filter({hasText:tag+'客戶'}).first().waitFor({state:'visible'});
   assert.deepEqual((await db.collection('orders').doc(orderId).get()).data(),order);
   assert.equal((await db.collection('orders').where('createdByUid','==',uid).get()).size,1);
   assert.deepEqual(dialogs,[]);assert.deepEqual(errors,[]);assert.deepEqual(functions,[]);
@@ -2414,7 +2414,7 @@ for(const width of [1280,390])test('full site '+width+'px original UI gated PO p
   await route.continue();});
  try{
   await siteOpen(page);await siteLogin(page,accounts.sales,'sales');await siteNav(page,'orders');
-  const sourceRow=page.locator('#ordersBody > tr').filter({hasText:orderId});await sourceRow.waitFor({state:'visible'});
+  const sourceRow=page.locator('#ordersBody > tr').filter({hasText:orderId}).first();await sourceRow.waitFor({state:'visible'});
   await sourceRow.locator('button[onclick^="retryOrderInventoryReservation("]').click();
   await page.waitForFunction(id=>ordersCache.some(o=>o.id===id&&o.inventoryReservationStatus==='completed')&&!pendingOrderReservationIds.has(id),orderId,{timeout:45000});
   assert.deepEqual(await physical(),before);
@@ -2439,7 +2439,7 @@ for(const width of [1280,390])test('full site '+width+'px original UI gated PO p
   assert.deepEqual(await physical(),before);
   await siteLogout(page);await siteLogin(page,accounts.sales,'sales');await siteNav(page,'orders');
   for(const [qty,total] of [[1,1],[2,3]]){
-   const row=page.locator('#ordersBody > tr').filter({hasText:orderId});
+   const row=page.locator('#ordersBody > tr').filter({hasText:orderId}).first();
    await row.locator('button[onclick^="openOrderDirectShipReceipt("]').click();
    await page.locator('#poReceiptBatchOverlay.active').waitFor({state:'visible'});
    assert.equal(await page.locator('#poReceiptBatchBody .po-receive-lot').isDisabled(),true);

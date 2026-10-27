@@ -429,7 +429,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     // 僅查看模式：保留搜尋、篩選、重新整理與開啟明細，攔截會改動資料的控制項。
     const blockReadonlyEdit = event => {
-        const section = event.target.closest?.('.content-section');
+        const section = event.target.closest?.('.content-section') || event.target.closest?.('.workspace-menu-dialog')?.workspaceSourceSection;
         if (!section || !section.classList.contains('active')) return;
         const pageKey = getActivePermissionPage();
         if (!pageKey || canEditPage(pageKey)) return;
@@ -460,67 +460,7 @@ window.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('change', blockReadonlyEdit, true);
     document.addEventListener('input', blockReadonlyEdit, true);
 
-    // 訂單／估價單／採購單的「更多」選單共用同一組事件代理：
-    // 全站同一時間只開一個；點擊外部、完成選擇或按 Esc 都會收起。
-    const moreMenuSelector = '.order-more-menu, .quote-more-menu, .po-more-menu';
-    const openMoreMenuSelector = '.order-more-menu[open], .quote-more-menu[open], .po-more-menu[open]';
-    const orderMenuMobile = window.matchMedia('(max-width: 640px)');
-    let orderMenuScrollLock = null;
-    function syncOrderMenuViewport() {
-        const openOrderMenu = document.querySelector('#ordersBody .order-more-menu[open]');
-        const lock = orderMenuMobile.matches && !!openOrderMenu;
-        if (lock && !orderMenuScrollLock) {
-            const body = document.body;
-            orderMenuScrollLock = { y: window.scrollY, position: body.style.position, top: body.style.top, left: body.style.left, right: body.style.right };
-            body.style.position = 'fixed';
-            body.style.top = `-${orderMenuScrollLock.y}px`;
-            body.style.left = '0';
-            body.style.right = '0';
-            body.classList.add('order-menu-open');
-        } else if (!lock && orderMenuScrollLock) {
-            const saved = orderMenuScrollLock;
-            orderMenuScrollLock = null;
-            const body = document.body;
-            body.classList.remove('order-menu-open');
-            ['position', 'top', 'left', 'right'].forEach(key => { body.style[key] = saved[key]; });
-            window.scrollTo(0, saved.y);
-        }
-        if (lock) {
-            const viewport = window.visualViewport;
-            const height = viewport?.height || window.innerHeight;
-            const bottom = Math.max(0, window.innerHeight - height - (viewport?.offsetTop || 0));
-            openOrderMenu.style.setProperty('--order-menu-bottom', `${bottom + 16}px`);
-            openOrderMenu.style.setProperty('--order-menu-height', `${height}px`);
-        }
-    }
-    window.visualViewport?.addEventListener('resize', syncOrderMenuViewport);
-    window.visualViewport?.addEventListener('scroll', syncOrderMenuViewport);
-    window.addEventListener('resize', syncOrderMenuViewport);
-    document.addEventListener('toggle', event => {
-        const openedMenu = event.target.closest?.(moreMenuSelector);
-        if (!openedMenu?.open) { syncOrderMenuViewport(); return; }
-        document.querySelectorAll(openMoreMenuSelector).forEach(menu => {
-            if (menu !== openedMenu) menu.open = false;
-        });
-        syncOrderMenuViewport();
-    }, true);
-    document.addEventListener('click', event => {
-        const menu = event.target.closest?.(moreMenuSelector);
-        if (!menu) {
-            document.querySelectorAll(openMoreMenuSelector).forEach(openMenu => { openMenu.open = false; });
-            syncOrderMenuViewport();
-            return;
-        }
-        if (event.target.closest('.order-more-menu-popover button, .quote-more-menu-popover button, .po-more-menu-popover button')) {
-            menu.open = false;
-            syncOrderMenuViewport();
-        }
-    });
-    document.addEventListener('keydown', event => {
-        if (event.key !== 'Escape') return;
-        document.querySelectorAll(openMoreMenuSelector).forEach(menu => { menu.open = false; });
-        syncOrderMenuViewport();
-    });
+    window.initializeWorkspaceMenus?.();
 
     // 估價單表單的草稿自動儲存：只要在「建立估價單」區塊裡打字/選擇/切換任何東西，
     // 都會（debounce 一下）把目前整份內容存到本機瀏覽器，這樣關掉分頁重開也不會不見。
@@ -3279,6 +3219,8 @@ function workflowPurchaseOrderDetails(order) {
 // Keep stage-specific action handlers and quantities; only reorganize the presentation.
 function organizePurchasingOrderRow(row, order, item) {
     row.classList.add('workflow-order-context-row');
+    row.dataset.menuTitle=[order?.customerName,order?.orderNo,order?.orderDate].filter(Boolean).join(' · ');
+    row.dataset.menuScope='整張訂單操作';
     const cells=[...row.children],find=label=>cells.find(cell=>cell.dataset.th===label);
     const product=cells.find(cell=>/品項$/.test(cell.dataset.th||''));
     if (!product) return;
@@ -3297,6 +3239,60 @@ function organizePurchasingOrderRow(row, order, item) {
     row.closest('table')?.classList.add('workflow-order-context-table');
     bindOrderDetailDrawer(row);
 }
+
+// Compact stock list, with complete warehouse/lot evidence retained in a modal.
+window.organizeInventoryList=function(body,chosenWarehouse){
+ const table=body.closest('table');if(table?.tHead)table.tHead.rows[0].innerHTML='<th>產品資訊</th><th>倉庫</th><th>現有庫存</th><th>已預留</th><th>可用庫存</th><th>在途</th><th>操作</th>';
+ for(const row of body.children){
+  const cells=[...row.children];if(cells.length!==13)continue;
+  const title=[cells[1].querySelector('strong')?.textContent,cells[0].textContent].filter(Boolean).join(' · ');
+  row.dataset.menuTitle=title+' · '+(chosenWarehouse?(document.getElementById('inventoryWarehouseFilter')?.selectedOptions[0]?.textContent||'所選倉庫'):'全部倉庫合計');row.dataset.menuScope='庫存品項操作';
+  const details=document.createElement('dialog');details.className='order-detail-drawer inventory-detail-dialog';details.setAttribute('aria-label','庫存明細');
+  details.innerHTML=`<header class="order-drawer-heading"><h3>庫存明細</h3><button type="button" class="btn-secondary" onclick="this.closest('dialog').close()">關閉</button></header><div class="order-detail-content"><section class="order-drawer-section"><h4>${escapeHtml(title)}</h4><dl class="order-drawer-summary"></dl></section></div>`;
+  const list=details.querySelector('dl');for(const cell of cells.slice(3,12)){const group=document.createElement('div'),term=document.createElement('dt'),value=document.createElement('dd');term.textContent=cell.dataset.th;while(cell.firstChild)value.append(cell.firstChild);group.append(term,value);list.append(group);}
+  // Restore metrics to visible cells while originals remain in the evidence drawer.
+  for(const index of [4,5,6,9])cells[index].innerHTML=list.children[index-3].querySelector('dd').innerHTML;
+  const product=cells[1];product.dataset.th='產品資訊';product.querySelectorAll('.inventory-mobile-summary,.inventory-mobile-brand').forEach(el=>el.remove());product.insertAdjacentHTML('beforeend',`<small>${escapeHtml(cells[2].textContent)} · 貨號 ${escapeHtml(cells[0].textContent)}</small>`);
+  const warehouse=document.createElement('td');warehouse.dataset.th='倉庫';warehouse.textContent=chosenWarehouse?(document.getElementById('inventoryWarehouseFilter')?.selectedOptions[0]?.textContent||'所選倉庫'):'全部倉庫合計';
+  const actions=cells[12],area=actions.querySelector('.inventory-row-actions');
+  if(area){const more=document.createElement('details');more.className='inventory-more-menu';more.innerHTML='<summary>更多</summary><div class="inventory-more-menu-popover"></div>';for(const control of [...area.children])if(!control.classList.contains('inventory-details-toggle'))more.lastElementChild.append(control);if(more.lastElementChild.children.length)area.append(more);area.append(details);}
+  if(row.dataset.warehousePending==='true'){for(const i of [4,5,6,9]){cells[i].textContent='待確認';list.children[i-3].querySelector('dd').textContent='待確認';}warehouse.append('（資料待確認）');}
+  row.replaceChildren(product,warehouse,cells[4],cells[5],cells[6],cells[9],actions);row.classList.add('inventory-compact-row');
+ }
+};
+// Shared modal ownership. Originals retain their handlers; no transaction data is copied.
+(function(root){
+ if(typeof document==='undefined')return;
+ root.initializeWorkspaceMenus=function(){
+  if(root.workspaceMenusInitialized)return;root.workspaceMenusInitialized=true;
+  const selector='.order-more-menu,.quote-more-menu,.po-more-menu,.inventory-more-menu';
+  let active=null;
+  function close(){if(!active)return;const {menu,panel,dialog,trigger}=active;active=null;menu.append(panel);menu.open=false;if(dialog.open)dialog.close();dialog.remove();if(trigger.isConnected)trigger.focus({preventScroll:true});}
+  document.addEventListener('toggle',event=>{
+   const menu=event.target;if(!menu.matches?.(selector))return;
+   if(!menu.open){if(active?.menu===menu)close();return;}if(active?.menu===menu)return;close();
+   const panel=menu.querySelector('[class$="-menu-popover"]');if(!panel)return;
+   const row=menu.closest('tr'),dialog=document.createElement('dialog');dialog.className='workspace-menu-dialog';dialog.workspaceSourceSection=menu.closest('.content-section');dialog.setAttribute('aria-label','更多操作');
+   const header=document.createElement('header'),title=document.createElement('strong'),context=document.createElement('p'),button=document.createElement('button');
+   title.textContent=row?.dataset.menuScope||'更多操作';context.textContent=row?.dataset.menuTitle||[...row?.querySelectorAll('td')||[]].slice(0,3).map(cell=>cell.innerText.trim()).join(' · ');
+   button.type='button';button.className='btn-secondary';button.textContent='關閉';button.onclick=close;header.append(title,context,button);dialog.append(header,panel);document.body.append(dialog);
+   active={menu,panel,dialog,trigger:menu.querySelector('summary')};dialog.showModal();
+   dialog.addEventListener('cancel',e=>{e.preventDefault();close();});dialog.addEventListener('close',()=>{if(active?.dialog===dialog)close();});
+   dialog.addEventListener('click',e=>{if(e.target===dialog){const r=dialog.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)close();}else if(e.target.closest('[class$="-menu-popover"] button'))close();});
+  },true);
+  new MutationObserver(()=>{if(active&&!active.menu.isConnected)close();}).observe(document.body,{childList:true,subtree:true});
+  document.addEventListener('click',e=>{if(active&&!active.dialog.contains(e.target)&&!active.menu.contains(e.target))close();});
+ };
+ // One lock for native dialogs and legacy overlays, including nested modal transitions.
+ let saved=null;
+ function sync(){
+  const modal=document.querySelector('dialog[open],.eq-modal-overlay.active,.password-modal-overlay.active');
+  if(modal&&!saved){const b=document.body;saved={x:scrollX,y:scrollY,position:b.style.position,top:b.style.top,left:b.style.left,right:b.style.right,overflow:b.style.overflow};Object.assign(b.style,{position:'fixed',top:`-${saved.y}px`,left:'0',right:'0',overflow:'hidden'});}
+  else if(!modal&&saved){const previous=saved;saved=null;for(const key of ['position','top','left','right','overflow'])document.body.style[key]=previous[key];window.scrollTo(previous.x,previous.y);}
+ }
+ function start(){new MutationObserver(sync).observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['open','class']});sync();}
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
+})(globalThis);
 // One authoritative order document commit. Features own drafts, IDs and presentation;
 // inventory initialization and delayed quote/source synchronization remain checkpoints.
 async function commitOrderCreation(orderId,data,{actorUid=currentUser?.uid,actorRole=currentUserRole,linkForecast=false,expectedForecastUpdatedAt=''}={}) {
@@ -4134,7 +4130,7 @@ window.permanentlyDeleteOrder = async function(orderId) {
     if(!order)return alert('找不到這筆訂單，請重新整理。');
     try{assertOrderEligibleForPermanentDelete(order);}
     catch(error){return alert('無法永久刪除：'+error.message);}
-    if(!confirm(`永久刪除訂單「${order.orderNo||orderId}」？將在同一交易中釋放庫存並清除訂單、預留及未採購的需求。此操作無法復原。`))return;
+    if(!confirm(`客戶「${order.customerName||order.customer||'未填寫'}」：永久刪除整張訂單「${order.orderNo||orderId}」？將在同一交易中釋放庫存並清除訂單、預留及未採購的需求。此操作無法復原。`))return;
     const button=actionButtonFromEventOrSelector();
     const buttonState=beginActionButton(button,'刪除中…');
     pendingLifecycleOrderIds.add(orderId);
@@ -9298,13 +9294,16 @@ function inventoryStockPolicyBadge(item = {}) {const policy=inventoryStockPolicy
 
 window.renderInventoryList=function(){
  const body=document.getElementById('inventoryListBody');if(!body)return;const k=(document.getElementById('inventorySearch')?.value||'').toLowerCase(),stateFilter=document.getElementById('inventoryStateFilter')?.value||'all',policyFilter=document.getElementById('inventoryPolicyFilter')?.value||'',brands=populateInventoryBrandFilter(),brandFilter=document.getElementById('inventoryBrandFilter')?.value||'',rowsHtml=[],inventoryRows=inventorySearchActive?inventorySearchResults:inventoryCache,activeWarehouseCount=warehouseMasterCache.filter(warehouse=>warehouse.active!==false).length;
- inventoryRows.forEach(x=>{if(brandFilter&&orderBrandFilterValue(x.brand,brands)!==brandFilter)return;const lots=fefoLots(x),productKey=x.productKey||x.productId||'',warehouseState=inventoryAggregateStock(x),warehouseRows=warehouseState.rows,warehouseSearch=warehouseRows.map(row=>row.warehouse.warehouseName||'').join(' '),text=`${x.itemCode||''} ${x.itemName||''} ${x.brand||''} ${warehouseSearch} ${lots.map(l=>l.lotNo).join(' ')}`.toLowerCase();if(!inventorySearchActive&&k&&!text.includes(k))return;const archived=globalThis.YushinInventory.isListArchived(x,warehouseState);if(stateFilter==='archived'?!archived:archived)return;const n=warehouseState,stockPolicy=inventoryStockPolicy(x),safetyStock=Number(x.safetyStock||0),plan=inventoryReplenishmentPlan(x,n);if(policyFilter&&stockPolicy!==policyFilter)return;if(stateFilter==='low'&&!plan.needsReplenishment)return;if(stateFilter==='out'&&n.available>0)return;if(stateFilter==='reserved'&&n.reserved<=0)return;
+ const warehouseFilter=document.getElementById('inventoryWarehouseFilter'),chosenWarehouse=warehouseFilter?.value||'';
+ if(warehouseFilter){warehouseFilter.innerHTML='<option value="">全部倉庫合計</option>'+warehouseMasterCache.filter(w=>w.active!==false&&!w.systemCustody).map(w=>`<option value="${escapeAttr(w.id)}">${escapeHtml(w.warehouseName||w.id)}</option>`).join('');warehouseFilter.value=chosenWarehouse;}
+ inventoryRows.forEach(x=>{if(brandFilter&&orderBrandFilterValue(x.brand,brands)!==brandFilter)return;const lots=fefoLots(x),productKey=x.productKey||x.productId||'',aggregate=inventoryAggregateStock(x),selectedStock=chosenWarehouse?aggregate.rows.find(row=>row.warehouse.id===chosenWarehouse)?.n:null,warehouseState=chosenWarehouse?(selectedStock?{...selectedStock,rows:aggregate.rows}:{onHand:0,reserved:0,available:0,incoming:0,rows:aggregate.rows}):aggregate,warehouseRows=warehouseState.rows,warehouseSearch=warehouseRows.map(row=>row.warehouse.warehouseName||'').join(' '),text=`${x.itemCode||''} ${x.itemName||''} ${x.brand||''} ${warehouseSearch} ${lots.map(l=>l.lotNo).join(' ')}`.toLowerCase();if(!inventorySearchActive&&k&&!text.includes(k))return;const archived=globalThis.YushinInventory.isListArchived(x,aggregate);if(stateFilter==='archived'?!archived:archived)return;const n=warehouseState,stockPolicy=inventoryStockPolicy(x),safetyStock=Number(x.safetyStock||0),plan=inventoryReplenishmentPlan(x,aggregate);if(policyFilter&&stockPolicy!==policyFilter)return;if(stateFilter==='low'&&!plan.needsReplenishment)return;if(stateFilter==='out'&&n.available>0)return;if(stateFilter==='reserved'&&n.reserved<=0)return;
  const visibleWarehouseRows=warehouseRows.filter(row=>row.n.onHand||row.n.reserved||row.n.incoming),showWarehouseDetail=activeWarehouseCount>1&&visibleWarehouseRows.length>0,warehouseHtml=showWarehouseDetail?visibleWarehouseRows.map(row=>`<div><strong>${escapeHtml(row.warehouse.warehouseName||row.warehouse.id)}</strong>：現有 ${row.n.onHand}／預留 ${row.n.reserved}／可用 ${row.n.available}／在途 ${row.n.incoming}</div>`).join('')+(Number(x.transferInTransit||0)>0?`<div>調撥途中：${Number(x.transferInTransit)}</div>`:''):'－';
  const productMaster=productMasterForRecord({productId:x.productId||productKey,itemCode:x.itemCode||'',brand:x.brand||''}),lotState=inventoryLotViewState(x),showLotDetail=!!(productMaster?.lotTracked||productMaster?.expiryTracked||lots.length||!lotState.complete),lotHtml=inventoryLotCellHtml(x),reserved=n.reserved>0?`<button type="button" class="link-button inventory-reserved-link" onclick="openInventoryReservationDetails(${inlineJsValue(x.productKey||x.id||'')})">${n.reserved}</button>`:'0';
- rowsHtml.push(`<tr class="inventory-list-row"><td data-th="貨號" class="inventory-detail-field">${escapeHtml(x.itemCode||'')}</td><td data-th="品名" class="inventory-primary-cell"><strong class="inventory-item-name">${escapeHtml(x.itemName||x.itemCode||'未命名品項')}${archived?'（已移出）':''}</strong><span class="inventory-mobile-brand">${escapeHtml(x.brand||'')}</span><div class="inventory-mobile-summary"><div><span>可用</span><strong>${n.available}</strong></div><div><span>在途</span><strong>${n.incoming}</strong></div><div><span>預計</span><strong>${plan.projected}</strong></div></div></td><td data-th="廠牌" class="inventory-brand-cell">${escapeHtml(x.brand||'')}</td><td data-th="倉庫位置" class="inventory-detail-field inventory-optional-detail ${showWarehouseDetail?'':'inventory-no-detail'}">${warehouseHtml}</td><td data-th="現有庫存" class="inventory-detail-field">${n.onHand}</td><td data-th="已預留" class="inventory-detail-field">${reserved}</td><td data-th="可用庫存" class="inventory-desktop-metric">${n.available}</td><td data-th="庫存策略" class="inventory-policy-cell">${inventoryStockPolicyBadge(x)}</td><td data-th="安全庫存" class="inventory-detail-field inventory-optional-detail ${stockPolicy===INVENTORY_STOCK_POLICIES.SAFETY_STOCK?'':'inventory-no-detail'}">${stockPolicy===INVENTORY_STOCK_POLICIES.SAFETY_STOCK?safetyStock:'－'}</td><td data-th="在途" class="inventory-desktop-metric">${n.incoming}</td><td data-th="預計庫存" class="inventory-desktop-metric"><strong>${plan.projected}</strong></td><td data-th="批號／效期" class="inventory-detail-field inventory-optional-detail ${showLotDetail?'':'inventory-no-detail'}">${lotHtml}</td><td data-th="操作" class="no-print inventory-actions-cell">${canEditPage('inventory')?`<div class="inventory-row-actions"><button type="button" class="btn-small btn-secondary inventory-details-toggle" onclick="toggleInventoryRowDetails(this)">詳細資料</button><button type="button" class="btn-small inventory-action-quantity" onclick="openInventoryQuantityEditor(${inlineJsValue(x.id)})">修改庫存</button>${canManageInventoryStockPolicy()?`<button type="button" class="btn-small btn-secondary inventory-action-transfer" onclick="openInventoryTransfer(${inlineJsValue(x.id)})" ${activeInventoryWarehouses().length<2?'disabled title="至少需要兩個實體倉庫"':''}>調回主倉備貨</button>`:''}${canManageInventoryStockPolicy()?`<button type="button" class="btn-small btn-secondary inventory-action-policy" onclick="openInventoryPolicySettings(${inlineJsValue(x.id)})">⚙️ 庫存設定</button>`:''}${canManageInventoryList()?`<button type="button" class="btn-small btn-secondary inventory-action-archive" onclick="setInventoryListArchived(${inlineJsValue(x.id)},${!archived},this)" ${!archived&&!globalThis.YushinInventory.stockIsEmpty({...x,...n,lots:[]})?'disabled title="現有、預留、在途及調撥數量必須為零"':''}>${archived?'恢復至庫存列表':'移出庫存列表'}</button>${!archived&&!globalThis.YushinInventory.stockIsEmpty({...x,...n,lots:[]})?'<small class="inventory-action-reason">仍有庫存／預留／在途／調撥，無法移出</small>':''}`:''}</div>`:`<div class="inventory-row-actions"><button type="button" class="btn-small btn-secondary inventory-details-toggle" onclick="toggleInventoryRowDetails(this)">詳細資料</button><span>僅可查看</span></div>`}</td></tr>`);
+ rowsHtml.push(`<tr class="inventory-list-row" data-inventory-id="${escapeAttr(x.id)}" data-warehouse-pending="${!!chosenWarehouse&&!warehouseStockCache.has(chosenWarehouse+'||'+productKey)}"><td data-th="貨號" class="inventory-detail-field">${escapeHtml(x.itemCode||'')}</td><td data-th="品名" class="inventory-primary-cell"><strong class="inventory-item-name">${escapeHtml(x.itemName||x.itemCode||'未命名品項')}${archived?'（已移出）':''}</strong><span class="inventory-mobile-brand">${escapeHtml(x.brand||'')}</span><div class="inventory-mobile-summary"><div><span>可用</span><strong>${n.available}</strong></div><div><span>在途</span><strong>${n.incoming}</strong></div><div><span>預計</span><strong>${plan.projected}</strong></div></div></td><td data-th="廠牌" class="inventory-brand-cell">${escapeHtml(x.brand||'')}</td><td data-th="倉庫位置" class="inventory-detail-field inventory-optional-detail ${showWarehouseDetail?'':'inventory-no-detail'}">${warehouseHtml}</td><td data-th="現有庫存" class="inventory-detail-field">${n.onHand}</td><td data-th="已預留" class="inventory-detail-field">${reserved}</td><td data-th="可用庫存" class="inventory-desktop-metric">${n.available}</td><td data-th="庫存策略" class="inventory-policy-cell">${inventoryStockPolicyBadge(x)}</td><td data-th="安全庫存" class="inventory-detail-field inventory-optional-detail ${stockPolicy===INVENTORY_STOCK_POLICIES.SAFETY_STOCK?'':'inventory-no-detail'}">${stockPolicy===INVENTORY_STOCK_POLICIES.SAFETY_STOCK?safetyStock:'－'}</td><td data-th="在途" class="inventory-desktop-metric">${n.incoming}</td><td data-th="預計庫存" class="inventory-desktop-metric"><strong>${plan.projected}</strong></td><td data-th="批號／效期" class="inventory-detail-field inventory-optional-detail ${showLotDetail?'':'inventory-no-detail'}">${lotHtml}</td><td data-th="操作" class="no-print inventory-actions-cell">${canEditPage('inventory')?`<div class="inventory-row-actions"><button type="button" class="btn-small btn-secondary inventory-details-toggle" onclick="toggleInventoryRowDetails(this)">詳細資料</button><button type="button" class="btn-small inventory-action-quantity" onclick="openInventoryQuantityEditor(${inlineJsValue(x.id)})">修改庫存</button>${canManageInventoryStockPolicy()?`<button type="button" class="btn-small btn-secondary inventory-action-transfer" onclick="openInventoryTransfer(${inlineJsValue(x.id)})" ${activeInventoryWarehouses().length<2?'disabled title="至少需要兩個實體倉庫"':''}>調回主倉備貨</button>`:''}${canManageInventoryStockPolicy()?`<button type="button" class="btn-small btn-secondary inventory-action-policy" onclick="openInventoryPolicySettings(${inlineJsValue(x.id)})">⚙️ 庫存設定</button>`:''}${canManageInventoryList()?`<button type="button" class="btn-small btn-secondary inventory-action-archive" onclick="setInventoryListArchived(${inlineJsValue(x.id)},${!archived},this)" ${!archived&&!globalThis.YushinInventory.stockIsEmpty({...x,...aggregate,lots:[]})?'disabled title="現有、預留、在途及調撥數量必須為零"':''}>${archived?'恢復至庫存列表':'移出庫存列表'}</button>${!archived&&!globalThis.YushinInventory.stockIsEmpty({...x,...aggregate,lots:[]})?'<small class="inventory-action-reason">仍有庫存／預留／在途／調撥，無法移出</small>':''}`:''}</div>`:`<div class="inventory-row-actions"><button type="button" class="btn-small btn-secondary inventory-details-toggle" onclick="toggleInventoryRowDetails(this)">詳細資料</button><span>僅可查看</span></div>`}</td></tr>`);
  });body.innerHTML=rowsHtml.join('');
+ if(globalThis.organizeInventoryList)globalThis.organizeInventoryList(body,chosenWarehouse);
 };
-window.toggleInventoryRowDetails=function(button){const row=button?.closest?.('tr');if(!row)return;const expanded=row.classList.toggle('inventory-expanded');button.textContent=expanded?'收合詳細':'詳細資料';};
+window.toggleInventoryRowDetails=function(button){const dialog=button?.closest('tr')?.querySelector('.inventory-detail-dialog');if(dialog)dialog.showModal();};
 window.openInventoryReplenishment = async function(inventoryId) {
     if (!canEditPage('orders.po')) { alert('您沒有採購權限。'); return; }
     const button = actionButtonFromEventOrSelector();
@@ -9774,7 +9773,7 @@ window.openInventoryQuantityEditor=async function(inventoryId){
 
         const activeWarehouses=warehouseMasterCache.filter(warehouse=>warehouse.active!==false);
         const productKey=String(item.productKey||item.productId||'').trim();
-        const preferredWarehouse=activeWarehouses.find(warehouse=>{
+        const preferredWarehouse=activeWarehouses.find(warehouse=>warehouse.id===document.getElementById('inventoryWarehouseFilter')?.value)||activeWarehouses.find(warehouse=>{
             const stock=warehouseStockCache.get(warehouse.id+'||'+productKey);
             return Number(inventoryNumbers(stock||{}).onHand||0)>0;
         })||defaultWarehouse()||activeWarehouses[0]||null;
@@ -9819,6 +9818,7 @@ window.saveInventoryQuantity=async function(){
     const target=Number(rawTarget);
     if(!rawTarget||!Number.isFinite(target)||target<0){alert('盤點後現有數量必須是 0 或正數。');return;}
     const note=String(document.getElementById('inventoryQuantityNote')?.value||'').trim();
+    if(!note){alert('請填寫庫存調整原因。');return;}
     const warehouseId=inventoryQuantityEditingWarehouseId;
     if(!warehouseId){alert('請選擇盤點倉庫。');return;}
     const actorUid=currentUser?.uid,actorRole=currentUserRole;
@@ -12792,12 +12792,16 @@ window.renderOrdersList = function() {
         if (activeOrderWorkFilter === 'complete' && !orderMatchesWorkPeriod(o,'complete')) return;
         // 工作圖卡是以「品項」計數；套用狀態篩選後，產品欄也只顯示該狀態品項，
         // 避免同一張多品項訂單把其他狀態的品項一起帶進來造成誤判。
-        const orderItems=activeOrderWorkFilter==='all'
+        const matchedOrderItems=activeOrderWorkFilter==='all'
             ? allOrderItems
             : allOrderItems.filter(item=>(displayCategoriesByItem.get(item) || []).includes(activeOrderWorkFilter));
         shown++;
 
+        matchedOrderItems.forEach((displayItem,displayIndex)=>{
+        const orderItems=[displayItem],displayRowKey=o.id+':'+displayItem.itemId;
         const tr = document.createElement('tr');
+        tr.dataset.orderId=o.id;tr.dataset.menuTitle=[o.customerName,o.orderNo||o.quoteNo||'未編單號',o.orderDate].filter(Boolean).join(' · ');
+        tr.dataset.menuScope='整張訂單操作';
         if (canManageOrderOps && (o.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER') {
             loadVisibleProductCost(findPriceItemForOrder(o) || {productId:o.productId}).then(cost => {
                 if (!tr.isConnected || cost === null || !Number.isFinite(cost)) return;
@@ -12824,16 +12828,16 @@ window.renderOrdersList = function() {
             <td data-th="產品資訊" class="order-product-cell">${orderItems.map(item=>`<div class="workflow-product-item">${purchaseProductSummary(item, Number(item.orderedQty||item.qty||0), null)}</div>`).join('')}</td>
             <td class="order-sales-cell" data-th="負責業務">${escapeHtml(stripPhoneSuffix(o.salesName))}</td>
 
-            <td data-th="訂單金額" class="order-money-cell">${orderItems.map(item=>workflowAmountSummary(item,Number(item.orderedQty||item.qty||0))).join('')}${allOrderItems.length>1?`<small class="workflow-order-total">訂單總額 NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice??'').replace(/,/g,''))||0).toLocaleString())}</small>`:''}<small>${o.isBilled ? '已核銷' : '未核銷'}</small></td>
+            <td data-th="訂單金額" class="order-money-cell">${orderItems.map(item=>workflowSalesAmount(o,item)).join('')}${allOrderItems.length>1&&displayIndex===matchedOrderItems.length-1?`<small class="workflow-order-total">整張訂單合計 NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice??'').replace(/,/g,''))||0).toLocaleString())}</small>`:''}<small>${o.isBilled ? '已核銷' : '未核銷'}</small></td>
             <td data-th="進度" class="order-progress-cell">${workflowCommercialSummary(o)}${orderItems.map((item,index)=>{const displayCategories=displayCategoriesByItem.get(item)||[];const primaryStatus=displayCategories[0]||'ordering';const itemStatus=['dispatch','shipping'].includes(activeOrderWorkFilter)&&displayCategories.includes(activeOrderWorkFilter)?activeOrderWorkFilter:primaryStatus;const itemStatusMap={ordering:'待採購',arrival:'待到貨',dispatch:'待打單',shipping:'已打單',billing:'待核銷',complete:'已完成',closed:lifecycle.label};const waiting=primaryStatus==='arrival'?waitingDaysFromDate(item.orderedAt):'';const state=dispatchStateByItem.get(item)||itemDispatchState(o,item);const receipt=primaryStatus==='arrival'?receivingWorkProgress(o,item):null;return `<div class="workflow-progress-item">${orderItems.length>1?`<strong>${escapeHtml(item.itemName||item.itemCode||'品項')}</strong>`:''}<small class="order-item-work-status">訂單狀態：<span class="order-progress-badge">${escapeHtml(((lifecycle.status==='normal'&&orderInventorySyncIncomplete(o)) ? (o.inventoryReservationStatus==='failed'?'庫存同步未完成':'庫存同步中…') : ((String(item.productType||'').trim().toUpperCase()==='SERVICE'&&lifecycle.status==='normal'&&primaryStatus==='delivery'?'待服務處理':(lifecycle.status==='normal'&&globalThis.YushinWarehouseLogistics?.shippingStatus(o,item,state)))||itemStatusMap[itemStatus]||'待採購')))}</span>${waiting?`・已等 ${escapeHtml(waiting)}`:''}${state.pending>0?`<span class="workflow-quantity">待打單 ${escapeHtml(state.pending)}</span>`:''}${receipt?`<span class="workflow-quantity">已到貨 ${escapeHtml(receipt.received)}／應到貨 ${escapeHtml(receipt.target)}・待到貨 ${escapeHtml(receipt.remaining)}</span>`:''}${state.shippable>0?`・已有 ${escapeHtml(state.shippable)} 可出貨`:''}</small>${window.serviceCaseVerifiedItemHint?.(o.id,item)||''}</div>`}).join('')}</td>
             <td class="no-print" data-th="操作"><div class="workflow-inline-actions">
-                <details class="order-detail-panel" data-order-id="${escapeAttr(o.id)}" ${openedDetails.has(o.id)?'open':''}>
+                <details class="order-detail-panel" data-order-id="${escapeAttr(displayRowKey)}" ${openedDetails.has(displayRowKey)?'open':''}>
                     <summary aria-haspopup="dialog" aria-expanded="false">明細${window.orderCommercialEditPending?.has(o.id)?'（儲存中…）':''}</summary>
-                    <dialog class="order-detail-drawer" aria-label="訂單明細"><header class="order-drawer-heading"><h3>訂單明細</h3><button type="button" class="btn-secondary" data-order-drawer-close autofocus>關閉</button></header><div class="order-detail-content"><section class="order-drawer-section"><h4>訂單摘要</h4><dl class="order-drawer-summary"><div><dt>單號</dt><dd>${escapeHtml(o.orderNo||'—')}</dd></div><div><dt>客戶</dt><dd>${escapeHtml(o.customerName||'—')}</dd></div><div><dt>負責業務</dt><dd>${escapeHtml(stripPhoneSuffix(o.salesName))}</dd></div><div><dt>訂單日期</dt><dd>${escapeHtml(o.orderDate||'—')}</dd></div><div><dt>訂單總額</dt><dd>NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice??'').replace(/,/g,''))||0).toLocaleString())}</dd></div></dl>${o.quoteNo?`<div class="record-reference">來源估價單 ${escapeHtml(o.quoteNo)}</div>`:''}</section><section class="order-drawer-section"><h4>全部訂單品項</h4><div class="workflow-price-breakdown">${allOrderItems.map(item=>`<div class="${orderItems.includes(item)?'is-current-work-item':''}"><strong>${escapeHtml(item.itemName||item.itemCode||'品項')}</strong>${orderItems.includes(item)?'<small class="order-current-item-label">目前分頁品項</small>':''}<small>${escapeHtml(lifecycle.status!=='normal'?lifecycle.label:(String(item.productType||'').toUpperCase()==='SERVICE'&&(displayCategoriesByItem.get(item)||[]).includes('delivery')?'待服務處理':globalThis.YushinWarehouseLogistics?.shippingStatus(o,item,dispatchStateByItem.get(item))||(displayCategoriesByItem.get(item)||[]).map(workflowWorkCategoryLabel).join('・')))}</small>${window.serviceCaseVerifiedItemHint?.(o.id,item)||''}${workflowAmountSummary(item,Number(item.orderedQty||item.qty||0))}</div>`).join('')}</div></section><section class="order-drawer-section"><h4>交付資料</h4>
+                    <dialog class="order-detail-drawer" aria-label="訂單明細"><header class="order-drawer-heading"><h3>訂單明細</h3><button type="button" class="btn-secondary" data-order-drawer-close autofocus>關閉</button></header><div class="order-detail-content"><section class="order-drawer-section"><h4>訂單摘要</h4><dl class="order-drawer-summary"><div><dt>單號</dt><dd>${escapeHtml(o.orderNo||'—')}</dd></div><div><dt>客戶</dt><dd>${escapeHtml(o.customerName||'—')}</dd></div><div><dt>負責業務</dt><dd>${escapeHtml(stripPhoneSuffix(o.salesName))}</dd></div><div><dt>訂單日期</dt><dd>${escapeHtml(o.orderDate||'—')}</dd></div><div><dt>訂單總額</dt><dd>NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice??'').replace(/,/g,''))||0).toLocaleString())}</dd></div></dl>${o.quoteNo?`<div class="record-reference">來源估價單 ${escapeHtml(o.quoteNo)}</div>`:''}</section><section class="order-drawer-section"><h4>全部訂單品項</h4><div class="workflow-price-breakdown">${allOrderItems.map(item=>`<div class="${orderItems.includes(item)?'is-current-work-item':''}"><strong>${escapeHtml(item.itemName||item.itemCode||'品項')}</strong>${orderItems.includes(item)?'<small class="order-current-item-label">目前分頁品項</small>':''}<small>${escapeHtml(lifecycle.status!=='normal'?lifecycle.label:(String(item.productType||'').toUpperCase()==='SERVICE'&&(displayCategoriesByItem.get(item)||[]).includes('delivery')?'待服務處理':globalThis.YushinWarehouseLogistics?.shippingStatus(o,item,dispatchStateByItem.get(item))||(displayCategoriesByItem.get(item)||[]).map(workflowWorkCategoryLabel).join('・')))}</small>${window.serviceCaseVerifiedItemHint?.(o.id,item)||''}${workflowSalesAmount(o,item)}</div>`).join('')}</div></section><section class="order-drawer-section"><h4>交付資料</h4>
                         <div class="order-item-prices">${allOrderItems.map(item => `<div><strong>${escapeHtml(item.itemName||item.itemCode||'品項')}</strong><div>採購方式：${escapeHtml(globalThis.YushinOrderCommercialDetails.procurementLabel(item))}</div><div>交付方式：${escapeHtml(globalThis.YushinOrderEntry.deliveryLabel({fulfillmentType:item.fulfillmentType,deliveryPlan:item.deliveryPlan||o.shippingInstructions||{}}))}</div>${canEditOrders&&lifecycle.status==='normal'&&!detailsLocked&&(currentUserRole==='admin'||o.ownerUid===currentUser?.uid||canReceiveInventoryCapability())&&!globalThis.YushinOrderCommercialDetails.itemMoved(item)?`<button type="button" class="btn-small btn-secondary" onclick="openWarehouseDeliveryPlan(${inlineJsValue(o.id)},${inlineJsValue(item.itemId)})">修改交付方式／地址</button>`:''}</div>`).join('')}</div>
-                        </section><section class="order-drawer-section"><h4>交易與備註</h4><dl class="order-drawer-summary order-commercial-summary"><div><dt>交易方式</dt><dd>${escapeHtml(o.transactionType||'未選擇')}</dd></div><div><dt>發票抬頭</dt><dd>${escapeHtml(o.invoiceTitle||'—')}</dd></div><div><dt>訂單備註</dt><dd>${escapeHtml(o.remarks||'—')}</dd></div></dl><details class="order-commercial-editor" ${openedEditors.has(o.id)?'open':''}><summary>${detailsEditable?'編輯交易與備註':canManageOrderOps?'成本與交易設定':'查看交易設定'}</summary>${detailsLocked?'<small>已到貨或進入交付流程，訂單交付設定、交易方式及訂單備註已鎖定。</small>':''}
+                        </section><section class="order-drawer-section"><h4>交易與備註</h4><dl class="order-drawer-summary order-commercial-summary"><div><dt>交易方式</dt><dd>${escapeHtml(o.transactionType||'未選擇')}</dd></div><div><dt>發票抬頭</dt><dd>${escapeHtml(o.invoiceTitle||'—')}</dd></div><div><dt>訂單備註</dt><dd>${escapeHtml(o.remarks||'—')}</dd></div></dl><details class="order-commercial-editor" ${openedEditors.has(displayRowKey)?'open':''}><summary>${detailsEditable?'編輯交易與備註':canManageOrderOps?'成本與交易設定':'查看交易設定'}</summary>${detailsLocked?'<small>已到貨或進入交付流程，訂單交付設定、交易方式及訂單備註已鎖定。</small>':''}
             ${canManageOrderOps ? `
-            <div class="no-print order-cost-profit-cell"><label>單位成本</label><input type="number" step="0.01" class="order-cost-input" data-order-id="${o.id}" ${(o.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER' ? 'readonly title="標準成本由產品成本資料帶入"' : ''} value="${o.procurementType === 'SALES_SELF_ORDER' ? (o.costPrice == null ? '' : Number(Number(o.costPrice).toFixed(2))) : ''}" oninput="updateOrderProfitDisplay('${o.id}', this.value)" onchange="updateOrderField('${o.id}','costPrice', this.value === '' ? null : parseFloat(this.value))"><small>毛利：<span id="orderProfit_${o.id}">${formatProfitPercent(o.unitPrice, o.costPrice)}</span></small></div>` : ''}
+            <div class="no-print order-cost-profit-cell"><label>單位成本</label><input type="number" step="0.01" class="order-cost-input" data-order-id="${o.id}" ${(o.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER' ? 'readonly title="標準成本由產品成本資料帶入"' : ''} value="${o.procurementType === 'SALES_SELF_ORDER' ? (o.costPrice == null ? '' : Number(Number(o.costPrice).toFixed(2))) : ''}" oninput="updateOrderProfitDisplay('${o.id}', this.value)" onchange="updateOrderField('${o.id}','costPrice', this.value === '' ? null : parseFloat(this.value))"><small>毛利：<span id="orderProfit_${o.id}_${displayIndex}">${formatProfitPercent(o.unitPrice, o.costPrice)}</span></small></div>` : ''}
             <div class="order-transaction-cell"><label>交易方式</label>
                 <select onchange="updateOrderField('${o.id}','transactionType',this.value)">
                     <option value="" ${!o.transactionType ? 'selected' : ''}>未選擇</option>
@@ -12882,6 +12886,7 @@ window.renderOrdersList = function() {
         }
         organizeOrderRowActions(tr, activeOrderWorkFilter);
         fragment.appendChild(tr);
+        });
     });
     tbody.appendChild(fragment);
     tbody.querySelectorAll('tr').forEach(bindOrderDetailDrawer);
@@ -19963,7 +19968,7 @@ function confirmOrderCancellation(order) {
         const incoming=items.reduce((sum,item)=>sum+Math.max(0,Number(item.supplyOrderedQty||0)-Number(item.receivedQty||0)),0);
         const documents=[...new Set(items.flatMap(item=>item.purchaseDocumentNos||[]))];
         const action=progress.delivered>0?'取消剩餘未送貨數量':'取消訂單';
-        const message=[`${action}：${progress.remaining} 個。`, `釋放庫存預留：${reserved} 個；已到貨的貨仍留在庫存。`,
+        const message=[`客戶：${order.customerName||order.customer||'未填寫'}｜訂單：${order.orderNo||order.quoteNo||'未編單號'}`,`${action}：${progress.remaining} 個。`, `釋放庫存預留：${reserved} 個；已到貨的貨仍留在庫存。`,
             incoming>0?`尚有 ${incoming} 個採購未到貨；已建立採購單不會自動取消，請到採購待到貨確認：供應商同意取消，或保留採購轉庫存。`:'',
             documents.length?`關聯採購單：${documents.join('、')}`:'',
             progress.delivered>0?'已送貨與退貨紀錄保留，已送出的貨不會自動退回庫存。':''].filter(Boolean).join('\n\n');
@@ -26440,7 +26445,7 @@ window.reloadSalesFromUsers = function() {
         if (generation !== sessionDataGeneration) return;
         salesList = rows
             .filter(d => d.name && d.code)
-            .map(d => ({ uid:d.id, code:d.code, name:d.name, phone:d.phone || '', role:d.role || 'sales', active:d.active !== false }))
+            .map(d => ({ uid:d.id, code:d.code, name:d.name, phone:d.phone || '', deliveryDefaults:d.deliveryDefaults || {}, role:d.role || 'sales', active:d.active !== false }))
             .sort((a,b)=>String(a.code||'').localeCompare(String(b.code||'')));
 
         allUsersCache = rows.map(d => ({
