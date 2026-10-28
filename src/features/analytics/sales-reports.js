@@ -1025,21 +1025,6 @@ function formatStatsMoney(value) {
     return `${rounded < 0 ? '-NT$ ' : 'NT$ '}${Math.abs(rounded).toLocaleString()}`;
 }
 
-function renderSalesStatsRows(tbodyId, values, grandTotal) {
-    const tbody = document.getElementById(tbodyId);
-    if (!tbody) return;
-    const entries = Object.entries(values).sort((a, b) => b[1].totalSales - a[1].totalSales);
-    tbody.innerHTML = entries.length
-        ? entries.map(([name, metric]) => {
-            const incompleteCost = metric.missingCostIds.size > 0;
-            const rate = incompleteCost ? '待補成本' : metric.totalSales ? (metric.profit / metric.totalSales * 100).toFixed(1) + '%' : '－';
-            const share = grandTotal ? (metric.totalSales / grandTotal * 100).toFixed(1) + '%' : '－';
-            const costText = `${formatStatsMoney(metric.totalCost)}${incompleteCost ? `（少 ${metric.missingCostIds.size} 筆）` : ''}`;
-            return `<tr><td>${escapeHtml(name)}</td><td>${formatStatsMoney(metric.actualSales)}</td><td>${formatStatsMoney(metric.pendingSales)}</td><td>${formatStatsMoney(metric.totalSales)}</td><td>${costText}</td><td>${incompleteCost ? '待補成本' : formatStatsMoney(metric.profit)}</td><td>${rate}</td><td>${share}</td></tr>`;
-        }).join('')
-        : '<tr><td colspan="8" style="color:#888;">尚無資料</td></tr>';
-}
-
 let tradeAnalysisLoadedKey = '';
 const tradeAnalysisSnapshots = new Map();
 let tradeAnalysisRevision = 0;
@@ -1184,13 +1169,6 @@ function buildTradeAnalysisRows() {
             ...context.extra,date:localDateString(),event:'在庫',status:'在庫',lotNo:lot.lotNo||'',expiryDate:lot.expiryDate||'',warehouseId:lot.warehouseId||'',eventId:lot.id});
     });
     return rows;
-}
-
-function buildTradeAnalysisReport(rows = buildTradeAnalysisRows()) {
-    const {start,end}=salesStatisticsQueryWindow();
-    const filters={start,end,sales:document.getElementById('salesStatsSalesFilter')?.value||'',brand:document.getElementById('salesStatsBrandFilter')?.value||'',
-        line:document.getElementById('salesStatsLineFilter')?.value||'',type:document.getElementById('salesStatsTypeFilter')?.value||''};
-    return {...globalThis.YushinTradeAnalysis.summarize(rows,filters),filters};
 }
 
 function tradeAnalysisExportRows(report,kind) {

@@ -581,10 +581,6 @@ function warehouseKind(item) {
     return item?.warehouseType === 'EXTERNAL' ? 'EXTERNAL' : 'INTERNAL';
 }
 
-function isExternalWarehouseId(warehouseId) {
-    return warehouseKind(warehouseMasterCache.find(item => item.id === warehouseId && item.active !== false)) === 'EXTERNAL';
-}
-
 function defaultWarehouse() {
     const internal = warehouseMasterCache.filter(item => item.active !== false && !item.systemCustody && warehouseKind(item) === 'INTERNAL');
     return internal.find(item => item.isDefault) || internal[0] || null;
@@ -1436,10 +1432,6 @@ function isCompanyBrandAllowed(company, brand) {
 
 function isCompanyOtherOptionAllowed(company) {
     return true;
-}
-
-function getCompanySelectableBrands(company) {
-    return getUnifiedBrandNames(false);
 }
 
 function quoteAllowedCompaniesForBrand(brand) {
