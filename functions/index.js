@@ -103,3 +103,8 @@ exports.commitV2QuickPurchase=createQuickPurchaseCallable({onCall,HttpsError,get
 // authorized Preview can call this, never the production project.
 const {createSupplyReceiptCallable}=require('./supply-receipt-callable');
 exports.receiveV2Supply=createSupplyReceiptCallable({onCall,HttpsError,getDatabase:getFirestore});
+
+// Explicitly gated dispatch-preparation Preview candidate. There is no
+// production opt-in, and this does not export shipment/delivery writers.
+const {createDispatchPreparationCallable}=require('./dispatch-preparation-callable');
+exports.prepareV2OrderDispatch=createDispatchPreparationCallable({onCall,HttpsError,getDatabase:getFirestore});

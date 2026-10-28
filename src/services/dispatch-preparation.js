@@ -1,20 +1,34 @@
 // Transaction service shared by both dispatch UI entrances. A frozen attempt
 // identifies paperwork only; inventory, shipment and customer delivery do not change.
-async function prepareV2OrderDispatchEmulator(orderId,itemId,intent,assertActor) {
+function dispatchBackendPilotEnabled() {
+    return globalThis.YUSHIN_V2_DISPATCH_EMULATOR===true
+        || (typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'
+            &&globalThis.YUSHIN_PREVIEW_DISPATCH===true);
+}
+async function prepareV2OrderDispatchBackend(orderId,itemId,intent,assertActor) {
     const local=host=>['localhost','127.0.0.1'].includes(host);
-    if(globalThis.YUSHIN_V2_DISPATCH_EMULATOR!==true||!local(globalThis.location?.hostname)
+    const emulator=globalThis.YUSHIN_V2_DISPATCH_EMULATOR===true;
+    const preview=typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'
+        &&globalThis.YUSHIN_PREVIEW_DISPATCH===true;
+    const host=String(globalThis.location?.hostname||'').toLowerCase();
+    if((!emulator&&!preview)||(emulator&&!local(host))
+        ||(preview&&!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(host))
         ||typeof firebase==='undefined'||!firebase.auth||!firebase.functions)
-        throw new Error('v2 打單傳輸僅限明確啟用的本機 Emulator。');
+        throw new Error('出貨準備後端尚未在目前授權的測試環境啟用，禁止改用舊交易。');
     const auth=firebase.auth(),functions=firebase.app().functions('asia-east1');
-    if(auth.app?.options?.projectId!=='demo-yushin'||functions.app?.options?.projectId!=='demo-yushin'
-        ||!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099)
-        throw new Error('v2 打單須使用 demo-yushin 的本機登入與 Functions Emulator。');
+    const project=emulator?'demo-yushin':'preview-20135';
+    if(firebase.app().options?.projectId!==project
+        ||auth.app?.options?.projectId!==project||functions.app?.options?.projectId!==project
+        ||typeof db==='undefined'||db.app?.options?.projectId!==project
+        ||(emulator&&(!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099))
+        ||(preview&&!!auth.emulatorConfig))
+        throw new Error('出貨準備 Auth、Functions 與資料庫專案不一致，未提交打單。');
     const assertSession=()=>{assertActor();if(auth.currentUser?.uid!==intent.actorUid)
         throw new Error('實際登入帳號已變更，請以原身分確認打單結果。');};
     assertSession();
     if(typeof intent.syncAttemptId!=='string'||!intent.syncAttemptId||intent.syncAttemptId.length>96)
         throw new Error('缺少原 v2 同步識別碼，請保留原作業並重新核對。');
-    functions.useEmulator('127.0.0.1',5001);
+    if(emulator)functions.useEmulator('127.0.0.1',5001);
     let reply;
     try{reply=await functions.httpsCallable('prepareV2OrderDispatch')({orderId,itemId,
         quantity:intent.quantity,operationId:intent.operationId,syncAttemptId:intent.syncAttemptId,
@@ -30,7 +44,7 @@ async function prepareV2OrderDispatchEmulator(orderId,itemId,intent,assertActor)
         ||result.qty!==intent.quantity||result.recordId!=='v2-'+intent.operationId)
         throw new Error('v2 打單回覆不明確，請保留原識別碼重試。');
     // Refresh actual source data; never synthesize an order from result counters.
-    const source=await db.collection('orders').doc(orderId).get();assertSession();
+    const source=await db.collection('orders').doc(orderId).get({source:'server'});assertSession();
     if(!source.exists)throw new Error('打單可能已提交，但找不到最新訂單，請以原識別碼重試。');
     return source.data();
 }
@@ -47,9 +61,11 @@ async function prepareOrderDispatch(orderId,itemId,attempt) {
         ||!Number.isFinite(attempt.expectedPreparedQty)||attempt.expectedPreparedQty<0)
         throw new Error('打單作業資料不正確，請以原身分重新核對。');
     const intent={...attempt};
-    if(globalThis.YUSHIN_V2_DISPATCH_EMULATOR===true)
-        return prepareV2OrderDispatchEmulator(orderId,itemId,intent,assertActor);
-    if(intent.syncAttemptId!==undefined)throw new Error('原 v2 打單作業不可改用一般交易重送。');
+    if(dispatchBackendPilotEnabled())
+        return prepareV2OrderDispatchBackend(orderId,itemId,intent,assertActor);
+    if(intent.syncAttemptId!==undefined||globalThis.YUSHIN_PREVIEW_DISPATCH===true
+        ||(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'))
+        throw new Error('原後端打單作業不可改用一般交易重送。');
     let saved;
     await runRoleTransaction(async tx=>{
         assertActor();

@@ -127,7 +127,8 @@ function orderLifecycleInfo(order, normalizedItems = null) {
 }
 function itemDispatchState(order, item) {
     if(orderInventorySyncIncomplete(order))return {ordered:Number(item.orderedQty||item.qty||0),reserved:0,prepared:0,delivered:0,grossDelivered:0,returned:0,shippable:0,pending:0};
-    if(globalThis.YUSHIN_V2_DISPATCH_EMULATOR===true){
+    if(globalThis.YUSHIN_V2_DISPATCH_EMULATOR===true
+        ||(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'&&globalThis.YUSHIN_PREVIEW_DISPATCH===true)){
         // The Emulator bridge consumes physical shipments, not acknowledgements.
         const source=order.items?.find(row=>row.itemId===item.itemId)||item;
         return {...globalThis.YushinFulfillment.warehouseShipmentState(source),

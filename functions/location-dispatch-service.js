@@ -4,6 +4,7 @@
 const {createHash}=require('node:crypto');
 const fulfillment=require('./shared/fulfillment-core');
 const {readLocationReturnProofs}=require('./location-return-trace-service');
+const {dispatchBackendProject}=require('./dispatch-preparation-gate');
 function fault(message,code='failed-precondition'){const error=new Error(message);error.code=code;throw error;}
 function id(value,label){
  if(typeof value!=='string'||!value||value!==value.trim()||value.includes('/')||value.length>160)
@@ -27,9 +28,10 @@ function normalizeLocationDispatchIntent(data){
   fault('打單數量或操作識別碼不正確','invalid-argument');
  return {...intent,hash:createHash('sha256').update(JSON.stringify(intent)).digest('hex')};
 }
-async function commitLocationDispatchPreparation(db,uid,data){
- if(!process.env.FIRESTORE_EMULATOR_HOST||db.projectId!=='demo-yushin')
-  fault('多倉 v2 打單僅允許 demo-yushin Emulator');
+async function commitLocationDispatchPreparation(db,uid,data,env=process.env){
+ const project=dispatchBackendProject(env);
+ if(!project||db.projectId!==project)
+  fault('多倉 v2 打單後端未獲專案授權');
  id(uid,'登入者');
  const intent=normalizeLocationDispatchIntent(data);
  const {orderId,itemId,quantity,operationId,syncAttemptId}=intent;
