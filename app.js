@@ -1595,16 +1595,6 @@ function updatePendingProductMasterButton() {
     if (batchMaintenance) batchMaintenance.style.display = allowed ? '' : 'none';
 }
 
-function productBrandBrowserEntries() {
-    const query = String(document.getElementById('productBrandBrowserSearch')?.value || '').normalize('NFKC').trim().toLocaleLowerCase();
-    return getUnifiedBrandEntries(false)
-        .filter(entry => entry?.name && entry.active !== false)
-        .filter(entry => !query || [entry.name, ...(entry.aliases || [])].some(name =>
-            String(name || '').normalize('NFKC').toLocaleLowerCase().includes(query)
-        ))
-        .sort((a,b) => String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hant'));
-}
-
 function updateProductSearchControls() {
     const selected = !!document.getElementById('productManagementSearchBrand')?.value;
     const input = document.getElementById('productManagementSearch');
@@ -2170,14 +2160,6 @@ function productIdsFromItems(items = []) {
     return [...new Set((Array.isArray(items) ? items : [])
         .map(item => String(item?.productId || '').trim())
         .filter(Boolean))];
-}
-
-function productRecordContainsProduct(record, productId) {
-    const id = String(productId || '').trim();
-    if (!id || !record) return false;
-    if (String(record.productId || '').trim() === id) return true;
-    if (Array.isArray(record.productIds) && record.productIds.some(value => String(value || '').trim() === id)) return true;
-    return Array.isArray(record.items) && record.items.some(item => String(item?.productId || '').trim() === id);
 }
 
 function updateProductManagementMoreButton() {
@@ -5210,10 +5192,6 @@ function warehouseKind(item) {
     return item?.warehouseType === 'EXTERNAL' ? 'EXTERNAL' : 'INTERNAL';
 }
 
-function isExternalWarehouseId(warehouseId) {
-    return warehouseKind(warehouseMasterCache.find(item => item.id === warehouseId && item.active !== false)) === 'EXTERNAL';
-}
-
 function defaultWarehouse() {
     const internal = warehouseMasterCache.filter(item => item.active !== false && !item.systemCustody && warehouseKind(item) === 'INTERNAL');
     return internal.find(item => item.isDefault) || internal[0] || null;
@@ -6065,10 +6043,6 @@ function isCompanyBrandAllowed(company, brand) {
 
 function isCompanyOtherOptionAllowed(company) {
     return true;
-}
-
-function getCompanySelectableBrands(company) {
-    return getUnifiedBrandNames(false);
 }
 
 function quoteAllowedCompaniesForBrand(brand) {
@@ -24804,14 +24778,6 @@ function salesStatisticsQueryWindow() {
     const start = document.getElementById('salesStatsStart')?.value || defaultStart;
     return { start, end };
 }
-
-async function preloadSalesStatisticsProductCosts(orders = []) {
-    const formalLines = (orders || []).flatMap(salesStatisticOrderLines)
-        .filter(order => (order.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER');
-    if (!formalLines.length) return;
-    await preloadPurchaseCostsForItems(formalLines);
-}
-
 // 管理員銷售統計以「訂單」為準，避免把尚未成交的估價單也算進營收。
 function readTradeAnalysisFilters() {
     const {start,end}=salesStatisticsQueryWindow();
@@ -25839,21 +25805,6 @@ function formatStatsMoney(value) {
     return `${rounded < 0 ? '-NT$ ' : 'NT$ '}${Math.abs(rounded).toLocaleString()}`;
 }
 
-function renderSalesStatsRows(tbodyId, values, grandTotal) {
-    const tbody = document.getElementById(tbodyId);
-    if (!tbody) return;
-    const entries = Object.entries(values).sort((a, b) => b[1].totalSales - a[1].totalSales);
-    tbody.innerHTML = entries.length
-        ? entries.map(([name, metric]) => {
-            const incompleteCost = metric.missingCostIds.size > 0;
-            const rate = incompleteCost ? '待補成本' : metric.totalSales ? (metric.profit / metric.totalSales * 100).toFixed(1) + '%' : '－';
-            const share = grandTotal ? (metric.totalSales / grandTotal * 100).toFixed(1) + '%' : '－';
-            const costText = `${formatStatsMoney(metric.totalCost)}${incompleteCost ? `（少 ${metric.missingCostIds.size} 筆）` : ''}`;
-            return `<tr><td>${escapeHtml(name)}</td><td>${formatStatsMoney(metric.actualSales)}</td><td>${formatStatsMoney(metric.pendingSales)}</td><td>${formatStatsMoney(metric.totalSales)}</td><td>${costText}</td><td>${incompleteCost ? '待補成本' : formatStatsMoney(metric.profit)}</td><td>${rate}</td><td>${share}</td></tr>`;
-        }).join('')
-        : '<tr><td colspan="8" style="color:#888;">尚無資料</td></tr>';
-}
-
 let tradeAnalysisLoadedKey = '';
 const tradeAnalysisSnapshots = new Map();
 let tradeAnalysisRevision = 0;
@@ -25998,13 +25949,6 @@ function buildTradeAnalysisRows() {
             ...context.extra,date:localDateString(),event:'在庫',status:'在庫',lotNo:lot.lotNo||'',expiryDate:lot.expiryDate||'',warehouseId:lot.warehouseId||'',eventId:lot.id});
     });
     return rows;
-}
-
-function buildTradeAnalysisReport(rows = buildTradeAnalysisRows()) {
-    const {start,end}=salesStatisticsQueryWindow();
-    const filters={start,end,sales:document.getElementById('salesStatsSalesFilter')?.value||'',brand:document.getElementById('salesStatsBrandFilter')?.value||'',
-        line:document.getElementById('salesStatsLineFilter')?.value||'',type:document.getElementById('salesStatsTypeFilter')?.value||''};
-    return {...globalThis.YushinTradeAnalysis.summarize(rows,filters),filters};
 }
 
 function tradeAnalysisExportRows(report,kind) {

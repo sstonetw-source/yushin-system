@@ -46,16 +46,6 @@ function updatePendingProductMasterButton() {
     if (batchMaintenance) batchMaintenance.style.display = allowed ? '' : 'none';
 }
 
-function productBrandBrowserEntries() {
-    const query = String(document.getElementById('productBrandBrowserSearch')?.value || '').normalize('NFKC').trim().toLocaleLowerCase();
-    return getUnifiedBrandEntries(false)
-        .filter(entry => entry?.name && entry.active !== false)
-        .filter(entry => !query || [entry.name, ...(entry.aliases || [])].some(name =>
-            String(name || '').normalize('NFKC').toLocaleLowerCase().includes(query)
-        ))
-        .sort((a,b) => String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hant'));
-}
-
 function updateProductSearchControls() {
     const selected = !!document.getElementById('productManagementSearchBrand')?.value;
     const input = document.getElementById('productManagementSearch');
@@ -621,14 +611,6 @@ function productIdsFromItems(items = []) {
     return [...new Set((Array.isArray(items) ? items : [])
         .map(item => String(item?.productId || '').trim())
         .filter(Boolean))];
-}
-
-function productRecordContainsProduct(record, productId) {
-    const id = String(productId || '').trim();
-    if (!id || !record) return false;
-    if (String(record.productId || '').trim() === id) return true;
-    if (Array.isArray(record.productIds) && record.productIds.some(value => String(value || '').trim() === id)) return true;
-    return Array.isArray(record.items) && record.items.some(item => String(item?.productId || '').trim() === id);
 }
 
 function updateProductManagementMoreButton() {
