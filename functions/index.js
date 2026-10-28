@@ -114,6 +114,11 @@ exports.prepareV2OrderDispatch=createDispatchPreparationCallable({onCall,HttpsEr
 const {createDeliveryConfirmationCallable}=require('./delivery-confirmation-callable');
 exports.confirmV2ShipmentDelivery=createDeliveryConfirmationCallable({onCall,HttpsError,getDatabase:getFirestore});
 
+// Delivery reversal only corrects acknowledgement; shipped inventory stays
+// outside this transaction. It has its own default-closed Preview gate.
+const {createDeliveryReversalCallable}=require('./delivery-reversal-callable');
+exports.reverseV2ShipmentDelivery=createDeliveryReversalCallable({onCall,HttpsError,getDatabase:getFirestore});
+
 // Physical customer shipment is a separate atomic transaction from paperwork.
 // Both the demo Emulator and Preview gates are disabled unless independently
 // authorized; production has no enablement path.

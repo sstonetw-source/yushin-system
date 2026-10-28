@@ -65,5 +65,6 @@ test('production index exposes independently gated dispatch and shipment, never 
  assert.match(index,/exports\.prepareV2OrderDispatch\s*=\s*createDispatchPreparationCallable/);
  assert.match(index,/exports\.shipV2WarehouseItem\s*=\s*createWarehouseShipmentCallable/);
  assert.match(index,/exports\.confirmV2ShipmentDelivery\s*=\s*createDeliveryConfirmationCallable/);
- assert.doesNotMatch(index,/v2-return-callable-adapter|reverseV2ShipmentDelivery/);
+ assert.match(index,/exports\.reverseV2ShipmentDelivery\s*=\s*createDeliveryReversalCallable/);
+ assert.doesNotMatch(index,/v2-return-callable-adapter/);
 });

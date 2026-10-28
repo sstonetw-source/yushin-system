@@ -6,6 +6,7 @@ const core=require('./shared/fulfillment-core');
 const {normalizeShipmentIntent}=require('./location-shipment-service');
 const {readLocationReturnProofs}=require('./location-return-trace-service');
 const {deliveryConfirmationBackendProject}=require('./delivery-confirmation-gate');
+const {deliveryReversalBackendProject}=require('./delivery-reversal-gate');
 function fault(message,code='failed-precondition'){const e=new Error(message);e.code=code;throw e;}
 function id(value){
  if(typeof value!=='string'||!value||value!==value.trim()||value.includes('/')||value.length>160)
@@ -219,9 +220,15 @@ function normalizeDeliveryReversalIntent(data){
  intent.date=data.date;intent.reason=data.reason.trim();
  return {...intent,hash:createHash('sha256').update(JSON.stringify(intent)).digest('hex')};
 }
-async function reverseShipmentDelivery(db,uid,data){
- if(!process.env.FIRESTORE_EMULATOR_HOST||db.projectId!=='demo-yushin')
-  fault('送達撤銷目前僅允許 demo-yushin Emulator');
+async function reverseShipmentDelivery(db,uid,data,env=process.env){
+ const project=deliveryReversalBackendProject(env);
+ // Direct tests use a local demo Firestore fixture; external Callables must
+ // pass their independent gate before this Service can be reached.
+ const directDemo=db.projectId==='demo-yushin'
+  &&typeof env.FIRESTORE_EMULATOR_HOST==='string'
+  &&/^(127\.0\.0\.1|localhost):[0-9]+$/.test(env.FIRESTORE_EMULATOR_HOST);
+ if((!project||db.projectId!==project)&&!directDemo)
+  fault('送達撤銷後端未獲專案授權');
  const intent=normalizeDeliveryReversalIntent(data);
  const {orderId,itemId,deliveryRecordId,operationId,syncAttemptId}=intent;
  return db.runTransaction(async tx=>{

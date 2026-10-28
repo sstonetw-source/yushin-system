@@ -63,7 +63,8 @@ test('shipment Callable export exists while legacy test-only endpoints remain un
  const index=fs.readFileSync('functions/index.js','utf8');
  assert.match(index,/exports\.shipV2WarehouseItem\s*=\s*createWarehouseShipmentCallable/);
  assert.match(index,/exports\.confirmV2ShipmentDelivery\s*=\s*createDeliveryConfirmationCallable/);
- assert.doesNotMatch(index,/v2-return-callable-adapter|reverseV2ShipmentDelivery/);
+ assert.match(index,/exports\.reverseV2ShipmentDelivery\s*=\s*createDeliveryReversalCallable/);
+ assert.doesNotMatch(index,/v2-return-callable-adapter/);
  const integration=fs.readFileSync('tests/fixtures/v2-return-auth-functions.cjs','utf8');
  assert.match(integration,/shipV2WarehouseItem:service\.shipV2WarehouseItem/);
 });

@@ -59,8 +59,9 @@ test('confirmation service errors keep known reason codes and sanitize unknown e
  await assert.rejects(handler({auth:{uid:'actor'},data}),error=>error.code==='internal'&&error.message==='送達確認交易失敗');
 });
 
-test('production entry has only the independently gated confirmation and not the reversal',()=>{
+test('production entry keeps separate gated confirmation and reversal without legacy adapter',()=>{
  const index=fs.readFileSync('functions/index.js','utf8');
  assert.match(index,/exports\.confirmV2ShipmentDelivery\s*=\s*createDeliveryConfirmationCallable/);
- assert.doesNotMatch(index,/exports\.reverseV2ShipmentDelivery|v2-return-auth-functions/);
+ assert.match(index,/exports\.reverseV2ShipmentDelivery\s*=\s*createDeliveryReversalCallable/);
+ assert.doesNotMatch(index,/v2-return-auth-functions|v2-return-callable-adapter/);
 });
