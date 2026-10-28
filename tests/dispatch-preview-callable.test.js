@@ -2,6 +2,7 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs');
 const {allowDispatchEmulator,allowPreviewDispatch,dispatchBackendProject}=require('../functions/dispatch-preparation-gate');
 const {createDispatchPreparationCallable}=require('../functions/dispatch-preparation-callable');
+const {commitLocationDispatchPreparation}=require('../functions/location-dispatch-service');
 const emulator=()=>({ENABLE_V2_RETURN_AUTH_EMULATOR:'true',FUNCTIONS_EMULATOR:'true',GCLOUD_PROJECT:'demo-yushin',
  FIRESTORE_EMULATOR_HOST:'127.0.0.1:8080',FIREBASE_AUTH_EMULATOR_HOST:'127.0.0.1:9099'});
 const preview=()=>({ENABLE_PREVIEW_DISPATCH:'true',GCLOUD_PROJECT:'preview-20135'});
@@ -21,6 +22,18 @@ test('dispatch has independent, default-closed Emulator and Preview gates, never
   {FUNCTIONS_EMULATOR:'false'}])assert.equal(dispatchBackendProject({...emulator(),...change}),'');
  assert.equal(dispatchBackendProject({...preview(),GCLOUD_PROJECT:'yu-shing-company',ENABLE_PRODUCTION_DISPATCH:'true'}),'');
  assert.equal(dispatchBackendProject({}),'');
+});
+
+test('direct demo Service harness remains isolated while Preview and production cannot bypass the Callable gate',async()=>{
+ const db=projectId=>({projectId});
+ const malformed={actorUid:'forged'};
+ await assert.rejects(commitLocationDispatchPreparation(db('demo-yushin'),'real',malformed,
+  {FIRESTORE_EMULATOR_HOST:'127.0.0.1:8080'}),error=>error.code==='invalid-argument');
+ for(const [projectId,env] of [['demo-yushin',{}],['demo-yushin',{FIRESTORE_EMULATOR_HOST:'remote.example:8080'}],
+  ['preview-20135',{FIRESTORE_EMULATOR_HOST:'127.0.0.1:8080'}],
+  ['yu-shing-company',{FIRESTORE_EMULATOR_HOST:'127.0.0.1:8080',ENABLE_PREVIEW_DISPATCH:'true'}]])
+  await assert.rejects(commitLocationDispatchPreparation(db(projectId),'real',malformed,env),
+   error=>error.code==='failed-precondition');
 });
 
 test('disabled gate, wrong project, missing Auth and forged UID never enter transaction',async()=>{

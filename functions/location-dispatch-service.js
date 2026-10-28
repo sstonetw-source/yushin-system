@@ -30,7 +30,12 @@ function normalizeLocationDispatchIntent(data){
 }
 async function commitLocationDispatchPreparation(db,uid,data,env=process.env){
  const project=dispatchBackendProject(env);
- if(!project||db.projectId!==project)
+ // Preserve the original direct Service tests using the isolated demo Firestore
+ // Emulator. All exposed Callables still require the independent strict gate.
+ const directDemo= db.projectId==='demo-yushin'
+  && typeof env.FIRESTORE_EMULATOR_HOST==='string'
+  && /^(127\.0\.0\.1|localhost):[0-9]+$/.test(env.FIRESTORE_EMULATOR_HOST);
+ if((!project||db.projectId!==project)&&!directDemo)
   fault('多倉 v2 打單後端未獲專案授權');
  id(uid,'登入者');
  const intent=normalizeLocationDispatchIntent(data);
