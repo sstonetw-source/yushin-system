@@ -171,9 +171,29 @@ test('whole-order projection enforces stable source IDs positive integer quantit
   x=>{x.items[0].productId='';},x=>{x.shipments=null;},x=>{x.returns=Array(201).fill(x.returns[0]);}]){
   const input=orderEvents();mutate(input);assert.throws(()=>f.projectOrderShipmentReturns(input));
  }
- const items=Array.from({length:5},(_,i)=>({itemId:'I'+i,productId:'P',qty:1}));
- assert.equal(f.projectOrderShipmentReturns({orderId:'O',items}).orderedQty,5);
- assert.throws(()=>f.projectOrderShipmentReturns({orderId:'O',items:[...items,{itemId:'I6',productId:'P',qty:1}]}));
+ const items=Array.from({length:15},(_,i)=>({itemId:'I'+i,productId:'P',qty:1}));
+ assert.equal(f.projectOrderShipmentReturns({orderId:'O',items}).orderedQty,15);
+ assert.throws(()=>f.projectOrderShipmentReturns({orderId:'O',items:[...items,{itemId:'I16',productId:'P',qty:1}]}));
+});
+test('15-line whole-order projection validates same-product lots, independent events and service siblings',()=>{
+ const orderId='O',items=Array.from({length:15},(_,i)=>i%5===0
+  ?{itemId:'I'+i,productType:'SERVICE',qty:2,reservedQty:0}
+  :{itemId:'I'+i,productId:'P',qty:1});
+ const goods=items.filter(i=>i.productType!=='SERVICE');
+ const shipments=goods.map(item=>({id:'S'+item.itemId,itemId:item.itemId,orderId,productKey:'P',qty:1,
+  warehouseId:'A',date:'2026-10-16',sourceType:'WAREHOUSE_CUSTOMER_SHIPMENT'}));
+ const deliveries=shipments.map(s=>({...s,id:'D'+s.itemId,shipmentId:s.id,date:'2026-10-17',
+  sourceType:'WAREHOUSE_SHIPMENT_CONFIRMATION'}));
+ const returns=[{...shipments[0],id:'R'+shipments[0].itemId,shipmentId:shipments[0].id,
+  date:'2026-10-18',sourceType:'WAREHOUSE_CUSTOMER_RETURN',condition:'RESTOCKABLE',settlement:'REPLACE'}];
+ const source={orderId,items,shipments,deliveries,returns},before=structuredClone(source);
+ const projected=f.projectOrderShipmentReturns(source);
+ assert.equal(projected.items.length,12);assert.equal(projected.orderedQty,12);
+ assert.equal(projected.shippedQty,12);assert.equal(projected.confirmedQty,12);
+ assert.equal(projected.returnedQty,1);assert.equal(projected.outstandingQty,1);
+ assert.equal(projected.isDelivered,false);assert.deepEqual(source,before);
+ const invalid=structuredClone(source);invalid.deliveries[11].itemId=goods[0].itemId;
+ assert.throws(()=>f.projectOrderShipmentReturns(invalid),/來源|重複|未對應/);
 });
 test('whole-order aggregate cannot overflow otherwise valid per-item integer quantities',()=>{
  assert.throws(()=>f.projectOrderShipmentReturns({orderId:'O',items:[{itemId:'I1',productId:'P',qty:Number.MAX_SAFE_INTEGER},{itemId:'I2',productId:'Q',qty:1}]}),/安全數量/);
