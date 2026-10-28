@@ -154,3 +154,37 @@ test('five-line multiwarehouse insufficiency rejects the whole transaction and c
   assert.equal((await db.doc('reservationOperationReceipts/grouped-'+request.attemptId).get()).exists,false);
   assert.equal((await db.doc('inventoryMovements/grouped-'+request.attemptId+'-B').get()).exists,false);
 });
+
+test('five-line completed order can rebalance then release through gated server writer',async()=>{
+  const f=await fiveLineFixture('five-amend');
+  await f.call(f.intent([2,3,1,4,2]));
+  await db.doc('orders/'+f.orderId).update({inventoryReservationStatus:'completed'});
+  const amend=(values,attemptId)=>({...f.intent(values,attemptId),mode:'amend'});
+  const exchange=amend([1,4,2,3,2],'amend_five_exchange_123456789');
+  assert.equal((await f.call(exchange)).companyReservedDelta,0);
+  assert.deepEqual(await f.balances(),{company:12,a:7,b:5,
+    order:[1,4,2,3,2],reservations:[1,4,2,3,2]});
+  const receipt=await f.doc('reservationOperationReceipts/grouped-'+exchange.attemptId);
+  assert.equal(receipt.action,'grouped_reservation_amend');
+  assert.equal((await f.call(exchange)).status,'already-applied');
+  const release=amend([0,0,0,0,0],'amend_five_release_123456789');
+  assert.equal((await f.call(release)).companyReservedDelta,-12);
+  const zero={company:0,a:0,b:0,order:[0,0,0,0,0],reservations:[0,0,0,0,0]};
+  assert.deepEqual(await f.balances(),zero);
+  assert.equal((await f.call(exchange)).status,'already-applied');
+  assert.deepEqual(await f.balances(),zero,'lost-response replay cannot roll back a later release');
+});
+
+test('post-sync server writer rejects stale status and supplier progress without partial stock updates',async()=>{
+  const f=await fiveLineFixture('amend-guard');
+  const intent={...f.intent([1,1,1,1,1],'amend_guard_123456789'),mode:'amend'};
+  const before=await f.balances();
+  await assert.rejects(f.call(intent),/同步狀態/);
+  assert.deepEqual(await f.balances(),before);
+  await db.doc('orders/'+f.orderId).update({inventoryReservationStatus:'completed'});
+  await db.doc('orders/'+f.orderId).update({items:(await f.doc('orders/'+f.orderId)).items.map((item,i)=>
+    i===4?{...item,supplyOrderedQty:1}:item)});
+  await assert.rejects(f.call(intent),/供應進度/);
+  assert.deepEqual(await f.balances(),before);
+  assert.equal((await db.doc('reservationOperationReceipts/grouped-'+intent.attemptId).get()).exists,false);
+});

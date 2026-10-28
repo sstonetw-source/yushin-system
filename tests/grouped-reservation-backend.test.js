@@ -210,6 +210,82 @@ test('orders with inconsistent cancellation fields cannot reopen reservations',a
   await assert.rejects(f.commit(),/已取消/);
 });
 
+test('post-sync grouped amendments rebalance and release both warehouses atomically',async()=>{
+  const f=fixture();
+  await f.commit();
+  f.docs.get('orders/O').inventoryReservationStatus='completed';
+  const amend=(a,b,attemptId)=>({...f.request(a,b,attemptId),mode:'amend'});
+  const exchange=amend(1,4,'amend_exchange_123456789');
+  const first=await f.commit(exchange);
+  assert.equal(first.status,'applied');
+  assert.equal(first.companyReservedDelta,0);
+  assert.deepEqual(['inventory/P','warehouseStocks/A__P','warehouseStocks/B__P'].map(k=>f.docs.get(k).reserved),[5,1,4]);
+  assert.deepEqual(f.docs.get('orders/O').items.map(row=>row.reservedQty),[1,4]);
+  assert.equal(f.docs.get('reservationOperationReceipts/grouped-'+exchange.attemptId).action,'grouped_reservation_amend');
+  const snapshot=f.snapshot();
+  assert.equal((await f.commit(exchange)).status,'already-applied');
+  assert.equal(f.snapshot(),snapshot);
+  await assert.rejects(f.commit(amend(2,3,exchange.attemptId)),/操作識別碼/);
+  assert.equal(f.snapshot(),snapshot);
+  const release=amend(0,0,'amend_release_123456789');
+  assert.equal((await f.commit(release)).companyReservedDelta,-5);
+  assert.deepEqual(['inventory/P','warehouseStocks/A__P','warehouseStocks/B__P'].map(k=>f.docs.get(k).reserved),[0,0,0]);
+  const released=f.snapshot();
+  assert.equal((await f.commit(exchange)).status,'already-applied');
+  assert.equal(f.snapshot(),released,'old successful intent must not restore released stock');
+});
+
+test('post-sync amendment requires completed source, matching attempt and an operational role',async()=>{
+  for(const edit of [
+    o=>o.inventoryReservationStatus='pending',
+    o=>o.inventoryReservationStatus='failed',
+    o=>o.inventoryReservationAttemptId='newer_sync_attempt',
+    o=>o.status='cancelled'
+  ]){
+    const f=fixture(),order=f.docs.get('orders/O');
+    order.inventoryReservationStatus='completed';edit(order);
+    const before=f.snapshot();
+    await assert.rejects(f.commit({...f.request(1,2),mode:'amend'}),/同步狀態|已取消/);
+    assert.equal(f.snapshot(),before);
+  }
+  for(const role of ['sales','engineer']){
+    const f=fixture({role,owner:'actor'});
+    f.docs.get('orders/O').inventoryReservationStatus='completed';
+    const before=f.snapshot();
+    await assert.rejects(f.commit({...f.request(1,2),mode:'amend'}),/只有採購、倉管或管理員/);
+    assert.equal(f.snapshot(),before);
+  }
+});
+
+test('post-sync amendments reject fulfilled or supplied items without partial writes',async()=>{
+  for(const edit of [
+    item=>{item.supplyOrderedQty=1;},
+    item=>{item.receivedQty=1;},
+    item=>{item.deliveredQty=1;},
+    item=>{item.dispatchPreparedQty=1;},
+    item=>{item.transferPendingId='TRANSIT';}
+  ]){
+    const f=fixture(),order=f.docs.get('orders/O');
+    order.inventoryReservationStatus='completed';edit(order.items[0]);
+    const before=f.snapshot();
+    await assert.rejects(f.commit({...f.request(1,2),mode:'amend'}),/已履約|供應進度|途中/);
+    assert.equal(f.snapshot(),before);
+  }
+});
+
+test('original initial-sync receipt fingerprint is unchanged and modes cannot reuse one ID',async()=>{
+  const f=fixture(),intent=f.request();
+  assert.equal(normalizeIntent(intent).hash,normalizeIntent({...intent,mode:'initial'}).hash);
+  assert.notEqual(normalizeIntent(intent).hash,normalizeIntent({...intent,mode:'amend'}).hash);
+  for(const mode of ['',null,'restore','cancelled'])
+    assert.throws(()=>normalizeIntent({...intent,mode}),/模式不正確/);
+  await f.commit();
+  f.docs.get('orders/O').inventoryReservationStatus='completed';
+  const before=f.snapshot();
+  await assert.rejects(f.commit({...intent,mode:'amend'}),/操作識別碼/);
+  assert.equal(f.snapshot(),before);
+});
+
 test('stale or completed order sync attempt cannot mutate stock, including newer attempt replay',async()=>{
  const f=fixture();
  for(const change of [

@@ -40,6 +40,11 @@ function fingerprint(orderId,rows){
 }
 function normalizeIntent(data){
   if(!data||typeof data!=='object'||Array.isArray(data))fault('invalid-argument','缺少交易內容');
+  // The existing initial-sync intent stays byte-for-byte compatible with
+  // receipts already issued by the Preview writer. Amendments are separate
+  // operations with a different fingerprint and stricter role/state checks.
+  const mode=data.mode===undefined?'initial':data.mode;
+  if(!['initial','amend'].includes(mode))fault('invalid-argument','預留交易模式不正確');
   const orderId=id(data.orderId,'訂單 ID');
   const syncAttemptId=id(data.syncAttemptId,'來源同步識別碼',96);
   const attemptId=id(data.attemptId,'操作識別碼',96);
@@ -52,11 +57,12 @@ function normalizeIntent(data){
   })).sort((a,b)=>a.itemId.localeCompare(b.itemId));
   if(new Set(rows.map(x=>x.itemId)).size!==rows.length)fault('invalid-argument','重複訂單品項 ID');
   // Prevent callers from injecting a proposed stock balance, role, or warehouse.
-  if(Object.keys(data).some(k=>!['orderId','attemptId','syncAttemptId','items'].includes(k)))
+  if(Object.keys(data).some(k=>!['mode','orderId','attemptId','syncAttemptId','items'].includes(k)))
     fault('invalid-argument','請求含未授權的欄位');
   if(data.items.some(x=>!x||Object.keys(x).some(k=>!['itemId','quantity'].includes(k))))
     fault('invalid-argument','品項請求含未授權的欄位');
-  return {orderId,attemptId,syncAttemptId,rows,hash:fingerprint(orderId,[syncAttemptId,...rows])};
+  const intentParts=mode==='initial'?[syncAttemptId,...rows]:['amend',syncAttemptId,...rows];
+  return {mode,orderId,attemptId,syncAttemptId,rows,hash:fingerprint(orderId,intentParts)};
 }
 function validateSourceItem(item,order,actorRole,uid){
   const ordered=qty(item.qty??item.orderedQty,'訂購量');
@@ -94,7 +100,7 @@ function projectAfter(stock,delta,label){
 
 async function commitGroupedWarehouseReservation(db,uid,data){
   id(uid,'登入 UID');
-  const {orderId,attemptId,syncAttemptId,rows,hash}=normalizeIntent(data);
+  const {mode,orderId,attemptId,syncAttemptId,rows,hash}=normalizeIntent(data);
   const ref=(name,key)=>db.collection(name).doc(key);
   const receiptRef=ref('reservationOperationReceipts','grouped-'+attemptId);
   const now=new Date().toISOString();
@@ -106,6 +112,11 @@ async function commitGroupedWarehouseReservation(db,uid,data){
     const actorRole=user.role;
     if(!['admin','purchaser','warehouse','sales','engineer'].includes(actorRole))
       fault('permission-denied','此帳號沒有預留權限');
+    // Post-initial stock amendments are operational decisions, not sales
+    // order synchronization. A sales/engineer token can only use the original
+    // initial-sync pathway, even when replaying an old receipt.
+    if(mode==='amend'&&!['admin','purchaser','warehouse'].includes(actorRole))
+      fault('permission-denied','只有採購、倉管或管理員可調整已同步預留');
     const applied=await tx.get(receiptRef);
     if(applied.exists){
       const receipt=applied.data();
@@ -122,9 +133,11 @@ async function commitGroupedWarehouseReservation(db,uid,data){
       fault('failed-precondition','已取消或結案訂單不可重新預留');
     if(!order.ownerUid||!order.salesCode||!Array.isArray(order.items))
       fault('failed-precondition','訂單缺少必要的所有權或品項資料');
-    // Prevent stale initial-sync attempts from committing after cancellation,
-    // a newer sync attempt, or completion. Receipt replays were handled above.
-    if(order.inventoryReservationStatus!=='pending'
+    // Initial synchronization and post-sync operational amendments must never
+    // authorize each other's state. The persisted source attempt fences both
+    // modes against an obsolete client snapshot and receipt replay was handled
+    // before this check.
+    if(order.inventoryReservationStatus!==(mode==='initial'?'pending':'completed')
       ||order.inventoryReservationAttemptId!==syncAttemptId)
       fault('failed-precondition','來源訂單同步狀態已變更，請重新讀取');
     if(['sales','engineer'].includes(actorRole)&&order.ownerUid!==uid)
@@ -248,7 +261,7 @@ async function commitGroupedWarehouseReservation(db,uid,data){
       tx.set(change.ref,change.after,{merge:true});
     if(changes.some(c=>c.before.quantity!==c.quantity))
       tx.update(orderRef,{items:nextItems,updatedAt:now});
-    tx.create(receiptRef,{action:'grouped_reservation',orderId,productKey,
+    tx.create(receiptRef,{action:mode==='initial'?'grouped_reservation':'grouped_reservation_amend',orderId,productKey,
       actorUid:uid,actorRole,syncAttemptId,intentHash:hash,companyReservedDelta:companyDelta,
       warehouseIds:[...warehouses].sort(),reservationIds:changes.map(c=>c.ref.id),
       createdAt:now,status:'applied'});
