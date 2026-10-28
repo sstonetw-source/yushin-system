@@ -96,7 +96,9 @@ const scripts=[read('src/shared/workspace-display.js'),read('modules/fulfillment
   await page.exposeFunction('shipmentCallable',payload=>{
    calls++;assert.equal(payload.warehouseId,'B');assert.equal(payload.syncAttemptId,'browser-sync');
    assert.equal(payload.actorUid,undefined);assert.equal(payload.actorRole,undefined);
-   if(!doc.warehouseShipmentRecords){doc.warehouseShipmentRecords=[{id:payload.operationId}];doc.items[0].warehouseShippedQty=2;stockWrites++;}
+   if(!doc.warehouseShipmentRecords){doc.warehouseShipmentRecords=[{id:payload.operationId,orderId:payload.orderId,
+    itemId:payload.itemId,warehouseId:payload.warehouseId,qty:payload.quantity,date:payload.date,
+    notes:payload.notes,deliveryPlan:payload.expectedPlan}];doc.items[0].warehouseShippedQty=2;stockWrites++;}
    if(lost){lost=false;throw Error('response lost after stock commit');}
    return {data:{status:'already-applied',orderId:'O',itemId:'I',warehouseId:'B',qty:2,movementId:'location-ship-'+payload.operationId}};
   });
@@ -106,9 +108,9 @@ const scripts=[read('src/shared/workspace-display.js'),read('modules/fulfillment
    await page.addScriptTag({content:`let currentUser={uid:'buyer'},currentUserRole='purchaser',orderWorkQueueCache=[],warehouseMasterCache=[{id:'B',active:true}];
     globalThis.YUSHIN_V2_SHIPMENT_EMULATOR=true;globalThis.locationSchemaFlag=true;
     const app={options:{projectId:'demo-yushin'}};
-    globalThis.firebase={app(){return {functions:region=>this.functions(region)};},auth:()=>({app,currentUser:{uid:'buyer'},emulatorConfig:{host:'127.0.0.1',port:9099}}),
+    globalThis.firebase={app(){return {options:app.options,functions:region=>this.functions(region)};},auth:()=>({app,currentUser:{uid:'buyer'},emulatorConfig:{host:'127.0.0.1',port:9099}}),
      functions:()=>({app,useEmulator:(host,port)=>{if(host!=='127.0.0.1'||port!==5001)throw Error('remote');},httpsCallable:()=>shipmentCallable})};
-    globalThis.db={collection:()=>({doc:()=>({get:async()=>{const data=await shipmentRead();return {exists:true,data:()=>data};}})})};
+    globalThis.db={app,collection:()=>({doc:()=>({get:async()=>{const data=await shipmentRead();return {exists:true,data:()=>data};}})})};
     const canReceiveInventoryCapability=()=>true,canAccessPage=()=>true,defaultWarehouse=()=>({id:'B'});
     const normalizedOrderStatus=()=> 'normal',orderInventorySyncIncomplete=()=>false,normalizedOrderItems=o=>o.items;
     const itemDispatchState=(o,i)=>({shippable:i.dispatchPreparedQty-i.warehouseShippedQty});

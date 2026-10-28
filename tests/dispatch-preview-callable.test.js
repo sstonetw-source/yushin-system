@@ -60,8 +60,9 @@ test('stale dispatch baseline preserves typed reason and unknown errors are sani
  await assert.rejects(handler({auth:{uid:'real'},data}),e=>e.code==='internal'&&e.message==='出貨準備交易失敗');
 });
 
-test('production index exposes only an independently gated dispatch Callable, not other return test endpoints',()=>{
+test('production index exposes independently gated dispatch and shipment, never the isolated return or delivery adapters',()=>{
  const index=fs.readFileSync('functions/index.js','utf8');
  assert.match(index,/exports\.prepareV2OrderDispatch\s*=\s*createDispatchPreparationCallable/);
- assert.doesNotMatch(index,/v2-return-callable-adapter|shipV2WarehouseItem|confirmV2ShipmentDelivery/);
+ assert.match(index,/exports\.shipV2WarehouseItem\s*=\s*createWarehouseShipmentCallable/);
+ assert.doesNotMatch(index,/v2-return-callable-adapter|confirmV2ShipmentDelivery/);
 });

@@ -247,7 +247,7 @@
       try{await refreshAffectedOrderCaches([orderId]);await loadOrderWorkQueue(true);}
       catch(err){showActionFeedback('出貨已儲存，清單更新失敗；請重新開啟倉庫頁。','warning');}
       renderInventoryShipping();markMainPageDirty('inventory','orders.list','orders.po','admin');
-      showActionFeedback(globalThis.YUSHIN_V2_SHIPMENT_EMULATOR===true?'已登記實際出貨，客戶尚未確認送達。':'已確認實際出貨，庫存與訂單送貨紀錄已同步。','success');
+      showActionFeedback(shipmentBackendPilotEnabled()?'已登記實際出貨，客戶尚未確認送達。':'已確認實際出貨，庫存與訂單送貨紀錄已同步。','success');
     }catch(err){showActionFeedback('出貨未完成：'+err.message,'warning');}
     finally{shipmentPending.delete(orderId);endActionButton(button,buttonState);}
   };

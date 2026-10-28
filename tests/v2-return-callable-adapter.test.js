@@ -24,8 +24,11 @@ test('disabled gate missing authentication and wrong database never call a retur
  await assert.rejects(build(env()).receiveV2CustomerReturn({auth:{uid:'actor'},data:{}}),e=>e.code==='failed-precondition');
  assert.equal(reads,1);
 });
-test('production Functions entry never exports the isolated return or shipment/delivery Callables or their fixture',()=>{
- assert.doesNotMatch(fs.readFileSync('functions/index.js','utf8'),/v2-return-callable|previewV2CustomerReturn|receiveV2CustomerReturn|shipV2WarehouseItem|confirmV2ShipmentDelivery|reverseV2ShipmentDelivery|setV2OrderLifecycle|listV2FreeStockRecovery|resumeV2FreeStockRecovery|v2-return-auth-functions/);
+test('production Functions entry exports gated dispatch and shipment, not the isolated return/delivery adapters',()=>{
+ const index=fs.readFileSync('functions/index.js','utf8');
+ assert.match(index,/exports\.prepareV2OrderDispatch\s*=\s*createDispatchPreparationCallable/);
+ assert.match(index,/exports\.shipV2WarehouseItem\s*=\s*createWarehouseShipmentCallable/);
+ assert.doesNotMatch(index,/v2-return-callable|previewV2CustomerReturn|receiveV2CustomerReturn|confirmV2ShipmentDelivery|reverseV2ShipmentDelivery|setV2OrderLifecycle|listV2FreeStockRecovery|resumeV2FreeStockRecovery|v2-return-auth-functions/);
 });
 test('dispatch baseline is optional for old receipts and is bound to the canonical intent when supplied',()=>{
  const {normalizeLocationDispatchIntent}=require('../functions/location-dispatch-service');
