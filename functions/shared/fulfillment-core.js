@@ -315,7 +315,7 @@
       return value;
     };
     ident(orderId);
-    if(!Array.isArray(items)||!items.length||items.length>5)throw Error('整單履約僅支援 1–5 個品項。');
+    if(!Array.isArray(items)||!items.length||items.length>15)throw Error('整單履約僅支援 1–15 個品項。');
     const sources=new Map(),allIds=new Set();
     for(const item of items){
       const itemId=ident(item?.itemId);
