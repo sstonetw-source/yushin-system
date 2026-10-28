@@ -75,8 +75,9 @@ function emulatorFixture(){
  const functions={app:auth.app,useEmulator:(...args)=>calls.push({endpoint:args}),httpsCallable:name=>async data=>{
   calls.push({name,data});if(f.c.replyError)throw f.c.replyError;
   return {data:{status:'applied',orderId:'O',itemId:'I',qty:data.quantity,recordId:'v2-'+data.operationId}};}};
- f.c.YUSHIN_V2_DISPATCH_EMULATOR=true;f.c.location={hostname:'localhost'};f.c.firebase={app:()=>({functions:()=>functions}),auth:()=>auth,functions:()=>functions};
+ f.c.YUSHIN_V2_DISPATCH_EMULATOR=true;f.c.location={hostname:'localhost'};f.c.firebase={app:()=>({...auth.app,functions:()=>functions}),auth:()=>auth,functions:()=>functions};
  f.c.runRoleTransaction=()=>{throw Error('legacy fallback forbidden');};
+ f.c.db.app=auth.app;
  f.c.db.collection=n=>({doc:id=>({get:async()=>{f.c.afterRead?.();return {exists:true,data:()=>({...f.order(),latest:true})};}})});
  return {...f,calls,auth,functions,run:()=>f.c.prepareOrderDispatch('O','I',f.intent({syncAttemptId:'original-sync'}))};
 }
@@ -99,4 +100,50 @@ test('only the server confirmed stale baseline clears as dispatch-stale; network
 test('v2 source refresh rejects a session change and an old v2 intent cannot fall back when its mode is disabled',async()=>{
  const f=emulatorFixture();f.c.afterRead=()=>f.c.currentUserRole='sales';await assert.rejects(f.run(),/角色/);
  const g=emulatorFixture();g.c.YUSHIN_V2_DISPATCH_EMULATOR=false;await assert.rejects(g.run(),/不可改用一般交易/);assert.equal(g.calls.length,0);
+});
+
+function previewFixture(){
+ const f=emulatorFixture();
+ f.c.YUSHIN_V2_DISPATCH_EMULATOR=false;f.c.APP_ENVIRONMENT='preview';f.c.YUSHIN_PREVIEW_DISPATCH=true;
+ f.c.location.hostname='preview-20135.web.app';
+ f.auth.app.options.projectId='preview-20135';f.auth.emulatorConfig=null;
+ return f;
+}
+test('Preview dispatch uses the same frozen intent and server read without setting an Emulator endpoint',async()=>{
+ const f=previewFixture(),result=await f.run();assert.equal(result.latest,true);
+ assert.equal(f.calls.length,1);assert.equal(f.calls[0].name,'prepareV2OrderDispatch');
+ assert.equal(f.calls[0].data.syncAttemptId,'original-sync');assert.equal(f.records().length,0);
+});
+test('Preview wrong website or project, missing flag and backend failure never use the old writer',async()=>{
+ for(const change of [f=>f.c.location.hostname='example.com',f=>f.c.db.app.options.projectId='yu-shing-company',
+  f=>f.auth.app.options.projectId='yu-shing-company',f=>f.c.YUSHIN_PREVIEW_DISPATCH=false]){
+  const f=previewFixture();change(f);await assert.rejects(f.run());assert.equal(f.calls.length,0);
+ }
+ const f=previewFixture();f.c.replyError={code:'functions/unavailable',message:'unavailable'};
+ await assert.rejects(f.run(),e=>e.code==='functions/unavailable');assert.equal(f.calls.length,1);
+ const noFlag=fixture();noFlag.c.APP_ENVIRONMENT='preview';
+ await assert.rejects(noFlag.run(),/不可改用一般交易/);assert.equal(noFlag.records().length,0);
+ const wrongEnvironment=fixture();wrongEnvironment.c.APP_ENVIRONMENT='production';wrongEnvironment.c.YUSHIN_PREVIEW_DISPATCH=true;
+ await assert.rejects(wrongEnvironment.run(),/不可改用一般交易/);assert.equal(wrongEnvironment.records().length,0);
+});
+
+test('original UI blocks corrupt pending dispatch credentials and disabled Preview before minting a new ID',async()=>{
+ const workspace=fs.readFileSync('src/features/orders/order-workspace.js','utf8');
+ const start=workspace.indexOf('function dispatchPreparationStorageKey('),end=workspace.indexOf('function canBusinessSelfOrder(',start);
+ assert.ok(start>=0&&end>start);
+ const key='yushin-dispatch-attempt:'+JSON.stringify(['buyer','O','I']);
+ for(const raw of ['{broken','null','',undefined]){
+  const storage=new Map(raw===undefined?[]:[[key,raw]]),alerts=[];let legacy=0;
+  const c=vm.createContext({window:{},APP_ENVIRONMENT:'preview',YUSHIN_PREVIEW_DISPATCH:false,
+   currentUser:{uid:'buyer'},currentUserRole:'purchaser',pendingDispatchOrderIds:new Set(),
+   ordersCache:[],purchasingDispatchCache:[],currentDeliveryOrderId:null,
+   document:{getElementById:()=>null},
+   sessionStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},
+   runRoleTransaction:()=>{legacy++;throw Error('legacy reached');},alert:value=>alerts.push(value)});
+  vm.runInContext(source,c);vm.runInContext(workspace.slice(start,end),c);
+  await c.window.markOrderItemDispatchPrepared('O','I');
+  assert.equal(legacy,0);assert.equal(storage.size,raw===undefined?0:1);
+  if(raw!==undefined)assert.equal(storage.get(key),raw);
+  assert.match(alerts[0],raw===undefined?/尚未啟用/:/憑證/);
+ }
 });
