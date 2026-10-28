@@ -24,7 +24,7 @@ async function actor(tag,role){
  const auth=getAuth(app);connectAuthEmulator(auth,'http://127.0.0.1:9099',{disableWarnings:true});
  await signInWithEmailAndPassword(auth,email,'EmulatorOnly!123456');
  const functions=getFunctions(app,'asia-east1');connectFunctionsEmulator(functions,'127.0.0.1',5001);
- return {uid,app,purchase:input=>httpsCallable(functions,'commitV2QuickPurchase',{timeout:60000})(input).then(r=>r.data),receive:input=>httpsCallable(functions,'receiveV2Supply',{timeout:60000})(input).then(r=>r.data)};
+ return {uid,app,formalPurchase:input=>httpsCallable(functions,'commitV2FormalPurchase',{timeout:60000})(input).then(r=>r.data),purchase:input=>httpsCallable(functions,'commitV2QuickPurchase',{timeout:60000})(input).then(r=>r.data),receive:input=>httpsCallable(functions,'receiveV2Supply',{timeout:60000})(input).then(r=>r.data)};
 }
 async function fixture(tag,count,{role='warehouse',...options}={}){
  const receiver=await actor(tag,role);
@@ -127,13 +127,13 @@ test('Preview-gated handler completes the fifteen-line shared writer on an expli
 
 // Source creation uses real Client Rules; only masters/opening balances are Admin fixtures.
 // Initialization retains the existing explicitly enforced Service-adapter boundary.
-test('fifteen Auth-created lines flow through initialization, manual purchasing/incoming and canonical receiving',{timeout:180000},async()=>{
+for(const mode of ['manual','formal'])test('fifteen Auth-created lines flow through initialization, '+(mode==='manual'?'manual purchasing/incoming':'formal PO and incoming-Service')+' and canonical receiving',{timeout:180000},async()=>{
  const {orderCreationClient}=require('./fixtures/order-creation-client.cjs');
  const {synchronizeV2OrderFixture}=require('./fixtures/v2-order-initialization.cjs');
- const tag='created15-chain',orderId=tag+'-order',keys=[tag+'-P',tag+'-Q'],warehouses=[tag+'-A',tag+'-B'];
+ const tag=mode==='manual'?'created15-chain':'created15-formal',orderId=tag+'-order',keys=[tag+'-P',tag+'-Q'],warehouses=[tag+'-A',tag+'-B'];
  const sales=await actor(tag+'-sales','sales'),buyer=await actor(tag+'-buyer','purchaser'),warehouse=await actor(tag+'-warehouse','warehouse');
  await db.doc('users/'+sales.uid).update({code:'B',name:'sales'});
- const names=['orders','products','warehouses','inventory','warehouseStocks','inventoryReservations','procurementDemands',
+ const names=['purchaseOrders','orders','products','warehouses','inventory','warehouseStocks','inventoryReservations','procurementDemands',
   'supplyOrders','receivingSupplyOrders','purchaseOperations','reservationOperationReceipts','inventoryMovements','receipts','inventoryLots','inventoryLotCosts'];
  const owned=doc=>doc.id.includes(tag)||[doc.data().orderId,doc.data().sourceId,doc.data().productKey,doc.data().productId].some(v=>typeof v==='string'&&v.includes(tag));
  const snapshot=async()=>Object.fromEntries(await Promise.all(names.map(async name=>[name,(await db.collection(name).get()).docs.filter(owned)
@@ -168,14 +168,34 @@ test('fifteen Auth-created lines flow through initialization, manual purchasing/
  assert.equal(initialized.items.length,15);
  assert.ok(initialized.items.every(i=>i.reservedQty===0&&i.shortageQty===3));
  const intents=items.map((row,i)=>({operationId:tag+'-purchase-'+i,orderId,itemId:row.itemId,qty:3,supplier:'Vendor',unitCost:17}));
- const replies=[];for(const intent of intents)replies.push(await buyer.purchase(intent));
+ const replies=[],poIntents=[];
+ const {registerV2PurchaseIncomingFixture}=require('./fixtures/v2-purchase-incoming.cjs');
+ if(mode==='manual')for(const intent of intents)replies.push(await buyer.purchase(intent));
+ else for(let start=0;start<15;start+=5){
+  const input={poNo:tag+'-PO-'+start,poDate:'2026-10-28',supplier:'Vendor',
+   items:intents.slice(start,start+5).map(({orderId,itemId,qty,unitCost})=>({orderId,itemId,qty,unitCost}))};
+  poIntents.push(input);
+  const result=await buyer.formalPurchase(input);assert.equal(result.status,'committed');
+  assert.equal(result.committedQty,15);assert.equal(result.supplyOrderIds.length,5);
+  // PO commitment alone must not register stock: the original incoming Service
+  // owns its separate, retryable checkpoint.
+  for(const id of result.supplyOrderIds)assert.equal((await db.doc('supplyOrders/'+id).get()).data().incomingRegisteredQty||0,0);
+  await registerV2PurchaseIncomingFixture(db,buyer.uid,input.poNo);
+  replies.push(...result.supplyOrderIds.map(supplyId=>({status:result.status,supplyId})));
+ }
+ const replayPurchase=async()=>{
+  if(mode==='manual')return buyer.purchase(intents[0]);
+  const result=await buyer.formalPurchase(poIntents[0]);
+  await registerV2PurchaseIncomingFixture(db,buyer.uid,poIntents[0].poNo);return result;
+ };
  assert.ok(replies.every(r=>r.status==='committed'));
  const purchased=await snapshot();
- assert.equal(purchased.purchaseOperations.length,15);assert.equal(purchased.supplyOrders.length,15);
+ assert.equal(purchased.purchaseOperations.length,mode==='manual'?15:0);
+ assert.equal(purchased.purchaseOrders.length,mode==='formal'?3:0);assert.equal(purchased.supplyOrders.length,15);
  assert.equal(purchased.inventoryMovements.length,15);
  for(const key of keys){const stock=(await db.doc('inventory/'+key).get()).data();assert.equal(stock.incoming,items.filter(i=>i.productId===key).length*3);assert.equal(stock.onHand,0);}
  // Replaying an actual committed request (a lost-reply recovery) changes no facts.
- assert.equal((await buyer.purchase(intents[0])).status,'already-applied');assert.deepEqual(await snapshot(),purchased);
+ assert.equal((await replayPurchase()).status,'already-applied');assert.deepEqual(await snapshot(),purchased);
  const receipts=[0,14].map(i=>({supplyId:replies[i].supplyId,operationId:tag+'-receipt-'+i,qty:2,lotNo:'L'+i,expiryDate:'2028-01-01'}));
  for(const input of receipts)assert.equal((await warehouse.receive(input)).status,'confirmed');
  const received=await snapshot(),order=(await db.doc('orders/'+orderId).get()).data();
@@ -188,7 +208,7 @@ test('fifteen Auth-created lines flow through initialization, manual purchasing/
   assert.equal(demand.orderedQty,3);assert.equal(demand.receivedQty,[0,14].includes(i)?2:0);
  }
  for(const input of receipts)await warehouse.receive(input);
- await buyer.purchase(intents[0]);assert.deepEqual(await snapshot(),received);
+ await replayPurchase();assert.deepEqual(await snapshot(),received);
  const stock=(await db.doc('inventory/'+keys[0]).get()).data();assert.equal(stock.onHand,4);assert.equal(stock.reserved,4);assert.equal(stock.incoming,20);
  await creator.create(orderId,{...source,customerName:'stale retry'});
  assert.deepEqual(await snapshot(),received,'same-ID creation cannot overwrite later transactions');
