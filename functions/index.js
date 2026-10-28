@@ -103,3 +103,9 @@ exports.commitV2QuickPurchase=createQuickPurchaseCallable({onCall,HttpsError,get
 // authorized Preview can call this, never the production project.
 const {createSupplyReceiptCallable}=require('./supply-receipt-callable');
 exports.receiveV2Supply=createSupplyReceiptCallable({onCall,HttpsError,getDatabase:getFirestore});
+
+// Physical customer shipment is a separate atomic transaction from paperwork.
+// Both the demo Emulator and Preview gates are disabled unless independently
+// authorized; production has no enablement path.
+const {createWarehouseShipmentCallable}=require('./warehouse-shipment-callable');
+exports.shipV2WarehouseItem=createWarehouseShipmentCallable({onCall,HttpsError,getDatabase:getFirestore});

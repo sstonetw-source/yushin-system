@@ -337,8 +337,8 @@ test('original warehouse shipment Service uses real Auth Callable with frozen re
    canReceiveInventoryCapability:()=>true,canAccessPage:()=>true,
    YushinWarehouseLogistics:require('../modules/warehouse-logistics'),
    sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},
-   db:{collection:name=>({doc:id=>({get:async()=>{const s=await getDoc(doc(live,name,id));return {exists:s.exists(),data:()=>s.data()};}})})},
-   firebase:{app(){return {functions:region=>this.functions(region)};},auth:()=>x.actor.auth,functions:()=>({app:x.actor.app,useEmulator:()=>{},
+   db:{app:x.actor.app,collection:name=>({doc:id=>({get:async()=>{const s=await getDoc(doc(live,name,id));return {exists:s.exists(),data:()=>s.data()};}})})},
+   firebase:{app(){return {options:x.actor.app.options,functions:region=>this.functions(region)};},auth:()=>x.actor.auth,functions:()=>({app:x.actor.app,useEmulator:()=>{},
     httpsCallable:name=>async data=>{calls++;assert.equal(name,'shipV2WarehouseItem');
      assert.equal(data.actorUid,undefined);assert.equal(data.actorRole,undefined);
      const result=await httpsCallable(x.actor.functions,name)(data);

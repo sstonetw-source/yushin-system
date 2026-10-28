@@ -15,7 +15,9 @@ function setup({host='localhost',authUid='buyer',lost=true}={}){
  const functions={app,useEmulator(){},
   httpsCallable:()=>async data=>{
    sent.push(data);
-   if(!seen.has(data.operationId)){seen.add(data.operationId);applied++;}
+   if(!seen.has(data.operationId)){seen.add(data.operationId);applied++;
+    order.warehouseShipmentRecords=[{id:data.operationId,orderId:data.orderId,itemId:data.itemId,
+      warehouseId:data.warehouseId,qty:data.quantity,date:data.date,notes:data.notes,deliveryPlan:data.expectedPlan}];}
    if(lost){lost=false;throw Error('response lost');}
    return {data:{status:'already-applied',orderId:data.orderId,itemId:data.itemId,
     warehouseId:data.warehouseId,qty:data.quantity,movementId:'location-ship-'+data.operationId}};
@@ -24,11 +26,11 @@ function setup({host='localhost',authUid='buyer',lost=true}={}){
   YUSHIN_V2_SHIPMENT_EMULATOR:true,location:{hostname:host},
   YushinWarehouseLogistics:logistics,canReceiveInventoryCapability:()=>true,canAccessPage:()=>true,
   sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},
-  db:{collection:()=>({doc:()=>({get:async()=>({exists:true,data:()=>order})})})},
-  firebase:{app:()=>({functions:()=>functions}),auth:()=>auth,functions:()=>functions},
+  db:{app,collection:()=>({doc:()=>({get:async()=>({exists:true,data:()=>order})})})},
+  firebase:{app:()=>({options:app.options,functions:()=>functions}),auth:()=>auth,functions:()=>functions},
   runRoleTransaction:()=>{throw Error('legacy write prohibited');}});
  vm.runInContext(source,c);
- return {c,storage,sent,applied:()=>applied};
+ return {c,storage,sent,app,auth,order,applied:()=>applied};
 }
 test('v2 shipment keeps original id after unknown response and safely retries',async()=>{
  const f=setup();
@@ -49,13 +51,50 @@ test('v2 shipment keeps original id after unknown response and safely retries',a
 test('v2 shipment rejects remote browser, wrong signed-in uid and bad dates before legacy writer',async()=>{
  for(const config of [{host:'remote.example'},{authUid:'different'}]){
   const f=setup(config);
-  await assert.rejects(f.c.commitInventoryShipment(base),/本機|帳號|權限/);
+  await assert.rejects(f.c.commitInventoryShipment(base),/本機|帳號|權限|尚未.*啟用/);
   assert.equal(f.sent.length,0);
  }
  const f=setup({lost:false});
  await assert.rejects(f.c.commitInventoryShipment({...base,date:'2026-02-30'}),/不正確/);
  await assert.rejects(f.c.commitInventoryShipment({...base,qty:0}),/不正確/);
  assert.equal(f.storage.size,0);
+});
+test('unknown backend result cannot fall back to legacy on Preview, flag change or malformed stored attempt',async()=>{
+ const x=setup();await assert.rejects(x.c.commitInventoryShipment(base),/response lost/);
+ x.c.YUSHIN_V2_SHIPMENT_EMULATOR=false;
+ await assert.rejects(x.c.commitInventoryShipment(base),/不得改走一般交易/);
+ assert.equal(x.applied(),1);
+ const y=setup({lost:false});y.c.APP_ENVIRONMENT='preview';y.c.YUSHIN_V2_SHIPMENT_EMULATOR=false;y.c.YUSHIN_PREVIEW_SHIPMENT=false;
+ await assert.rejects(y.c.commitInventoryShipment(base),/不得改走一般交易/);
+ assert.equal(y.applied(),0);
+ const z=setup();z.storage.set('v2-shipment:buyer:O:I','{broken');
+ await assert.rejects(z.c.commitInventoryShipment(base),/核對出貨識別資料/);
+ assert.equal(z.applied(),0);
+});
+test('Preview shipment binds explicit host, project and non-Emulator Auth before writing',async()=>{
+ const x=setup({lost:false});x.c.APP_ENVIRONMENT='preview';x.c.YUSHIN_V2_SHIPMENT_EMULATOR=false;
+ x.c.YUSHIN_PREVIEW_SHIPMENT=true;x.c.location.hostname='preview-20135.web.app';
+ await assert.rejects(x.c.commitInventoryShipment(base),/專案不一致/);
+ assert.equal(x.applied(),0);
+ const y=setup({lost:false});y.c.APP_ENVIRONMENT='preview';y.c.YUSHIN_V2_SHIPMENT_EMULATOR=false;
+ y.c.YUSHIN_PREVIEW_SHIPMENT=true;y.c.location.hostname='example.com';
+ await assert.rejects(y.c.commitInventoryShipment(base),/尚未.*啟用/);
+ assert.equal(y.applied(),0);
+});
+test('Preview retries the frozen operation and keeps it pending until server order proves the physical shipment',async()=>{
+ const x=setup();x.c.APP_ENVIRONMENT='preview';x.c.YUSHIN_V2_SHIPMENT_EMULATOR=false;
+ x.c.YUSHIN_PREVIEW_SHIPMENT=true;x.c.location.hostname='preview-20135.web.app';
+ x.app.options.projectId='preview-20135';delete x.auth.emulatorConfig;
+ await assert.rejects(x.c.commitInventoryShipment(base),/response lost/);
+ const pending=x.c.pendingV2WarehouseShipment('O','I');assert.equal(pending.operationId,base.operationId);
+ const actual=x.order.warehouseShipmentRecords;
+ x.order.warehouseShipmentRecords=[];
+ await assert.rejects(x.c.commitInventoryShipment(base),/尚未證實原交易/);
+ assert.equal(x.c.pendingV2WarehouseShipment('O','I').operationId,base.operationId);
+ x.order.warehouseShipmentRecords=actual;
+ await x.c.commitInventoryShipment(base);
+ assert.equal(x.applied(),1);assert.deepEqual(x.sent.map(row=>row.operationId),Array(3).fill(base.operationId));
+ assert.equal(x.c.pendingV2WarehouseShipment('O','I'),null);
 });
 test('pending v2 shipment stays visible when current shippable stock reaches zero',()=>{
  const workspace=require('../modules/inventory-workspace');
