@@ -36,8 +36,8 @@ function normalizeCommitIntent(data){
 function normalizeOrderCommitIntent(data){
  const fields=['orderId','itemIds','warehouseIds','attemptId','syncAttemptId'];
  if(!data||typeof data!=='object'||Array.isArray(data)||Object.keys(data).some(k=>!fields.includes(k))
-   ||!Array.isArray(data.itemIds)||data.itemIds.length<1||data.itemIds.length>5)
-  reject('整單雙倉一次須包含 1 至 5 個品項','invalid-argument');
+   ||!Array.isArray(data.itemIds)||data.itemIds.length<1||data.itemIds.length>15)
+  reject('整單雙倉一次須包含 1 至 15 個品項','invalid-argument');
  const itemIds=data.itemIds.map(value=>ident(value,'品項')).sort();
  if(new Set(itemIds).size!==itemIds.length)reject('訂單品項重複','invalid-argument');
  const single=normalizeCommitIntent({orderId:data.orderId,itemId:itemIds[0],warehouseIds:data.warehouseIds,

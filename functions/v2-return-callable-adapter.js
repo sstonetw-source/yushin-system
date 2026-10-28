@@ -10,7 +10,6 @@ const {commitOrderLocationLifecycleAndRecover}=require('./single-item-location-l
 const {listReleasedV2FreeStock,resumeReleasedV2FreeStock}=require('./single-item-location-service');
 const {previewV2FormalPurchase}=require('./formal-purchase-preview-service');
 const {commitV2FormalPurchase}=require('./formal-purchase-commit-service');
-const {receiveV2Supply}=require('./supply-receipt-service');
 function allowV2ReturnAuthEmulator(env=process.env){
  const local=value=>typeof value==='string'&&/^(127\.0\.0\.1|localhost):[0-9]+$/.test(value);
  return env.ENABLE_V2_RETURN_AUTH_EMULATOR==='true'&&env.FUNCTIONS_EMULATOR==='true'
@@ -31,7 +30,7 @@ function createV2ReturnCallables({onCall,HttpsError,getDatabase,env=process.env}
    throw new HttpsError('internal','交易查核或提交失敗');
   }
  });
- return {receiveV2Supply:wrap(receiveV2Supply),previewV2CustomerReturn:wrap(planLocationReturnTrace),receiveV2CustomerReturn:wrap(commitLocationReturn),
+ return {previewV2CustomerReturn:wrap(planLocationReturnTrace),receiveV2CustomerReturn:wrap(commitLocationReturn),
   prepareV2OrderDispatch:wrap(commitLocationDispatchPreparation),
   shipV2WarehouseItem:wrap(commitLocationShipment),
   confirmV2ShipmentDelivery:wrap(commitShipmentDelivery),

@@ -5,21 +5,24 @@ const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{spa
 const root=path.resolve(__dirname,'..');
 // Local iteration may select a layer. CI deliberately calls with no arguments.
 const suites={
- all:['tests/emulator-v2-return-callable.cjs','tests/emulator-v2-lifecycle-browser.cjs'],
- callable:['tests/emulator-v2-return-callable.cjs'],
+ all:['tests/emulator-v2-return-callable.cjs','tests/emulator-receiving-fifteen.cjs','tests/emulator-v2-lifecycle-browser.cjs'],
+ callable:['tests/emulator-v2-return-callable.cjs','tests/emulator-receiving-fifteen.cjs'],
+ receiving:['tests/emulator-receiving-fifteen.cjs'],
  browser:['tests/emulator-v2-lifecycle-browser.cjs']
 };
 const args=process.argv.slice(2),selection=args.filter(arg=>arg.startsWith('--suite='));
+const patterns=args.filter(arg=>arg.startsWith('--test-name-pattern='));
+const pattern=patterns[0]?.slice('--test-name-pattern='.length);
 const suite=selection[0]?.slice('--suite='.length)||'all';
-if(selection.length>1||!Object.hasOwn(suites,suite)
- ||args.some(arg=>arg!=='--list'&&!arg.startsWith('--suite='))
+if(selection.length>1||patterns.length>1||patterns.some(arg=>arg==='--test-name-pattern=')||!Object.hasOwn(suites,suite)
+ ||args.some(arg=>arg!=='--list'&&!arg.startsWith('--suite=')&&!arg.startsWith('--test-name-pattern='))
  ||selection.some(arg=>arg==='--suite=')){
- console.error('Usage: node tools/run-v2-return-auth-emulator.cjs [--suite=all|callable|browser] [--list]');
+ console.error('Usage: node tools/run-v2-return-auth-emulator.cjs [--suite=all|callable|receiving|browser] [--test-name-pattern=regex] [--list]');
  process.exit(2);
 }
 const testFiles=suites[suite].map(file=>path.join(root,file));
 if(args.includes('--list')){console.log(testFiles.join('\n'));process.exit(0);}
-if(suite!=='all')console.log('Development subset only: '+suite+'; full CI is still required before merge.');
+if(suite!=='all'||pattern)console.log('Development subset only: '+suite+'; full CI is still required before merge.');
 const temporary=fs.mkdtempSync(path.join(os.tmpdir(),'yushin-return-auth-'));
 const source=path.join(temporary,'functions');
 try{
@@ -40,7 +43,7 @@ try{
  const shellQuote=value=>"'"+value.split("'").join("'"+String.fromCharCode(92)+"''")+"'";
  const result=spawnSync('npx',['--yes','firebase-tools@15','emulators:exec','--config',config,
   '--only','firestore,auth,functions','--project','demo-yushin',
-  'node --test --test-concurrency=1 '+testFiles.map(shellQuote).join(' ')],{cwd:root,stdio:'inherit',env:{...process.env,
+  'node --test --test-concurrency=1 '+(pattern?'--test-name-pattern='+shellQuote(pattern)+' ':'')+testFiles.map(shellQuote).join(' ')],{cwd:root,stdio:'inherit',env:{...process.env,
    ENABLE_V2_RETURN_AUTH_EMULATOR:'true',ENABLE_SERVICE_CASE_EMULATOR:'true',
    ENABLE_PREVIEW_FORMAL_PURCHASE:'true',ENABLE_QUICK_PURCHASE_EMULATOR:'true'}});
  if(result.error)throw result.error;

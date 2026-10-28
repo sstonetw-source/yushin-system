@@ -49,9 +49,9 @@
     const fulfilledQty = clamp(delivery.effectiveDeliveredQty, 0, orderedQty);
     const outstandingQty = Math.max(0, orderedQty - fulfilledQty);
     const reservedQty = clamp(item.reservedQty, 0, outstandingQty);
-    // Service work remaining is not a physical stock shortage. Keep recorded
-    // stock/supplier quantities visible so their validators can reject conflicts.
-    const shortageQty = String(item.productType||'').trim().toUpperCase()==='SERVICE'
+    // Service work and factory-direct arrivals are not warehouse shortages.
+    // Keep recorded holds/supplier quantities available to source validators.
+    const shortageQty = item.fulfillmentType==='DIRECT_SHIP'||String(item.productType||'').trim().toUpperCase()==='SERVICE'
       ? 0 : Math.max(0, outstandingQty - reservedQty);
     return {
       ...item,

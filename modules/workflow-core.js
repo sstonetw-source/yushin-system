@@ -90,10 +90,10 @@
     const stockOutstandingQty=shipment?shipment.outstandingQty:outstandingQty;
     let reservedQty=0;
     let shortageQty=0;
-    if(!serviceItem&&hasNumber(input.reservedQty)){
+    if(!serviceItem&&fulfillmentType!=='DIRECT_SHIP'&&hasNumber(input.reservedQty)){
       reservedQty=Math.min(stockOutstandingQty,n(input.reservedQty));
       shortageQty=Math.max(0,stockOutstandingQty-reservedQty);
-    }else if(!serviceItem&&hasNumber(input.shortageQty)){
+    }else if(!serviceItem&&fulfillmentType!=='DIRECT_SHIP'&&hasNumber(input.shortageQty)){
       shortageQty=Math.min(stockOutstandingQty,n(input.shortageQty));
       reservedQty=Math.max(0,stockOutstandingQty-shortageQty);
     }

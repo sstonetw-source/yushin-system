@@ -1710,3 +1710,58 @@ test('pure Service cancellation and restoration preserve custody evidence withou
  for(const name of ['inventoryReservations','inventoryMovements','supplyOrders'])
   assert.equal((await db.collection(name).where(name==='inventoryMovements'?'sourceId':'orderId','==',orderId).get()).size,0);
 });
+
+async function directReceiptProofFixture(tag,ownerRole){
+ const owner=await identity('direct-proof-'+tag,ownerRole),buyer=await identity('direct-proof-buyer-'+tag,'purchaser');
+ const orderId='direct-proof-'+tag,key=orderId+'-P',warehouseId=orderId+'-W',poNo=orderId+'-PO';
+ const demandId=procurementDemandCore.demandIdForSource({sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:'I'});
+ const batch=db.batch(),put=(name,id,data)=>batch.set(db.collection(name).doc(id),data);
+ put('products',key,{productType:'Goods',active:true});put('warehouses',warehouseId,{active:true});
+ put('inventory',key,{productKey:key,onHand:5,reserved:1,incoming:0});
+ put('warehouseStocks',warehouseId+'__'+key,{warehouseId,productKey:key,onHand:5,reserved:1,incoming:0});
+ put('inventoryLots',orderId+'-lot',{productKey:key,warehouseId,remainingQty:5,receivedQty:5,lotNo:'untouched'});
+ put('inventoryReservations',orderId+'-other',{productKey:key,warehouseId,quantity:1,shortageQty:0,orderId:'OTHER',itemId:'OTHER',status:'active'});
+ put('orders',orderId,{ownerUid:owner.uid,salesCode:'DP',status:'active',orderStatus:'normal',inventoryReservationStatus:'completed',
+  inventoryReservationAttemptId:orderId+'-sync',deliveryRecords:[],returnRecords:[],deliveredQty:0,returnedQty:0,isDelivered:false,
+  items:[{itemId:'I',productId:key,productType:'Goods',qty:3,orderedQty:3,warehouseId:'',fulfillmentType:'DIRECT_SHIP',
+   reservedQty:0,shortageQty:0,supplyOrderedQty:0,receivedQty:0,deliveredQty:0,returnedQty:0,dispatchPreparedQty:0,warehouseShippedQty:0}]});
+ put('procurementDemands',encodeURIComponent(demandId),procurementDemandCore.normalizeDemand({demandId,sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:'I',sourceItemIndex:0,
+  ownerUid:owner.uid,salesCode:'DP',productId:key,productKey:key,fulfillmentType:'DIRECT_SHIP',warehouseId:'',requestedQty:3,orderedQty:0,receivedQty:0}));
+ await batch.commit();
+ const purchase=(await httpsCallable(buyer.functions,'commitV2FormalPurchase')({poNo,poDate:'2026-10-27',supplier:'直送驗證',items:[{orderId,itemId:'I',qty:3,unitCost:20}]})).data;
+ const supplyId=purchase.supplyOrderIds[0],input=(qty,suffix)=>({supplyId,qty,lotNo:'',expiryDate:'',operationId:orderId+'-'+suffix});
+ const receive=(request,who=owner)=>httpsCallable(who.functions,'receiveV2Supply',{timeout:60000})(request).then(r=>r.data);
+ const snapshot=async()=>{
+  const get=async(name,id)=>(await db.collection(name).doc(id).get()).data(),physical={};
+  for(const name of ['inventoryLots','inventoryLotCosts','inventoryMovements','inventoryReservations'])physical[name]=(await db.collection(name).where('productKey','==',key).get()).docs.map(doc=>[doc.id,doc.data()]).sort((a,b)=>a[0].localeCompare(b[0]));
+  return {order:await get('orders',orderId),supply:await get('supplyOrders',supplyId),demand:await get('procurementDemands',encodeURIComponent(demandId)),
+   inventory:await get('inventory',key),stock:await get('warehouseStocks',warehouseId+'__'+key),...physical,
+   receipts:(await db.collection('receipts').where('supplyOrderId','==',supplyId).get()).docs.map(doc=>[doc.id,doc.data()]).sort((a,b)=>a[0].localeCompare(b[0]))};
+ };
+ return {owner,buyer,orderId,key,poNo,supplyId,input,receive,snapshot};
+}
+test('direct arrival validates actual PO source before every new receipt, preserves original-ID recovery and never touches physical stock',{timeout:240000},async()=>{
+ for(const ownerRole of ['sales','engineer']){
+  const x=await directReceiptProofFixture(ownerRole,ownerRole),poRef=db.collection('purchaseOrders').doc(x.poNo),po=(await poRef.get()).data();
+  const before=await x.snapshot();
+  for(const corrupt of [
+   r=>r.status='CANCELLED',r=>r.status='DRAFT',r=>r.documentOnly=true,r=>r.supplyOrderIds=[],r=>r.supplyOrderIds.push(x.supplyId),
+   r=>r.items[0].orderId='OTHER',r=>r.items[0].itemId='OTHER',r=>r.items[0].productId='OTHER',r=>r.items[0].qty=4,
+   r=>r.items[0].warehouseId='W',r=>r.items[0].fulfillmentType='WAREHOUSE'
+  ]){const damaged=structuredClone(po);corrupt(damaged);await poRef.set(damaged);await assert.rejects(x.receive(x.input(1,'first')));assert.deepEqual(await x.snapshot(),before);await poRef.set(po);}
+  for(const role of ['warehouse','sales','engineer']){
+   const other=await identity('direct-proof-denied-'+ownerRole+'-'+role,role);await assert.rejects(x.receive(x.input(1,'first'),other),code('permission-denied'));assert.deepEqual(await x.snapshot(),before);
+  }
+  await assert.rejects(x.receive(x.input(1,'first'),x.buyer),code('permission-denied'));assert.deepEqual(await x.snapshot(),before);
+  await assert.rejects(x.receive({...x.input(1,'first'),lotNo:'INVALID'}));assert.deepEqual(await x.snapshot(),before);
+  await Promise.all([x.receive(x.input(1,'first')),x.receive(x.input(1,'first'))]);const partial=await x.snapshot();
+  assert.equal(partial.receipts.length,1);assert.equal(partial.order.deliveredQty,1);assert.equal(partial.demand.receivedQty,1);assert.equal(partial.order.items[0].shortageQty,0);assert.equal(partial.order.items[0].reservedQty,0);
+  await poRef.update({status:'CANCELLED'});await x.receive(x.input(1,'first'));assert.deepEqual(await x.snapshot(),partial,'existing receipt recovers despite later PO cancellation');
+  await assert.rejects(x.receive(x.input(1,'later')));assert.deepEqual(await x.snapshot(),partial);await poRef.set(po);
+  const admin=await identity('direct-proof-admin-'+ownerRole,'admin');await x.receive(x.input(2,'final'),admin);const complete=await x.snapshot();
+  assert.equal(complete.receipts.length,2);assert.equal(complete.order.deliveredQty,3);assert.equal(complete.supply.receivedQty,3);assert.equal(complete.demand.receivedQty,3);assert.equal(complete.order.items[0].shortageQty,0);assert.equal(complete.order.items[0].reservedQty,0);
+  for(const field of ['inventory','stock','inventoryLots','inventoryLotCosts','inventoryMovements','inventoryReservations'])assert.deepEqual(complete[field],before[field]);
+  assert.ok(complete.receipts.every(([,r])=>r.fulfillmentType==='DIRECT_SHIP'&&r.warehouseId===''&&!r.lotNo&&!r.expiryDate));
+  assert.equal(JSON.stringify(complete.receipts).includes('unitCost'),false);
+ }
+});

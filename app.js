@@ -16914,13 +16914,23 @@ async function commitFormalPurchaseOrder(poRecord, {actorUid=currentUser?.uid,ac
 // Transport only. All receipt quantities and writes remain in the same receiving Service.
 async function receiveV2SupplyEmulator(supplyId,qty,lotNo,expiryDate,operationId,options) {
     const local=host=>['localhost','127.0.0.1'].includes(host);
-    if(typeof APP_ENVIRONMENT==='undefined'||APP_ENVIRONMENT!=='emulator'
-        ||!local(globalThis.location?.hostname)||typeof firebase==='undefined'||!firebase.functions)
-        throw Error('多倉收貨後端僅限本機 Emulator。');
+    const emulator=typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='emulator'
+        &&globalThis.YUSHIN_V2_RECEIVING_EMULATOR===true;
+    const preview=typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'
+        &&globalThis.YUSHIN_PREVIEW_RECEIVING===true;
+    const host=String(globalThis.location?.hostname||'').toLowerCase();
+    if((!emulator&&!preview)||typeof firebase==='undefined'||!firebase.functions
+        ||(emulator&&!local(host))
+        ||(preview&&!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(host)))
+        throw Error('收貨後端尚未在目前授權的測試環境啟用，禁止改用舊交易。');
     const auth=firebase.auth(),functions=firebase.app().functions('asia-east1');
-    if(auth.app?.options?.projectId!=='demo-yushin'||functions.app?.options?.projectId!=='demo-yushin'
-        ||!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099)
-        throw Error('多倉收貨必須使用 demo-yushin 本機登入與 Functions。');
+    const project=emulator?'demo-yushin':'preview-20135';
+    if(auth.app?.options?.projectId!==project||functions.app?.options?.projectId!==project
+        ||firebase.app().options?.projectId!==project
+        ||typeof db==='undefined'||db.app?.options?.projectId!==project
+        ||(emulator&&(!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099))
+        ||(preview&&!!auth.emulatorConfig))
+        throw Error('收貨 Auth、Functions 與資料庫專案不一致，未提交收貨。');
     const uid=options.actorUid??currentUser?.uid,role=options.actorRole??currentUserRole;
     const check=()=>{
         if(!uid||auth.currentUser?.uid!==uid||currentUser?.uid!==uid||currentUserRole!==role
@@ -16933,7 +16943,7 @@ async function receiveV2SupplyEmulator(supplyId,qty,lotNo,expiryDate,operationId
     const job=Array.isArray(jobs)&&jobs.find(job=>job.ownerUid===uid&&job.actorRole===role&&job.supplyId===supplyId
         &&job.entries?.some(entry=>`${job.operationBase}-${entry.itemIndex}`===operationId&&entry.qty===qty&&entry.lotNo===lotNo&&entry.expiryDate===expiryDate));
     if(!job)throw Error('收貨原始作業尚未安全保存，請保留原資料並重新確認。');
-    functions.useEmulator('127.0.0.1',5001);
+    if(emulator)functions.useEmulator('127.0.0.1',5001);
     const response=await functions.httpsCallable('receiveV2Supply')({supplyId,qty,lotNo,expiryDate,operationId});check();
     const result=response?.data;
     if(result?.status!=='confirmed'||result.supplyId!==supplyId||result.operationId!==operationId
@@ -17086,12 +17096,41 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
 // Reuse this receiving Service for the v2 trial; never create another receipt
 // writer. The browser path stays closed until its backend/Rules adapters exist.
 async function assertV2ReceiptActor(transaction, actorUid, actorRole) {
-    if(typeof process==='undefined'||!process.env?.FIRESTORE_EMULATOR_HOST||db.projectId!=='demo-yushin')
-        throw new Error('多倉收貨目前僅允許 demo-yushin Emulator，尚未開放正式入口。');
+    // The backend Callable separately verifies its Firebase project and feature
+    // gate. Keep the isolated Emulator route for existing integration coverage;
+    // never infer Preview authorization from a browser-provided flag.
+    const backendAuthorized=typeof context!=='undefined'
+        &&typeof context.authorizeV2ReceiptActor==='function'
+        &&context.authorizeV2ReceiptActor()===true;
+    const demoAuthorized=typeof process!=='undefined'
+        &&!!process.env?.FIRESTORE_EMULATOR_HOST&&db.projectId==='demo-yushin';
+    if(!backendAuthorized&&!demoAuthorized)
+        throw new Error('多倉收貨後端尚未在此環境授權啟用。');
     const actor=await transaction.get(db.collection('users').doc(actorUid));
     if(!actor.exists||actor.data().active===false||actor.data().disabled===true
         ||actor.data().role!==actorRole||!['admin','purchaser','warehouse'].includes(actorRole))
         throw new Error('真實登入角色無此多倉收貨權限。');
+}
+// One PO witness check for physical receiving and backend direct arrival.
+// Follow the saved supply ID link, never a client-provided row index.
+async function validateReceiptPurchaseDocument(transaction,supply,{orderId,itemId,productId,warehouseId,fulfillmentType}) {
+    const reject=()=>{
+        const error=new Error('收貨缺少有效供應商採購單憑證，尚未入帳；請由採購確認原單後，使用原資料重試。');
+        error.code='failed-precondition';throw error;
+    };
+    const documentId=supply.purchaseDocumentId;
+    if(typeof documentId!=='string'||!documentId||documentId!==documentId.trim()||documentId.includes('/')||documentId.length>160)
+        reject();
+    const po=await transaction.get(db.collection('purchaseOrders').doc(documentId));
+    const record=po.exists?po.data():{},links=record.supplyOrderIds;
+    const index=Array.isArray(links)?links.indexOf(supply.id):-1;
+    const line=Array.isArray(record.items)?record.items[index]:null;
+    if(index<0||links.filter(key=>key===supply.id).length!==1||!line
+        ||line.orderId!==orderId||line.itemId!==itemId||line.productId!==productId||supply.productId!==productId
+        ||Number(line.qty)!==supply.qty||(line.warehouseId||'')!==warehouseId
+        ||(line.fulfillmentType||'WAREHOUSE')!==fulfillmentType
+        ||record.status==='DRAFT'||record.documentOnly===true||isPurchaseTerminalStatus(record.status))
+        reject();
 }
 async function validateV2ReceiptSource(transaction, {order,supply,reservation,item,inventory,warehouseStock,demand,actorUid,actorRole,qty}) {
     await assertV2ReceiptActor(transaction,actorUid,actorRole);
@@ -17106,14 +17145,15 @@ async function validateV2ReceiptSource(transaction, {order,supply,reservation,it
     };
     const orderId=id(supply.orderId),itemId=id(supply.itemId),productKey=id(supply.productKey),warehouseId=id(supply.warehouseId);
     const status=normalizedOrderStatus(order),cancelled=status==='cancelled';
-    if(!Array.isArray(order.items)||!order.items.length||order.items.length>5
+    const sourceItemLimit=typeof RECEIVING_SOURCE_ITEM_LIMIT==='number'?RECEIVING_SOURCE_ITEM_LIMIT:5;
+    if(!Array.isArray(order.items)||!order.items.length||order.items.length>sourceItemLimit
         ||order.items.filter(row=>row?.itemId===itemId).length!==1
         ||!order.ownerUid||!order.salesCode||!['normal','cancelled'].includes(status)
         ||(cancelled?order.status!=='cancelled':!['active','normal'].includes(order.status))
         ||!['normal','active','cancelled','',undefined].includes(order.orderStatus)
         ||order.returnPending===true||item.transferPendingId||item.custodyTransferId
         ||integer(order.logisticsTransfersPending??0,'調撥途中')!==0)
-        throw new Error('多倉收貨只支援來源完整且無調撥的 1–5 品項訂單。');
+        throw new Error(`多倉收貨只支援來源完整且無調撥的 1–${sourceItemLimit} 品項訂單。`);
     for(const field of ['warehouseShipmentRecords','deliveryRecords','returnRecords','returnHistory']){
         if(!Array.isArray(order[field]??[]))throw new Error('多倉收貨履約紀錄格式不正確。');
     }
@@ -17274,21 +17314,15 @@ async function validateV2ReceiptSource(transaction, {order,supply,reservation,it
         ||inventory.reserved+integer(inventory.transferFreeInTransit??0,'公司途中')>integer(inventory.onHand,'公司實貨'))
         throw new Error('公司多倉庫存帳異常。');
     if(supply.type==='PURCHASING_PO'){
-        const po=await transaction.get(db.collection('purchaseOrders').doc(id(supply.purchaseDocumentId)));
-        const record=po.exists?po.data():{},links=record.supplyOrderIds;
-        // Match the actual immutable PO-line link, not a supplied array index.
-        const index=Array.isArray(links)?links.indexOf(supply.id):-1;
-        const line=Array.isArray(record.items)?record.items[index]:null;
-        if(index<0||links.filter(key=>key===supply.id).length!==1||!line
-            ||line.orderId!==orderId||line.itemId!==itemId||line.productId!==item.productId
-            ||Number(line.qty)!==supply.qty||line.warehouseId!==warehouseId
-            ||isPurchaseTerminalStatus(record.status))throw new Error('多倉收貨缺少有效供應商採購單憑證。');
+        await validateReceiptPurchaseDocument(transaction,supply,{orderId,itemId,productId:item.productId,warehouseId,fulfillmentType:'WAREHOUSE'});
     }else if(!['PURCHASING_MANUAL','SALES_SELF_ORDER'].includes(supply.type))throw new Error('不支援的多倉供應來源。');
     return warehouseShipmentContext;
 }
 
 async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',operationId='',options={}) {
-    if(globalThis.YUSHIN_V2_RECEIVING_EMULATOR===true)
+    if(globalThis.YUSHIN_V2_RECEIVING_EMULATOR===true
+        ||globalThis.YUSHIN_PREVIEW_RECEIVING===true
+        ||(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'))
         return receiveV2SupplyEmulator(supplyId,qty,lotNo,expiryDate,operationId,options);
     const actorUid=options.actorUid??currentUser?.uid,actorRole=options.actorRole??currentUserRole;
     const assertActor=(supply=null)=>{
