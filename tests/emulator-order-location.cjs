@@ -256,3 +256,93 @@ test('five-line same-product initialization retains source priority and Core sho
  const saved=await demands(f);assert.deepEqual(saved.map(d=>d?.remainingToOrderQty||0),[0,0,2,3,3]);
  assert.equal((await snapshot(f)).receipts.length,1);assert.equal((await f.read('inventory',f.p)).reserved,7);
 });
+
+// Expanded initial-only contract. Supply, receipt, logistics and production
+// remain separately gated; no source stock quantities are accepted from callers.
+async function seedLarge(tag,{count=15,distinct=false,service=false,role='purchaser'}={}){
+ const orderId='large-init-'+tag,uid=orderId+'-actor',warehouses=[orderId+'-A',orderId+'-B'];
+ const keys=Array.from({length:distinct?count:1},(_,i)=>orderId+'-P'+i),items=[],paths=[];
+ const batch=db.batch(),put=(name,id,data)=>{paths.push(name+'/'+id);batch.set(db.collection(name).doc(id),data);};
+ put('users',uid,{role,active:true});for(const wh of warehouses)put('warehouses',wh,{active:true});
+ for(const key of keys){
+  put('products',key,{productType:'Goods',active:true});
+  put('inventory',key,{productKey:key,onHand:distinct?6:7,reserved:0,incoming:100,transferFreeInTransit:0});
+  for(const [i,wh] of warehouses.entries())put('warehouseStocks',wh+'__'+key,{productKey:key,warehouseId:wh,
+   onHand:distinct?(i?5:1):(i?4:3),reserved:0,incoming:100,transferFreeInTransit:0});
+ }
+ for(let i=0;i<count;i++){
+  if(service&&i===count-1){const productId=orderId+'-service';put('products',productId,{productType:'SERVICE',active:true,serviceKind:'ONSITE_REPAIR'});
+   items.push({itemId:'I'+i,productId,productType:'SERVICE',qty:0.5,reservedQty:0,shortageQty:0,fulfillmentType:'WAREHOUSE'});continue;}
+  items.push({itemId:'I'+i,productId:keys[distinct?i:0],productType:'Goods',qty:3,orderedQty:3,
+   warehouseId:warehouses[distinct?0:i%2],fulfillmentType:'WAREHOUSE',reservedQty:0,shortageQty:3,receivedQty:0,supplyOrderedQty:0});
+ }
+ const source={ownerUid:uid,salesCode:'L15',status:'active',orderStatus:'normal',inventoryReservationStatus:'pending',
+  inventoryReservationAttemptId:orderId+'-sync',orderDate:'2026-10-27',items,deliveryRecords:[],returnRecords:[],warehouseShipmentRecords:[]};
+ put('orders',orderId,source);await batch.commit();
+ const intent={orderId,itemIds:items.map(i=>i.itemId).reverse(),warehouseIds:[...warehouses].reverse(),attemptId:'large_attempt_'+tag,syncAttemptId:source.inventoryReservationAttemptId};
+ const snap=async()=>{
+  const fixed=await Promise.all(paths.map(async path=>[path,(await db.doc(path).get()).data()]));
+  const ledgers=(await db.collection('inventoryReservations').where('orderId','==',orderId).get()).docs.map(d=>[d.id,d.data()]).sort((a,b)=>a[0].localeCompare(b[0]));
+  const receipts=(await db.collection('reservationOperationReceipts').where('orderId','==',orderId).get()).docs.map(d=>[d.id,d.data()]).sort((a,b)=>a[0].localeCompare(b[0]));
+  const movements=(await db.collection('inventoryMovements').where('sourceId','==',orderId).get()).docs.map(d=>[d.id,d.data()]).sort((a,b)=>a[0].localeCompare(b[0]));
+  return {fixed,ledgers,receipts,movements};
+ };
+ return {orderId,uid,keys,warehouses,items,source,intent,snap,run:(patch={},actor=uid,target=db)=>commitOrderTwoWarehouse(target,actor,{...intent,...patch})};
+}
+test('six and fifteen initial lines share the actual same-product balances and replay their exact operation once',async()=>{
+ for(const count of [6,15]){
+  const x=await seedLarge('same-'+count,{count});const [a,b]=await Promise.all([x.run(),x.run()]);
+  assert.ok([a,b].some(r=>r.status==='already-applied'));const order=(await db.doc('orders/'+x.orderId).get()).data();
+  assert.deepEqual(order.items.map(i=>i.reservedQty),[3,3,1,...Array(count-3).fill(0)]);
+  assert.equal(order.items.reduce((sum,i)=>sum+i.shortageQty,0),count*3-7);
+  const saved=await x.snap();assert.equal(saved.receipts.length,1);assert.equal(saved.ledgers.length,count);
+  await x.run({itemIds:[...x.intent.itemIds].reverse()});assert.deepEqual(await x.snap(),saved);
+  assert.equal((await db.doc('inventory/'+x.keys[0]).get()).data().reserved,7);
+  for(const wh of x.warehouses){const stock=(await db.doc('warehouseStocks/'+wh+'__'+x.keys[0]).get()).data();assert.equal(stock.onHand,stock.reserved);assert.equal(stock.incoming,100);}
+ }
+});
+test('fifteen distinct products stay within measured transaction budgets and keep service work out of physical reservations',async()=>{
+ for(const service of [false,true]){
+  const x=await seedLarge('budget-'+service,{distinct:true,service}),attempts=[];
+  const measured={projectId:db.projectId,collection:name=>db.collection(name),runTransaction:fn=>db.runTransaction(async tx=>{
+   const stats={reads:0,writes:0};attempts.push(stats);
+   return fn({get:async ref=>{stats.reads++;return tx.get(ref);},create:(...args)=>{stats.writes++;return tx.create(...args);},set:(...args)=>{stats.writes++;return tx.set(...args);},
+    update:(...args)=>{stats.writes++;return tx.update(...args);}});
+  })};
+  const result=await x.run({},x.uid,measured),saved=await x.snap();assert.equal(result.items.length,service?14:15);
+  for(const stats of attempts){assert.ok(stats.reads<=100,JSON.stringify(stats));assert.ok(stats.writes<=100,JSON.stringify(stats));}
+  console.log('fifteen initialization budget',JSON.stringify({service,attempts}));
+  assert.equal(saved.ledgers.length,service?14:15);assert.equal(saved.movements.length,service?28:30);
+  if(service){const order=(await db.doc('orders/'+x.orderId).get()).data();assert.deepEqual(order.items[14],x.items[14]);}
+  for(const row of result.items){assert.equal(row.reservedQty,3);assert.equal(row.shortageQty,0);assert.equal(row.locations.length,2);}
+ }
+});
+test('fifteen-line late failure, source omission, sixteen-line overflow and overlapping prior holds leave all documents unchanged',async()=>{
+ const x=await seedLarge('denied'),ref=db.doc('orders/'+x.orderId),original=(await ref.get()).data();
+ for(const patch of [
+  {items:original.items.map((row,i)=>i===14?{...row,productId:'MISSING'}:row)},
+  {items:original.items.map((row,i)=>i===14?{...row,itemId:'I0'}:row)},
+  {items:original.items.map((row,i)=>i===14?{...row,supplyOrderedQty:1}:row)}
+ ]){await ref.update(patch);const before=await x.snap();await assert.rejects(x.run());assert.deepEqual(await x.snap(),before);await ref.set(original);}
+ for(const patch of [{itemIds:x.intent.itemIds.slice(0,14)},{itemIds:[...x.intent.itemIds,'I15']}]){const before=await x.snap();await assert.rejects(x.run(patch));assert.deepEqual(await x.snap(),before);}
+ const batch=db.batch();batch.update(ref,{items:original.items.map(i=>({...i,reservedQty:3,shortageQty:0}))});
+ batch.update(db.doc('inventory/'+x.keys[0]),{reserved:3});batch.update(db.doc('warehouseStocks/'+x.warehouses[0]+'__'+x.keys[0]),{reserved:3});
+ for(const item of x.items)batch.set(db.doc('inventoryReservations/'+x.orderId+'__'+item.itemId),{orderId:x.orderId,itemId:item.itemId,productKey:x.keys[0],ownerUid:x.uid,salesCode:'L15',
+  quantity:3,shortageQty:0,status:'active',locationSchemaVersion:2,locations:[{warehouseId:x.warehouses[0],reservedQty:3}],lifecycleWarehouseIds:x.warehouses});
+ await batch.commit();const overlapping=await x.snap();await assert.rejects(x.run());assert.deepEqual(await x.snap(),overlapping);
+});
+test('parallel fifteen-line orders cannot claim the same seven units; all five roles retain live identity restrictions',async()=>{
+ const x=await seedLarge('parallel'),otherId=x.orderId+'-other',sync='large_parallel_other_sync';
+ await db.doc('orders/'+otherId).set({...x.source,inventoryReservationAttemptId:sync});
+ const other={...x.intent,orderId:otherId,syncAttemptId:sync,attemptId:'large_parallel_other_attempt'};
+ await Promise.all([x.run(),commitOrderTwoWarehouse(db,x.uid,other)]);
+ const orders=await Promise.all([x.orderId,otherId].map(async id=>(await db.doc('orders/'+id).get()).data()));
+ assert.equal(orders.flatMap(o=>o.items).reduce((sum,i)=>sum+i.reservedQty,0),7);
+ assert.equal((await db.doc('inventory/'+x.keys[0]).get()).data().reserved,7);
+ for(const role of ['sales','engineer','purchaser','warehouse','admin']){
+  const f=await seedLarge('role-'+role,{role});await f.run();await db.doc('users/'+f.uid).update({disabled:true});
+  const before=await f.snap();await assert.rejects(f.run());assert.deepEqual(await f.snap(),before);
+  if(['sales','engineer'].includes(role)){await db.doc('users/'+f.uid).update({disabled:false});await db.doc('orders/'+f.orderId).update({ownerUid:'OTHER'});
+   const reassigned=await f.snap();await assert.rejects(f.run());assert.deepEqual(await f.snap(),reassigned);}
+ }
+});

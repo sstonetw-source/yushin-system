@@ -103,3 +103,9 @@ test('whole-order lifecycle Callable uses the same isolated project and authenti
  await assert.rejects(create(env(),'production').setV2OrderLifecycle({auth:{uid:'A'},data:{}}),e=>e.code==='failed-precondition');
  assert.equal(reads,1);
 });
+
+test('obsolete isolated receipt wrapper is retired and the harness uses the canonical exported handler',()=>{
+ const handlers=createV2ReturnCallables({onCall:(_settings,fn)=>fn,HttpsError:Error,getDatabase:()=>{throw Error('not called');},env:env()});
+ assert.equal(handlers.receiveV2Supply,undefined);
+ assert.match(fs.readFileSync('tests/fixtures/v2-return-auth-functions.cjs','utf8'),/receiveV2Supply:service\.receiveV2Supply/);
+});

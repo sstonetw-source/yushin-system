@@ -674,7 +674,7 @@ test('v2 receipt over-consumption races and late failures never leave partial st
  x.c.runRoleTransaction=fn=>db.runTransaction(async tx=>fn(tx));
  await x.receive();assert.equal((await x.read('inventory',x.productKey)).onHand,8);
  const guarded=await receiptLifecycle('environment');delete guarded.c.process;
- const original=await receiptSnapshot(guarded);await assert.rejects(guarded.receive(),/僅允許 demo-yushin/);
+ const original=await receiptSnapshot(guarded);await assert.rejects(guarded.receive(),/後端尚未在此環境授權啟用/);
  assert.deepEqual(await receiptSnapshot(guarded),original);
 });
 test('v2 receiving uses three real operational roles and warehouse cost linkage, and denies both business roles',async()=>{
@@ -2051,8 +2051,8 @@ test('concurrent multi-line receipts for different products preserve the complet
 });
 test('multi-line receipt never opens browser production gates or accepts actor substitution on replay',async()=>{
  const x=await multiReceiptLifecycle('gates'),before=await multiReceiptSnapshot(x);
- delete x.c.process;await assert.rejects(x.receive('I2',1,'multi_gated_receipt'),/僅允許 demo-yushin/);assert.deepEqual(await multiReceiptSnapshot(x),before);
- x.c.process={env:{FIRESTORE_EMULATOR_HOST:''}};await assert.rejects(x.receive('I2',1,'multi_gated_receipt'),/僅允許 demo-yushin/);
+ delete x.c.process;await assert.rejects(x.receive('I2',1,'multi_gated_receipt'),/後端尚未在此環境授權啟用/);assert.deepEqual(await multiReceiptSnapshot(x),before);
+ x.c.process={env:{FIRESTORE_EMULATOR_HOST:''}};await assert.rejects(x.receive('I2',1,'multi_gated_receipt'),/後端尚未在此環境授權啟用/);
  x.c.process=process;await x.receive('I2',1,'multi_gated_receipt');const once=await multiReceiptSnapshot(x);
  await db.collection('users').doc('other-multi-receiver').set({role:'admin',active:true});receivingHarness(x.c,'other-multi-receiver','admin');
  await assert.rejects(x.receive('I2',1,'multi_gated_receipt'),/識別碼衝突/);assert.deepEqual(await multiReceiptSnapshot(x),once);
@@ -2330,7 +2330,7 @@ test('cancelled multi-item receipt exposes the original bounded free-stock recov
  const receipt=await x.read('receipts','mk_recovery');assert.equal(receipt.sourceOrderStatus,'cancelled');assert.equal(receipt.autoAllocationQty,1);assert.equal(receipt.reservationLocationSchemaVersion,2);
  const moves=await db.collection('inventoryMovements').where('receiptId','==','mk_recovery').get(),movement=moves.docs.find(s=>s.data().type==='receipt');
  const before=await wholeLifecycleSnapshot(x);await advanceReleasedV2FreeStock(db,'emulator-purchaser',{movementId:movement.id});assert.deepEqual(await wholeLifecycleSnapshot(x),before);
- delete x.c.process;await assert.rejects(x.receive('I1',1,'mk_production_gate'),/僅允許 demo-yushin/);assert.deepEqual(await wholeLifecycleSnapshot(x),before);
+ delete x.c.process;await assert.rejects(x.receive('I1',1,'mk_production_gate'),/後端尚未在此環境授權啟用/);assert.deepEqual(await wholeLifecycleSnapshot(x),before);
 });
 test('real multi-item PO shipment cancellation then two-product CLOSE permits KEEP_STOCK receipts and restores only original unshipped demand',async()=>{
  const x=await wholeLifecycleFixture('cancel-new-close');

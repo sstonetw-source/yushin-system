@@ -95,6 +95,11 @@ exports.commitServiceOrderBilling=onCall({region:'asia-east1'},async request=>{
   }
 });
 
-// Disabled in every deployed environment; enabled only by demo-yushin Emulator gate.
+// Manual purchasing has independent, default-closed Emulator/Preview/production gates.
 const {createQuickPurchaseCallable}=require('./quick-purchase-callable');
 exports.commitV2QuickPurchase=createQuickPurchaseCallable({onCall,HttpsError,getDatabase:getFirestore});
+
+// Isolated receiving migration candidate: only demo Emulator or separately
+// authorized Preview can call this, never the production project.
+const {createSupplyReceiptCallable}=require('./supply-receipt-callable');
+exports.receiveV2Supply=createSupplyReceiptCallable({onCall,HttpsError,getDatabase:getFirestore});

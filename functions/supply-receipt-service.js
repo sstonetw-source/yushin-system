@@ -8,6 +8,7 @@ const cores=Object.fromEntries(Object.entries(coreNames).map(([key,name])=>[key,
 
 const {createHash}=require('node:crypto');
 const demandCore=require('./shared/procurement-demand-core');
+const {receiptBackendProject}=require('./supply-receipt-gate');
 // Quick Purchase uses the same Receiving writer as formal PO, but has a
 // different immutable purchase witness. Verify the existing single-writer
 // operation and incoming debit before permitting any receipt-side mutation.
@@ -73,9 +74,11 @@ function receiptIntent(input){
  if(typeof input.expiryDate!=='string'||(input.expiryDate!==''&&(!/^\d{4}-\d{2}-\d{2}$/.test(input.expiryDate)||!Number.isFinite(Date.parse(input.expiryDate+'T00:00:00Z'))||new Date(input.expiryDate+'T00:00:00Z').toISOString().slice(0,10)!==input.expiryDate)))fail('invalid-argument','效期不正確');
  return {...input};
 }
-async function receiveV2Supply(db,uid,input){
+async function receiveV2Supply(db,uid,input,env=process.env){
  const intent=receiptIntent(input);
- if(!process.env.FIRESTORE_EMULATOR_HOST||db.projectId!=='demo-yushin')fail('failed-precondition','收貨後端僅允許 demo-yushin Emulator');
+ const project=receiptBackendProject(env);
+ if(!project||db.projectId!==project)
+  fail('failed-precondition','收貨後端尚未在此授權專案啟用');
  if(typeof uid!=='string'||!uid||uid.includes('/'))fail('permission-denied','登入身分不正確');
  const userRef=db.collection('users').doc(uid),profile=await userRef.get();
  const allowed=data=>data&&data.active!==false&&data.disabled!==true&&['admin','purchaser','warehouse','sales','engineer'].includes(data.role);
@@ -106,15 +109,23 @@ async function receiveV2Supply(db,uid,input){
    const ledger=await get(db.collection('inventoryReservations').doc(supply.orderId+'__'+supply.itemId));
    if(!ledger.exists||ledger.data().locationSchemaVersion!==2)fail('failed-precondition','來源未完成 v2 預留');
   }
-  // Normal 1–5-item source. The existing Receiving Service validates every
+  // Warehouse source: 1–15 items; direct shipping retains its 1–5 pilot.
+  // The existing Receiving Service validates every
   // immutable shipment/return proof and current outstanding demand, including
   // sibling reservation and receipts after partial fulfillment. Cancellation stays gated.
   // The existing Service remains authoritative for quantities and all writes.
   const previous=await get(db.collection('receipts').doc(intent.operationId));
   if(previous.exists&&!directShip&&previous.data().reservationLocationSchemaVersion!==2)
    fail('failed-precondition','原收貨憑證不是 v2 格式');
-  if(!previous.exists&&(!Array.isArray(order.items)||order.items.length<1||order.items.length>5||order.status!=='active'||order.orderStatus!=='normal'))
-   fail('failed-precondition','收貨登入試點僅支援正常 1–5 品項來源；取消尚未開放');
+  if(!previous.exists&&(!Array.isArray(order.items)||order.items.length<1||order.items.length>(directShip?5:15)||order.status!=='active'||order.orderStatus!=='normal'))
+   fail('failed-precondition',`收貨登入試點僅支援正常 1–${directShip?5:15} 品項來源；取消尚未開放`);
+  if(!previous.exists&&directShip&&supply.type==='PURCHASING_PO'){
+   const selected=order.items.filter(row=>row?.itemId===supply.itemId);
+   if(selected.length!==1||supply.warehouseId||selected[0].warehouseId)
+    fail('failed-precondition','直送來源品項或倉庫資料不一致');
+   await runtime.validateReceiptPurchaseDocument({get},{...supply,id:intent.supplyId},{orderId:supply.orderId,itemId:supply.itemId,
+    productId:selected[0].productId,warehouseId:'',fulfillmentType:'DIRECT_SHIP'});
+  }
   const orderPatches=[];
   const adapter={get,update(reference,data){
    staged.update(reference,data);
@@ -130,7 +141,8 @@ async function receiveV2Supply(db,uid,input){
   staged.flush();
   return result;
  });
- const runtime=createReceivingService({db,currentUser:{uid},currentUserRole:role,currentUserCode:String(profile.data().code||''),permissionRulesReady:false,cores,
+ const runtime=createReceivingService({db,currentUser:{uid},currentUserRole:role,currentUserCode:String(profile.data().code||''),permissionRulesReady:false,cores,receivingSourceItemLimit:15,
+  authorizeV2ReceiptActor:()=>receiptBackendProject(env)===db.projectId,
   runRoleTransaction,canConfirmSupplyReceipt:()=>true,deliveryActor:()=>actor,
   localDateString:()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()),
   firestoreReadWithTimeout:promise=>promise,
