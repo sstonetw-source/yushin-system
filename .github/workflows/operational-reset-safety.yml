@@ -6,6 +6,7 @@ on:
       - 'functions/operational-reset-policy.js'
       - 'functions/scripts/one-time-operational-reset.js'
       - 'tests/operational-reset-policy.test.js'
+      - 'docs/one-time-operational-reset.md'
       - '.github/workflows/operational-reset-safety.yml'
   workflow_dispatch:
 
