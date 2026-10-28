@@ -103,3 +103,11 @@ test('Callable rejects changed sync checkpoint and cannot bypass disabled featur
  await assert.rejects(f.call(f.intent()),e=>e.code==='functions/failed-precondition');
  assert.equal((await f.data('inventory/'+f.productKey)).reserved,0);
 });
+test('initial grouped rollout alone never enables the separate post-sync amendment mode',async()=>{
+ const f=await seeded('amend-not-enabled');
+ await db.doc('orders/'+f.orderId).update({inventoryReservationStatus:'completed'});
+ const intent=f.intent(1,4,{mode:'amend',attemptId:'amend_not_enabled_123456789'});
+ await assert.rejects(f.call(intent),e=>e.code==='functions/failed-precondition');
+ assert.equal((await f.data('inventory/'+f.productKey)).reserved,0);
+ assert.equal((await db.doc('reservationOperationReceipts/grouped-'+intent.attemptId).get()).exists,false);
+});

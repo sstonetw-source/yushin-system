@@ -13,4 +13,9 @@ function allowGroupedReservation(env=process.env){
   return id==='preview-20135' ||
     (id==='demo-yushin' && !!env.FIRESTORE_EMULATOR_HOST && !!env.FIREBASE_AUTH_EMULATOR_HOST);
 }
-module.exports={allowGroupedReservation,projectIdFromEnvironment};
+// The initial-sync Preview rollout must not implicitly authorize new
+// post-sync amendments. Each mode has an independent, default-closed flag.
+function allowGroupedReservationAmend(env=process.env){
+  return env.ENABLE_GROUPED_RESERVATION_AMEND==='true' && allowGroupedReservation(env);
+}
+module.exports={allowGroupedReservation,allowGroupedReservationAmend,projectIdFromEnvironment};

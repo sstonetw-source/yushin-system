@@ -1,6 +1,6 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
-const {allowGroupedReservation,projectIdFromEnvironment}=require('../functions/grouped-reservation-gate');
+const {allowGroupedReservation,allowGroupedReservationAmend,projectIdFromEnvironment}=require('../functions/grouped-reservation-gate');
 test('grouped reservation requires explicit flag and never accepts live production project',()=>{
  const preview={GCLOUD_PROJECT:'preview-20135',ENABLE_GROUPED_RESERVATION:'true'};
  assert.equal(allowGroupedReservation(preview),true);
@@ -20,4 +20,15 @@ test('project ID detection uses Cloud Functions environment and rejects malforme
  assert.equal(projectIdFromEnvironment({FIREBASE_CONFIG:'{"projectId":"preview-20135"}'}),'preview-20135');
  assert.equal(projectIdFromEnvironment({FIREBASE_CONFIG:'bad data'}),'');
  assert.equal(projectIdFromEnvironment({GCP_PROJECT:'yu-shing-company',GCLOUD_PROJECT:'preview-20135'}),'preview-20135');
+});
+test('post-sync amendments remain disabled under the original grouped Preview flag',()=>{
+ const preview={GCLOUD_PROJECT:'preview-20135',ENABLE_GROUPED_RESERVATION:'true'};
+ assert.equal(allowGroupedReservation(preview),true);
+ assert.equal(allowGroupedReservationAmend(preview),false);
+ assert.equal(allowGroupedReservationAmend({...preview,ENABLE_GROUPED_RESERVATION_AMEND:'true'}),true);
+ assert.equal(allowGroupedReservationAmend({...preview,ENABLE_GROUPED_RESERVATION:'false',ENABLE_GROUPED_RESERVATION_AMEND:'true'}),false);
+ assert.equal(allowGroupedReservationAmend({...preview,GCLOUD_PROJECT:'yu-shing-company',ENABLE_GROUPED_RESERVATION_AMEND:'true'}),false);
+ const demo={GCLOUD_PROJECT:'demo-yushin',ENABLE_GROUPED_RESERVATION:'true',ENABLE_GROUPED_RESERVATION_AMEND:'true'};
+ assert.equal(allowGroupedReservationAmend(demo),false);
+ assert.equal(allowGroupedReservationAmend({...demo,FIRESTORE_EMULATOR_HOST:'127.0.0.1:8080',FIREBASE_AUTH_EMULATOR_HOST:'127.0.0.1:9099'}),true);
 });
