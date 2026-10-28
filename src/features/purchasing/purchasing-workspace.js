@@ -1247,7 +1247,7 @@ const pendingPurchaseOrderKeys = new Set();
  // server commits, remainingToOrderQty is zero. Recover by original operation
  // ID from the purchasing workspace rather than opening a new purchase.
 function pendingQuickPurchaseAttempts() {
-    if(!quickPurchaseBackendPilotEnabled() || !currentUser?.uid) return [];
+    if(!currentUser?.uid || typeof sessionStorage==='undefined') return [];
     const prefix='quick-purchase-pending:'+encodeURIComponent(currentUser.uid)+':',result=[];
     for(let i=0;i<sessionStorage.length;i++) {
         const key=sessionStorage.key(i);
@@ -1278,12 +1278,13 @@ function renderQuickPurchaseRecovery() {
     const root=document.getElementById('purchasing-system');
     if(!root)return;
     const existing=document.getElementById('quickPurchaseRecoveryPanel');
-    if(!quickPurchaseBackendPilotEnabled() || !currentUser?.uid
+    if(!currentUser?.uid
         ||!canCreatePurchaseOrderCapability()||!canAccessPage('orders.po')) {
         if(existing)existing.hidden=true;
         return;
     }
     const attempts=pendingQuickPurchaseAttempts();
+    const backendEnabled=quickPurchaseBackendPilotEnabled();
     if(!attempts.length){if(existing)existing.hidden=true;return;}
     const panel=existing||document.createElement('div');
     if(!existing){
@@ -1298,9 +1299,10 @@ function renderQuickPurchaseRecovery() {
         const row=document.createElement('div'),message=document.createElement('span');
         message.textContent=attempt.invalid
             ? '前次手動採購憑證異常，請以原帳號請管理員核對，勿另建採購。'
-            : '手動採購 '+attempt.orderId+'／'+attempt.itemId+' 結果尚待確認。';
+            : '手動採購 '+attempt.orderId+'／'+attempt.itemId+' 結果尚待確認。'
+                +(backendEnabled?'':'採購核對暫停，請保留原憑證並請管理員確認，勿另建採購。');
         row.appendChild(message);
-        if(!attempt.invalid) {
+        if(!attempt.invalid && backendEnabled) {
             const button=document.createElement('button');
             button.type='button';
             button.className='btn-small';
@@ -1398,7 +1400,7 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button, recover
     try {
         const actorUid=currentUser?.uid, actorRole=currentUserRole;
         if(recoveryDetails && !quickPurchaseBackendPilotEnabled())
-            throw new Error('前次採購核對僅限已授權的 Emulator 試點。');
+            throw new Error('前次採購核對尚未啟用，請保留原憑證並請管理員確認，勿另建採購。');
         const purchaseDetails = recoveryDetails || await requestQuickPurchaseDetails(orderId, itemId);
         if (!purchaseDetails) return;
         if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;

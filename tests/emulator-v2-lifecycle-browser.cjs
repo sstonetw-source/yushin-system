@@ -299,6 +299,25 @@ for(const width of [1280,390])test('original Quick Purchase '+width+'px commits 
   if(width===1280){
    await page.locator('#quickPurchaseRecoveryPanel button').waitFor({state:'visible',timeout:45000});
    const original=calls[0];
+   // Rollout suspension must not hide the unresolved purchase or send the
+   // same intent through the legacy writer before the original ID is restored.
+   const suspended=await page.evaluate(async intent=>{
+    const key=quickPurchasePendingKey(currentUser.uid,intent.orderId,intent.itemId);
+    const before=sessionStorage.getItem(key);
+    globalThis.YUSHIN_QUICK_PURCHASE_EMULATOR=false;
+    renderQuickPurchaseRecovery();
+    let error='';
+    try{await commitQuickPurchase(intent.orderId,intent.itemId,{
+     expectedQty:intent.qty,supplier:intent.supplier,unitCost:intent.unitCost
+    });}catch(e){error=e.message;}
+    return {before,after:sessionStorage.getItem(key),error};
+   },original);
+   assert.ok(suspended.before);assert.equal(suspended.after,suspended.before);
+   assert.match(suspended.error,/禁止改用舊交易/);
+   assert.equal(calls.length,1);
+   await page.locator('#quickPurchaseRecoveryPanel').waitFor({state:'visible'});
+   assert.match(await page.locator('#quickPurchaseRecoveryPanel').textContent(),/採購核對暫停/);
+   assert.equal(await page.locator('#quickPurchaseRecoveryPanel button').count(),0);
    // Even when the ordering row disappears, the exact original attempt remains reachable.
    await siteOpen(page,'purchaser');await siteNav(page,'purchasing');
    await page.locator('#quickPurchaseRecoveryPanel button').waitFor({state:'visible'});

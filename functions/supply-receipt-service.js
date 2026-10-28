@@ -1,4 +1,5 @@
 'use strict';
+const {createReceiptTransaction}=require('./receipt-transaction');
 // Isolated Auth/Firestore adapter around the ONE existing src receiving writer.
 const createReceivingService=require('./shared/receiving-runtime');
 const stockPermissions=require('./shared/stock-permissions');
@@ -81,11 +82,7 @@ async function receiveV2Supply(db,uid,input){
  if(!profile.exists||!allowed(profile.data()))fail('permission-denied','目前沒有收貨權限');
  const role=profile.data().role,actor=String(profile.data().name||uid);
  const runRoleTransaction=callback=>db.runTransaction(async native=>{
-  const reads=new Map(),get=reference=>{
-   if(!reference.path)return native.get(reference);
-   if(!reads.has(reference.path))reads.set(reference.path,native.get(reference));
-   return reads.get(reference.path);
-  };
+  const staged=createReceiptTransaction(native),get=staged.get;
   const live=await get(userRef);
   if(!live.exists||!allowed(live.data())||live.data().role!==role)fail('permission-denied','收貨角色已變更或停用');
   const supplyRef=db.collection('supplyOrders').doc(intent.supplyId),supplySnap=await get(supplyRef);
@@ -118,19 +115,19 @@ async function receiveV2Supply(db,uid,input){
    fail('failed-precondition','原收貨憑證不是 v2 格式');
   if(!previous.exists&&(!Array.isArray(order.items)||order.items.length<1||order.items.length>5||order.status!=='active'||order.orderStatus!=='normal'))
    fail('failed-precondition','收貨登入試點僅支援正常 1–5 品項來源；取消尚未開放');
-  const pending=[],orderPatches=[];
+  const orderPatches=[];
   const adapter={get,update(reference,data){
-   pending.push(()=>native.update(reference,data));
-   if(reference.path===supplyRef.path)pending.push(()=>native.set(db.collection('receivingSupplyOrders').doc(intent.supplyId),stockPermissions.sanitizeSupply({...supply,...data})));
+   staged.update(reference,data);
+   if(reference.path===supplyRef.path)staged.set(db.collection('receivingSupplyOrders').doc(intent.supplyId),stockPermissions.sanitizeSupply({...supply,...data}));
    if(reference.path==='orders/'+supply.orderId)orderPatches.push(data);
-  },set:(...args)=>pending.push(()=>native.set(...args))};
+  },set:(...args)=>staged.set(...args)};
   const result=await callback(adapter);
   if(orderPatches.length&&order.items?.some(item=>String(item.productType||'').trim().toUpperCase()==='SERVICE')){
    const next=Object.assign({},order,...orderPatches);
    const index=await require('./service-order-fulfillment').mixedWorkIndex(db,{get},supply.orderId,next,{proofOrder:order});
-   pending.push(()=>native.update(db.collection('orders').doc(supply.orderId),index));
+   staged.update(db.collection('orders').doc(supply.orderId),index);
   }
-  pending.forEach(write=>write());
+  staged.flush();
   return result;
  });
  const runtime=createReceivingService({db,currentUser:{uid},currentUserRole:role,currentUserCode:String(profile.data().code||''),permissionRulesReady:false,cores,
