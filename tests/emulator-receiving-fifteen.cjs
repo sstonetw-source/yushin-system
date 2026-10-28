@@ -24,7 +24,7 @@ async function actor(tag,role){
  const auth=getAuth(app);connectAuthEmulator(auth,'http://127.0.0.1:9099',{disableWarnings:true});
  await signInWithEmailAndPassword(auth,email,'EmulatorOnly!123456');
  const functions=getFunctions(app,'asia-east1');connectFunctionsEmulator(functions,'127.0.0.1',5001);
- return {uid,receive:input=>httpsCallable(functions,'receiveV2Supply',{timeout:60000})(input).then(r=>r.data)};
+ return {uid,app,purchase:input=>httpsCallable(functions,'commitV2QuickPurchase',{timeout:60000})(input).then(r=>r.data),receive:input=>httpsCallable(functions,'receiveV2Supply',{timeout:60000})(input).then(r=>r.data)};
 }
 async function fixture(tag,count,{role='warehouse',...options}={}){
  const receiver=await actor(tag,role);
@@ -123,4 +123,73 @@ test('Preview-gated handler completes the fifteen-line shared writer on an expli
  await assert.rejects(handler()({data:request.data}),{code:'unauthenticated'});
  await db.doc('users/'+x.receiver.uid).update({disabled:true});
  await assert.rejects(handler()({...request,data:x.input(13,1,'later')}),{code:'permission-denied'});assert.deepEqual(await x.snapshot(),after);
+});
+
+// Source creation uses real Client Rules; only masters/opening balances are Admin fixtures.
+// Initialization retains the existing explicitly enforced Service-adapter boundary.
+test('fifteen Auth-created lines flow through initialization, manual purchasing/incoming and canonical receiving',{timeout:180000},async()=>{
+ const {orderCreationClient}=require('./fixtures/order-creation-client.cjs');
+ const {synchronizeV2OrderFixture}=require('./fixtures/v2-order-initialization.cjs');
+ const tag='created15-chain',orderId=tag+'-order',keys=[tag+'-P',tag+'-Q'],warehouses=[tag+'-A',tag+'-B'];
+ const sales=await actor(tag+'-sales','sales'),buyer=await actor(tag+'-buyer','purchaser'),warehouse=await actor(tag+'-warehouse','warehouse');
+ await db.doc('users/'+sales.uid).update({code:'B',name:'sales'});
+ const names=['orders','products','warehouses','inventory','warehouseStocks','inventoryReservations','procurementDemands',
+  'supplyOrders','receivingSupplyOrders','purchaseOperations','reservationOperationReceipts','inventoryMovements','receipts','inventoryLots','inventoryLotCosts'];
+ const owned=doc=>doc.id.includes(tag)||[doc.data().orderId,doc.data().sourceId,doc.data().productKey,doc.data().productId].some(v=>typeof v==='string'&&v.includes(tag));
+ const snapshot=async()=>Object.fromEntries(await Promise.all(names.map(async name=>[name,(await db.collection(name).get()).docs.filter(owned)
+  .map(d=>[d.id,d.data()]).sort((a,b)=>a[0].localeCompare(b[0]))])));
+ const cleanup=async()=>{
+  assert.equal(db.projectId,'demo-yushin');assert.match(process.env.FIRESTORE_EMULATOR_HOST||'',/^(localhost|127\.0\.0\.1):\d+$/);
+  const rows=await snapshot(),paths=Object.entries(rows).flatMap(([name,docs])=>docs.map(([id])=>name+'/'+id));
+  for(let i=0;i<paths.length;i+=400){const batch=db.batch();for(const path of paths.slice(i,i+400))batch.delete(db.doc(path));await batch.commit();}
+ };
+ fixtures.push({cleanup});
+ const seed=db.batch();
+ for(const id of warehouses)seed.set(db.doc('warehouses/'+id),{active:true,warehouseName:id});
+ for(const key of keys){
+  seed.set(db.doc('products/'+key),{active:true,productType:'Goods',productId:key,itemCode:key,model:key,brand:'Roche',nameCn:key});
+  seed.set(db.doc('inventory/'+key),{productId:key,productKey:key,onHand:0,reserved:0,incoming:0,transferFreeInTransit:0});
+  for(const id of warehouses)seed.set(db.doc('warehouseStocks/'+id+'__'+key),{warehouseId:id,productId:key,productKey:key,onHand:0,reserved:0,incoming:0,transferFreeInTransit:0});
+ }
+ await seed.commit();
+ const items=Array.from({length:15},(_,i)=>({itemId:'I'+i,productId:keys[i%2],itemCode:keys[i%2],itemName:keys[i%2],brand:'Roche',
+  qty:3,warehouseId:warehouses[Math.floor(i/2)%2],unitPrice:100,fulfillmentType:'WAREHOUSE',reservedQty:0,deliveredQty:0,returnedQty:0,
+  dispatchPreparedQty:0,warehouseShippedQty:0,deliveryPlan:{mode:'CUSTOMER_SHIP',contact:'測試',phone:'02-12345678',address:'測試地址'}}));
+ const source={transactionType:'借',orderNo:orderId,customerName:'15品項串接驗收',ownerUid:sales.uid,salesCode:'B',status:'active',orderStatus:'normal',
+  createdByUid:sales.uid,createdByRole:'sales',createdAt:new Date().toISOString(),productId:keys[0],productMasterMatched:true,
+  itemCount:15,orderSchemaVersion:2,orderDate:'2026-10-28',inventoryReservationStatus:'pending',inventoryReservationAttemptId:'sync_'+tag,
+  deliveryRecords:[],returnRecords:[],deliveryHistory:[],deliveredQty:0,isDelivered:false,items};
+ const creator=orderCreationClient(sales.app,sales.uid,'sales');
+ await creator.create(orderId,source);
+ assert.deepEqual((await db.doc('orders/'+orderId).get()).data(),source);
+ await synchronizeV2OrderFixture(db,buyer.uid,{orderId,warehouseIds:warehouses});
+ const initialized=(await db.doc('orders/'+orderId).get()).data();
+ assert.equal(initialized.inventoryReservationStatus,'completed');
+ assert.equal(initialized.items.length,15);
+ assert.ok(initialized.items.every(i=>i.reservedQty===0&&i.shortageQty===3));
+ const intents=items.map((row,i)=>({operationId:tag+'-purchase-'+i,orderId,itemId:row.itemId,qty:3,supplier:'Vendor',unitCost:17}));
+ const replies=[];for(const intent of intents)replies.push(await buyer.purchase(intent));
+ assert.ok(replies.every(r=>r.status==='committed'));
+ const purchased=await snapshot();
+ assert.equal(purchased.purchaseOperations.length,15);assert.equal(purchased.supplyOrders.length,15);
+ assert.equal(purchased.inventoryMovements.length,15);
+ for(const key of keys){const stock=(await db.doc('inventory/'+key).get()).data();assert.equal(stock.incoming,items.filter(i=>i.productId===key).length*3);assert.equal(stock.onHand,0);}
+ // Replaying an actual committed request (a lost-reply recovery) changes no facts.
+ assert.equal((await buyer.purchase(intents[0])).status,'already-applied');assert.deepEqual(await snapshot(),purchased);
+ const receipts=[0,14].map(i=>({supplyId:replies[i].supplyId,operationId:tag+'-receipt-'+i,qty:2,lotNo:'L'+i,expiryDate:'2028-01-01'}));
+ for(const input of receipts)assert.equal((await warehouse.receive(input)).status,'confirmed');
+ const received=await snapshot(),order=(await db.doc('orders/'+orderId).get()).data();
+ assert.equal(received.receipts.length,2);assert.equal(received.inventoryLots.length,2);assert.equal(received.inventoryLotCosts.length,2);
+ assert.equal(received.inventoryMovements.length,17);
+ for(let i=0;i<15;i++){
+  assert.equal(order.items[i].receivedQty||0,[0,14].includes(i)?2:0);
+  assert.equal(order.items[i].supplyOrderedQty,3);
+  const demand=received.procurementDemands.map(([,d])=>d).find(d=>d.sourceItemId==='I'+i);
+  assert.equal(demand.orderedQty,3);assert.equal(demand.receivedQty,[0,14].includes(i)?2:0);
+ }
+ for(const input of receipts)await warehouse.receive(input);
+ await buyer.purchase(intents[0]);assert.deepEqual(await snapshot(),received);
+ const stock=(await db.doc('inventory/'+keys[0]).get()).data();assert.equal(stock.onHand,4);assert.equal(stock.reserved,4);assert.equal(stock.incoming,20);
+ await creator.create(orderId,{...source,customerName:'stale retry'});
+ assert.deepEqual(await snapshot(),received,'same-ID creation cannot overwrite later transactions');
 });
