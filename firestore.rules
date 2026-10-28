@@ -913,13 +913,14 @@ service cloud.firestore {
       let qty = after.get('quantity', 0);
       let local = id in localIds;
       let delta = qty - oldQty;
-      let warehouseDelta = (after.get('warehouseId', '') == warehouseId ? qty : 0)
-        - (before.get('warehouseId', '') == warehouseId ? oldQty : 0);
       return {
         'valid': after.productKey == productKey && before.get('productKey', productKey) == productKey
           // Global IDs are not enough: every changed contribution to this
-          // warehouse must also appear in the primary local evidence.
-          && (warehouseDelta == 0 || local)
+          // warehouse must also appear in the primary local evidence. Only
+          // nonlocal IDs need this calculation; local IDs are already proved
+          // against the local stock counter below.
+          && (local || (after.get('warehouseId', '') == warehouseId ? qty : 0)
+            - (before.get('warehouseId', '') == warehouseId ? oldQty : 0) == 0)
           // A changed sibling cannot attach a second "primary" movement for
           // the same company delta while supplying a different local subset.
           && ((delta == 0 && after.get('warehouseId', '') == before.get('warehouseId', ''))
@@ -961,13 +962,15 @@ service cloud.firestore {
       let oldQty = before.get('quantity', 0);
       let qty = after.get('quantity', 0);
       let local = id in localIds;
-      let warehouseDelta = (after.get('warehouseId', '') == warehouseId ? qty : 0)
-        - (before.get('warehouseId', '') == warehouseId ? oldQty : 0);
+      // A local ID is already constrained to this warehouse, so its stock
+      // contribution is qty-oldQty. Only nonlocal IDs need an explicit
+      // zero-contribution check; no sibling may be silently omitted.
       return {'valid': local
           ? (qty == 0 && oldQty == 0) || (after.get('warehouseId', '') == warehouseId
             && (oldQty == 0 || before.get('warehouseId', warehouseId) == warehouseId))
-          : warehouseDelta == 0,
-        'quantity': warehouseDelta};
+          : (after.get('warehouseId', '') == warehouseId ? qty : 0)
+            - (before.get('warehouseId', '') == warehouseId ? oldQty : 0) == 0,
+        'quantity': local ? qty - oldQty : 0};
     }
     function linkedWarehouseReservationTotal(e, warehouseId) {
       let ids = e.reservationIds;
