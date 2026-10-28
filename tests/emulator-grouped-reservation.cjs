@@ -188,3 +188,28 @@ test('post-sync server writer rejects stale status and supplier progress without
   assert.deepEqual(await f.balances(),before);
   assert.equal((await db.doc('reservationOperationReceipts/grouped-'+intent.attemptId).get()).exists,false);
 });
+
+test('Emulator amendment keeps linked demand and stock consistent, and blocks supplier progress',async()=>{
+  const f=await fiveLineFixture('amend-demand');
+  const initial=f.intent([2,3,1,4,2]);
+  await f.call(initial);
+  await db.doc('orders/'+f.orderId).update({inventoryReservationStatus:'completed'});
+  const demandId='SALES_ORDER:'+f.orderId+':I1';
+  const demandRef=db.doc('procurementDemands/'+encodeURIComponent(demandId));
+  await demandRef.set({demandId,sourceType:'SALES_ORDER',sourceId:f.orderId,
+    sourceItemId:'I1',sourceItemIndex:0,productKey:f.productKey,warehouseId:'A',
+    ownerUid:'sales1',salesCode:'S01',orderedQty:0,receivedQty:0,
+    requestedQty:3,status:'PENDING',scheduleDate:'2026-10-28',createdAt:'2026-10-01'});
+  const amend=(values,attemptId)=>({...f.intent(values,attemptId),mode:'amend'});
+  const exchange=amend([1,4,2,3,2],'amend_with_demand_123456789');
+  assert.equal((await f.call(exchange)).companyReservedDelta,0);
+  assert.equal((await demandRef.get()).data().requestedQty,4);
+  assert.deepEqual(await f.balances(),{company:12,a:7,b:5,
+    order:[1,4,2,3,2],reservations:[1,4,2,3,2]});
+  await demandRef.update({orderedQty:1,status:'PARTIALLY_ORDERED'});
+  const before=await f.balances();
+  const denied=amend([0,4,2,3,2],'amend_demand_denied_123456789');
+  await assert.rejects(f.call(denied),/已有採購承諾/);
+  assert.deepEqual(await f.balances(),before);
+  assert.equal((await db.doc('reservationOperationReceipts/grouped-'+denied.attemptId).get()).exists,false);
+});

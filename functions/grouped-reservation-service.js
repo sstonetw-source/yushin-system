@@ -7,6 +7,7 @@
 const {createHash}=require('node:crypto');
 const reservationCore=require('./shared/reservation-core.js');
 const fulfillmentCore=require('./shared/fulfillment-core.js');
+const procurementDemandCore=require('./shared/procurement-demand-core.js');
 
 function fault(code,message){const error=new Error(message);error.code=code;throw error;}
 function id(value,label,max=128){
@@ -72,7 +73,8 @@ function validateSourceItem(item,order,actorRole,uid){
   if(delivered>0||returned>0||Number(item.supplyOrderedQty||0)!==0
     ||Number(item.receivedQty||0)!==0)
     fault('failed-precondition','已履約或有供應進度的品項不可用初始雙倉預留');
-  if(item.transferPendingId||item.custodyTransferId||item.dispatchPreparedQty>0)
+  if(item.transferPendingId||item.custodyTransferId||Number(item.dispatchPreparedQty||0)!==0
+    ||Number(item.warehouseShippedQty||0)!==0)
     fault('failed-precondition','調撥或出貨途中品項不可重新配置預留');
   if((item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
     ||item.productType==='Service'||item.productType==='SERVICE')
@@ -157,8 +159,36 @@ async function commitGroupedWarehouseReservation(db,uid,data){
       if(warehouseId.startsWith('custody-'))fault('failed-precondition','業務保管位置不可直接預留');
       const demand=validateSourceItem(item,order,actorRole,uid);
       if(row.quantity>demand)fault('failed-precondition','預留超過待交付數量');
+      let purchaseDemand=null;
+      if(mode==='amend'){
+        // Amendments change shortage and therefore the live purchase demand.
+        // Read it in the same transaction to fence against supplier commitments
+        // that may not yet be reflected in the order-item projection.
+        const demandId=procurementDemandCore.demandIdForSource({
+          sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:row.itemId});
+        const demandRef=ref('procurementDemands',encodeURIComponent(demandId));
+        const demandSnap=await tx.get(demandRef);
+        const beforeDemand=demandSnap.exists?demandSnap.data():null;
+        if(beforeDemand){
+          for(const [field,expected] of Object.entries({
+            demandId,sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:row.itemId,
+            productKey,warehouseId,ownerUid:order.ownerUid,salesCode:order.salesCode
+          })){
+            if(beforeDemand[field]!==expected)
+              fault('failed-precondition','既有採購需求與來源訂單不一致');
+          }
+          if(beforeDemand.sourceItemIndex!==undefined&&beforeDemand.sourceItemIndex!==-1
+            &&beforeDemand.sourceItemIndex!==index)
+            fault('failed-precondition','既有採購需求品項位置與訂單不一致');
+          if(beforeDemand.status==='CANCELLED'
+            ||!Number.isSafeInteger(beforeDemand.orderedQty)||beforeDemand.orderedQty!==0
+            ||!Number.isSafeInteger(beforeDemand.receivedQty)||beforeDemand.receivedQty!==0)
+            fault('failed-precondition','已有採購承諾或收貨進度，不可調整預留');
+        }
+        purchaseDemand={ref:demandRef,before:beforeDemand};
+      }
       keys.add(productKey);warehouses.add(warehouseId);
-      selections.push({row,item,index,productKey,warehouseId,demand});
+      selections.push({row,item,index,productKey,warehouseId,demand,purchaseDemand});
     }
     if(keys.size!==1||warehouses.size!==2)
       fault('failed-precondition','此交易限同一產品、剛好兩個實體倉庫');
@@ -193,7 +223,7 @@ async function commitGroupedWarehouseReservation(db,uid,data){
     let companyDelta=0,originalQty=0;
     const changes=[];
     for(const selection of selections){
-      const {row,item,index,warehouseId,demand}=selection;
+      const {row,item,index,warehouseId,demand,purchaseDemand}=selection;
       const reservationRef=ref('inventoryReservations',orderId+'__'+row.itemId);
       const existingSnap=await tx.get(reservationRef);
       const before=existingSnap.exists?existingSnap.data():{};
@@ -227,7 +257,7 @@ async function commitGroupedWarehouseReservation(db,uid,data){
       const target=warehouseState.get(warehouseId);
       target.delta+=delta.warehouseDeltas.find(x=>x.warehouseId===warehouseId)?.reservedDelta||0;
       changes.push({ref:reservationRef,before,after,index,quantity:row.quantity,
-        shortageQty:demand-row.quantity});
+        shortageQty:demand-row.quantity,purchaseDemand,item,warehouseId});
     }
     if(company.reserved<originalQty)fault('failed-precondition','公司預留帳小於來源訂單預留');
     const nextCompany=projectAfter(company,companyDelta,'公司');
@@ -259,6 +289,30 @@ async function commitGroupedWarehouseReservation(db,uid,data){
     }
     for(const change of changes)if(change.before.quantity!==change.quantity)
       tx.set(change.ref,change.after,{merge:true});
+    if(mode==='amend')for(const change of changes){
+      if(change.before.quantity===change.quantity)continue;
+      const {purchaseDemand,item,index,shortageQty,warehouseId}=change;
+      const previous=purchaseDemand.before;
+      const projection=procurementDemandCore.fromSalesOrder({
+        sourceId:orderId,sourceItemId:change.after.itemId,sourceItemIndex:index,
+        fulfillmentType:'WAREHOUSE',shortageQty,supplyOrderedQty:0,receivedQty:0,
+        productId:item.productId||'',productKey,itemCode:item.itemCode||'',
+        itemName:item.itemName||'',brand:item.brand||'',warehouseId,
+        ownerUid:order.ownerUid,salesCode:order.salesCode,salesName:order.salesName||'',
+        scheduleDate:previous?.scheduleDate||item.requiredByDate||item.scheduleDate
+          ||order.requiredByDate||order.expectedDate||''
+      });
+      const demandDoc=procurementDemandCore.demandDocument(projection,{
+        createdAt:previous?.createdAt||order.createdAt||now,updatedAt:now});
+      if(previous){
+        tx.update(purchaseDemand.ref,{
+          requestedQty:demandDoc.requestedQty,remainingToOrderQty:demandDoc.remainingToOrderQty,
+          remainingToReceiveQty:demandDoc.remainingToReceiveQty,perOrdered:demandDoc.perOrdered,
+          perReceived:demandDoc.perReceived,status:demandDoc.status,
+          sourceItemIndex:index,updatedAt:now
+        });
+      }else if(demandDoc.requestedQty>0)tx.create(purchaseDemand.ref,demandDoc);
+    }
     if(changes.some(c=>c.before.quantity!==c.quantity))
       tx.update(orderRef,{items:nextItems,updatedAt:now});
     tx.create(receiptRef,{action:mode==='initial'?'grouped_reservation':'grouped_reservation_amend',orderId,productKey,

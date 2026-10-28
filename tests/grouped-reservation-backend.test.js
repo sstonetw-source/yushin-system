@@ -150,7 +150,8 @@ test('source cancellation, delivery overcommit, service orders and in-transit sh
     o=>{o.items[0].fulfillmentType='DIRECT_SHIP';},
     o=>{o.items[0].productType='Service';},
     o=>{o.items[0].transferPendingId='X';},
-    o=>{o.items[0].dispatchPreparedQty=1;}
+    o=>{o.items[0].dispatchPreparedQty=1;},
+    o=>{o.items[0].warehouseShippedQty=1;}
   ]){
     const f=fixture();edit(f.docs.get('orders/O'));const before=f.snapshot();
     await assert.rejects(f.commit(),/已取消|待交付|服務|直送|途中|來源|出貨|已履約/);
@@ -263,6 +264,7 @@ test('post-sync amendments reject fulfilled or supplied items without partial wr
     item=>{item.receivedQty=1;},
     item=>{item.deliveredQty=1;},
     item=>{item.dispatchPreparedQty=1;},
+    item=>{item.warehouseShippedQty=1;},
     item=>{item.transferPendingId='TRANSIT';}
   ]){
     const f=fixture(),order=f.docs.get('orders/O');
@@ -271,6 +273,71 @@ test('post-sync amendments reject fulfilled or supplied items without partial wr
     await assert.rejects(f.commit({...f.request(1,2),mode:'amend'}),/已履約|供應進度|途中/);
     assert.equal(f.snapshot(),before);
   }
+});
+
+test('post-sync amendment updates linked purchase demands in the SAME atomic transaction',async()=>{
+  const f=fixture();await f.commit();
+  f.docs.get('orders/O').inventoryReservationStatus='completed';
+  const demandId=itemId=>'procurementDemands/'+encodeURIComponent('SALES_ORDER:O:'+itemId);
+  const demand=(itemId,index,warehouseId,requestedQty)=>({
+    demandId:'SALES_ORDER:O:'+itemId,sourceType:'SALES_ORDER',sourceId:'O',
+    sourceItemId:itemId,sourceItemIndex:index,productKey:'P',warehouseId,
+    ownerUid:'sales1',salesCode:'S01',requestedQty,orderedQty:0,
+    receivedQty:0,status:'PENDING',scheduleDate:'2026-10-28',createdAt:'2026-10-01'
+  });
+  f.set(demandId('I1'),demand('I1',0,'A',3));
+  f.set(demandId('I2'),demand('I2',1,'B',2));
+  const request={...f.request(1,4,'amend_demand_123456789'),mode:'amend'};
+  assert.equal((await f.commit(request)).companyReservedDelta,0);
+  const first=f.docs.get(demandId('I1')),second=f.docs.get(demandId('I2'));
+  assert.deepEqual([first.requestedQty,first.remainingToOrderQty,
+    second.requestedQty,second.remainingToOrderQty],[4,4,1,1]);
+  assert.equal(first.scheduleDate,'2026-10-28');
+  assert.equal(second.createdAt,'2026-10-01');
+  const snapshot=f.snapshot();
+  assert.equal((await f.commit(request)).status,'already-applied');
+  assert.equal(f.snapshot(),snapshot);
+  const release={...f.request(0,0,'amend_demand_release_123456789'),mode:'amend'};
+  await f.commit(release);
+  assert.deepEqual([f.docs.get(demandId('I1')).requestedQty,
+    f.docs.get(demandId('I2')).requestedQty],[5,5]);
+  assert.deepEqual(['inventory/P','warehouseStocks/A__P','warehouseStocks/B__P']
+    .map(k=>f.docs.get(k).reserved),[0,0,0]);
+});
+
+test('post-sync amendment fails closed on recorded supplier progress or demand identity drift',async()=>{
+  const demandId='procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I1');
+  for(const edit of [
+    d=>{d.orderedQty=1;},
+    d=>{d.receivedQty=1;},
+    d=>{d.status='CANCELLED';},
+    d=>{d.sourceId='OTHER';},
+    d=>{d.productKey='OTHER';},
+    d=>{d.warehouseId='OTHER';}
+  ]){
+    const f=fixture();await f.commit();
+    f.docs.get('orders/O').inventoryReservationStatus='completed';
+    const record={demandId:'SALES_ORDER:O:I1',sourceType:'SALES_ORDER',sourceId:'O',
+      sourceItemId:'I1',productKey:'P',warehouseId:'A',ownerUid:'sales1',
+      salesCode:'S01',orderedQty:0,receivedQty:0,status:'PENDING'};
+    edit(record);f.set(demandId,record);
+    const before=f.snapshot();
+    await assert.rejects(f.commit({...f.request(1,4,'amend_demand_guard_123456789'),mode:'amend'}),
+      /已有採購承諾|採購需求與來源訂單不一致/);
+    assert.equal(f.snapshot(),before);
+  }
+});
+
+test('post-sync amendment creates missing shortage demand without inventing supplier history',async()=>{
+  const f=fixture();await f.commit();
+  f.docs.get('orders/O').inventoryReservationStatus='completed';
+  await f.commit({...f.request(1,4,'amend_create_demand_123456789'),mode:'amend'});
+  const demandId='procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I1');
+  const demand=f.docs.get(demandId);
+  assert.equal(demand.requestedQty,4);
+  assert.equal(demand.orderedQty,0);
+  assert.equal(demand.receivedQty,0);
+  assert.equal(demand.status,'PENDING');
 });
 
 test('original initial-sync receipt fingerprint is unchanged and modes cannot reuse one ID',async()=>{
