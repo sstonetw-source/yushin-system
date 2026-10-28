@@ -13,7 +13,7 @@
 
 1. 使用者已明確授權**不備份**舊資料（2026-10-28）；這不表示可刪除主檔或整個資料庫。
 2. 必須先阻止網頁、Cloud Functions、排程與其他所有程式對交易／庫存集合寫入；命令的 `--writes-frozen` 是操作者聲明，**不是自動鎖定**。
-3. 在執行機器設定 Firebase Admin SDK Application Default Credentials，且身分必須僅對指定專案有讀取／刪除／更新 Firestore 的必要權限。不要將金鑰、登入代碼或憑證放入 GitHub 及對話。
+3. 在執行機器設定 Firebase Admin SDK Application Default Credentials（例如使用 `gcloud auth application-default login`，與 `firebase login` 不同），且身分必須對指定專案有讀取／刪除／更新 Firestore 的必要權限。不要將金鑰、登入代碼或憑證放入 GitHub 及對話。
 4. 先在 Emulator 上以可控制的測試資料完成 dry-run、刪除及殘留驗證；再對正式專案跑 dry-run 審閱筆數。
 5. 先確定 `products` 等主檔中的內嵌交易欄位及主檔子集合是否需要清理；目前腳本刻意不修改主檔，這些內容可能仍需另外盤點。
 
