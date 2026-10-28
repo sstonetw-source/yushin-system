@@ -83,7 +83,7 @@ test('reload retains operation id after lost response, and only authoritative re
   const c={
    APP_ENVIRONMENT:'emulator',YUSHIN_QUICK_PURCHASE_EMULATOR:true,
    location:{hostname:'localhost'},firebase,sessionStorage,
-   db:{collection},currentUser:{uid:'buyer'},currentUserRole:'purchaser',
+   db:{app:{options:{projectId:'demo-yushin'}},collection},currentUser:{uid:'buyer'},currentUserRole:'purchaser',
    canCreatePurchaseOrderCapability:()=>true,canAccessPage:()=>true,
    ensureFormalPurchaseFunctionsCompat:async()=>{},
    quickPurchaseSupplyId:()=>supplyId,

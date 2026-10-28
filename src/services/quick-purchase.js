@@ -23,6 +23,7 @@ async function commitQuickPurchaseBackendPilot(orderId,itemId,details,actorUid,a
         || typeof firebase==='undefined' || !firebase.auth || !firebase.app
         || firebase.app().options?.projectId!==project
         || firebase.auth().app?.options?.projectId!==project
+        || typeof db==='undefined' || db.app?.options?.projectId!==project
         || (isDemo && (!local(host) || !local(firebase.auth().emulatorConfig?.host)
             || firebase.auth().emulatorConfig?.port!==9099))
         || (isPreview && (!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(host)
@@ -52,7 +53,7 @@ async function commitQuickPurchaseBackendPilot(orderId,itemId,details,actorUid,a
     }
     await ensureFormalPurchaseFunctionsCompat();
     const functions=firebase.app().functions('asia-east1');
-    if(functions.app?.options?.projectId!==project)
+    if(functions.app?.options?.projectId!==project || db.app?.options?.projectId!==project)
         throw new Error('手動採購後端連線專案不正確，未提交採購。');
     if(isDemo)functions.useEmulator('127.0.0.1',5001);
     const check=()=>{assertActor();

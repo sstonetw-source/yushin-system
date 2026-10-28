@@ -100,7 +100,7 @@ test('quick purchase original Service routes demo-only pilot to Callable with st
     supplyId:'manual-o-i',demandId:'d',committedQty:2}};
   }};
  x.c.APP_ENVIRONMENT='emulator';x.c.YUSHIN_QUICK_PURCHASE_EMULATOR=true;
- x.c.location={hostname:'localhost'};x.c.db=db;
+ x.c.location={hostname:'localhost'};x.c.db={...db,app:{options:opts}};
  x.c.firebase={auth:()=>auth,functions:()=>functions,app:()=>({options:opts,functions:()=>functions})};
  x.c.ensureFormalPurchaseFunctionsCompat=async()=>{};
  x.c.sessionStorage={getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)};
@@ -122,6 +122,7 @@ test('quick purchase pilot flag never falls back outside local demo, or on corru
  assert.equal(x.writes.length,0);
  x.c.APP_ENVIRONMENT='emulator';x.c.location={hostname:'localhost'};
  const opts={projectId:'demo-yushin'};
+ x.c.db={...x.c.db,app:{options:opts}};
  const auth={app:{options:opts},emulatorConfig:{host:'127.0.0.1',port:9099},currentUser:{uid:'buyer'}};
  x.c.firebase={auth:()=>auth,functions:()=>({}),app:()=>({options:opts})};
  x.c.sessionStorage={getItem:()=>'{corrupt checkpoint',setItem:()=>{},removeItem:()=>{}};
