@@ -5,6 +5,10 @@ function quickPurchaseBackendPilotEnabled() {
             || (APP_ENVIRONMENT === 'preview' && globalThis.YUSHIN_PREVIEW_QUICK_PURCHASE === true)
             || (APP_ENVIRONMENT === 'production' && globalThis.YUSHIN_PRODUCTION_QUICK_PURCHASE === true));
 }
+function quickPurchasePendingKey(actorUid,orderId,itemId) {
+    return 'quick-purchase-pending:'+encodeURIComponent(actorUid)+':'
+        +encodeURIComponent(orderId)+':'+encodeURIComponent(itemId);
+}
 async function commitQuickPurchaseBackendPilot(orderId,itemId,details,actorUid,assertActor) {
     const local=host=>['localhost','127.0.0.1'].includes(host);
     const host=String(globalThis.location?.hostname||'').toLowerCase();
@@ -32,8 +36,7 @@ async function commitQuickPurchaseBackendPilot(orderId,itemId,details,actorUid,a
     if(!Number.isSafeInteger(details.expectedQty) || details.expectedQty<=0 || details.expectedQty>1000000)
         throw new Error('手動採購數量不正確，未提交採購。');
     const qty=details.expectedQty, supplier=details.supplier,unitCost=details.unitCost;
-    const key='quick-purchase-pending:'+encodeURIComponent(actorUid)+':'
-        +encodeURIComponent(orderId)+':'+encodeURIComponent(itemId);
+    const key=quickPurchasePendingKey(actorUid,orderId,itemId);
     const fingerprint=JSON.stringify([actorUid,orderId,itemId,qty,supplier,unitCost]);
     let pending;
     try {
@@ -112,9 +115,19 @@ async function commitQuickPurchase(orderId, itemId, purchaseDetails, actorUid=cu
             if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) throw new Error('目前無採購作業權限。');
         };
         assertActor();
+        // An unresolved backend attempt remains authoritative even if rollout
+        // flags are disabled after a lost reply. Never send it to the old writer.
+        let pendingBackendAttempt=false;
+        try {
+            pendingBackendAttempt=typeof sessionStorage!=='undefined'
+                && sessionStorage.getItem(quickPurchasePendingKey(actorUid,orderId,itemId))!==null;
+        } catch (_) {
+            throw new Error('前次採購憑證無法讀取，請先核對採購結果，勿另建採購。');
+        }
         if(globalThis.YUSHIN_QUICK_PURCHASE_EMULATOR===true
             || globalThis.YUSHIN_PREVIEW_QUICK_PURCHASE===true
             || globalThis.YUSHIN_PRODUCTION_QUICK_PURCHASE===true
+            || pendingBackendAttempt
             || (typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='preview')) {
             if(!quickPurchaseBackendPilotEnabled())
                 throw new Error('手動採購後端尚未在目前環境啟用，禁止改用舊交易。');
