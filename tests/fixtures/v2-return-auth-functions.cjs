@@ -18,7 +18,8 @@ const previewPurchase=require(path.join(root,'functions/formal-purchase-preview-
  .createPreviewFormalPurchaseCallable({onCall,HttpsError,getDatabase:getFirestore});
 const quickPurchase=require(path.join(root,'functions/quick-purchase-callable'))
  .createQuickPurchaseCallable({onCall,HttpsError,getDatabase:getFirestore});
-module.exports={...standard,shipV2WarehouseItem:service.shipV2WarehouseItem,
+module.exports={...standard,prepareV2OrderDispatch:service.prepareV2OrderDispatch,
+ shipV2WarehouseItem:service.shipV2WarehouseItem,
  receiveV2Supply:service.receiveV2Supply,commitV2FormalPurchase:previewPurchase,commitV2QuickPurchase:quickPurchase,
  commitServiceCaseEvent:service.commitServiceCaseEvent,
  getServiceCaseStatus:service.getServiceCaseStatus,

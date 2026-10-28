@@ -104,6 +104,11 @@ exports.commitV2QuickPurchase=createQuickPurchaseCallable({onCall,HttpsError,get
 const {createSupplyReceiptCallable}=require('./supply-receipt-callable');
 exports.receiveV2Supply=createSupplyReceiptCallable({onCall,HttpsError,getDatabase:getFirestore});
 
+// Explicitly gated dispatch-preparation Preview candidate. It only changes
+// paperwork preparation, not physical shipment or customer delivery.
+const {createDispatchPreparationCallable}=require('./dispatch-preparation-callable');
+exports.prepareV2OrderDispatch=createDispatchPreparationCallable({onCall,HttpsError,getDatabase:getFirestore});
+
 // Physical customer shipment is a separate atomic transaction from paperwork.
 // Both the demo Emulator and Preview gates are disabled unless independently
 // authorized; production has no enablement path.

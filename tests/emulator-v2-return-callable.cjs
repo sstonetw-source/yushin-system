@@ -143,8 +143,8 @@ async function dispatchUI(x,actor=x.actor,role='purchaser',{storage=new Map(),lo
   sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},
   document:{getElementById:()=>null},renderOrdersList(){},renderPurchasingDispatchOrders(){},renderPurchasingView(){},renderDeliveryModal(){},
   syncOrderIntoPurchasingCaches(){},writeAppDataCache(){},alert:m=>alerts.push(m),runRoleTransaction:()=>{throw Error('v2 cannot use the legacy transaction');},
-  db:{collection:n=>({doc:id=>{const ref=id?doc(live,n,id):doc(collection(live,n));return {id:ref.id,get:async()=>{const s=await getDoc(ref);return {exists:s.exists(),data:()=>s.data()};}};}})},
-  firebase:{app(){return {functions:region=>this.functions(region)};},auth:()=>actor.auth,functions:()=>({app:actor.app,useEmulator:(host,port)=>connectFunctionsEmulator(actor.functions,host,port),
+  db:{app:actor.app,collection:n=>({doc:id=>{const ref=id?doc(live,n,id):doc(collection(live,n));return {id:ref.id,get:async()=>{const s=await getDoc(ref);return {exists:s.exists(),data:()=>s.data()};}};}})},
+  firebase:{app(){return {options:actor.app.options,functions:region=>this.functions(region)};},auth:()=>actor.auth,functions:()=>({app:actor.app,useEmulator:(host,port)=>connectFunctionsEmulator(actor.functions,host,port),
    httpsCallable:name=>async data=>{calls.push({name,data});const reply=await httpsCallable(actor.functions,name)(data);if(lose){lose=false;throw Error('UI Callable reply lost');}return reply;}})}});
  c.window=c;const workspace=fs.readFileSync('src/features/orders/order-workspace.js','utf8');
  const section=(a,b)=>workspace.slice(workspace.indexOf(a),workspace.indexOf(b,workspace.indexOf(a)));
