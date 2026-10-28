@@ -62,7 +62,8 @@ test('unknown Service errors are sanitized by shipment Callable',async()=>{
 test('shipment Callable export exists while legacy test-only endpoints remain unexported',()=>{
  const index=fs.readFileSync('functions/index.js','utf8');
  assert.match(index,/exports\.shipV2WarehouseItem\s*=\s*createWarehouseShipmentCallable/);
- assert.doesNotMatch(index,/v2-return-callable-adapter|confirmV2ShipmentDelivery|reverseV2ShipmentDelivery/);
+ assert.match(index,/exports\.confirmV2ShipmentDelivery\s*=\s*createDeliveryConfirmationCallable/);
+ assert.doesNotMatch(index,/v2-return-callable-adapter|reverseV2ShipmentDelivery/);
  const integration=fs.readFileSync('tests/fixtures/v2-return-auth-functions.cjs','utf8');
  assert.match(integration,/shipV2WarehouseItem:service\.shipV2WarehouseItem/);
 });

@@ -274,7 +274,7 @@ function orderContextActionState(order, normalizedItems = null, dispatchStateByI
         return ordered > 0 && received > 0 && received < ordered && Number(state?.shippable || 0) > 0;
     });
     let showPartialDelivery=hasPartialArrival || (items.length > 1 && states.some(state => Number(state?.shippable || 0) > 0));
-    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true){
+    if(deliveryConfirmationProtectedMode()){
         try{
             // Customer acknowledgement consumes shipped quota. Once all printed
             // goods leave the warehouse, shippable is zero but arrival is pending.

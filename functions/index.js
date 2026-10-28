@@ -109,6 +109,11 @@ exports.receiveV2Supply=createSupplyReceiptCallable({onCall,HttpsError,getDataba
 const {createDispatchPreparationCallable}=require('./dispatch-preparation-callable');
 exports.prepareV2OrderDispatch=createDispatchPreparationCallable({onCall,HttpsError,getDatabase:getFirestore});
 
+// Customer acknowledgement is independent of shipment stock accounting.
+// Production cannot enable this explicitly gated Emulator/Preview candidate.
+const {createDeliveryConfirmationCallable}=require('./delivery-confirmation-callable');
+exports.confirmV2ShipmentDelivery=createDeliveryConfirmationCallable({onCall,HttpsError,getDatabase:getFirestore});
+
 // Physical customer shipment is a separate atomic transaction from paperwork.
 // Both the demo Emulator and Preview gates are disabled unless independently
 // authorized; production has no enablement path.

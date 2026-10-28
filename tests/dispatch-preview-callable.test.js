@@ -64,5 +64,6 @@ test('production index exposes independently gated dispatch and shipment, never 
  const index=fs.readFileSync('functions/index.js','utf8');
  assert.match(index,/exports\.prepareV2OrderDispatch\s*=\s*createDispatchPreparationCallable/);
  assert.match(index,/exports\.shipV2WarehouseItem\s*=\s*createWarehouseShipmentCallable/);
- assert.doesNotMatch(index,/v2-return-callable-adapter|confirmV2ShipmentDelivery/);
+ assert.match(index,/exports\.confirmV2ShipmentDelivery\s*=\s*createDeliveryConfirmationCallable/);
+ assert.doesNotMatch(index,/v2-return-callable-adapter|reverseV2ShipmentDelivery/);
 });

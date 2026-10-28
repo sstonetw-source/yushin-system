@@ -55,11 +55,11 @@ test('acknowledgement retry intent binds source shipment, date, quantity, notes 
  for(const patch of [{actorRole:'admin'},{quantity:'2'},{quantity:0},{date:'2026-02-30'},
   {shipmentId:'../bad'},{operationId:'bad'},{notes:[]}])assert.throws(()=>normalizeDeliveryIntent(request(patch)));
 });
-test('acknowledgement writer stays Emulator-only and has no public Callable export',async()=>{
- await assert.rejects(commitShipmentDelivery({projectId:'production'},'actor',request()),/僅允許/);
+test('acknowledgement writer rejects production and ungated demo; direct Service is not exported',async()=>{
+ await assert.rejects(commitShipmentDelivery({projectId:'production'},'actor',request()),/未獲專案授權/);
  const host=process.env.FIRESTORE_EMULATOR_HOST;
  try{delete process.env.FIRESTORE_EMULATOR_HOST;
-  await assert.rejects(commitShipmentDelivery({projectId:'demo-yushin'},'actor',request()),/僅允許/);
+  await assert.rejects(commitShipmentDelivery({projectId:'demo-yushin'},'actor',request()),/未獲專案授權/);
  }finally{if(host!==undefined)process.env.FIRESTORE_EMULATOR_HOST=host;}
  assert.doesNotMatch(fs.readFileSync('functions/index.js','utf8'),/commitShipmentDelivery/);
 });

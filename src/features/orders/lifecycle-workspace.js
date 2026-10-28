@@ -89,7 +89,7 @@ window.openPartialDeliveryForm = function() {
     if (normalizedOrderStatus(order) !== 'normal') { alert('已取消的訂單不能新增送貨紀錄。'); return; }
     const progress = deliveryProgressInfo(order);
     let awaitingConfirmation=false;
-    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true){
+    if(deliveryConfirmationProtectedMode()){
         try{awaitingConfirmation=!!pendingV2DeliveryConfirmation(order.id);}
         catch(error){alert(error.message);return;}
     }
@@ -100,7 +100,7 @@ window.openPartialDeliveryForm = function() {
     document.getElementById('deliveryQty').value = '';
     // The original renderer restores the frozen acknowledgement after reload;
     // opening the form must not erase its quantity or shipment selection.
-    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true)renderDeliveryModal();
+    if(deliveryConfirmationProtectedMode())renderDeliveryModal();
     document.getElementById('deliveryDate').focus();
 };
 

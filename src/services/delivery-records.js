@@ -1,6 +1,18 @@
-// Emulator-only bridge. A customer acknowledgement never writes physical stock.
+// Customer acknowledgement never writes physical stock. Preview is opt-in,
+// but all Preview delivery mutations remain fail-closed if the gate is off.
+function deliveryConfirmationProtectedMode(){
+ return globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true
+  ||globalThis.YUSHIN_PREVIEW_DELIVERY_CONFIRMATION===true
+  ||(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview');
+}
+function assertNoUnresolvedV2DeliveryBeforeLegacyWrite(orderId){
+ if(typeof sessionStorage==='undefined'||!currentUser?.uid)return;
+ const key='v2-delivery:'+encodeURIComponent(currentUser.uid)+':'+encodeURIComponent(orderId);
+ if(sessionStorage.getItem(key)!==null)
+  throw Error('前次 v2 送達仍待確認，禁止改用舊交易；請恢復原受控環境並以相同識別碼核對。');
+}
 function pendingV2DeliveryConfirmation(orderId){
- if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR!==true)return null;
+ if(!deliveryConfirmationProtectedMode())return null;
  const key='v2-delivery:'+encodeURIComponent(currentUser?.uid||'')+':'+encodeURIComponent(orderId);
  const raw=sessionStorage.getItem(key);
  if(!raw)return null;
@@ -28,8 +40,33 @@ function v2DeliveryEmulatorTransport(){
  };
  check();return {uid,role,functions,check};
 }
+function v2DeliveryConfirmationTransport(){
+ if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true)
+  return {...v2DeliveryEmulatorTransport(),emulator:true};
+ const preview=typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'
+  &&globalThis.YUSHIN_PREVIEW_DELIVERY_CONFIRMATION===true;
+ const host=String(globalThis.location?.hostname||'').toLowerCase();
+ if(!preview||!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(host)
+  ||typeof firebase==='undefined'||!firebase.auth||!firebase.functions)
+  throw Error('送達確認後端尚未在此 Preview 獲准啟用，禁止改用舊交易。');
+ const auth=firebase.auth(),functions=firebase.app().functions('asia-east1');
+ if(firebase.app().options?.projectId!=='preview-20135'
+  ||auth.app?.options?.projectId!=='preview-20135'
+  ||functions.app?.options?.projectId!=='preview-20135'
+  ||typeof db==='undefined'||db.app?.options?.projectId!=='preview-20135'
+  ||!!auth.emulatorConfig)
+  throw Error('送達確認 Auth、Functions 與資料庫專案不一致，未提交送達。');
+ const uid=currentUser?.uid,role=currentUserRole;
+ const check=()=>{
+  if(!uid||auth.currentUser?.uid!==uid||currentUser?.uid!==uid||currentUserRole!==role
+   ||!['admin','sales','engineer'].includes(role)
+   ||!canManageOrderLifecycleCapability()||!canEditPage('orders.list'))
+   throw Error('登入身分或送達作業權限已變更。');
+ };
+ check();return {uid,role,functions,check,emulator:false};
+}
 async function confirmV2ShipmentDeliveryEmulator(orderId,{date,qty,notes='',itemId='',shipmentId='',recordId}){
- const {uid,role,functions,check}=v2DeliveryEmulatorTransport();
+ const {uid,role,functions,check,emulator}=v2DeliveryConfirmationTransport();
  if(pendingV2DeliveryReversal(orderId))throw Error('尚有未確認的送達撤銷，請先核對原操作。');
  if(!Number.isSafeInteger(qty)||qty<=0||typeof date!=='string'
   ||!/^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.test(date)
@@ -63,7 +100,7 @@ async function confirmV2ShipmentDeliveryEmulator(orderId,{date,qty,notes='',item
    operationId:recordId,syncAttemptId:order.inventoryReservationAttemptId,actorUid:uid,actorRole:role};
   sessionStorage.setItem(key,JSON.stringify(frozen));
  }
- check();functions.useEmulator('127.0.0.1',5001);
+ check();if(emulator)functions.useEmulator('127.0.0.1',5001);
  const {actorUid,actorRole,...payload}=frozen;
  const response=await functions.httpsCallable('confirmV2ShipmentDelivery')(payload);check();
  const data=response?.data;
@@ -150,7 +187,8 @@ function deliveryRecordWasReversed(order,recordId) {
 }
 
 async function completeOrderDelivery(orderId,today) {
-    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true)throw Error('v2 送達必須逐筆對應原出貨；不可使用一般送貨或更正扣帳。');
+    if(deliveryConfirmationProtectedMode())throw Error('v2 送達必須逐筆對應原出貨；不可使用一般送貨或更正扣帳。');
+    assertNoUnresolvedV2DeliveryBeforeLegacyWrite(orderId);
     const actor=deliveryActor(),now=new Date().toISOString(),recordId=deliveryRecordId();
     let savedOrder;
     await runRoleTransaction(async transaction => {
@@ -202,7 +240,8 @@ async function completeOrderDelivery(orderId,today) {
 }
 
 async function cancelOrderDeliveries(orderId) {
-    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true)throw Error('v2 送達必須逐筆對應原出貨；不可使用一般送貨或更正扣帳。');
+    if(deliveryConfirmationProtectedMode())throw Error('v2 送達必須逐筆對應原出貨；不可使用一般送貨或更正扣帳。');
+    assertNoUnresolvedV2DeliveryBeforeLegacyWrite(orderId);
     const actor=deliveryActor(),now=new Date().toISOString();
     let savedOrder;
     await runRoleTransaction(async transaction => {
@@ -236,10 +275,11 @@ async function cancelOrderDeliveries(orderId) {
 }
 
 async function saveOrderDeliveryRecord(orderId,{date,qty,notes='',editId='',itemId='',recordId,shipmentId=''}) {
-    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true){
+    if(deliveryConfirmationProtectedMode()){
         if(editId)throw Error('v2 已確認的送達紀錄不可直接編輯，請改用送達撤銷流程。');
         return confirmV2ShipmentDeliveryEmulator(orderId,{date,qty,notes,itemId,shipmentId,recordId});
     }
+    assertNoUnresolvedV2DeliveryBeforeLegacyWrite(orderId);
     if(!date||typeof qty!=='number'||!Number.isFinite(qty)||qty<=0)
         throw new Error('請填寫送貨日期與大於 0 的送貨數量。');
     if(!editId&&(typeof recordId!=='string'||!recordId.trim()))throw new Error('缺少送貨作業識別碼，請重新開啟表單。');
@@ -330,7 +370,8 @@ async function saveOrderDeliveryRecord(orderId,{date,qty,notes='',editId='',item
 }
 
 async function correctOrderDeliveryRecord(orderId,recordId,correctionReason) {
-    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true)throw Error('v2 送達必須逐筆對應原出貨；不可使用一般送貨或更正扣帳。');
+    if(deliveryConfirmationProtectedMode())throw Error('v2 送達必須逐筆對應原出貨；不可使用一般送貨或更正扣帳。');
+    assertNoUnresolvedV2DeliveryBeforeLegacyWrite(orderId);
     if(typeof correctionReason!=='string'||!correctionReason.trim())throw new Error('請填寫誤登更正原因。');
     const actor=deliveryActor(),now=new Date().toISOString();
     let savedOrder;
