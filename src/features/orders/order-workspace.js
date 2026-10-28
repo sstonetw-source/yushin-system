@@ -236,7 +236,7 @@ function orderLifecycleActionButtons(order, lifecycle, progress, actions) {
     if (pendingLifecycleOrderIds.has(order.id)) return '<button type="button" disabled>處理中…</button>';
     const id = inlineJsValue(order.id);
     try{
-        const retry=globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true?pendingV2OrderLifecycle(order.id):null;
+        const retry=lifecycleProtectedMode()?pendingV2OrderLifecycle(order.id):null;
         if(retry)return `<button type="button" onclick="quickSetOrderLifecycle(${id}, ${inlineJsValue(retry.nextStatus)})">確認前次取消／恢復結果</button>`;
     }catch(err){return `<span role="alert">${escapeHtml(err.message)}</span>`;}
     const buttons = [];

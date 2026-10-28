@@ -114,3 +114,8 @@ exports.prepareV2OrderDispatch=createDispatchPreparationCallable({onCall,HttpsEr
 // authorized; production has no enablement path.
 const {createWarehouseShipmentCallable}=require('./warehouse-shipment-callable');
 exports.shipV2WarehouseItem=createWarehouseShipmentCallable({onCall,HttpsError,getDatabase:getFirestore});
+
+// Whole-order cancellation/restoration is a separate default-closed Preview
+// transaction; the old client writer remains until a later rollout approval.
+const {createOrderLifecycleCallable}=require('./order-lifecycle-preview-callable');
+exports.setV2OrderLifecycle=createOrderLifecycleCallable({onCall,HttpsError,getDatabase:getFirestore});
