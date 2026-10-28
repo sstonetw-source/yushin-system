@@ -12,7 +12,8 @@ concurrency:
   group: regression-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 jobs:
-  regression:
+  source:
+    name: source-and-node
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -53,62 +54,123 @@ jobs:
           node --check functions/index.js
       - name: All application regression tests
         run: node --test $(find tests -maxdepth 1 -name '*.test.js' ! -name 'firestore-rules.test.js' | sort)
-      - name: Install shared browser and Firestore integration dependencies once
+
+  # Each browser matrix entry uses its own runner and Chrome process. These
+  # retain all 17 original smoke scripts without sharing mutable test state.
+  browser:
+    name: browser-${{ matrix.group }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [layout, workflow]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-regression-${{ runner.os }}-node22-${{ hashFiles('functions/package.json') }}-v1
+      - name: Install browser integration dependencies
         run: npm install --no-save --no-package-lock @firebase/rules-unit-testing firebase firebase-admin@14.2.0 playwright-core@1.56.0 esbuild@0.25.0 html2canvas@1.4.1 jspdf@2.5.2
-      - name: Check shared buttons in desktop and mobile Chrome
-        run: node tests/ui-control-browser-smoke.js
-      - name: Check numeric wheel input and scroll behavior
-        run: node tests/number-wheel-browser-smoke.js
-      - name: Check per-item service progress in desktop and mobile Chrome
-        run: node tests/service-progress-browser-smoke.js
-      - name: Check quick-created product brand discovery
-        run: node tests/quick-brand-browser-smoke.js
-      - name: Check warm sand typography and page alignment
-        run: node tests/warm-sand-browser-smoke.js
-      - name: Check four workspace improvements in desktop and mobile Chrome
-        run: node tests/workspace-four-improvements-browser-smoke.js
-      - name: Check unified order and purchasing work-list presentation
-        run: node tests/workspace-display-browser-smoke.js
-      - name: Check order entry in desktop and mobile Chrome
-        run: node tests/order-entry-browser-smoke.js
-      - name: Check direct arrival and source retry for five roles in desktop and mobile Chrome
-        run: node tests/workflow-audit-browser-smoke.js
-      - name: Check free stock recovery in desktop and mobile Chrome
-        run: node tests/free-stock-recovery-browser-smoke.js
-      - name: Check reconciled product search and margin privacy in desktop and mobile Chrome
-        run: node tests/pr-reconciliation-browser-smoke.js
-      - name: Check company frequent products and public copy in desktop and mobile Chrome
-        run: node tests/frequent-products-browser-smoke.js
-      - name: Check authoritative lot display and batch search in desktop and mobile Chrome
-        run: node tests/inventory-lot-browser-smoke.js
-      - name: Check shared dispatch preparation and cross-page retries in desktop and mobile Chrome
-        run: node tests/dispatch-preparation-browser-smoke.js
-      - name: Check v2 customer delivery original form in desktop and mobile Chrome
-        run: node tests/delivery-confirmation-browser-smoke.js
-      - name: Check v2 lifecycle original quick and form actions in desktop and mobile Chrome
-        run: node tests/lifecycle-browser-smoke.js
-      - name: Check customer return receiving Service in desktop and mobile Chrome
-        run: node tests/customer-return-browser-smoke.js
+      - name: Chrome layout, search, documents and order entry
+        if: matrix.group == 'layout'
+        run: |
+          node tests/ui-control-browser-smoke.js
+          node tests/number-wheel-browser-smoke.js
+          node tests/quick-brand-browser-smoke.js
+          node tests/warm-sand-browser-smoke.js
+          node tests/workspace-four-improvements-browser-smoke.js
+          node tests/workspace-display-browser-smoke.js
+          node tests/order-entry-browser-smoke.js
+          node tests/frequent-products-browser-smoke.js
+          node tests/inventory-lot-browser-smoke.js
+      - name: Chrome service, stock, dispatch, delivery and returns
+        if: matrix.group == 'workflow'
+        run: |
+          node tests/service-progress-browser-smoke.js
+          node tests/workflow-audit-browser-smoke.js
+          node tests/free-stock-recovery-browser-smoke.js
+          node tests/pr-reconciliation-browser-smoke.js
+          node tests/dispatch-preparation-browser-smoke.js
+          node tests/delivery-confirmation-browser-smoke.js
+          node tests/lifecycle-browser-smoke.js
+          node tests/customer-return-browser-smoke.js
+
+  # Every Emulator matrix entry starts on a separate runner: the fixed
+  # localhost ports and test data never overlap. Internal suite ordering stays
+  # unchanged; only independent Emulator instances run concurrently.
+  emulator:
+    name: emulator-${{ matrix.suite }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [grouped, callables, v2-callable, v2-browser, stock, rules]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Set up Java 21 for Firestore emulator
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
-      - name: Emulator Admin SDK grouped reservation integration
-        run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --test tests/emulator-grouped-reservation.cjs"
-      - name: Install Functions runtime for real callable emulator
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.npm
+            ~/.cache/firebase/emulators
+          key: firebase-regression-${{ runner.os }}-node22-${{ hashFiles('functions/package.json') }}-v1
+      - name: Install Firestore integration dependencies
+        run: npm install --no-save --no-package-lock @firebase/rules-unit-testing firebase firebase-admin@14.2.0 playwright-core@1.56.0 esbuild@0.25.0 html2canvas@1.4.1 jspdf@2.5.2
+      - name: Install Functions runtime for callable suites
+        if: matrix.suite == 'callables' || startsWith(matrix.suite, 'v2-')
         run: npm install --prefix functions --no-save --no-package-lock
+      - name: Emulator Admin SDK grouped reservation integration
+        if: matrix.suite == 'grouped'
+        run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --test tests/emulator-grouped-reservation.cjs"
       - name: Preview Callable Auth + Functions + Firestore Emulator integration
+        if: matrix.suite == 'callables'
         env:
           ENABLE_GROUPED_RESERVATION: "true"
           ENABLE_SERVICE_CASE_EMULATOR: "true"
           ENABLE_QUICK_PURCHASE_EMULATOR: "true"
         run: npx --yes firebase-tools@15 emulators:exec --only firestore,auth,functions --project demo-yushin "node --test --test-concurrency=1 tests/emulator-grouped-reservation-callable.cjs tests/emulator-service-case-callable.cjs tests/emulator-quick-purchase-callable.cjs"
-      - name: Verify v2 Auth Callables and real browser lifecycle handoff in isolated demo Emulator
-        run: node tools/run-v2-return-auth-emulator.cjs
+      - name: Verify v2 Auth Callables and 15-item receiving in isolated demo Emulator
+        if: matrix.suite == 'v2-callable'
+        run: node tools/run-v2-return-auth-emulator.cjs --suite=callable
+      - name: Verify original Chrome lifecycle handoff in isolated demo Emulator
+        if: matrix.suite == 'v2-browser'
+        run: node tools/run-v2-return-auth-emulator.cjs --suite=browser
       - name: Verify single-item and whole-order dual-warehouse atomic reservation in Emulator
+        if: matrix.suite == 'stock'
         run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --test tests/emulator-single-item-location.cjs tests/emulator-order-location.cjs"
       - name: Verify shipment, delivery correction and physical return receipt in Emulator
+        if: matrix.suite == 'stock'
         run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --test tests/emulator-location-shipment.cjs"
       - name: Compile and test Firestore rules
+        if: matrix.suite == 'rules'
         run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --max-old-space-size=4096 --test tests/firestore-rules.test.js"
+
+  # Keep the existing required check named exactly "regression". A failure,
+  # cancellation or skip in any full-suite group must fail this merge gate.
+  regression:
+    name: regression
+    if: always()
+    needs: [source, browser, emulator]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all regression groups to pass
+        env:
+          SOURCE_RESULT: ${{ needs.source.result }}
+          BROWSER_RESULT: ${{ needs.browser.result }}
+          EMULATOR_RESULT: ${{ needs.emulator.result }}
+        run: |
+          printf 'source=%s browser=%s emulator=%s\n' "$SOURCE_RESULT" "$BROWSER_RESULT" "$EMULATOR_RESULT"
+          test "$SOURCE_RESULT" = success
+          test "$BROWSER_RESULT" = success
+          test "$EMULATOR_RESULT" = success
