@@ -3221,6 +3221,77 @@ test('native corruption of company warehouse or proof metadata cannot bypass cro
   assert.equal((await getDoc(doc(db('admin'),'inventoryMovements/'+f.id+'-1-A'))).exists(),false);
  }
 });
+// The transaction envelope is deliberately written with the native SDK, not
+// stockPermissions.run: a trusted UI wrapper cannot be the Rules boundary.
+async function splitSameWarehouseProofFixture(uid,kind,complete=false){
+ const orderId='proof-'+uid+'-'+kind+(complete?'-complete':'');
+ const warehouseIds=kind==='linked'?['A','B','B']:['A','A'];
+ const productKey='P-'+orderId,ids=warehouseIds.map((_,i)=>orderId+'__I'+i);
+ const groups=kind==='linked'?(complete?[[0],[1,2]]:[[0],[1],[2]])
+  :kind==='duplicate'?[[0,1],[0,1]]:(complete?[[0,1]]:[[0],[1]]);
+ await seed('orders/'+orderId,{ownerUid:'sales1',salesCode:'S01',status:'active',inventoryReservationStatus:'completed',
+  items:warehouseIds.map((warehouseId,i)=>({itemId:'I'+i,productId:productKey,warehouseId,qty:5}))});
+ await seed('inventory/'+productKey,{productKey,onHand:20,reserved:0,incoming:0});
+ for(const wh of new Set(warehouseIds))await seed('warehouseStocks/'+wh+'__'+productKey,{productKey,warehouseId:wh,onHand:20,reserved:0,incoming:0});
+ const client=db(uid),batch=writeBatch(client),movementIds=groups.map((_,i)=>orderId+'-M'+i);
+ const proofs=groups.map((indices,i)=>{
+  const warehouseId=warehouseIds[indices[0]],primary=kind==='primary'||i===0;
+  return {inventoryId:productKey,warehouseStockId:warehouseId+'__'+productKey,
+   previousWarehouseStockId:warehouseId+'__'+productKey,movementId:movementIds[i],crossWarehouse:true,
+   companyMovementId:primary?movementIds[i]:movementIds[0],
+   reservationIds:[...indices.map(j=>ids[j]),...ids.filter((_,j)=>!indices.includes(j))],
+   warehouseReservationIds:indices.map(j=>ids[j])};
+ });
+ batch.update(doc(client,'inventory/'+productKey),{reserved:warehouseIds.length});
+ for(const wh of new Set(warehouseIds)){
+  const total=kind==='duplicate'?warehouseIds.filter(w=>w===wh).length
+   :groups.reduce((sum,indices)=>sum+(warehouseIds[indices[0]]===wh?indices.length:0),0);
+  batch.update(doc(client,'warehouseStocks/'+wh+'__'+productKey),{reserved:total});
+ }
+ groups.forEach((indices,i)=>batch.set(doc(client,'inventoryMovements/'+movementIds[i]),{
+  productKey,warehouseId:warehouseIds[indices[0]],sourceId:orderId,sourceType:'order',type:'reserve',
+  ownerUid:'sales1',salesCode:'S01',qty:indices.length,reservationStockEvidence:proofs[i]
+ }));
+ warehouseIds.forEach((warehouseId,i)=>{
+  const proof=proofs[kind==='duplicate'?i:groups.findIndex(indices=>indices.includes(i))];
+  batch.set(doc(client,'inventoryReservations/'+ids[i]),{orderId,itemId:'I'+i,orderItemIndex:i,
+   productKey,warehouseId,quantity:1,shortageQty:4,ownerUid:'sales1',salesCode:'S01',stockEvidence:proof});
+ });
+ const snapshot=async()=>({
+  company:(await getDoc(doc(db('admin'),'inventory/'+productKey))).data().reserved,
+  warehouses:await Promise.all([...new Set(warehouseIds)].map(async wh=>
+   (await getDoc(doc(db('admin'),'warehouseStocks/'+wh+'__'+productKey))).data().reserved)),
+  reservations:await Promise.all(ids.map(async id=>(await getDoc(doc(db('admin'),'inventoryReservations/'+id))).exists())),
+  movements:await Promise.all(movementIds.map(async id=>(await getDoc(doc(db('admin'),'inventoryMovements/'+id))).exists()))
+ });
+ return {run:()=>batch.commit(),snapshot};
+}
+test('split or duplicate primary reservation proofs cannot omit changed same-warehouse IDs or partially commit',async()=>{
+ for(const uid of ['buyer1','wh1']){
+  const f=await splitSameWarehouseProofFixture(uid,'primary'),before=await f.snapshot();
+  await assertFails(f.run());assert.deepEqual(await f.snapshot(),before);
+ }
+});
+test('two fully enumerated primary movements still cannot both claim one company transaction',async()=>{
+ for(const uid of ['buyer1','wh1']){
+  const f=await splitSameWarehouseProofFixture(uid,'duplicate'),before=await f.snapshot();
+  await assertFails(f.run());assert.deepEqual(await f.snapshot(),before);
+ }
+});
+test('split linked warehouse proofs cannot omit changed siblings or partially commit',async()=>{
+ for(const uid of ['buyer1','wh1']){
+  const f=await splitSameWarehouseProofFixture(uid,'linked'),before=await f.snapshot();
+  await assertFails(f.run());assert.deepEqual(await f.snapshot(),before);
+ }
+});
+test('one complete local witness per warehouse still proves all changed reservations',async()=>{
+ for(const uid of ['buyer1','wh1']){
+  const f=await splitSameWarehouseProofFixture(uid,'linked',true);
+  await assertSucceeds(f.run());
+  const after=await f.snapshot();assert.equal(after.company,3);
+  assert.deepEqual(after.warehouses,[1,2]);assert.deepEqual(after.reservations,[true,true,true]);
+ }
+});
 test('native grouped proofs cannot conceal a nonrepresentative reservation move from an unproved third warehouse',async()=>{
  await seed('orders/hidden-move',{ownerUid:'sales1',salesCode:'S01',items:[
   {itemId:'I0',productId:'P',qty:5,warehouseId:'A'},{itemId:'I1',productId:'P',qty:5,warehouseId:'A'},{itemId:'I2',productId:'P',qty:5,warehouseId:'B'}]});

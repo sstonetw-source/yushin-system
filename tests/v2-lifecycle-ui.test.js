@@ -33,6 +33,19 @@ function fixture(){
  };
  return {open,order,ledgers,storage,calls,reads,applied,setTransport:f=>transport=f,setReadFailure:v=>failRead=v,setSaveFailure:v=>failSave=v,setAfterRead:f=>afterRead=f};
 }
+function previewContext(f,{host='preview-20135.web.app',project='preview-20135',enabled=true,authEmulator=false}={}){
+ const c=f.open(),legacyFunctions=c.firebase.app().functions('asia-east1');
+ c.YUSHIN_V2_LIFECYCLE_EMULATOR=false;c.YUSHIN_PREVIEW_ORDER_LIFECYCLE=enabled;
+ c.APP_ENVIRONMENT='preview';c.location.hostname=host;
+ c.firebase.app=()=>({options:{projectId:project},functions:region=>{
+  assert.equal(region,'asia-east1');return {...legacyFunctions,app:{options:{projectId:project}},
+   useEmulator:()=>{throw Error('Preview must not use Functions Emulator');}};
+ }});
+ c.firebase.auth=()=>({app:{options:{projectId:project}},currentUser:{uid:'U'},
+  emulatorConfig:authEmulator?{host:'localhost',port:9099}:undefined});
+ c.db.app={options:{projectId:'preview-20135'}};
+ return c;
+}
 test('lifecycle freezes complete original candidates and retries the identical intent after lost reply and reload',async()=>{
  const f=fixture();f.setTransport(p=>{f.applied(p);throw Error('lost reply');});
  await assert.rejects(f.open().setOrderLifecycleStatus('O','cancelled'),/lost reply/);
@@ -106,4 +119,38 @@ for(const pure of [false,true])test('Service lifecycle freezes '+(pure?'no virtu
  const c=f.open();assert.equal(c.pendingV2OrderLifecycle('O').operationId,f.calls[0].operationId);
  await c.setOrderLifecycleStatus('O','cancelled');
  assert.deepEqual(f.calls[1],f.calls[0]);assert.equal(f.order.orderLifecycleHistory.length,1);assert.equal(f.storage.size,0);
+});
+
+test('explicit Preview lifecycle retains frozen intent after lost reply and refresh',async()=>{
+ const f=fixture();f.setTransport(p=>{f.applied(p);throw Error('lost reply');});
+ await assert.rejects(previewContext(f).setOrderLifecycleStatus('O','cancelled'),/lost reply/);
+ assert.equal(f.storage.size,1);assert.equal(f.calls.length,1);
+ f.ledgers.clear();f.setTransport(p=>({...f.applied(p),data:{...f.applied(p).data,status:'already-applied'}}));
+ const saved=await previewContext(f,{host:'preview-20135.firebaseapp.com'}).setOrderLifecycleStatus('O','cancelled');
+ assert.equal(saved.orderStatus,'cancelled');assert.deepEqual(f.calls[1],f.calls[0]);
+ assert.equal(f.storage.size,0);assert.equal(f.order.orderLifecycleHistory.length,1);
+});
+
+test('Preview defaults closed without falling back to legacy cancellation',async()=>{
+ const f=fixture(),c=previewContext(f,{enabled:false});
+ c.runRoleTransaction=()=>{throw Error('legacy writer forbidden');};
+ await assert.rejects(c.setOrderLifecycleStatus('O','cancelled'),/尚未在此 Preview/);
+ assert.equal(f.calls.length,0);assert.equal(f.storage.size,0);
+});
+
+test('Preview refuses foreign host, mismatched project and accidental Auth emulator',async()=>{
+ for(const variant of [{host:'yu-shing-company.web.app'},{project:'yu-shing-company'},
+  {authEmulator:true}]){
+  const f=fixture();await assert.rejects(previewContext(f,variant).setOrderLifecycleStatus('O','cancelled'));
+  assert.equal(f.calls.length,0);assert.equal(f.storage.size,0);
+ }
+});
+
+test('order quick actions, list and form all use the same Preview pending guard',()=>{
+ for(const path of ['src/features/orders/order-workspace.js','src/features/orders/order-progress.js',
+  'src/features/orders/lifecycle-workspace.js','src/features/orders/delivery-actions.js']){
+  const content=fs.readFileSync(path,'utf8');
+  assert.match(content,/lifecycleProtectedMode\(\)/,path);
+  assert.doesNotMatch(content,/YUSHIN_V2_LIFECYCLE_EMULATOR/,path);
+ }
 });

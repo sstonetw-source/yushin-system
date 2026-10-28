@@ -11845,7 +11845,7 @@ function orderLifecycleActionButtons(order, lifecycle, progress, actions) {
     if (pendingLifecycleOrderIds.has(order.id)) return '<button type="button" disabled>處理中…</button>';
     const id = inlineJsValue(order.id);
     try{
-        const retry=globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true?pendingV2OrderLifecycle(order.id):null;
+        const retry=lifecycleProtectedMode()?pendingV2OrderLifecycle(order.id):null;
         if(retry)return `<button type="button" onclick="quickSetOrderLifecycle(${id}, ${inlineJsValue(retry.nextStatus)})">確認前次取消／恢復結果</button>`;
     }catch(err){return `<span role="alert">${escapeHtml(err.message)}</span>`;}
     const buttons = [];
@@ -16618,14 +16618,18 @@ async function commitFormalPurchaseBackend(poRecord,actorUid,assertActor) {
         throw new Error('採購後端僅限已授權的網站及專案。');
     const auth=firebase.auth(),project=isProduction?'yu-shing-company':isPreview?'preview-20135':'demo-yushin';
     if(auth.app?.options?.projectId!==project||firebase.app().options?.projectId!==project
+        ||typeof db==='undefined'||db.app?.options?.projectId!==project
         ||(isEmulator&&(!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099))
         ||((isPreview||isProduction)&&auth.emulatorConfig))
-        throw new Error('採購登入與後端 Firebase 專案不一致。');
+        throw new Error('採購登入、Firestore 與後端 Firebase 專案不一致。');
     await ensureFormalPurchaseFunctionsCompat();
     const functions=firebase.app().functions('asia-east1');
     if(functions.app?.options?.projectId!==project)
         throw new Error('採購後端連線專案不正確。');
-    const check=()=>{assertActor();if(auth.currentUser?.uid!==actorUid)throw new Error('實際登入身分已變更，請以原帳號核對採購結果。');};
+    const check=()=>{assertActor();
+        if(auth.currentUser?.uid!==actorUid)throw new Error('實際登入身分已變更，請以原帳號核對採購結果。');
+        if(db.app?.options?.projectId!==project)throw new Error('採購回讀 Firestore 專案已變更，請保留原單號核對結果。');
+    };
     check();
     if(poRecord.items.length>5||poRecord.items.some(item=>!item.orderId||!item.itemId
         ||(item.sourceType&&item.sourceType!=='SALES_ORDER')
@@ -19663,7 +19667,7 @@ window.closeOrderLifecycleForm = function() {
 window.openOrderLifecycleForm = function() {
     const order = ordersCache.find(o => o.id === currentLifecycleOrderId);
     if (!order || !canManageOrderLifecycleCapability() || !canEditPage('orders.list')) return;
-    if (globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true){
+    if (lifecycleProtectedMode()){
         try{if(!pendingV2OrderLifecycle(order.id)&&normalizedOrderStatus(order)==='normal'&&deliveryProgressInfo(order).remaining<=0)return;}
         catch(err){alert(err.message);return;}
     }else if (normalizedOrderStatus(order) === 'normal' && deliveryProgressInfo(order).remaining <= 0) return;
@@ -19929,8 +19933,20 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
 }
 
 // Central authority for cancellation/restoration of an order and its stock holds.
+function lifecycleProtectedMode(){
+ return globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true
+  ||globalThis.YUSHIN_PREVIEW_ORDER_LIFECYCLE===true
+  ||(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview');
+}
+function assertNoPendingV2LifecycleBeforeLegacyWrite(orderId){
+ if(typeof sessionStorage==='undefined'||!currentUser?.uid)return;
+ const key='v2-lifecycle:'+encodeURIComponent(currentUser.uid)+':'+encodeURIComponent(orderId);
+ if(sessionStorage.getItem(key)!==null)
+  throw Error('前次 v2 取消／恢復尚未確認，禁止改用舊交易；請恢復原受控環境以原識別碼核對。');
+}
 async function setOrderLifecycleStatus(orderId,nextStatus,details=null) {
-    if(globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true)return setV2OrderLifecycleEmulator(orderId,nextStatus,details);
+    if(lifecycleProtectedMode())return setV2OrderLifecycleEmulator(orderId,nextStatus,details);
+    assertNoPendingV2LifecycleBeforeLegacyWrite(orderId);
     if(!['normal','cancelled'].includes(nextStatus))throw new Error('不支援的訂單狀態。');
     // Quick actions change status only; the form may also amend date/reason.
     const date=details===null?localDateString():details.date;
@@ -19982,7 +19998,7 @@ async function setOrderLifecycleStatus(orderId,nextStatus,details=null) {
 
 // Transport only: the existing backend lifecycle Service owns every stock change.
 function pendingV2OrderLifecycle(orderId){
- if(globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR!==true)return null;
+ if(!lifecycleProtectedMode())return null;
  const raw=sessionStorage.getItem('v2-lifecycle:'+encodeURIComponent(currentUser?.uid||'')+':'+encodeURIComponent(orderId));
  if(!raw)return null;
  try{
@@ -19996,12 +20012,25 @@ function pendingV2OrderLifecycle(orderId){
 }
 async function setV2OrderLifecycleEmulator(orderId,nextStatus,details=null){
  const local=host=>host==='localhost'||host==='127.0.0.1';
- if(globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR!==true||!local(globalThis.location?.hostname)
-  ||typeof firebase==='undefined'||!firebase.auth||!firebase.functions)throw Error('v2 取消／恢復僅限本機 Emulator。');
+ const emulator=globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true;
+ const preview=typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'
+  &&globalThis.YUSHIN_PREVIEW_ORDER_LIFECYCLE===true;
+ const host=String(globalThis.location?.hostname||'').toLowerCase();
+ if((!emulator&&!preview)||(emulator&&!local(host))
+  ||(preview&&!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(host))
+  ||typeof firebase==='undefined'||!firebase.auth||!firebase.functions)
+  throw Error('取消／恢復後端尚未在此 Preview／Emulator 獲准啟用，禁止改用舊交易。');
  const auth=firebase.auth(),functions=firebase.app().functions('asia-east1'),uid=currentUser?.uid,role=currentUserRole;
- if(auth.app?.options?.projectId!=='demo-yushin'||functions.app?.options?.projectId!=='demo-yushin'
-  ||!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099)
-  throw Error('v2 取消／恢復只允許本機 demo-yushin Auth／Functions Emulator。');
+ if(emulator){
+  if(auth.app?.options?.projectId!=='demo-yushin'||functions.app?.options?.projectId!=='demo-yushin'
+   ||!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099)
+   throw Error('v2 取消／恢復只允許本機 demo-yushin Auth／Functions Emulator。');
+ }else if(firebase.app().options?.projectId!=='preview-20135'
+  ||auth.app?.options?.projectId!=='preview-20135'
+  ||functions.app?.options?.projectId!=='preview-20135'
+  ||typeof db==='undefined'||db.app?.options?.projectId!=='preview-20135'
+  ||!!auth.emulatorConfig)
+  throw Error('取消／恢復 Auth、Functions 與資料庫專案不一致，未提交交易。');
  const check=()=>{
   if(!uid||auth.currentUser?.uid!==uid||currentUser?.uid!==uid||currentUserRole!==role
    ||!['admin','sales','engineer'].includes(role)||!canManageOrderLifecycleCapability()||!canEditPage('orders.list'))
@@ -20043,7 +20072,7 @@ async function setV2OrderLifecycleEmulator(orderId,nextStatus,details=null){
    syncAttemptId:order.inventoryReservationAttemptId,actorUid:uid,actorRole:role};
   sessionStorage.setItem(key,JSON.stringify(frozen));
  }
- check();functions.useEmulator('127.0.0.1',5001);
+ check();if(emulator)functions.useEmulator('127.0.0.1',5001);
  const {actorUid,actorRole,...payload}=frozen;
  const response=await functions.httpsCallable('setV2OrderLifecycle')(payload);check();
  const result=response?.data;
@@ -20102,7 +20131,7 @@ window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
     const cachedOrder = ordersCache.find(item => item.id === orderId);
     if (!cachedOrder) return;
     let retry;
-    try{retry=globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true?pendingV2OrderLifecycle(orderId):null;}catch(err){alert(err.message);return;}
+    try{retry=lifecycleProtectedMode()?pendingV2OrderLifecycle(orderId):null;}catch(err){alert(err.message);return;}
     if(!retry&&cachedOrder.inventoryReservationStatus==='pending'){showActionFeedback('這筆訂單庫存仍在同步，請完成或重試同步後再變更狀態。','warning');return;}
     if(retry&&retry.nextStatus!==nextStatus){alert('請先確認前次取消／恢復結果。');return;}
     if (pendingLifecycleOrderIds.has(orderId) || (!retry&&normalizedOrderStatus(cachedOrder) === nextStatus)) return;
@@ -22051,7 +22080,7 @@ function renderOrderLifecycleStatusOptions(order) {
     const selected = select.value || currentStatus;
     const canCancel = progress.remaining > 0;
     let pendingCancel=false;
-    if(globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true){try{pendingCancel=pendingV2OrderLifecycle(order.id)?.nextStatus==='cancelled';}catch(_){/* visible error rendered below */}}
+    if(lifecycleProtectedMode()){try{pendingCancel=pendingV2OrderLifecycle(order.id)?.nextStatus==='cancelled';}catch(_){/* visible error rendered below */}}
     const cancelLabel = currentStatus === 'cancelled' ? '已取消'
         : progress.grossDelivered > 0 ? '取消剩餘未送貨數量' : '取消訂單';
     select.innerHTML = '<option value="normal">正常</option>'
@@ -22080,7 +22109,7 @@ function renderOrderLifecycleModal() {
     const reorderButton=document.getElementById('reorderAfterReturnBtn');
     if(reorderButton)reorderButton.hidden=!editable||!savedReturnRecords(order).some(row=>row.settlement==='CLOSE'&&Number(row.qty)>0);
     document.getElementById('orderLifecycleActionHint').textContent = !canCancel && !cancelled ? '已無剩餘未送貨數量；退貨請建立申請，由倉庫頁確認實收。' : '取消僅處理未送貨數量；已送貨部分請申請退貨。';
-    if(globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true){
+    if(lifecycleProtectedMode()){
         let retry,error;
         try{retry=pendingV2OrderLifecycle(order.id);}catch(err){error=err.message;}
         if(retry||error){
@@ -22123,7 +22152,7 @@ window.saveOrderLifecycleStatus = async function() {
     if (!date) { alert('請填寫狀態日期。'); return; }
     const previous = { status: normalizedOrderStatus(order), date: order.orderStatusDate || '', reason: order.orderStatusReason || '' };
     let retry;
-    try{retry=globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true?pendingV2OrderLifecycle(order.id):null;}catch(err){alert(err.message);return;}
+    try{retry=lifecycleProtectedMode()?pendingV2OrderLifecycle(order.id):null;}catch(err){alert(err.message);return;}
     if (!retry&&previous.status === nextStatus && previous.date === date && previous.reason === reason) return;
     if (pendingLifecycleOrderIds.has(order.id)) return;
     if(!retry&&nextStatus==='cancelled'&&previous.status!=='cancelled'&&!confirmOrderCancellation(order))return;
@@ -22144,7 +22173,7 @@ window.saveOrderLifecycleStatus = async function() {
     } finally {
         pendingLifecycleOrderIds.delete(order.id);
         if (saveButton) { saveButton.disabled = false; saveButton.innerText = '💾 儲存狀態'; }
-        if(globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true)renderOrderLifecycleModal();
+        if(lifecycleProtectedMode())renderOrderLifecycleModal();
     }
 };
 

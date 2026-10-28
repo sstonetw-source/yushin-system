@@ -85,14 +85,18 @@ async function commitFormalPurchaseBackend(poRecord,actorUid,assertActor) {
         throw new Error('採購後端僅限已授權的網站及專案。');
     const auth=firebase.auth(),project=isProduction?'yu-shing-company':isPreview?'preview-20135':'demo-yushin';
     if(auth.app?.options?.projectId!==project||firebase.app().options?.projectId!==project
+        ||typeof db==='undefined'||db.app?.options?.projectId!==project
         ||(isEmulator&&(!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099))
         ||((isPreview||isProduction)&&auth.emulatorConfig))
-        throw new Error('採購登入與後端 Firebase 專案不一致。');
+        throw new Error('採購登入、Firestore 與後端 Firebase 專案不一致。');
     await ensureFormalPurchaseFunctionsCompat();
     const functions=firebase.app().functions('asia-east1');
     if(functions.app?.options?.projectId!==project)
         throw new Error('採購後端連線專案不正確。');
-    const check=()=>{assertActor();if(auth.currentUser?.uid!==actorUid)throw new Error('實際登入身分已變更，請以原帳號核對採購結果。');};
+    const check=()=>{assertActor();
+        if(auth.currentUser?.uid!==actorUid)throw new Error('實際登入身分已變更，請以原帳號核對採購結果。');
+        if(db.app?.options?.projectId!==project)throw new Error('採購回讀 Firestore 專案已變更，請保留原單號核對結果。');
+    };
     check();
     if(poRecord.items.length>5||poRecord.items.some(item=>!item.orderId||!item.itemId
         ||(item.sourceType&&item.sourceType!=='SALES_ORDER')

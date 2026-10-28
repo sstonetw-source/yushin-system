@@ -1,3 +1,12 @@
+// Reservation proof model relevant to #311 (existing schema, no migration):
+// users/{uid}: role/active/disabled, protected by authenticated role checks.
+// orders/{id}: ownerUid, salesCode, items[{itemId,productId,warehouseId,qty}].
+// inventory/{id}: productKey, onHand/reserved/incoming numeric counters.
+// warehouseStocks/{id}: productKey, warehouseId, numeric counters.
+// inventoryReservations/{orderId}__{itemId}: source/owner identity, quantity,
+//   warehouseId, stockEvidence with global and local reservation ID arrays.
+// inventoryMovements/{id}: immutable source, product and reservationStockEvidence.
+// Create and update remain guarded by existing domain validators below.
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -895,7 +904,7 @@ service cloud.firestore {
     // Evaluate each primary reservation snapshot once for both stock totals.
     // A local contribution must keep its warehouse; each changed reservation's
     // own movement witness also requires membership in this local ID set.
-    function primaryReservationDeltaAt(id, productKey, warehouseId, localIds) {
+    function primaryReservationDeltaAt(id, productKey, warehouseId, localIds, companyMovementId) {
       let path = /databases/$(database)/documents/inventoryReservations/$(id);
       let previous = get(path);
       let before = previous == null ? {} : previous.data;
@@ -904,8 +913,17 @@ service cloud.firestore {
       let qty = after.get('quantity', 0);
       let local = id in localIds;
       let delta = qty - oldQty;
+      let warehouseDelta = (after.get('warehouseId', '') == warehouseId ? qty : 0)
+        - (before.get('warehouseId', '') == warehouseId ? oldQty : 0);
       return {
         'valid': after.productKey == productKey && before.get('productKey', productKey) == productKey
+          // Global IDs are not enough: every changed contribution to this
+          // warehouse must also appear in the primary local evidence.
+          && (warehouseDelta == 0 || local)
+          // A changed sibling cannot attach a second "primary" movement for
+          // the same company delta while supplying a different local subset.
+          && ((delta == 0 && after.get('warehouseId', '') == before.get('warehouseId', ''))
+            || after.get('stockEvidence', {}).get('companyMovementId', '') == companyMovementId)
           && (!local || (qty == 0 && oldQty == 0) || (after.warehouseId == warehouseId
             && (oldQty == 0 || before.get('warehouseId', warehouseId) == warehouseId))),
         'company': delta, 'warehouse': local ? delta : 0
@@ -921,15 +939,45 @@ service cloud.firestore {
       let localIds = e.warehouseReservationIds;
       let zero = {'valid': true, 'company': 0, 'warehouse': 0};
       let delta = combinedPrimaryReservationDelta(
-        primaryReservationDeltaAt(ids[0], productKey, warehouseId, localIds),
-        ids.size() > 1 ? primaryReservationDeltaAt(ids[1], productKey, warehouseId, localIds) : zero,
-        ids.size() > 2 ? primaryReservationDeltaAt(ids[2], productKey, warehouseId, localIds) : zero,
-        ids.size() > 3 ? primaryReservationDeltaAt(ids[3], productKey, warehouseId, localIds) : zero,
-        ids.size() > 4 ? primaryReservationDeltaAt(ids[4], productKey, warehouseId, localIds) : zero);
+        primaryReservationDeltaAt(ids[0], productKey, warehouseId, localIds, e.companyMovementId),
+        ids.size() > 1 ? primaryReservationDeltaAt(ids[1], productKey, warehouseId, localIds, e.companyMovementId) : zero,
+        ids.size() > 2 ? primaryReservationDeltaAt(ids[2], productKey, warehouseId, localIds, e.companyMovementId) : zero,
+        ids.size() > 3 ? primaryReservationDeltaAt(ids[3], productKey, warehouseId, localIds, e.companyMovementId) : zero,
+        ids.size() > 4 ? primaryReservationDeltaAt(ids[4], productKey, warehouseId, localIds, e.companyMovementId) : zero);
       return operationalReservedStockMatches(/databases/$(database)/documents/inventory/$(e.inventoryId),
           {'valid': delta.valid, 'quantity': delta.company}, productKey, '')
         && operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId),
           {'valid': delta.valid, 'quantity': delta.warehouse}, productKey, warehouseId);
+    }
+    // A linked warehouse has no separate company-stock update. Its local IDs
+    // must nevertheless cover every changed contribution among the *global*
+    // reservation set. This also rejects two partial linked movements that
+    // try to prove the same warehouse total independently.
+    function linkedReservationDeltaAt(id, warehouseId, localIds) {
+      let path = /databases/$(database)/documents/inventoryReservations/$(id);
+      let previous = get(path);
+      let before = previous == null ? {} : previous.data;
+      let after = getAfter(path).data;
+      let oldQty = before.get('quantity', 0);
+      let qty = after.get('quantity', 0);
+      let local = id in localIds;
+      let warehouseDelta = (after.get('warehouseId', '') == warehouseId ? qty : 0)
+        - (before.get('warehouseId', '') == warehouseId ? oldQty : 0);
+      return {'valid': local
+          ? (qty == 0 && oldQty == 0) || (after.get('warehouseId', '') == warehouseId
+            && (oldQty == 0 || before.get('warehouseId', warehouseId) == warehouseId))
+          : warehouseDelta == 0,
+        'quantity': warehouseDelta};
+    }
+    function linkedWarehouseReservationTotal(e, warehouseId) {
+      let ids = e.reservationIds;
+      let localIds = e.warehouseReservationIds;
+      let zero = {'valid': true, 'quantity': 0};
+      return combinedReservationDelta(linkedReservationDeltaAt(ids[0], warehouseId, localIds),
+        ids.size() > 1 ? linkedReservationDeltaAt(ids[1], warehouseId, localIds) : zero,
+        ids.size() > 2 ? linkedReservationDeltaAt(ids[2], warehouseId, localIds) : zero,
+        ids.size() > 3 ? linkedReservationDeltaAt(ids[3], warehouseId, localIds) : zero,
+        ids.size() > 4 ? linkedReservationDeltaAt(ids[4], warehouseId, localIds) : zero);
     }
     function crossWarehouseReservationStocks(e, productKey, warehouseId) {
       return e.get('companyMovementId', '') is string && e.get('companyMovementId', '') != ''
@@ -941,7 +989,7 @@ service cloud.firestore {
           ? primaryReservationStocks(e, productKey, warehouseId)
           : linkedCompanyReservationProof(e, productKey, warehouseId)
             && operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId),
-              sameWarehouseReservationTotal(e.warehouseReservationIds, productKey, warehouseId), productKey, warehouseId));
+              linkedWarehouseReservationTotal(e, warehouseId), productKey, warehouseId));
     }
     function operationalReservationStockEvidence(id) {
       let data = request.resource.data;

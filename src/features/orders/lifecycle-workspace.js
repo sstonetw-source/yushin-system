@@ -34,7 +34,7 @@ window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
     const cachedOrder = ordersCache.find(item => item.id === orderId);
     if (!cachedOrder) return;
     let retry;
-    try{retry=globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true?pendingV2OrderLifecycle(orderId):null;}catch(err){alert(err.message);return;}
+    try{retry=lifecycleProtectedMode()?pendingV2OrderLifecycle(orderId):null;}catch(err){alert(err.message);return;}
     if(!retry&&cachedOrder.inventoryReservationStatus==='pending'){showActionFeedback('這筆訂單庫存仍在同步，請完成或重試同步後再變更狀態。','warning');return;}
     if(retry&&retry.nextStatus!==nextStatus){alert('請先確認前次取消／恢復結果。');return;}
     if (pendingLifecycleOrderIds.has(orderId) || (!retry&&normalizedOrderStatus(cachedOrder) === nextStatus)) return;

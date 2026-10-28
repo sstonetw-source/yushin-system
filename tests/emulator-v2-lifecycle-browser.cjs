@@ -33,7 +33,7 @@ test.before(async()=>{
   const vendor={'/vendor/html2canvas.js':'html2canvas/dist/html2canvas.min.js','/vendor/jspdf.js':'jspdf/dist/jspdf.umd.min.js'}[pathname];
   if(vendor){response.writeHead(200,{'Content-Type':'application/javascript'});response.end(fs.readFileSync(require.resolve(vendor)));return;}
   if(request.url==='/sdk.js'){response.writeHead(200,{'Content-Type':'application/javascript'});response.end(sdk);return;}
-  if(/^\/(app\.js|styles\.css|modules\/[\w.-]+\.js|assets\/[\w./-]+)$/.test(pathname)){
+  if(/^\/(app\.js|transaction-rollout-config\.js|styles\.css|modules\/[\w.-]+\.js|assets\/[\w./-]+)$/.test(pathname)){
    const file=path.resolve(root,'.'+pathname);
    if(file.startsWith(root+path.sep)&&fs.existsSync(file)&&fs.statSync(file).isFile()){
     response.writeHead(200,{'Content-Type':({'.js':'application/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png'})[path.extname(file)]||'application/octet-stream'});
