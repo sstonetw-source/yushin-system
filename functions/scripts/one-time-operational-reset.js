@@ -72,9 +72,14 @@ async function inspect(db) {
     // Only root documents are counted. recursiveDelete also removes subcollections.
     deleteCounts[name] = result.data().count;
   }
+  const preserveCounts = {};
+  for (const name of classification.preserving) {
+    const result = await db.collection(name).count().get();
+    preserveCounts[name] = result.data().count;
+  }
   const stock = {};
   for (const name of ZERO_STOCK_COLLECTIONS) stock[name] = await scanStock(db, name);
-  return { classification, deleteRootDocumentCounts: deleteCounts, stock };
+  return { classification, deleteRootDocumentCounts: deleteCounts, preserveRootDocumentCounts: preserveCounts, stock };
 }
 
 async function deleteOperationalCollections(db, names) {
@@ -101,12 +106,14 @@ async function zeroStock(db, name) {
   return updated;
 }
 
-async function verify(db, expectedPreserve) {
+async function verify(db, expectedPreserveCounts) {
   const roots = (await db.listCollections()).map(ref => ref.id);
   const cls = classifyRootCollections(roots);
   if (cls.unknown.length || cls.deleting.length) throw new Error('Delete roots remain or unknown root appeared: ' + JSON.stringify(cls));
-  for (const name of expectedPreserve) {
+  for (const [name, expectedCount] of Object.entries(expectedPreserveCounts)) {
     if (!roots.includes(name)) throw new Error('Preserved root disappeared: ' + name);
+    const currentCount = (await db.collection(name).count().get()).data().count;
+    if (currentCount !== expectedCount) throw new Error('Preserved root document count changed: ' + name);
   }
   const inventory = {};
   for (const name of ZERO_STOCK_COLLECTIONS) {
@@ -133,7 +140,7 @@ async function main() {
   // Requires user to have disabled all app/worker writes before execution.
   await deleteOperationalCollections(db, preflight.classification.deleting);
   for (const name of ZERO_STOCK_COLLECTIONS) await zeroStock(db, name);
-  const result = await verify(db, preflight.classification.preserving);
+  const result = await verify(db, preflight.preserveRootDocumentCounts);
   process.stdout.write(JSON.stringify({ status: 'VERIFIED', project: args.project, result }, null, 2) + '\n');
 }
 
