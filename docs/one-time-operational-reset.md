@@ -19,7 +19,7 @@
 
 ## 使用
 
-在 repository 根目錄安裝 Functions 依賴（`npm --prefix functions ci`，依現有鎖檔狀況調整），再執行：
+在 repository 根目錄安裝 Functions 依賴（`npm --prefix functions install --no-package-lock`（目前沒有 Functions lockfile）），再執行：
 
 ```bash
 node functions/scripts/one-time-operational-reset.js --project=yu-shing-company
