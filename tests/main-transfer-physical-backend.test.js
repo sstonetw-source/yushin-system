@@ -228,3 +228,29 @@ test('explicit Preview source allocates through existing core and completion/lis
   const before=f.snapshot();process.env.ENABLE_PREVIEW_FREE_STOCK_ALLOCATION='false';await assert.rejects(drainReleasedV2FreeStock(f.db,'U',{movementId:dispatch.id+'-in'}));assert.equal(f.snapshot(),before);
  }finally{for(const [key,value] of Object.entries(prior)){if(value===undefined)delete process.env[key];else process.env[key]=value;}}
 }));
+const {commitOrderTransferPhysical}=require('../functions/order-transfer-physical-service');
+const orderEnv={GCLOUD_PROJECT:'demo-yushin',FUNCTIONS_EMULATOR:'true',FIRESTORE_EMULATOR_HOST:'localhost:8080',FIREBASE_AUTH_EMULATOR_HOST:'localhost:9099',ENABLE_ORDER_TRANSFER_DISPATCH_EMULATOR:'true',ENABLE_ORDER_TRANSFER_RECEIVE_EMULATOR:'true'};
+function orderTransferFixture(){
+ const f=fixture();f.db.projectId='demo-yushin';f.put('products/P',{productType:'Goods'});
+ f.put('orders/ORDER',{status:'active',inventoryReservationStatus:'completed',ownerUid:'S',salesCode:'01',items:[{itemId:'I',productId:'P',qty:3,reservedQty:3,shortageQty:0,warehouseId:'A',dispatchPreparedQty:3,deliveryPlan:{mode:'TRANSFER',warehouseId:'MAIN',contact:'Wh',phone:'123',address:'Taipei'}}]});
+ f.put('inventoryReservations/ORDER__I',{status:'active',orderId:'ORDER',itemId:'I',productKey:'P',quantity:3,shortageQty:0,warehouseId:'A'});
+ const send={id:'order_transfer_123',orderId:'ORDER',itemId:'I',fromWarehouseId:'A',toWarehouseId:'MAIN',qty:3};
+ const receive={id:send.id,operationId:'order_receive_123'};
+ return {...f,send,receive,dispatch:()=>commitOrderTransferPhysical(f.db,'U',send,'DISPATCH',orderEnv),receipt:()=>commitOrderTransferPhysical(f.db,'U',receive,'RECEIVE',orderEnv)};
+}
+test('order transfer dispatch and receipt are atomic distinct events with immutable replay and no customer delivery',async()=>{
+ const f=orderTransferFixture();f.setRetry(true);await f.dispatch();let before=f.snapshot();assert.equal((await f.dispatch()).status,'already-applied');assert.equal(f.snapshot(),before);
+ assert.equal(f.docs.get('warehouseStocks/A__P').onHand,3);assert.equal(f.docs.get('warehouseStocks/A__P').reserved,1);assert.equal(f.docs.get('inventory/P').reserved,5);
+ assert.equal(f.docs.get('orders/ORDER').items[0].warehouseId,'A');assert.equal(f.docs.get('orders/ORDER').items[0].transferPendingId,f.send.id);
+ await f.receipt();before=f.snapshot();assert.equal((await f.receipt()).status,'already-applied');assert.equal(f.snapshot(),before);
+ assert.equal(f.docs.get('warehouseStocks/MAIN__P').reserved,3);assert.equal(f.docs.get('inventory/P').transferInTransit,0);
+ assert.equal(f.docs.get('inventoryReservations/ORDER__I').warehouseId,'MAIN');assert.equal(f.docs.get('orders/ORDER').items[0].warehouseId,'MAIN');
+ assert.equal(f.docs.get('orders/ORDER').deliveryRecords,undefined);assert.equal(f.docs.get('orders/ORDER').logisticsHistory.length,2);
+});
+test('order transfer rejects v2, wrong roles, incomplete preparation, conflicting IDs and final commit failures without partial writes',async()=>{
+ for(const mutate of [f=>f.put('users/U',{role:'sales'}),f=>{f.docs.get('orders/ORDER').items[0].dispatchPreparedQty=2;},f=>{f.docs.get('inventoryReservations/ORDER__I').locationSchemaVersion=2;},f=>f.setFail(true)]){
+  const f=orderTransferFixture();mutate(f);const before=f.snapshot();await assert.rejects(f.dispatch());assert.equal(f.snapshot(),before);
+ }
+ const f=orderTransferFixture();await f.dispatch();let before=f.snapshot();await assert.rejects(commitOrderTransferPhysical(f.db,'U',{...f.send,qty:2},'DISPATCH',orderEnv));assert.equal(f.snapshot(),before);
+ f.docs.delete('inventoryLots/L');before=f.snapshot();await assert.rejects(f.receipt());assert.equal(f.snapshot(),before);
+});

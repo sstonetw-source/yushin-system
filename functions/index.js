@@ -168,3 +168,8 @@ exports.resumeV2MainTransferAllocation=createMainTransferAllocationCallable({onC
 
 const {createMainTransferAllocationListCallable}=require('./main-transfer-allocation-list');
 exports.listV2MainTransferAllocations=createMainTransferAllocationListCallable({onCall,HttpsError,getDatabase:getFirestore});
+
+const {createOrderTransferPhysicalCallables}=require('./order-transfer-physical-service');
+const orderTransferPhysical=createOrderTransferPhysicalCallables({onCall,HttpsError,getDatabase:getFirestore});
+exports.dispatchOrderTransfer=orderTransferPhysical.dispatchOrderTransfer;
+exports.receiveOrderTransfer=orderTransferPhysical.receiveOrderTransfer;
