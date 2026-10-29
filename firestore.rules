@@ -919,8 +919,8 @@ service cloud.firestore {
           // warehouse must also appear in the primary local evidence. Only
           // nonlocal IDs need this calculation; local IDs are already proved
           // against the local stock counter below.
-          && (local || (after.get('warehouseId', '') == warehouseId ? qty : 0)
-            - (before.get('warehouseId', '') == warehouseId ? oldQty : 0) == 0)
+          && (local || ((after.get('warehouseId', '') != warehouseId || qty == 0)
+            && (before.get('warehouseId', '') != warehouseId || oldQty == 0)))
           // A changed sibling cannot attach a second "primary" movement for
           // the same company delta while supplying a different local subset.
           && ((delta == 0 && after.get('warehouseId', '') == before.get('warehouseId', ''))
@@ -968,8 +968,8 @@ service cloud.firestore {
       return {'valid': local
           ? (qty == 0 && oldQty == 0) || (after.get('warehouseId', '') == warehouseId
             && (oldQty == 0 || before.get('warehouseId', warehouseId) == warehouseId))
-          : (after.get('warehouseId', '') == warehouseId ? qty : 0)
-            - (before.get('warehouseId', '') == warehouseId ? oldQty : 0) == 0,
+          : (after.get('warehouseId', '') != warehouseId || qty == 0)
+            && (before.get('warehouseId', '') != warehouseId || oldQty == 0),
         'quantity': local ? qty - oldQty : 0};
     }
     function linkedWarehouseReservationTotal(e, warehouseId) {
