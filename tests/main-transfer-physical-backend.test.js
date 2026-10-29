@@ -13,7 +13,7 @@ function fixture(){
  put('inventoryLotCosts/L',{unitCost:99});
  function snap(path,v){return {id:path.split('/')[1],exists:v!==undefined,data:()=>structuredClone(v)};}
  function page(q){const rows=[...docs].filter(([p,v])=>p.startsWith(q.n+'/')&&q.terms.every(([k,x])=>v[k]===x)).sort(([a],[b])=>a.localeCompare(b)).filter(([p])=>!q.after||p.split('/')[1]>q.after).slice(0,q.cap).map(([p,v])=>snap(p,v));return {docs:rows,size:rows.length,empty:!rows.length};}
- function collection(n){return {doc:id=>({path:n+'/'+id,id,get:async()=>snap(n+'/'+id,docs.get(n+'/'+id))}),where(field,_op,value){return {query:true,n,terms:[[field,value]],cap:1000,where(f,_o,v){this.terms.push([f,v]);return this;},limit(v){this.cap=v;return this;},startAfter(v){this.after=v.id;return this;},get:async function(){return page(this);}};}};}
+ function collection(n){return {doc:id=>({path:n+'/'+id,id,get:async()=>snap(n+'/'+id,docs.get(n+'/'+id))}),where(field,_op,value){return {query:true,n,terms:[[field,value]],cap:1000,where(f,_o,v){this.terms.push([f,v]);return this;},limit(v){this.cap=v;return this;},orderBy(){return this;},startAfter(v){this.after=typeof v==='string'?v:v.id;return this;},get:async function(){return page(this);}};}};}
 
  const db={projectId:'preview-20135',collection,runTransaction:async fn=>{
   let writes=[];
@@ -195,4 +195,22 @@ test('completion projection rejects active or corrupt jobs and revoked role, whi
  Object.assign(job,original);f.put('users/U',{role:'sales'});await assert.rejects(completeAllocation(f.db,'U',dispatch.id),e=>e.code==='permission-denied');f.put('users/U',{role:'warehouse'});
  f.setFail(true);const before=f.snapshot();await assert.rejects(completeAllocation(f.db,'U',dispatch.id),/late failure/);assert.equal(f.snapshot(),before);
  f.setFail(false);await completeAllocation(f.db,'U',dispatch.id);assert.equal(f.docs.get('stockTransfers/'+dispatch.id).allocationCompleted,true);
+}));
+const {listMainTransferAllocations}=require('../functions/main-transfer-allocation-list');
+test('authority list ignores forged completion flags and omits only completed backend jobs without writes',()=>allocationEnvironment(async()=>{
+ const f=await allocationFixture();Object.assign(f.docs.get('stockTransfers/'+dispatch.id),{allocationCompleted:true,autoAllocatedQty:3});
+ const before=f.snapshot();const page=await listMainTransferAllocations(f.db,'U',{});assert.equal(f.snapshot(),before);
+ assert.equal(page.rows.length,1);assert.equal(page.rows[0].transferId,dispatch.id);assert.equal(page.rows[0].status,'pending');
+ await drainReleasedV2FreeStock(f.db,'U',{movementId:dispatch.id+'-in'});
+ Object.assign(f.docs.get('stockTransfers/'+dispatch.id),{allocationCompleted:false,autoAllocatedQty:0});
+ const after=f.snapshot();assert.equal((await listMainTransferAllocations(f.db,'U',{})).rows.length,0);assert.equal(f.snapshot(),after);
+}));
+test('authority list preserves blocked witnesses, advances bounded pages and rejects role or cursor changes',()=>allocationEnvironment(async()=>{
+ const f=await allocationFixture();
+ for(let n=0;n<7;n++)f.put('reservationOperationReceipts/aaa-'+n,{kind:'MAIN_TRANSFER_RECEIPT',transferId:'missing-'+n});
+ const before=f.snapshot(),first=await listMainTransferAllocations(f.db,'U',{});
+ assert.equal(first.rows.length,5);assert.equal(first.hasMore,true);assert.ok(first.rows.every(row=>row.status==='blocked'));
+ const second=await listMainTransferAllocations(f.db,'U',{afterId:first.afterId});assert.equal(second.rows.length,3);assert.equal(second.hasMore,false);assert.equal(f.snapshot(),before);
+ await assert.rejects(listMainTransferAllocations(f.db,'U',{afterId:'bad/id'}));
+ f.put('users/U',{role:'sales'});await assert.rejects(listMainTransferAllocations(f.db,'U',{}),e=>e.code==='permission-denied');
 }));

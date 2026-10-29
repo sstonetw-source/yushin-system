@@ -40,12 +40,16 @@ test('real dispatch and receipt allocate a multi-item shortage through one durab
  Object.assign(process.env,{GCLOUD_PROJECT:'demo-yushin',FUNCTIONS_EMULATOR:'true',FIREBASE_AUTH_EMULATOR_HOST:'localhost:9099',ENABLE_MAIN_TRANSFER_ALLOCATION_EMULATOR:'true'});
  try{
   const source={movementId:transferId+'-in',maxSteps:5};
+  const {listMainTransferAllocations}=require('../functions/main-transfer-allocation-list');
+  await db.collection('stockTransfers').doc(transferId).update({allocationCompleted:true});
+  assert.ok((await listMainTransferAllocations(db,uid,{})).rows.some(row=>row.transferId===transferId));
   const results=await Promise.all([drainReleasedV2FreeStock(db,uid,source),drainReleasedV2FreeStock(db,uid,source)]);
   assert.equal(results[0].runId,results[1].runId);
   const replay=await drainReleasedV2FreeStock(db,uid,source);
   const {projectMainTransferAllocationCompletion}=require('../functions/main-transfer-allocation-completion');
   await projectMainTransferAllocationCompletion(db,uid,transferId);
   assert.equal((await db.collection('stockTransfers').doc(transferId).get()).data().allocationCompleted,true);
+  assert.ok(!(await listMainTransferAllocations(db,uid,{})).rows.some(row=>row.transferId===transferId));
   assert.equal(replay.status,'completed');assert.equal(replay.allocatedQty,3);
   const order=(await db.collection('orders').doc(orderId).get()).data();
   assert.deepEqual(order.items[0],sibling);assert.equal(order.items[1].reservedQty,3);assert.equal(order.items[1].shortageQty,2);

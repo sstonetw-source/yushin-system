@@ -165,3 +165,6 @@ exports.receiveV2MainTransfer=mainTransferPhysical.receiveV2MainTransfer;
 
 const {createMainTransferAllocationCallable}=require('./main-transfer-allocation-callable');
 exports.resumeV2MainTransferAllocation=createMainTransferAllocationCallable({onCall,HttpsError,getDatabase:getFirestore});
+
+const {createMainTransferAllocationListCallable}=require('./main-transfer-allocation-list');
+exports.listV2MainTransferAllocations=createMainTransferAllocationListCallable({onCall,HttpsError,getDatabase:getFirestore});
