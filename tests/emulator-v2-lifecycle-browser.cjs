@@ -2582,3 +2582,66 @@ for(const width of [1280,390])test('full site '+width+'px fifteen-line original 
   console.log('Full site '+width+'px fifteen-line receipt: original warehouse UI, two actual warehouses, first/final HTTP replies aborted after commit, refresh retries original ID, three receipts/lots/costs and six units held once; twelve untouched goods lines and service identical. Admin source fixture; no >5-line PO/initialization or production acceptance claim.');
  }finally{await context.close();}
 });
+
+for(const width of [1280,390])test('original order transfer '+width+'px keeps source IDs through dropped replies and reload',{timeout:240000},async()=>{
+ const tag='order-transfer-site-'+width,uid=tag+'-warehouse',email=uid+'@example.test',key=tag+'-P',orderId=tag+'-O',from=tag+'-A',to=tag+'-MAIN';
+ await auth.createUser({uid,email,password});const setup=db.batch(),put=(name,id,data)=>setup.set(db.collection(name).doc(id),data);
+ put('users',uid,{role:'warehouse',active:true,name:'Warehouse',email,code:uid});put('products',key,{productType:'Goods',active:true,itemCode:tag,itemName:'調撥驗證商品'});
+ put('warehouses',from,{active:true,warehouseName:'測試分倉',contact:'Branch',phone:'123',address:'Taipei'});put('warehouses',to,{active:true,isDefault:true,warehouseName:'測試主倉',contact:'Main',phone:'456',address:'Taipei Main'});
+ put('inventory',key,{productKey:key,productId:key,onHand:3,reserved:3});put('warehouseStocks',from+'__'+key,{productKey:key,productId:key,warehouseId:from,onHand:3,reserved:3});
+ put('inventoryLots',tag+'-L',{productKey:key,productId:key,warehouseId:from,remainingQty:3,qty:3,lotNo:'SITE',expiryDate:'2027-01-01'});
+ put('orders',orderId,{orderNo:'YS-'+tag,customerName:'調撥測試客戶',status:'active',orderStatus:'normal',ownerUid:uid,salesCode:uid,salesName:'Warehouse',inventoryReservationStatus:'completed',inventoryReservationAttemptId:tag+'-sync',orderDate:'2026-10-29',workCategories:['delivery'],deliveryRecords:[],returnRecords:[],items:[{itemId:'I',productId:key,productType:'Goods',itemCode:tag,itemName:'調撥驗證商品',qty:3,orderedQty:3,reservedQty:3,shortageQty:0,warehouseId:from,dispatchPreparedQty:3,deliveredQty:0,returnedQty:0,deliveryPlan:{mode:'PICKUP',warehouseId:to}}]});
+ put('inventoryReservations',orderId+'__I',{orderId,itemId:'I',productKey:key,warehouseId:from,quantity:3,shortageQty:0,status:'active'});await setup.commit();
+ const context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage(),calls=[],errors=[];
+ let dropped=false;const dropAction=width===1280?'dispatchOrderTransfer':'receiveOrderTransfer';
+ await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_ORDER_TRANSFER_DISPATCH_EMULATOR=true;window.YUSHIN_ORDER_TRANSFER_RECEIVE_EMULATOR=true;});
+ page.on('dialog',dialog=>dialog.accept());page.on('pageerror',error=>errors.push(error.message));
+ await context.route('**/*',async route=>{
+  const request=route.request(),url=new URL(request.url());if(!['localhost','127.0.0.1'].includes(url.hostname)){await route.abort();return;}
+  if(url.port==='5001'&&request.method()==='POST'&&/\/(dispatchOrderTransfer|receiveOrderTransfer)$/.test(url.pathname)){
+   const action=url.pathname.split('/').at(-1);calls.push({action,payload:request.postDataJSON().data});assert.match((await request.allHeaders()).authorization||'',/^Bearer /);
+   if(action===dropAction&&!dropped){dropped=true;const response=await route.fetch();assert.equal(response.status(),200);await route.abort('failed');return;}
+  }
+  await route.continue();
+ });
+ // Scope presentation caches to source documents read from the real server.
+ // No transaction, Callable or rendering handler is replaced by a stub.
+ const shipping=async()=>{
+  await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();await page.selectOption('#inventoryShippingScope','transfer');
+  await page.evaluate(async({orderId,from,to})=>{
+   await loadInventoryWorkspace();
+   const order=await db.collection('orders').doc(orderId).get({source:'server'});
+   warehouseMasterCache=await Promise.all([from,to].map(async id=>({id,...(await db.collection('warehouses').doc(id).get({source:'server'})).data()})));
+   orderWorkQueueCache=[{id:orderId,...order.data()}];renderMainTransferRequests();
+  },{orderId,from,to});
+ };
+ const receiving=async()=>{await siteNav(page,'inventory');await page.locator('#inventoryReceivingTabBtn').click();await page.locator('#inventoryTransferReceivingTab').click();await page.evaluate(()=>loadWarehouseTransferQueue(true));};
+ try{
+  await siteOpen(page);await siteLogin(page,{uid,email},'warehouse');await shipping();
+  await page.locator('#mainTransferRequestBody').getByRole('button',{name:'登記出貨',exact:true}).click();
+  await page.waitForFunction(drop=>{const text=document.getElementById('actionFeedback')?.textContent||'';return text.includes(drop?'調撥未完成':'已出貨至主倉');},width===1280);
+  if(width===1280){
+   await siteOpen(page,'warehouse');await shipping();
+   await page.locator('#mainTransferRequestBody').getByRole('button',{name:'確認原寄出結果',exact:true}).click();
+   await page.waitForFunction(()=>!pendingOrderTransferOperations().length);
+   assert.deepEqual(calls[0],calls[1]);
+  }
+  const transferId=calls[0].payload.id;assert.ok(transferId);
+  await receiving();await page.locator('#inventoryTransferReceivingBody tr').filter({hasText:tag}).getByRole('button',{name:'已收貨',exact:true}).click();
+  await page.waitForFunction(drop=>{const text=document.getElementById('actionFeedback')?.textContent||'';return text.includes(drop?'調撥收貨未完成':'原訂單預留已移到收貨倉庫');},width===390);
+  if(width===390){
+   await siteOpen(page,'warehouse');await receiving();
+   await page.evaluate(()=>{globalThis.YUSHIN_ORDER_TRANSFER_RECEIVE_EMULATOR=false;});const before=calls.length;
+   await page.locator('#inventoryTransferReceivingBody').getByRole('button',{name:'確認原收貨結果',exact:true}).click();
+   await page.waitForFunction(()=>document.getElementById('actionFeedback')?.textContent?.includes('禁止回退舊交易'));
+   assert.equal(calls.length,before);assert.equal(await page.evaluate(()=>pendingOrderTransferOperations().length),1);
+   await siteOpen(page,'warehouse');await receiving();await page.locator('#inventoryTransferReceivingBody').getByRole('button',{name:'確認原收貨結果',exact:true}).click();
+   await page.waitForFunction(()=>!pendingOrderTransferOperations().length);
+   const receipts=calls.filter(c=>c.action==='receiveOrderTransfer');assert.equal(receipts.length,2);assert.deepEqual(receipts[0],receipts[1]);
+  }
+  const order=(await db.doc('orders/'+orderId).get()).data(),stock=(await db.doc('warehouseStocks/'+to+'__'+key).get()).data();
+  assert.equal(order.items[0].warehouseId,to);assert.equal(order.logisticsTransfersPending,0);assert.deepEqual(order.deliveryRecords,[]);assert.equal(stock.onHand,3);assert.equal(stock.reserved,3);
+  assert.equal((await db.doc('inventory/'+key).get()).data().onHand,3);assert.equal((await db.doc('inventory/'+key).get()).data().reserved,3);
+  assert.equal(await page.evaluate(()=>pendingOrderTransferOperations().length),0);assert.deepEqual(errors,[]);
+ }finally{await context.close();}
+});
