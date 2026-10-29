@@ -19970,17 +19970,21 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
 
 // Central authority for cancellation/restoration of an order and its stock holds.
 function lifecycleProtectedMode(){
- return globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true
+ return globalThis.YUSHIN_V3_CUSTODY_LIFECYCLE_EMULATOR===true
+  ||globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true
   ||globalThis.YUSHIN_PREVIEW_ORDER_LIFECYCLE===true
   ||(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview');
 }
 function assertNoPendingV2LifecycleBeforeLegacyWrite(orderId){
  if(typeof sessionStorage==='undefined'||!currentUser?.uid)return;
  const key='v2-lifecycle:'+encodeURIComponent(currentUser.uid)+':'+encodeURIComponent(orderId);
- if(sessionStorage.getItem(key)!==null)
+ const v3='v3-custody-lifecycle:'+encodeURIComponent(currentUser.uid)+':'+encodeURIComponent(orderId);
+ if(sessionStorage.getItem(key)!==null||sessionStorage.getItem(v3)!==null)
   throw Error('前次 v2 取消／恢復尚未確認，禁止改用舊交易；請恢復原受控環境以原識別碼核對。');
 }
 async function setOrderLifecycleStatus(orderId,nextStatus,details=null) {
+    if(globalThis.YUSHIN_V3_CUSTODY_LIFECYCLE_EMULATOR===true)
+        return setV3CustodyOrderLifecycleEmulator(orderId,nextStatus,details);
     if(lifecycleProtectedMode())return setV2OrderLifecycleEmulator(orderId,nextStatus,details);
     assertNoPendingV2LifecycleBeforeLegacyWrite(orderId);
     if(!['normal','cancelled'].includes(nextStatus))throw new Error('不支援的訂單狀態。');
@@ -20127,6 +20131,96 @@ async function setV2OrderLifecycleEmulator(orderId,nextStatus,details=null){
   &&row.after?.date===frozen.date&&row.after?.reason===frozen.reason))
   throw Error('訂單尚未讀回原取消／恢復憑證，請保留識別碼確認結果。');
  Object.defineProperty(savedOrder,'v2LifecycleOutcome',{value:{warehouseIds:frozen.warehouseIds,postCommitAllocation:result.postCommitAllocation}});
+ sessionStorage.removeItem(key);
+ return savedOrder;
+}
+
+// A separate, demo-only handoff lifecycle transport. An unresolved write is
+// durable across refresh and cannot be retried through the legacy SDK writer.
+function pendingV3CustodyLifecycle(orderId){
+ const key='v3-custody-lifecycle:'+encodeURIComponent(currentUser?.uid||'')+':'+encodeURIComponent(orderId);
+ const raw=sessionStorage.getItem(key);
+ if(!raw)return null;
+ try{
+  const intent=JSON.parse(raw);
+  if(intent?.orderId!==orderId||intent.actorUid!==currentUser?.uid
+   ||intent.actorRole!==currentUserRole||!['normal','cancelled'].includes(intent.nextStatus)
+   ||!/^[A-Za-z0-9_-]{12,96}$/.test(intent.operationId||'')
+   ||!/^[A-Za-z0-9_-]{12,96}$/.test(intent.syncAttemptId||'')
+   ||!Array.isArray(intent.itemIds)||!intent.itemIds.length||intent.itemIds.length>5
+   ||new Set(intent.itemIds).size!==intent.itemIds.length)throw Error('invalid pending v3 intent');
+  return intent;
+ }catch(_){throw Error('前次 V3 保管取消／恢復尚未確認，請用原帳號、原操作編號恢復。');}
+}
+async function setV3CustodyOrderLifecycleEmulator(orderId,nextStatus,details=null){
+ const local=host=>host==='localhost'||host==='127.0.0.1';
+ const host=String(globalThis.location?.hostname||'').toLowerCase();
+ if(globalThis.YUSHIN_V3_CUSTODY_LIFECYCLE_EMULATOR!==true||!local(host)
+  ||typeof firebase==='undefined'||!firebase.auth||!firebase.functions||!firebase.app)
+  throw Error('V3 保管取消／恢復僅開放隔離 Emulator，禁止切回舊交易。');
+ const auth=firebase.auth(),app=firebase.app(),functions=app.functions('asia-east1');
+ if(auth.app?.options?.projectId!=='demo-yushin'||app.options?.projectId!=='demo-yushin'
+  ||functions.app?.options?.projectId!=='demo-yushin'||db?.app?.options?.projectId!=='demo-yushin'
+  ||!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099)
+  throw Error('V3 保管訂單 Auth、Functions、Firestore 專案或 Emulator 不一致。');
+ const uid=currentUser?.uid,role=currentUserRole;
+ const check=()=>{
+  if(!uid||auth.currentUser?.uid!==uid||currentUser?.uid!==uid||currentUserRole!==role
+   ||!['admin','sales','engineer'].includes(role)||!canManageOrderLifecycleCapability()||!canEditPage('orders.list'))
+   throw Error('登入身分或 V3 保管取消／恢復權限已改變。');
+ };
+ check();
+ const key='v3-custody-lifecycle:'+encodeURIComponent(uid)+':'+encodeURIComponent(orderId);
+ let frozen=pendingV3CustodyLifecycle(orderId);
+ if(frozen){
+  if(frozen.nextStatus!==nextStatus||(details!==null
+   &&(frozen.date!==details.date||frozen.reason!==String(details.reason||'').trim())))
+   throw Error('前次 V3 操作結果未確認，必須使用相同日期、原因、目標狀態及原操作編號。');
+ }else{
+  const date=details===null?localDateString():details.date,reason=String(details?.reason||'').trim();
+  if(!['normal','cancelled'].includes(nextStatus)||typeof date!=='string'
+   ||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)
+   ||!Number.isFinite(Date.parse(date+'T00:00:00Z'))
+   ||new Date(date+'T00:00:00Z').toISOString().slice(0,10)!==date||reason.length>1000)
+   throw Error('V3 保管交易的日期、原因或狀態不正確。');
+  const snap=await db.collection('orders').doc(orderId).get({source:'server'});check();
+  if(!snap.exists)throw Error('原訂單不存在。');
+  const order=snap.data(),items=order.items;
+  if(order.inventoryReservationStatus!=='completed'||!order.inventoryReservationAttemptId
+   ||!Array.isArray(items)||!items.length||items.length>5
+   ||new Set(items.map(row=>row?.itemId)).size!==items.length
+   ||items.some(row=>typeof row?.itemId!=='string'||!row.itemId||row.itemId.includes('/')
+    ||row.warehouseId!=='custody-'+order.ownerUid||!row.custodyTransferId))
+   throw Error('此訂單尚未具備完整 V3 業務保管交接來源。');
+  if(normalizedOrderStatus(order)===nextStatus)throw Error('V3 訂單已是此狀態。');
+  for(const row of items){
+   const ledgerSnap=await db.collection('inventoryReservations').doc(orderId+'__'+row.itemId).get({source:'server'});check();
+   const ledger=ledgerSnap.exists?ledgerSnap.data():null;
+   if(!ledger||ledger.orderId!==orderId||ledger.itemId!==row.itemId
+    ||ledger.locationSchemaVersion!==3||ledger.custodyTransferId!==row.custodyTransferId
+    ||ledger.ownerUid!==order.ownerUid||!Array.isArray(ledger.sourceLocationSnapshot))
+    throw Error('原始 V3 保管預留及來源憑證不一致。');
+  }
+  frozen={orderId,itemIds:items.map(row=>row.itemId).sort(),nextStatus,date,reason,
+   operationId:'custody_'+globalThis.crypto.randomUUID().replaceAll('-','_'),
+   syncAttemptId:order.inventoryReservationAttemptId,actorUid:uid,actorRole:role};
+  sessionStorage.setItem(key,JSON.stringify(frozen));
+ }
+ check();functions.useEmulator('127.0.0.1',5001);
+ const {actorUid,actorRole,...payload}=frozen;
+ const response=await functions.httpsCallable('setV3CustodyOrderLifecycle')(payload);check();
+ const result=response?.data;
+ if(!['applied','already-applied'].includes(result?.status)||result.orderId!==orderId
+  ||result.nextStatus!==frozen.nextStatus||result.receiptId!=='v3-custody-lifecycle-'+frozen.operationId
+  ||!Array.isArray(result.items)||JSON.stringify(result.items.map(row=>row.itemId).sort())!==JSON.stringify(frozen.itemIds))
+  throw Error('V3 保管交易結果無法核對，保留原操作編號待查。');
+ const refreshed=await db.collection('orders').doc(orderId).get({source:'server'});check();
+ if(!refreshed.exists)throw Error('已回覆交易成功，但原訂單回讀失敗。');
+ const savedOrder=refreshed.data();
+ if(!(savedOrder.orderLifecycleHistory||[]).some(row=>row.operationId===frozen.operationId
+  &&row.by===uid&&row.actorRole===role&&row.after?.status===frozen.nextStatus
+  &&row.after?.date===frozen.date&&row.after?.reason===frozen.reason))
+  throw Error('尚未讀回 V3 原始交易憑證，請以原操作編號確認。');
  sessionStorage.removeItem(key);
  return savedOrder;
 }
