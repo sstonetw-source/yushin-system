@@ -770,11 +770,3 @@ function salesStatisticsQueryWindow() {
     const start = document.getElementById('salesStatsStart')?.value || defaultStart;
     return { start, end };
 }
-
-async function preloadSalesStatisticsProductCosts(orders = []) {
-    const formalLines = (orders || []).flatMap(salesStatisticOrderLines)
-        .filter(order => (order.procurementType || 'PURCHASING_PO') !== 'SALES_SELF_ORDER');
-    if (!formalLines.length) return;
-    await preloadPurchaseCostsForItems(formalLines);
-}
-

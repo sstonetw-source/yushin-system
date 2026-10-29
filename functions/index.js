@@ -15,12 +15,16 @@ const {createPreviewFormalPurchaseCallable}=require('./formal-purchase-preview-c
 // rollout flag may enable the already-validated strict transactional writer.
 exports.commitV2FormalPurchase=createPreviewFormalPurchaseCallable({onCall,HttpsError,getDatabase:getFirestore});
 const {commitGroupedWarehouseReservation}=require('./grouped-reservation-service');
-const {allowGroupedReservation}=require('./grouped-reservation-gate');
+const {allowGroupedReservation,allowGroupedReservationAmend,
+  allowGroupedReservationSameWarehouse}=require('./grouped-reservation-gate');
 exports.commitGroupedWarehouseReservation=onCall({region:'asia-east1'},async request=>{
   if(!allowGroupedReservation())
     throw new HttpsError('failed-precondition','跨倉後端交易尚未完成 Preview 驗收');
   if(!request.auth?.uid)throw new HttpsError('unauthenticated','請先登入');
-  try{return await commitGroupedWarehouseReservation(getFirestore(),request.auth.uid,request.data);}
+  if(request.data?.mode==='amend'&&!allowGroupedReservationAmend())
+    throw new HttpsError('failed-precondition','同步後跨倉預留調整尚未單獨授權啟用');
+  try{return await commitGroupedWarehouseReservation(getFirestore(),request.auth.uid,request.data,{
+    allowSameWarehouse:allowGroupedReservationSameWarehouse()});}
   catch(error){
     const allowed=['invalid-argument','permission-denied','failed-precondition','not-found','already-exists'];
     if(allowed.includes(error.code))throw new HttpsError(error.code,error.message);
@@ -28,6 +32,9 @@ exports.commitGroupedWarehouseReservation=onCall({region:'asia-east1'},async req
     throw new HttpsError('internal','跨倉預留交易失敗');
   }
 });
+
+const {createOrderReservationCallable}=require('./order-reservation-callable');
+exports.commitOrderReservationPreview=createOrderReservationCallable({onCall,HttpsError,getDatabase:getFirestore});
 
  
 // Safe transport-only trial. This callable cannot be enabled outside the
@@ -109,8 +116,23 @@ exports.receiveV2Supply=createSupplyReceiptCallable({onCall,HttpsError,getDataba
 const {createDispatchPreparationCallable}=require('./dispatch-preparation-callable');
 exports.prepareV2OrderDispatch=createDispatchPreparationCallable({onCall,HttpsError,getDatabase:getFirestore});
 
+// Customer acknowledgement is independent of shipment stock accounting.
+// Production cannot enable this explicitly gated Emulator/Preview candidate.
+const {createDeliveryConfirmationCallable}=require('./delivery-confirmation-callable');
+exports.confirmV2ShipmentDelivery=createDeliveryConfirmationCallable({onCall,HttpsError,getDatabase:getFirestore});
+
+// Delivery reversal only corrects acknowledgement; shipped inventory stays
+// outside this transaction. It has its own default-closed Preview gate.
+const {createDeliveryReversalCallable}=require('./delivery-reversal-callable');
+exports.reverseV2ShipmentDelivery=createDeliveryReversalCallable({onCall,HttpsError,getDatabase:getFirestore});
+
 // Physical customer shipment is a separate atomic transaction from paperwork.
 // Both the demo Emulator and Preview gates are disabled unless independently
 // authorized; production has no enablement path.
 const {createWarehouseShipmentCallable}=require('./warehouse-shipment-callable');
 exports.shipV2WarehouseItem=createWarehouseShipmentCallable({onCall,HttpsError,getDatabase:getFirestore});
+
+// Whole-order cancellation/restoration is a separate default-closed Preview
+// transaction; the old client writer remains until a later rollout approval.
+const {createOrderLifecycleCallable}=require('./order-lifecycle-preview-callable');
+exports.setV2OrderLifecycle=createOrderLifecycleCallable({onCall,HttpsError,getDatabase:getFirestore});

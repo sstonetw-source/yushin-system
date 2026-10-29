@@ -57,7 +57,8 @@ function emulatorSetup(){
  x.records.set('supplyOrders/PO1-0',{purchaseDocumentId:'PO1',qty:1,unitCost:0});
  x.c.YUSHIN_FORMAL_PURCHASE_EMULATOR=true;x.c.APP_ENVIRONMENT='emulator';x.c.location={hostname:'localhost'};
  x.c.firebase={auth:()=>auth,functions:()=>functions,app:()=>({options,functions:()=>functions})};
- x.c.db={collection:name=>({doc:id=>({get:async()=>({exists:x.records.has(name+'/'+id),data:()=>structuredClone(x.records.get(name+'/'+id))})})})};
+ x.c.db={app:{options:{projectId:'demo-yushin'}},
+  collection:name=>({doc:id=>({get:async()=>({exists:x.records.has(name+'/'+id),data:()=>structuredClone(x.records.get(name+'/'+id))})})})};
  return {...x,auth,functions,calls};
 }
 function previewSetup(){
@@ -66,6 +67,7 @@ function previewSetup(){
  x.c.YUSHIN_PREVIEW_FORMAL_PURCHASE=true;
  x.c.APP_ENVIRONMENT='preview';x.c.location.hostname='preview-20135.web.app';
  x.auth.app.options=options;x.auth.emulatorConfig=null;x.functions.app.options=options;
+ x.c.db.app.options={projectId:'preview-20135'};
  x.c.firebase.app=()=>({options,functions:()=>x.functions});
  return x;
 }
@@ -76,6 +78,7 @@ function productionSetup(){
  x.c.APP_ENVIRONMENT='production';x.c.location.hostname='yu-shing-company.web.app';
  x.auth.app.options=options;x.auth.emulatorConfig=null;
  x.functions.app.options=options;
+ x.c.db.app.options={projectId:'yu-shing-company'};
  x.c.firebase.app=()=>({options,functions:()=>x.functions});
  return x;
 }
@@ -110,6 +113,8 @@ test('GitHub Pages rejects other repositories and lookalike hosts before any pur
 test('production opt-in refuses unexpected hostname project emulator login change or bad response without fallback',async()=>{
  for(const mutate of [x=>x.c.location.hostname='example.com',
   x=>x.auth.app.options.projectId='preview-20135',
+  x=>x.c.db.app.options.projectId='preview-20135',
+  x=>{delete x.c.db.app;},
   x=>x.auth.emulatorConfig={host:'127.0.0.1',port:9099},
   x=>x.auth.currentUser.uid='different']){
   const x=productionSetup();mutate(x);
@@ -123,6 +128,24 @@ test('production opt-in refuses unexpected hostname project emulator login chang
  const unsupported=productionSetup();unsupported.po.items[0].sourceType='STOCK_REPLENISHMENT';
  await assert.rejects(unsupported.c.commitFormalPurchaseOrder(unsupported.po),/只支援/);
  assert.equal(unsupported.writes.length,0);
+});
+
+test('formal PO refuses mismatched Firestore project before Callable across all enabled environments',async()=>{
+ for(const setupEnv of [emulatorSetup,previewSetup,productionSetup]){
+  const x=setupEnv();x.c.db.app.options.projectId='unrelated-project';
+  await assert.rejects(x.c.commitFormalPurchaseOrder(x.po),/Firestore 與後端 Firebase 專案不一致/);
+  assert.equal(x.calls.length,0,'wrong Firestore project must block before any server call');
+  assert.equal(x.writes.length,0,'wrong Firestore project must never fall back to client transaction');
+ }
+});
+test('formal PO refuses to read results after Firestore project changes during server reply',async()=>{
+ const x=productionSetup();
+ x.functions.httpsCallable=()=>async()=>{
+  x.c.db.app.options.projectId='unrelated-project';
+  return {data:{status:'committed',poNo:'PO1',supplyOrderIds:['PO1-0']}};
+ };
+ await assert.rejects(x.c.commitFormalPurchaseOrder(x.po),/回讀 Firestore 專案已變更/);
+ assert.equal(x.writes.length,0,'unknown response must never invoke legacy writer');
 });
 
 test('Preview without backend opt-in fails closed instead of using legacy purchase transaction',async()=>{

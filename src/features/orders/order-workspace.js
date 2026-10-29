@@ -236,7 +236,7 @@ function orderLifecycleActionButtons(order, lifecycle, progress, actions) {
     if (pendingLifecycleOrderIds.has(order.id)) return '<button type="button" disabled>處理中…</button>';
     const id = inlineJsValue(order.id);
     try{
-        const retry=globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true?pendingV2OrderLifecycle(order.id):null;
+        const retry=lifecycleProtectedMode()?pendingV2OrderLifecycle(order.id):null;
         if(retry)return `<button type="button" onclick="quickSetOrderLifecycle(${id}, ${inlineJsValue(retry.nextStatus)})">確認前次取消／恢復結果</button>`;
     }catch(err){return `<span role="alert">${escapeHtml(err.message)}</span>`;}
     const buttons = [];
@@ -274,7 +274,7 @@ function orderContextActionState(order, normalizedItems = null, dispatchStateByI
         return ordered > 0 && received > 0 && received < ordered && Number(state?.shippable || 0) > 0;
     });
     let showPartialDelivery=hasPartialArrival || (items.length > 1 && states.some(state => Number(state?.shippable || 0) > 0));
-    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true){
+    if(deliveryConfirmationProtectedMode()){
         try{
             // Customer acknowledgement consumes shipped quota. Once all printed
             // goods leave the warehouse, shippable is zero but arrival is pending.
