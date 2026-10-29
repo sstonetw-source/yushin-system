@@ -2,16 +2,17 @@
 const test=require('node:test');
 const assert=require('node:assert/strict');
 const {allocationIntent,assertReceiptReady,inspectAllocationCheckpoint}=require('../functions/main-transfer-allocation-proof');
+const {normalizePhysicalIntent}=require('../functions/main-transfer-physical-service');
 const intent=allocationIntent({transferId:'transfer_12345678',operationId:'allocate_12345678'});
 function fixture(){
  const transfer={id:intent.transferId,kind:'TRANSFER',status:'RECEIVED',orderId:'',itemId:'',reservedQty:0,
   qty:3,productKey:'P',toWarehouseId:'MAIN',allocations:[{lotId:'L',qty:3}],
-  dispatchIntentHash:'dispatch-hash',receiptIntentHash:'receipt-hash',receiptOperationId:'receive_12345678',
+  dispatchIntentHash:'dispatch-hash',receiptIntentHash:normalizePhysicalIntent('RECEIVE',{id:intent.transferId,operationId:'receive_12345678'}).hash,receiptOperationId:'receive_12345678',
   allocationCompleted:true,autoAllocatedQty:3};
  const dispatchProof={kind:'MAIN_TRANSFER_DISPATCH',intentHash:'dispatch-hash',transfer:{...transfer,status:'IN_TRANSIT',
   allocationCompleted:undefined,autoAllocatedQty:undefined}};
  delete dispatchProof.transfer.allocationCompleted;delete dispatchProof.transfer.autoAllocatedQty;
- const receiptProof={kind:'MAIN_TRANSFER_RECEIPT',transferId:intent.transferId,intentHash:'receipt-hash'};
+ const receiptProof={kind:'MAIN_TRANSFER_RECEIPT',transferId:intent.transferId,intentHash:transfer.receiptIntentHash};
  return {transfer,dispatchProof,receiptProof,intent};
 }
 test('allocation intent has stable digest and rejects unbounded or extra fields',()=>{
@@ -55,4 +56,9 @@ test('shortage selection is deterministic, bounded and rejects corrupt candidate
   assert.throws(()=>selectBoundedShortages({rows,productKey:'P',warehouseId:'MAIN'}));
  }
  assert.throws(()=>selectBoundedShortages({rows:[row('a','2026-10-01'),row('b','2026-10-02')],productKey:'P',warehouseId:'MAIN',maxCandidates:1}));
+});
+
+test('receipt proof cannot authorize a mismatched receipt operation id',()=>{
+ const f=fixture();f.transfer.receiptOperationId='receive_99999999';
+ assert.throws(()=>assertReceiptReady(f));
 });
