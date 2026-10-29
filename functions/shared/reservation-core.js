@@ -151,6 +151,37 @@
      throw Error('多倉調撥來源位置不正確。');
    return {schemaVersion:2,qty,sources};
  }
+ // Build source legs without changing a v2 reservation, moving only quantities
+ // outside the selected destination. No physical or ledger write is authorized here.
+ function planOrderTransferTarget({reservation,item,orderId,itemId,productKey,qty,toWarehouseId,action='DISPATCH',ownerUid=''}={}){
+   if(!['DISPATCH','HANDOFF'].includes(action)
+     ||typeof toWarehouseId!=='string'||!toWarehouseId||toWarehouseId!==toWarehouseId.trim()||toWarehouseId.includes('/'))
+     throw Error('訂單調撥目的位置或動作不正確。');
+   const source=orderTransferReservationSources({reservation,item,orderId,itemId,productKey,qty});
+   const isCustody=toWarehouseId.startsWith('custody-');
+   if(action==='HANDOFF'){
+     if(typeof ownerUid!=='string'||!ownerUid||ownerUid.includes('/')
+       ||toWarehouseId!=='custody-'+ownerUid)throw Error('業務交接目的地必須屬於目前訂單負責人。');
+   }else if(isCustody)throw Error('一般倉庫調撥不得直接寫入業務保管位置。');
+   if(source.schemaVersion===2){
+     const candidates=reservation.lifecycleWarehouseIds;
+     if(!Array.isArray(candidates)||candidates.length!==2||new Set(candidates).size!==2
+       ||candidates.some(w=>typeof w!=='string'||!w||w!==w.trim()||w.includes('/')||w.startsWith('custody-'))
+       ||!candidates.includes(item.warehouseId)
+       ||source.sources.some(row=>!candidates.includes(row.warehouseId))
+       ||(action==='DISPATCH'&&!candidates.includes(toWarehouseId)))
+       throw Error('多倉調撥來源與原兩個候選實體倉不一致。');
+   }else if(item.warehouseId!==source.sources[0].warehouseId)
+     throw Error('原單倉調撥位置與訂單指定倉不一致。');
+   const keptQty=source.sources.find(row=>row.warehouseId===toWarehouseId)?.qty||0;
+   const moveLegs=source.sources.filter(row=>row.warehouseId!==toWarehouseId)
+     .map(row=>({warehouseId:row.warehouseId,qty:row.qty}));
+   const movingQty=moveLegs.reduce((sum,row)=>sum+row.qty,0);
+   if(!moveLegs.length||Math.abs(movingQty+keptQty-source.qty)>1e-9)
+     throw Error('調撥沒有需要移動的預留，或分倉總量不一致。');
+   return {schemaVersion:source.schemaVersion,orderQty:source.qty,destinationWarehouseId:toWarehouseId,
+     sourceLocations:source.sources,moveLegs,movingQty,keptQty};
+ }
  // Compatibility guard: existing single-source callers must not silently start moving distributed holds.
  function orderTransferReservationSource(input={}){
    const warehouseId=input.warehouseId;
@@ -517,5 +548,5 @@
    const plan=planShortageAllocation(reservations,availableQty);
    return {allocations:plan.allocations.map(row=>({...row,id:row.reservationId})),allocatedQty:plan.allocatedQty,unallocatedQty:plan.remainingQty};
  }
- return {orderTransferReservationSource,orderTransferReservationSources,planReservationReceipt,planReservationReturn,planReservationIssue,validateReservationBalance,physicalWarehouse,planMainTransferHold,planReservationLifecycle,reservationStockDeltas,validateMultiLocationLedger,planLocationReservation,reservationLocations,planMultiWarehouseReservation,planReservation,planShortageAllocation,allocateReceiptToShortages,reservationLocationCanChange,selectSingleWarehouse,compareReservationPriority};
+ return {orderTransferReservationSource,orderTransferReservationSources,planOrderTransferTarget,planReservationReceipt,planReservationReturn,planReservationIssue,validateReservationBalance,physicalWarehouse,planMainTransferHold,planReservationLifecycle,reservationStockDeltas,validateMultiLocationLedger,planLocationReservation,reservationLocations,planMultiWarehouseReservation,planReservation,planShortageAllocation,allocateReceiptToShortages,reservationLocationCanChange,selectSingleWarehouse,compareReservationPriority};
 });
