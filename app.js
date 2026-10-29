@@ -10588,6 +10588,10 @@ function groupedReservationPreviewEnabled() {
     return APP_ENVIRONMENT === 'preview'
         && globalThis.YUSHIN_PREVIEW_GROUPED_RESERVATION === true;
 }
+function sameWarehouseReservationPreviewEnabled() {
+    return groupedReservationPreviewEnabled()
+        && globalThis.YUSHIN_PREVIEW_SAME_WAREHOUSE_RESERVATION === true;
+}
 function initialGroupedReservationCandidates(order) {
     if (!groupedReservationPreviewEnabled()
         || order?.inventoryReservationStatus !== 'pending'
@@ -10600,7 +10604,7 @@ function initialGroupedReservationCandidates(order) {
             || String(item.productType||'').toUpperCase() === 'SERVICE'
             || !item.warehouseId || String(item.warehouseId).startsWith('custody-')) continue;
         const untouched = ['reservedQty','deliveredQty','returnedQty','supplyOrderedQty',
-            'receivedQty','dispatchPreparedQty'].every(key=>Number(item[key]||0)===0);
+            'receivedQty','dispatchPreparedQty','warehouseShippedQty'].every(key=>Number(item[key]||0)===0);
         const requested = Number(item.qty??item.orderedQty);
         if (!untouched || item.transferPendingId || item.custodyTransferId
             || !Number.isSafeInteger(requested) || requested<=0 || requested>1000000) continue;
@@ -10612,7 +10616,9 @@ function initialGroupedReservationCandidates(order) {
     }
     return [...groups].filter(([,rows])=>rows.length>=2&&rows.length<=5
         && new Set(rows.map(row=>row.itemId)).size===rows.length
-        && new Set(rows.map(row=>row.warehouseId)).size===2)
+        && (new Set(rows.map(row=>row.warehouseId)).size===2
+            || (sameWarehouseReservationPreviewEnabled()
+                && new Set(rows.map(row=>row.warehouseId)).size===1)))
         .map(([productKey,rows])=>({productKey,rows}));
 }
 async function groupedReservationPreviewCallable() {
@@ -10639,10 +10645,14 @@ async function commitInitialGroupedReservationPreview(orderId,liveOrder,actorUid
     if (!globalThis.YushinReservation?.planReservation || !globalThis.YushinInventory?.normalizeStock)
         throw new Error('預留或庫存核心尚未載入。');
     const operationAttempt=liveOrder.inventoryReservationAttemptId;
-    let committed=false;
-    for (const [groupIndex,group] of groups.entries()) {
+    let committed=false,crossIndex=0,sameIndex=0;
+    for (const group of groups) {
         const {productKey,rows}=group;
         const warehouses=[...new Set(rows.map(row=>row.warehouseId))].sort();
+        const sameWarehouse=warehouses.length===1;
+        // Preserve legacy two-warehouse attempt IDs even if a same-warehouse
+        // group appears earlier in the order. Replays must never swap intents.
+        const groupIndex=sameWarehouse?sameIndex++:crossIndex++;
         const companyRef=db.collection('inventory').doc(encodeURIComponent(productKey));
         const warehouseRefs=warehouses.map(wh=>db.collection('warehouseStocks').doc(warehouseStockDocId(wh,productKey)));
         const snaps=await Promise.all([companyRef,...warehouseRefs].map(ref=>
@@ -10678,12 +10688,13 @@ async function commitInitialGroupedReservationPreview(orderId,liveOrder,actorUid
         // No stock to hold; use the existing item-level Service to publish
         // the shortage and procurement demand without adding server writes.
         if (!items.some(row=>row.quantity>0)) continue;
-        if (currentUser?.uid!==actorUid || !groupedReservationPreviewEnabled())
+        if (currentUser?.uid!==actorUid || !groupedReservationPreviewEnabled()
+            || (sameWarehouse&&!sameWarehouseReservationPreviewEnabled()))
             throw new Error('登入身分或測試環境已變更，停止跨倉庫存同步。');
         const callable=await groupedReservationPreviewCallable();
         // Derive a stable per-product-group ID from the persisted order sync
         // attempt. Never create a new ID on network retry.
-        const attemptId=operationAttempt+'_group_'+groupIndex;
+        const attemptId=operationAttempt+(sameWarehouse?'_same_':'_group_')+groupIndex;
         const reply=await callable({orderId,attemptId,syncAttemptId:operationAttempt,items});
         if (!['applied','already-applied'].includes(reply?.data?.status))
             throw new Error('雙倉交易回覆不明確；請重新讀取訂單後使用相同識別碼重試。');

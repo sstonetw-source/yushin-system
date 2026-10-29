@@ -155,6 +155,30 @@ test('five-line multiwarehouse insufficiency rejects the whole transaction and c
   assert.equal((await db.doc('inventoryMovements/grouped-'+request.attemptId+'-B').get()).exists,false);
 });
 
+test('five same-product lines in ONE warehouse use the Admin writer without Rules proofs',async()=>{
+  const f=await fiveLineFixture('five-same');
+  await db.doc('orders/'+f.orderId).update({items:(await f.doc('orders/'+f.orderId)).items.map(item=>({...item,warehouseId:'A'}))});
+  const commit=data=>commitGroupedWarehouseReservation(db,f.uid,data,{allowSameWarehouse:true});
+  const initial=f.intent([2,3,1,4,2],'attempt_five_same_123456789');
+  await assert.rejects(f.call(initial),/尚未獨立啟用/);
+  assert.equal((await f.doc('inventory/'+f.productKey)).reserved,0);
+  assert.equal((await commit(initial)).companyReservedDelta,12);
+  assert.deepEqual(await f.balances(),{company:12,a:12,b:0,
+    order:[2,3,1,4,2],reservations:[2,3,1,4,2]});
+  assert.equal((await commit(initial)).status,'already-applied');
+  await db.doc('orders/'+f.orderId).update({inventoryReservationStatus:'completed'});
+  const amend=(values,attemptId)=>({...f.intent(values,attemptId),mode:'amend'});
+  assert.equal((await commit(amend([1,4,2,3,2],'amend_five_same_exchange_1234'))).companyReservedDelta,0);
+  assert.deepEqual(await f.balances(),{company:12,a:12,b:0,
+    order:[1,4,2,3,2],reservations:[1,4,2,3,2]});
+  const release=amend([0,0,0,0,0],'amend_five_same_release_1234');
+  assert.equal((await commit(release)).companyReservedDelta,-12);
+  const zero={company:0,a:0,b:0,order:[0,0,0,0,0],reservations:[0,0,0,0,0]};
+  assert.deepEqual(await f.balances(),zero);
+  assert.equal((await commit(release)).status,'already-applied');
+  assert.deepEqual(await f.balances(),zero);
+});
+
 test('five-line completed order can rebalance then release through gated server writer',async()=>{
   const f=await fiveLineFixture('five-amend');
   await f.call(f.intent([2,3,1,4,2]));

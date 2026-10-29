@@ -104,6 +104,11 @@ jobs:
           ENABLE_SERVICE_CASE_EMULATOR: "true"
           ENABLE_QUICK_PURCHASE_EMULATOR: "true"
         run: npx --yes firebase-tools@15 emulators:exec --only firestore,auth,functions --project demo-yushin "node --test --test-concurrency=1 tests/emulator-grouped-reservation-callable.cjs tests/emulator-service-case-callable.cjs tests/emulator-quick-purchase-callable.cjs"
+      - name: Explicit same-warehouse reservation Callable in isolated Auth Emulator
+        env:
+          ENABLE_GROUPED_RESERVATION: "true"
+          ENABLE_GROUPED_RESERVATION_SAME_WAREHOUSE: "true"
+        run: npx --yes firebase-tools@15 emulators:exec --only firestore,auth,functions --project demo-yushin "node --test --test-name-pattern='explicitly enabled same-warehouse Callable' tests/emulator-grouped-reservation-callable.cjs"
       - name: Verify v2 Auth Callables and real browser lifecycle handoff in isolated demo Emulator
         run: node tools/run-v2-return-auth-emulator.cjs
       - name: Verify single-item and whole-order dual-warehouse atomic reservation in Emulator

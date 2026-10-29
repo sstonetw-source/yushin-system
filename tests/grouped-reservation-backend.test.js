@@ -158,13 +158,47 @@ test('source cancellation, delivery overcommit, service orders and in-transit sh
     assert.equal(f.snapshot(),before);
   }
 });
-test('existing reservation mismatches, disabled warehouses and third warehouse fail closed',async()=>{
+test('existing reservation mismatches, disabled warehouses and default-closed same warehouse fail closed',async()=>{
   const f=fixture();f.set('inventoryReservations/O__I1',{orderId:'WRONG',productKey:'P',warehouseId:'A',quantity:1});
   let before=f.snapshot();await assert.rejects(f.commit(),/來源與訂單不一致/);assert.equal(f.snapshot(),before);
   const disabled=fixture();disabled.docs.get('warehouses/A').active=false;
   before=disabled.snapshot();await assert.rejects(disabled.commit(),/停用/);assert.equal(disabled.snapshot(),before);
   const third=fixture();third.docs.get('orders/O').items[1].warehouseId='A';
-  before=third.snapshot();await assert.rejects(third.commit(),/剛好兩個/);assert.equal(third.snapshot(),before);
+  before=third.snapshot();await assert.rejects(third.commit(),/尚未獨立啟用/);assert.equal(third.snapshot(),before);
+});
+test('same-warehouse multi-line backend atomically reserves, amends and releases without duplicate movement',async()=>{
+  const f=fixture();f.docs.get('orders/O').items[1].warehouseId='A';
+  const commit=data=>commitGroupedWarehouseReservation(f.db,'actor',data,{allowSameWarehouse:true});
+  const first=await commit(f.request(2,3));
+  assert.equal(first.companyReservedDelta,5);
+  assert.deepEqual(['inventory/P','warehouseStocks/A__P','warehouseStocks/B__P']
+    .map(k=>f.docs.get(k).reserved),[5,5,0]);
+  assert.deepEqual(f.docs.get('reservationOperationReceipts/grouped-attempt_123456789').warehouseIds,['A']);
+  assert.equal([...f.docs.keys()].filter(k=>k.startsWith('inventoryMovements/')).length,1);
+  const snapshot=f.snapshot();
+  assert.equal((await commit(f.request())).status,'already-applied');
+  assert.equal(f.snapshot(),snapshot);
+  await assert.rejects(commit(f.request(3,2)),/操作識別碼/);
+  assert.equal(f.snapshot(),snapshot);
+  f.docs.get('orders/O').inventoryReservationStatus='completed';
+  const amend=(a,b,attemptId)=>({...f.request(a,b,attemptId),mode:'amend'});
+  assert.equal((await commit(amend(1,4,'same_amend_exchange_12345'))).companyReservedDelta,0);
+  assert.deepEqual(f.docs.get('orders/O').items.map(x=>x.reservedQty),[1,4]);
+  assert.equal((await commit(amend(0,0,'same_amend_release_12345'))).companyReservedDelta,-5);
+  assert.deepEqual(['inventory/P','warehouseStocks/A__P','warehouseStocks/B__P']
+    .map(k=>f.docs.get(k).reserved),[0,0,0]);
+  const released=f.snapshot();
+  assert.equal((await commit(amend(1,4,'same_amend_exchange_12345'))).status,'already-applied');
+  assert.equal(f.snapshot(),released,'old same-warehouse receipt must not restore stock');
+});
+test('same-warehouse backend fails without any partial write when that warehouse has insufficient stock',async()=>{
+  const f=fixture();f.docs.get('orders/O').items[1].warehouseId='A';
+  f.docs.get('warehouseStocks/A__P').onHand=4;
+  const before=f.snapshot();
+  await assert.rejects(commitGroupedWarehouseReservation(f.db,'actor',f.request(),{
+    allowSameWarehouse:true}),/庫存不足/);
+  assert.equal(f.snapshot(),before);
+  assert.equal([...f.docs.keys()].filter(k=>k.startsWith('reservationOperationReceipts/')).length,0);
 });
 test('operation limit, intent quantities and unknown location ledger are rejected',async()=>{
   for(const input of [

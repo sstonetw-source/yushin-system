@@ -100,7 +100,7 @@ function projectAfter(stock,delta,label){
   return next;
 }
 
-async function commitGroupedWarehouseReservation(db,uid,data){
+async function commitGroupedWarehouseReservation(db,uid,data,{allowSameWarehouse=false}={}){
   id(uid,'登入 UID');
   const {mode,orderId,attemptId,syncAttemptId,rows,hash}=normalizeIntent(data);
   const ref=(name,key)=>db.collection(name).doc(key);
@@ -190,8 +190,10 @@ async function commitGroupedWarehouseReservation(db,uid,data){
       keys.add(productKey);warehouses.add(warehouseId);
       selections.push({row,item,index,productKey,warehouseId,demand,purchaseDemand});
     }
-    if(keys.size!==1||warehouses.size!==2)
-      fault('failed-precondition','此交易限同一產品、剛好兩個實體倉庫');
+    if(keys.size!==1||warehouses.size<1||warehouses.size>2)
+      fault('failed-precondition','此交易限同一產品、最多兩個實體倉庫');
+    if(warehouses.size===1&&!allowSameWarehouse)
+      fault('failed-precondition','同倉多品項後端交易尚未獨立啟用');
     const productKey=[...keys][0];
     const masterIds=[...new Set(selections.map(s=>s.item.productId).filter(Boolean))];
     for(const masterId of masterIds){

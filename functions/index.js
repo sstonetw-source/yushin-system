@@ -15,14 +15,16 @@ const {createPreviewFormalPurchaseCallable}=require('./formal-purchase-preview-c
 // rollout flag may enable the already-validated strict transactional writer.
 exports.commitV2FormalPurchase=createPreviewFormalPurchaseCallable({onCall,HttpsError,getDatabase:getFirestore});
 const {commitGroupedWarehouseReservation}=require('./grouped-reservation-service');
-const {allowGroupedReservation,allowGroupedReservationAmend}=require('./grouped-reservation-gate');
+const {allowGroupedReservation,allowGroupedReservationAmend,
+  allowGroupedReservationSameWarehouse}=require('./grouped-reservation-gate');
 exports.commitGroupedWarehouseReservation=onCall({region:'asia-east1'},async request=>{
   if(!allowGroupedReservation())
     throw new HttpsError('failed-precondition','跨倉後端交易尚未完成 Preview 驗收');
   if(!request.auth?.uid)throw new HttpsError('unauthenticated','請先登入');
   if(request.data?.mode==='amend'&&!allowGroupedReservationAmend())
     throw new HttpsError('failed-precondition','同步後跨倉預留調整尚未單獨授權啟用');
-  try{return await commitGroupedWarehouseReservation(getFirestore(),request.auth.uid,request.data);}
+  try{return await commitGroupedWarehouseReservation(getFirestore(),request.auth.uid,request.data,{
+    allowSameWarehouse:allowGroupedReservationSameWarehouse()});}
   catch(error){
     const allowed=['invalid-argument','permission-denied','failed-precondition','not-found','already-exists'];
     if(allowed.includes(error.code))throw new HttpsError(error.code,error.message);

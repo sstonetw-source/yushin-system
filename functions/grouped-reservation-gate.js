@@ -18,4 +18,10 @@ function allowGroupedReservation(env=process.env){
 function allowGroupedReservationAmend(env=process.env){
   return env.ENABLE_GROUPED_RESERVATION_AMEND==='true' && allowGroupedReservation(env);
 }
-module.exports={allowGroupedReservation,allowGroupedReservationAmend,projectIdFromEnvironment};
+// Same-warehouse multi-line writes close a distinct #311 Rules gap. They may
+// not be silently switched on by the existing two-warehouse Preview flag.
+function allowGroupedReservationSameWarehouse(env=process.env){
+  return env.ENABLE_GROUPED_RESERVATION_SAME_WAREHOUSE==='true' && allowGroupedReservation(env);
+}
+module.exports={allowGroupedReservation,allowGroupedReservationAmend,
+  allowGroupedReservationSameWarehouse,projectIdFromEnvironment};

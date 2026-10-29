@@ -111,3 +111,24 @@ test('initial grouped rollout alone never enables the separate post-sync amendme
  assert.equal((await f.data('inventory/'+f.productKey)).reserved,0);
  assert.equal((await db.doc('reservationOperationReceipts/grouped-'+intent.attemptId).get()).exists,false);
 });
+test('original two-warehouse Callable flag does not authorize same-warehouse grouped writes',async()=>{
+ const f=await seeded('same-not-enabled');
+ await db.doc('orders/'+f.orderId).update({items:(await f.data('orders/'+f.orderId)).items
+  .map(item=>({...item,warehouseId:'A'}))});
+ await assert.rejects(f.call(f.intent(2,3)),e=>e.code==='functions/failed-precondition');
+ assert.equal((await f.data('inventory/'+f.productKey)).reserved,0);
+ assert.equal((await db.doc('reservationOperationReceipts/grouped-'+f.attemptId).get()).exists,false);
+});
+test('explicitly enabled same-warehouse Callable atomically commits and replays with real Auth',{
+ skip:process.env.ENABLE_GROUPED_RESERVATION_SAME_WAREHOUSE!=='true'
+},async()=>{
+ const f=await seeded('same-enabled');
+ await db.doc('orders/'+f.orderId).update({items:(await f.data('orders/'+f.orderId)).items
+  .map(item=>({...item,warehouseId:'A'}))});
+ const first=(await f.call(f.intent(2,3))).data;
+ assert.equal(first.status,'applied');assert.equal(first.companyReservedDelta,5);
+ assert.equal((await f.call(f.intent(2,3))).data.status,'already-applied');
+ assert.equal((await f.data('inventory/'+f.productKey)).reserved,5);
+ assert.equal((await f.data('warehouseStocks/A__'+f.productKey)).reserved,5);
+ assert.equal((await f.data('warehouseStocks/B__'+f.productKey)).reserved,0);
+});
