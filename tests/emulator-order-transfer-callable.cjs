@@ -77,3 +77,13 @@ test('v2 whole-source Callable transfer preserves locations schema and original 
  const before=await f.snapshot();await f.receipt(f.receive);assert.deepEqual(await f.snapshot(),before);
  assert.equal((await f.read('inventory',f.productKey)).reserved,3);assert.equal((await f.read('warehouseStocks',f.to+'__'+f.productKey)).reserved,3);
 });
+test('legacy assigned-owner handoff Callable keeps company and customer facts unchanged and replays one custody movement',async()=>{
+ const f=await fixture('handoff');const order=await f.read('orders',f.orderId);order.items[1].deliveryPlan={mode:'SALES_SHIP',contact:'Owner',phone:'123',address:'Taipei'};await db.collection('orders').doc(f.orderId).update({items:order.items});
+ const client=clients.at(-1),functions=getFunctions(client,'asia-east1'),input={...f.send,toWarehouseId:'custody-OWNER'};
+ const handoff=data=>httpsCallable(functions,'handoffOrderTransfer',{timeout:30000})(data).then(r=>r.data);
+ assert.equal((await handoff(input)).status,'applied');assert.equal((await handoff(input)).status,'already-applied');
+ const company=await f.read('inventory',f.productKey),custody=await f.read('warehouseStocks','custody-OWNER__'+f.productKey),saved=await f.read('orders',f.orderId);
+ assert.equal(company.onHand,3);assert.equal(company.reserved,3);assert.equal(company.transferInTransit,0);assert.equal(custody.onHand,3);assert.equal(custody.reserved,3);
+ assert.equal(saved.items[1].custodyTransferId,input.id);assert.deepEqual(saved.items[0],f.sibling);assert.equal(saved.deliveryRecords,undefined);assert.equal(saved.logisticsTransfersPending,0);
+ assert.equal((await f.read('stockTransfers',input.id)).kind,'HANDOFF');await assert.rejects(f.receipt({id:input.id,operationId:f.receive.operationId}));
+});

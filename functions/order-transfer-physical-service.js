@@ -7,15 +7,15 @@ function fail(message,code='failed-precondition'){throw Object.assign(Error(mess
 function id(v){if(typeof v!=='string'||!v||v!==v.trim()||v.includes('/')||v.length>96)fail('訂單調撥識別碼不正確','invalid-argument');return v;}
 function orderTransferProject(action,env=process.env){
  const local=v=>typeof v==='string'&&/^(localhost|127\.0\.0\.1):[0-9]+$/.test(v);
- return ['DISPATCH','RECEIVE'].includes(action)&&projectIdFromEnvironment(env)==='demo-yushin'
+ return ['DISPATCH','RECEIVE','HANDOFF'].includes(action)&&projectIdFromEnvironment(env)==='demo-yushin'
   &&env['ENABLE_ORDER_TRANSFER_'+action+'_EMULATOR']==='true'&&env.FUNCTIONS_EMULATOR==='true'
   &&local(env.FIRESTORE_EMULATOR_HOST)&&local(env.FIREBASE_AUTH_EMULATOR_HOST)?'demo-yushin':'';
 }
 function orderTransferIntent(action,data){
- const keys=action==='DISPATCH'?['id','orderId','itemId','fromWarehouseId','toWarehouseId','qty']:action==='RECEIVE'?['id','operationId']:[];
- if(!keys.length||!data||typeof data!=='object'||Array.isArray(data)||keys.some(k=>!Object.hasOwn(data,k))||Object.keys(data).some(k=>!keys.includes(k)&&!(action==='DISPATCH'&&k==='expectedPlan')))fail('訂單調撥欄位不正確','invalid-argument');
+ const keys=['DISPATCH','HANDOFF'].includes(action)?['id','orderId','itemId','fromWarehouseId','toWarehouseId','qty']:action==='RECEIVE'?['id','operationId']:[];
+ if(!keys.length||!data||typeof data!=='object'||Array.isArray(data)||keys.some(k=>!Object.hasOwn(data,k))||Object.keys(data).some(k=>!keys.includes(k)&&!(['DISPATCH','HANDOFF'].includes(action)&&k==='expectedPlan')))fail('訂單調撥欄位不正確','invalid-argument');
  const intent={action};for(const key of keys){if(key==='qty'){if(typeof data.qty!=='number'||!Number.isFinite(data.qty)||data.qty<=0||data.qty>1000000)fail('調撥數量不正確','invalid-argument');intent.qty=data.qty;}else intent[key]=id(data[key]);}
- if(action==='DISPATCH'&&data.expectedPlan!==undefined){
+ if(['DISPATCH','HANDOFF'].includes(action)&&data.expectedPlan!==undefined){
   if(!data.expectedPlan||typeof data.expectedPlan!=='object'||Array.isArray(data.expectedPlan))fail('原轉倉設定不正確','invalid-argument');
   const normalized=logistics.plan(data.expectedPlan);
   if(Object.keys(data.expectedPlan).sort().join(',')!==Object.keys(normalized).sort().join(',')||Object.entries(normalized).some(([key,value])=>data.expectedPlan[key]!==value))fail('原轉倉設定不是有效快照','invalid-argument');
@@ -27,6 +27,7 @@ function orderTransferIntent(action,data){
 async function commitOrderTransferPhysical(db,uid,data,action,env=process.env){
  const project=orderTransferProject(action,env);if(!project||db.projectId!==project)fail('訂單調撥後端未在此環境啟用');
  const intent=orderTransferIntent(action,data);id(uid);
+ const handoff=action==='HANDOFF',dispatching=action!=='RECEIVE';
  return db.runTransaction(async tx=>{
   const ref=(n,k)=>db.collection(n).doc(k),actorSnap=await tx.get(ref('users',uid)),actor=actorSnap.exists?actorSnap.data():null;
   if(!actor||actor.active===false||actor.disabled===true||!['admin','purchaser','warehouse'].includes(actor.role))fail('目前角色不能處理訂單調撥','permission-denied');
@@ -34,11 +35,12 @@ async function commitOrderTransferPhysical(db,uid,data,action,env=process.env){
   const proofRef=ref('reservationOperationReceipts','order-transfer-dispatch-'+intent.id),proofSnap=await tx.get(proofRef),proof=proofSnap.exists?proofSnap.data():null;
   const receiveRef=action==='RECEIVE'?ref('reservationOperationReceipts','order-transfer-receipt-'+intent.operationId):null;
   const received=receiveRef?await tx.get(receiveRef):null;
-  const result=status=>({status,action,id:intent.id,operationId:action==='DISPATCH'?intent.id:intent.operationId,actorUid:uid,actorRole:actor.role});
+  const result=status=>({status,action,id:intent.id,operationId:dispatching?intent.id:intent.operationId,actorUid:uid,actorRole:actor.role});
   if(t){
+   if(action==='RECEIVE'&&t.kind==='HANDOFF')fail('業務交接不是待收貨調撥');
    if(!proof||proof.kind!=='ORDER_TRANSFER_DISPATCH'||!proof.transfer||proof.intentHash!==t.orderTransferIntentHash)fail('缺少可信任訂單調撥寄出憑證');
    for(const [key,value] of Object.entries(proof.transfer))if(key!=='status'&&JSON.stringify(t[key])!==JSON.stringify(value))fail('調撥已偏離原寄出憑證');
-   if(action==='DISPATCH'){
+   if(dispatching){
     if(proof.intentHash!==intent.hash||proof.actorUid!==uid||proof.actorRole!==actor.role)fail('寄出操作識別碼衝突','already-exists');
     return result('already-applied');
    }
@@ -51,7 +53,7 @@ async function commitOrderTransferPhysical(db,uid,data,action,env=process.env){
    if(t.status!=='IN_TRANSIT')fail('原調撥狀態不正確');
   }else if(action==='RECEIVE')fail('找不到原調撥','not-found');
   if(!t&&proof)fail('原寄出憑證已存在');if(received?.exists)fail('原收貨憑證已存在');
-  const orderId=action==='DISPATCH'?intent.orderId:id(t.orderId),itemId=action==='DISPATCH'?intent.itemId:id(t.itemId);
+  const orderId=dispatching?intent.orderId:id(t.orderId),itemId=dispatching?intent.itemId:id(t.itemId);
   const orderRef=ref('orders',orderId),orderSnap=await tx.get(orderRef),order=orderSnap.exists?orderSnap.data():null;
   if(!order||!['active','normal'].includes(order.status)||!['',undefined,'normal','active'].includes(order.orderStatus)
    ||order.inventoryReservationStatus!=='completed'||!order.ownerUid||!order.salesCode
@@ -64,8 +66,8 @@ async function commitOrderTransferPhysical(db,uid,data,action,env=process.env){
   if(!item||item.custodyTransferId||(item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
    ||String(item.productType||item.type||'').toUpperCase()==='SERVICE'||(item.warehouseShippedQty??0)!==0
    ||(item.deliveredQty??0)!==0||(item.returnedQty??0)!==0)fail('品項不是可調撥實貨');
-  const key=id(item.inventoryProductKey||item.productId),from=action==='DISPATCH'?intent.fromWarehouseId:t.fromWarehouseId,to=action==='DISPATCH'?intent.toWarehouseId:t.toWarehouseId,qty=action==='DISPATCH'?intent.qty:t.qty;
-  if(from===to||from.startsWith('custody-')||to.startsWith('custody-')||item.warehouseId!==from)fail('調撥來源位置不一致');
+  const key=id(item.inventoryProductKey||item.productId),from=dispatching?intent.fromWarehouseId:t.fromWarehouseId,to=dispatching?intent.toWarehouseId:t.toWarehouseId,qty=dispatching?intent.qty:t.qty;
+  if(from===to||from.startsWith('custody-')||(!handoff&&to.startsWith('custody-'))||item.warehouseId!==from)fail('調撥來源位置不一致');
   const product=await tx.get(ref('products',id(item.productId)));
   if(!product.exists||product.data().active===false||String(product.data().productType||product.data().type||'').toUpperCase()==='SERVICE')fail('產品主檔不是有效實貨');
   const ledgerRef=ref('inventoryReservations',orderId+'__'+itemId),ledgerSnap=await tx.get(ledgerRef);
@@ -74,6 +76,7 @@ async function commitOrderTransferPhysical(db,uid,data,action,env=process.env){
   if(action==='RECEIVE'&&item.transferPendingId!==intent.id)fail('原調撥與訂單關聯不一致');
   const source=reservation.orderTransferReservationSource({reservation:ledger,item:action==='RECEIVE'?{...item,transferPendingId:''}:item,orderId,itemId,productKey:key,warehouseId:from,qty});
   if(ledger.ownerUid&&ledger.ownerUid!==order.ownerUid||ledger.salesCode&&ledger.salesCode!==order.salesCode)fail('原預留與訂單負責人不一致');
+  if(handoff&&source.schemaVersion!==1)fail('業務交接尚不支援v2保管位置');
   if(source.schemaVersion===2){
    if(env.ENABLE_ORDER_TRANSFER_V2_EMULATOR!=='true')fail('v2訂單調撥尚未獨立啟用');
    if(ledger.ownerUid!==order.ownerUid||ledger.salesCode!==order.salesCode
@@ -86,42 +89,59 @@ async function commitOrderTransferPhysical(db,uid,data,action,env=process.env){
   if(Number(item.qty??item.orderedQty)!==qty||Number(item.reservedQty)!==qty||qty>fulfillment.dispatchState(item).shippable)fail('品項須全數到貨預留並完成打單');
   const plan=logistics.plan(item.deliveryPlan||order.shippingInstructions||{});
   const whFrom=await tx.get(ref('warehouses',from)),whTo=await tx.get(ref('warehouses',to));
-  for(const snap of [whFrom,whTo])if(!snap.exists||snap.data().active===false||snap.data().systemCustody||snap.data().warehouseType==='CUSTODY')fail('來源或目的倉不是啟用實體倉');
-  if(action==='DISPATCH'){
+  if(!whFrom.exists||whFrom.data().active===false||whFrom.data().systemCustody||whFrom.data().warehouseType==='CUSTODY')fail('來源不是啟用實體倉');
+  if(handoff){
+   if(to!=='custody-'+order.ownerUid)fail('只能交付目前負責業務');
+   if(whTo.exists&&(whTo.data().active===false||whTo.data().systemCustody!==true||whTo.data().ownerUid!==order.ownerUid))fail('業務保管位置不一致');
+  }else if(!whTo.exists||whTo.data().active===false||whTo.data().systemCustody||whTo.data().warehouseType==='CUSTODY')fail('目的不是啟用實體倉');
+  if(dispatching){
    if(intent.expectedPlan&&JSON.stringify(intent.expectedPlan)!==JSON.stringify(plan))fail('原轉倉設定已變更');
-   if(!['TRANSFER','PICKUP'].includes(plan.mode)||(plan.warehouseId||(plan.mode==='PICKUP'&&whTo.data().isDefault?to:''))!==to)fail('轉倉設定與目的倉不一致');
-   if(plan.mode==='TRANSFER')logistics.validatePlan(plan,true);
+   if(handoff){
+    if(!['PICKUP','SALES_SHIP'].includes(plan.mode)||plan.mode==='PICKUP'&&whFrom.data().isDefault!==true)fail('交接方式或主倉位置不一致');
+    if(plan.mode==='SALES_SHIP')logistics.validatePlan(plan,true);
+   }else if(!['TRANSFER','PICKUP'].includes(plan.mode)||(plan.warehouseId||(plan.mode==='PICKUP'&&whTo.data().isDefault?to:''))!==to)fail('轉倉設定與目的倉不一致');
+   if(!handoff&&plan.mode==='TRANSFER')logistics.validatePlan(plan,true);
   }
   const inventoryRef=ref('inventory',encodeURIComponent(key)),company=await tx.get(inventoryRef),stockId=w=>encodeURIComponent(w)+'__'+encodeURIComponent(key);
-  const stockRef=ref('warehouseStocks',stockId(action==='DISPATCH'?from:to)),stock=await tx.get(stockRef);
-  if(!company.exists||company.data().productKey!==key||(action==='DISPATCH'&&!stock.exists)
-   ||stock.exists&&(stock.data().productKey!==key||stock.data().warehouseId!==(action==='DISPATCH'?from:to)))fail('公司或分倉庫存來源不一致');
+  const stockRef=ref('warehouseStocks',stockId(dispatching?from:to)),stock=await tx.get(stockRef);
+  if(!company.exists||company.data().productKey!==key||(dispatching&&!stock.exists)
+   ||stock.exists&&(stock.data().productKey!==key||stock.data().warehouseId!==(dispatching?from:to)))fail('公司或分倉庫存來源不一致');
+  const custodyRef=handoff?ref('warehouseStocks',stockId(to)):null,custody=handoff?await tx.get(custodyRef):null;
+  if(custody?.exists&&(custody.data().productKey!==key||custody.data().warehouseId!==to))fail('業務保管庫存來源不一致');
   const outRef=ref('inventoryMovements',intent.id+'-out'),inRef=ref('inventoryMovements',intent.id+'-in');
   const outgoing=await tx.get(outRef),incoming=await tx.get(inRef);
-  if(incoming.exists||action==='DISPATCH'&&outgoing.exists)fail('調撥異動識別碼已存在');
+  if(incoming.exists||dispatching&&outgoing.exists)fail('調撥異動識別碼已存在');
   if(!Array.isArray(order.logisticsHistory??[])||(order.logisticsHistory??[]).length>=1000)fail('物流歷史格式或長度不正確');
   const now=new Date().toISOString(),actorName=actor.displayName||actor.name||uid;
   const move=(type,value,warehouseId)=>({type,qty:value,warehouseId,productKey:key,fromWarehouseId:from,toWarehouseId:to,sourceType:'WAREHOUSE_TRANSFER',sourceId:intent.id,transferId:intent.id,orderId,itemId,actorUid:uid,createdAt:now,createdBy:actorName});
   let saved,nextItem;
-  if(action==='DISPATCH'){
+  if(dispatching){
    if((order.logisticsTransfersPending??0)!==0)fail('訂單仍有其他調撥未完成');
-   const physical=logistics.planTransferDispatch({aggregateStock:company.data(),warehouseStock:stock.data(),qty,reservedQty:qty});
+   const physical=handoff?logistics.planTransferHandoff({aggregateStock:company.data(),warehouseStock:stock.data(),targetStock:custody.exists?custody.data():{},qty}):logistics.planTransferDispatch({aggregateStock:company.data(),warehouseStock:stock.data(),qty,reservedQty:qty});
    const lotsSnap=await tx.get(db.collection('inventoryLots').where('productKey','==',key).where('warehouseId','==',from).limit(101));
    if(lotsSnap.size>100)fail('訂單調撥批次超過100筆上限');
    const lots=lotsSnap.docs.map(doc=>({...doc.data(),id:doc.id}));
    if(lots.some(l=>typeof l.remainingQty!=='number'||!Number.isFinite(l.remainingQty)||l.remainingQty<0))fail('批次數量不正確');
    const allocated=inventory.allocateLots(lots,qty);
    const allocations=allocated.allocations.map((a,n)=>({...a,targetLotId:intent.id+'-'+n,costLotId:lots.find(l=>l.id===a.lotId).costLotId||a.lotId}));
-   saved={id:intent.id,kind:'TRANSFER',status:'IN_TRANSIT',orderId,itemId,itemIndex:index,inventoryId:inventoryRef.id,productKey:key,productId:item.productId,
+   saved={id:intent.id,kind:handoff?'HANDOFF':'TRANSFER',status:handoff?'RECEIVED':'IN_TRANSIT',orderId,itemId,itemIndex:index,inventoryId:inventoryRef.id,productKey:key,productId:item.productId,
     fromWarehouseId:from,toWarehouseId:to,fromStockId:stockId(from),toStockId:stockId(to),qty,reservedQty:qty,allocations,
     ownerUid:order.ownerUid,salesCode:order.salesCode,itemCode:item.itemCode||'',itemName:item.itemName||'',deliveryPlan:plan,
     ...(source.schemaVersion===2?{reservationLocationSchemaVersion:2,lifecycleWarehouseIds:[...ledger.lifecycleWarehouseIds]}:{}),
-    orderTransferIntentHash:intent.hash,createdByUid:uid,createdByRole:actor.role,createdAt:now};
-   logistics.transferDestinationLots(saved,saved,now);
+    orderTransferIntentHash:intent.hash,createdByUid:uid,createdByRole:actor.role,createdAt:now,...(handoff?{receivedByUid:uid,receivedByRole:actor.role,receivedAt:now}:{})};
+   const destinationRows=logistics.transferDestinationLots(saved,saved,now);
+   if(handoff)for(const row of destinationRows){const lot=await tx.get(ref('inventoryLots',row.lotId)),cost=await tx.get(ref('inventoryLotCosts',row.lotId));if(lot.exists||cost.exists)fail('交接目的批次已存在');}
+
    tx.create(transferRef,saved);tx.create(proofRef,{kind:'ORDER_TRANSFER_DISPATCH',transfer:saved,intentHash:intent.hash,actorUid:uid,actorRole:actor.role});
    tx.update(inventoryRef,{...physical.aggregate,updatedAt:now});tx.update(stockRef,{...physical.source,updatedAt:now});
    for(const a of allocations){const lot=lots.find(l=>l.id===a.lotId);tx.update(ref('inventoryLots',a.lotId),{remainingQty:lot.remainingQty-a.qty,updatedAt:now});}
-   tx.create(outRef,move('warehouse_transfer_out',-qty,from));nextItem={...item,transferPendingId:intent.id};
+   tx.create(outRef,move('warehouse_transfer_out',-qty,from));nextItem=handoff?{...item,warehouseId:to,custodyTransferId:intent.id}:{...item,transferPendingId:intent.id};
+   if(handoff){
+    if(!whTo.exists)tx.create(ref('warehouses',to),{active:true,isDefault:false,warehouseType:'CUSTODY',systemCustody:true,ownerUid:order.ownerUid,warehouseName:'負責業務保管',sourceTransferId:intent.id});
+    tx.set(custodyRef,{productKey:key,productId:item.productId,warehouseId:to,...physical.target,updatedAt:now},{merge:true});
+    for(const row of destinationRows){tx.create(ref('inventoryLots',row.lotId),row.lot);tx.create(ref('inventoryLotCosts',row.lotId),row.cost);}
+    tx.create(inRef,move('warehouse_transfer_in',qty,to));tx.update(ledgerRef,{warehouseId:to,updatedAt:now});
+   }
   }else{
    if(!outgoing.exists||outgoing.data().sourceId!==intent.id||outgoing.data().orderId!==orderId||outgoing.data().itemId!==itemId
     ||outgoing.data().type!=='warehouse_transfer_out'||outgoing.data().qty!==-qty||outgoing.data().productKey!==key||outgoing.data().warehouseId!==from)fail('缺少相符的原寄出異動');
@@ -135,9 +155,9 @@ async function commitOrderTransferPhysical(db,uid,data,action,env=process.env){
    tx.update(transferRef,{status:'RECEIVED',receiptOperationId:intent.operationId,receivedByUid:uid,receivedByRole:actor.role,receivedAt:now});
    tx.update(ledgerRef,source.schemaVersion===2?{locations:[{warehouseId:to,reservedQty:qty}],updatedAt:now}:{warehouseId:to,updatedAt:now});nextItem={...item,warehouseId:to,transferPendingId:''};
   }
-  tx.update(orderRef,{items:order.items.map((row,n)=>n===index?nextItem:row),logisticsTransfersPending:action==='DISPATCH'?1:0,
-   logisticsHistory:[...(order.logisticsHistory??[]),{id:intent.id+(action==='DISPATCH'?'-out':'-received'),action:action==='DISPATCH'?'倉庫調撥寄出':'倉庫調撥收貨',itemId,by:actorName,at:now,detail:from+' → '+to+' × '+qty}],
-   warehouseLogisticsId:intent.id,warehouseLogisticsEventId:intent.id+(action==='DISPATCH'?'-out':'-received'),updatedAt:now});
+  tx.update(orderRef,{items:order.items.map((row,n)=>n===index?nextItem:row),logisticsTransfersPending:dispatching&&!handoff?1:0,
+   logisticsHistory:[...(order.logisticsHistory??[]),{id:intent.id+(dispatching?'-out':'-received'),action:handoff?'倉庫交付業務':dispatching?'倉庫調撥寄出':'倉庫調撥收貨',itemId,by:actorName,at:now,detail:from+' → '+to+' × '+qty}],
+   warehouseLogisticsId:intent.id,warehouseLogisticsEventId:intent.id+(dispatching?'-out':'-received'),updatedAt:now});
   return result('applied');
  });
 }
@@ -150,6 +170,6 @@ function createOrderTransferPhysicalCallables({onCall,HttpsError,getDatabase,env
   catch(error){if(['invalid-argument','failed-precondition','permission-denied','already-exists','not-found'].includes(error.code))throw new HttpsError(error.code,error.message);
    console.error('Order transfer physical transaction failed',error);throw new HttpsError('internal','訂單調撥結果未確認，請沿用原操作編號');}
  });
- return {dispatchOrderTransfer:wrap('DISPATCH'),receiveOrderTransfer:wrap('RECEIVE')};
+ return {dispatchOrderTransfer:wrap('DISPATCH'),receiveOrderTransfer:wrap('RECEIVE'),handoffOrderTransfer:wrap('HANDOFF')};
 }
 module.exports.createOrderTransferPhysicalCallables=createOrderTransferPhysicalCallables;

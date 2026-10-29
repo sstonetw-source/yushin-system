@@ -121,6 +121,11 @@
     if(Math.abs(total-transfer.qty)>1e-8)throw Error('調撥批次總量不一致。');
     return rows;
   }
+  function planTransferHandoff({aggregateStock,warehouseStock,targetStock={},qty}){
+    const dispatch=planTransferDispatch({aggregateStock,warehouseStock,qty,reservedQty:qty});
+    const receipt=planTransferReceipt({aggregateStock:{...aggregateStock,...dispatch.aggregate},warehouseStock:targetStock,qty,reservedQty:qty});
+    return {source:dispatch.source,target:receipt.target,aggregate:{...dispatch.aggregate,...receipt.aggregate}};
+  }
   function batchJobs(list,getPlan,batchId){
     if(!list.length||list.length>100)throw Error('每批請勾選 1 至 100 個品項。');
     const seen=new Set();
@@ -155,7 +160,7 @@
     if((order.logisticsHistory||[]).some(h=>h.itemId===item.itemId&&h.action==='倉庫調撥收貨'))return '已轉倉・待送客戶';
     return '';
   }
-  const api={transferDestinationLots,transferBalances,planTransferDispatch,planTransferReceipt,modes,plan,executionPlan,transferRequirements,businessDeliveryState,aggregateRows,validatePlan,bundleKey,partition,transferable,batchJobs,processBatch,csvDocument,shippingStatus};root.YushinWarehouseLogistics=api;
+  const api={planTransferHandoff,transferDestinationLots,transferBalances,planTransferDispatch,planTransferReceipt,modes,plan,executionPlan,transferRequirements,businessDeliveryState,aggregateRows,validatePlan,bundleKey,partition,transferable,batchJobs,processBatch,csvDocument,shippingStatus};root.YushinWarehouseLogistics=api;
   if(typeof module==='object'&&module.exports)module.exports=api;
   if(typeof document==='undefined')return;
   const $=id=>document.getElementById(id);

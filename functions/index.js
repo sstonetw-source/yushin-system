@@ -173,3 +173,5 @@ const {createOrderTransferPhysicalCallables}=require('./order-transfer-physical-
 const orderTransferPhysical=createOrderTransferPhysicalCallables({onCall,HttpsError,getDatabase:getFirestore});
 exports.dispatchOrderTransfer=orderTransferPhysical.dispatchOrderTransfer;
 exports.receiveOrderTransfer=orderTransferPhysical.receiveOrderTransfer;
+
+exports.handoffOrderTransfer=orderTransferPhysical.handoffOrderTransfer;

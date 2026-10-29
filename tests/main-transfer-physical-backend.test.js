@@ -276,3 +276,18 @@ test('v2 transfer refuses disabled gate split source third warehouse or altered 
  const off=v2OrderTransferFixture(),before=off.snapshot();await assert.rejects(commitOrderTransferPhysical(off.db,'U',off.send,'DISPATCH',orderEnv),/獨立啟用/);assert.equal(off.snapshot(),before);
  const f=v2OrderTransferFixture();await f.dispatch();f.docs.get('inventoryReservations/ORDER__I').lifecycleWarehouseIds=['MAIN','A'];const after=f.snapshot();await assert.rejects(f.receipt(),/已變更/);assert.equal(f.snapshot(),after);
 });
+function handoffFixture(){const f=orderTransferFixture();f.docs.get('orders/ORDER').items[0].deliveryPlan={mode:'SALES_SHIP',warehouseId:'',contact:'Sales',phone:'123',address:'Taipei'};const input={...f.send,toWarehouseId:'custody-S'};return {...f,input,handoff:()=>commitOrderTransferPhysical(f.db,'U',input,'HANDOFF',{...orderEnv,ENABLE_ORDER_TRANSFER_HANDOFF_EMULATOR:'true'})};}
+test('backend handoff atomically moves reserved goods into assigned custody without customer delivery or transit',async()=>{
+ const f=handoffFixture();f.setRetry(true);await f.handoff();const before=f.snapshot();assert.equal((await f.handoff()).status,'already-applied');assert.equal(f.snapshot(),before);
+ assert.equal(f.docs.get('inventory/P').onHand,10);assert.equal(f.docs.get('inventory/P').reserved,5);assert.equal(f.docs.get('inventory/P').transferInTransit,0);
+ assert.equal(f.docs.get('warehouseStocks/A__P').onHand,3);assert.equal(f.docs.get('warehouseStocks/custody-S__P').onHand,3);assert.equal(f.docs.get('warehouseStocks/custody-S__P').reserved,3);
+ assert.equal(f.docs.get('inventoryReservations/ORDER__I').warehouseId,'custody-S');assert.equal(f.docs.get('orders/ORDER').items[0].custodyTransferId,f.input.id);assert.equal(f.docs.get('orders/ORDER').deliveryRecords,undefined);
+ assert.equal(f.docs.get('stockTransfers/'+f.input.id).kind,'HANDOFF');assert.equal(f.docs.get('stockTransfers/'+f.input.id).status,'RECEIVED');assert.equal(f.docs.get('warehouses/custody-S').ownerUid,'S');assert.equal(f.docs.get('inventoryLotCosts/'+f.input.id+'-0').costSourceLotId,'L');
+ await assert.rejects(f.receipt(),/業務交接/);
+});
+test('handoff independently gated and refuses wrong custody v2 disabled location target collision or final failure atomically',async()=>{
+ for(const mutate of [f=>{f.input.toWarehouseId='custody-OTHER';},f=>f.put('warehouses/custody-S',{active:true,systemCustody:true,ownerUid:'OTHER'}),f=>f.put('inventoryLots/'+f.input.id+'-0',{sentinel:true}),f=>{f.docs.get('inventoryReservations/ORDER__I').locationSchemaVersion=2;},f=>f.setFail(true)]){
+  const f=handoffFixture();mutate(f);const before=f.snapshot();await assert.rejects(f.handoff());assert.equal(f.snapshot(),before);
+ }
+ const f=handoffFixture(),before=f.snapshot();await assert.rejects(commitOrderTransferPhysical(f.db,'U',f.input,'HANDOFF',orderEnv));assert.equal(f.snapshot(),before);
+});
