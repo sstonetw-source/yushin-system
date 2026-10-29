@@ -1,0 +1,11 @@
+# v2集中來源訂單調撥
+
+相依 #369，關聯 #291。沿既有訂單調撥Service加入獨立ENABLE_ORDER_TRANSFER_V2_EMULATOR，原DISPATCH／RECEIVE旗標亦須啟用；仍限demo Emulator，不支援Preview／正式。原前端受控路由可沿用，無新增UI操作或平行核心。
+
+僅接受v2預留已全數集中在單一實體來源倉、兩個原lifecycleWarehouseIds包含來源及目的倉、預留ownerUid／salesCode匹配最新訂單的情形。沿原預留數量／locations校驗，拒絕分散來源、第三倉、custody及單倉欄位混用。
+
+寄出快照綁定來源版本與原候選倉，途中ledger locations維持原位置作來源錨點，訂單transferPendingId及logisticsTransfersPending阻擋其他履約寫入；實貨與reserved已依原調撥核心移入途中帳。收貨須核對快照與未變更ledger，原子更新locations為目的倉，保留原兩候選位置及quantity，不新增warehouseId。若v2格式被降級成legacy則拒絕。後續取消／恢復／出貨等完整生命週期仍待整合驗收，不宣稱全階段一致性已完成。
+
+本機Node2096/2096、定向20項、build一致性／語法／diff通過，含schema不變、庫存與reserved守恆、原ID重播、停用獨立旗標、分散來源／第三倉／來源身分及候選位置變更拒絕。原真Auth／Callable Emulator群組新增一個有效v2流程，只有臨時測試設定開新旗標；本機缺runtime未執行新真Auth／Chrome／Preview，遠端CI待結果。
+
+#369原站Chrome案例CI仍執行中，沒有以本批新增功能覆蓋其驗證結果。保持Draft，未合併main、部署、開正式旗標、改Rules或正式資料。下一步依CI修正，再處理真正分散多倉與業務保管交接；最後集中人工驗收。

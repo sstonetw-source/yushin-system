@@ -69,3 +69,11 @@ test('competing dispatch identities cannot move the same order twice and reassig
  await db.collection('orders').doc(f.orderId).update({ownerUid:'REASSIGNED'});const before=await f.snapshot();
  await assert.rejects(f.receipt({id:actual,operationId:f.receive.operationId}));assert.deepEqual(await f.snapshot(),before);
 });
+test('v2 whole-source Callable transfer preserves locations schema and original warehouse candidates',async()=>{
+ const f=await fixture('v2-whole'),ledgerRef=db.collection('inventoryReservations').doc(f.orderId+'__I');
+ await ledgerRef.update({warehouseId:require('firebase-admin/firestore').FieldValue.delete(),locationSchemaVersion:2,ownerUid:'OWNER',salesCode:'01',lifecycleWarehouseIds:[f.from,f.to],locations:[{warehouseId:f.from,reservedQty:3}]});
+ await f.dispatch(f.send);const inTransit=(await ledgerRef.get()).data();assert.deepEqual(inTransit.locations,[{warehouseId:f.from,reservedQty:3}]);assert.equal('warehouseId' in inTransit,false);
+ await f.receipt(f.receive);const ledger=(await ledgerRef.get()).data();assert.deepEqual(ledger.locations,[{warehouseId:f.to,reservedQty:3}]);assert.equal('warehouseId' in ledger,false);assert.equal(ledger.quantity,3);assert.deepEqual(ledger.lifecycleWarehouseIds,[f.from,f.to]);
+ const before=await f.snapshot();await f.receipt(f.receive);assert.deepEqual(await f.snapshot(),before);
+ assert.equal((await f.read('inventory',f.productKey)).reserved,3);assert.equal((await f.read('warehouseStocks',f.to+'__'+f.productKey)).reserved,3);
+});

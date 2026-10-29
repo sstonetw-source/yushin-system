@@ -258,3 +258,21 @@ test('order transfer rejects v2, wrong roles, incomplete preparation, conflictin
 test('order transfer receipt refuses reassigned source ownership without moving any stock',async()=>{
  const f=orderTransferFixture();await f.dispatch();f.docs.get('orders/ORDER').ownerUid='OTHER';const before=f.snapshot();await assert.rejects(f.receipt(),/負責人/);assert.equal(f.snapshot(),before);
 });
+function v2OrderTransferFixture(){
+ const f=orderTransferFixture(),ledger=f.docs.get('inventoryReservations/ORDER__I');delete ledger.warehouseId;
+ Object.assign(ledger,{locationSchemaVersion:2,ownerUid:'S',salesCode:'01',locations:[{warehouseId:'A',reservedQty:3}],lifecycleWarehouseIds:['A','MAIN']});
+ const env={...orderEnv,ENABLE_ORDER_TRANSFER_V2_EMULATOR:'true'};
+ return {...f,dispatch:()=>commitOrderTransferPhysical(f.db,'U',f.send,'DISPATCH',env),receipt:()=>commitOrderTransferPhysical(f.db,'U',f.receive,'RECEIVE',env)};
+}
+test('v2 concentrated source moves physical reserved stock and original location ledger without creating a single-warehouse field',async()=>{
+ const f=v2OrderTransferFixture();await f.dispatch();const pending=f.docs.get('inventoryReservations/ORDER__I');assert.deepEqual(pending.locations,[{warehouseId:'A',reservedQty:3}]);assert.equal(f.docs.get('orders/ORDER').items[0].transferPendingId,f.send.id);
+ await f.receipt();const ledger=f.docs.get('inventoryReservations/ORDER__I');assert.deepEqual(ledger.locations,[{warehouseId:'MAIN',reservedQty:3}]);assert.equal('warehouseId' in ledger,false);assert.equal(ledger.locationSchemaVersion,2);assert.deepEqual(ledger.lifecycleWarehouseIds,['A','MAIN']);assert.equal(ledger.quantity,3);assert.equal(f.docs.get('inventory/P').reserved,5);assert.equal(f.docs.get('warehouseStocks/MAIN__P').reserved,3);
+ const before=f.snapshot();await f.receipt();assert.equal(f.snapshot(),before);
+});
+test('v2 transfer refuses disabled gate split source third warehouse or altered location contract without partial writes',async()=>{
+ for(const modify of [f=>{f.docs.get('inventoryReservations/ORDER__I').locations=[{warehouseId:'A',reservedQty:1},{warehouseId:'MAIN',reservedQty:2}];},f=>{f.docs.get('inventoryReservations/ORDER__I').lifecycleWarehouseIds=['A','OTHER'];},f=>{f.docs.get('inventoryReservations/ORDER__I').ownerUid='OTHER';}]){
+  const f=v2OrderTransferFixture();modify(f);const before=f.snapshot();await assert.rejects(f.dispatch());assert.equal(f.snapshot(),before);
+ }
+ const off=v2OrderTransferFixture(),before=off.snapshot();await assert.rejects(commitOrderTransferPhysical(off.db,'U',off.send,'DISPATCH',orderEnv),/獨立啟用/);assert.equal(off.snapshot(),before);
+ const f=v2OrderTransferFixture();await f.dispatch();f.docs.get('inventoryReservations/ORDER__I').lifecycleWarehouseIds=['MAIN','A'];const after=f.snapshot();await assert.rejects(f.receipt(),/已變更/);assert.equal(f.snapshot(),after);
+});

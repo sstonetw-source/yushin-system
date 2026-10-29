@@ -73,7 +73,16 @@ async function commitOrderTransferPhysical(db,uid,data,action,env=process.env){
   if(ledger.status!=='active')fail('原訂單預留不是有效狀態');
   if(action==='RECEIVE'&&item.transferPendingId!==intent.id)fail('原調撥與訂單關聯不一致');
   const source=reservation.orderTransferReservationSource({reservation:ledger,item:action==='RECEIVE'?{...item,transferPendingId:''}:item,orderId,itemId,productKey:key,warehouseId:from,qty});
-  if(source.schemaVersion!==1||ledger.ownerUid&&ledger.ownerUid!==order.ownerUid||ledger.salesCode&&ledger.salesCode!==order.salesCode)fail('本入口只接受相符的單倉預留');
+  if(ledger.ownerUid&&ledger.ownerUid!==order.ownerUid||ledger.salesCode&&ledger.salesCode!==order.salesCode)fail('原預留與訂單負責人不一致');
+  if(source.schemaVersion===2){
+   if(env.ENABLE_ORDER_TRANSFER_V2_EMULATOR!=='true')fail('v2訂單調撥尚未獨立啟用');
+   if(ledger.ownerUid!==order.ownerUid||ledger.salesCode!==order.salesCode
+    ||!Array.isArray(ledger.lifecycleWarehouseIds)||ledger.lifecycleWarehouseIds.length!==2
+    ||new Set(ledger.lifecycleWarehouseIds).size!==2
+    ||!ledger.lifecycleWarehouseIds.includes(from)||!ledger.lifecycleWarehouseIds.includes(to))fail('目的倉不在原v2候選位置，不能引入第三倉');
+   if(action==='RECEIVE'&&(t.reservationLocationSchemaVersion!==2
+    ||JSON.stringify(t.lifecycleWarehouseIds)!==JSON.stringify(ledger.lifecycleWarehouseIds)))fail('原多倉預留版本或候選位置已變更');
+  }else if(action==='RECEIVE'&&t.reservationLocationSchemaVersion===2)fail('原多倉預留不可退回單倉格式');
   if(Number(item.qty??item.orderedQty)!==qty||Number(item.reservedQty)!==qty||qty>fulfillment.dispatchState(item).shippable)fail('品項須全數到貨預留並完成打單');
   const plan=logistics.plan(item.deliveryPlan||order.shippingInstructions||{});
   const whFrom=await tx.get(ref('warehouses',from)),whTo=await tx.get(ref('warehouses',to));
@@ -106,6 +115,7 @@ async function commitOrderTransferPhysical(db,uid,data,action,env=process.env){
    saved={id:intent.id,kind:'TRANSFER',status:'IN_TRANSIT',orderId,itemId,itemIndex:index,inventoryId:inventoryRef.id,productKey:key,productId:item.productId,
     fromWarehouseId:from,toWarehouseId:to,fromStockId:stockId(from),toStockId:stockId(to),qty,reservedQty:qty,allocations,
     ownerUid:order.ownerUid,salesCode:order.salesCode,itemCode:item.itemCode||'',itemName:item.itemName||'',deliveryPlan:plan,
+    ...(source.schemaVersion===2?{reservationLocationSchemaVersion:2,lifecycleWarehouseIds:[...ledger.lifecycleWarehouseIds]}:{}),
     orderTransferIntentHash:intent.hash,createdByUid:uid,createdByRole:actor.role,createdAt:now};
    logistics.transferDestinationLots(saved,saved,now);
    tx.create(transferRef,saved);tx.create(proofRef,{kind:'ORDER_TRANSFER_DISPATCH',transfer:saved,intentHash:intent.hash,actorUid:uid,actorRole:actor.role});
@@ -123,7 +133,7 @@ async function commitOrderTransferPhysical(db,uid,data,action,env=process.env){
    for(const row of rows){tx.create(ref('inventoryLots',row.lotId),row.lot);tx.create(ref('inventoryLotCosts',row.lotId),row.cost);}
    tx.create(inRef,move('warehouse_transfer_in',qty,to));tx.create(receiveRef,{kind:'ORDER_TRANSFER_RECEIPT',transferId:intent.id,intentHash:intent.hash,actorUid:uid,actorRole:actor.role});
    tx.update(transferRef,{status:'RECEIVED',receiptOperationId:intent.operationId,receivedByUid:uid,receivedByRole:actor.role,receivedAt:now});
-   tx.update(ledgerRef,{warehouseId:to,updatedAt:now});nextItem={...item,warehouseId:to,transferPendingId:''};
+   tx.update(ledgerRef,source.schemaVersion===2?{locations:[{warehouseId:to,reservedQty:qty}],updatedAt:now}:{warehouseId:to,updatedAt:now});nextItem={...item,warehouseId:to,transferPendingId:''};
   }
   tx.update(orderRef,{items:order.items.map((row,n)=>n===index?nextItem:row),logisticsTransfersPending:action==='DISPATCH'?1:0,
    logisticsHistory:[...(order.logisticsHistory??[]),{id:intent.id+(action==='DISPATCH'?'-out':'-received'),action:action==='DISPATCH'?'倉庫調撥寄出':'倉庫調撥收貨',itemId,by:actorName,at:now,detail:from+' → '+to+' × '+qty}],
