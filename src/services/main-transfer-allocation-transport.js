@@ -42,3 +42,37 @@ async function submitMainTransferAllocationBackend(id){
  if(!result.recoveryPending)sessionStorage.removeItem(key);
  return result;
 }
+
+function mainTransferAllocationListRequired(){
+ return globalThis.YUSHIN_MAIN_TRANSFER_ALLOCATION_EMULATOR===true
+  ||globalThis.YUSHIN_MAIN_TRANSFER_RECEIPT_EMULATOR===true
+  ||globalThis.YUSHIN_MAIN_TRANSFER_DISPATCH_EMULATOR===true
+  ||(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview')
+  ||pendingMainTransferAllocations().length>0;
+}
+async function readMainTransferAllocationPage(afterId=''){
+ const uid=currentUser?.uid,role=currentUserRole;
+ if(typeof ensureReservationFunctionsCompat==='function')await ensureReservationFunctionsCompat();
+ if(currentUser?.uid!==uid||currentUserRole!==role)throw Error('讀取分配清單期間登入身分已變更。');
+ if(globalThis.YUSHIN_MAIN_TRANSFER_ALLOCATION_EMULATOR!==true)throw Error('此環境尚未開放後端分配清單，請保留原調撥紀錄。');
+ if(typeof afterId!=='string'||afterId.includes('/')||afterId.length>160)throw Error('分配分頁游標不正確。');
+ const {functions,check}=mainTransferBackendContext({emulatorFlag:'YUSHIN_MAIN_TRANSFER_ALLOCATION_EMULATOR',previewFlag:'YUSHIN_PREVIEW_MAIN_TRANSFER_ALLOCATION',roles:['admin','purchaser','warehouse'],authorized:()=>canReceiveInventoryCapability()&&canAccessPage('inventory')});
+ check();functions.useEmulator('127.0.0.1',5001);
+ const response=await functions.httpsCallable('listV2MainTransferAllocations')({afterId});check();
+ const page=response?.data;
+ if(!page||!Array.isArray(page.rows)||page.rows.length>5||typeof page.hasMore!=='boolean'
+  ||typeof page.afterId!=='string'||page.afterId.includes('/')||page.afterId.length>160
+  ||(page.hasMore&&(!page.afterId||page.afterId===afterId)))throw Error('分配分頁回覆無法核對，請重試原頁。');
+ const seen=new Set();
+ for(const row of page.rows){
+  if(!row||!['pending','active','blocked'].includes(row.status)||typeof row.transferId!=='string'
+    )throw Error('分配來源回覆無法核對。');
+  if(row.status==='blocked'){
+   if(typeof row.receiptId!=='string'||!row.receiptId||row.receiptId.includes('/')||typeof row.errorMessage!=='string')throw Error('待核對憑證回覆不正確。');
+  }else if(!row.transferId||row.transferId.includes('/')||row.transferId.length>96||!Number.isSafeInteger(row.quantity)||row.quantity<=0||row.quantity>1000
+   ||!Number.isSafeInteger(row.allocatedQty)||row.allocatedQty<0||row.allocatedQty>row.quantity)throw Error('分配來源數量不正確。');
+  const key=row.status==='blocked'?row.receiptId:row.transferId;
+  if(seen.has(key))throw Error('分配來源重複，請重試原頁。');seen.add(key);
+ }
+ return page;
+}

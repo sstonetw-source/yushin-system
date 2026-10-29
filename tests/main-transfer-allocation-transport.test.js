@@ -10,3 +10,23 @@ test('lost response refresh keeps identical source and clears only confirmed com
 test('active reply retains recovery and concurrent clicks share one submission',async()=>{const f=fixture();f.setTransport(async()=>({transferId:'T',sourceMovementId:'T-in',status:'active',recoveryPending:true,maxQty:3,allocatedQty:1,affectedOrderIds:[]}));const c=f.open();await Promise.all([c.resumeMainTransferAllocationBackend('T'),c.resumeMainTransferAllocationBackend('T')]);assert.equal(f.calls.length,1);assert.equal(f.storage.size,1);});
 test('disabled flag corrupted storage and account change cannot clear or replace original intent',async()=>{const f=fixture();f.setTransport(async()=>{throw Error('lost');});await assert.rejects(f.open().resumeMainTransferAllocationBackend('T'));const c=f.open();c.YUSHIN_MAIN_TRANSFER_ALLOCATION_EMULATOR=false;await assert.rejects(c.resumeMainTransferAllocationBackend('T'));assert.equal(f.calls.length,1);const key=[...f.storage.keys()][0];f.storage.set(key,'bad');assert.ok(f.open().pendingMainTransferAllocations()[0].error);await assert.rejects(f.open().resumeMainTransferAllocationBackend('T'));assert.equal(f.storage.get(key),'bad');const d=fixture(),x=d.open();x.ensureReservationFunctionsCompat=async()=>{x.currentUser={uid:'OTHER'};};await assert.rejects(x.resumeMainTransferAllocationBackend('T'));assert.equal(d.calls.length,0);});
 test('mismatched or excessive reply and role switch preserve pending recovery',async()=>{for(const patch of [{sourceMovementId:'OTHER-in'},{allocatedQty:4},{recoveryPending:true}]){const f=fixture();f.setTransport(async()=>({transferId:'T',sourceMovementId:'T-in',status:'completed',recoveryPending:false,maxQty:3,allocatedQty:3,affectedOrderIds:[],...patch}));await assert.rejects(f.open().resumeMainTransferAllocationBackend('T'));assert.equal(f.storage.size,1);}const f=fixture();f.setTransport(async c=>{c.currentUserRole='sales';return {};});await assert.rejects(f.open().resumeMainTransferAllocationBackend('T'));assert.equal(f.storage.size,1);});
+
+test('authority list advances through empty completed pages and preserves blocked witnesses',async()=>{
+ const f=fixture(),c=f.open();
+ f.setTransport(async()=>({rows:[],hasMore:true,afterId:'receipt-five'}));
+ const empty=await c.readMainTransferAllocationPage();assert.equal(empty.hasMore,true);assert.equal(empty.rows.length,0);
+ f.setTransport(async()=>({rows:[{transferId:'invalid/id',status:'blocked',receiptId:'bad-receipt',errorMessage:'需核對'}],hasMore:false,afterId:'receipt-six'}));
+ const blocked=await c.readMainTransferAllocationPage(empty.afterId);assert.equal(blocked.rows[0].status,'blocked');
+ assert.equal(f.calls[0].name,'listV2MainTransferAllocations');assert.equal(f.calls[1].payload.afterId,'receipt-five');assert.equal(f.storage.size,0);
+});
+test('authority list rejects stalled cursor, duplicate sources, excessive quantities and identity switches',async()=>{
+ const row={transferId:'T',status:'pending',quantity:3,allocatedQty:0};
+ for(const page of [{rows:[],hasMore:true,afterId:'same'},{rows:[row,row],hasMore:false,afterId:'last'},{rows:[{...row,allocatedQty:4}],hasMore:false,afterId:'last'}]){
+  const f=fixture();f.setTransport(async()=>page);await assert.rejects(f.open().readMainTransferAllocationPage('same'));assert.equal(f.storage.size,0);
+ }
+ const f=fixture();f.setTransport(async c=>{c.currentUserRole='sales';return {rows:[],hasMore:false,afterId:''};});await assert.rejects(f.open().readMainTransferAllocationPage());
+});
+test('authority list fails closed when flag disabled and leaves recovery source untouched',async()=>{
+ const f=fixture(),c=f.open();f.setTransport(async()=>{throw Error('lost');});await assert.rejects(c.resumeMainTransferAllocationBackend('T'));
+ c.YUSHIN_MAIN_TRANSFER_ALLOCATION_EMULATOR=false;await assert.rejects(c.readMainTransferAllocationPage());assert.equal(f.calls.length,1);assert.equal(f.storage.size,1);
+});

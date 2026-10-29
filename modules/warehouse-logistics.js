@@ -144,31 +144,52 @@
   function canSetPlan(order){return allowed()||(root.YushinOrderCommercialDetails.beforeReceipt(order)&&canManageOrderLifecycleCapability()&&canEditPage('orders.list')&&order.ownerUid===currentUser?.uid);}
   function context(){return currentUser?.uid+'|'+currentUserRole;}
   root.resetWarehouseLogistics=function(){transfers=[];selected.clear();visibleRows=[];shippingBatch=null;queueReady=false;queueError='';queueContext='';queuePromise=null;editor=null;root.resetDeliverySettings?.();root.resetMainTransferRequests?.();$('warehouseLogisticsOverlay')?.remove();};
+
+  let allocationRows=[],allocationAfterId='',allocationHasMore=false,allocationLoading=false,allocationEpoch=0;
+  const originalLogisticsReset=root.resetWarehouseLogistics;
+  root.resetWarehouseLogistics=function(){allocationRows=[];allocationAfterId='';allocationHasMore=false;allocationLoading=false;allocationEpoch++;return originalLogisticsReset.apply(this,arguments);};
+  root.loadMoreMainTransferAllocations=async function(){
+    if(!allowed()||allocationLoading||!allocationHasMore)return;
+    const ctx=context(),epoch=allocationEpoch,cursor=allocationAfterId;allocationLoading=true;root.renderWarehouseTransfers();
+    try{const page=await readMainTransferAllocationPage(cursor);
+      if(ctx!==context()||epoch!==allocationEpoch)return;
+      const keyed=new Map(allocationRows.map(r=>[r.status==='blocked'?r.receiptId:r.transferId,r]));
+      for(const row of page.rows)keyed.set(row.status==='blocked'?row.receiptId:row.transferId,row);
+      allocationRows=[...keyed.values()];allocationAfterId=page.afterId;allocationHasMore=page.hasMore;queueError='';
+    }catch(err){if(ctx===context()&&epoch===allocationEpoch)queueError='分配清單讀取失敗：'+err.message;}
+    finally{if(ctx===context()&&epoch===allocationEpoch){allocationLoading=false;root.renderWarehouseTransfers();}}
+  };
   root.loadWarehouseTransferQueue=async function(force=false){
     if(!allowed())return;
     const ctx=context();if(queueContext!==ctx){root.resetWarehouseLogistics();queueContext=ctx;}
     if(queuePromise)return queuePromise;if(queueReady&&!force)return root.renderWarehouseTransfers();
-    queueReady=false;queueError='';root.renderWarehouseTransfers();
+    queueReady=false;queueError='';allocationEpoch++;allocationRows=[];allocationAfterId='';allocationHasMore=false;allocationLoading=false;root.renderWarehouseTransfers();
     const task=(async()=>{try{
-      const [snapshot,allocationSnapshot]=await Promise.all([
+      const authority=typeof mainTransferAllocationListRequired==='function'&&mainTransferAllocationListRequired();
+      const [snapshot,allocationSnapshot,allocationPage]=await Promise.all([
         firestoreReadWithTimeout(db.collection('stockTransfers').where('status','==','IN_TRANSIT').limit(50).get(),'倉庫調撥收貨'),
-        firestoreReadWithTimeout(db.collection('stockTransfers').where('status','==','RECEIVED').where('allocationCompleted','==',false).limit(50).get(),'調撥入庫後分配進度')
+        firestoreReadWithTimeout(db.collection('stockTransfers').where('status','==','RECEIVED').where('allocationCompleted','==',false).limit(50).get(),'調撥入庫後分配進度'),
+        authority?readMainTransferAllocationPage():Promise.resolve(null)
       ]);
       if(ctx!==context())return;
-      transfers=[...snapshot.docs,...allocationSnapshot.docs].map(doc=>({...doc.data(),id:doc.id}));queueReady=true;
+      transfers=[...snapshot.docs,...allocationSnapshot.docs.filter(doc=>!authority||!doc.data().dispatchIntentHash)].map(doc=>({...doc.data(),id:doc.id}));
+      if(allocationPage){allocationRows=allocationPage.rows;allocationAfterId=allocationPage.afterId;allocationHasMore=allocationPage.hasMore;}queueReady=true;
     }catch(err){if(ctx!==context())return;queueError=err.code==='permission-denied'?'調撥功能所需的 Firestore 規則尚未部署。':'調撥資料讀取失敗：'+err.message;
     }finally{if(ctx===context()){queuePromise=null;root.renderWarehouseTransfers();root.updateInventoryWorkspaceBadges?.();}}})();queuePromise=task;return task;
   };
-  root.warehouseTransferQueueState=()=>({ready:queueReady,error:queueError,count:transfers.length,hasMore:transfers.length>=50});
+  root.warehouseTransferQueueState=()=>({ready:queueReady,error:queueError,count:transfers.length+allocationRows.length,hasMore:transfers.length>=50||allocationHasMore});
   root.renderWarehouseTransfers=function(){
     const body=$('inventoryTransferReceivingBody');if(!body)return;
     const recovery=typeof pendingMainTransferPhysicalOperations==='function'?pendingMainTransferPhysicalOperations().filter(r=>r.action==='RECEIVE'):[];
     const recoveryHtml=recovery.map(r=>`<tr><td colspan="5">${r.error?escapeHtml(r.error):`前次調撥入庫結果待確認 <button type="button" onclick="resumeMainTransferPhysical('RECEIVE',${inlineJsValue(r.id)},this)">確認前次入庫結果</button>`}</td></tr>`).join('');
     const allocationRecovery=typeof pendingMainTransferAllocations==='function'?pendingMainTransferAllocations():[];
     const allocationHtml=allocationRecovery.map(r=>`<tr><td colspan="5">${r.error?escapeHtml(r.error):`分配結果待核對 <button type="button" onclick="resumeMainTransferAllocation(${inlineJsValue(r.id)},this)">核對／續傳分配</button>`}</td></tr>`).join('');
-    body.innerHTML=recoveryHtml+allocationHtml+transfers.map(t=>`<tr><td data-th="來源">${escapeHtml(t.orderId?'業務訂單':'庫存調撥')}<br>${escapeHtml(t.orderNo||t.id)}<br>${escapeHtml(t.salesName||'')}</td><td data-th="寄出方／目的倉">${escapeHtml(warehouseName(t.fromWarehouseId))} → ${escapeHtml(warehouseName(t.toWarehouseId))}</td><td data-th="品項">${escapeHtml(t.itemCode)}<br>${escapeHtml(t.itemName)}</td><td data-th="待收數量">${t.status==='RECEIVED'?'已入庫・分配另行核對':t.qty}</td><td data-th="操作"><button type="button" onclick="${t.status==='RECEIVED'&&t.dispatchIntentHash?'resumeMainTransferAllocation':'receiveWarehouseTransfer'}(${inlineJsValue(t.id)},this)">${t.status==='RECEIVED'?(t.dispatchIntentHash?'核對／續傳分配':'重試庫存分配'):'已收貨'}</button></td></tr>`).join('');
-    $('inventoryTransferReceivingStatus').textContent=queueError||(!queueReady?'讀取中…':`${transfers.length} 筆調撥收貨／待分配${recovery.length?'；有未確認入庫結果':''}${transfers.length>=50?'，各類先顯示 50 筆；處理後補入下一批':''}。已入庫的重試只處理分配，不重複入庫。`);
-    const card=$('inventoryTransferReceivingTab');if(card)card.innerHTML=`<span>調撥收貨</span><strong>${queueError?'—':queueReady?transfers.length+' 筆':'…'}</strong>`;
+    
+    const authorityHtml=allocationRows.map(r=>'<tr><td colspan="5">'+(r.status==='blocked'?escapeHtml(r.errorMessage)+'｜'+escapeHtml(r.receiptId):escapeHtml(r.transferId)+'｜待分配 '+(r.quantity-r.allocatedQty)+' <button type="button" onclick="resumeMainTransferAllocation('+inlineJsValue(r.transferId)+',this)">核對／續傳分配</button>')+'</td></tr>').join('');
+    const moreHtml=allocationHasMore?'<tr><td colspan="5"><button type="button" onclick="loadMoreMainTransferAllocations()" '+(allocationLoading?'disabled':'')+'>'+(allocationLoading?'讀取中…':'讀取下一頁分配紀錄')+'</button></td></tr>':'';
+    body.innerHTML=recoveryHtml+allocationHtml+authorityHtml+moreHtml+transfers.map(t=>`<tr><td data-th="來源">${escapeHtml(t.orderId?'業務訂單':'庫存調撥')}<br>${escapeHtml(t.orderNo||t.id)}<br>${escapeHtml(t.salesName||'')}</td><td data-th="寄出方／目的倉">${escapeHtml(warehouseName(t.fromWarehouseId))} → ${escapeHtml(warehouseName(t.toWarehouseId))}</td><td data-th="品項">${escapeHtml(t.itemCode)}<br>${escapeHtml(t.itemName)}</td><td data-th="待收數量">${t.status==='RECEIVED'?'已入庫・分配另行核對':t.qty}</td><td data-th="操作"><button type="button" onclick="${t.status==='RECEIVED'&&t.dispatchIntentHash?'resumeMainTransferAllocation':'receiveWarehouseTransfer'}(${inlineJsValue(t.id)},this)">${t.status==='RECEIVED'?(t.dispatchIntentHash?'核對／續傳分配':'重試庫存分配'):'已收貨'}</button></td></tr>`).join('');
+    $('inventoryTransferReceivingStatus').textContent=queueError||(!queueReady?'讀取中…':`${transfers.length+allocationRows.length} 筆調撥收貨／待分配${recovery.length?'；有未確認入庫結果':''}${transfers.length>=50?'，各類先顯示 50 筆；處理後補入下一批':''}。已入庫的重試只處理分配，不重複入庫。`);
+    const card=$('inventoryTransferReceivingTab');if(card)card.innerHTML=`<span>調撥收貨</span><strong>${queueError?'—':queueReady?(transfers.length+allocationRows.length)+' 筆':'…'}</strong>`;
   };
   function warehouseName(id){return warehouseMasterCache.find(w=>w.id===id)?.warehouseName||id;}
   function modal(html){let overlay=$('warehouseLogisticsOverlay');if(!overlay){overlay=document.createElement('div');overlay.id='warehouseLogisticsOverlay';overlay.className='eq-modal-overlay no-print';overlay.addEventListener('click',e=>{if(e.target===overlay)root.closeWarehouseLogistics();});document.body.appendChild(overlay);}overlay.innerHTML=`<div class="eq-modal-box warehouse-logistics-modal">${html}</div>`;overlay.classList.add('active');}
