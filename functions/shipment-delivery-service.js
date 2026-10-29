@@ -186,6 +186,12 @@ async function commitShipmentDelivery(db,uid,data,env=process.env,options={}){
   // concealed by an otherwise valid order-level delivery projection.
   if(multi)await readWholeOrderShipmentProofs(tx,db,order,intent);
   const shipment=await readShipmentProof(tx,db,order,intent,productKey);
+  // Give an explicit, retry-safe domain rejection for an over-confirmation.
+  // Shared projections still validate all event totals after the candidate
+  // is appended, but their raw Error must not become an opaque 500 here.
+  const pending=context.projection.shipments.find(row=>row.shipmentId===shipmentId)?.pendingQty;
+  if(!Number.isSafeInteger(pending)||intent.quantity>pending)
+   fault('送達量超過這筆實際出貨尚待簽收數量');
   const expectedMovementId=shipment.movementId;
   const now=new Date().toISOString();
   const record={id:operationId,orderId,itemId,productKey,shipmentId,warehouseId:shipment.warehouseId,
