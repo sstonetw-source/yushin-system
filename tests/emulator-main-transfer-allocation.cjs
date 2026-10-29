@@ -43,6 +43,9 @@ test('real dispatch and receipt allocate a multi-item shortage through one durab
   const results=await Promise.all([drainReleasedV2FreeStock(db,uid,source),drainReleasedV2FreeStock(db,uid,source)]);
   assert.equal(results[0].runId,results[1].runId);
   const replay=await drainReleasedV2FreeStock(db,uid,source);
+  const {projectMainTransferAllocationCompletion}=require('../functions/main-transfer-allocation-completion');
+  await projectMainTransferAllocationCompletion(db,uid,transferId);
+  assert.equal((await db.collection('stockTransfers').doc(transferId).get()).data().allocationCompleted,true);
   assert.equal(replay.status,'completed');assert.equal(replay.allocatedQty,3);
   const order=(await db.collection('orders').doc(orderId).get()).data();
   assert.deepEqual(order.items[0],sibling);assert.equal(order.items[1].reservedQty,3);assert.equal(order.items[1].shortageQty,2);

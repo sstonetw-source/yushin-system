@@ -29,3 +29,10 @@ test('database mismatch and live role rejection cannot execute a different sourc
  const denied=fixture({drain:async()=>{throw Object.assign(Error('role revoked'),{code:'permission-denied'});}});
  await assert.rejects(denied.handler({auth:{uid:'U'},data:{transferId:'T'}}),e=>e.code==='permission-denied');
 });
+test('completed response waits for authority projection and refuses a mismatched completion',async()=>{
+ let finalized=0;const result={status:'completed',runId:'original-run',maxQty:3,allocatedQty:3};
+ const f=fixture({drain:async()=>result,projectCompletion:async()=>{finalized++;return {runId:'original-run',maxQty:3,allocatedQty:3};}});
+ assert.equal((await f.handler({auth:{uid:'U'},data:{transferId:'T'}})).status,'completed');assert.equal(finalized,1);
+ const bad=fixture({drain:async()=>result,projectCompletion:async()=>({runId:'other',maxQty:3,allocatedQty:3})});
+ await assert.rejects(bad.handler({auth:{uid:'U'},data:{transferId:'T'}}),e=>e.code==='failed-precondition');
+});

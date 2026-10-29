@@ -176,3 +176,23 @@ test('allocation updates one target in fifteen lines and refuses oversized or du
  await assert.rejects(drainReleasedV2FreeStock(f.db,'U',{movementId:dispatch.id+'-in'}),/重複/);
  assert.equal(f.docs.get('warehouseStocks/MAIN__P').reserved,0);
 }));
+const {projectMainTransferAllocationCompletion:completeAllocation}=require('../functions/main-transfer-allocation-completion');
+test('completion projection requires real completed job, repairs forged display and replays without stock writes',()=>allocationEnvironment(async()=>{
+ const f=await allocationFixture();const before=f.snapshot();await assert.rejects(completeAllocation(f.db,'U',dispatch.id));assert.equal(f.snapshot(),before);
+ const result=await drainReleasedV2FreeStock(f.db,'U',{movementId:dispatch.id+'-in'});
+ const inventory=structuredClone(f.docs.get('inventory/P'));
+ Object.assign(f.docs.get('stockTransfers/'+dispatch.id),{allocationCompleted:false,autoAllocatedQty:999});
+ const projection=await completeAllocation(f.db,'U',dispatch.id);assert.equal(projection.runId,result.runId);
+ const t=f.docs.get('stockTransfers/'+dispatch.id);assert.equal(t.allocationCompleted,true);assert.equal(t.autoAllocatedQty,3);
+ assert.deepEqual(f.docs.get('inventory/P'),inventory);const after=f.snapshot();await completeAllocation(f.db,'U',dispatch.id);assert.equal(f.snapshot(),after);
+}));
+test('completion projection rejects active or corrupt jobs and revoked role, while late failure can retry safely',()=>allocationEnvironment(async()=>{
+ const f=await allocationFixture();await drainReleasedV2FreeStock(f.db,'U',{movementId:dispatch.id+'-in'});
+ const job=[...f.docs.values()].find(value=>value.action==='single_v2_free_stock_batch'),original=structuredClone(job);
+ for(const patch of [{status:'active'},{allocatedQty:999},{intentHash:'forged'}]){
+  Object.assign(job,original,patch);const before=f.snapshot();await assert.rejects(completeAllocation(f.db,'U',dispatch.id));assert.equal(f.snapshot(),before);
+ }
+ Object.assign(job,original);f.put('users/U',{role:'sales'});await assert.rejects(completeAllocation(f.db,'U',dispatch.id),e=>e.code==='permission-denied');f.put('users/U',{role:'warehouse'});
+ f.setFail(true);const before=f.snapshot();await assert.rejects(completeAllocation(f.db,'U',dispatch.id),/late failure/);assert.equal(f.snapshot(),before);
+ f.setFail(false);await completeAllocation(f.db,'U',dispatch.id);assert.equal(f.docs.get('stockTransfers/'+dispatch.id).allocationCompleted,true);
+}));
