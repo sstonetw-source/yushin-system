@@ -44,3 +44,15 @@ test('checkpoint retries original operation and rejects collisions or ambiguous 
   assert.throws(()=>inspectAllocationCheckpoint({...args,checkpoint:{...checkpoint,...change}}));
  }
 });
+
+test('shortage selection is deterministic, bounded and rejects corrupt candidate quantities',()=>{
+ const {selectBoundedShortages}=require('../functions/main-transfer-allocation-proof');
+ const row=(id,orderDate,shortageQty=1)=>({id,orderId:id,itemId:'I',productKey:'P',warehouseId:'MAIN',status:'shortage',orderDate,shortageQty});
+ const selected=selectBoundedShortages({rows:[row('new','2026-10-20'),row('old','2026-10-01'),row('zero','2026-10-01',0)],productKey:'P',warehouseId:'MAIN'});
+ assert.deepEqual(selected.map(x=>x.id),['old','new']);
+ assert.deepEqual(selectBoundedShortages({rows:[row('old','2026-10-01')],productKey:'P',warehouseId:'MAIN',excludeOrderId:'old'}),[]);
+ for(const rows of [[row('x','2026-10-01',-1)],[row('x','2026-10-01',NaN)],[row('x','2026-10-01'),row('x','2026-10-02')]]){
+  assert.throws(()=>selectBoundedShortages({rows,productKey:'P',warehouseId:'MAIN'}));
+ }
+ assert.throws(()=>selectBoundedShortages({rows:[row('a','2026-10-01'),row('b','2026-10-02')],productKey:'P',warehouseId:'MAIN',maxCandidates:1}));
+});
