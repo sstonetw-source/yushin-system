@@ -23,6 +23,7 @@ test('multi-source transfer source rejects corrupted identities, custody, duplic
  for(const change of [
   x=>x.reservation.orderId='ANOTHER',x=>x.reservation.productKey='ANOTHER',
   x=>x.reservation.locations[1].warehouseId='A',x=>x.reservation.locations[0].warehouseId='custody-U',
+  x=>x.reservation.locations[1].warehouseId='A/B',
   x=>x.reservation.locations[1].reservedQty=3,x=>x.reservation.shortageQty=1,
   x=>x.item.reservedQty=2,x=>x.item.transferPendingId='prior',x=>x.item.custodyTransferId='prior',
   x=>x.reservation.warehouseId='A',x=>x.reservation.locationSchemaVersion=99
