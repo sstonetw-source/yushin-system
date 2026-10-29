@@ -27,6 +27,7 @@ async function createMainTransferRequest({id,inventoryId,fromWarehouseId,qty}) {
 }
 
 async function cancelMainTransferRequestRecord(id) {
+    if(typeof pendingMainTransferDispatch==='function'&&pendingMainTransferDispatch(id))throw Error('原實貨寄出結果未確認，請先確認原寄出操作再處理需求。');
     if(typeof mainTransferBackendRequired==='function'&&mainTransferBackendRequired(id))
         return commitMainTransferRequestBackend(id,'CANCEL',{id});
     if(!canManageInventoryStockPolicy()||!canEditPage('inventory'))throw Error('只有採購或管理員可取消主倉備貨需求。');

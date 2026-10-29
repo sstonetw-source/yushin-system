@@ -2,6 +2,8 @@
 async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toWarehouseId='',qty,orderId='',itemId='',handoff=false,expectedWarehouseId='',expectedPlan=null,requestId=''}){
   if(requestId&&typeof pendingMainTransferOperation==='function'&&pendingMainTransferOperation(requestId))
     throw Error('原主倉需求結果尚未確認，請先確認原操作再寄出。');
+  if(requestId&&typeof mainTransferPhysicalRequired==='function'&&mainTransferPhysicalRequired('DISPATCH',id,requestId))
+    return commitMainTransferPhysicalBackend('DISPATCH',id,{id,requestId});
   if(!canReceiveInventoryCapability()||!canAccessPage('inventory'))throw Error('無調撥權限。');
   if(!id||!Number.isFinite(qty)||qty<=0)throw Error('調撥資料不正確。');
   const actorUid=currentUser.uid,actorRole=currentUserRole,now=new Date().toISOString(),who=deliveryActor();let saved;
@@ -9,6 +11,7 @@ async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toW
     const transferRef=db.collection('stockTransfers').doc(id),prior=await tx.get(transferRef);
     if(prior.exists){
       saved=prior.data();
+      if(saved.dispatchIntentHash)throw Error('此調撥由後端處理，禁止改用舊交易，請回原環境核對。');
       // A committed operation may be retried after its response is lost, but
       // the same ID must never confirm a different dispatch or request.
       const sameSource=orderId
@@ -99,11 +102,15 @@ function writeTransferLots(tx,transfer,inventory,now){
   }
 }
 async function commitWarehouseTransferReceipt(id,{onStockCommitted=null}={}){
+  if(typeof mainTransferPhysicalRequired==='function'&&mainTransferPhysicalRequired('RECEIVE',id))
+    return commitMainTransferPhysicalBackend('RECEIVE',id);
   if(!canReceiveInventoryCapability()||!canAccessPage('inventory'))throw Error('無調撥收貨權限。');let saved;
   const actorUid=currentUser.uid,actorRole=currentUserRole,actor=deliveryActor(),now=new Date().toISOString();
   const assertActor=()=>{if(actorUid!==currentUser?.uid||actorRole!==currentUserRole)throw Error('登入身分已變更，請重新開啟調撥收貨。');};
   await runRoleTransaction(async tx=>{
-    const ref=db.collection('stockTransfers').doc(id),snap=await tx.get(ref);if(!snap.exists)throw Error('調撥不存在。');const t={...snap.data(),id};saved=t;if(t.status==='RECEIVED')return;if(t.status!=='IN_TRANSIT')throw Error('調撥狀態不可收貨。');
+    const ref=db.collection('stockTransfers').doc(id),snap=await tx.get(ref);if(!snap.exists)throw Error('調撥不存在。');const t={...snap.data(),id};
+    if(t.dispatchIntentHash)throw Error('此調撥實貨由後端處理，禁止使用舊收貨或缺貨分配交易。');
+    saved=t;if(t.status==='RECEIVED')return;if(t.status!=='IN_TRANSIT')throw Error('調撥狀態不可收貨。');
     const invRef=db.collection('inventory').doc(t.inventoryId),whRef=db.collection('warehouseStocks').doc(t.toStockId),invSnap=await tx.get(invRef),whSnap=await tx.get(whRef),destWh=await tx.get(db.collection('warehouses').doc(t.toWarehouseId));
     if(!invSnap.exists||!destWh.exists||destWh.data().active===false)throw Error('目的倉庫或庫存不存在。');const inv=invSnap.data(),wh=whSnap.exists?whSnap.data():{};
     const physicalPlan=YushinWarehouseLogistics.planTransferReceipt({aggregateStock:inv,warehouseStock:wh,qty:t.qty,reservedQty:t.reservedQty});

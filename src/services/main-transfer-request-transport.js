@@ -12,23 +12,28 @@ function mainTransferBackendRequired(id){
  return (typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview')||globalThis.YUSHIN_MAIN_TRANSFER_REQUEST_EMULATOR===true
   ||sessionStorage.getItem(mainTransferPendingKey(id))!==null;
 }
-function mainTransferRequestTransport(){
- const emulator=globalThis.YUSHIN_MAIN_TRANSFER_REQUEST_EMULATOR===true,project=emulator?'demo-yushin':'preview-20135';
- if(typeof firebase==='undefined'||!firebase.auth||!firebase.functions)throw Error('調撥需求後端尚未準備完成，禁止回退舊交易。');
+// Shared SDK/session boundary for main-demand and physical-transfer operations.
+function mainTransferBackendContext({emulatorFlag,previewFlag,roles,authorized}){
+ const emulator=globalThis[emulatorFlag]===true,project=emulator?'demo-yushin':'preview-20135';
+ if(typeof firebase==='undefined'||!firebase.auth||!firebase.functions)throw Error('調撥後端尚未準備完成，禁止回退舊交易。');
  const auth=firebase.auth(),functions=firebase.app().functions('asia-east1'),uid=currentUser?.uid,role=currentUserRole;
  const local=h=>h==='localhost'||h==='127.0.0.1';
  const check=()=>{
-  const preview=typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'&&globalThis.YUSHIN_PREVIEW_MAIN_TRANSFER_REQUEST===true;
-  if((!emulator&&!preview)||emulator!==(globalThis.YUSHIN_MAIN_TRANSFER_REQUEST_EMULATOR===true)
+  const preview=typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'&&globalThis[previewFlag]===true;
+  if((!emulator&&!preview)||emulator!==(globalThis[emulatorFlag]===true)
    ||(emulator?!local(globalThis.location?.hostname):!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(globalThis.location?.hostname))
    ||firebase.app().options?.projectId!==project||auth.app?.options?.projectId!==project
    ||functions.app?.options?.projectId!==project||db.app?.options?.projectId!==project
    ||(emulator?(!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099):!!auth.emulatorConfig))
    throw Error('主倉調撥環境或旗標已變更，禁止改用舊交易，請保留原操作。');
-  if(!uid||auth.currentUser?.uid!==uid||currentUser?.uid!==uid||currentUserRole!==role
-   ||!['admin','purchaser'].includes(role)||!canManageInventoryStockPolicy()||!canEditPage('inventory'))throw Error('登入身分或主倉備貨權限已變更。');
+  if(!uid||auth.currentUser?.uid!==uid||currentUser?.uid!==uid||currentUserRole!==role||!roles.includes(role)||!authorized())
+   throw Error('登入身分或主倉備貨權限已變更。');
  };
  check();return {uid,role,project,functions,emulator,check};
+}
+function mainTransferRequestTransport(){
+ return mainTransferBackendContext({emulatorFlag:'YUSHIN_MAIN_TRANSFER_REQUEST_EMULATOR',previewFlag:'YUSHIN_PREVIEW_MAIN_TRANSFER_REQUEST',
+  roles:['admin','purchaser'],authorized:()=>canManageInventoryStockPolicy()&&canEditPage('inventory')});
 }
 async function commitMainTransferRequestBackend(id,action,input){
  const actorUid=currentUser?.uid,actorRole=currentUserRole;

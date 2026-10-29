@@ -162,8 +162,10 @@
   root.warehouseTransferQueueState=()=>({ready:queueReady,error:queueError,count:transfers.length,hasMore:transfers.length>=50});
   root.renderWarehouseTransfers=function(){
     const body=$('inventoryTransferReceivingBody');if(!body)return;
-    body.innerHTML=transfers.map(t=>`<tr><td data-th="來源">${escapeHtml(t.orderId?'業務訂單':'庫存調撥')}<br>${escapeHtml(t.orderNo||t.id)}<br>${escapeHtml(t.salesName||'')}</td><td data-th="寄出方／目的倉">${escapeHtml(warehouseName(t.fromWarehouseId))} → ${escapeHtml(warehouseName(t.toWarehouseId))}</td><td data-th="品項">${escapeHtml(t.itemCode)}<br>${escapeHtml(t.itemName)}</td><td data-th="待收數量">${t.status==='RECEIVED'?'已入庫・待分配':t.qty}</td><td data-th="操作"><button type="button" onclick="receiveWarehouseTransfer(${inlineJsValue(t.id)},this)">${t.status==='RECEIVED'?'重試庫存分配':'已收貨'}</button></td></tr>`).join('');
-    $('inventoryTransferReceivingStatus').textContent=queueError||(!queueReady?'讀取中…':`${transfers.length} 筆調撥收貨／待分配${transfers.length>=50?'，各類先顯示 50 筆；處理後補入下一批':''}。已入庫的重試只處理分配，不重複入庫。`);
+    const recovery=typeof pendingMainTransferPhysicalOperations==='function'?pendingMainTransferPhysicalOperations().filter(r=>r.action==='RECEIVE'):[];
+    const recoveryHtml=recovery.map(r=>`<tr><td colspan="5">${r.error?escapeHtml(r.error):`前次調撥入庫結果待確認 <button type="button" onclick="resumeMainTransferPhysical('RECEIVE',${inlineJsValue(r.id)},this)">確認前次入庫結果</button>`}</td></tr>`).join('');
+    body.innerHTML=recoveryHtml+transfers.map(t=>`<tr><td data-th="來源">${escapeHtml(t.orderId?'業務訂單':'庫存調撥')}<br>${escapeHtml(t.orderNo||t.id)}<br>${escapeHtml(t.salesName||'')}</td><td data-th="寄出方／目的倉">${escapeHtml(warehouseName(t.fromWarehouseId))} → ${escapeHtml(warehouseName(t.toWarehouseId))}</td><td data-th="品項">${escapeHtml(t.itemCode)}<br>${escapeHtml(t.itemName)}</td><td data-th="待收數量">${t.status==='RECEIVED'?'已入庫・待分配':t.qty}</td><td data-th="操作"><button type="button" onclick="receiveWarehouseTransfer(${inlineJsValue(t.id)},this)">${t.status==='RECEIVED'?(t.dispatchIntentHash?'核對已入庫結果':'重試庫存分配'):'已收貨'}</button></td></tr>`).join('');
+    $('inventoryTransferReceivingStatus').textContent=queueError||(!queueReady?'讀取中…':`${transfers.length} 筆調撥收貨／待分配${recovery.length?'；有未確認入庫結果':''}${transfers.length>=50?'，各類先顯示 50 筆；處理後補入下一批':''}。已入庫的重試只處理分配，不重複入庫。`);
     const card=$('inventoryTransferReceivingTab');if(card)card.innerHTML=`<span>調撥收貨</span><strong>${queueError?'—':queueReady?transfers.length+' 筆':'…'}</strong>`;
   };
   function warehouseName(id){return warehouseMasterCache.find(w=>w.id===id)?.warehouseName||id;}
@@ -347,9 +349,15 @@
     catch(err){showActionFeedback('調撥未完成：'+err.message,'warning');}finally{endActionButton(button,bs);}
   };
   root.receiveWarehouseTransfer=async function(id,button){
-    if(!allowed()||pending.has(id))return;if(!confirm('已點收這筆調撥貨品，確認全部入庫？'))return;
+    if(!allowed()||pending.has(id))return;
+    let checkpoint=null;try{checkpoint=typeof pendingMainTransferPhysical==='function'?pendingMainTransferPhysical('RECEIVE',id):null;}catch(err){showActionFeedback(err.message,'warning');return;}
+    if(checkpoint)return root.resumeMainTransferPhysical('RECEIVE',id,button);
+    if(!confirm('已點收這筆調撥貨品，確認全部入庫？'))return;
     pending.add(id);const bs=beginActionButton(button,'入庫中…');
-    try{const result=await root.commitWarehouseTransferReceipt(id,{onStockCommitted:invalidateWarehouseStockCache});await refreshRows(result.orderId);await refreshAffectedOrderCaches(result.affectedOrderIds||[]);await loadInventory(true);await root.loadWarehouseTransferQueue(true);showActionFeedback(result.orderId?'調撥已入庫，原訂單預留已移到收貨倉庫。':'調撥已入庫，缺貨訂單分配與採購需求已同步。');}
+    try{const result=await root.commitWarehouseTransferReceipt(id,{onStockCommitted:invalidateWarehouseStockCache});
+      try{await refreshRows(result.orderId);await refreshAffectedOrderCaches(result.affectedOrderIds||[]);await loadInventory(true);await root.loadWarehouseTransferQueue(true);}
+      catch(_){showActionFeedback('調撥入庫結果已確認，但清單更新失敗；請重新開啟庫存頁。','warning');return;}
+      showActionFeedback(result.physicalReceiptOnly?'實貨已入庫；缺貨訂單分配尚待後端接線，請保留待分配紀錄。':result.orderId?'調撥已入庫，原訂單預留已移到收貨倉庫。':'調撥已入庫，缺貨訂單分配與採購需求已同步。',result.physicalReceiptOnly?'warning':'success');}
     catch(err){showActionFeedback('調撥收貨未完成：'+err.message,'warning');}finally{pending.delete(id);endActionButton(button,bs);}
   };
 })(typeof globalThis!=='undefined'?globalThis:this);

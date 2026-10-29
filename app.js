@@ -21740,6 +21740,8 @@ async function commitInventoryShipment({orderId,itemId,qty,date,notes='',operati
 async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toWarehouseId='',qty,orderId='',itemId='',handoff=false,expectedWarehouseId='',expectedPlan=null,requestId=''}){
   if(requestId&&typeof pendingMainTransferOperation==='function'&&pendingMainTransferOperation(requestId))
     throw Error('原主倉需求結果尚未確認，請先確認原操作再寄出。');
+  if(requestId&&typeof mainTransferPhysicalRequired==='function'&&mainTransferPhysicalRequired('DISPATCH',id,requestId))
+    return commitMainTransferPhysicalBackend('DISPATCH',id,{id,requestId});
   if(!canReceiveInventoryCapability()||!canAccessPage('inventory'))throw Error('無調撥權限。');
   if(!id||!Number.isFinite(qty)||qty<=0)throw Error('調撥資料不正確。');
   const actorUid=currentUser.uid,actorRole=currentUserRole,now=new Date().toISOString(),who=deliveryActor();let saved;
@@ -21747,6 +21749,7 @@ async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toW
     const transferRef=db.collection('stockTransfers').doc(id),prior=await tx.get(transferRef);
     if(prior.exists){
       saved=prior.data();
+      if(saved.dispatchIntentHash)throw Error('此調撥由後端處理，禁止改用舊交易，請回原環境核對。');
       // A committed operation may be retried after its response is lost, but
       // the same ID must never confirm a different dispatch or request.
       const sameSource=orderId
@@ -21837,11 +21840,15 @@ function writeTransferLots(tx,transfer,inventory,now){
   }
 }
 async function commitWarehouseTransferReceipt(id,{onStockCommitted=null}={}){
+  if(typeof mainTransferPhysicalRequired==='function'&&mainTransferPhysicalRequired('RECEIVE',id))
+    return commitMainTransferPhysicalBackend('RECEIVE',id);
   if(!canReceiveInventoryCapability()||!canAccessPage('inventory'))throw Error('無調撥收貨權限。');let saved;
   const actorUid=currentUser.uid,actorRole=currentUserRole,actor=deliveryActor(),now=new Date().toISOString();
   const assertActor=()=>{if(actorUid!==currentUser?.uid||actorRole!==currentUserRole)throw Error('登入身分已變更，請重新開啟調撥收貨。');};
   await runRoleTransaction(async tx=>{
-    const ref=db.collection('stockTransfers').doc(id),snap=await tx.get(ref);if(!snap.exists)throw Error('調撥不存在。');const t={...snap.data(),id};saved=t;if(t.status==='RECEIVED')return;if(t.status!=='IN_TRANSIT')throw Error('調撥狀態不可收貨。');
+    const ref=db.collection('stockTransfers').doc(id),snap=await tx.get(ref);if(!snap.exists)throw Error('調撥不存在。');const t={...snap.data(),id};
+    if(t.dispatchIntentHash)throw Error('此調撥實貨由後端處理，禁止使用舊收貨或缺貨分配交易。');
+    saved=t;if(t.status==='RECEIVED')return;if(t.status!=='IN_TRANSIT')throw Error('調撥狀態不可收貨。');
     const invRef=db.collection('inventory').doc(t.inventoryId),whRef=db.collection('warehouseStocks').doc(t.toStockId),invSnap=await tx.get(invRef),whSnap=await tx.get(whRef),destWh=await tx.get(db.collection('warehouses').doc(t.toWarehouseId));
     if(!invSnap.exists||!destWh.exists||destWh.data().active===false)throw Error('目的倉庫或庫存不存在。');const inv=invSnap.data(),wh=whSnap.exists?whSnap.data():{};
     const physicalPlan=YushinWarehouseLogistics.planTransferReceipt({aggregateStock:inv,warehouseStock:wh,qty:t.qty,reservedQty:t.reservedQty});
@@ -21897,6 +21904,7 @@ async function createMainTransferRequest({id,inventoryId,fromWarehouseId,qty}) {
 }
 
 async function cancelMainTransferRequestRecord(id) {
+    if(typeof pendingMainTransferDispatch==='function'&&pendingMainTransferDispatch(id))throw Error('原實貨寄出結果未確認，請先確認原寄出操作再處理需求。');
     if(typeof mainTransferBackendRequired==='function'&&mainTransferBackendRequired(id))
         return commitMainTransferRequestBackend(id,'CANCEL',{id});
     if(!canManageInventoryStockPolicy()||!canEditPage('inventory'))throw Error('只有採購或管理員可取消主倉備貨需求。');
@@ -21934,23 +21942,28 @@ function mainTransferBackendRequired(id){
  return (typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview')||globalThis.YUSHIN_MAIN_TRANSFER_REQUEST_EMULATOR===true
   ||sessionStorage.getItem(mainTransferPendingKey(id))!==null;
 }
-function mainTransferRequestTransport(){
- const emulator=globalThis.YUSHIN_MAIN_TRANSFER_REQUEST_EMULATOR===true,project=emulator?'demo-yushin':'preview-20135';
- if(typeof firebase==='undefined'||!firebase.auth||!firebase.functions)throw Error('調撥需求後端尚未準備完成，禁止回退舊交易。');
+// Shared SDK/session boundary for main-demand and physical-transfer operations.
+function mainTransferBackendContext({emulatorFlag,previewFlag,roles,authorized}){
+ const emulator=globalThis[emulatorFlag]===true,project=emulator?'demo-yushin':'preview-20135';
+ if(typeof firebase==='undefined'||!firebase.auth||!firebase.functions)throw Error('調撥後端尚未準備完成，禁止回退舊交易。');
  const auth=firebase.auth(),functions=firebase.app().functions('asia-east1'),uid=currentUser?.uid,role=currentUserRole;
  const local=h=>h==='localhost'||h==='127.0.0.1';
  const check=()=>{
-  const preview=typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'&&globalThis.YUSHIN_PREVIEW_MAIN_TRANSFER_REQUEST===true;
-  if((!emulator&&!preview)||emulator!==(globalThis.YUSHIN_MAIN_TRANSFER_REQUEST_EMULATOR===true)
+  const preview=typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'&&globalThis[previewFlag]===true;
+  if((!emulator&&!preview)||emulator!==(globalThis[emulatorFlag]===true)
    ||(emulator?!local(globalThis.location?.hostname):!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(globalThis.location?.hostname))
    ||firebase.app().options?.projectId!==project||auth.app?.options?.projectId!==project
    ||functions.app?.options?.projectId!==project||db.app?.options?.projectId!==project
    ||(emulator?(!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099):!!auth.emulatorConfig))
    throw Error('主倉調撥環境或旗標已變更，禁止改用舊交易，請保留原操作。');
-  if(!uid||auth.currentUser?.uid!==uid||currentUser?.uid!==uid||currentUserRole!==role
-   ||!['admin','purchaser'].includes(role)||!canManageInventoryStockPolicy()||!canEditPage('inventory'))throw Error('登入身分或主倉備貨權限已變更。');
+  if(!uid||auth.currentUser?.uid!==uid||currentUser?.uid!==uid||currentUserRole!==role||!roles.includes(role)||!authorized())
+   throw Error('登入身分或主倉備貨權限已變更。');
  };
  check();return {uid,role,project,functions,emulator,check};
+}
+function mainTransferRequestTransport(){
+ return mainTransferBackendContext({emulatorFlag:'YUSHIN_MAIN_TRANSFER_REQUEST_EMULATOR',previewFlag:'YUSHIN_PREVIEW_MAIN_TRANSFER_REQUEST',
+  roles:['admin','purchaser'],authorized:()=>canManageInventoryStockPolicy()&&canEditPage('inventory')});
 }
 async function commitMainTransferRequestBackend(id,action,input){
  const actorUid=currentUser?.uid,actorRole=currentUserRole;
@@ -21998,6 +22011,97 @@ function pendingMainTransferOperations(){
   catch(_){rows.push({id:'',error:'調撥暫存識別碼無法讀取，請保留暫存核對。'});}
  }
  return rows;
+}
+function mainTransferPhysicalKey(action,id){return 'main-transfer-physical:'+encodeURIComponent(currentUser?.uid||'')+':'+action+':'+encodeURIComponent(id);}
+function pendingMainTransferPhysical(action,id){
+ const raw=sessionStorage.getItem(mainTransferPhysicalKey(action,id));if(raw===null)return null;
+ try{const p=JSON.parse(raw);
+  if(!['DISPATCH','RECEIVE'].includes(action)||p.uid!==currentUser?.uid||p.role!==currentUserRole||p.action!==action||p.payload?.id!==id
+   ||!['preview-20135','demo-yushin'].includes(p.project)||Object.keys(p.payload).sort().join(',')!==(action==='DISPATCH'?'id,requestId':'id,operationId')
+   ||typeof id!=='string'||!id||id.length>96||id!==id.trim()||id.includes('/')
+   ||(action==='DISPATCH'?(typeof p.payload.requestId!=='string'||!p.payload.requestId||p.payload.requestId.includes('/')):!/^[A-Za-z0-9_-]{12,96}$/.test(p.payload.operationId)))throw Error('invalid');
+  return p;
+ }catch(_){throw Error('前次調撥實貨結果未確認，請保留原暫存並使用原帳號與角色。');}
+}
+function pendingMainTransferPhysicalOperations(){
+ const prefix='main-transfer-physical:'+encodeURIComponent(currentUser?.uid||'')+':',rows=[];
+ for(let n=0;n<sessionStorage.length;n++){
+  const key=sessionStorage.key(n);if(!key?.startsWith(prefix))continue;
+  try{const at=key.indexOf(':',prefix.length),action=key.slice(prefix.length,at),id=decodeURIComponent(key.slice(at+1));
+   try{const p=pendingMainTransferPhysical(action,id);if(p)rows.push({id,action,requestId:p.payload.requestId||''});}
+   catch(e){rows.push({id,action,error:e.message});}
+  }catch(_){rows.push({id:'',action:'',error:'調撥實貨暫存無法讀取，請保留原暫存核對。'});}
+ }
+ return rows;
+}
+function pendingMainTransferDispatch(requestId){
+ const rows=pendingMainTransferPhysicalOperations();
+ if(rows.some(r=>r.error))throw Error('尚有無法核對的調撥暫存，請先確認原操作。');
+ const matches=rows.filter(r=>r.action==='DISPATCH'&&r.requestId===requestId);
+ if(matches.length>1)throw Error('同一主倉需求有多筆未確認調撥，請保留原操作核對。');
+ return matches[0]||null;
+}
+function mainTransferPhysicalRequired(action,id,requestId=''){
+ const flag=action==='DISPATCH'?'YUSHIN_MAIN_TRANSFER_DISPATCH_EMULATOR':'YUSHIN_MAIN_TRANSFER_RECEIPT_EMULATOR';
+ return (typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview')||globalThis[flag]===true
+  ||sessionStorage.getItem(mainTransferPhysicalKey(action,id))!==null
+  ||(action==='DISPATCH'&&!!pendingMainTransferDispatch(requestId));
+}
+const mainTransferPhysicalInFlight=new Map();
+async function commitMainTransferPhysicalBackend(action,id,input){
+ const key=JSON.stringify([currentUser?.uid,currentUserRole,action,id]),signature=JSON.stringify(input??null);
+ const existing=mainTransferPhysicalInFlight.get(key);
+ if(existing){if(existing.signature!==signature)throw Error('實貨調撥處理中，不能變更原操作內容。');return existing.promise;}
+ const promise=submitMainTransferPhysicalBackend(action,id,input).finally(()=>mainTransferPhysicalInFlight.delete(key));
+ mainTransferPhysicalInFlight.set(key,{signature,promise});return promise;
+}
+async function submitMainTransferPhysicalBackend(action,id,input){
+ const actorUid=currentUser?.uid,actorRole=currentUserRole;
+ if(typeof ensureReservationFunctionsCompat==='function')await ensureReservationFunctionsCompat();
+ if(currentUser?.uid!==actorUid||currentUserRole!==actorRole)throw Error('載入後端期間登入身分已變更，尚未提交。');
+ if(!['DISPATCH','RECEIVE'].includes(action))throw Error('調撥動作不正確。');
+ const suffix=action==='DISPATCH'?'DISPATCH':'RECEIPT';
+ const {uid,role,project,functions,emulator,check}=mainTransferBackendContext({emulatorFlag:'YUSHIN_MAIN_TRANSFER_'+suffix+'_EMULATOR',previewFlag:'YUSHIN_PREVIEW_MAIN_TRANSFER_'+suffix,
+  roles:['admin','purchaser','warehouse'],authorized:()=>canReceiveInventoryCapability()&&canAccessPage('inventory')});
+ if(action==='DISPATCH'&&input){const original=pendingMainTransferDispatch(input.requestId);if(original&&original.id!==id)throw Error('此需求已有未確認寄出，必須沿用原操作識別碼。');}
+ if(action==='RECEIVE'&&pendingMainTransferPhysical('DISPATCH',id))throw Error('原寄出結果尚未確認，請先確認原寄出操作。');
+ const key=mainTransferPhysicalKey(action,id);let saved=pendingMainTransferPhysical(action,id);
+ if(saved){if(saved.project!==project)throw Error('前次實貨調撥屬於其他專案，請回原環境核對。');
+  if(input&&JSON.stringify(saved.payload)!==JSON.stringify(input))throw Error('調撥已有未確認原操作，不能變更來源或重建識別碼。');
+ }else{
+  if(typeof id!=='string'||!id||id!==id.trim()||id.includes('/')||id.length>96)throw Error('調撥識別碼不正確。');
+  let payload=input;
+  if(action==='RECEIVE'&&!payload){
+   // Confirm an already-received event with its original identity, never a new operation.
+   const prior=await db.collection('stockTransfers').doc(id).get({source:'server'});check();const t=prior.exists?prior.data():null;
+   if(!t?.dispatchIntentHash||t.kind!=='TRANSFER'||t.orderId||!t.requestId)throw Error('此入口只接受主倉備貨後端調撥。');
+   if(t.status==='RECEIVED'&&(!t.receiptOperationId||t.receivedByUid!==uid||t.receivedByRole!==role))throw Error('已入庫結果須由原操作帳號與角色核對。');
+   payload={id,operationId:t.status==='RECEIVED'?t.receiptOperationId:lifecycleRecordId()};
+  }
+  if(!payload||payload.id!==id||Object.keys(payload).sort().join(',')!==(action==='DISPATCH'?'id,requestId':'id,operationId')
+   ||(action==='DISPATCH'?(typeof payload.requestId!=='string'||!payload.requestId||payload.requestId!==payload.requestId.trim()||payload.requestId.includes('/')||payload.requestId.length>160)
+    :!/^[A-Za-z0-9_-]{12,96}$/.test(payload.operationId)))throw Error('調撥原操作資料不正確。');
+  // Receipt preflight awaited a server read. Another click may have frozen its ID meanwhile.
+  const concurrent=pendingMainTransferPhysical(action,id);
+  if(concurrent){
+   if(concurrent.project!==project||(input&&JSON.stringify(concurrent.payload)!==JSON.stringify(input)))throw Error('實貨調撥已有另一筆未確認原操作。');
+   saved=concurrent;
+  }else{
+   saved={uid,role,project,action,payload};const raw=JSON.stringify(saved);sessionStorage.setItem(key,raw);
+   if(sessionStorage.getItem(key)!==raw)throw Error('無法保存實貨調撥原操作，尚未送出。');
+  }
+ }
+ check();if(emulator)functions.useEmulator('127.0.0.1',5001);
+ const response=await functions.httpsCallable(action==='DISPATCH'?'dispatchV2MainTransfer':'receiveV2MainTransfer')(saved.payload);check();
+ const r=response?.data,p=saved.payload;
+ if(!['applied','already-applied'].includes(r?.status)||r.action!==action||r.id!==id||r.operationId!==(action==='DISPATCH'?id:p.operationId)
+  ||r.actorUid!==uid||r.actorRole!==role)throw Error('調撥實貨回覆無法核對，請保留原操作。');
+ const snap=await db.collection('stockTransfers').doc(id).get({source:'server'});check();const t=snap.exists?snap.data():null;
+ if(!t||t.id!==id||t.kind!=='TRANSFER'||t.orderId||!t.requestId||!t.dispatchIntentHash||!['IN_TRANSIT','RECEIVED'].includes(t.status))throw Error('原實貨調撥憑證無法核對。');
+ if(action==='DISPATCH'?(t.requestId!==p.requestId||t.createdByUid!==uid||t.createdByRole!==role)
+  :(t.status!=='RECEIVED'||t.receiptOperationId!==p.operationId||t.receivedByUid!==uid||t.receivedByRole!==role||!t.receiptIntentHash))throw Error('實貨調撥憑證與原操作不一致。');
+ const raw=sessionStorage.getItem(key);if(raw!==null&&raw!==JSON.stringify(saved))throw Error('實貨調撥暫存已變更，請保留核對。');
+ sessionStorage.removeItem(key);return {...t,id,affectedOrderIds:[],physicalReceiptOnly:action==='RECEIVE'&&t.allocationCompleted!==true};
 }
 let deliveryCreateAttempt = null;
 
