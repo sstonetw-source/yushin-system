@@ -22101,7 +22101,7 @@ async function submitMainTransferPhysicalBackend(action,id,input){
  if(action==='DISPATCH'?(t.requestId!==p.requestId||t.createdByUid!==uid||t.createdByRole!==role)
   :(t.status!=='RECEIVED'||t.receiptOperationId!==p.operationId||t.receivedByUid!==uid||t.receivedByRole!==role||!t.receiptIntentHash))throw Error('實貨調撥憑證與原操作不一致。');
  const raw=sessionStorage.getItem(key);if(raw!==null&&raw!==JSON.stringify(saved))throw Error('實貨調撥暫存已變更，請保留核對。');
- sessionStorage.removeItem(key);return {...t,id,affectedOrderIds:[],physicalReceiptOnly:action==='RECEIVE'&&t.allocationCompleted!==true};
+ sessionStorage.removeItem(key);return {...t,id,affectedOrderIds:[],physicalReceiptOnly:action==='RECEIVE'};
 }
 let deliveryCreateAttempt = null;
 

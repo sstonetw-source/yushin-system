@@ -38,7 +38,8 @@ test('receipt replay confirms original event, reports allocation pending and nev
  const resumed=f.open();assert.equal(resumed.pendingMainTransferPhysicalOperations()[0].action,'RECEIVE');
  const result=await resumed.commitWarehouseTransferReceipt(f.id);assert.equal(result.physicalReceiptOnly,true);assert.equal(result.allocationCompleted,false);
  assert.deepEqual(f.calls[1],f.calls[2]);assert.equal(f.storage.size,0);
- await resumed.commitWarehouseTransferReceipt(f.id);assert.deepEqual(f.calls[2],f.calls[3]);
+ f.getTransfer().allocationCompleted=true;
+ const confirmed=await resumed.commitWarehouseTransferReceipt(f.id);assert.deepEqual(f.calls[2],f.calls[3]);assert.equal(confirmed.physicalReceiptOnly,true);
 });
 test('disabled gates, identity/project changes and wrong replies keep checkpoints without legacy fallback',async()=>{
  for(const mode of ['flag','role','project','reply','read']){
