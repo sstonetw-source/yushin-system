@@ -157,4 +157,4 @@ function createMainTransferPhysicalCallables({onCall,HttpsError,getDatabase,env=
  });
  return {dispatchV2MainTransfer:wrap('DISPATCH'),receiveV2MainTransfer:wrap('RECEIVE')};
 }
-module.exports={physicalProject,normalizePhysicalIntent,commitMainTransferPhysical,createMainTransferPhysicalCallables};
+module.exports={physicalProject,normalizePhysicalIntent,validateTransfer,commitMainTransferPhysical,createMainTransferPhysicalCallables};

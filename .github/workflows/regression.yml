@@ -159,7 +159,7 @@ jobs:
         run: node tools/run-v2-return-auth-emulator.cjs --suite=browser
       - name: Verify single-item and whole-order dual-warehouse atomic reservation in Emulator
         if: matrix.suite == 'stock'
-        run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --test tests/emulator-single-item-location.cjs tests/emulator-order-location.cjs"
+        run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --test tests/emulator-single-item-location.cjs tests/emulator-order-location.cjs tests/emulator-main-transfer-allocation.cjs"
       - name: Verify shipment, delivery correction and physical return receipt in Emulator
         if: matrix.suite == 'stock'
         run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --test tests/emulator-location-shipment.cjs"

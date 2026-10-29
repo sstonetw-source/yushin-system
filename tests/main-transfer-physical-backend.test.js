@@ -11,11 +11,14 @@ function fixture(){
  put('stockTransferRequests/'+dispatch.requestId,{id:dispatch.requestId,inventoryId:'P',productKey:'P',fromWarehouseId:'A',toWarehouseId:'MAIN',fromStockId:'A__P',qty:3,status:'PENDING'});
  put('inventoryLots/L',{productKey:'P',warehouseId:'A',remainingQty:4,lotNo:'LOT',expiryDate:'2027-01-01'});
  put('inventoryLotCosts/L',{unitCost:99});
- function collection(n){return {doc:id=>({path:n+'/'+id,id}),where(field,_op,value){const terms=[[field,value]];return {query:true,n,terms,cap:0,where(f,_o,v){terms.push([f,v]);return this;},limit(v){this.cap=v;return this;}};}};}
+ function snap(path,v){return {id:path.split('/')[1],exists:v!==undefined,data:()=>structuredClone(v)};}
+ function page(q){const rows=[...docs].filter(([p,v])=>p.startsWith(q.n+'/')&&q.terms.every(([k,x])=>v[k]===x)).sort(([a],[b])=>a.localeCompare(b)).filter(([p])=>!q.after||p.split('/')[1]>q.after).slice(0,q.cap).map(([p,v])=>snap(p,v));return {docs:rows,size:rows.length,empty:!rows.length};}
+ function collection(n){return {doc:id=>({path:n+'/'+id,id,get:async()=>snap(n+'/'+id,docs.get(n+'/'+id))}),where(field,_op,value){return {query:true,n,terms:[[field,value]],cap:1000,where(f,_o,v){this.terms.push([f,v]);return this;},limit(v){this.cap=v;return this;},startAfter(v){this.after=v.id;return this;},get:async function(){return page(this);}};}};}
+
  const db={projectId:'preview-20135',collection,runTransaction:async fn=>{
   let writes=[];
   const snap=(path,v)=>({id:path.split('/')[1],exists:v!==undefined,data:()=>structuredClone(v)});
-  const tx={get:async r=>{assert.equal(writes.length,0,'all reads precede writes');if(r.query){const rows=[...docs].filter(([p,v])=>p.startsWith(r.n+'/')&&r.terms.every(([k,x])=>v[k]===x)).slice(0,r.cap).map(([p,v])=>snap(p,v));return {docs:rows,size:rows.length};}return snap(r.path,docs.get(r.path));},
+  const tx={get:async r=>{assert.equal(writes.length,0,'all reads precede writes');if(r.query)return page(r);return snap(r.path,docs.get(r.path));},
    create:(r,d)=>{assert.equal(docs.has(r.path),false);writes.push([r.path,d,false]);},update:(r,d)=>{assert.ok(docs.has(r.path));writes.push([r.path,d,true]);},set:(r,d,o)=>writes.push([r.path,d,!!o?.merge])};
   let out=await fn(tx);if(retry){writes=[];out=await fn(tx);}if(fail)throw Error('late failure');for(const [p,d,merge] of writes)put(p,{...(merge?docs.get(p):{}),...d});return out;
  }};
@@ -84,3 +87,92 @@ test('separate gates remain closed for production, missing flags and mixed emula
  let reads=0;const callables=createMainTransferPhysicalCallables({onCall:(_,fn)=>fn,HttpsError,env,getDatabase:()=>{reads++;return {};}});
  for(const h of Object.values(callables))await assert.rejects(h({data:dispatch}),e=>e.code==='unauthenticated');assert.equal(reads,0);
 });
+
+async function allocationFixture(){
+ const f=fixture();await f.run();await f.run(receive,'RECEIVE');f.db.projectId='demo-yushin';
+ const sibling={itemId:'SIBLING',productId:'OTHER',qty:7,reservedQty:2,shortageQty:5,note:'preserve'};
+ f.put('products/P',{productType:'Goods'});
+ f.put('orders/TARGET',{status:'active',ownerUid:'U',salesCode:'S',orderDate:'2026-10-01',
+  inventoryReservationStatus:'completed',inventoryReservationAttemptId:'sync_12345678',items:[sibling,
+   {itemId:'I',productId:'P',qty:5,warehouseId:'MAIN',reservedQty:0,shortageQty:5}]});
+ f.put('inventoryReservations/TARGET__I',{orderId:'TARGET',itemId:'I',productKey:'P',ownerUid:'U',salesCode:'S',
+  locationSchemaVersion:2,locations:[],quantity:0,shortageQty:5,status:'shortage',orderDate:'2026-10-01'});
+ return {...f,sibling};
+}
+async function allocationEnvironment(fn){
+ const patch={FUNCTIONS_EMULATOR:'true',FIRESTORE_EMULATOR_HOST:'localhost:8080',
+  FIREBASE_AUTH_EMULATOR_HOST:'localhost:9099',ENABLE_MAIN_TRANSFER_ALLOCATION_EMULATOR:'true'};
+ const prior=Object.fromEntries(Object.keys(patch).map(key=>[key,process.env[key]]));
+ Object.assign(process.env,patch);
+ try{return await fn();}finally{for(const [key,value] of Object.entries(prior)){
+  if(value===undefined)delete process.env[key];else process.env[key]=value;
+ }}
+}
+const {drainReleasedV2FreeStock}=require('../functions/single-item-location-service');
+test('committed main transfer feeds the existing coordinator and preserves multi-item siblings on lost-reply replay',()=>allocationEnvironment(async()=>{
+ const f=await allocationFixture(),source={movementId:dispatch.id+'-in',maxSteps:5};
+ // Mutable UI completion cannot grant or consume allocation credit.
+ Object.assign(f.docs.get('stockTransfers/'+dispatch.id),{allocationCompleted:true,autoAllocatedQty:999});
+ const result=await drainReleasedV2FreeStock(f.db,'U',source);
+ assert.equal(result.status,'completed');assert.equal(result.allocatedQty,3);
+ assert.deepEqual(f.docs.get('orders/TARGET').items[0],f.sibling);
+ assert.equal(f.docs.get('orders/TARGET').items[1].reservedQty,3);
+ assert.equal(f.docs.get('orders/TARGET').items[1].shortageQty,2);
+ const demands=[...f.docs].filter(([path])=>path.startsWith('procurementDemands/'));
+ assert.equal(demands.length,1);assert.equal(demands[0][1].sourceItemIndex,1);
+ assert.equal(demands[0][1].requestedQty,2);
+ assert.equal(f.docs.get('inventory/P').onHand,10);assert.equal(f.docs.get('inventory/P').reserved,5);
+ assert.equal(f.docs.get('warehouseStocks/MAIN__P').reserved,3);
+ assert.equal(f.docs.get('inventoryLots/'+dispatch.id+'-0').remainingQty,3,'allocation reserves; it does not ship lots');
+ const before=f.snapshot();const replay=await drainReleasedV2FreeStock(f.db,'U',source);
+ assert.equal(replay.runId,result.runId);assert.equal(replay.allocatedQty,3);assert.equal(f.snapshot(),before);
+ assert.equal([...f.docs.keys()].filter(path=>path.startsWith('reservationOperationReceipts/single-v2-free-batch-')).length,1);
+}));
+test('main transfer allocation rejects forged proof, movement, lot, role, gate and excessive quantity before starting a job',()=>allocationEnvironment(async()=>{
+ for(const mutate of [
+  f=>f.docs.delete('reservationOperationReceipts/main-transfer-dispatch-'+dispatch.id),
+  f=>f.docs.delete('reservationOperationReceipts/main-transfer-receipt-'+receive.operationId),
+  f=>{f.docs.get('inventoryMovements/'+dispatch.id+'-in').qty=4;},
+  f=>{f.docs.get('inventoryMovements/'+dispatch.id+'-in').actorUid='OTHER';},
+  f=>{f.docs.get('inventoryLots/'+dispatch.id+'-0').costLotId='FORGED';},
+  f=>{f.docs.get('stockTransfers/'+dispatch.id).qty=1001;},
+  f=>f.put('users/U',{role:'sales'}),
+  ()=>{process.env.ENABLE_MAIN_TRANSFER_ALLOCATION_EMULATOR='false';}
+ ]){
+  process.env.ENABLE_MAIN_TRANSFER_ALLOCATION_EMULATOR='true';
+  const f=await allocationFixture();mutate(f);const before=f.snapshot();
+  await assert.rejects(drainReleasedV2FreeStock(f.db,'U',{movementId:dispatch.id+'-in',maxSteps:5}));
+  assert.equal(f.snapshot(),before);
+ }
+}));
+test('late allocation commit failure preserves original pending command and resumes it once',()=>allocationEnvironment(async()=>{
+ const f=await allocationFixture(),source={movementId:dispatch.id+'-in',maxSteps:5};
+ const original=f.db.runTransaction;let injected=false;
+ f.db.runTransaction=fn=>original(tx=>fn({...tx,create:(ref,data)=>{
+  if(ref.path.startsWith('inventoryMovements/single-v2-free-')&&!injected){injected=true;throw Error('allocation commit interrupted');}
+  return tx.create(ref,data);
+ }}));
+ await assert.rejects(drainReleasedV2FreeStock(f.db,'U',source),/interrupted/);
+ assert.equal(f.docs.get('orders/TARGET').items[1].reservedQty,0);
+ assert.equal(f.docs.get('warehouseStocks/MAIN__P').reserved,0);
+ const job=[...f.docs.values()].find(value=>value.action==='single_v2_free_stock_batch');
+ assert.ok(job.pending);const operationId=job.pending.operationId;
+ const result=await drainReleasedV2FreeStock(f.db,'U',source);assert.equal(result.allocatedQty,3);
+ assert.equal(f.docs.get('inventoryMovements/single-v2-free-'+operationId).qty,3);
+ assert.deepEqual(f.docs.get('orders/TARGET').items[0],f.sibling);
+}));
+test('allocation updates one target in fifteen lines and refuses oversized or duplicate identities without stock writes',()=>allocationEnvironment(async()=>{
+ for(const count of [15,16]){
+  const f=await allocationFixture(),order=f.docs.get('orders/TARGET');
+  const siblings=Array.from({length:count-1},(_,index)=>({...f.sibling,itemId:'SIBLING-'+index}));
+  order.items=[...siblings,order.items[1]];
+  const run=()=>drainReleasedV2FreeStock(f.db,'U',{movementId:dispatch.id+'-in',maxSteps:5});
+  if(count===15){await run();assert.deepEqual(f.docs.get('orders/TARGET').items.slice(0,-1),siblings);
+   assert.equal(f.docs.get('orders/TARGET').items.at(-1).reservedQty,3);
+  }else{await assert.rejects(run(),/有效訂單/);assert.deepEqual(f.docs.get('orders/TARGET').items,order.items);
+   assert.equal(f.docs.get('warehouseStocks/MAIN__P').reserved,0);}
+ }
+ const f=await allocationFixture(),order=f.docs.get('orders/TARGET');order.items[0].itemId='I';
+ await assert.rejects(drainReleasedV2FreeStock(f.db,'U',{movementId:dispatch.id+'-in'}),/重複/);
+ assert.equal(f.docs.get('warehouseStocks/MAIN__P').reserved,0);
+}));

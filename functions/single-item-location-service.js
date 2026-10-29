@@ -307,6 +307,16 @@ function normalizeFreeStockIntent(input){
  if(!intent.quantity)reject('分配量必須大於零','invalid-argument');
  return {...intent,hash:createHash('sha256').update(JSON.stringify(intent)).digest('hex')};
 }
+function freeStockTargetItem(order,itemId){
+ if(!Array.isArray(order.items)||!order.items.length||order.items.length>15)
+  reject('來源訂單不是可分配的有效訂單');
+ const itemIds=order.items.map(row=>row?.itemId);
+ if(itemIds.some(value=>typeof value!=='string'||!value)||new Set(itemIds).size!==itemIds.length)
+  reject('來源訂單品項識別碼缺失或重複');
+ const itemIndex=itemIds.indexOf(itemId);
+ if(itemIndex<0)reject('找不到原分配品項');
+ return {item:order.items[itemIndex],itemIndex};
+}
 async function commitSingleItemFreeStockAllocation(db,uid,input,batchContext=null){
  if(!process.env.FIRESTORE_EMULATOR_HOST||db.projectId!=='demo-yushin')
   reject('跨 v2 訂單自由庫存分配僅允許 demo-yushin Emulator');
@@ -359,9 +369,9 @@ async function commitSingleItemFreeStockAllocation(db,uid,input,batchContext=nul
     ||order.inventoryReservationAttemptId!==intent.syncAttemptId
     ||!['active','normal'].includes(order.status)
     ||!['normal','active',undefined,''].includes(order.orderStatus)
-    ||!order.ownerUid||!order.salesCode||!Array.isArray(order.items)||order.items.length!==1)
-   reject('來源訂單不是可分配的有效單品項訂單');
-  const item=order.items[0];
+    ||!order.ownerUid||!order.salesCode)
+   reject('來源訂單不是可分配的有效訂單');
+  const {item,itemIndex}=freeStockTargetItem(order,itemId);
   const productId=ident(item.productId,'產品'),productKey=ident(item.inventoryProductKey||productId,'庫存產品');
   if(batchJob&&batchJob.productKey!==productKey)reject('批次與目標訂單產品不一致');
   const hint=ident(item.warehouseId||order.warehouseId,'來源指定倉');
@@ -469,7 +479,7 @@ async function commitSingleItemFreeStockAllocation(db,uid,input,batchContext=nul
    ...(existingDemand||{}),...demandCore.fromSalesOrder({
     sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId,fulfillmentType:'WAREHOUSE',
     shortageQty:plan.reservation.shortageQty,supplyOrderedQty:0,receivedQty:0}),
-   sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId,sourceItemIndex:0,
+   sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId,sourceItemIndex:itemIndex,
    productId,productKey,fulfillmentType:'WAREHOUSE',warehouseId:hint,
    itemCode:item.itemCode||'',itemName:item.itemName||'',brand:item.brand||'',
    ownerUid:order.ownerUid,salesCode:order.salesCode,salesName:order.salesName||''
@@ -480,12 +490,12 @@ async function commitSingleItemFreeStockAllocation(db,uid,input,batchContext=nul
   tx.update(companyRef,{reserved:plan.aggregateStock.reserved,updatedAt:now});
   tx.update(stockRef,{reserved:plan.warehouseStock.reserved,updatedAt:now});
   tx.set(ledgerRef,{...plan.reservation,updatedAt:now});
-  tx.update(orderRef,{items:[nextItem],updatedAt:now});
+  tx.update(orderRef,{items:order.items.map((row,index)=>index===itemIndex?nextItem:row),updatedAt:now});
   if(existingDemand)tx.update(demandRef,{
    requestedQty:nextDemand.requestedQty,remainingToOrderQty:nextDemand.remainingToOrderQty,
    remainingToReceiveQty:nextDemand.remainingToReceiveQty,
    perOrdered:nextDemand.perOrdered,perReceived:nextDemand.perReceived,
-   status:nextDemand.status,sourceItemIndex:0,updatedAt:now});
+   status:nextDemand.status,sourceItemIndex:itemIndex,updatedAt:now});
   else if(nextDemand.requestedQty>0)tx.create(demandRef,nextDemand);
   tx.create(movementRef,{
    action:'single_v2_free_stock_allocation',type:'reserve_from_free_stock',
@@ -708,7 +718,7 @@ async function advanceAutomaticFreeStockAllocation(db,uid,input){
    if(known.has(warehouseId)){
     const order=await db.collection('orders').doc(candidate.orderId).get();
     if(!order.exists||!['active','normal'].includes(order.data().status))continue;
-    const item=order.data().items?.find(i=>i.itemId===candidate.itemId);
+    const {item}=freeStockTargetItem(order.data(),candidate.itemId);
     if(!item||item.productId===undefined||order.data().inventoryReservationStatus!=='completed')
      continue;
     selected={candidate,order:order.data()};
@@ -717,7 +727,7 @@ async function advanceAutomaticFreeStockAllocation(db,uid,input){
    // Original location hint may not be saved on a zero-hold v2 ledger.
    const order=await db.collection('orders').doc(candidate.orderId).get();
    if(!order.exists||!['active','normal'].includes(order.data().status))continue;
-   const item=order.data().items?.find(i=>i.itemId===candidate.itemId);
+   const {item}=freeStockTargetItem(order.data(),candidate.itemId);
    if(!item||(item.warehouseId||order.data().warehouseId)!==warehouseId)continue;
    if(order.data().inventoryReservationStatus!=='completed')continue;
    selected={candidate,order:order.data()};
@@ -800,14 +810,18 @@ async function advanceReleasedV2FreeStock(db,uid,input){
   // never force the browser writer to mirror that business fact.
   const isV2Receipt=event.type==='receipt'&&event.sourceType==='SUPPLY_ORDER'
    &&typeof event.receiptId==='string'&&event.receiptId.length>0;
-  if(!isV2Receipt&&!['CANCELLED_ORDER_RELEASE','CLOSED_CUSTOMER_RETURN'].includes(event.v2FreeStockSource))
+  const isMainTransfer=event.type==='warehouse_transfer_in'&&event.sourceType==='WAREHOUSE_TRANSFER';
+  if(!isV2Receipt&&!isMainTransfer&&!['CANCELLED_ORDER_RELEASE','CLOSED_CUSTOMER_RETURN'].includes(event.v2FreeStockSource))
    reject('這筆 movement 不會釋放可分配的 v2 自由實貨');
   let amount=event.freeAllocationQty;
   if(!event.productKey||!event.warehouseId||!event.sourceId)
    reject('釋放憑證缺少有效的產品、倉庫或來源');
-  if(!isV2Receipt&&(!Number.isSafeInteger(amount)||amount<=0||!event.itemId))
+  if(!isV2Receipt&&!isMainTransfer&&(!Number.isSafeInteger(amount)||amount<=0||!event.itemId))
    reject('釋放憑證缺少有效的庫存數量或來源');
-  if(event.v2FreeStockSource==='CANCELLED_ORDER_RELEASE'){
+  if(isMainTransfer){
+   const {readMainTransferFreeStockSource}=require('./main-transfer-free-stock-source');
+   amount=await readMainTransferFreeStockSource(tx,db,movementId,event);
+  }else if(event.v2FreeStockSource==='CANCELLED_ORDER_RELEASE'){
    if(!movementId.startsWith('single-v2-life-')||event.type!=='release'
      ||event.reason!=='order_cancelled'||event.qty!==-amount
      ||typeof event.reservationOperationId!=='string'
