@@ -45,6 +45,8 @@ async function readCommittedCustomerReturnRequest(intent,actorRole,assertCurrent
     assertCurrent();return confirmed;
 }
 async function commitCustomerReturnRequest({orderId,itemId,operationId,qty,date,reason=''}) {
+    if(typeof customerReturnRequestBackendRequired==='function'&&customerReturnRequestBackendRequired(orderId))
+        return commitCustomerReturnRequestBackend(orderId,'REQUEST',{orderId,itemId,operationId,qty,date,reason});
     const {actorUid,actorRole,assertCurrent}=customerReturnActorContext(()=>canManageOrderLifecycleCapability());
     if([orderId,itemId,operationId].some(id=>typeof id!=='string'||!id||id!==id.trim()||id.includes('/')||id.length>160)
         ||!Number.isFinite(qty)||qty<=0||typeof reason!=='string'
@@ -80,6 +82,8 @@ async function commitCustomerReturnRequest({orderId,itemId,operationId,qty,date,
     assertCurrent();return saved;
 }
 async function commitCustomerReturnWithdrawal({orderId,requestId}) {
+    if(typeof customerReturnRequestBackendRequired==='function'&&customerReturnRequestBackendRequired(orderId))
+        return commitCustomerReturnRequestBackend(orderId,'WITHDRAW',{orderId,requestId});
     const {actorUid,assertCurrent}=customerReturnActorContext(()=>canManageOrderLifecycleCapability());let saved;
     await runRoleTransaction(async tx=>{
         assertCurrent();const ref=db.collection('orders').doc(orderId),snap=await tx.get(ref);assertCurrent();

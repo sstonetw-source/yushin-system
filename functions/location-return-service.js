@@ -8,15 +8,11 @@ const {normalizeLocationReturnIntent,readLocationReturnProofs,assertCancelledClo
 const {readShipmentActorOrder,shipmentDeliveryContext,readShipmentProof}=require('./shipment-delivery-service');
 function fault(message,code='failed-precondition'){const e=new Error(message);e.code=code;throw e;}
 function qty(value){if(!Number.isSafeInteger(value)||value<0)fault('退貨帳目數量不正確');return value;}
-// Pure request projection; stock/lot planning remains in the original writer below.
-function planLocationReturnRequest(order,intent,returnQty){
+// One request-history validator for application, withdrawal and physical receipt.
+function validateLocationReturnRequests(order){
  const requests=order.returnRequests??[];
  if(!Array.isArray(requests)||requests.length>30)fault('退貨申請格式或筆數不正確');
- if(!intent.requestId){
-  if(requests.some(r=>r?.itemId===intent.itemId&&r.status==='PENDING'))
-   fault('此品項有待收退貨，請依原申請實收');
-  return null;
- }
+ if(!Array.isArray(order.returnRecords??[]))fault('退貨紀錄格式不正確');
  const ids=new Set();
  for(const r of requests){
   if(!r||typeof r.id!=='string'||!r.id||ids.has(r.id)||typeof r.itemId!=='string'||!r.itemId
@@ -30,6 +26,18 @@ function planLocationReturnRequest(order,intent,returnQty){
    ||received.reduce((sum,row)=>sum+row.qty,0)!==r.receivedQty)
    fault('退貨申請已收量與原入庫紀錄不一致');
  }
+ return requests;
+}
+// Pure request projection; stock/lot planning remains in the original writer below.
+function planLocationReturnRequest(order,intent,returnQty){
+ const requests=order.returnRequests??[];
+ if(!Array.isArray(requests)||requests.length>30)fault('退貨申請格式或筆數不正確');
+ if(!intent.requestId){
+  if(requests.some(r=>r?.itemId===intent.itemId&&r.status==='PENDING'))
+   fault('此品項有待收退貨，請依原申請實收');
+  return null;
+ }
+ validateLocationReturnRequests(order);
  if(order.returnPending!==requests.some(r=>r.status==='PENDING'))fault('退貨待收旗標不一致');
  const index=requests.findIndex(r=>r.id===intent.requestId),request=requests[index];
  if(!request||request.status!=='PENDING'||request.itemId!==intent.itemId)
@@ -187,4 +195,4 @@ async function commitLocationReturnAndRecover(db,uid,input){
  return {...committed,postCommitAllocation};
 }
 
-module.exports={normalizeLocationReturnIntent,planLocationReturnRequest,commitLocationReturn,commitLocationReturnAndRecover};
+module.exports={validateLocationReturnRequests,normalizeLocationReturnIntent,planLocationReturnRequest,commitLocationReturn,commitLocationReturnAndRecover};

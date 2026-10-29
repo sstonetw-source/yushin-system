@@ -142,3 +142,9 @@ const {createCustomerReturnCallables}=require('./customer-return-callable');
 const customerReturnCallables=createCustomerReturnCallables({onCall,HttpsError,getDatabase:getFirestore});
 exports.previewV2CustomerReturn=customerReturnCallables.previewV2CustomerReturn;
 exports.receiveV2CustomerReturn=customerReturnCallables.receiveV2CustomerReturn;
+
+// Application/withdrawal is independently gated from physical receipt.
+const {createCustomerReturnRequestCallables}=require('./customer-return-request-callable');
+const customerReturnRequests=createCustomerReturnRequestCallables({onCall,HttpsError,getDatabase:getFirestore});
+exports.requestV2CustomerReturn=customerReturnRequests.requestV2CustomerReturn;
+exports.withdrawV2CustomerReturnRequest=customerReturnRequests.withdrawV2CustomerReturnRequest;
