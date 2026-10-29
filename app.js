@@ -21782,7 +21782,8 @@ async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toW
       if(expectedWarehouseId&&fromWarehouseId!==expectedWarehouseId)throw Error('出貨倉庫已變更，請重新核對。');
       if(expectedPlan&&JSON.stringify(YushinWarehouseLogistics.plan(item.deliveryPlan||order.shippingInstructions||{}))!==JSON.stringify(expectedPlan))throw Error('寄送資訊已變更，請重新核對。');
       reservationRef=db.collection('inventoryReservations').doc(orderId+'__'+itemId);const rs=await tx.get(reservationRef);if(!rs.exists)throw Error('找不到訂單預留。');reservation=rs.data();
-      if(Number(reservation.quantity)!==qty||reservation.warehouseId!==fromWarehouseId)throw Error('訂單預留已變更。');
+      const source=YushinReservation.orderTransferReservationSource({reservation,item,orderId,itemId,productKey:String(item.inventoryProductKey||item.productId||''),warehouseId:fromWarehouseId,qty});
+      if(source.schemaVersion===2)throw Error('此訂單使用多倉預留，調撥與交接須由受控後端處理，禁止以舊交易覆寫。');
     }else if(handoff)throw Error('業務交付必須有來源訂單。');
     if(!inventoryId||!fromWarehouseId||!toWarehouseId||fromWarehouseId===toWarehouseId)throw Error('請選擇不同的來源與目的倉庫。');
     const invRef=db.collection('inventory').doc(inventoryId),invSnap=await tx.get(invRef);if(!invSnap.exists)throw Error('找不到庫存。');const inv=invSnap.data(),key=String(inv.productKey||inv.productId||'');if(!key)throw Error('庫存缺少產品識別。');

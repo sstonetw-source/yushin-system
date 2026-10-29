@@ -116,6 +116,36 @@
    return ledger.locations.map(row=>({warehouseId:row.warehouseId,qty:row.reservedQty}))
      .sort((a,b)=>a.warehouseId.localeCompare(b.warehouseId));
  }
+ // Resolve a whole-item transfer source without flattening a v2 ledger.
+ // This validates source only; it does not authorize a legacy writer to move v2.
+ function orderTransferReservationSource({reservation,item,orderId,itemId,productKey,warehouseId,qty}={}){
+   if(!reservation||!item||typeof warehouseId!=='string'||!warehouseId||warehouseId!==warehouseId.trim()
+     ||warehouseId.includes('/')||typeof qty!=='number'||!Number.isFinite(qty)||qty<=0)
+     throw Error('訂單調撥預留來源不正確。');
+   for(const [field,expected] of [['orderId',orderId],['itemId',itemId],['productKey',productKey]]){
+     if(typeof expected!=='string'||!expected||expected.includes('/')
+       ||(reservation[field]!==undefined&&reservation[field]!==expected)
+       ||(reservation.locationSchemaVersion===2&&reservation[field]!==expected))
+       throw Error('訂單調撥預留來源識別不一致。');
+   }
+   if(item.itemId!==itemId||item.transferPendingId||item.custodyTransferId)
+     throw Error('訂單品項已有調撥或交接，不能重複移動。');
+   const held=legacyReservationQty(reservation.quantity),projected=legacyReservationQty(item.reservedQty);
+   if(Math.abs(held-qty)>1e-9||Math.abs(projected-qty)>1e-9
+     ||legacyReservationQty(reservation.shortageQty??0)!==0)
+     throw Error('訂單調撥須全數預留，數量或缺貨狀態不一致。');
+   if(reservation.locationSchemaVersion===undefined){
+     if(reservation.locations!==undefined||reservation.allocations!==undefined||reservation.warehouseId!==warehouseId)
+       throw Error('單倉調撥預留位置不一致。');
+     return {schemaVersion:1,warehouseId,qty};
+   }
+   if(reservation.locationSchemaVersion!==2||reservation.warehouseId!==undefined)
+     throw Error('多倉預留版本或單倉欄位不一致。');
+   const locations=reservationLocations(reservation);
+   if(locations.length!==1||locations[0].warehouseId!==warehouseId||locations[0].qty!==qty)
+     throw Error('調撥來源仍分散於多倉，須由受控後端處理。');
+   return {schemaVersion:2,warehouseId,qty};
+ }
  // Legacy stock and fulfillment can contain fractional quantities. Validate
  // without clamping corrupt values into a smaller release or a new reservation.
  function legacyReservationQty(value=0){
@@ -471,5 +501,5 @@
    const plan=planShortageAllocation(reservations,availableQty);
    return {allocations:plan.allocations.map(row=>({...row,id:row.reservationId})),allocatedQty:plan.allocatedQty,unallocatedQty:plan.remainingQty};
  }
- return {planReservationReceipt,planReservationReturn,planReservationIssue,validateReservationBalance,physicalWarehouse,planMainTransferHold,planReservationLifecycle,reservationStockDeltas,validateMultiLocationLedger,planLocationReservation,reservationLocations,planMultiWarehouseReservation,planReservation,planShortageAllocation,allocateReceiptToShortages,reservationLocationCanChange,selectSingleWarehouse,compareReservationPriority};
+ return {orderTransferReservationSource,planReservationReceipt,planReservationReturn,planReservationIssue,validateReservationBalance,physicalWarehouse,planMainTransferHold,planReservationLifecycle,reservationStockDeltas,validateMultiLocationLedger,planLocationReservation,reservationLocations,planMultiWarehouseReservation,planReservation,planShortageAllocation,allocateReceiptToShortages,reservationLocationCanChange,selectSingleWarehouse,compareReservationPriority};
 });

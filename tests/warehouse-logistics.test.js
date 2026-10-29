@@ -48,7 +48,7 @@ function fixture({retry=false}={}){
   ['inventoryReservations/O__A',{orderId:'O',itemId:'A',warehouseId:'MAIN',productKey:'P',quantity:4,status:'active'}]
  ]);
  const ref=(col,id)=>({id,path:col+'/'+id});let failCommit=false,commits=0;
- const c=vm.createContext({currentUser:{uid:'buyer'},currentUserRole:'purchaser',currentUserName:'Buyer',currentUserCode:'P01',warehouseMasterCache:[{id:'MAIN',active:true},{id:'EXT',active:true}],
+ const c=vm.createContext({YushinReservation:require('../modules/reservation-core'),currentUser:{uid:'buyer'},currentUserRole:'purchaser',currentUserName:'Buyer',currentUserCode:'P01',warehouseMasterCache:[{id:'MAIN',active:true},{id:'EXT',active:true}],
    canReceiveInventoryCapability:()=>true,canAccessPage:()=>true,deliveryActor:()=> 'Buyer',defaultWarehouse:()=>({id:'MAIN'}),allocateFreeReceiptStockToShortages:async()=>({affectedOrderIds:[]}),
    inventoryRefFor:i=>ref('inventory',i.productId),warehouseStockDocId:(w,p)=>w+'__'+p,
    normalizedOrderStatus:o=>o.status==='cancelled'?'cancelled':'normal',orderInventorySyncIncomplete:()=>false,
@@ -437,4 +437,14 @@ test('shared transfer lots validate all sources before exposing any destination 
   {allocations:[{...transfer.allocations[0],costLotId:'bad/id'}]},
   {qty:4,allocations:[transfer.allocations[0],{...transfer.allocations[0],targetLotId:'T-1'}]},
   {allocations:[{...transfer.allocations[0],qty:NaN}]}])assert.throws(()=>core.transferDestinationLots({...transfer,...patch},{},'date'));
+});
+
+test('legacy transfer rejects a mixed or v2 reservation without partially moving stock or lots',async()=>{
+ for(const mixed of [false,true]){
+  const f=fixture(),ledger=f.docs.get('inventoryReservations/O__A');
+  Object.assign(ledger,{locationSchemaVersion:2,locations:[{warehouseId:'MAIN',reservedQty:4}]});if(!mixed)delete ledger.warehouseId;
+  const before=JSON.stringify([...f.docs]);
+  await assert.rejects(f.c.commitWarehouseTransfer({id:'V2-BLOCK',orderId:'O',itemId:'A',qty:4,toWarehouseId:'EXT'}),/多倉/);
+  assert.equal(JSON.stringify([...f.docs]),before);
+ }
 });
