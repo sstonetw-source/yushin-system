@@ -2645,3 +2645,62 @@ for(const width of [1280,390])test('original order transfer '+width+'px keeps so
   assert.equal(await page.evaluate(()=>pendingOrderTransferOperations().length),0);assert.deepEqual(errors,[]);
  }finally{await context.close();}
 });
+
+for(const width of [1280,390])test('original owner handoff '+width+'px keeps source IDs through dropped replies and reload',{timeout:240000},async()=>{
+ const tag='owner-handoff-site-'+width,uid=tag+'-warehouse',email=uid+'@example.test',key=tag+'-P',orderId=tag+'-O',from=tag+'-A',to=tag+'-MAIN';
+ await auth.createUser({uid,email,password});const setup=db.batch(),put=(name,id,data)=>setup.set(db.collection(name).doc(id),data);
+ put('users',uid,{role:'warehouse',active:true,name:'Warehouse',email,code:uid});put('products',key,{productType:'Goods',active:true,itemCode:tag,itemName:'調撥驗證商品'});
+ put('warehouses',from,{active:true,isDefault:true,warehouseName:'測試分倉',contact:'Branch',phone:'123',address:'Taipei'});put('warehouses',to,{active:true,warehouseName:'測試主倉',contact:'Main',phone:'456',address:'Taipei Main'});
+ put('inventory',key,{productKey:key,productId:key,onHand:3,reserved:3});put('warehouseStocks',from+'__'+key,{productKey:key,productId:key,warehouseId:from,onHand:3,reserved:3});
+ put('inventoryLots',tag+'-L',{productKey:key,productId:key,warehouseId:from,remainingQty:3,qty:3,lotNo:'SITE',expiryDate:'2027-01-01'});
+ put('orders',orderId,{orderNo:'YS-'+tag,customerName:'調撥測試客戶',status:'active',orderStatus:'normal',ownerUid:uid,salesCode:uid,salesName:'Warehouse',inventoryReservationStatus:'completed',inventoryReservationAttemptId:tag+'-sync',orderDate:'2026-10-29',workCategories:['delivery'],deliveryRecords:[],returnRecords:[],items:[{itemId:'I',productId:key,productType:'Goods',itemCode:tag,itemName:'調撥驗證商品',qty:3,orderedQty:3,reservedQty:3,shortageQty:0,warehouseId:from,dispatchPreparedQty:3,deliveredQty:0,returnedQty:0,deliveryPlan:{mode:'SALES_SHIP',contact:'Owner',phone:'123',address:'Taipei'}}]});
+ put('inventoryReservations',orderId+'__I',{orderId,itemId:'I',productKey:key,warehouseId:from,quantity:3,shortageQty:0,status:'active'});await setup.commit();
+ const context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage(),calls=[],errors=[];
+ let dropped=false;const dropAction='handoffOrderTransfer';
+ await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_ORDER_TRANSFER_HANDOFF_EMULATOR=true;window.YUSHIN_ORDER_TRANSFER_DISPATCH_EMULATOR=true;window.YUSHIN_ORDER_TRANSFER_RECEIVE_EMULATOR=true;});
+ page.on('dialog',dialog=>dialog.accept());page.on('pageerror',error=>errors.push(error.message));
+ await context.route('**/*',async route=>{
+  const request=route.request(),url=new URL(request.url());if(!['localhost','127.0.0.1'].includes(url.hostname)){await route.abort();return;}
+  if(url.port==='5001'&&request.method()==='POST'&&/\/(handoffOrderTransfer)$/.test(url.pathname)){
+   const action=url.pathname.split('/').at(-1);calls.push({action,payload:request.postDataJSON().data});assert.match((await request.allHeaders()).authorization||'',/^Bearer /);
+   if(action===dropAction&&!dropped){dropped=true;const response=await route.fetch();assert.equal(response.status(),200);await route.abort('failed');return;}
+  }
+  await route.continue();
+ });
+ // Scope presentation caches to source documents read from the real server.
+ // No transaction, Callable or rendering handler is replaced by a stub.
+ const shipping=async()=>{
+  await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();await page.selectOption('#inventoryShippingScope','customer');
+  await page.evaluate(async({orderId,from,to})=>{
+   await loadInventoryWorkspace();
+   const order=await db.collection('orders').doc(orderId).get({source:'server'});
+   warehouseMasterCache=await Promise.all([from,to].map(async id=>({id,...(await db.collection('warehouses').doc(id).get({source:'server'})).data()})));
+   orderWorkQueueCache=[{id:orderId,...order.data()}];renderInventoryShipping();renderMainTransferRequests();
+  },{orderId,from,to});
+ };
+ try{
+  await siteOpen(page);await siteLogin(page,{uid,email},'warehouse');await shipping();
+  await page.locator('#inventoryShippingBody tr').filter({hasText:tag}).getByRole('checkbox').check();
+  await page.locator('#warehouseShippingBatchBtn').click();await page.locator('#warehouseShippingBatchConfirm').click();
+  await page.waitForFunction(()=>document.getElementById('actionFeedback')?.textContent?.includes('未完成項目'));
+  assert.equal(calls.length,1);assert.equal(await page.evaluate(()=>pendingOrderTransferOperations()[0].action),'HANDOFF');
+  await siteOpen(page,'warehouse');await shipping();await page.selectOption('#inventoryShippingScope','transfer');
+  await page.evaluate(()=>renderMainTransferRequests());
+  if(width===390){
+   await page.evaluate(()=>{globalThis.YUSHIN_ORDER_TRANSFER_HANDOFF_EMULATOR=false;});
+   await page.getByRole('button',{name:'確認原交接結果',exact:true}).click();
+   await page.waitForFunction(()=>document.getElementById('actionFeedback')?.textContent?.includes('禁止回退舊交易'));
+   assert.equal(calls.length,1);assert.equal(await page.evaluate(()=>pendingOrderTransferOperations().length),1);
+   await page.evaluate(()=>{globalThis.YUSHIN_ORDER_TRANSFER_HANDOFF_EMULATOR=true;});
+  }
+  await page.getByRole('button',{name:'確認原交接結果',exact:true}).click();
+  await page.waitForFunction(()=>!pendingOrderTransferOperations().length);
+  assert.equal(calls.length,2);assert.deepEqual(calls[0],calls[1]);
+  const target='custody-'+uid,order=(await db.doc('orders/'+orderId).get()).data(),transfer=(await db.doc('stockTransfers/'+calls[0].payload.id).get()).data();
+  assert.equal(transfer.kind,'HANDOFF');assert.equal(transfer.status,'RECEIVED');assert.equal(calls[0].payload.toWarehouseId,target);
+  assert.equal(order.items[0].warehouseId,target);assert.deepEqual(order.deliveryRecords,[]);
+  assert.equal((await db.doc('inventory/'+key).get()).data().onHand,3);assert.equal((await db.doc('inventory/'+key).get()).data().reserved,3);
+  const stock=(await db.doc('warehouseStocks/'+target+'__'+key).get()).data();assert.equal(stock.onHand,3);assert.equal(stock.reserved,3);
+  assert.deepEqual(errors,[]);
+ }finally{await context.close();}
+});

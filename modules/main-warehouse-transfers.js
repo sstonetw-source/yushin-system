@@ -44,7 +44,7 @@
   };
   root.resumeOrderTransferOperation=async function(action,id,button){
     if(!operational()||busy.has(id))return;busy.add(id);const state=beginActionButton(button,'確認中…');
-    try{const result=await commitOrderTransferBackend(action,id);await refreshAffectedOrderCaches(result.affectedOrderIds);await loadInventory(true);await root.loadWarehouseTransferQueue(true);await root.loadMainTransferRequests(true);showActionFeedback(action==='DISPATCH'?'原訂單調撥寄出已確認，等待收貨。':'原訂單調撥已收貨，預留已移倉。');}
+    try{const result=await commitOrderTransferBackend(action,id);await refreshAffectedOrderCaches(result.affectedOrderIds);await loadInventory(true);await root.loadWarehouseTransferQueue(true);await root.loadMainTransferRequests(true);showActionFeedback(action==='HANDOFF'?'原業務交接已確認，保留訂單預留，待業務送達客戶。':action==='DISPATCH'?'原訂單調撥寄出已確認，等待收貨。':'原訂單調撥已收貨，預留已移倉。');}
     catch(err){showActionFeedback('原操作仍須核對：'+err.message,'warning');}finally{busy.delete(id);endActionButton(button,state);}
   };
   root.dispatchMainTransferRequest=async function(id,button){
@@ -92,8 +92,8 @@
     const physicalRecovery=typeof pendingMainTransferPhysicalOperations==='function'?pendingMainTransferPhysicalOperations().filter(r=>r.action==='DISPATCH'||r.error):[];
     const physicalRecoveryHtml=physicalRecovery.map(r=>`<tr><td colspan="5">${r.error?escapeHtml(r.error):`前次主倉備貨寄出結果待確認 <button type="button" onclick="resumeMainTransferPhysical('DISPATCH',${inlineJsValue(r.id)},this)">確認前次寄出結果</button>`}</td></tr>`).join('');
     const recoveryHtml=recovery.map(r=>`<tr><td colspan="5">${r.error?escapeHtml(r.error):`前次主倉需求${r.action==='CANCEL'?'取消':'建立'}結果待確認 <button type="button" onclick="resumeMainTransferOperation(${inlineJsValue(r.id)},this)">確認前次結果</button>`}</td></tr>`).join('');
-    const orderRecovery=typeof pendingOrderTransferOperations==='function'?pendingOrderTransferOperations().filter(p=>p.action==='DISPATCH'||p.error):[];
-    const orderHtml=orderRecovery.map(p=>`<tr><td colspan="5">${p.error?escapeHtml(p.error):`訂單調撥寄出結果待確認 <button type="button" onclick="resumeOrderTransferOperation('DISPATCH',${inlineJsValue(p.id)},this)">確認原寄出結果</button>`}</td></tr>`).join('');
+    const orderRecovery=typeof pendingOrderTransferOperations==='function'?pendingOrderTransferOperations().filter(p=>p.action==='DISPATCH'||p.action==='HANDOFF'||p.error):[];
+    const orderHtml=orderRecovery.map(p=>`<tr><td colspan="5">${p.error?escapeHtml(p.error):`${p.action==='HANDOFF'?'業務交接':'訂單調撥寄出'}結果待確認 <button type="button" onclick="resumeOrderTransferOperation('${p.action}',${inlineJsValue(p.id)},this)">${p.action==='HANDOFF'?'確認原交接結果':'確認原寄出結果'}</button>`}</td></tr>`).join('');
     body.innerHTML=orderHtml+recoveryHtml+physicalRecoveryHtml+[...orderRows,...stockRows].map(r=>`<tr><td data-th="來源">${escapeHtml(r.source)}</td><td data-th="分倉">${escapeHtml(name(r.warehouseId))} → ${escapeHtml(name(mainId()))}</td><td data-th="品項">${escapeHtml(r.item.itemCode)}<br>${escapeHtml(r.item.itemName)}</td><td data-th="調回數量">${r.qty}</td><td data-th="操作">${r.action}</td></tr>`).join('');
     const table=body.closest?.('.inventory-work-table');if(table)table.hidden=ready&&!orderRows.length&&!stockRows.length&&!error&&!recovery.length&&!physicalRecovery.length&&!orderRecovery.length;
     document.getElementById('mainTransferRequestStatus').textContent=error||(!ready?'正在讀取調撥出貨工作…':`${orderRows.length} 筆訂單需求、${stockRows.length} 筆主倉備貨${pendingRequests.length>=50?'（備貨先顯示 50 筆）':''}；實際寄出後按登記出貨，主倉收到後在調撥收貨按已收貨。`);

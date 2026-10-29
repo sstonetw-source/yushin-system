@@ -1,8 +1,15 @@
 // Transfer dispatch and receipt are separate physical events, not customer deliveries.
 async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toWarehouseId='',qty,orderId='',itemId='',handoff=false,expectedWarehouseId='',expectedPlan=null,requestId=''}){
-  if(orderId&&typeof orderTransferBackendRequired==='function'&&orderTransferBackendRequired('DISPATCH',id,orderId,itemId)){
-    if(handoff)throw Error('業務交接尚未開放後端入口，禁止回退舊交易。');
-    return commitOrderTransferBackend('DISPATCH',id,{id,orderId,itemId,fromWarehouseId:expectedWarehouseId||fromWarehouseId,toWarehouseId,qty,expectedPlan});
+  if(orderId&&typeof orderTransferBackendRequired==='function'&&orderTransferBackendRequired(handoff?'HANDOFF':'DISPATCH',id,orderId,itemId)){
+    if(handoff){
+      const uid=currentUser?.uid,role=currentUserRole;
+      const snap=await db.collection('orders').doc(orderId).get({source:'server'});
+      if(uid!==currentUser?.uid||role!==currentUserRole)throw Error('核對交接期間登入身分已變更。');
+      const owner=snap.exists?snap.data().ownerUid:'';
+      if(typeof owner!=='string'||!owner||owner.includes('/'))throw Error('無法核對目前負責業務。');
+      toWarehouseId='custody-'+owner;
+    }
+    return commitOrderTransferBackend(handoff?'HANDOFF':'DISPATCH',id,{id,orderId,itemId,fromWarehouseId:expectedWarehouseId||fromWarehouseId,toWarehouseId,qty,expectedPlan});
   }
   if(requestId&&typeof pendingMainTransferOperation==='function'&&pendingMainTransferOperation(requestId))
     throw Error('原主倉需求結果尚未確認，請先確認原操作再寄出。');
