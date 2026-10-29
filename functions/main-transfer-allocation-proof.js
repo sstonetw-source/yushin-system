@@ -38,4 +38,25 @@ function inspectAllocationCheckpoint({checkpoint,intent,actorUid,actorRole}){
  if(checkpoint.status==='PENDING')return 'resume-original';
  fail('分配憑證狀態不明，不得改用新操作編號');
 }
-module.exports={allocationIntent,assertReceiptReady,inspectAllocationCheckpoint};
+
+const {compareReservationPriority}=require('./shared/reservation-core');
+function selectBoundedShortages({rows,productKey,warehouseId,excludeOrderId='',maxCandidates=50}){
+ if(!Array.isArray(rows)||!Number.isSafeInteger(maxCandidates)||maxCandidates<1||maxCandidates>100
+  ||rows.length>maxCandidates)fail('缺貨候選超出本入口有界讀取預算');
+ const seen=new Set(),candidates=[];
+ for(const row of rows){
+  if(!row||typeof row!=='object'||!row.id||typeof row.id!=='string'||seen.has(row.id))
+   fail('缺貨候選來源重複或不正確');
+  seen.add(row.id);
+  if(row.productKey!==productKey||row.warehouseId!==warehouseId||row.orderId===excludeOrderId)continue;
+  if(!['shortage','active'].includes(row.status))continue;
+  if(typeof row.shortageQty!=='number'||!Number.isSafeInteger(row.shortageQty)||row.shortageQty<0)
+   fail('缺貨候選數量不正確');
+  if(row.shortageQty===0)continue;
+  if(typeof row.orderId!=='string'||!row.orderId||typeof row.itemId!=='string'||!row.itemId)
+   fail('缺貨候選缺少來源訂單品項');
+  candidates.push(row);
+ }
+ return candidates.sort(compareReservationPriority);
+}
+module.exports={allocationIntent,assertReceiptReady,inspectAllocationCheckpoint,selectBoundedShortages};
