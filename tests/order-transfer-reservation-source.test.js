@@ -30,3 +30,42 @@ test('multi-source transfer source rejects corrupted identities, custody, duplic
  ]){const x=valid();change(x);assert.throws(()=>resolve(x));}
  const legacy=fixture();assert.deepEqual(resolve(legacy),{schemaVersion:1,qty:3,sources:[{warehouseId:'W',qty:3}]});
 });
+
+test('v2 target consolidation keeps existing destination holds and moves only other legs',()=>{
+ const {planOrderTransferTarget:plan}=require('../modules/reservation-core');
+ const x=fixture();x.item.warehouseId='A';delete x.reservation.warehouseId;
+ Object.assign(x.reservation,{locationSchemaVersion:2,lifecycleWarehouseIds:['A','B'],
+  locations:[{warehouseId:'B',reservedQty:2},{warehouseId:'A',reservedQty:1}]});
+ const before=structuredClone(x);
+ assert.deepEqual(plan({...x,toWarehouseId:'B'}),{
+  schemaVersion:2,orderQty:3,destinationWarehouseId:'B',
+  sourceLocations:[{warehouseId:'A',qty:1},{warehouseId:'B',qty:2}],
+  moveLegs:[{warehouseId:'A',qty:1}],movingQty:1,keptQty:2
+ });
+ assert.deepEqual(x,before);
+ assert.deepEqual(plan({...x,toWarehouseId:'custody-U',action:'HANDOFF',ownerUid:'U'}).moveLegs,
+  [{warehouseId:'A',qty:1},{warehouseId:'B',qty:2}]);
+ assert.equal(plan({...x,toWarehouseId:'custody-U',action:'HANDOFF',ownerUid:'U'}).movingQty,3);
+});
+test('v2 target planner rejects other owners, third warehouses, no-op and ambiguous candidate sets',()=>{
+ const {planOrderTransferTarget:plan}=require('../modules/reservation-core');
+ const fixtureV2=()=>{const x=fixture();x.item.warehouseId='A';delete x.reservation.warehouseId;
+  Object.assign(x.reservation,{locationSchemaVersion:2,lifecycleWarehouseIds:['A','B'],
+   locations:[{warehouseId:'A',reservedQty:1},{warehouseId:'B',reservedQty:2}]});return x;};
+ for(const changes of [
+  {toWarehouseId:'C'}, {toWarehouseId:'custody-U'},
+  {toWarehouseId:'custody-OTHER',action:'HANDOFF',ownerUid:'U'},
+  {toWarehouseId:'custody-U',action:'HANDOFF',ownerUid:'U/OTHER'},
+  {toWarehouseId:'B/child'}, {toWarehouseId:'B',action:'RECEIVE'}
+ ])assert.throws(()=>plan({...fixtureV2(),...changes}));
+ for(const modify of [
+  x=>x.reservation.lifecycleWarehouseIds=['A','A'],
+  x=>x.reservation.lifecycleWarehouseIds=['A','C'],
+  x=>x.reservation.lifecycleWarehouseIds=['A','custody-U'],
+  x=>x.item.warehouseId='C',
+  x=>x.reservation.locations=[{warehouseId:'B',reservedQty:3}]
+ ]){const x=fixtureV2();modify(x);assert.throws(()=>plan({...x,toWarehouseId:'B'}));}
+ const legacy=fixture();legacy.item.warehouseId='W';
+ assert.equal(plan({...legacy,toWarehouseId:'NEXT'}).movingQty,3);
+ assert.throws(()=>plan({...legacy,toWarehouseId:'W'}),/沒有需要移動/);
+});
