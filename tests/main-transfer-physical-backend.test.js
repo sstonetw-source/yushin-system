@@ -100,7 +100,7 @@ async function allocationFixture(){
  return {...f,sibling};
 }
 async function allocationEnvironment(fn){
- const patch={FUNCTIONS_EMULATOR:'true',FIRESTORE_EMULATOR_HOST:'localhost:8080',
+ const patch={GCLOUD_PROJECT:'demo-yushin',FUNCTIONS_EMULATOR:'true',FIRESTORE_EMULATOR_HOST:'localhost:8080',
   FIREBASE_AUTH_EMULATOR_HOST:'localhost:9099',ENABLE_MAIN_TRANSFER_ALLOCATION_EMULATOR:'true'};
  const prior=Object.fromEntries(Object.keys(patch).map(key=>[key,process.env[key]]));
  Object.assign(process.env,patch);

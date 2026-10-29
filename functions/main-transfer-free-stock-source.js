@@ -1,13 +1,12 @@
 'use strict';
 const {validateTransfer}=require('./main-transfer-physical-service');
 const {assertReceiptReady}=require('./main-transfer-allocation-proof');
+const {mainTransferAllocationProject}=require('./main-transfer-allocation-gate');
 function fail(message){throw Object.assign(Error(message),{code:'failed-precondition'});}
 // Read adapter only. The existing durable movement coordinator owns all stock,
 // reservation, order and demand writes; this must never establish a second job.
 async function readMainTransferFreeStockSource(tx,db,movementId,event){
- if(process.env.ENABLE_MAIN_TRANSFER_ALLOCATION_EMULATOR!=='true'
-  ||process.env.FUNCTIONS_EMULATOR!=='true'||!process.env.FIRESTORE_EMULATOR_HOST
-  ||!process.env.FIREBASE_AUTH_EMULATOR_HOST||db.projectId!=='demo-yushin')
+ if(!mainTransferAllocationProject()||db.projectId!==mainTransferAllocationProject())
   fail('主倉調撥缺貨分配尚未在此環境啟用');
  const transferId=event.transferId;
  if(typeof transferId!=='string'||!transferId||transferId.includes('/')||transferId.length>96

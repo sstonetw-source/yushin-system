@@ -35,9 +35,9 @@ test('real dispatch and receipt allocate a multi-item shortage through one durab
  await batch.commit();
  await commitMainTransferPhysical(db,uid,{id:transferId,requestId},'DISPATCH',env);
  await commitMainTransferPhysical(db,uid,{id:transferId,operationId:prefix+'-receipt'},'RECEIVE',env);
- const keys=['FUNCTIONS_EMULATOR','FIREBASE_AUTH_EMULATOR_HOST','ENABLE_MAIN_TRANSFER_ALLOCATION_EMULATOR'];
+ const keys=['GCLOUD_PROJECT','FUNCTIONS_EMULATOR','FIREBASE_AUTH_EMULATOR_HOST','ENABLE_MAIN_TRANSFER_ALLOCATION_EMULATOR'];
  const prior=Object.fromEntries(keys.map(key=>[key,process.env[key]]));
- Object.assign(process.env,{FUNCTIONS_EMULATOR:'true',FIREBASE_AUTH_EMULATOR_HOST:'localhost:9099',ENABLE_MAIN_TRANSFER_ALLOCATION_EMULATOR:'true'});
+ Object.assign(process.env,{GCLOUD_PROJECT:'demo-yushin',FUNCTIONS_EMULATOR:'true',FIREBASE_AUTH_EMULATOR_HOST:'localhost:9099',ENABLE_MAIN_TRANSFER_ALLOCATION_EMULATOR:'true'});
  try{
   const source={movementId:transferId+'-in',maxSteps:5};
   const results=await Promise.all([drainReleasedV2FreeStock(db,uid,source),drainReleasedV2FreeStock(db,uid,source)]);
