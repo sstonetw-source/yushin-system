@@ -1,6 +1,10 @@
 // Transfer dispatch and receipt are separate physical events, not customer deliveries.
 async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toWarehouseId='',qty,orderId='',itemId='',handoff=false,expectedWarehouseId='',expectedPlan=null,requestId=''}){
   if(orderId&&typeof orderTransferBackendRequired==='function'&&orderTransferBackendRequired(handoff?'HANDOFF':'DISPATCH',id,orderId,itemId)){
+    const action=handoff?'HANDOFF':'DISPATCH';
+    if(pendingOrderTransferOperations().some(p=>p.action===action&&p.id===id))
+      return commitOrderTransferBackend(action,id);
+    let physicalSource=expectedWarehouseId||fromWarehouseId;
     if(handoff){
       const uid=currentUser?.uid,role=currentUserRole;
       const snap=await db.collection('orders').doc(orderId).get({source:'server'});
@@ -8,8 +12,22 @@ async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toW
       const owner=snap.exists?snap.data().ownerUid:'';
       if(typeof owner!=='string'||!owner||owner.includes('/'))throw Error('無法核對目前負責業務。');
       toWarehouseId='custody-'+owner;
+    }else{
+      const uid=currentUser?.uid,role=currentUserRole;
+      const orderSnap=await db.collection('orders').doc(orderId).get({source:'server'});
+      if(uid!==currentUser?.uid||role!==currentUserRole)throw Error('核對來源期間登入身分已變更。');
+      const item=orderSnap.exists?orderSnap.data().items?.find(row=>row.itemId===itemId):null;
+      if(!item||expectedWarehouseId&&item.warehouseId!==expectedWarehouseId)throw Error('原訂單來源倉庫已變更。');
+      const ledgerSnap=await db.collection('inventoryReservations').doc(orderId+'__'+itemId).get({source:'server'});
+      if(uid!==currentUser?.uid||role!==currentUserRole)throw Error('核對多倉預留期間登入身分已變更。');
+      if(ledgerSnap.exists&&ledgerSnap.data().locationSchemaVersion===2){
+        const plan=YushinReservation.planOrderTransferTarget({reservation:ledgerSnap.data(),item,orderId,itemId,
+          productKey:String(item.inventoryProductKey||item.productId||''),qty,toWarehouseId,action:'DISPATCH'});
+        if(plan.moveLegs.length!==1)throw Error('多倉來源須由後端逐倉處理。');
+        physicalSource=plan.moveLegs[0].warehouseId;
+      }
     }
-    return commitOrderTransferBackend(handoff?'HANDOFF':'DISPATCH',id,{id,orderId,itemId,fromWarehouseId:expectedWarehouseId||fromWarehouseId,toWarehouseId,qty,expectedPlan});
+    return commitOrderTransferBackend(action,id,{id,orderId,itemId,fromWarehouseId:physicalSource,toWarehouseId,qty,expectedPlan});
   }
   if(requestId&&typeof pendingMainTransferOperation==='function'&&pendingMainTransferOperation(requestId))
     throw Error('原主倉需求結果尚未確認，請先確認原操作再寄出。');

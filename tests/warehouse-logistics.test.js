@@ -168,6 +168,23 @@ test('order transfer preserves commercial values and reservation, then changes w
  await f.c.commitWarehouseTransferReceipt('T');const after=f.docs.get('orders/O');assert.equal(after.items[0].warehouseId,'EXT');assert.equal(after.items[0].transferPendingId,'');assert.equal(after.items[0].qty,before.items[0].qty);assert.equal(after.ownerUid,before.ownerUid);assert.equal(after.deliveryRecords.length,0);assert.equal(after.logisticsTransfersPending,0);
  assert.equal(f.docs.get('inventoryReservations/O__A').warehouseId,'EXT');assert.equal(f.docs.get('warehouseStocks/EXT__P').reserved,4);
 });
+test('controlled v2 transfer resolves the actual moving warehouse even when the order display warehouse equals the destination',async()=>{
+ const f=fixture(),c=f.c,calls=[];
+ const order=f.docs.get('orders/O');order.items[0].reservedQty=4;
+ f.docs.set('inventoryReservations/O__A',{orderId:'O',itemId:'A',productKey:'P',quantity:4,shortageQty:0,status:'active',
+  locationSchemaVersion:2,lifecycleWarehouseIds:['MAIN','EXT'],locations:[{warehouseId:'MAIN',reservedQty:1},{warehouseId:'EXT',reservedQty:3}]});
+ let readCount=0,pending=[];
+ c.orderTransferBackendRequired=()=>true;c.pendingOrderTransferOperations=()=>pending;
+ c.commitOrderTransferBackend=async(action,transferId,payload)=>{calls.push({action,transferId,payload});return {status:'applied'};};
+ c.db={collection:name=>({doc:key=>({get:async()=>{readCount++;const data=f.docs.get(name+'/'+key);return {exists:!!data,data:()=>structuredClone(data)};}})})};
+ const input={id:'V2-MOVE',orderId:'O',itemId:'A',expectedWarehouseId:'MAIN',fromWarehouseId:'MAIN',toWarehouseId:'MAIN',qty:4,
+  expectedPlan:core.plan({mode:'PICKUP'})};
+ await c.commitWarehouseTransfer(input);
+ assert.equal(calls[0].action,'DISPATCH');assert.equal(calls[0].payload.fromWarehouseId,'EXT');
+ assert.equal(calls[0].payload.qty,4);assert.equal(readCount,2);
+ pending=[{id:input.id,action:'DISPATCH'}];await c.commitWarehouseTransfer(input);
+ assert.equal(calls[1].payload,undefined);assert.equal(readCount,2);
+});
 test('handoff keeps goods reserved in salesperson custody and does not mark customer delivery or expose them in warehouse shipping queue',async()=>{
  const f=fixture();f.docs.get('orders/O').items[0].deliveryPlan={mode:'PICKUP'};
  await f.c.commitWarehouseTransfer({id:'H',orderId:'O',itemId:'A',qty:4,handoff:true});
