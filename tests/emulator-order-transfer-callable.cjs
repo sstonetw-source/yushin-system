@@ -146,3 +146,59 @@ test('legacy assigned-owner handoff Callable keeps company and customer facts un
  assert.equal(saved.items[1].custodyTransferId,input.id);assert.deepEqual(saved.items[0],f.sibling);assert.equal(saved.deliveryRecords,undefined);assert.equal(saved.logisticsTransfersPending,0);
  assert.equal((await f.read('stockTransfers',input.id)).kind,'HANDOFF');await assert.rejects(f.receipt({id:input.id,operationId:f.receive.operationId}));
 });
+test('V2 two-source HANDOFF creates one V3 custody reservation and preserves both original lot-cost links',async()=>{
+ const f=await fixture('v3-custody'),ledgerRef=db.collection('inventoryReservations').doc(f.orderId+'__I');
+ const order=await f.read('orders',f.orderId);order.items[1].deliveryPlan={mode:'SALES_SHIP',contact:'Owner',phone:'123',address:'Taipei'};
+ await Promise.all([
+  db.collection('orders').doc(f.orderId).update({items:order.items}),
+  db.collection('warehouseStocks').doc(f.from+'__'+f.productKey).update({onHand:1,reserved:1}),
+  db.collection('warehouseStocks').doc(f.to+'__'+f.productKey).set({productKey:f.productKey,warehouseId:f.to,onHand:2,reserved:2}),
+  db.collection('inventoryLots').doc(f.prefix+'-L').update({remainingQty:1,qty:1}),
+  db.collection('inventoryLots').doc(f.prefix+'-B').set({productKey:f.productKey,warehouseId:f.to,remainingQty:2,qty:2,lotNo:'SECOND'}),
+  ledgerRef.update({warehouseId:require('firebase-admin/firestore').FieldValue.delete(),locationSchemaVersion:2,
+   ownerUid:'OWNER',salesCode:'01',lifecycleWarehouseIds:[f.from,f.to],
+   locations:[{warehouseId:f.from,reservedQty:1},{warehouseId:f.to,reservedQty:2}]})
+ ]);
+ const app=clients.at(-1),functions=getFunctions(app,'asia-east1');
+ const handoff=data=>httpsCallable(functions,'handoffOrderTransfer',{timeout:30000})(data).then(r=>r.data);
+ const input={...f.send,toWarehouseId:'custody-OWNER'};
+ assert.equal((await handoff(input)).status,'applied');
+ const company=await f.read('inventory',f.productKey),ledger=(await ledgerRef.get()).data(),orderAfter=await f.read('orders',f.orderId);
+ assert.equal(company.onHand,3);assert.equal(company.reserved,3);assert.equal(company.transferInTransit,0);
+ assert.equal((await f.read('warehouseStocks',f.from+'__'+f.productKey)).reserved,0);
+ assert.equal((await f.read('warehouseStocks',f.to+'__'+f.productKey)).reserved,0);
+ assert.deepEqual({onHand:(await f.read('warehouseStocks','custody-OWNER__'+f.productKey)).onHand,
+  reserved:(await f.read('warehouseStocks','custody-OWNER__'+f.productKey)).reserved},{onHand:3,reserved:3});
+ assert.equal(ledger.locationSchemaVersion,3);assert.equal(ledger.custodyTransferId,input.id);
+ assert.deepEqual(ledger.locations,[{warehouseId:'custody-OWNER',reservedQty:3}]);
+ assert.deepEqual(ledger.sourceLocationSnapshot,[{warehouseId:f.from,reservedQty:1},{warehouseId:f.to,reservedQty:2}]);
+ assert.equal((await f.read('inventoryMovements',input.id+'-out')).qty,-1);
+ assert.equal((await f.read('inventoryMovements',input.id+'-out-1')).qty,-2);
+ assert.equal((await f.read('inventoryMovements',input.id+'-in')).qty,3);
+ assert.equal((await f.read('inventoryLotCosts',input.id+'-0')).costSourceLotId,f.prefix+'-L');
+ assert.equal((await f.read('inventoryLotCosts',input.id+'-1')).costSourceLotId,f.prefix+'-B');
+ assert.equal(orderAfter.items[1].warehouseId,'custody-OWNER');assert.equal(orderAfter.items[1].custodyTransferId,input.id);
+ assert.equal(orderAfter.deliveryRecords,undefined);assert.equal(orderAfter.deliveredQty,undefined);
+ const before=await f.snapshot(),extraBefore=await f.read('inventoryMovements',input.id+'-out-1');
+ assert.equal((await handoff(input)).status,'already-applied');
+ assert.deepEqual(await f.snapshot(),before);assert.deepEqual(await f.read('inventoryMovements',input.id+'-out-1'),extraBefore);
+ await assert.rejects(handoff({...input,qty:2}));
+});
+test('V2 Custody fails atomically if either source has insufficient lot quantities',async()=>{
+ const f=await fixture('v3-lot-short'),ledgerRef=db.collection('inventoryReservations').doc(f.orderId+'__I');
+ const order=await f.read('orders',f.orderId);order.items[1].deliveryPlan={mode:'SALES_SHIP',contact:'Owner',phone:'123',address:'Taipei'};
+ await Promise.all([
+  db.collection('orders').doc(f.orderId).update({items:order.items}),
+  db.collection('warehouseStocks').doc(f.from+'__'+f.productKey).update({onHand:1,reserved:1}),
+  db.collection('warehouseStocks').doc(f.to+'__'+f.productKey).set({productKey:f.productKey,warehouseId:f.to,onHand:2,reserved:2}),
+  db.collection('inventoryLots').doc(f.prefix+'-L').update({remainingQty:1,qty:1}),
+  ledgerRef.update({warehouseId:require('firebase-admin/firestore').FieldValue.delete(),locationSchemaVersion:2,
+   ownerUid:'OWNER',salesCode:'01',lifecycleWarehouseIds:[f.from,f.to],
+   locations:[{warehouseId:f.from,reservedQty:1},{warehouseId:f.to,reservedQty:2}]})
+ ]);
+ const app=clients.at(-1),functions=getFunctions(app,'asia-east1'),input={...f.send,toWarehouseId:'custody-OWNER'};
+ const handoff=data=>httpsCallable(functions,'handoffOrderTransfer',{timeout:30000})(data).then(r=>r.data);
+ const before=await f.snapshot();await assert.rejects(handoff(input));assert.deepEqual(await f.snapshot(),before);
+ assert.equal(await f.read('warehouseStocks','custody-OWNER__'+f.productKey),undefined);
+ assert.equal(await f.read('inventoryMovements',input.id+'-out-1'),undefined);
+});

@@ -75,24 +75,28 @@ async function commitOrderTransferPhysical(db,uid,data,action,env=process.env){
   if(ledger.status!=='active')fail('原訂單預留不是有效狀態');
   if(action==='RECEIVE'&&item.transferPendingId!==intent.id)fail('原調撥與訂單關聯不一致');
   const sourceItem=action==='RECEIVE'?{...item,transferPendingId:''}:item;
-  const target=ledger.locationSchemaVersion===2&&!handoff
+  const custodyV3=ledger.locationSchemaVersion===2&&handoff
+   ?reservation.planCustodyHandoffLedger({reservation:ledger,item:sourceItem,orderId,itemId,
+     productKey:key,qty,ownerUid:order.ownerUid,transferId:intent.id}):null;
+  const target=custodyV3?.plan||(ledger.locationSchemaVersion===2&&!handoff
    ?reservation.planOrderTransferTarget({reservation:ledger,item:sourceItem,orderId,itemId,productKey:key,qty,toWarehouseId:to,action:'DISPATCH'})
-   :null;
+   :null);
   const source=target?{schemaVersion:target.schemaVersion,warehouseId:target.moveLegs[0]?.warehouseId,qty}
    :reservation.orderTransferReservationSource({reservation:ledger,item:sourceItem,orderId,itemId,productKey:key,warehouseId:from,qty});
   const movingQty=target?target.movingQty:qty;
   if(!target&&item.warehouseId!==from)fail('單倉調撥來源位置不一致');
-  if(target&&(target.moveLegs.length!==1||target.moveLegs[0].warehouseId!==from
+  if(target&&((!handoff&&target.moveLegs.length!==1)||target.moveLegs[0].warehouseId!==from
     ||(action==='RECEIVE'&&(t.movingQty!==movingQty||t.keptQty!==target.keptQty))))
     fail('多倉調撥實際來源或原寄出數量不一致');
   if(ledger.ownerUid&&ledger.ownerUid!==order.ownerUid||ledger.salesCode&&ledger.salesCode!==order.salesCode)fail('原預留與訂單負責人不一致');
-  if(handoff&&source.schemaVersion!==1)fail('業務交接尚不支援v2保管位置');
+  if(handoff&&source.schemaVersion!==1&&!custodyV3)fail('業務交接預留版本尚未支援');
   if(source.schemaVersion===2){
    if(env.ENABLE_ORDER_TRANSFER_V2_EMULATOR!=='true')fail('v2訂單調撥尚未獨立啟用');
    if(ledger.ownerUid!==order.ownerUid||ledger.salesCode!==order.salesCode
     ||!Array.isArray(ledger.lifecycleWarehouseIds)||ledger.lifecycleWarehouseIds.length!==2
     ||new Set(ledger.lifecycleWarehouseIds).size!==2
-    ||!ledger.lifecycleWarehouseIds.includes(from)||!ledger.lifecycleWarehouseIds.includes(to))fail('目的倉不在原v2候選位置，不能引入第三倉');
+    ||!ledger.lifecycleWarehouseIds.includes(from)||(!handoff&&!ledger.lifecycleWarehouseIds.includes(to)))
+    fail('調撥來源不在原v2候選倉，或目的實體倉是第三倉');
    if(action==='RECEIVE'&&(t.reservationLocationSchemaVersion!==2
     ||JSON.stringify(t.lifecycleWarehouseIds)!==JSON.stringify(ledger.lifecycleWarehouseIds)))fail('原多倉預留版本或候選位置已變更');
   }else if(action==='RECEIVE'&&t.reservationLocationSchemaVersion===2)fail('原多倉預留不可退回單倉格式');
@@ -124,39 +128,93 @@ async function commitOrderTransferPhysical(db,uid,data,action,env=process.env){
       ||keptStock.data().reserved<target.keptQty))))fail('原多倉預留與目的倉保留數量不一致');
   const custodyRef=handoff?ref('warehouseStocks',stockId(to)):null,custody=handoff?await tx.get(custodyRef):null;
   if(custody?.exists&&(custody.data().productKey!==key||custody.data().warehouseId!==to))fail('業務保管庫存來源不一致');
+  const moveLegs=target?.moveLegs||[{warehouseId:from,qty:movingQty}];
+  const sourceStocks=new Map([[from,stock]]);
+  if(custodyV3)for(const leg of moveLegs.slice(1)){
+   const master=await tx.get(ref('warehouses',leg.warehouseId));
+   if(!master.exists||master.data().active===false||master.data().systemCustody
+     ||master.data().warehouseType==='CUSTODY')fail('原多倉預留含停用或非實體倉');
+   const extra=await tx.get(ref('warehouseStocks',stockId(leg.warehouseId)));
+   if(!extra.exists||extra.data().productKey!==key||extra.data().warehouseId!==leg.warehouseId)
+     fail('原多倉來源庫存不存在或產品不一致');
+   sourceStocks.set(leg.warehouseId,extra);
+  }
   const outRef=ref('inventoryMovements',intent.id+'-out'),inRef=ref('inventoryMovements',intent.id+'-in');
   const outgoing=await tx.get(outRef),incoming=await tx.get(inRef);
   if(incoming.exists||dispatching&&outgoing.exists)fail('調撥異動識別碼已存在');
+  const extraOutRefs=custodyV3?moveLegs.slice(1).map((_,index)=>ref('inventoryMovements',intent.id+'-out-'+(index+1))):[];
+  for(const row of extraOutRefs)if((await tx.get(row)).exists)fail('多倉交接異動識別碼已存在');
   if(!Array.isArray(order.logisticsHistory??[])||(order.logisticsHistory??[]).length>=1000)fail('物流歷史格式或長度不正確');
   const now=new Date().toISOString(),actorName=actor.displayName||actor.name||uid;
-  const move=(type,value,warehouseId)=>({type,qty:value,warehouseId,productKey:key,fromWarehouseId:from,toWarehouseId:to,sourceType:'WAREHOUSE_TRANSFER',sourceId:intent.id,transferId:intent.id,orderId,itemId,actorUid:uid,createdAt:now,createdBy:actorName});
+  const move=(type,value,warehouseId,origin=from)=>({type,qty:value,warehouseId,productKey:key,fromWarehouseId:origin,toWarehouseId:to,sourceType:'WAREHOUSE_TRANSFER',sourceId:intent.id,transferId:intent.id,orderId,itemId,actorUid:uid,createdAt:now,createdBy:actorName});
   let saved,nextItem;
   if(dispatching){
    if((order.logisticsTransfersPending??0)!==0)fail('訂單仍有其他調撥未完成');
-   const physical=handoff?logistics.planTransferHandoff({aggregateStock:company.data(),warehouseStock:stock.data(),targetStock:custody.exists?custody.data():{},qty}):logistics.planTransferDispatch({aggregateStock:company.data(),warehouseStock:stock.data(),qty:movingQty,reservedQty:movingQty});
-   const lotsSnap=await tx.get(db.collection('inventoryLots').where('productKey','==',key).where('warehouseId','==',from).limit(101));
-   if(lotsSnap.size>100)fail('訂單調撥批次超過100筆上限');
-   const lots=lotsSnap.docs.map(doc=>({...doc.data(),id:doc.id}));
-   if(lots.some(l=>typeof l.remainingQty!=='number'||!Number.isFinite(l.remainingQty)||l.remainingQty<0))fail('批次數量不正確');
-   const allocated=inventory.allocateLots(lots,movingQty);
-   const allocations=allocated.allocations.map((a,n)=>({...a,targetLotId:intent.id+'-'+n,costLotId:lots.find(l=>l.id===a.lotId).costLotId||a.lotId}));
+   const sourceProjections=new Map(),allLots=new Map();let allocations=[],physical;
+   if(custodyV3){
+    let aggregate={...company.data()},destination=custody.exists?{...custody.data()}:{};
+    for(const leg of moveLegs){
+     const sourceStock=sourceStocks.get(leg.warehouseId);
+     const projected=logistics.planTransferHandoff({aggregateStock:aggregate,
+       warehouseStock:sourceStock.data(),targetStock:destination,qty:leg.qty});
+     aggregate={...aggregate,...projected.aggregate};destination={...destination,...projected.target};
+     sourceProjections.set(leg.warehouseId,projected.source);
+     const batch=await tx.get(db.collection('inventoryLots').where('productKey','==',key)
+       .where('warehouseId','==',leg.warehouseId).limit(101));
+     if(batch.size>100)fail('單一來源倉調撥批次超過100筆上限');
+     const lots=batch.docs.map(doc=>({...doc.data(),id:doc.id}));
+     if(lots.some(l=>typeof l.remainingQty!=='number'||!Number.isFinite(l.remainingQty)||l.remainingQty<0
+       ||l.productKey!==key||l.warehouseId!==leg.warehouseId))fail('來源倉批次不一致');
+     const allocated=inventory.allocateLots(lots,leg.qty);
+     for(const lot of lots)allLots.set(lot.id,lot);
+     for(const row of allocated.allocations){
+      const original=allLots.get(row.lotId);
+      allocations.push({...row,sourceWarehouseId:leg.warehouseId,targetLotId:intent.id+'-'+allocations.length,
+       costLotId:original.costLotId||row.lotId});
+     }
+    }
+    physical={aggregate,target:destination};
+   }else{
+    physical=handoff?logistics.planTransferHandoff({aggregateStock:company.data(),warehouseStock:stock.data(),targetStock:custody.exists?custody.data():{},qty})
+     :logistics.planTransferDispatch({aggregateStock:company.data(),warehouseStock:stock.data(),qty:movingQty,reservedQty:movingQty});
+    const batch=await tx.get(db.collection('inventoryLots').where('productKey','==',key).where('warehouseId','==',from).limit(101));
+    if(batch.size>100)fail('訂單調撥批次超過100筆上限');
+    const lots=batch.docs.map(doc=>({...doc.data(),id:doc.id}));
+    if(lots.some(l=>typeof l.remainingQty!=='number'||!Number.isFinite(l.remainingQty)||l.remainingQty<0))fail('批次數量不正確');
+    const allocated=inventory.allocateLots(lots,movingQty);
+    for(const lot of lots)allLots.set(lot.id,lot);
+    allocations=allocated.allocations.map((a,n)=>({...a,targetLotId:intent.id+'-'+n,
+     costLotId:allLots.get(a.lotId).costLotId||a.lotId}));
+   }
    saved={id:intent.id,kind:handoff?'HANDOFF':'TRANSFER',status:handoff?'RECEIVED':'IN_TRANSIT',orderId,itemId,itemIndex:index,inventoryId:inventoryRef.id,productKey:key,productId:item.productId,
     fromWarehouseId:from,toWarehouseId:to,fromStockId:stockId(from),toStockId:stockId(to),qty,reservedQty:movingQty,allocations,
     ownerUid:order.ownerUid,salesCode:order.salesCode,itemCode:item.itemCode||'',itemName:item.itemName||'',deliveryPlan:plan,
-    ...(source.schemaVersion===2?{reservationLocationSchemaVersion:2,lifecycleWarehouseIds:[...ledger.lifecycleWarehouseIds],movingQty,keptQty:target.keptQty}:{}),
+    ...(source.schemaVersion===2?{reservationLocationSchemaVersion:2,lifecycleWarehouseIds:[...ledger.lifecycleWarehouseIds],
+      movingQty,keptQty:target.keptQty,sourceLocations:target.sourceLocations.map(row=>({...row})),
+      ...(custodyV3?{custodyLocationSchemaVersion:3}:{} )}:{}),
     orderTransferIntentHash:intent.hash,createdByUid:uid,createdByRole:actor.role,createdAt:now,...(handoff?{receivedByUid:uid,receivedByRole:actor.role,receivedAt:now}:{})};
    const destinationRows=logistics.transferDestinationLots({...saved,qty:movingQty},saved,now);
    if(handoff)for(const row of destinationRows){const lot=await tx.get(ref('inventoryLots',row.lotId)),cost=await tx.get(ref('inventoryLotCosts',row.lotId));if(lot.exists||cost.exists)fail('交接目的批次已存在');}
 
    tx.create(transferRef,saved);tx.create(proofRef,{kind:'ORDER_TRANSFER_DISPATCH',transfer:saved,intentHash:intent.hash,actorUid:uid,actorRole:actor.role});
-   tx.update(inventoryRef,{...physical.aggregate,updatedAt:now});tx.update(stockRef,{...physical.source,updatedAt:now});
-   for(const a of allocations){const lot=lots.find(l=>l.id===a.lotId);tx.update(ref('inventoryLots',a.lotId),{remainingQty:lot.remainingQty-a.qty,updatedAt:now});}
-   tx.create(outRef,move('warehouse_transfer_out',-movingQty,from));nextItem=handoff?{...item,warehouseId:to,custodyTransferId:intent.id}:{...item,transferPendingId:intent.id};
+   tx.update(inventoryRef,{...physical.aggregate,updatedAt:now});
+   if(custodyV3)for(const leg of moveLegs)tx.update(ref('warehouseStocks',stockId(leg.warehouseId)),
+     {...sourceProjections.get(leg.warehouseId),updatedAt:now});
+   else tx.update(stockRef,{...physical.source,updatedAt:now});
+   for(const a of allocations){const lot=allLots.get(a.lotId);tx.update(ref('inventoryLots',a.lotId),{remainingQty:lot.remainingQty-a.qty,updatedAt:now});}
+   if(custodyV3)for(const [index,leg] of moveLegs.entries())tx.create(index?extraOutRefs[index-1]:outRef,
+     move('warehouse_transfer_out',-leg.qty,leg.warehouseId,leg.warehouseId));
+   else tx.create(outRef,move('warehouse_transfer_out',-movingQty,from));
+   nextItem=handoff?{...item,warehouseId:to,custodyTransferId:intent.id}:{...item,transferPendingId:intent.id};
    if(handoff){
     if(!whTo.exists)tx.create(ref('warehouses',to),{active:true,isDefault:false,warehouseType:'CUSTODY',systemCustody:true,ownerUid:order.ownerUid,warehouseName:'負責業務保管',sourceTransferId:intent.id});
     tx.set(custodyRef,{productKey:key,productId:item.productId,warehouseId:to,...physical.target,updatedAt:now},{merge:true});
     for(const row of destinationRows){tx.create(ref('inventoryLots',row.lotId),row.lot);tx.create(ref('inventoryLotCosts',row.lotId),row.cost);}
-    tx.create(inRef,move('warehouse_transfer_in',qty,to));tx.update(ledgerRef,{warehouseId:to,updatedAt:now});
+    tx.create(inRef,move('warehouse_transfer_in',qty,to));
+    if(custodyV3)tx.update(ledgerRef,{locationSchemaVersion:3,locations:custodyV3.reservation.locations,
+      sourceLocationSnapshot:custodyV3.reservation.sourceLocationSnapshot,
+      custodyOriginalQty:qty,custodyTransferId:intent.id,updatedAt:now});
+    else tx.update(ledgerRef,{warehouseId:to,updatedAt:now});
    }
   }else{
    if(!outgoing.exists||outgoing.data().sourceId!==intent.id||outgoing.data().orderId!==orderId||outgoing.data().itemId!==itemId

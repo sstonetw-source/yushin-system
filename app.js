@@ -20365,6 +20365,10 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
     const whSnap = await transaction.get(whRef);
     const reservationSnap = await transaction.get(deliveryReservationRef);
     if (!whSnap.exists) throw new Error('指定倉庫沒有這個產品的分倉庫存，請先入庫或以庫存調整建立分倉數量。');
+    const custodyV3=reservationSnap.exists&&reservationSnap.data().locationSchemaVersion===3;
+    if(custodyV3&&(warehouseId!=='custody-'+order.ownerUid
+      ||order.custodyTransferId!==reservationSnap.data().custodyTransferId))
+      throw new Error('V3 業務保管出貨與原交接憑證不一致。');
 
     const inv = inventoryNumbers(invSnap.exists ? invSnap.data() : {}), wh = inventoryNumbers(whSnap.data());
     const stockPlan=deltaQty>0?globalThis.YushinReservation.planReservationIssue({
@@ -20421,7 +20425,8 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
         ownerUid:order.ownerUid||'',salesCode:order.salesCode||''
     }));
 
-    transaction.set(deliveryReservationRef,{...stockPlan.reservation,...inventoryReservationPayload(sourceId,order,newReservedRemaining,stockPlan.reservation.status),itemId:deliveryItemId,warehouseId},{merge:true});
+    transaction.set(deliveryReservationRef,{...stockPlan.reservation,...inventoryReservationPayload(sourceId,order,newReservedRemaining,stockPlan.reservation.status),
+        itemId:deliveryItemId,...(custodyV3?{}:{warehouseId})},{merge:true});
     return { reservedDelta,newReservedQty:newReservedRemaining,lotAllocations,cogs,movementId:movementRef.id };
 }
 function applyInventoryDeliveryInTransaction(transaction, orderRef, order, deliveryQty, actor, sourceId) {
@@ -20443,6 +20448,10 @@ async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQ
     const whSnap = await transaction.get(whRef);
     const reservationSnap = await transaction.get(reservationRef);
     if (!whSnap.exists) throw new Error('找不到原出貨倉庫庫存。');
+    const custodyV3=reservationSnap.exists&&reservationSnap.data().locationSchemaVersion===3;
+    if(custodyV3&&(warehouseId!=='custody-'+order.ownerUid
+      ||order.custodyTransferId!==reservationSnap.data().custodyTransferId))
+      throw new Error('V3 業務保管退貨與原交接憑證不一致。');
     const inv=inventoryNumbers(invSnap.exists?invSnap.data():{}), wh=inventoryNumbers(whSnap.data());
     const stockPlan=globalThis.YushinReservation.planReservationReturn({operation:'CUSTOMER_RETURN',deltaQty,
         orderStatus:normalizedOrderStatus(order),settlement:order.customerReturnSettlement||'REPLACE',
@@ -20476,7 +20485,8 @@ async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQ
     const nextReservation=stockPlan.reservation.quantity,reservationDelta=stockPlan.reservedDelta;
     transaction.set(invRef,{onHand:stockPlan.aggregateStock.onHand,reserved:stockPlan.aggregateStock.reserved,incoming:inv.incoming,updatedAt:now},{merge:true});
     transaction.set(whRef,{warehouseId,productKey,onHand:stockPlan.warehouseStock.onHand,reserved:stockPlan.warehouseStock.reserved,incoming:wh.incoming,updatedAt:now},{merge:true});
-    transaction.set(reservationRef,{...stockPlan.reservation,...inventoryReservationPayload(sourceId,order,nextReservation,stockPlan.reservation.status),itemId:deliveryItemId,warehouseId},{merge:true});
+    transaction.set(reservationRef,{...stockPlan.reservation,...inventoryReservationPayload(sourceId,order,nextReservation,stockPlan.reservation.status),
+        itemId:deliveryItemId,...(custodyV3?{}:{warehouseId})},{merge:true});
     transaction.set(db.collection('inventoryMovements').doc(),{
         type:deltaQty>0?'return_in':'return_reversal',qty:deltaQty,productKey,warehouseId,
         fulfillmentType:'WAREHOUSE',sourceType:DOCUMENT_TYPES.ORDER,sourceId,
@@ -21750,6 +21760,16 @@ async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toW
       const owner=snap.exists?snap.data().ownerUid:'';
       if(typeof owner!=='string'||!owner||owner.includes('/'))throw Error('無法核對目前負責業務。');
       toWarehouseId='custody-'+owner;
+      const item=snap.data().items?.find(row=>row.itemId===itemId);
+      if(!item||expectedWarehouseId&&item.warehouseId!==expectedWarehouseId)
+        throw Error('原交接品項或來源倉庫已變更。');
+      const ledgerSnap=await db.collection('inventoryReservations').doc(orderId+'__'+itemId).get({source:'server'});
+      if(uid!==currentUser?.uid||role!==currentUserRole)throw Error('核對保管預留期間登入身分已變更。');
+      if(ledgerSnap.exists&&ledgerSnap.data().locationSchemaVersion===2){
+        const plan=YushinReservation.planCustodyHandoffLedger({reservation:ledgerSnap.data(),item,orderId,itemId,
+          productKey:String(item.inventoryProductKey||item.productId||''),qty,ownerUid:owner,transferId:id});
+        physicalSource=plan.plan.moveLegs[0].warehouseId;
+      }
     }else{
       const uid=currentUser?.uid,role=currentUserRole;
       const orderSnap=await db.collection('orders').doc(orderId).get({source:'server'});

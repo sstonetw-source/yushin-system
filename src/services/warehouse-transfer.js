@@ -12,6 +12,16 @@ async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toW
       const owner=snap.exists?snap.data().ownerUid:'';
       if(typeof owner!=='string'||!owner||owner.includes('/'))throw Error('無法核對目前負責業務。');
       toWarehouseId='custody-'+owner;
+      const item=snap.data().items?.find(row=>row.itemId===itemId);
+      if(!item||expectedWarehouseId&&item.warehouseId!==expectedWarehouseId)
+        throw Error('原交接品項或來源倉庫已變更。');
+      const ledgerSnap=await db.collection('inventoryReservations').doc(orderId+'__'+itemId).get({source:'server'});
+      if(uid!==currentUser?.uid||role!==currentUserRole)throw Error('核對保管預留期間登入身分已變更。');
+      if(ledgerSnap.exists&&ledgerSnap.data().locationSchemaVersion===2){
+        const plan=YushinReservation.planCustodyHandoffLedger({reservation:ledgerSnap.data(),item,orderId,itemId,
+          productKey:String(item.inventoryProductKey||item.productId||''),qty,ownerUid:owner,transferId:id});
+        physicalSource=plan.plan.moveLegs[0].warehouseId;
+      }
     }else{
       const uid=currentUser?.uid,role=currentUserRole;
       const orderSnap=await db.collection('orders').doc(orderId).get({source:'server'});
