@@ -214,3 +214,17 @@ test('authority list preserves blocked witnesses, advances bounded pages and rej
  await assert.rejects(listMainTransferAllocations(f.db,'U',{afterId:'bad/id'}));
  f.put('users/U',{role:'sales'});await assert.rejects(listMainTransferAllocations(f.db,'U',{}),e=>e.code==='permission-denied');
 }));
+test('explicit Preview source allocates through existing core and completion/list with no Emulator connections',()=>allocationEnvironment(async()=>{
+ const f=await allocationFixture();f.db.projectId='preview-20135';
+ const keys=['GCLOUD_PROJECT','FUNCTIONS_EMULATOR','FIRESTORE_EMULATOR_HOST','FIREBASE_AUTH_EMULATOR_HOST','ENABLE_PREVIEW_FREE_STOCK_ALLOCATION','ENABLE_PREVIEW_MAIN_TRANSFER_ALLOCATION'];
+ const prior=Object.fromEntries(keys.map(key=>[key,process.env[key]]));
+ try{
+  process.env.GCLOUD_PROJECT='preview-20135';for(const key of ['FUNCTIONS_EMULATOR','FIRESTORE_EMULATOR_HOST','FIREBASE_AUTH_EMULATOR_HOST'])delete process.env[key];
+  process.env.ENABLE_PREVIEW_FREE_STOCK_ALLOCATION='true';process.env.ENABLE_PREVIEW_MAIN_TRANSFER_ALLOCATION='true';
+  assert.equal((await listMainTransferAllocations(f.db,'U',{})).rows.length,1);
+  const result=await drainReleasedV2FreeStock(f.db,'U',{movementId:dispatch.id+'-in'});assert.equal(result.allocatedQty,3);
+  await completeAllocation(f.db,'U',dispatch.id);assert.equal((await listMainTransferAllocations(f.db,'U',{})).rows.length,0);
+  assert.deepEqual(f.docs.get('orders/TARGET').items[0],f.sibling);
+  const before=f.snapshot();process.env.ENABLE_PREVIEW_FREE_STOCK_ALLOCATION='false';await assert.rejects(drainReleasedV2FreeStock(f.db,'U',{movementId:dispatch.id+'-in'}));assert.equal(f.snapshot(),before);
+ }finally{for(const [key,value] of Object.entries(prior)){if(value===undefined)delete process.env[key];else process.env[key]=value;}}
+}));

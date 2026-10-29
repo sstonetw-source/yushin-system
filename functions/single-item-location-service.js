@@ -3,6 +3,7 @@
 // a Callable until all fulfillment writers support the same location ledger.
 const {createHash}=require('node:crypto');
 const core=require('./shared/reservation-core');
+const {allowFreeStockAllocationDatabase}=require('./free-stock-allocation-gate');
 function reject(message,code='failed-precondition'){const e=new Error(message);e.code=code;throw e;}
 function ident(v,name){if(typeof v!=='string'||!v||v!==v.trim()||v.includes('/')||v.length>160)reject(name+'不正確','invalid-argument');return v;}
 function integer(v,name){if(!Number.isSafeInteger(v)||v<0)reject(name+'異常');return v;}
@@ -318,7 +319,7 @@ function freeStockTargetItem(order,itemId){
  return {item:order.items[itemIndex],itemIndex};
 }
 async function commitSingleItemFreeStockAllocation(db,uid,input,batchContext=null){
- if(!process.env.FIRESTORE_EMULATOR_HOST||db.projectId!=='demo-yushin')
+ if(!allowFreeStockAllocationDatabase(db))
   reject('跨 v2 訂單自由庫存分配僅允許 demo-yushin Emulator');
  ident(uid,'登入者');
  const intent=normalizeFreeStockIntent(input),{orderId,itemId,warehouseId,operationId}=intent;
@@ -594,7 +595,7 @@ function verifyAutomaticFreeStockMovement(proof,job,intent){
  return {...proof.result,status:'already-applied'};
 }
 async function advanceAutomaticFreeStockAllocation(db,uid,input){
- if(!process.env.FIRESTORE_EMULATOR_HOST||db.projectId!=='demo-yushin')
+ if(!allowFreeStockAllocationDatabase(db))
   reject('自動自由庫存分配僅允許 demo-yushin Emulator');
  ident(uid,'登入者');
  const intent=normalizeAutomaticFreeStockIntent(input);
@@ -790,7 +791,7 @@ async function advanceAutomaticFreeStockAllocation(db,uid,input){
 // Existing movement acts as a durable source event; this only delegates to
 // the current free-stock allocation coordinator after verifying its proof.
 async function advanceReleasedV2FreeStock(db,uid,input){
- if(!process.env.FIRESTORE_EMULATOR_HOST||db.projectId!=='demo-yushin')
+ if(!allowFreeStockAllocationDatabase(db))
   reject('來源庫存釋放續傳僅允許 demo-yushin Emulator');
  ident(uid,'登入者');
  if(!input||typeof input!=='object'||Array.isArray(input)

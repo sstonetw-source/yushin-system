@@ -5,7 +5,7 @@ const {normalizeAllocationSource,createMainTransferAllocationCallable}=require('
 const env={GCLOUD_PROJECT:'demo-yushin',ENABLE_MAIN_TRANSFER_ALLOCATION_EMULATOR:'true',FUNCTIONS_EMULATOR:'true',FIRESTORE_EMULATOR_HOST:'localhost:8080',FIREBASE_AUTH_EMULATOR_HOST:'127.0.0.1:9099'};
 class HttpsError extends Error{constructor(code,message){super(message);this.code=code;}}
 function fixture(patch={}){let reads=0;const calls=[];const handler=createMainTransferAllocationCallable({onCall:(_,fn)=>fn,HttpsError,env,getDatabase:()=>{reads++;return {projectId:'demo-yushin'};},drain:async(...args)=>{calls.push(args);return {status:'active',recoveryPending:true,allocatedQty:2};},...patch});return {handler,calls,reads:()=>reads};}
-test('allocation endpoint rejects production Preview missing flag and remote emulator hosts',()=>{
+test('allocation endpoint rejects production Preview missing shared flag and remote emulator hosts',()=>{
  assert.equal(gate(env),'demo-yushin');
  for(const patch of [{GCLOUD_PROJECT:'yu-shing-company'},{GCLOUD_PROJECT:'preview-20135',ENABLE_PREVIEW_MAIN_TRANSFER_ALLOCATION:'true'},{ENABLE_MAIN_TRANSFER_ALLOCATION_EMULATOR:'false'},{FUNCTIONS_EMULATOR:'false'},{FIRESTORE_EMULATOR_HOST:'remote:8080'},{FIREBASE_AUTH_EMULATOR_HOST:''}])assert.equal(gate({...env,...patch}),'');
 });
