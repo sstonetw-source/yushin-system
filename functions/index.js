@@ -151,6 +151,11 @@ exports.shipV3CustodyItem=createCustodyShipmentCallable({onCall,HttpsError,getDa
 const {createCustodyDeliveryCallable}=require('./custody-delivery-service');
 exports.confirmV3CustodyDelivery=createCustodyDeliveryCallable({onCall,HttpsError,getDatabase:getFirestore});
 
+// Return to the exact Custody source lot after customer receipt; no automatic
+// free-stock allocation or formal production enablement.
+const {createCustodyReturnCallable}=require('./custody-return-service');
+exports.receiveV3CustodyReturn=createCustodyReturnCallable({onCall,HttpsError,getDatabase:getFirestore});
+
 // Independent, default-closed return Preview; no second inventory writer.
 const {createCustomerReturnCallables}=require('./customer-return-callable');
 const customerReturnCallables=createCustomerReturnCallables({onCall,HttpsError,getDatabase:getFirestore});

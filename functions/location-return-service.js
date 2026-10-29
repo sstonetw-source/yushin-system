@@ -61,9 +61,16 @@ function assertLinkedReceipt(order,intent,record,receipt,uid,actorRole){
   ||!(order.returnRecords??[]).some(row=>isDeepStrictEqual(row,record)))
   fault('退貨申請實收缺少一致的原入庫憑證');
 }
-async function commitLocationReturn(db,uid,data,env=process.env){
- assertCustomerReturnDatabase(db,env);
+async function commitLocationReturn(db,uid,data,env=process.env,options={}){
+ const custodyV3=options.allowCustody===true;
+ if(custodyV3){
+  const {custodyReturnProject}=require('./custody-return-service');
+  if(!custodyReturnProject(env)||db.projectId!=='demo-yushin')
+   fault('V3 保管退貨收回尚未在此專案啟用');
+ }else assertCustomerReturnDatabase(db,env);
  const intent=normalizeLocationReturnIntent(data),{orderId,itemId,warehouseId,operationId}=intent;
+ if(custodyV3&&(intent.requestId!==undefined||intent.settlement!=='CLOSE'))
+  fault('V3 保管退貨試點只接受無申請待收、已確認送達的 CLOSE 結案退貨');
  if(db.projectId==='preview-20135'&&(!intent.requestId||intent.settlement!=='CLOSE'))
   fault('Preview 退貨實收必須連結原申請並結案，不自動補送');
  const ref=(n,k)=>db.collection(n).doc(k),movementRef=ref('inventoryMovements','location-return-'+operationId);
@@ -84,8 +91,15 @@ async function commitLocationReturn(db,uid,data,env=process.env){
   }
   if(receipt?.exists)fault('退貨收貨識別碼已用於其他交易','already-exists');
   const context=shipmentDeliveryContext(order,intent,{
-   allowReturns:true,allowCancelledCloseReturn:intent.settlement==='CLOSE',allowMultiReturn:true});
+   allowReturns:true,allowCancelledCloseReturn:intent.settlement==='CLOSE',
+   allowMultiReturn:!custodyV3,allowCustody:custodyV3});
   const {item,productKey,projection,returnProjection,cancelled,whole}=context;
+  if(custodyV3){
+   if(cancelled||whole||!item.custodyTransferId||order.returnRecords.length
+     ||(order.returnRequests??[]).length||order.returnPending===true)
+    fault('V3 保管退貨目前僅接受正常、未申請或未曾退貨的單品項訂單');
+   await require('./custody-delivery-service').readCustodyDeliveryProofs(tx,db,order,context,intent);
+  }
   if(whole&&intent.settlement!=='CLOSE')fault('多品項退貨目前僅支援 CLOSE 結案，訂錯貨請另開新單');
   if(order.returnHistory!==undefined&&!Array.isArray(order.returnHistory))fault('退貨歷史格式不正確');
   assertCancelledCloseReturnContext(order,context);
@@ -106,11 +120,19 @@ async function commitLocationReturn(db,uid,data,env=process.env){
   if(!inv.exists||!stock.exists||!ledgerSnap.exists||!master.exists)fault('退貨公司／分倉／預留／倉庫資料不完整');
   for(const raw of [inv.data(),stock.data()])for(const field of ['onHand','reserved','transferFreeInTransit'])
    qty(raw[field]??(field==='transferFreeInTransit'?0:undefined));
-  if(!reservation.physicalWarehouse({...master.data(),id:warehouseId}))fault('收貨倉不是啟用中的實體倉');
+  if(custodyV3){
+   if(warehouseId!=='custody-'+order.ownerUid||master.data().active===false
+     ||master.data().systemCustody!==true||master.data().warehouseType!=='CUSTODY'
+     ||master.data().ownerUid!==order.ownerUid)
+    fault('V3 退貨只能由原負責業務保管倉收回');
+  }else if(!reservation.physicalWarehouse({...master.data(),id:warehouseId}))
+   fault('收貨倉不是啟用中的實體倉');
   const ledger=ledgerSnap.data();
-  if(ledger.locationSchemaVersion!==2||ledger.warehouseId!==undefined
+  if(ledger.locationSchemaVersion!==(custodyV3?3:2)||ledger.warehouseId!==undefined
    ||ledger.orderId!==orderId||ledger.itemId!==itemId||ledger.productKey!==productKey
    ||ledger.ownerUid!==order.ownerUid||ledger.salesCode!==order.salesCode
+   ||(custodyV3&&(ledger.custodyTransferId!==item.custodyTransferId
+      ||ledger.custodyOriginalQty!==(item.qty??item.orderedQty)))
    ||ledger.status!==(cancelled?'released':qty(ledger.quantity)?'active':qty(ledger.shortageQty)?'shortage':'fulfilled')
    ||qty(ledger.quantity)+qty(ledger.shortageQty)!==(cancelled?0:returnProjection.outstandingQty)
    ||qty(item.shortageQty)!==ledger.shortageQty
@@ -124,16 +146,28 @@ async function commitLocationReturn(db,uid,data,env=process.env){
    .where('warehouseId','==',warehouseId).limit(201));
   if(candidates.size>200)fault('退貨批次超過安全處理上限');
   const lots=candidates.docs.map(s=>({...s.data(),id:s.id}));
-  for(const lot of lots){qty(lot.remainingQty);if(qty(lot.receivedQty)<lot.remainingQty)fault('批次餘量超過原入庫量');}
+  const originalLotQty=lot=>custodyV3?qty(lot.qty):qty(lot.receivedQty);
+  for(const lot of lots){qty(lot.remainingQty);if(originalLotQty(lot)<lot.remainingQty)fault('批次餘量超過原入庫量');}
   // This check must reject a deficit as well as an excess; no synthetic lot repair.
   if(lots.reduce((total,lot)=>qty(total+lot.remainingQty),0)!==stock.data().onHand)fault('分倉實貨與權威批次合計不一致');
   for(const row of plan.allocations){
    const lot=lots.find(l=>l.id===row.lotId);
    if(!lot||String(lot.lotNo||'')!==row.lotNo||String(lot.expiryDate||'')!==row.expiryDate)
     fault('原出貨批次不存在或批號／效期不一致');
+   if(custodyV3){
+    const originalAllocation=shipment.lotAllocations.find(source=>source.lotId===row.lotId);
+    const cost=await tx.get(ref('inventoryLotCosts',row.lotId));
+    if(!originalAllocation||!cost.exists||!originalAllocation.costLotId
+      ||lot.transferId!==item.custodyTransferId||lot.sourceId!==item.custodyTransferId
+      ||lot.sourceType!=='WAREHOUSE_TRANSFER'||lot.costLotId!==originalAllocation.costLotId
+      ||cost.data().productKey!==productKey||cost.data().warehouseId!==warehouseId
+      ||cost.data().sourceId!==item.custodyTransferId
+      ||cost.data().costSourceLotId!==originalAllocation.costLotId)
+     fault('V3 退貨的原出貨批次成本來源不一致');
+   }
   }
   const restoration=inventory.planLotRestoration({productKey,warehouseId,allocations:plan.allocations,lots});
-  if(restoration.some(r=>r.remainingQty>lots.find(l=>l.id===r.lotId).receivedQty))fault('退貨還原量超過原入庫量');
+  if(restoration.some(r=>r.remainingQty>originalLotQty(lots.find(l=>l.id===r.lotId))))fault('退貨還原量超過原入庫量');
   const now=new Date().toISOString();
   const record={id:operationId,orderId,itemId,shipmentId:shipment.id,productKey,warehouseId,
    qty:plan.returnQty,sourceType:'WAREHOUSE_CUSTOMER_RETURN',date:intent.date,reason:intent.reason,
@@ -177,7 +211,7 @@ async function commitLocationReturn(db,uid,data,env=process.env){
    ownerUid:order.ownerUid,salesCode:order.salesCode,createdAt:now,reservedDelta:stockPlan.reservedDelta,
    lotAllocations:plan.allocations,costPending:true,intentHash:intent.hash,returnRecord:record,result,
    // CLOSE creates free stock; REPLACE reserves a customer replacement.
-   ...(intent.settlement==='CLOSE'?{v2FreeStockSource:'CLOSED_CUSTOMER_RETURN',
+   ...(!custodyV3&&intent.settlement==='CLOSE'?{v2FreeStockSource:'CLOSED_CUSTOMER_RETURN',
      freeAllocationQty:plan.returnQty}:{} )});
   return {...result,status:'applied',movementId:movementRef.id};
  });
