@@ -2,6 +2,7 @@
 // Read-only batch/provenance preflight; this is NOT a stock return commit.
 const inventory=require('./shared/inventory-core'),reservation=require('./shared/reservation-core');
 const {createHash}=require('node:crypto');
+const {assertCustomerReturnDatabase}=require('./customer-return-gate');
 function fault(message,code='failed-precondition'){const e=new Error(message);e.code=code;throw e;}
 const fulfillment=require('./shared/fulfillment-core');
 const {normalizeReturnTraceIntent}=fulfillment;
@@ -86,9 +87,8 @@ async function readMultiReturnSource(tx,db,order,intent,context,{ledger=null,inv
    fault('分倉庫存不足以支持整單原預留');
  }
 }
-async function planLocationReturnTrace(db,uid,data){
- if(!process.env.FIRESTORE_EMULATOR_HOST||db.projectId!=='demo-yushin')
-  fault('退貨批次追溯目前僅允許 demo-yushin Emulator');
+async function planLocationReturnTrace(db,uid,data,env=process.env){
+ assertCustomerReturnDatabase(db,env);
  const intent=normalizeReturnTraceIntent(data);
  const {readShipmentActorOrder,shipmentDeliveryContext,readShipmentProof}=require('./shipment-delivery-service');
  return db.runTransaction(async tx=>{

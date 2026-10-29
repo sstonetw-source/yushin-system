@@ -136,3 +136,9 @@ exports.shipV2WarehouseItem=createWarehouseShipmentCallable({onCall,HttpsError,g
 // transaction; the old client writer remains until a later rollout approval.
 const {createOrderLifecycleCallable}=require('./order-lifecycle-preview-callable');
 exports.setV2OrderLifecycle=createOrderLifecycleCallable({onCall,HttpsError,getDatabase:getFirestore});
+
+// Independent, default-closed return Preview; no second inventory writer.
+const {createCustomerReturnCallables}=require('./customer-return-callable');
+const customerReturnCallables=createCustomerReturnCallables({onCall,HttpsError,getDatabase:getFirestore});
+exports.previewV2CustomerReturn=customerReturnCallables.previewV2CustomerReturn;
+exports.receiveV2CustomerReturn=customerReturnCallables.receiveV2CustomerReturn;

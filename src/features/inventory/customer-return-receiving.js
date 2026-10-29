@@ -15,7 +15,7 @@ window.closeCustomerReturnReceipt=function(){
     resetCustomerReturnReceiptView();
 };
 function customerReturnReceiptRecoveryHtml(){
-    if(globalThis.YUSHIN_V2_RETURN_RECEIPT_EMULATOR!==true||!canReceiveInventoryCapability())return '';
+    if(!canReceiveInventoryCapability())return '';
     const prefix='v2-return-receipt:'+encodeURIComponent(currentUser?.uid||'')+':';
     try{
         const rows=[];
@@ -31,7 +31,7 @@ function customerReturnReceiptRecoveryHtml(){
     }catch(error){return `<p role="alert">無法讀取退貨待確認資料：${escapeHtml(error.message)}；請保留原分頁並先核對，勿重新收貨。</p>`;}
 }
 function customerReturnReceiptQueueAction(order,request){
-    if(globalThis.YUSHIN_V2_RETURN_RECEIPT_EMULATOR!==true)
+    if(!customerReturnBackendEnabled())
         return '<span role="status">此出貨來源的退貨收貨尚未開放，申請保留待收。</span>';
     try{
         v2CustomerReturnTransport();

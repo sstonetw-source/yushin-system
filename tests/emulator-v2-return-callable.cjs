@@ -1435,9 +1435,9 @@ function originalReturnReceiptClient(receiver,role,storage,{loseReply=false}={})
  const c=vm.createContext({YUSHIN_V2_RETURN_RECEIPT_EMULATOR:true,location:{hostname:'localhost'},
   currentUser:{uid:receiver.uid},currentUserRole:role,YushinFulfillment:require('../modules/fulfillment-core'),
   canReceiveInventoryCapability:()=>['admin','purchaser','warehouse'].includes(c.currentUserRole),
-  firebase:{auth:()=>receiver.auth,functions:()=>{throw Error('Use compat app regional API');},app:()=>({functions:region=>{assert.equal(region,'asia-east1');return functions;}})},
+  firebase:{auth:()=>receiver.auth,functions:()=>{throw Error('Use compat app regional API');},app:()=>({options:receiver.app.options,functions:region=>{assert.equal(region,'asia-east1');return functions;}})},
   sessionStorage:{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},
-  db:{collection:name=>({doc:id=>({get:async options=>{
+  db:{app:receiver.app,collection:name=>({doc:id=>({get:async options=>{
    assert.equal(options.source,'server');const snap=await getDocFromServer(doc(live,name,id));return {exists:snap.exists(),data:()=>snap.data()};
   }})})}});
  vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/services/customer-return-transport.js'),'utf8'),c);

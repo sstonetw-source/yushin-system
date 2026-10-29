@@ -3,6 +3,7 @@
 const inventory=require('./shared/inventory-core'),reservation=require('./shared/reservation-core');
 const fulfillment=require('./shared/fulfillment-core');
 const {isDeepStrictEqual}=require('node:util');
+const {assertCustomerReturnDatabase}=require('./customer-return-gate');
 const {normalizeLocationReturnIntent,readLocationReturnProofs,assertCancelledCloseReturnContext,readMultiReturnSource}=require('./location-return-trace-service');
 const {readShipmentActorOrder,shipmentDeliveryContext,readShipmentProof}=require('./shipment-delivery-service');
 function fault(message,code='failed-precondition'){const e=new Error(message);e.code=code;throw e;}
@@ -52,9 +53,11 @@ function assertLinkedReceipt(order,intent,record,receipt,uid,actorRole){
   ||!(order.returnRecords??[]).some(row=>isDeepStrictEqual(row,record)))
   fault('退貨申請實收缺少一致的原入庫憑證');
 }
-async function commitLocationReturn(db,uid,data){
- if(!process.env.FIRESTORE_EMULATOR_HOST||db.projectId!=='demo-yushin')fault('實物退貨目前僅允許 demo-yushin Emulator');
+async function commitLocationReturn(db,uid,data,env=process.env){
+ assertCustomerReturnDatabase(db,env);
  const intent=normalizeLocationReturnIntent(data),{orderId,itemId,warehouseId,operationId}=intent;
+ if(db.projectId==='preview-20135'&&(!intent.requestId||intent.settlement!=='CLOSE'))
+  fault('Preview 退貨實收必須連結原申請並結案，不自動補送');
  const ref=(n,k)=>db.collection(n).doc(k),movementRef=ref('inventoryMovements','location-return-'+operationId);
  return db.runTransaction(async tx=>{
   // Logistics may receive a real pending request; unlinked lifecycle authority stays unchanged.
