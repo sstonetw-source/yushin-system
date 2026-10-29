@@ -8,6 +8,14 @@
   const busy=new Set();
   root.resetMainTransferRequests=function(){pendingRequests=[];ready=false;error='';context='';loading=null;busy.clear();};
   function identity(){return currentUser?.uid+'|'+currentUserRole;}
+  root.resumeMainTransferOperation=async function(id,button){
+    if(!purchasing()||busy.has(id))return;busy.add(id);const state=beginActionButton(button,'確認中…');
+    try{await commitMainTransferRequestBackend(id);
+      try{await root.loadMainTransferRequests(true);await loadInventory(true);}
+      catch(_){showActionFeedback('原調撥需求已確認，清單更新失敗，請重新開啟庫存頁。','warning');return;}
+      showActionFeedback('原調撥需求結果已確認。');
+    }catch(err){showActionFeedback(err.message,'warning');}finally{busy.delete(id);endActionButton(button,state);}
+  };
   root.cancelMainTransferRequest=async function(id,button){
     if(!purchasing()||busy.has(id)||!confirm('取消這筆尚未寄出的備貨調回需求，並釋放保留庫存？'))return;
     busy.add(id);const state=beginActionButton(button,'取消中…');
@@ -52,8 +60,10 @@
     const name=id=>warehouseMasterCache.find(w=>w.id===id)?.warehouseName||id;
     const orderRows=needs.map(r=>({source:`訂單需求｜${r.order.orderNo||r.order.quoteNo||'未編單號'}｜${r.order.salesName||''}｜${r.order.customerName||''}`,warehouseId:r.warehouseId,item:r.item,qty:r.qty,action:`<button type="button" onclick="startOrderWarehouseTransfer(${inlineJsValue(r.order.id)},${inlineJsValue(r.item.itemId)},this)" ${r.readyQty<r.qty?'disabled':''}>登記出貨</button>${r.readyQty<r.qty?'<small>待品項到齊並打單</small>':''}`}));
     const stockRows=pendingRequests.map(r=>({source:'主倉備貨',warehouseId:r.fromWarehouseId,item:r,qty:r.qty,action:`<button type="button" onclick="dispatchMainTransferRequest(${inlineJsValue(r.id)},this)">登記出貨</button>${purchasing()?`<button type="button" class="btn-danger" onclick="cancelMainTransferRequest(${inlineJsValue(r.id)},this)">取消需求</button>`:''}`}));
-    body.innerHTML=[...orderRows,...stockRows].map(r=>`<tr><td data-th="來源">${escapeHtml(r.source)}</td><td data-th="分倉">${escapeHtml(name(r.warehouseId))} → ${escapeHtml(name(mainId()))}</td><td data-th="品項">${escapeHtml(r.item.itemCode)}<br>${escapeHtml(r.item.itemName)}</td><td data-th="調回數量">${r.qty}</td><td data-th="操作">${r.action}</td></tr>`).join('');
-    const table=body.closest?.('.inventory-work-table');if(table)table.hidden=ready&&!orderRows.length&&!stockRows.length&&!error;
+    const recovery=purchasing()&&typeof pendingMainTransferOperations==='function'?pendingMainTransferOperations():[];
+    const recoveryHtml=recovery.map(r=>`<tr><td colspan="5">${r.error?escapeHtml(r.error):`前次主倉需求${r.action==='CANCEL'?'取消':'建立'}結果待確認 <button type="button" onclick="resumeMainTransferOperation(${inlineJsValue(r.id)},this)">確認前次結果</button>`}</td></tr>`).join('');
+    body.innerHTML=recoveryHtml+[...orderRows,...stockRows].map(r=>`<tr><td data-th="來源">${escapeHtml(r.source)}</td><td data-th="分倉">${escapeHtml(name(r.warehouseId))} → ${escapeHtml(name(mainId()))}</td><td data-th="品項">${escapeHtml(r.item.itemCode)}<br>${escapeHtml(r.item.itemName)}</td><td data-th="調回數量">${r.qty}</td><td data-th="操作">${r.action}</td></tr>`).join('');
+    const table=body.closest?.('.inventory-work-table');if(table)table.hidden=ready&&!orderRows.length&&!stockRows.length&&!error&&!recovery.length;
     document.getElementById('mainTransferRequestStatus').textContent=error||(!ready?'正在讀取調撥出貨工作…':`${orderRows.length} 筆訂單需求、${stockRows.length} 筆主倉備貨${pendingRequests.length>=50?'（備貨先顯示 50 筆）':''}；實際寄出後按登記出貨，主倉收到後在調撥收貨按已收貨。`);
   };
   const original=root.renderInventoryList;

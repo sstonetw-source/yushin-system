@@ -1,5 +1,7 @@
 // Main-warehouse replenishment requests hold free stock; dispatch/receipt are separate.
 async function createMainTransferRequest({id,inventoryId,fromWarehouseId,qty}) {
+    if(typeof mainTransferBackendRequired==='function'&&mainTransferBackendRequired(id))
+        return commitMainTransferRequestBackend(id,'CREATE',{id,inventoryId,fromWarehouseId,toWarehouseId:defaultWarehouse()?.id||'',qty});
     if(!canManageInventoryStockPolicy()||!canEditPage('inventory'))throw Error('只有採購或管理員可發起主倉備貨調撥。');
     if(typeof id!=='string'||!id.trim()||id.length>128||!Number.isFinite(qty)||qty<=0||qty>1000000)throw Error('調回數量或識別碼不正確。');
     const toWarehouseId=defaultWarehouse()?.id||'',actorUid=currentUser.uid,actorRole=currentUserRole,now=new Date().toISOString();
@@ -25,6 +27,8 @@ async function createMainTransferRequest({id,inventoryId,fromWarehouseId,qty}) {
 }
 
 async function cancelMainTransferRequestRecord(id) {
+    if(typeof mainTransferBackendRequired==='function'&&mainTransferBackendRequired(id))
+        return commitMainTransferRequestBackend(id,'CANCEL',{id});
     if(!canManageInventoryStockPolicy()||!canEditPage('inventory'))throw Error('只有採購或管理員可取消主倉備貨需求。');
     const actorUid=currentUser.uid,actorRole=currentUserRole,now=new Date().toISOString();
     let saved;

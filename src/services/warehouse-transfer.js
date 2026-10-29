@@ -1,5 +1,7 @@
 // Transfer dispatch and receipt are separate physical events, not customer deliveries.
 async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toWarehouseId='',qty,orderId='',itemId='',handoff=false,expectedWarehouseId='',expectedPlan=null,requestId=''}){
+  if(requestId&&typeof pendingMainTransferOperation==='function'&&pendingMainTransferOperation(requestId))
+    throw Error('原主倉需求結果尚未確認，請先確認原操作再寄出。');
   if(!canReceiveInventoryCapability()||!canAccessPage('inventory'))throw Error('無調撥權限。');
   if(!id||!Number.isFinite(qty)||qty<=0)throw Error('調撥資料不正確。');
   const actorUid=currentUser.uid,actorRole=currentUserRole,now=new Date().toISOString(),who=deliveryActor();let saved;
