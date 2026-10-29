@@ -109,6 +109,11 @@ async function commitLocationReturn(db,uid,data,env=process.env,options={}){
   if(warehouseId!==shipment.warehouseId)fault('此試點只能收回原出貨倉，不可跨倉退回');
   await readLocationReturnProofs(tx,db,order,intent,productKey,{closedOnly:cancelled||!!whole});
   const confirmedQty=projection.shipments.find(r=>r.shipmentId===intent.shipmentId)?.confirmedQty??0;
+  if(custodyV3){
+   const selectedQty=intent.selections.reduce((total,row)=>total+row.qty,0);
+   if(!Number.isSafeInteger(selectedQty)||selectedQty<=0||selectedQty>confirmedQty)
+    fault('V3 保管退貨數量超過原出貨已確認送達量');
+  }
   const plan=inventory.planExplicitShipmentReturn({shipment,confirmedQty,selections:intent.selections,
    priorReturns:order.returnRecords.filter(r=>r.shipmentId===shipment.id)});
   const requestPlan=planLocationReturnRequest(order,intent,plan.returnQty);
