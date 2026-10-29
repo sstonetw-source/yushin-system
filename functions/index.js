@@ -148,3 +148,6 @@ const {createCustomerReturnRequestCallables}=require('./customer-return-request-
 const customerReturnRequests=createCustomerReturnRequestCallables({onCall,HttpsError,getDatabase:getFirestore});
 exports.requestV2CustomerReturn=customerReturnRequests.requestV2CustomerReturn;
 exports.withdrawV2CustomerReturnRequest=customerReturnRequests.withdrawV2CustomerReturnRequest;
+
+const {createCancelledPurchaseCallable}=require('./cancelled-purchase-service');
+exports.keepV2CancelledPurchaseStock=createCancelledPurchaseCallable({onCall,HttpsError,getDatabase:getFirestore});
