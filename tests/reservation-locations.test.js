@@ -2,7 +2,7 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),vm=require('node:vm');
 const {planLocationReservation:plan,reservationLocations,planMultiWarehouseReservation:preview}=require('../modules/reservation-core');
-const {planCustodyHandoffLedger,reservationStockDeltas,planReservationIssue}=require('../modules/reservation-core');
+const {planCustodyHandoffLedger,planCustodyLifecycleReservation,reservationStockDeltas,planReservationIssue}=require('../modules/reservation-core');
 function v2CustodySource(){
  return {orderId:'O',itemId:'I',productKey:'P',ownerUid:'OWNER',salesCode:'01',status:'active',
   quantity:3,shortageQty:0,locationSchemaVersion:2,lifecycleWarehouseIds:['A','B'],
@@ -37,6 +37,78 @@ test('V3 custody rejects missing provenance, mismatched owner and altered quanti
   {warehouseId:'A'},{custodyOriginalQty:2}]){
   assert.throws(()=>reservationLocations({...make(),...patch}));
  }
+});
+test('V3 custody cancel and restore keep the original two physical sources and one custody ledger',()=>{
+ const ledger=planCustodyHandoffLedger({reservation:v2CustodySource(),item:{itemId:'I',warehouseId:'A',reservedQty:3},
+  orderId:'O',itemId:'I',productKey:'P',qty:3,ownerUid:'OWNER',transferId:'H'}).reservation;
+ const baseline={productKey:'P',ownerUid:'OWNER',custodyTransferId:'H',
+  aggregateStock:{productKey:'P',onHand:8,reserved:5},
+  custodyStock:{productKey:'P',warehouseId:'custody-OWNER',onHand:3,reserved:3}};
+ const before=structuredClone(ledger);
+ const released=planCustodyLifecycleReservation({...baseline,reservation:ledger,nextStatus:'cancelled',itemReservedQty:3});
+ assert.deepEqual(ledger,before,'pure planner must not change the authoritative document');
+ assert.equal(released.reservation.locationSchemaVersion,3);
+ assert.equal(released.reservation.quantity,0);
+ assert.deepEqual(released.reservation.locations,[]);
+ assert.deepEqual(released.reservation.sourceLocationSnapshot,ledger.sourceLocationSnapshot);
+ assert.equal(released.reservation.custodyTransferId,'H');
+ assert.equal(released.companyReservedDelta,-3);
+ assert.deepEqual(released.warehouseDeltas,[{warehouseId:'custody-OWNER',reservedDelta:-3}]);
+ const afterRelease={...baseline,reservation:released.reservation,itemReservedQty:0,
+  aggregateStock:{...baseline.aggregateStock,reserved:2},custodyStock:{...baseline.custodyStock,reserved:0}};
+ const restored=planCustodyLifecycleReservation({...afterRelease,nextStatus:'normal',targetQty:3});
+ assert.equal(restored.reservation.quantity,3);
+ assert.equal(restored.reservation.status,'active');
+ assert.deepEqual(restored.reservation.sourceLocationSnapshot,ledger.sourceLocationSnapshot);
+ assert.equal(restored.companyReservedDelta,3);
+ assert.deepEqual(restored.warehouseDeltas,[{warehouseId:'custody-OWNER',reservedDelta:3}]);
+ const retry=planCustodyLifecycleReservation({...baseline,reservation:restored.reservation,nextStatus:'normal',targetQty:3,itemReservedQty:3});
+ assert.equal(retry.companyReservedDelta,0);assert.deepEqual(retry.warehouseDeltas,[]);
+});
+test('V3 custody lifecycle rejects forged lineage, stale quantities and shortage of free stock',()=>{
+ const ledger=planCustodyHandoffLedger({reservation:v2CustodySource(),item:{itemId:'I',warehouseId:'A',reservedQty:3},
+  orderId:'O',itemId:'I',productKey:'P',qty:3,ownerUid:'OWNER',transferId:'H'}).reservation;
+ const base={reservation:ledger,productKey:'P',ownerUid:'OWNER',custodyTransferId:'H',
+  itemReservedQty:3,nextStatus:'cancelled',
+  aggregateStock:{productKey:'P',onHand:6,reserved:3},
+  custodyStock:{productKey:'P',warehouseId:'custody-OWNER',onHand:3,reserved:3}};
+ for(const patch of [
+  {ownerUid:'OTHER'},{custodyTransferId:'OTHER'},{productKey:'OTHER'},
+  {itemReservedQty:2},{nextStatus:'deleted'},
+  {reservation:{...ledger,sourceLocationSnapshot:[]}},
+  {reservation:{...ledger,warehouseId:'A'}},
+  {aggregateStock:{productKey:'P',onHand:2,reserved:3}},
+  {custodyStock:{productKey:'P',warehouseId:'custody-OTHER',onHand:3,reserved:3}},
+  {custodyStock:{productKey:'P',warehouseId:'custody-OWNER',onHand:2,reserved:3}}
+ ])assert.throws(()=>planCustodyLifecycleReservation({...base,...patch}));
+ const released=planCustodyLifecycleReservation(base).reservation;
+ const restore={...base,reservation:released,itemReservedQty:0,nextStatus:'normal',targetQty:3,
+  aggregateStock:{productKey:'P',onHand:5,reserved:3},
+  custodyStock:{productKey:'P',warehouseId:'custody-OWNER',onHand:3,reserved:1}};
+ assert.throws(()=>planCustodyLifecycleReservation(restore),/可用量不足/);
+ assert.throws(()=>planCustodyLifecycleReservation({...restore,targetQty:4}),/超過原保管/);
+});
+test('V3 custody cancellation after partial shipment releases only the remaining custody hold',()=>{
+ const initial=planCustodyHandoffLedger({reservation:v2CustodySource(),item:{itemId:'I',warehouseId:'A',reservedQty:3},
+  orderId:'O',itemId:'I',productKey:'P',qty:3,ownerUid:'OWNER',transferId:'H'}).reservation;
+ const issued=planReservationIssue({productKey:'P',warehouseId:'custody-OWNER',qty:2,
+  reservation:initial,itemReservedQty:3,aggregateStock:{onHand:5,reserved:3},
+  warehouseStock:{onHand:3,reserved:3}}).reservation;
+ const afterShipment={reservation:issued,productKey:'P',ownerUid:'OWNER',custodyTransferId:'H',
+  itemReservedQty:1,aggregateStock:{onHand:3,reserved:1},
+  custodyStock:{warehouseId:'custody-OWNER',productKey:'P',onHand:1,reserved:1}};
+ const cancellation=planCustodyLifecycleReservation({...afterShipment,nextStatus:'cancelled'});
+ assert.equal(cancellation.companyReservedDelta,-1);
+ assert.deepEqual(cancellation.warehouseDeltas,[{warehouseId:'custody-OWNER',reservedDelta:-1}]);
+ assert.deepEqual(cancellation.reservation.sourceLocationSnapshot,initial.sourceLocationSnapshot);
+ const afterCancel={...afterShipment,reservation:cancellation.reservation,itemReservedQty:0,
+  aggregateStock:{onHand:3,reserved:0},
+  custodyStock:{warehouseId:'custody-OWNER',productKey:'P',onHand:1,reserved:0}};
+ const restore=planCustodyLifecycleReservation({...afterCancel,nextStatus:'normal',targetQty:1});
+ assert.equal(restore.companyReservedDelta,1);
+ assert.equal(restore.reservation.quantity,1);
+ assert.deepEqual(restore.warehouseDeltas,[{warehouseId:'custody-OWNER',reservedDelta:1}]);
+ assert.throws(()=>planCustodyLifecycleReservation({...afterCancel,nextStatus:'normal',targetQty:3}),/可用量不足/);
 });
 
 function input(patch={}){

@@ -154,6 +154,47 @@
    if(deltas.companyReservedDelta!==0)throw Error('業務保管不得改變公司預留數量。');
    return {reservation:next,plan,warehouseDeltas:deltas.warehouseDeltas};
  }
+ // Pure V3 lifecycle projection. The trusted transaction caller must still
+ // establish the order's unfulfilled quantity, current role, shipment/return
+ // history and lot provenance from authoritative reads before using this plan.
+ function planCustodyLifecycleReservation({reservation,productKey,ownerUid,custodyTransferId,
+   nextStatus,targetQty,itemReservedQty,aggregateStock,custodyStock}={}){
+   if(!reservation||reservation.locationSchemaVersion!==3||!productKey||!ownerUid||!custodyTransferId
+     ||reservation.productKey!==productKey||reservation.ownerUid!==ownerUid
+     ||reservation.custodyTransferId!==custodyTransferId||ownerUid.includes('/')||custodyTransferId.includes('/'))
+     throw Error('V3 保管取消恢復與原交接來源不一致。');
+   if(!['normal','cancelled'].includes(nextStatus))throw Error('保管取消恢復狀態不正確。');
+   const custodyId='custody-'+ownerUid,existing=locationQty(reservation.quantity);
+   // Also validates both immutable physical source legs and the sole custody
+   // position for zero and nonzero holds. Never fall back to a legacy ledger.
+   reservationLocations(reservation);
+   if(itemReservedQty!==existing)throw Error('保管品項與預留憑證數量不一致。');
+   const original=locationQty(reservation.custodyOriginalQty);
+   const target=nextStatus==='cancelled'?0:locationQty(targetQty);
+   if(target>original)throw Error('恢復數量超過原保管交接數量。');
+   const checked=(stock,warehouseId)=>{
+     if(!stock||stock.productKey!==undefined&&stock.productKey!==productKey
+       ||warehouseId&&stock.warehouseId!==warehouseId)
+       throw Error('保管取消恢復缺少正確的公司或保管倉來源。');
+     const onHand=locationQty(stock.onHand),reserved=locationQty(stock.reserved);
+     const transit=locationQty(stock.transferFreeInTransit??0);
+     if(reserved<existing||reserved+transit>onHand)
+       throw Error('公司或保管倉預留與實貨不一致。');
+     return {onHand,reserved,transit};
+   };
+   const company=checked(aggregateStock,''),custody=checked(custodyStock,custodyId);
+   const delta=target-existing;
+   if(delta>0&&(company.onHand-company.reserved-company.transit<delta
+     ||custody.onHand-custody.reserved-custody.transit<delta))
+     throw Error('公司或保管倉可用量不足，不得重複預留。');
+   const next={...reservation,quantity:target,shortageQty:0,
+     locations:target?[{warehouseId:custodyId,reservedQty:target}]:[],
+     status:nextStatus==='cancelled'?'released':target?'active':'fulfilled'};
+   const changes=reservationStockDeltas(reservation,next);
+   if(changes.companyReservedDelta!==delta||changes.warehouseDeltas.some(row=>row.warehouseId!==custodyId))
+     throw Error('保管取消恢復不得改變原雙倉或其他倉的預留。');
+   return {reservation:next,companyReservedDelta:delta,warehouseDeltas:changes.warehouseDeltas};
+ }
  // Resolve a whole-item transfer source without flattening a v2 ledger.
  // This validates source only; it does not authorize a legacy writer to move v2.
  // Resolve every authoritative held location before composing a physical transfer.
@@ -587,5 +628,5 @@
    const plan=planShortageAllocation(reservations,availableQty);
    return {allocations:plan.allocations.map(row=>({...row,id:row.reservationId})),allocatedQty:plan.allocatedQty,unallocatedQty:plan.remainingQty};
  }
- return {orderTransferReservationSource,orderTransferReservationSources,planOrderTransferTarget,planCustodyHandoffLedger,planReservationReceipt,planReservationReturn,planReservationIssue,validateReservationBalance,physicalWarehouse,planMainTransferHold,planReservationLifecycle,reservationStockDeltas,validateMultiLocationLedger,planLocationReservation,reservationLocations,planMultiWarehouseReservation,planReservation,planShortageAllocation,allocateReceiptToShortages,reservationLocationCanChange,selectSingleWarehouse,compareReservationPriority};
+ return {orderTransferReservationSource,orderTransferReservationSources,planOrderTransferTarget,planCustodyHandoffLedger,planCustodyLifecycleReservation,planReservationReceipt,planReservationReturn,planReservationIssue,validateReservationBalance,physicalWarehouse,planMainTransferHold,planReservationLifecycle,reservationStockDeltas,validateMultiLocationLedger,planLocationReservation,reservationLocations,planMultiWarehouseReservation,planReservation,planShortageAllocation,allocateReceiptToShortages,reservationLocationCanChange,selectSingleWarehouse,compareReservationPriority};
 });
