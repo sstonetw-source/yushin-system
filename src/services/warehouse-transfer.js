@@ -1,5 +1,9 @@
 // Transfer dispatch and receipt are separate physical events, not customer deliveries.
 async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toWarehouseId='',qty,orderId='',itemId='',handoff=false,expectedWarehouseId='',expectedPlan=null,requestId=''}){
+  if(orderId&&typeof orderTransferBackendRequired==='function'&&orderTransferBackendRequired('DISPATCH',id,orderId,itemId)){
+    if(handoff)throw Error('業務交接尚未開放後端入口，禁止回退舊交易。');
+    return commitOrderTransferBackend('DISPATCH',id,{id,orderId,itemId,fromWarehouseId:expectedWarehouseId||fromWarehouseId,toWarehouseId,qty,expectedPlan});
+  }
   if(requestId&&typeof pendingMainTransferOperation==='function'&&pendingMainTransferOperation(requestId))
     throw Error('原主倉需求結果尚未確認，請先確認原操作再寄出。');
   if(requestId&&typeof mainTransferPhysicalRequired==='function'&&mainTransferPhysicalRequired('DISPATCH',id,requestId))
@@ -102,6 +106,13 @@ function writeTransferLots(tx,transfer,inventory,now){
   }
 }
 async function commitWarehouseTransferReceipt(id,{onStockCommitted=null}={}){
+  if(typeof orderTransferBackendRequired==='function'&&orderTransferBackendRequired('RECEIVE',id)){
+    const uid=currentUser?.uid,role=currentUserRole;
+    const original=await db.collection('stockTransfers').doc(id).get({source:'server'});
+    if(uid!==currentUser?.uid||role!==currentUserRole)throw Error('核對調撥期間登入身分已變更。');
+    if(original.exists&&original.data().orderTransferIntentHash)return commitOrderTransferBackend('RECEIVE',id);
+    if(original.exists&&original.data().orderId)throw Error('原訂單調撥沒有受控後端憑證，禁止回退舊收貨交易。');
+  }
   if(typeof mainTransferPhysicalRequired==='function'&&mainTransferPhysicalRequired('RECEIVE',id))
     return commitMainTransferPhysicalBackend('RECEIVE',id);
   if(!canReceiveInventoryCapability()||!canAccessPage('inventory'))throw Error('無調撥收貨權限。');let saved;

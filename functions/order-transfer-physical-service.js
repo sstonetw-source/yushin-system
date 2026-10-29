@@ -13,8 +13,14 @@ function orderTransferProject(action,env=process.env){
 }
 function orderTransferIntent(action,data){
  const keys=action==='DISPATCH'?['id','orderId','itemId','fromWarehouseId','toWarehouseId','qty']:action==='RECEIVE'?['id','operationId']:[];
- if(!keys.length||!data||typeof data!=='object'||Array.isArray(data)||Object.keys(data).length!==keys.length||Object.keys(data).some(k=>!keys.includes(k)))fail('訂單調撥欄位不正確','invalid-argument');
+ if(!keys.length||!data||typeof data!=='object'||Array.isArray(data)||keys.some(k=>!Object.hasOwn(data,k))||Object.keys(data).some(k=>!keys.includes(k)&&!(action==='DISPATCH'&&k==='expectedPlan')))fail('訂單調撥欄位不正確','invalid-argument');
  const intent={action};for(const key of keys){if(key==='qty'){if(typeof data.qty!=='number'||!Number.isFinite(data.qty)||data.qty<=0||data.qty>1000000)fail('調撥數量不正確','invalid-argument');intent.qty=data.qty;}else intent[key]=id(data[key]);}
+ if(action==='DISPATCH'&&data.expectedPlan!==undefined){
+  if(!data.expectedPlan||typeof data.expectedPlan!=='object'||Array.isArray(data.expectedPlan))fail('原轉倉設定不正確','invalid-argument');
+  const normalized=logistics.plan(data.expectedPlan);
+  if(Object.keys(data.expectedPlan).sort().join(',')!==Object.keys(normalized).sort().join(',')||Object.entries(normalized).some(([key,value])=>data.expectedPlan[key]!==value))fail('原轉倉設定不是有效快照','invalid-argument');
+  intent.expectedPlan=normalized;
+ }
  if(action==='RECEIVE'&&!/^[A-Za-z0-9_-]{12,96}$/.test(intent.operationId))fail('原收貨操作識別碼不正確','invalid-argument');
  return {...intent,hash:createHash('sha256').update(JSON.stringify(intent)).digest('hex')};
 }
@@ -73,6 +79,7 @@ async function commitOrderTransferPhysical(db,uid,data,action,env=process.env){
   const whFrom=await tx.get(ref('warehouses',from)),whTo=await tx.get(ref('warehouses',to));
   for(const snap of [whFrom,whTo])if(!snap.exists||snap.data().active===false||snap.data().systemCustody||snap.data().warehouseType==='CUSTODY')fail('來源或目的倉不是啟用實體倉');
   if(action==='DISPATCH'){
+   if(intent.expectedPlan&&JSON.stringify(intent.expectedPlan)!==JSON.stringify(plan))fail('原轉倉設定已變更');
    if(!['TRANSFER','PICKUP'].includes(plan.mode)||(plan.warehouseId||(plan.mode==='PICKUP'&&whTo.data().isDefault?to:''))!==to)fail('轉倉設定與目的倉不一致');
    if(plan.mode==='TRANSFER')logistics.validatePlan(plan,true);
   }
