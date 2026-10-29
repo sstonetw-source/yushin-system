@@ -1294,6 +1294,12 @@ window.renderOrdersList = function() {
                     ${window.serviceCaseActionHtml?.(o)||''}
                     ${selfOrderActionHtml(o, allOrderItems, dispatchStateByItem)}
                     ${directShipReceiptActionHtml(o, allOrderItems)}
+                    ${globalThis.YUSHIN_V3_CUSTODY_SHIPMENT_EMULATOR===true
+                        && lifecycle.status==='normal'&&canManageOrderLifecycleCapability()&&canEditPage('orders.list')
+                        && (currentUserRole==='admin'||o.ownerUid===currentUser?.uid)
+                        && allOrderItems.length===1&&allOrderItems[0].custodyTransferId
+                        && allOrderItems[0].warehouseId==='custody-'+o.ownerUid
+                        ? `<button type="button" class="btn-small" onclick="openV3CustodyShipment(${inlineJsValue(o.id)})">業務保管出貨／核對</button>`:''}
                     
                     ${canConfirmOrderDelivery && lifecycle.status === 'normal' && deliveryProgress.state !== 'complete' && (fulfillmentProgress.shippable>0 || deliveryPending) ? `<button type="button" class="btn-small" onclick="${useBatchDelivery ? 'openPartialDeliveryForOrder' : 'quickCompleteDelivery'}(${inlineJsValue(o.id)})" ${orderInventorySyncIncomplete(o) || lifecycle.status !== 'normal' || deliveryPending || deliveryProgress.state === 'complete' || fulfillmentProgress.shippable<=0 ? 'disabled' : ''}>${deliveryPending ? '處理中…' : useBatchDelivery ? '確認分批送達' : '確認送達'}</button>` : ''}
                     ${canBusinessSelfOrder(o) ? `<button type="button" class="btn-small order-billing-action ${o.isBilled ? 'btn-secondary' : ''}" onclick="toggleOrderStatus('${o.id}', 'isBilled', ${!o.isBilled})" ${lifecycle.status !== 'normal' || billingPending ? 'disabled' : ''}>${billingPending ? '儲存中…' : o.isBilled ? '已核銷' : '核銷'}</button>` : ''}

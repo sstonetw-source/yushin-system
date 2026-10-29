@@ -23,6 +23,7 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
     const reservationSnap = await transaction.get(deliveryReservationRef);
     if (!whSnap.exists) throw new Error('指定倉庫沒有這個產品的分倉庫存，請先入庫或以庫存調整建立分倉數量。');
     const custodyV3=reservationSnap.exists&&reservationSnap.data().locationSchemaVersion===3;
+    if(custodyV3)throw new Error('V3 業務保管的實際出貨與客戶送達必須由獨立後端交易完成，禁止舊前端重複扣庫。');
     if(custodyV3&&(warehouseId!=='custody-'+order.ownerUid
       ||order.custodyTransferId!==reservationSnap.data().custodyTransferId))
       throw new Error('V3 業務保管出貨與原交接憑證不一致。');

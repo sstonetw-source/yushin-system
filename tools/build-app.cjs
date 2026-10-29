@@ -59,6 +59,7 @@ const parts = [
   "src/services/cancelled-purchase-transport.js",
   "src/features/inventory/customer-return-receiving.js",
   "src/services/warehouse-shipment.js",
+  "src/services/custody-shipment.js",
   "src/services/warehouse-transfer.js",
   "src/services/main-transfer-request.js",
   "src/services/main-transfer-request-transport.js",

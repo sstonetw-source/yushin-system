@@ -299,7 +299,10 @@ window.saveDeliveryRecord = async function() {
     pendingDeliveryOrderIds.add(orderId);
     if (saveButton) { saveButton.disabled = true; saveButton.textContent = '儲存中…'; }
     try {
-        const savedOrder=await saveOrderDeliveryRecord(orderId,{date,qty,notes,editId,itemId,recordId,shipmentId});
+        const custodyV3=globalThis.YUSHIN_V3_CUSTODY_DELIVERY_EMULATOR===true
+            &&ordersCache.find(row=>row.id===orderId)?.items?.length===1
+            &&!!ordersCache.find(row=>row.id===orderId)?.items?.[0]?.custodyTransferId;
+        const savedOrder=await saveOrderDeliveryRecord(orderId,{date,qty,notes,editId,itemId,recordId,shipmentId,custodyV3});
         const index = ordersCache.findIndex(item => item.id === orderId);
         if (index >= 0) ordersCache[index] = { id: orderId, ...savedOrder };
         resetDeliveryForm();
