@@ -65,21 +65,28 @@ async function fixture(tag){
  put('inventoryLots',prefix+'-OTHER-LOT',{productKey,warehouseId:custody,sourceType:'WAREHOUSE_TRANSFER',
   sourceId:'OTHER-TRANSFER',transferId:'OTHER-TRANSFER',qty:2,remainingQty:2,costLotId:'OTHER-SOURCE'});
  await batch.commit();
- const makeCall=app=>{
+ const makeCalls=app=>{
   const fn=getFunctions(app,'asia-east1');connectFunctionsEmulator(fn,'127.0.0.1',5001);
-  return value=>httpsCallable(fn,'shipV3CustodyItem',{timeout:60000})(value).then(response=>response.data);
+  return{
+   ship:value=>httpsCallable(fn,'shipV3CustodyItem',{timeout:60000})(value).then(response=>response.data),
+   confirm:value=>httpsCallable(fn,'confirmV3CustodyDelivery',{timeout:60000})(value).then(response=>response.data)
+  };
  };
- const call=makeCall(apps[0]),otherCall=makeCall(apps[1]);
+ const ownerCalls=makeCalls(apps[0]),otherCalls=makeCalls(apps[1]);
  const input=(operationId,quantity)=>({orderId,itemId:'I',warehouseId:custody,quantity,
   operationId,syncAttemptId:'sync_1234567890',date:'2026-10-29',notes:'原業務送出',
   expectedPlan:{mode:'CUSTOMER_SHIP',contact:'收件人',phone:'0222334455',
    address:'測試收件地址',warehouseId:'',packages:1,notes:''}});
+ const confirmation=(shipmentId,operationId,quantity)=>({orderId,itemId:'I',shipmentId,operationId,
+  quantity,syncAttemptId:'sync_1234567890',date:'2026-10-30',notes:'客戶已收貨'});
  const read=async(name,key)=>(await db.collection(name).doc(key).get()).data();
  const facts=async()=>({order:await read('orders',orderId),inventory:await read('inventory',encodeURIComponent(productKey)),
   stock:await read('warehouseStocks',encodeURIComponent(custody)+'__'+encodeURIComponent(productKey)),
   ledger:await read('inventoryReservations',orderId+'__I'),lot:await read('inventoryLots',lotId),
   extra:await read('inventoryLots',prefix+'-OTHER-LOT'),cost:await read('inventoryLotCosts',lotId)});
- return{uid,other,orderId,productKey,custody,transferId,lotId,call,otherCall,input,read,facts};
+ return{uid,other,orderId,productKey,custody,transferId,lotId,
+  call:ownerCalls.ship,otherCall:otherCalls.ship,confirm:ownerCalls.confirm,otherConfirm:otherCalls.confirm,
+  input,confirmation,read,facts};
 }
 test('authenticated owner V3 Custody shipment consumes original source and reruns original ID only once',async()=>{
  const f=await fixture('flow');
@@ -110,6 +117,23 @@ test('authenticated owner V3 Custody shipment consumes original source and rerun
  assert.equal((await f.facts()).lot.remainingQty,0);
  assert.equal((await f.facts()).extra.remainingQty,2);
  assert.equal((await f.facts()).order.deliveredQty,0);
+ const beforeConfirmation=await f.facts();
+ const confirmed1=f.confirmation(first.operationId,'custody_delivered_12345',1);
+ const delivered=await f.confirm(confirmed1);
+ assert.equal(delivered.status,'applied');assert.equal(delivered.confirmedQty,1);
+ const afterFirstConfirmation=await f.facts();
+ for(const key of ['inventory','stock','ledger','lot','extra','cost'])
+  assert.deepEqual(afterFirstConfirmation[key],beforeConfirmation[key],key+' is not a delivery-side stock writer');
+ assert.equal(afterFirstConfirmation.order.deliveredQty,1);
+ assert.equal(afterFirstConfirmation.order.items[0].deliveredQty,1);
+ assert.equal(afterFirstConfirmation.order.isDelivered,false);
+ assert.equal((await f.confirm(confirmed1)).status,'already-applied');
+ assert.deepEqual(await f.facts(),afterFirstConfirmation);
+ const confirmed2=f.confirmation('ship_custody_auth_5678','custody_delivered_56789',2);
+ assert.equal((await f.confirm(confirmed2)).status,'applied');
+ assert.equal((await f.facts()).order.deliveredQty,3);
+ assert.equal((await f.facts()).order.isDelivered,true);
+ assert.equal((await f.facts()).inventory.onHand,beforeConfirmation.inventory.onHand);
 });
 test('real Auth rejects other sales and a mutated cost provenance without inventory writes',async()=>{
  const f=await fixture('blocked'),first=f.input('ship_custody_guard_123',1);
@@ -120,4 +144,19 @@ test('real Auth rejects other sales and a mutated cost provenance without invent
  const tampered=await f.facts();
  await assert.rejects(f.call(first),error=>error.code==='functions/failed-precondition');
  assert.deepEqual(await f.facts(),tampered);
+});
+test('real Custody delivery Callable refuses other owner, unshipped quantities and forged physical proof',async()=>{
+ const f=await fixture('delivery-guard'),shipment=f.input('custody_ship_guard_12345',1);
+ await f.call(shipment);
+ const receipt=f.confirmation(shipment.operationId,'custody_ack_guard_12345',1);
+ const before=await f.facts();
+ await assert.rejects(f.otherConfirm(receipt),e=>e.code==='functions/permission-denied');
+ assert.deepEqual(await f.facts(),before);
+ await assert.rejects(f.confirm({...receipt,quantity:2}),e=>e.code==='functions/failed-precondition');
+ assert.deepEqual(await f.facts(),before);
+ await db.collection('inventoryMovements').doc('location-ship-'+shipment.operationId)
+  .update({custodyTransferId:'FORGED'});
+ const altered=await f.facts();
+ await assert.rejects(f.confirm(receipt),e=>e.code==='functions/failed-precondition');
+ assert.deepEqual(await f.facts(),altered);
 });

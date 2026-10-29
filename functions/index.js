@@ -147,6 +147,10 @@ exports.setV3CustodyOrderLifecycle=createCustodyLifecycleCallable({onCall,HttpsE
 const {createCustodyShipmentCallable}=require('./custody-shipment-service');
 exports.shipV3CustodyItem=createCustodyShipmentCallable({onCall,HttpsError,getDatabase:getFirestore});
 
+// V3 customer receipt is separate from Custody stock deduction. Demo only.
+const {createCustodyDeliveryCallable}=require('./custody-delivery-service');
+exports.confirmV3CustodyDelivery=createCustodyDeliveryCallable({onCall,HttpsError,getDatabase:getFirestore});
+
 // Independent, default-closed return Preview; no second inventory writer.
 const {createCustomerReturnCallables}=require('./customer-return-callable');
 const customerReturnCallables=createCustomerReturnCallables({onCall,HttpsError,getDatabase:getFirestore});

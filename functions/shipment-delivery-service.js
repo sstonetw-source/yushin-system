@@ -44,7 +44,7 @@ async function readShipmentActorOrder(tx,db,uid,orderId,roles=['admin','sales','
   if(order.deliveryHistory!==undefined&&!Array.isArray(order.deliveryHistory))fault('送達歷史格式不正確');
   return {actorRole,orderRef,order};
 }
-function shipmentDeliveryContext(order,intent,{allowReturns=false,allowCancelledCloseReturn=false,allowMultiReturn=false}={}) {
+function shipmentDeliveryContext(order,intent,{allowReturns=false,allowCancelledCloseReturn=false,allowMultiReturn=false,allowCustody=false}={}) {
  if(allowMultiReturn&&Array.isArray(order.items)&&order.items.length>1){
   const context=multiShipmentDeliveryContext(order,intent,{allowCancelledCloseReturn:allowReturns&&allowCancelledCloseReturn});
   return {...context,returnProjection:context.projection};
@@ -61,7 +61,7 @@ function shipmentDeliveryContext(order,intent,{allowReturns=false,allowCancelled
   const item=order.items[0],productKey=id(item.inventoryProductKey||item.productId);
   if(item.itemId!==itemId||(item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
    ||String(item.productType||item.type||'').toUpperCase()==='SERVICE'
-   ||item.transferPendingId||item.custodyTransferId||(order.logisticsTransfersPending??0)!==0)
+   ||item.transferPendingId||(item.custodyTransferId&&!allowCustody)||(order.logisticsTransfersPending??0)!==0)
    fault('品項不是可確認的實體倉出貨');
   if(!Array.isArray(order.returnRecords)||(!allowReturns&&(order.returnRecords.length||(item.returnedQty??0)!==0)))
    fault('退貨或補送流程尚未開放');
@@ -140,7 +140,13 @@ async function readWholeOrderShipmentProofs(tx,db,order,intent){
  for(const row of shipments)await readShipmentProof(tx,db,order,
   {...intent,itemId:row.itemId,shipmentId:row.id},row.productKey);
 }
-async function commitShipmentDelivery(db,uid,data,env=process.env){
+async function commitShipmentDelivery(db,uid,data,env=process.env,options={}){
+ const custodyV3=options.allowCustody===true;
+ if(custodyV3){
+  const {custodyDeliveryProject}=require('./custody-delivery-service');
+  if(!custodyDeliveryProject(env)||db.projectId!=='demo-yushin')
+   fault('V3 保管送達確認尚未在此專案啟用');
+ }
  const project=deliveryConfirmationBackendProject(env);
  // Existing direct-Service test fixtures use isolated local demo Firestore.
  // Externally callable requests cannot reach this path without their own gate.
@@ -166,8 +172,14 @@ async function commitShipmentDelivery(db,uid,data,env=process.env){
    fault('此送達操作已有歷史紀錄，不能以原識別碼重新確認');
   const multi=Array.isArray(order.items)&&order.items.length>1;
   const context=multi?multiShipmentDeliveryContext(order,intent):
-   shipmentDeliveryContext(order,intent,{allowReturns:true});
+   shipmentDeliveryContext(order,intent,{allowReturns:true,allowCustody:custodyV3});
   const {item,productKey}=context;
+  if(custodyV3){
+   if(multi||!item.custodyTransferId||order.ownerUid===undefined||order.returnRecords.length
+     ||context.returnProjection.returnedQty!==0)
+    fault('V3 保管送達確認只接受未退貨的單品項業務交接');
+   await require('./custody-delivery-service').readCustodyDeliveryProofs(tx,db,order,context,intent);
+  }
   await readLocationReturnProofs(tx,db,order,intent,productKey,{closedOnly:true});
   // All physical debits are checked, not merely the selected shipment.
   // This prevents a sibling's missing/corrupt immutable debit from being
