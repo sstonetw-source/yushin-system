@@ -420,3 +420,21 @@ test('multi-warehouse batch checks one shared dispatch allowance before submitti
  assert.equal(f.calls.length,2);assert.equal(f.calls[0][1].expectedWarehouseId,'MAIN');assert.equal(f.calls[1][1].expectedWarehouseId,'OTHER');
  assert.deepEqual(f.calls.map(row=>row[1].qty),[3,2]);
 });
+
+test('shared transfer lots preserve original cost references, fractional quantities and custody destinations',()=>{
+ const transfer={id:'T',productKey:'P',productId:'PRODUCT',toWarehouseId:'custody-U',qty:1.5,itemCode:'OLD',itemName:'Name',
+  allocations:[{lotId:'SOURCE',targetLotId:'T-0',costLotId:'ORIGINAL-COST',qty:1.5,lotNo:'LOT',expiryDate:'2027-01-01',unbatched:true}]};
+ const before=structuredClone(transfer),rows=core.transferDestinationLots(transfer,{itemCode:'NEW'},'2026-10-29');
+ assert.deepEqual(transfer,before);assert.equal(rows.length,1);assert.equal(rows[0].lot.remainingQty,1.5);
+ assert.equal(rows[0].lot.warehouseId,'custody-U');assert.equal(rows[0].lot.itemCode,'NEW');assert.equal(rows[0].lot.unbatched,true);
+ assert.equal(rows[0].lot.costLotId,'ORIGINAL-COST');assert.equal(rows[0].cost.costSourceLotId,'ORIGINAL-COST');
+ assert.equal('unitCost' in rows[0].cost,false);assert.equal('cost' in rows[0].lot,false);
+ const changed=core.transferDestinationLots({...transfer,toWarehouseId:'MAIN'},transfer,'2026-10-29');assert.equal(changed[0].lot.lotNo,'LOT');assert.equal(changed[0].lot.expiryDate,'2027-01-01');
+});
+test('shared transfer lots validate all sources before exposing any destination writes',()=>{
+ const transfer={id:'T',productKey:'P',toWarehouseId:'MAIN',qty:2,allocations:[{lotId:'A',targetLotId:'T-0',costLotId:'C',qty:2}]};
+ for(const patch of [{qty:3},{allocations:[]},{allocations:[{...transfer.allocations[0],targetLotId:'OTHER'}]},
+  {allocations:[{...transfer.allocations[0],costLotId:'bad/id'}]},
+  {qty:4,allocations:[transfer.allocations[0],{...transfer.allocations[0],targetLotId:'T-1'}]},
+  {allocations:[{...transfer.allocations[0],qty:NaN}]}])assert.throws(()=>core.transferDestinationLots({...transfer,...patch},{},'date'));
+});

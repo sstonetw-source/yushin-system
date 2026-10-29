@@ -2,7 +2,7 @@
 const {createHash}=require('node:crypto');
 const {mainTransferRequestProject}=require('./main-transfer-request-service');
 const {projectIdFromEnvironment}=require('./grouped-reservation-gate');
-const {planTransferDispatch,planTransferReceipt}=require('./shared/warehouse-logistics');
+const {planTransferDispatch,planTransferReceipt,transferDestinationLots}=require('./shared/warehouse-logistics');
 const {reconcileStockLots,allocateLots}=require('./shared/inventory-core');
 function fault(message,code='failed-precondition'){throw Object.assign(Error(message),{code});}
 function id(v){if(typeof v!=='string'||!v||v!==v.trim()||v.length>160||v.includes('/'))fault('調撥識別碼不正確','invalid-argument');return v;}
@@ -133,10 +133,9 @@ async function commitMainTransferPhysical(db,uid,data,action,env=process.env){
    }
    tx.update(invRef,{...plan.aggregate,updatedAt:now});
    tx.set(toRef,{productKey:key,productId:t.productId,warehouseId:to,itemCode:t.itemCode,itemName:t.itemName,brand:t.brand,brandId:t.brandId,...plan.target,updatedAt:now},{merge:true});
-   for(const a of t.allocations){
-    tx.create(ref('inventoryLots',a.targetLotId),{productKey:key,productId:t.productId,warehouseId:to,lotNo:a.lotNo||'',expiryDate:a.expiryDate||'',qty:a.qty,remainingQty:a.qty,
-     ...(a.unbatched?{unbatched:true}:{}),receivedAt:now,createdAt:now,sourceType:'WAREHOUSE_TRANSFER',sourceId:intent.id,costLotId:a.costLotId,transferId:intent.id,itemCode:t.itemCode,itemName:t.itemName});
-    tx.create(ref('inventoryLotCosts',a.targetLotId),{lotId:a.targetLotId,productKey:key,warehouseId:to,sourceType:'WAREHOUSE_TRANSFER',sourceId:intent.id,costSourceLotId:a.costLotId,createdAt:now});
+   for(const row of transferDestinationLots(t,t,now)){
+    tx.create(ref('inventoryLots',row.lotId),row.lot);
+    tx.create(ref('inventoryLotCosts',row.lotId),row.cost);
    }
    tx.create(inRef,move('warehouse_transfer_in',qty,to));
    tx.create(receiptProofRef,{kind:'MAIN_TRANSFER_RECEIPT',intentHash:intent.hash,transferId:intent.id,actorUid:uid,actorRole:role,createdAt:now});

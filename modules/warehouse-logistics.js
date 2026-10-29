@@ -96,6 +96,31 @@
     return {aggregate:{transferInTransit:company.transferInTransit-qty,transferFreeInTransit:company.transferFreeInTransit-(qty-reservedQty)},
       target:{onHand:target.onHand+qty,reserved:target.reserved+reservedQty,incoming:target.incoming}};
   }
+  // Shared destination-lot projection for main stock transfers and order handoff.
+  // Cost remains a reference to its original source; no cost amount is exposed.
+  function transferDestinationLots(transfer,inventory,now){
+    const id=value=>typeof value==='string'&&!!value&&value===value.trim()&&!value.includes('/');
+    if(!transfer||!id(transfer.id)||!id(transfer.productKey)||!id(transfer.toWarehouseId)
+      ||!Number.isFinite(transfer.qty)||transfer.qty<=0||typeof now!=='string'||!now
+      ||!Array.isArray(transfer.allocations)||!transfer.allocations.length||transfer.allocations.length>201)
+      throw Error('調撥目的倉批次來源不正確。');
+    const seen=new Set();let total=0;
+    const rows=transfer.allocations.map((a,index)=>{
+      if(!a||!id(a.lotId)||!id(a.costLotId)||a.targetLotId!==transfer.id+'-'+index
+        ||seen.has(a.lotId)||!Number.isFinite(a.qty)||a.qty<=0)throw Error('調撥批次重複或數量不正確。');
+      seen.add(a.lotId);total+=a.qty;
+      const lot={productKey:transfer.productKey,productId:transfer.productId,warehouseId:transfer.toWarehouseId,
+        lotNo:a.lotNo||'',expiryDate:a.expiryDate||'',qty:a.qty,remainingQty:a.qty,
+        ...(a.unbatched?{unbatched:true}:{}),receivedAt:now,createdAt:now,sourceType:'WAREHOUSE_TRANSFER',
+        sourceId:transfer.id,costLotId:a.costLotId,transferId:transfer.id,
+        itemCode:inventory.itemCode||transfer.itemCode,itemName:inventory.itemName||transfer.itemName};
+      const cost={lotId:a.targetLotId,productKey:transfer.productKey,warehouseId:transfer.toWarehouseId,
+        sourceType:'WAREHOUSE_TRANSFER',sourceId:transfer.id,costSourceLotId:a.costLotId,createdAt:now};
+      return {lotId:a.targetLotId,lot,cost};
+    });
+    if(Math.abs(total-transfer.qty)>1e-8)throw Error('調撥批次總量不一致。');
+    return rows;
+  }
   function batchJobs(list,getPlan,batchId){
     if(!list.length||list.length>100)throw Error('每批請勾選 1 至 100 個品項。');
     const seen=new Set();
@@ -130,7 +155,7 @@
     if((order.logisticsHistory||[]).some(h=>h.itemId===item.itemId&&h.action==='倉庫調撥收貨'))return '已轉倉・待送客戶';
     return '';
   }
-  const api={transferBalances,planTransferDispatch,planTransferReceipt,modes,plan,executionPlan,transferRequirements,businessDeliveryState,aggregateRows,validatePlan,bundleKey,partition,transferable,batchJobs,processBatch,csvDocument,shippingStatus};root.YushinWarehouseLogistics=api;
+  const api={transferDestinationLots,transferBalances,planTransferDispatch,planTransferReceipt,modes,plan,executionPlan,transferRequirements,businessDeliveryState,aggregateRows,validatePlan,bundleKey,partition,transferable,batchJobs,processBatch,csvDocument,shippingStatus};root.YushinWarehouseLogistics=api;
   if(typeof module==='object'&&module.exports)module.exports=api;
   if(typeof document==='undefined')return;
   const $=id=>document.getElementById(id);

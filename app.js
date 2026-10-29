@@ -21833,10 +21833,9 @@ async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toW
   });return saved;
 }
 function writeTransferLots(tx,transfer,inventory,now){
-  for(const a of transfer.allocations){
-    const ref=db.collection('inventoryLots').doc(a.targetLotId);
-    tx.set(ref,{productKey:transfer.productKey,productId:transfer.productId,warehouseId:transfer.toWarehouseId,lotNo:a.lotNo||'',expiryDate:a.expiryDate||'',qty:a.qty,remainingQty:a.qty,...(a.unbatched?{unbatched:true}:{}),receivedAt:now,createdAt:now,sourceType:'WAREHOUSE_TRANSFER',sourceId:transfer.id,costLotId:a.costLotId,transferId:transfer.id,itemCode:inventory.itemCode||transfer.itemCode,itemName:inventory.itemName||transfer.itemName});
-    tx.set(db.collection('inventoryLotCosts').doc(a.targetLotId),{lotId:a.targetLotId,productKey:transfer.productKey,warehouseId:transfer.toWarehouseId,sourceType:'WAREHOUSE_TRANSFER',sourceId:transfer.id,costSourceLotId:a.costLotId,createdAt:now});
+  for(const row of YushinWarehouseLogistics.transferDestinationLots(transfer,inventory,now)){
+    tx.set(db.collection('inventoryLots').doc(row.lotId),row.lot);
+    tx.set(db.collection('inventoryLotCosts').doc(row.lotId),row.cost);
   }
 }
 async function commitWarehouseTransferReceipt(id,{onStockCommitted=null}={}){
