@@ -31,7 +31,15 @@
     try{const result=await commitMainTransferPhysicalBackend(action,id);
       try{await root.loadMainTransferRequests(true);await root.loadWarehouseTransferQueue(true);await loadInventory(true);}
       catch(_){showActionFeedback('原實貨調撥已確認，清單更新失敗，請重新開啟庫存頁。','warning');return;}
-      showActionFeedback(result.physicalReceiptOnly?'實貨已入庫；缺貨訂單分配尚待後端接線，請保留待分配紀錄。':'原調撥實貨結果已確認。',result.physicalReceiptOnly?'warning':'success');
+      showActionFeedback(result.physicalReceiptOnly?'實貨已入庫；請另按「核對／續傳分配」處理缺貨訂單。':'原調撥實貨結果已確認。',result.physicalReceiptOnly?'warning':'success');
+    }catch(err){showActionFeedback(err.message,'warning');}finally{busy.delete(id);endActionButton(button,state);}
+  };
+  root.resumeMainTransferAllocation=async function(id,button){
+    if(!operational()||busy.has(id))return;busy.add(id);const state=beginActionButton(button,'分配中…');
+    try{const result=await resumeMainTransferAllocationBackend(id);
+      try{await refreshAffectedOrderCaches(result.affectedOrderIds);await loadInventory(true);await root.loadWarehouseTransferQueue(true);}
+      catch(_){showActionFeedback('分配結果已確認，清單更新失敗；請重新開啟庫存頁。','warning');return;}
+      showActionFeedback(result.recoveryPending?'實貨已入庫，分配尚未完成；請沿用原調撥繼續處理。':'此批分配已完成核對，未重複入庫。',result.recoveryPending?'warning':'success');
     }catch(err){showActionFeedback(err.message,'warning');}finally{busy.delete(id);endActionButton(button,state);}
   };
   root.dispatchMainTransferRequest=async function(id,button){
