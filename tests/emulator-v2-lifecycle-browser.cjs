@@ -1781,7 +1781,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
 for(const width of [1280,390])test('full site '+width+'px original multi-item purchasing receipt dispatch shipment and delivery keep same-product lines separate',{timeout:300000},async()=>{
  const x=await multiReceiptSiteFixture(width),context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
  const errors=[],external=[],calls=[],purchaseCalls=[],dialogs=[],logisticsCalls=[],dropLogistics=new Set();let lose=false,losePurchase=true;
- await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_FORMAL_PURCHASE_EMULATOR=true;window.YUSHIN_V2_RECEIVING_EMULATOR=true;window.YUSHIN_V2_DISPATCH_EMULATOR=true;window.YUSHIN_V2_SHIPMENT_EMULATOR=true;window.YUSHIN_V2_DELIVERY_EMULATOR=true;window.YUSHIN_V2_RETURN_RECEIPT_EMULATOR=true;window.YUSHIN_V2_LIFECYCLE_EMULATOR=true;});
+ await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_FORMAL_PURCHASE_EMULATOR=true;window.YUSHIN_V2_PO_INCOMING_EMULATOR=true;window.YUSHIN_V2_RECEIVING_EMULATOR=true;window.YUSHIN_V2_DISPATCH_EMULATOR=true;window.YUSHIN_V2_SHIPMENT_EMULATOR=true;window.YUSHIN_V2_DELIVERY_EMULATOR=true;window.YUSHIN_V2_RETURN_RECEIPT_EMULATOR=true;window.YUSHIN_V2_LIFECYCLE_EMULATOR=true;});
  page.on('pageerror',error=>errors.push(error.message));page.on('dialog',d=>{dialogs.push(d.message());return d.type()==='confirm'?d.accept():d.dismiss();});
  await context.route('**/*',async route=>{
   const request=route.request(),url=new URL(request.url());

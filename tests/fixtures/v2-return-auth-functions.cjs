@@ -21,6 +21,7 @@ const quickPurchase=require(path.join(root,'functions/quick-purchase-callable'))
 module.exports={...standard,prepareV2OrderDispatch:service.prepareV2OrderDispatch,
  shipV2WarehouseItem:service.shipV2WarehouseItem,setV2OrderLifecycle:service.setV2OrderLifecycle,
  receiveV2Supply:service.receiveV2Supply,commitV2FormalPurchase:previewPurchase,commitV2QuickPurchase:quickPurchase,
+ registerV2FormalPurchaseIncoming:service.registerV2FormalPurchaseIncoming,
  commitServiceCaseEvent:service.commitServiceCaseEvent,
  getServiceCaseStatus:service.getServiceCaseStatus,
  getServiceOrderProgress:service.getServiceOrderProgress,
