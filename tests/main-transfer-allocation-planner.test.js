@@ -16,3 +16,9 @@ test('rejects negative quantities, duplicate candidates and oversized batches',(
  assert.throws(()=>planAllocationBatch([row('x','2026-10-01',2),row('x','2026-10-02',1)],3,3));
  assert.throws(()=>planAllocationBatch([row('x','2026-10-01',2)],3,3,16));
 });
+
+test('rejects malformed candidates even when earlier candidates exhaust the batch',()=>{
+ const first=row('a','2026-10-01',1),bad=row('b','2026-10-02',-5);
+ assert.throws(()=>planAllocationBatch([first,bad],1,1,1));
+ assert.throws(()=>planAllocationBatch([first,{...first,orderDate:'2026-10-03'}],1,1,1));
+});
