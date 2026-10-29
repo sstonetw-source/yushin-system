@@ -254,3 +254,7 @@ test('order transfer rejects v2, wrong roles, incomplete preparation, conflictin
  const f=orderTransferFixture();await f.dispatch();let before=f.snapshot();await assert.rejects(commitOrderTransferPhysical(f.db,'U',{...f.send,qty:2},'DISPATCH',orderEnv));assert.equal(f.snapshot(),before);
  f.docs.delete('inventoryLots/L');before=f.snapshot();await assert.rejects(f.receipt());assert.equal(f.snapshot(),before);
 });
+
+test('order transfer receipt refuses reassigned source ownership without moving any stock',async()=>{
+ const f=orderTransferFixture();await f.dispatch();f.docs.get('orders/ORDER').ownerUid='OTHER';const before=f.snapshot();await assert.rejects(f.receipt(),/負責人/);assert.equal(f.snapshot(),before);
+});

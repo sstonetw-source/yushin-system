@@ -53,6 +53,7 @@ async function commitOrderTransferPhysical(db,uid,data,action,env=process.env){
    ||new Set(order.items.map(row=>row?.itemId)).size!==order.items.length)fail('訂單來源不是可調撥狀態');
   if(['deliveryRecords','returnRecords','returnHistory','warehouseShipmentRecords'].some(k=>!Array.isArray(order[k]??[])||(order[k]??[]).length)
    ||(order.deliveredQty??0)!==0||(order.returnedQty??0)!==0||order.isDelivered===true)fail('本入口尚不接受已有履約紀錄的訂單');
+  if(action==='RECEIVE'&&(t.ownerUid!==order.ownerUid||t.salesCode!==order.salesCode))fail('原調撥與目前訂單負責人不一致');
   const index=order.items.findIndex(row=>row.itemId===itemId),item=order.items[index];
   if(!item||item.custodyTransferId||(item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
    ||String(item.productType||item.type||'').toUpperCase()==='SERVICE'||(item.warehouseShippedQty??0)!==0
