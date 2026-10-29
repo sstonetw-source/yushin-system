@@ -185,6 +185,24 @@ test('controlled v2 transfer resolves the actual moving warehouse even when the 
  pending=[{id:input.id,action:'DISPATCH'}];await c.commitWarehouseTransfer(input);
  assert.equal(calls[1].payload,undefined);assert.equal(readCount,2);
 });
+test('V2 salesperson handoff routes the actual held source into the V3 custody backend',async()=>{
+ const f=fixture(),c=f.c,calls=[];
+ const order=f.docs.get('orders/O');order.items[0].deliveryPlan={mode:'PICKUP'};
+ f.docs.set('inventoryReservations/O__A',{orderId:'O',itemId:'A',productKey:'P',ownerUid:'S',salesCode:'01',
+  status:'active',quantity:4,shortageQty:0,locationSchemaVersion:2,lifecycleWarehouseIds:['MAIN','EXT'],
+  locations:[{warehouseId:'EXT',reservedQty:4}]});
+ c.orderTransferBackendRequired=()=>true;c.pendingOrderTransferOperations=()=>[];
+ c.commitOrderTransferBackend=async(action,id,payload)=>{calls.push({action,id,payload});return {status:'applied'};};
+ c.db={collection:name=>({doc:key=>({get:async()=>{const data=f.docs.get(name+'/'+key);
+  return {exists:!!data,data:()=>structuredClone(data)};}})})};
+ const expectedPlan=core.plan({mode:'PICKUP'});
+ await c.commitWarehouseTransfer({id:'V3-HANDOFF',orderId:'O',itemId:'A',qty:4,handoff:true,
+  fromWarehouseId:'MAIN',expectedWarehouseId:'MAIN',expectedPlan});
+ assert.equal(calls[0].action,'HANDOFF');assert.equal(calls[0].payload.fromWarehouseId,'EXT');
+ assert.equal(calls[0].payload.toWarehouseId,'custody-S');assert.equal(calls[0].payload.qty,4);
+ assert.deepEqual(f.docs.get('inventoryReservations/O__A').locations,[{warehouseId:'EXT',reservedQty:4}]);
+ assert.equal(f.docs.has('stockTransfers/V3-HANDOFF'),false);
+});
 test('handoff keeps goods reserved in salesperson custody and does not mark customer delivery or expose them in warehouse shipping queue',async()=>{
  const f=fixture();f.docs.get('orders/O').items[0].deliveryPlan={mode:'PICKUP'};
  await f.c.commitWarehouseTransfer({id:'H',orderId:'O',itemId:'A',qty:4,handoff:true});
