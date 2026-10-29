@@ -51,7 +51,9 @@ async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toW
     if(!handoff&&(!destWh.exists||destWh.data().active===false||destWh.data().systemCustody))throw Error('目的倉庫不存在或已停用。');
     const fromRef=db.collection('warehouseStocks').doc(warehouseStockDocId(fromWarehouseId,key)),toRef=db.collection('warehouseStocks').doc(warehouseStockDocId(toWarehouseId,key));
     const fromSnap=await tx.get(fromRef),toSnap=handoff?await tx.get(toRef):null;if(!fromSnap.exists)throw Error('來源倉庫無此庫存。');
-    const from=fromSnap.data(),reservedQty=orderId?qty:0,heldQty=transferRequest?qty:0;YushinWarehouseLogistics.transferable(from,qty,reservedQty+heldQty);if(heldQty>Number(from.transferReserved||0)||heldQty>Number(inv.transferReserved||0))throw Error('調回保留數量不一致。');
+    const from=fromSnap.data(),reservedQty=orderId?qty:0,heldQty=transferRequest?qty:0;
+    const physicalPlan=handoff?null:YushinWarehouseLogistics.planTransferDispatch({aggregateStock:inv,warehouseStock:from,qty,reservedQty,heldQty});
+    if(handoff)YushinWarehouseLogistics.transferable(from,qty,reservedQty);
     const lotQuery=await firestoreReadWithTimeout(db.collection('inventoryLots').where('productKey','==',key).where('warehouseId','==',fromWarehouseId).limit(201).get(),'調撥批次');
     if(lotQuery.size>200)throw Error('批次超過安全處理上限。');
     const lotSnaps=await Promise.all(lotQuery.docs.map(d=>tx.get(d.ref))),trackedLots=lotSnaps.filter(d=>d.exists).map(d=>({...d.data(),id:d.id}));
@@ -67,7 +69,7 @@ async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toW
     const allocations=allocation.allocations.map((a,n)=>({...a,targetLotId:id+'-'+n,...(lots.find(l=>l.id===a.lotId)?.unbatched?{unbatched:true}:{}),costLotId:lots.find(l=>l.id===a.lotId)?.costLotId||a.lotId}));
     saved={id,...(requestId?{requestId}:{}),inventoryId,productKey:key,productId:inv.productId||key,itemCode:inv.itemCode||item?.itemCode||'',itemName:inv.itemName||item?.itemName||'',brand:inv.brand||'',brandId:inv.brandId||'',fromWarehouseId,toWarehouseId,fromStockId:fromRef.id,toStockId:toRef.id,qty,reservedQty,status:handoff?'RECEIVED':'IN_TRANSIT',kind:handoff?'HANDOFF':'TRANSFER',orderId,itemId,itemIndex:index,orderNo:order?.orderNo||order?.quoteNo||'',salesName:order?.salesName||'',ownerUid:order?.ownerUid||'',salesCode:order?.salesCode||'',allocations,createdAt:now,createdBy:who,createdByUid:actorUid,...(handoff?{receivedAt:now,receivedByUid:actorUid}:{}),deliveryPlan:order?YushinWarehouseLogistics.plan(item.deliveryPlan||order.shippingInstructions||{}):{}};
     tx.set(transferRef,saved);
-    tx.update(fromRef,{onHand:Number(from.onHand)-qty,reserved:Number(from.reserved||0)-reservedQty-heldQty,...(heldQty?{transferReserved:Number(from.transferReserved||0)-heldQty}:{}),updatedAt:now});
+    tx.update(fromRef,{...(physicalPlan?physicalPlan.source:{onHand:Number(from.onHand)-qty,reserved:Number(from.reserved||0)-reservedQty}),updatedAt:now});
     if(reconciled.unbatched){
       const lot=reconciled.unbatched,issued=allocations.find(a=>a.lotId===lot.id)?.qty||0;
       tx.set(unbatchedRef,{productKey:key,productId:inv.productId||key,warehouseId:fromWarehouseId,lotNo:'',expiryDate:'',receivedQty:lot.receivedQty,remainingQty:lot.remainingQty-issued,unbatched:true,sourceType:'MANUAL_STOCK_BALANCE',sourceId:id,receivedAt:now,createdBy:who});
@@ -79,7 +81,7 @@ async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toW
       tx.set(toRef,{productKey:key,productId:inv.productId||key,itemCode:inv.itemCode||'',itemName:inv.itemName||'',brand:inv.brand||'',brandId:inv.brandId||'',warehouseId:toWarehouseId,onHand:Number(target.onHand||0)+qty,reserved:Number(target.reserved||0)+reservedQty,incoming:Number(target.incoming||0),updatedAt:now},{merge:true});
       writeTransferLots(tx,saved,inv,now);
       tx.update(reservationRef,{warehouseId:toWarehouseId,updatedAt:now});
-    }else tx.update(invRef,{...(heldQty?{reserved:Number(inv.reserved||0)-heldQty,transferReserved:Number(inv.transferReserved||0)-heldQty}:{}),transferInTransit:Number(inv.transferInTransit||0)+qty,transferFreeInTransit:Number(inv.transferFreeInTransit||0)+qty-reservedQty,updatedAt:now});
+    }else tx.update(invRef,{...physicalPlan.aggregate,updatedAt:now});
     if(requestRef)tx.update(requestRef,{status:'SHIPPED',transferId:id,shippedAt:now,shippedByUid:actorUid});
     tx.set(db.collection('inventoryMovements').doc(id+'-out'),{type:'warehouse_transfer_out',qty:-qty,productKey:key,warehouseId:fromWarehouseId,fromWarehouseId,toWarehouseId,sourceType:'WAREHOUSE_TRANSFER',sourceId:id,transferId:id,orderId,itemId,createdAt:now,createdBy:who,actorUid});
     if(handoff)tx.set(db.collection('inventoryMovements').doc(id+'-in'),{type:'warehouse_transfer_in',qty,productKey:key,warehouseId:toWarehouseId,fromWarehouseId,toWarehouseId,sourceType:'WAREHOUSE_TRANSFER',sourceId:id,transferId:id,orderId,itemId,createdAt:now,createdBy:who,actorUid});
@@ -104,14 +106,14 @@ async function commitWarehouseTransferReceipt(id,{onStockCommitted=null}={}){
     const ref=db.collection('stockTransfers').doc(id),snap=await tx.get(ref);if(!snap.exists)throw Error('調撥不存在。');const t={...snap.data(),id};saved=t;if(t.status==='RECEIVED')return;if(t.status!=='IN_TRANSIT')throw Error('調撥狀態不可收貨。');
     const invRef=db.collection('inventory').doc(t.inventoryId),whRef=db.collection('warehouseStocks').doc(t.toStockId),invSnap=await tx.get(invRef),whSnap=await tx.get(whRef),destWh=await tx.get(db.collection('warehouses').doc(t.toWarehouseId));
     if(!invSnap.exists||!destWh.exists||destWh.data().active===false)throw Error('目的倉庫或庫存不存在。');const inv=invSnap.data(),wh=whSnap.exists?whSnap.data():{};
-    if(Number(inv.transferInTransit||0)<t.qty||Number(inv.transferFreeInTransit||0)<t.qty-t.reservedQty)throw Error('調撥途中數量不一致。');
+    const physicalPlan=YushinWarehouseLogistics.planTransferReceipt({aggregateStock:inv,warehouseStock:wh,qty:t.qty,reservedQty:t.reservedQty});
     let order=null,orderRef=null,resRef=null;
     if(t.orderId){orderRef=db.collection('orders').doc(t.orderId);const os=await tx.get(orderRef);if(!os.exists)throw Error('來源訂單不存在。');order=os.data();const item=order.items[t.itemIndex];if(!item||item.itemId!==t.itemId||item.transferPendingId!==id||normalizedOrderStatus(order)!=='normal')throw Error('來源訂單或調撥關聯已變更。');resRef=db.collection('inventoryReservations').doc(t.orderId+'__'+t.itemId);const rs=await tx.get(resRef);if(!rs.exists||Number(rs.data().quantity)!==t.reservedQty)throw Error('來源訂單預留不一致。');}
     assertActor();
     const allocation={autoAllocationQty:t.orderId?0:Math.max(0,t.qty-t.reservedQty),autoAllocatedQty:0,allocationCompleted:!!t.orderId||t.qty===t.reservedQty};
     tx.update(ref,{status:'RECEIVED',receivedAt:now,receivedByUid:actorUid,...allocation});saved={...t,status:'RECEIVED',...allocation};
-    tx.update(invRef,{transferInTransit:Number(inv.transferInTransit)-t.qty,transferFreeInTransit:Number(inv.transferFreeInTransit||0)-(t.qty-t.reservedQty),updatedAt:now});
-    tx.set(whRef,{productKey:t.productKey,productId:t.productId,warehouseId:t.toWarehouseId,itemCode:t.itemCode,itemName:t.itemName,brand:t.brand||'',brandId:t.brandId||'',onHand:Number(wh.onHand||0)+t.qty,reserved:Number(wh.reserved||0)+t.reservedQty,incoming:Number(wh.incoming||0),updatedAt:now},{merge:true});writeTransferLots(tx,t,inv,now);
+    tx.update(invRef,{...physicalPlan.aggregate,updatedAt:now});
+    tx.set(whRef,{productKey:t.productKey,productId:t.productId,warehouseId:t.toWarehouseId,itemCode:t.itemCode,itemName:t.itemName,brand:t.brand||'',brandId:t.brandId||'',...physicalPlan.target,updatedAt:now},{merge:true});writeTransferLots(tx,t,inv,now);
     tx.set(db.collection('inventoryMovements').doc(id+'-in'),{type:'warehouse_transfer_in',qty:t.qty,productKey:t.productKey,warehouseId:t.toWarehouseId,fromWarehouseId:t.fromWarehouseId,toWarehouseId:t.toWarehouseId,sourceType:'WAREHOUSE_TRANSFER',sourceId:id,transferId:id,orderId:t.orderId,itemId:t.itemId,createdAt:now,createdBy:actor,actorUid});
     if(order){const items=order.items.map((i,n)=>n===t.itemIndex?{...i,warehouseId:t.toWarehouseId,transferPendingId:''}:i);tx.update(resRef,{warehouseId:t.toWarehouseId,updatedAt:now});tx.update(orderRef,{items,warehouseLogisticsId:id,warehouseLogisticsEventId:id+'-received',logisticsTransfersPending:Math.max(0,Number(order.logisticsTransfersPending||0)-1),logisticsHistory:firebase.firestore.FieldValue.arrayUnion({id:id+'-received',action:'倉庫調撥收貨',itemId:t.itemId,by:actor,at:now,detail:t.toWarehouseId+' × '+t.qty}),...orderWorkIndexFields({...order,items}),updatedAt:now});}
   });

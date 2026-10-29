@@ -156,3 +156,9 @@ const {createMainTransferRequestCallables}=require('./main-transfer-request-serv
 const mainTransferRequests=createMainTransferRequestCallables({onCall,HttpsError,getDatabase:getFirestore});
 exports.createV2MainTransferRequest=mainTransferRequests.createV2MainTransferRequest;
 exports.cancelV2MainTransferRequest=mainTransferRequests.cancelV2MainTransferRequest;
+
+// Physical dispatch and receipt retain independent gates and operation identities.
+const {createMainTransferPhysicalCallables}=require('./main-transfer-physical-service');
+const mainTransferPhysical=createMainTransferPhysicalCallables({onCall,HttpsError,getDatabase:getFirestore});
+exports.dispatchV2MainTransfer=mainTransferPhysical.dispatchV2MainTransfer;
+exports.receiveV2MainTransfer=mainTransferPhysical.receiveV2MainTransfer;

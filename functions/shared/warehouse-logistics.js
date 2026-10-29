@@ -63,6 +63,39 @@
     if(!Number.isFinite(reservedQty)||reservedQty<0||reservedQty>qty)throw Error('預留數量不正確。');
     if(Number(stock.onHand||0)<qty||Number(stock.reserved||0)<reservedQty||Number(stock.onHand||0)-Number(stock.reserved||0)<qty-reservedQty)throw Error('來源倉庫可移動庫存不足。');
   }
+  // Shared physical stock projection; transfer receipt is independent of order allocation.
+  function transferBalances(stock={}){
+    const result={};
+    for(const field of ['onHand','reserved','incoming','transferReserved','transferInTransit','transferFreeInTransit']){
+      const value=stock[field]??0;
+      if(typeof value!=='number'||!Number.isFinite(value)||value<0)throw Error('調撥庫存數量不正確。');
+      result[field]=value;
+    }
+    if(result.transferReserved>result.reserved||result.reserved+result.transferFreeInTransit>result.onHand
+      ||result.transferFreeInTransit>result.transferInTransit)throw Error('調撥庫存彙總不一致。');
+    return result;
+  }
+  function planTransferDispatch({aggregateStock,warehouseStock,qty,reservedQty=0,heldQty=0}){
+    const company=transferBalances(aggregateStock),source=transferBalances(warehouseStock);
+    if(!Number.isFinite(heldQty)||heldQty<0||reservedQty<0||!Number.isFinite(reservedQty)||reservedQty+heldQty>qty)
+      throw Error('調撥預留數量不正確。');
+    transferable(source,qty,reservedQty+heldQty);
+    if(company.onHand<source.onHand||company.reserved<source.reserved||company.transferReserved<source.transferReserved
+      ||source.transferReserved<heldQty||company.transferReserved<heldQty)throw Error('調回保留數量不一致。');
+    return {source:{onHand:source.onHand-qty,reserved:source.reserved-reservedQty-heldQty,
+      ...(heldQty?{transferReserved:source.transferReserved-heldQty}:{})},
+      aggregate:{...(heldQty?{reserved:company.reserved-heldQty,transferReserved:company.transferReserved-heldQty}:{}),
+        transferInTransit:company.transferInTransit+qty,transferFreeInTransit:company.transferFreeInTransit+qty-reservedQty}};
+  }
+  function planTransferReceipt({aggregateStock,warehouseStock={},qty,reservedQty=0}){
+    const company=transferBalances(aggregateStock),target=transferBalances(warehouseStock);
+    if(!Number.isFinite(qty)||qty<=0||!Number.isFinite(reservedQty)||reservedQty<0||reservedQty>qty)
+      throw Error('調撥收貨數量不正確。');
+    if(company.onHand<target.onHand+qty||company.reserved<target.reserved+reservedQty||company.transferInTransit<qty||company.transferFreeInTransit<qty-reservedQty)
+      throw Error('調撥途中數量不一致。');
+    return {aggregate:{transferInTransit:company.transferInTransit-qty,transferFreeInTransit:company.transferFreeInTransit-(qty-reservedQty)},
+      target:{onHand:target.onHand+qty,reserved:target.reserved+reservedQty,incoming:target.incoming}};
+  }
   function batchJobs(list,getPlan,batchId){
     if(!list.length||list.length>100)throw Error('每批請勾選 1 至 100 個品項。');
     const seen=new Set();
@@ -97,7 +130,7 @@
     if((order.logisticsHistory||[]).some(h=>h.itemId===item.itemId&&h.action==='倉庫調撥收貨'))return '已轉倉・待送客戶';
     return '';
   }
-  const api={modes,plan,executionPlan,transferRequirements,businessDeliveryState,aggregateRows,validatePlan,bundleKey,partition,transferable,batchJobs,processBatch,csvDocument,shippingStatus};root.YushinWarehouseLogistics=api;
+  const api={transferBalances,planTransferDispatch,planTransferReceipt,modes,plan,executionPlan,transferRequirements,businessDeliveryState,aggregateRows,validatePlan,bundleKey,partition,transferable,batchJobs,processBatch,csvDocument,shippingStatus};root.YushinWarehouseLogistics=api;
   if(typeof module==='object'&&module.exports)module.exports=api;
   if(typeof document==='undefined')return;
   const $=id=>document.getElementById(id);
