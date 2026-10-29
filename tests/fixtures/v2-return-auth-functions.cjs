@@ -22,6 +22,7 @@ module.exports={...standard,handoffOrderTransfer:service.handoffOrderTransfer,di
  requestV2CustomerReturn:service.requestV2CustomerReturn,withdrawV2CustomerReturnRequest:service.withdrawV2CustomerReturnRequest,
  receiveV2CustomerReturn:service.receiveV2CustomerReturn,prepareV2OrderDispatch:service.prepareV2OrderDispatch,
  shipV2WarehouseItem:service.shipV2WarehouseItem,setV2OrderLifecycle:service.setV2OrderLifecycle,
+ setV3CustodyOrderLifecycle:service.setV3CustodyOrderLifecycle,
  receiveV2Supply:service.receiveV2Supply,commitV2FormalPurchase:previewPurchase,commitV2QuickPurchase:quickPurchase,
  commitServiceCaseEvent:service.commitServiceCaseEvent,
  getServiceCaseStatus:service.getServiceCaseStatus,

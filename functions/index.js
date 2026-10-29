@@ -137,6 +137,11 @@ exports.shipV2WarehouseItem=createWarehouseShipmentCallable({onCall,HttpsError,g
 const {createOrderLifecycleCallable}=require('./order-lifecycle-preview-callable');
 exports.setV2OrderLifecycle=createOrderLifecycleCallable({onCall,HttpsError,getDatabase:getFirestore});
 
+// V3 owner-Custody cancellation/restoration has its own strictly demo-only
+// authority gate until full shipment/return and Preview acceptance is complete.
+const {createCustodyLifecycleCallable}=require('./custody-lifecycle-service');
+exports.setV3CustodyOrderLifecycle=createCustodyLifecycleCallable({onCall,HttpsError,getDatabase:getFirestore});
+
 // Independent, default-closed return Preview; no second inventory writer.
 const {createCustomerReturnCallables}=require('./customer-return-callable');
 const customerReturnCallables=createCustomerReturnCallables({onCall,HttpsError,getDatabase:getFirestore});
