@@ -4,16 +4,29 @@ let customerReturnOrders = [];
 let customerReturnHasMore = false;
 let customerReturnCursor = null;
 function customerCancellationActions(supply) {
+    if(typeof pendingCancelledPurchase==='function'){
+        try{if(pendingCancelledPurchase(supply.id))return `<button type="button" onclick="keepCancelledPurchaseAsStock(${inlineJsValue(supply.id)})">確認前次採購處理結果</button>`;}
+        catch(error){return `<span role="alert">${escapeHtml(error.message)}</span>`;}
+    }
     if(supply.customerCancellationDisposition==='KEEP_STOCK')return `${supplyCancelActionHtml(supply)} <button type="button" onclick="openSupplyReceipt(${inlineJsValue(supply.id)})">到貨入庫</button>`;
     return `<strong>採購待確認</strong><button type="button" class="btn-danger" onclick="confirmSupplierCancellation(${inlineJsValue(supply.id)})">供應商同意取消</button><button type="button" class="btn-secondary" onclick="keepCancelledPurchaseAsStock(${inlineJsValue(supply.id)})">不同意取消・到貨轉庫存</button>`;
 }
 window.confirmSupplierCancellation=async function(id){
     if(!canCreatePurchaseOrderCapability())return;
+    if(typeof pendingCancelledPurchase==='function'&&pendingCancelledPurchase(id))return alert('前次轉備庫結果尚未確認，請先確認原操作。');
     if(!confirm('請確認供應商已同意取消此品項尚未到貨的數量。系統將扣除對應在途數量，保留已到貨及其他品項。'))return;
     await cancelSupplyOutstanding(id);
 };
 window.keepCancelledPurchaseAsStock=async function(id){
     if(!canCreatePurchaseOrderCapability()||customerReturnActionsPending.has(id))return;
+    if(typeof pendingCancelledPurchase==='function'){
+        try{if(pendingCancelledPurchase(id)){
+            customerReturnActionsPending.add(id);
+            try{await commitCancelledPurchaseBackend(id);try{await loadActiveReceivingSupplyCache(true);renderPurchasingView();}catch(_){markMainPageDirty('orders.po');}
+                showActionFeedback('原採購轉備庫已確認，到貨後轉庫存。','success');}
+            finally{customerReturnActionsPending.delete(id);}return;
+        }}catch(error){alert(error.message);return;}
+    }
     const cached=supplyReceivingCache.find(s=>s.id===id);
     await loadWarehouseMaster();
     const direct=cached?.fulfillmentType==='DIRECT_SHIP';

@@ -97,6 +97,8 @@ async function commitCustomerReturnWithdrawal({orderId,requestId}) {
     assertCurrent();return saved;
 }
 async function commitCancelledPurchaseKeepStock({supplyId,warehouseId,expectedDirect}) {
+    if(typeof cancelledPurchaseBackendRequired==='function'&&cancelledPurchaseBackendRequired(supplyId))
+        return commitCancelledPurchaseBackend(supplyId,{supplyId,warehouseId,expectedDirect});
     const {actorUid,assertCurrent}=customerReturnActorContext(()=>canCreatePurchaseOrderCapability());let saved;
     const actor=deliveryActor();
     if(typeof expectedDirect!=='boolean')throw new Error('缺少原採購收貨方式。');
