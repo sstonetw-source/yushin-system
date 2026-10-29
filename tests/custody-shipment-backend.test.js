@@ -1,0 +1,141 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict');
+const {custodyShipmentProject,commitCustodyShipment}=require('../functions/custody-shipment-service');
+const env={GCLOUD_PROJECT:'demo-yushin',FUNCTIONS_EMULATOR:'true',
+ FIRESTORE_EMULATOR_HOST:'127.0.0.1:8080',FIREBASE_AUTH_EMULATOR_HOST:'127.0.0.1:9099',
+ ENABLE_V3_CUSTODY_SHIPMENT_EMULATOR:'true'};
+function fixture(){
+ const owner='SALES',custody='custody-'+owner,orderId='ORDER',itemId='I',productKey='P',transferId='HANDOFF';
+ const docs=new Map(),clone=value=>structuredClone(value),put=(path,data)=>docs.set(path,clone(data));
+ const handoffPlan={mode:'PICKUP',contact:'',phone:'',address:'',warehouseId:'',packages:1,notes:''};
+ put('users/SALES',{role:'sales',active:true});
+ put('users/OTHER',{role:'sales',active:true});
+ put('users/ADMIN',{role:'admin',active:true});
+ put('products/P',{active:true,productType:'Goods'});
+ put('warehouses/'+custody,{active:true,systemCustody:true,warehouseType:'CUSTODY',ownerUid:owner});
+ put('inventory/P',{productKey,onHand:5,reserved:4});
+ put('warehouseStocks/'+custody+'__P',{productKey,warehouseId:custody,onHand:3,reserved:3});
+ put('orders/ORDER',{status:'active',orderStatus:'normal',inventoryReservationStatus:'completed',
+  inventoryReservationAttemptId:'sync_123456789',ownerUid:owner,salesCode:'S01',logisticsTransfersPending:0,
+  warehouseShipmentRecords:[],deliveryRecords:[],returnRecords:[],deliveredQty:0,returnedQty:0,isDelivered:false,
+  items:[{itemId,qty:3,productId:productKey,warehouseId:custody,custodyTransferId:transferId,
+   deliveryPlan:handoffPlan,reservedQty:3,shortageQty:0,dispatchPreparedQty:3,warehouseShippedQty:0}]});
+ put('inventoryReservations/ORDER__I',{orderId,itemId,productKey,ownerUid:owner,salesCode:'S01',
+  locationSchemaVersion:3,quantity:3,shortageQty:0,status:'active',
+  locations:[{warehouseId:custody,reservedQty:3}],lifecycleWarehouseIds:['A','B'],
+  sourceLocationSnapshot:[{warehouseId:'A',reservedQty:3}],custodyOriginalQty:3,custodyTransferId:transferId});
+ const transfer={id:transferId,kind:'HANDOFF',status:'RECEIVED',orderId,itemId,productKey,
+  ownerUid:owner,salesCode:'S01',qty:3,toWarehouseId:custody,deliveryPlan:handoffPlan,
+  reservationLocationSchemaVersion:2,custodyLocationSchemaVersion:3,lifecycleWarehouseIds:['A','B'],
+  sourceLocations:[{warehouseId:'A',qty:3}],orderTransferIntentHash:'handoff-sha',
+  allocations:[{lotId:'ORIGINAL',targetLotId:'HANDOFF-0',qty:3,costLotId:'ORIGINAL'}]};
+ put('stockTransfers/HANDOFF',transfer);
+ put('reservationOperationReceipts/order-transfer-dispatch-HANDOFF',{
+  kind:'ORDER_TRANSFER_DISPATCH',intentHash:'handoff-sha',transfer});
+ put('inventoryMovements/HANDOFF-in',{type:'warehouse_transfer_in',sourceType:'WAREHOUSE_TRANSFER',
+  sourceId:transferId,warehouseId:custody,orderId,itemId,productKey,qty:3});
+ put('inventoryLots/HANDOFF-0',{productKey,warehouseId:custody,sourceId:transferId,transferId,
+  sourceType:'WAREHOUSE_TRANSFER',qty:3,remainingQty:3,costLotId:'ORIGINAL',lotNo:'LOT-01'});
+ put('inventoryLotCosts/HANDOFF-0',{productKey,warehouseId:custody,sourceId:transferId,
+  costSourceLotId:'ORIGINAL',unitCost:218});
+ let failCreate='',writes=0;
+ const db={projectId:'demo-yushin',collection(name){return{
+  doc(id){return{id,path:name+'/'+id};},
+  where(field,operator,value){return{
+   where(field2,operator2,value2){return{limit(max){return{query:{name,field,operator,value,field2,operator2,value2,max}};}};},
+   limit(max){return{query:{name,field,operator,value,max}};}
+  };}
+ };},async runTransaction(fn){
+  const pending=[];
+  const tx={async get(target){
+   if(target.query){const q=target.query;const rows=[...docs].filter(([path,data])=>path.startsWith(q.name+'/')
+    &&data[q.field]===q.value&&(!q.field2||data[q.field2]===q.value2)).slice(0,q.max);
+    return{size:rows.length,empty:!rows.length,docs:rows.map(([path,data])=>({id:path.split('/')[1],data:()=>clone(data)}))};}
+   const data=docs.get(target.path);return{exists:data!==undefined,data:()=>clone(data)};
+  },update(ref,data){pending.push({ref,data:clone(data),create:false});},
+  create(ref,data){pending.push({ref,data:clone(data),create:true});}};
+  const result=await fn(tx),next=new Map([...docs].map(([key,value])=>[key,clone(value)]));
+  for(const row of pending){
+   if(row.create&&(next.has(row.ref.path)||row.ref.path===failCreate))throw Error('create collision');
+   if(!row.create&&!next.has(row.ref.path))throw Error('missing update source');
+   next.set(row.ref.path,{...(next.get(row.ref.path)||{}),...row.data});
+  }
+  docs.clear();for(const [path,data] of next)docs.set(path,data);
+  writes+=pending.length;
+  return result;
+ }};
+ const input=(operationId,quantity=1)=>({orderId,itemId,warehouseId:custody,quantity,date:'2026-10-29',
+  notes:'發貨給客戶',operationId,syncAttemptId:'sync_123456789',
+  expectedPlan:{mode:'CUSTOMER_SHIP',contact:'客戶甲',phone:'0223456789',
+   address:'測試專用收件位置',warehouseId:'',packages:1,notes:''}});
+ return{db,docs,put,input,read:path=>clone(docs.get(path)),snapshot:()=>clone(Object.fromEntries(docs)),
+  writes:()=>writes,failCreate:path=>{failCreate=path;}};
+}
+test('V3 Custody shipment gate is demo Auth/Functions/Firestore Emulator only',()=>{
+ assert.equal(custodyShipmentProject({}),'');
+ assert.equal(custodyShipmentProject({...env,GCLOUD_PROJECT:'production'}),'');
+ assert.equal(custodyShipmentProject({...env,FIREBASE_AUTH_EMULATOR_HOST:'remote:9099'}),'');
+ assert.equal(custodyShipmentProject({...env,FUNCTIONS_EMULATOR:'false'}),'');
+ assert.equal(custodyShipmentProject(env),'demo-yushin');
+});
+test('real V3 source and the shared issue core partially ship, replay and finish without delivery or cost rewrite',async()=>{
+ const f=fixture(),initialCost=f.read('inventoryLotCosts/HANDOFF-0'),original=f.read('stockTransfers/HANDOFF');
+ const first=f.input('custody_ship_1234567',1);
+ const result=await commitCustodyShipment(f.db,'SALES',first,env);
+ assert.equal(result.status,'applied');
+ assert.equal(f.read('inventory/P').onHand,4);
+ assert.equal(f.read('inventory/P').reserved,3);
+ assert.equal(f.read('warehouseStocks/custody-SALES__P').onHand,2);
+ assert.equal(f.read('warehouseStocks/custody-SALES__P').reserved,2);
+ assert.equal(f.read('inventoryReservations/ORDER__I').quantity,2);
+ assert.equal(f.read('inventoryReservations/ORDER__I').custodyOriginalQty,3);
+ assert.equal(f.read('inventoryLots/HANDOFF-0').remainingQty,2);
+ assert.deepEqual(f.read('inventoryLotCosts/HANDOFF-0'),initialCost);
+ assert.deepEqual(f.read('stockTransfers/HANDOFF'),original);
+ const firstRecord=f.read('orders/ORDER').warehouseShipmentRecords[0];
+ assert.equal(firstRecord.custodyTransferId,'HANDOFF');
+ assert.equal(firstRecord.lotAllocations[0].costLotId,'ORIGINAL');
+ assert.equal(f.read('orders/ORDER').deliveredQty,0);
+ assert.deepEqual(f.read('orders/ORDER').deliveryRecords,[]);
+ const snapshot=f.snapshot(),replay=await commitCustodyShipment(f.db,'SALES',first,env);
+ assert.equal(replay.status,'already-applied');assert.deepEqual(f.snapshot(),snapshot);
+ const last=await commitCustodyShipment(f.db,'SALES',f.input('custody_ship_7654321',2),env);
+ assert.equal(last.status,'applied');
+ assert.equal(f.read('inventory/P').onHand,2);assert.equal(f.read('inventory/P').reserved,1);
+ assert.equal(f.read('warehouseStocks/custody-SALES__P').onHand,0);
+ assert.equal(f.read('warehouseStocks/custody-SALES__P').reserved,0);
+ assert.equal(f.read('inventoryReservations/ORDER__I').status,'fulfilled');
+ assert.equal(f.read('orders/ORDER').items[0].warehouseShippedQty,3);
+ assert.equal(f.read('orders/ORDER').isDelivered,false);
+});
+test('V3 Custody rejects forged owner, role, handoff, lot cost, exhausted stock and changed payload without partial writes',async()=>{
+ const scenarios=[
+  ['wrong-owner',f=>({actor:'OTHER'})],
+  ['wrong-role',f=>{f.put('users/SALES',{role:'warehouse',active:true});}],
+  ['wrong-handoff',f=>{f.put('stockTransfers/HANDOFF',{...f.read('stockTransfers/HANDOFF'),qty:4});}],
+  ['missing-handoff',f=>f.docs.delete('inventoryMovements/HANDOFF-in')],
+  ['wrong-cost',f=>{f.put('inventoryLotCosts/HANDOFF-0',{costSourceLotId:'OTHER'});} ],
+  ['wrong-lot',f=>{f.put('inventoryLots/HANDOFF-0',{...f.read('inventoryLots/HANDOFF-0'),costLotId:'OTHER'});} ],
+  ['company-shortage',f=>{f.put('inventory/P',{productKey:'P',onHand:2,reserved:4});}],
+  ['warehouse-shortage',f=>{f.put('warehouseStocks/custody-SALES__P',{productKey:'P',warehouseId:'custody-SALES',onHand:1,reserved:3});}],
+  ['cancelled',f=>{f.put('orders/ORDER',{...f.read('orders/ORDER'),orderStatus:'cancelled'});} ],
+ ];
+ for(const [name,setup] of scenarios){
+  const f=fixture(),opts=setup(f)||{},before=f.snapshot();
+  await assert.rejects(commitCustodyShipment(f.db,opts.actor||'SALES',f.input('custody_guard_1234567'),env),name);
+  assert.deepEqual(f.snapshot(),before,name+' must be atomic and read-only');
+ }
+ const f=fixture(),input=f.input('custody_shipment_replay');
+ await commitCustodyShipment(f.db,'SALES',input,env);
+ const before=f.snapshot();
+ await assert.rejects(commitCustodyShipment(f.db,'SALES',{...input,notes:'另一個客戶'},env),e=>e.code==='already-exists');
+ assert.deepEqual(f.snapshot(),before);
+ await assert.rejects(commitCustodyShipment(f.db,'SALES',f.input('custody_ship_overflow',4),env));
+ assert.deepEqual(f.snapshot(),before);
+});
+test('V3 Custody transaction keeps all writes atomic when immutable movement ID collides',async()=>{
+ const f=fixture(),before=f.snapshot();
+ f.failCreate('inventoryMovements/location-ship-custody_collision_123');
+ await assert.rejects(commitCustodyShipment(f.db,'SALES',f.input('custody_collision_123'),env));
+ assert.deepEqual(f.snapshot(),before);
+});

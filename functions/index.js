@@ -142,6 +142,11 @@ exports.setV2OrderLifecycle=createOrderLifecycleCallable({onCall,HttpsError,getD
 const {createCustodyLifecycleCallable}=require('./custody-lifecycle-service');
 exports.setV3CustodyOrderLifecycle=createCustodyLifecycleCallable({onCall,HttpsError,getDatabase:getFirestore});
 
+// After a verified physical V3 HANDOFF, the owner can separately ship from
+// Custody to the customer.  Demo Auth/Functions/Firestore Emulator only.
+const {createCustodyShipmentCallable}=require('./custody-shipment-service');
+exports.shipV3CustodyItem=createCustodyShipmentCallable({onCall,HttpsError,getDatabase:getFirestore});
+
 // Independent, default-closed return Preview; no second inventory writer.
 const {createCustomerReturnCallables}=require('./customer-return-callable');
 const customerReturnCallables=createCustomerReturnCallables({onCall,HttpsError,getDatabase:getFirestore});
