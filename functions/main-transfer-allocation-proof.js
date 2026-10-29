@@ -1,5 +1,6 @@
 'use strict';
 const {createHash}=require('node:crypto');
+const {normalizePhysicalIntent}=require('./main-transfer-physical-service');
 function fail(message){throw Object.assign(new Error(message),{code:'failed-precondition'});}
 function validId(value){
  if(typeof value!=='string'||!value||value!==value.trim()||value.length>96||value.includes('/'))fail('調撥分配識別碼不正確');
@@ -21,6 +22,10 @@ function assertReceiptReady({transfer,dispatchProof,receiptProof,intent}){
  for(const [key,value] of Object.entries(dispatchProof.transfer)){
   if(key!=='status'&&JSON.stringify(transfer[key])!==JSON.stringify(value))fail('調撥來源已偏離寄出憑證');
  }
+ if(typeof transfer.receiptOperationId!=='string'||!transfer.receiptOperationId
+  ||transfer.receiptIntentHash!==normalizePhysicalIntent('RECEIVE',{
+   id:intent.transferId,operationId:transfer.receiptOperationId}).hash)
+  fail('收貨操作意圖與來源不一致');
  if(!receiptProof||receiptProof.kind!=='MAIN_TRANSFER_RECEIPT'
   ||receiptProof.transferId!==intent.transferId||receiptProof.intentHash!==transfer.receiptIntentHash)fail('缺少可信任收貨憑證');
  if(typeof transfer.qty!=='number'||!Number.isFinite(transfer.qty)||transfer.qty<=0
