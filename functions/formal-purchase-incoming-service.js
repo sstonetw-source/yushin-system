@@ -3,6 +3,7 @@
 // The operation ID is the immutable PO number; there is never a second writer
 // selected when the isolated feature flag is enabled.
 const {projectIdFromEnvironment}=require('./grouped-reservation-gate');
+const {sanitizeSupply}=require('./shared/stock-permissions');
 function fail(code,message){throw Object.assign(new Error(message),{code});}
 function string(value,label){
  if(typeof value!=='string'||!value||value!==value.trim()||value.includes('/')||value.length>120)
@@ -68,10 +69,13 @@ async function registerFormalPurchaseIncoming(db,uid,data,env=process.env){
     ||(supply.fulfillmentType||'WAREHOUSE')!==(source.fulfillmentType||'WAREHOUSE'))
     fail('failed-precondition','正式採購與供應／到貨／已登記在途的來源不一致');
    const mirror=mirrorSnap.exists?mirrorSnap.data():null;
-   if(!mirror||mirror.purchaseDocumentId!==poNo||mirror.orderId!==orderId
+   // Formal PO creates this projection immediately for DIRECT_SHIP only.
+   // WAREHOUSE projection is first created by incoming registration. Do not
+   // allow an existing mirror with conflicting provenance or exposed cost.
+   if(mirror&&(mirror.purchaseDocumentId!==poNo||mirror.orderId!==orderId
     ||mirror.itemId!==itemId||mirror.productKey!==productKey
     ||mirror.qty!==planned||mirror.receivedQty!==0||mirror.incomingRegisteredQty!==0
-    ||Object.hasOwn(mirror,'unitCost')||Object.hasOwn(mirror,'cost')||Object.hasOwn(mirror,'costPrice'))
+    ||Object.hasOwn(mirror,'unitCost')||Object.hasOwn(mirror,'cost')||Object.hasOwn(mirror,'costPrice')))
     fail('failed-precondition','倉管去成本供應檢視與正式供應來源不一致');
    if(!orderCache.has(orderId))orderCache.set(orderId,await tx.get(ref('orders',orderId)));
    const orderSnap=orderCache.get(orderId),order=orderSnap.exists?orderSnap.data():null;
@@ -83,7 +87,7 @@ async function registerFormalPurchaseIncoming(db,uid,data,env=process.env){
    if(!product.exists||product.data().active===false
     ||String(product.data().productType||product.data().type||'').toUpperCase()==='SERVICE')
     fail('failed-precondition','在途商品主檔不存在、停用或不是實體商品');
-   supplies.push({ref:supplyRef,mirrorRef,id:supplyId,data:supply,direct,delta:planned});
+   supplies.push({ref:supplyRef,mirrorRef,mirrorExists:mirrorSnap.exists,id:supplyId,data:supply,direct,delta:planned});
    if(direct)continue;
    if(!warehouseId||warehouseId.startsWith('custody-'))fail('failed-precondition','不能將採購在途寫入保管倉');
    const master=await tx.get(ref('warehouses',warehouseId));
@@ -111,7 +115,9 @@ async function registerFormalPurchaseIncoming(db,uid,data,env=process.env){
   for(const row of supplies){
    if(row.direct){details.push({supplyOrderId:row.id,registeredQty:0});continue;}
    tx.update(row.ref,{incomingRegisteredQty:row.delta,incomingRegisteredAt:now,updatedAt:now});
-   tx.update(row.mirrorRef,{incomingRegisteredQty:row.delta,incomingRegisteredAt:now,updatedAt:now});
+   const mirrorUpdate={incomingRegisteredQty:row.delta,incomingRegisteredAt:now,updatedAt:now};
+   if(row.mirrorExists)tx.update(row.mirrorRef,mirrorUpdate);
+   else tx.create(row.mirrorRef,sanitizeSupply({...row.data,...mirrorUpdate}));
    const data=row.data;
    tx.create(ref('inventoryMovements','po-incoming-'+encodeURIComponent(poNo)+'-'+encodeURIComponent(row.id)),{
     type:'purchase_incoming',qty:row.delta,productKey:data.productKey,productId:data.productId,
