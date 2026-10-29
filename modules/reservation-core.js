@@ -147,7 +147,8 @@
    if(reservation.locationSchemaVersion!==2||reservation.warehouseId!==undefined)
      throw Error('多倉預留版本或單倉欄位不一致。');
    const sources=reservationLocations(reservation);
-   if(!sources.length)throw Error('多倉調撥沒有有效來源倉。');
+   if(!sources.length||sources.some(row=>row.warehouseId.includes('/')||row.warehouseId.startsWith('custody-')))
+     throw Error('多倉調撥來源位置不正確。');
    return {schemaVersion:2,qty,sources};
  }
  // Compatibility guard: existing single-source callers must not silently start moving distributed holds.
