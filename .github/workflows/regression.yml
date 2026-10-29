@@ -95,7 +95,7 @@ jobs:
           distribution: temurin
           java-version: '21'
       - name: Emulator Admin SDK grouped reservation integration
-        run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --test tests/emulator-grouped-reservation.cjs"
+        run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --test tests/emulator-grouped-reservation.cjs tests/emulator-order-reservation.cjs"
       - name: Install Functions runtime for real callable emulator
         run: npm install --prefix functions --no-save --no-package-lock
       - name: Preview Callable Auth + Functions + Firestore Emulator integration
@@ -109,6 +109,10 @@ jobs:
           ENABLE_GROUPED_RESERVATION: "true"
           ENABLE_GROUPED_RESERVATION_SAME_WAREHOUSE: "true"
         run: npx --yes firebase-tools@15 emulators:exec --only firestore,auth,functions --project demo-yushin "node --test --test-name-pattern='explicitly enabled same-warehouse Callable' tests/emulator-grouped-reservation-callable.cjs"
+      - name: Explicit whole-order reservation Callable in isolated Auth Emulator
+        env:
+          ENABLE_ORDER_RESERVATION_BACKEND: "true"
+        run: npx --yes firebase-tools@15 emulators:exec --only firestore,auth,functions --project demo-yushin "node --test --test-name-pattern='explicitly enabled whole-order Callable' tests/emulator-grouped-reservation-callable.cjs"
       - name: Verify v2 Auth Callables and real browser lifecycle handoff in isolated demo Emulator
         run: node tools/run-v2-return-auth-emulator.cjs
       - name: Verify single-item and whole-order dual-warehouse atomic reservation in Emulator

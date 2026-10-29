@@ -33,6 +33,21 @@ exports.commitGroupedWarehouseReservation=onCall({region:'asia-east1'},async req
   }
 });
 
+const {commitOrderReservation}=require('./order-reservation-service');
+const {allowOrderReservationBackend}=require('./order-reservation-gate');
+exports.commitOrderReservationPreview=onCall({region:'asia-east1'},async request=>{
+  if(!allowOrderReservationBackend())
+    throw new HttpsError('failed-precondition','整單後端預留尚未在 Preview 啟用');
+  if(!request.auth?.uid)throw new HttpsError('unauthenticated','請先登入');
+  try{return await commitOrderReservation(getFirestore(),request.auth.uid,request.data);}
+  catch(error){
+    const allowed=['invalid-argument','permission-denied','failed-precondition','not-found','already-exists'];
+    if(allowed.includes(error.code))throw new HttpsError(error.code,error.message);
+    console.error('Order reservation transaction failed',error);
+    throw new HttpsError('internal','整單預留交易失敗');
+  }
+});
+
  
 // Safe transport-only trial. This callable cannot be enabled outside the
 // isolated demo Auth + Firestore Emulator, even by environment flag alone.

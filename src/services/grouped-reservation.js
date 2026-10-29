@@ -11,6 +11,10 @@ function sameWarehouseReservationPreviewEnabled() {
     return groupedReservationPreviewEnabled()
         && globalThis.YUSHIN_PREVIEW_SAME_WAREHOUSE_RESERVATION === true;
 }
+function orderReservationBackendPreviewEnabled() {
+    return APP_ENVIRONMENT === 'preview'
+        && globalThis.YUSHIN_PREVIEW_ORDER_RESERVATION_BACKEND === true;
+}
 function initialGroupedReservationCandidates(order) {
     if (!groupedReservationPreviewEnabled()
         || order?.inventoryReservationStatus !== 'pending'
@@ -40,7 +44,7 @@ function initialGroupedReservationCandidates(order) {
                 && new Set(rows.map(row=>row.warehouseId)).size===1)))
         .map(([productKey,rows])=>({productKey,rows}));
 }
-async function groupedReservationPreviewCallable() {
+async function ensureReservationFunctionsCompat() {
     if (!firebase.functions) {
         if (!groupedReservationFunctionsScriptPromise) {
             groupedReservationFunctionsScriptPromise=new Promise((resolve,reject)=>{
@@ -53,8 +57,33 @@ async function groupedReservationPreviewCallable() {
         }
         await groupedReservationFunctionsScriptPromise;
     }
-    if (!firebase.functions) throw new Error('Firebase Functions 尚未初始化，跨倉同步未提交。');
+    if (!firebase.functions) throw new Error('Firebase Functions 尚未初始化，後端預留未提交。');
+}
+async function groupedReservationPreviewCallable() {
+    await ensureReservationFunctionsCompat();
     return firebase.app().functions('asia-east1').httpsCallable('commitGroupedWarehouseReservation');
+}
+async function commitNewOrderReservationPreview(orderId,liveOrder,actorUid) {
+    if (!orderReservationBackendPreviewEnabled()) return false;
+    if (!actorUid || currentUser?.uid!==actorUid)
+        throw new Error('登入身分已變更，停止後端庫存同步。');
+    const syncAttemptId=String(liveOrder.inventoryReservationAttemptId||'');
+    if (liveOrder.inventoryReservationStatus!=='pending'
+        || !/^[a-zA-Z0-9_-]{12,96}$/.test(syncAttemptId))
+        throw new Error('訂單同步識別碼已變更，請重新讀取。');
+    // Reuse the Functions compat SDK loader; never run a client-side stock
+    // transaction after a failed or ambiguous backend result.
+    await ensureReservationFunctionsCompat();
+    if (!orderReservationBackendPreviewEnabled() || currentUser?.uid!==actorUid)
+        throw new Error('登入身分或測試環境已變更，停止後端庫存同步。');
+    const callable=firebase.app().functions('asia-east1').httpsCallable('commitOrderReservationPreview');
+    const reply=await callable({orderId,syncAttemptId});
+    if (!['applied','already-applied'].includes(reply?.data?.status))
+        throw new Error('後端預留回覆不明確，請重新讀取訂單後以原識別碼重試。');
+    if (currentUser?.uid!==actorUid)
+        throw new Error('後端預留可能已提交，但登入身分已變更，請重新讀取結果。');
+    invalidateProcurementDemandQueue();
+    return true;
 }
 async function commitInitialGroupedReservationPreview(orderId,liveOrder,actorUid) {
     const groups=initialGroupedReservationCandidates(liveOrder);
