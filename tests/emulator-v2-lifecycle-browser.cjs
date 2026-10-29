@@ -2583,6 +2583,41 @@ for(const width of [1280,390])test('full site '+width+'px fifteen-line original 
  }finally{await context.close();}
 });
 
+
+async function assertOriginalTransferStockAndCostProof({tag,key,orderId,from,to,transferId,kind}){
+ const read=async(name,id)=>{const snap=await db.collection(name).doc(id).get();assert.ok(snap.exists,name+'/'+id+' must exist');return snap.data();};
+ const company=await read('inventory',key),source=await read('warehouseStocks',from+'__'+key),destination=await read('warehouseStocks',to+'__'+key);
+ assert.equal(company.onHand,3);assert.equal(company.reserved,3);assert.equal(company.transferInTransit??0,0);
+ assert.equal(source.onHand,0);assert.equal(source.reserved,0);assert.equal(destination.onHand,3);assert.equal(destination.reserved,3);
+ assert.equal(company.onHand,source.onHand+destination.onHand,'company physical balance must equal the two affected locations');
+ assert.equal(company.reserved,source.reserved+destination.reserved,'company holds must equal the two affected locations');
+ const order=await read('orders',orderId),ledger=await read('inventoryReservations',orderId+'__I'),transfer=await read('stockTransfers',transferId);
+ assert.equal(order.items[0].warehouseId,to);assert.equal(order.items[0].reservedQty,3);
+ assert.equal(order.logisticsTransfersPending??0,0);assert.deepEqual(order.deliveryRecords,[]);
+ assert.equal(ledger.warehouseId,to);assert.equal(ledger.quantity,3);assert.equal(ledger.status,'active');
+ assert.equal(transfer.kind,kind);assert.equal(transfer.status,'RECEIVED');assert.equal(transfer.qty,3);assert.equal(transfer.orderId,orderId);
+ assert.equal(transfer.allocations.length,1);assert.equal(transfer.allocations[0].costLotId,tag+'-L');
+ const originLot=await read('inventoryLots',tag+'-L'),movedLot=await read('inventoryLots',transferId+'-0');
+ assert.equal(originLot.remainingQty,0);assert.equal(movedLot.remainingQty,3);
+ assert.equal(movedLot.warehouseId,to);assert.equal(movedLot.lotNo,'SITE');assert.equal(movedLot.expiryDate,'2027-01-01');
+ assert.equal(movedLot.costLotId,tag+'-L');assert.equal(movedLot.sourceId,transferId);
+ const originCost=await read('inventoryLotCosts',tag+'-L'),movedCost=await read('inventoryLotCosts',transferId+'-0');
+ assert.equal(originCost.unitCost,42);assert.equal(originCost.warehouseId,from);
+ assert.equal(movedCost.costSourceLotId,tag+'-L');assert.equal(movedCost.warehouseId,to);assert.equal(movedCost.sourceId,transferId);
+ assert.equal(Object.hasOwn(movedCost,'unitCost'),false,'destination cost is a source reference, not an exposed amount');
+ const out=await read('inventoryMovements',transferId+'-out'),incoming=await read('inventoryMovements',transferId+'-in');
+ assert.equal(out.qty,-3);assert.equal(out.type,'warehouse_transfer_out');assert.equal(out.warehouseId,from);
+ assert.equal(incoming.qty,3);assert.equal(incoming.type,'warehouse_transfer_in');assert.equal(incoming.warehouseId,to);
+ assert.equal(out.sourceId,transferId);assert.equal(incoming.sourceId,transferId);
+ const proof=await read('reservationOperationReceipts','order-transfer-dispatch-'+transferId);
+ assert.equal(proof.transfer.id,transferId);assert.equal(proof.intentHash,transfer.orderTransferIntentHash);
+ if(kind==='TRANSFER'){
+  assert.match(transfer.receiptOperationId,/^[A-Za-z0-9_-]{12,96}$/);
+  const receipt=await read('reservationOperationReceipts','order-transfer-receipt-'+transfer.receiptOperationId);
+  assert.equal(receipt.transferId,transferId);
+ }
+}
+
 for(const width of [1280,390])test('original order transfer '+width+'px keeps source IDs through dropped replies and reload',{timeout:240000},async()=>{
  const tag='order-transfer-site-'+width,uid=tag+'-warehouse',email=uid+'@example.test',key=tag+'-P',orderId=tag+'-O',from=tag+'-A',to=tag+'-MAIN';
  await auth.createUser({uid,email,password});const setup=db.batch(),put=(name,id,data)=>setup.set(db.collection(name).doc(id),data);
@@ -2590,6 +2625,7 @@ for(const width of [1280,390])test('original order transfer '+width+'px keeps so
  put('warehouses',from,{active:true,warehouseName:'測試分倉',contact:'Branch',phone:'123',address:'Taipei'});put('warehouses',to,{active:true,isDefault:true,warehouseName:'測試主倉',contact:'Main',phone:'456',address:'Taipei Main'});
  put('inventory',key,{productKey:key,productId:key,onHand:3,reserved:3});put('warehouseStocks',from+'__'+key,{productKey:key,productId:key,warehouseId:from,onHand:3,reserved:3});
  put('inventoryLots',tag+'-L',{productKey:key,productId:key,warehouseId:from,remainingQty:3,qty:3,lotNo:'SITE',expiryDate:'2027-01-01'});
+  put('inventoryLotCosts',tag+'-L',{lotId:tag+'-L',productKey:key,warehouseId:from,unitCost:42,sourceType:'TEST_RECEIPT',sourceId:tag+'-origin'});
  put('orders',orderId,{orderNo:'YS-'+tag,customerName:'調撥測試客戶',status:'active',orderStatus:'normal',ownerUid:uid,salesCode:uid,salesName:'Warehouse',inventoryReservationStatus:'completed',inventoryReservationAttemptId:tag+'-sync',orderDate:'2026-10-29',workCategories:['delivery'],deliveryRecords:[],returnRecords:[],items:[{itemId:'I',productId:key,productType:'Goods',itemCode:tag,itemName:'調撥驗證商品',qty:3,orderedQty:3,reservedQty:3,shortageQty:0,warehouseId:from,dispatchPreparedQty:3,deliveredQty:0,returnedQty:0,deliveryPlan:{mode:'PICKUP',warehouseId:to}}]});
  put('inventoryReservations',orderId+'__I',{orderId,itemId:'I',productKey:key,warehouseId:from,quantity:3,shortageQty:0,status:'active'});await setup.commit();
  const context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage(),calls=[],errors=[];
@@ -2642,6 +2678,7 @@ for(const width of [1280,390])test('original order transfer '+width+'px keeps so
   const order=(await db.doc('orders/'+orderId).get()).data(),stock=(await db.doc('warehouseStocks/'+to+'__'+key).get()).data();
   assert.equal(order.items[0].warehouseId,to);assert.equal(order.logisticsTransfersPending,0);assert.deepEqual(order.deliveryRecords,[]);assert.equal(stock.onHand,3);assert.equal(stock.reserved,3);
   assert.equal((await db.doc('inventory/'+key).get()).data().onHand,3);assert.equal((await db.doc('inventory/'+key).get()).data().reserved,3);
+  await assertOriginalTransferStockAndCostProof({tag,key,orderId,from,to,transferId,kind:'TRANSFER'});
   assert.equal(await page.evaluate(()=>pendingOrderTransferOperations().length),0);assert.deepEqual(errors,[]);
  }finally{await context.close();}
 });
@@ -2653,6 +2690,7 @@ for(const width of [1280,390])test('original owner handoff '+width+'px keeps sou
  put('warehouses',from,{active:true,isDefault:true,warehouseName:'測試分倉',contact:'Branch',phone:'123',address:'Taipei'});put('warehouses',to,{active:true,warehouseName:'測試主倉',contact:'Main',phone:'456',address:'Taipei Main'});
  put('inventory',key,{productKey:key,productId:key,onHand:3,reserved:3});put('warehouseStocks',from+'__'+key,{productKey:key,productId:key,warehouseId:from,onHand:3,reserved:3});
  put('inventoryLots',tag+'-L',{productKey:key,productId:key,warehouseId:from,remainingQty:3,qty:3,lotNo:'SITE',expiryDate:'2027-01-01'});
+  put('inventoryLotCosts',tag+'-L',{lotId:tag+'-L',productKey:key,warehouseId:from,unitCost:42,sourceType:'TEST_RECEIPT',sourceId:tag+'-origin'});
  put('orders',orderId,{orderNo:'YS-'+tag,customerName:'調撥測試客戶',status:'active',orderStatus:'normal',ownerUid:uid,salesCode:uid,salesName:'Warehouse',inventoryReservationStatus:'completed',inventoryReservationAttemptId:tag+'-sync',orderDate:'2026-10-29',workCategories:['delivery'],deliveryRecords:[],returnRecords:[],items:[{itemId:'I',productId:key,productType:'Goods',itemCode:tag,itemName:'調撥驗證商品',qty:3,orderedQty:3,reservedQty:3,shortageQty:0,warehouseId:from,dispatchPreparedQty:3,deliveredQty:0,returnedQty:0,deliveryPlan:{mode:'SALES_SHIP',contact:'Owner',phone:'123',address:'Taipei'}}]});
  put('inventoryReservations',orderId+'__I',{orderId,itemId:'I',productKey:key,warehouseId:from,quantity:3,shortageQty:0,status:'active'});await setup.commit();
  const context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage(),calls=[],errors=[];
@@ -2701,6 +2739,7 @@ for(const width of [1280,390])test('original owner handoff '+width+'px keeps sou
   assert.equal(order.items[0].warehouseId,target);assert.deepEqual(order.deliveryRecords,[]);
   assert.equal((await db.doc('inventory/'+key).get()).data().onHand,3);assert.equal((await db.doc('inventory/'+key).get()).data().reserved,3);
   const stock=(await db.doc('warehouseStocks/'+target+'__'+key).get()).data();assert.equal(stock.onHand,3);assert.equal(stock.reserved,3);
+  await assertOriginalTransferStockAndCostProof({tag,key,orderId,from,to:target,transferId:calls[0].payload.id,kind:'HANDOFF'});
   assert.deepEqual(errors,[]);
  }finally{await context.close();}
 });
