@@ -151,3 +151,8 @@ exports.withdrawV2CustomerReturnRequest=customerReturnRequests.withdrawV2Custome
 
 const {createCancelledPurchaseCallable}=require('./cancelled-purchase-service');
 exports.keepV2CancelledPurchaseStock=createCancelledPurchaseCallable({onCall,HttpsError,getDatabase:getFirestore});
+
+const {createMainTransferRequestCallables}=require('./main-transfer-request-service');
+const mainTransferRequests=createMainTransferRequestCallables({onCall,HttpsError,getDatabase:getFirestore});
+exports.createV2MainTransferRequest=mainTransferRequests.createV2MainTransferRequest;
+exports.cancelV2MainTransferRequest=mainTransferRequests.cancelV2MainTransferRequest;
