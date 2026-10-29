@@ -53,6 +53,7 @@ async function registerFormalPurchaseIncoming(db,uid,data,env=process.env){
    const source=po.items[i],supplyId='po-'+encodeURIComponent(poNo)+'-'+i;
    if(po.supplyOrderIds[i]!==supplyId)fail('failed-precondition','原供應 ID 與採購列不一致');
    const supplyRef=ref('supplyOrders',supplyId),snap=await tx.get(supplyRef);
+   const mirrorRef=ref('receivingSupplyOrders',supplyId),mirrorSnap=await tx.get(mirrorRef);
    const supply=snap.exists?snap.data():null;
    const orderId=string(source.orderId,'訂單'),itemId=string(source.itemId,'訂單品項');
    const productId=string(source.productId,'商品'),productKey=string(source.productKey||productId,'庫存商品');
@@ -66,6 +67,12 @@ async function registerFormalPurchaseIncoming(db,uid,data,env=process.env){
     ||supply.incomingRegisteredQty!==0||supply.warehouseId!==warehouseId
     ||(supply.fulfillmentType||'WAREHOUSE')!==(source.fulfillmentType||'WAREHOUSE'))
     fail('failed-precondition','正式採購與供應／到貨／已登記在途的來源不一致');
+   const mirror=mirrorSnap.exists?mirrorSnap.data():null;
+   if(!mirror||mirror.purchaseDocumentId!==poNo||mirror.orderId!==orderId
+    ||mirror.itemId!==itemId||mirror.productKey!==productKey
+    ||mirror.qty!==planned||mirror.receivedQty!==0||mirror.incomingRegisteredQty!==0
+    ||Object.hasOwn(mirror,'unitCost')||Object.hasOwn(mirror,'cost')||Object.hasOwn(mirror,'costPrice'))
+    fail('failed-precondition','倉管去成本供應檢視與正式供應來源不一致');
    if(!orderCache.has(orderId))orderCache.set(orderId,await tx.get(ref('orders',orderId)));
    const orderSnap=orderCache.get(orderId),order=orderSnap.exists?orderSnap.data():null;
    const item=order?.items?.find(row=>row.itemId===itemId);
@@ -76,7 +83,7 @@ async function registerFormalPurchaseIncoming(db,uid,data,env=process.env){
    if(!product.exists||product.data().active===false
     ||String(product.data().productType||product.data().type||'').toUpperCase()==='SERVICE')
     fail('failed-precondition','在途商品主檔不存在、停用或不是實體商品');
-   supplies.push({ref:supplyRef,id:supplyId,data:supply,direct,delta:planned});
+   supplies.push({ref:supplyRef,mirrorRef,id:supplyId,data:supply,direct,delta:planned});
    if(direct)continue;
    if(!warehouseId||warehouseId.startsWith('custody-'))fail('failed-precondition','不能將採購在途寫入保管倉');
    const master=await tx.get(ref('warehouses',warehouseId));
@@ -104,6 +111,7 @@ async function registerFormalPurchaseIncoming(db,uid,data,env=process.env){
   for(const row of supplies){
    if(row.direct){details.push({supplyOrderId:row.id,registeredQty:0});continue;}
    tx.update(row.ref,{incomingRegisteredQty:row.delta,incomingRegisteredAt:now,updatedAt:now});
+   tx.update(row.mirrorRef,{incomingRegisteredQty:row.delta,incomingRegisteredAt:now,updatedAt:now});
    const data=row.data;
    tx.create(ref('inventoryMovements','po-incoming-'+encodeURIComponent(poNo)+'-'+encodeURIComponent(row.id)),{
     type:'purchase_incoming',qty:row.delta,productKey:data.productKey,productId:data.productId,

@@ -14,10 +14,14 @@ function fixture(){
  put('orders','O',{items:lines.map(l=>({itemId:l.itemId,productId:'P',supplyOrderedQty:l.qty}))});
  put('purchaseOrders','PO-1',{poNo:'PO-1',status:'ORDERED',serverCommitHash:'hash',
   documentOnly:false,items:lines,supplyOrderIds:lines.map((_,i)=>'po-PO-1-'+i)});
- lines.forEach((l,i)=>put('supplyOrders','po-PO-1-'+i,{type:'PURCHASING_PO',status:'ORDERED',
+ lines.forEach((l,i)=>{
+  const supply={type:'PURCHASING_PO',status:'ORDERED',
   purchaseDocumentId:'PO-1',sourceType:'SALES_ORDER',orderId:'O',itemId:l.itemId,productId:'P',
   productKey:'P',sourceId:'O',sourceItemId:l.itemId,qty:l.qty,receivedQty:0,incomingRegisteredQty:0,warehouseId:l.warehouseId,
-  fulfillmentType:'WAREHOUSE',brand:'B',brandId:'B',itemCode:'P',itemName:'Product'}));
+  fulfillmentType:'WAREHOUSE',brand:'B',brandId:'B',itemCode:'P',itemName:'Product'};
+  put('supplyOrders','po-PO-1-'+i,{...supply,unitCost:10});
+  put('receivingSupplyOrders','po-PO-1-'+i,supply);
+ });
  for(const id of ['A','B'])put('warehouses',id,{active:true,systemCustody:false});
  put('inventory','P',{productKey:'P',productId:'P',onHand:5,reserved:2,incoming:0,lots:['LOT']});
  put('warehouseStocks','A__P',{productKey:'P',productId:'P',warehouseId:'A',onHand:3,reserved:1,incoming:0});
@@ -51,12 +55,14 @@ test('one PO atomically credits shared-product company, two warehouses and three
  assert.deepEqual([x.docs.get('inventory/P').onHand,x.docs.get('inventory/P').reserved],[5,2]);
  assert.equal([...x.docs.keys()].filter(k=>k.startsWith('inventoryMovements/po-incoming-')).length,3);
  assert.deepEqual([0,1,2].map(i=>x.docs.get('supplyOrders/po-PO-1-'+i).incomingRegisteredQty),[2,1,4]);
+ assert.deepEqual([0,1,2].map(i=>x.docs.get('receivingSupplyOrders/po-PO-1-'+i).incomingRegisteredQty),[2,1,4]);
+ assert.equal(x.docs.get('receivingSupplyOrders/po-PO-1-0').unitCost,undefined);
  const before=structuredClone([...x.docs.entries()]);
  assert.equal((await registerFormalPurchaseIncoming(x.db,'buyer',{poNo:'PO-1'},env)).status,'already-applied');
  assert.deepEqual([...x.docs.entries()],before);
 });
 test('missing last source, previous client incoming and unauthorized actor all leave PO wholly unchanged',async()=>{
- for(const mode of ['supply','already','permission','warehouse','quantity','foreign']){
+ for(const mode of ['supply','already','permission','warehouse','quantity','foreign','mirror']){
   const x=fixture();
   if(mode==='supply')x.docs.delete('supplyOrders/po-PO-1-2');
   if(mode==='already')x.docs.get('supplyOrders/po-PO-1-1').incomingRegisteredQty=1;
@@ -64,6 +70,7 @@ test('missing last source, previous client incoming and unauthorized actor all l
   if(mode==='warehouse')x.docs.get('warehouses/B').systemCustody=true;
   if(mode==='quantity')x.docs.get('inventory/P').incoming=-1;
   if(mode==='foreign')x.db.projectId='yu-shing-company';
+  if(mode==='mirror')x.docs.delete('receivingSupplyOrders/po-PO-1-2');
   const before=structuredClone([...x.docs.entries()]);
   await assert.rejects(registerFormalPurchaseIncoming(x.db,'buyer',{poNo:'PO-1'},env));
   assert.deepEqual([...x.docs.entries()],before,mode);
