@@ -1,6 +1,18 @@
 // Central authority for cancellation/restoration of an order and its stock holds.
+function lifecycleProtectedMode(){
+ return globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true
+  ||globalThis.YUSHIN_PREVIEW_ORDER_LIFECYCLE===true
+  ||(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview');
+}
+function assertNoPendingV2LifecycleBeforeLegacyWrite(orderId){
+ if(typeof sessionStorage==='undefined'||!currentUser?.uid)return;
+ const key='v2-lifecycle:'+encodeURIComponent(currentUser.uid)+':'+encodeURIComponent(orderId);
+ if(sessionStorage.getItem(key)!==null)
+  throw Error('前次 v2 取消／恢復尚未確認，禁止改用舊交易；請恢復原受控環境以原識別碼核對。');
+}
 async function setOrderLifecycleStatus(orderId,nextStatus,details=null) {
-    if(globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true)return setV2OrderLifecycleEmulator(orderId,nextStatus,details);
+    if(lifecycleProtectedMode())return setV2OrderLifecycleEmulator(orderId,nextStatus,details);
+    assertNoPendingV2LifecycleBeforeLegacyWrite(orderId);
     if(!['normal','cancelled'].includes(nextStatus))throw new Error('不支援的訂單狀態。');
     // Quick actions change status only; the form may also amend date/reason.
     const date=details===null?localDateString():details.date;
@@ -52,7 +64,7 @@ async function setOrderLifecycleStatus(orderId,nextStatus,details=null) {
 
 // Transport only: the existing backend lifecycle Service owns every stock change.
 function pendingV2OrderLifecycle(orderId){
- if(globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR!==true)return null;
+ if(!lifecycleProtectedMode())return null;
  const raw=sessionStorage.getItem('v2-lifecycle:'+encodeURIComponent(currentUser?.uid||'')+':'+encodeURIComponent(orderId));
  if(!raw)return null;
  try{
@@ -66,12 +78,25 @@ function pendingV2OrderLifecycle(orderId){
 }
 async function setV2OrderLifecycleEmulator(orderId,nextStatus,details=null){
  const local=host=>host==='localhost'||host==='127.0.0.1';
- if(globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR!==true||!local(globalThis.location?.hostname)
-  ||typeof firebase==='undefined'||!firebase.auth||!firebase.functions)throw Error('v2 取消／恢復僅限本機 Emulator。');
+ const emulator=globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true;
+ const preview=typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'
+  &&globalThis.YUSHIN_PREVIEW_ORDER_LIFECYCLE===true;
+ const host=String(globalThis.location?.hostname||'').toLowerCase();
+ if((!emulator&&!preview)||(emulator&&!local(host))
+  ||(preview&&!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(host))
+  ||typeof firebase==='undefined'||!firebase.auth||!firebase.functions)
+  throw Error('取消／恢復後端尚未在此 Preview／Emulator 獲准啟用，禁止改用舊交易。');
  const auth=firebase.auth(),functions=firebase.app().functions('asia-east1'),uid=currentUser?.uid,role=currentUserRole;
- if(auth.app?.options?.projectId!=='demo-yushin'||functions.app?.options?.projectId!=='demo-yushin'
-  ||!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099)
-  throw Error('v2 取消／恢復只允許本機 demo-yushin Auth／Functions Emulator。');
+ if(emulator){
+  if(auth.app?.options?.projectId!=='demo-yushin'||functions.app?.options?.projectId!=='demo-yushin'
+   ||!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099)
+   throw Error('v2 取消／恢復只允許本機 demo-yushin Auth／Functions Emulator。');
+ }else if(firebase.app().options?.projectId!=='preview-20135'
+  ||auth.app?.options?.projectId!=='preview-20135'
+  ||functions.app?.options?.projectId!=='preview-20135'
+  ||typeof db==='undefined'||db.app?.options?.projectId!=='preview-20135'
+  ||!!auth.emulatorConfig)
+  throw Error('取消／恢復 Auth、Functions 與資料庫專案不一致，未提交交易。');
  const check=()=>{
   if(!uid||auth.currentUser?.uid!==uid||currentUser?.uid!==uid||currentUserRole!==role
    ||!['admin','sales','engineer'].includes(role)||!canManageOrderLifecycleCapability()||!canEditPage('orders.list'))
@@ -113,7 +138,7 @@ async function setV2OrderLifecycleEmulator(orderId,nextStatus,details=null){
    syncAttemptId:order.inventoryReservationAttemptId,actorUid:uid,actorRole:role};
   sessionStorage.setItem(key,JSON.stringify(frozen));
  }
- check();functions.useEmulator('127.0.0.1',5001);
+ check();if(emulator)functions.useEmulator('127.0.0.1',5001);
  const {actorUid,actorRole,...payload}=frozen;
  const response=await functions.httpsCallable('setV2OrderLifecycle')(payload);check();
  const result=response?.data;

@@ -7,6 +7,7 @@
 const {createHash}=require('node:crypto');
 const reservationCore=require('./shared/reservation-core.js');
 const fulfillmentCore=require('./shared/fulfillment-core.js');
+const procurementDemandCore=require('./shared/procurement-demand-core.js');
 
 function fault(code,message){const error=new Error(message);error.code=code;throw error;}
 function id(value,label,max=128){
@@ -40,6 +41,11 @@ function fingerprint(orderId,rows){
 }
 function normalizeIntent(data){
   if(!data||typeof data!=='object'||Array.isArray(data))fault('invalid-argument','缺少交易內容');
+  // The existing initial-sync intent stays byte-for-byte compatible with
+  // receipts already issued by the Preview writer. Amendments are separate
+  // operations with a different fingerprint and stricter role/state checks.
+  const mode=data.mode===undefined?'initial':data.mode;
+  if(!['initial','amend'].includes(mode))fault('invalid-argument','預留交易模式不正確');
   const orderId=id(data.orderId,'訂單 ID');
   const syncAttemptId=id(data.syncAttemptId,'來源同步識別碼',96);
   const attemptId=id(data.attemptId,'操作識別碼',96);
@@ -52,11 +58,12 @@ function normalizeIntent(data){
   })).sort((a,b)=>a.itemId.localeCompare(b.itemId));
   if(new Set(rows.map(x=>x.itemId)).size!==rows.length)fault('invalid-argument','重複訂單品項 ID');
   // Prevent callers from injecting a proposed stock balance, role, or warehouse.
-  if(Object.keys(data).some(k=>!['orderId','attemptId','syncAttemptId','items'].includes(k)))
+  if(Object.keys(data).some(k=>!['mode','orderId','attemptId','syncAttemptId','items'].includes(k)))
     fault('invalid-argument','請求含未授權的欄位');
   if(data.items.some(x=>!x||Object.keys(x).some(k=>!['itemId','quantity'].includes(k))))
     fault('invalid-argument','品項請求含未授權的欄位');
-  return {orderId,attemptId,syncAttemptId,rows,hash:fingerprint(orderId,[syncAttemptId,...rows])};
+  const intentParts=mode==='initial'?[syncAttemptId,...rows]:['amend',syncAttemptId,...rows];
+  return {mode,orderId,attemptId,syncAttemptId,rows,hash:fingerprint(orderId,intentParts)};
 }
 function validateSourceItem(item,order,actorRole,uid){
   const ordered=qty(item.qty??item.orderedQty,'訂購量');
@@ -66,7 +73,8 @@ function validateSourceItem(item,order,actorRole,uid){
   if(delivered>0||returned>0||Number(item.supplyOrderedQty||0)!==0
     ||Number(item.receivedQty||0)!==0)
     fault('failed-precondition','已履約或有供應進度的品項不可用初始雙倉預留');
-  if(item.transferPendingId||item.custodyTransferId||item.dispatchPreparedQty>0)
+  if(item.transferPendingId||item.custodyTransferId||Number(item.dispatchPreparedQty||0)!==0
+    ||Number(item.warehouseShippedQty||0)!==0)
     fault('failed-precondition','調撥或出貨途中品項不可重新配置預留');
   if((item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
     ||item.productType==='Service'||item.productType==='SERVICE')
@@ -92,9 +100,9 @@ function projectAfter(stock,delta,label){
   return next;
 }
 
-async function commitGroupedWarehouseReservation(db,uid,data){
+async function commitGroupedWarehouseReservation(db,uid,data,{allowSameWarehouse=false}={}){
   id(uid,'登入 UID');
-  const {orderId,attemptId,syncAttemptId,rows,hash}=normalizeIntent(data);
+  const {mode,orderId,attemptId,syncAttemptId,rows,hash}=normalizeIntent(data);
   const ref=(name,key)=>db.collection(name).doc(key);
   const receiptRef=ref('reservationOperationReceipts','grouped-'+attemptId);
   const now=new Date().toISOString();
@@ -106,6 +114,11 @@ async function commitGroupedWarehouseReservation(db,uid,data){
     const actorRole=user.role;
     if(!['admin','purchaser','warehouse','sales','engineer'].includes(actorRole))
       fault('permission-denied','此帳號沒有預留權限');
+    // Post-initial stock amendments are operational decisions, not sales
+    // order synchronization. A sales/engineer token can only use the original
+    // initial-sync pathway, even when replaying an old receipt.
+    if(mode==='amend'&&!['admin','purchaser','warehouse'].includes(actorRole))
+      fault('permission-denied','只有採購、倉管或管理員可調整已同步預留');
     const applied=await tx.get(receiptRef);
     if(applied.exists){
       const receipt=applied.data();
@@ -122,9 +135,11 @@ async function commitGroupedWarehouseReservation(db,uid,data){
       fault('failed-precondition','已取消或結案訂單不可重新預留');
     if(!order.ownerUid||!order.salesCode||!Array.isArray(order.items))
       fault('failed-precondition','訂單缺少必要的所有權或品項資料');
-    // Prevent stale initial-sync attempts from committing after cancellation,
-    // a newer sync attempt, or completion. Receipt replays were handled above.
-    if(order.inventoryReservationStatus!=='pending'
+    // Initial synchronization and post-sync operational amendments must never
+    // authorize each other's state. The persisted source attempt fences both
+    // modes against an obsolete client snapshot and receipt replay was handled
+    // before this check.
+    if(order.inventoryReservationStatus!==(mode==='initial'?'pending':'completed')
       ||order.inventoryReservationAttemptId!==syncAttemptId)
       fault('failed-precondition','來源訂單同步狀態已變更，請重新讀取');
     if(['sales','engineer'].includes(actorRole)&&order.ownerUid!==uid)
@@ -144,11 +159,41 @@ async function commitGroupedWarehouseReservation(db,uid,data){
       if(warehouseId.startsWith('custody-'))fault('failed-precondition','業務保管位置不可直接預留');
       const demand=validateSourceItem(item,order,actorRole,uid);
       if(row.quantity>demand)fault('failed-precondition','預留超過待交付數量');
+      let purchaseDemand=null;
+      if(mode==='amend'){
+        // Amendments change shortage and therefore the live purchase demand.
+        // Read it in the same transaction to fence against supplier commitments
+        // that may not yet be reflected in the order-item projection.
+        const demandId=procurementDemandCore.demandIdForSource({
+          sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:row.itemId});
+        const demandRef=ref('procurementDemands',encodeURIComponent(demandId));
+        const demandSnap=await tx.get(demandRef);
+        const beforeDemand=demandSnap.exists?demandSnap.data():null;
+        if(beforeDemand){
+          for(const [field,expected] of Object.entries({
+            demandId,sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:row.itemId,
+            productKey,warehouseId,ownerUid:order.ownerUid,salesCode:order.salesCode
+          })){
+            if(beforeDemand[field]!==expected)
+              fault('failed-precondition','既有採購需求與來源訂單不一致');
+          }
+          if(beforeDemand.sourceItemIndex!==undefined&&beforeDemand.sourceItemIndex!==-1
+            &&beforeDemand.sourceItemIndex!==index)
+            fault('failed-precondition','既有採購需求品項位置與訂單不一致');
+          if(beforeDemand.status==='CANCELLED'
+            ||!Number.isSafeInteger(beforeDemand.orderedQty)||beforeDemand.orderedQty!==0
+            ||!Number.isSafeInteger(beforeDemand.receivedQty)||beforeDemand.receivedQty!==0)
+            fault('failed-precondition','已有採購承諾或收貨進度，不可調整預留');
+        }
+        purchaseDemand={ref:demandRef,before:beforeDemand};
+      }
       keys.add(productKey);warehouses.add(warehouseId);
-      selections.push({row,item,index,productKey,warehouseId,demand});
+      selections.push({row,item,index,productKey,warehouseId,demand,purchaseDemand});
     }
-    if(keys.size!==1||warehouses.size!==2)
-      fault('failed-precondition','此交易限同一產品、剛好兩個實體倉庫');
+    if(keys.size!==1||warehouses.size<1||warehouses.size>2)
+      fault('failed-precondition','此交易限同一產品、最多兩個實體倉庫');
+    if(warehouses.size===1&&!allowSameWarehouse)
+      fault('failed-precondition','同倉多品項後端交易尚未獨立啟用');
     const productKey=[...keys][0];
     const masterIds=[...new Set(selections.map(s=>s.item.productId).filter(Boolean))];
     for(const masterId of masterIds){
@@ -180,7 +225,7 @@ async function commitGroupedWarehouseReservation(db,uid,data){
     let companyDelta=0,originalQty=0;
     const changes=[];
     for(const selection of selections){
-      const {row,item,index,warehouseId,demand}=selection;
+      const {row,item,index,warehouseId,demand,purchaseDemand}=selection;
       const reservationRef=ref('inventoryReservations',orderId+'__'+row.itemId);
       const existingSnap=await tx.get(reservationRef);
       const before=existingSnap.exists?existingSnap.data():{};
@@ -214,7 +259,7 @@ async function commitGroupedWarehouseReservation(db,uid,data){
       const target=warehouseState.get(warehouseId);
       target.delta+=delta.warehouseDeltas.find(x=>x.warehouseId===warehouseId)?.reservedDelta||0;
       changes.push({ref:reservationRef,before,after,index,quantity:row.quantity,
-        shortageQty:demand-row.quantity});
+        shortageQty:demand-row.quantity,purchaseDemand,item,warehouseId});
     }
     if(company.reserved<originalQty)fault('failed-precondition','公司預留帳小於來源訂單預留');
     const nextCompany=projectAfter(company,companyDelta,'公司');
@@ -246,9 +291,33 @@ async function commitGroupedWarehouseReservation(db,uid,data){
     }
     for(const change of changes)if(change.before.quantity!==change.quantity)
       tx.set(change.ref,change.after,{merge:true});
+    if(mode==='amend')for(const change of changes){
+      if(change.before.quantity===change.quantity)continue;
+      const {purchaseDemand,item,index,shortageQty,warehouseId}=change;
+      const previous=purchaseDemand.before;
+      const projection=procurementDemandCore.fromSalesOrder({
+        sourceId:orderId,sourceItemId:change.after.itemId,sourceItemIndex:index,
+        fulfillmentType:'WAREHOUSE',shortageQty,supplyOrderedQty:0,receivedQty:0,
+        productId:item.productId||'',productKey,itemCode:item.itemCode||'',
+        itemName:item.itemName||'',brand:item.brand||'',warehouseId,
+        ownerUid:order.ownerUid,salesCode:order.salesCode,salesName:order.salesName||'',
+        scheduleDate:previous?.scheduleDate||item.requiredByDate||item.scheduleDate
+          ||order.requiredByDate||order.expectedDate||''
+      });
+      const demandDoc=procurementDemandCore.demandDocument(projection,{
+        createdAt:previous?.createdAt||order.createdAt||now,updatedAt:now});
+      if(previous){
+        tx.update(purchaseDemand.ref,{
+          requestedQty:demandDoc.requestedQty,remainingToOrderQty:demandDoc.remainingToOrderQty,
+          remainingToReceiveQty:demandDoc.remainingToReceiveQty,perOrdered:demandDoc.perOrdered,
+          perReceived:demandDoc.perReceived,status:demandDoc.status,
+          sourceItemIndex:index,updatedAt:now
+        });
+      }else if(demandDoc.requestedQty>0)tx.create(purchaseDemand.ref,demandDoc);
+    }
     if(changes.some(c=>c.before.quantity!==c.quantity))
       tx.update(orderRef,{items:nextItems,updatedAt:now});
-    tx.create(receiptRef,{action:'grouped_reservation',orderId,productKey,
+    tx.create(receiptRef,{action:mode==='initial'?'grouped_reservation':'grouped_reservation_amend',orderId,productKey,
       actorUid:uid,actorRole,syncAttemptId,intentHash:hash,companyReservedDelta:companyDelta,
       warehouseIds:[...warehouses].sort(),reservationIds:changes.map(c=>c.ref.id),
       createdAt:now,status:'applied'});

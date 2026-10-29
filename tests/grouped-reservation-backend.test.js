@@ -150,20 +150,55 @@ test('source cancellation, delivery overcommit, service orders and in-transit sh
     o=>{o.items[0].fulfillmentType='DIRECT_SHIP';},
     o=>{o.items[0].productType='Service';},
     o=>{o.items[0].transferPendingId='X';},
-    o=>{o.items[0].dispatchPreparedQty=1;}
+    o=>{o.items[0].dispatchPreparedQty=1;},
+    o=>{o.items[0].warehouseShippedQty=1;}
   ]){
     const f=fixture();edit(f.docs.get('orders/O'));const before=f.snapshot();
     await assert.rejects(f.commit(),/已取消|待交付|服務|直送|途中|來源|出貨|已履約/);
     assert.equal(f.snapshot(),before);
   }
 });
-test('existing reservation mismatches, disabled warehouses and third warehouse fail closed',async()=>{
+test('existing reservation mismatches, disabled warehouses and default-closed same warehouse fail closed',async()=>{
   const f=fixture();f.set('inventoryReservations/O__I1',{orderId:'WRONG',productKey:'P',warehouseId:'A',quantity:1});
   let before=f.snapshot();await assert.rejects(f.commit(),/來源與訂單不一致/);assert.equal(f.snapshot(),before);
   const disabled=fixture();disabled.docs.get('warehouses/A').active=false;
   before=disabled.snapshot();await assert.rejects(disabled.commit(),/停用/);assert.equal(disabled.snapshot(),before);
   const third=fixture();third.docs.get('orders/O').items[1].warehouseId='A';
-  before=third.snapshot();await assert.rejects(third.commit(),/剛好兩個/);assert.equal(third.snapshot(),before);
+  before=third.snapshot();await assert.rejects(third.commit(),/尚未獨立啟用/);assert.equal(third.snapshot(),before);
+});
+test('same-warehouse multi-line backend atomically reserves, amends and releases without duplicate movement',async()=>{
+  const f=fixture();f.docs.get('orders/O').items[1].warehouseId='A';
+  const commit=data=>commitGroupedWarehouseReservation(f.db,'actor',data,{allowSameWarehouse:true});
+  const first=await commit(f.request(2,3));
+  assert.equal(first.companyReservedDelta,5);
+  assert.deepEqual(['inventory/P','warehouseStocks/A__P','warehouseStocks/B__P']
+    .map(k=>f.docs.get(k).reserved),[5,5,0]);
+  assert.deepEqual(f.docs.get('reservationOperationReceipts/grouped-attempt_123456789').warehouseIds,['A']);
+  assert.equal([...f.docs.keys()].filter(k=>k.startsWith('inventoryMovements/')).length,1);
+  const snapshot=f.snapshot();
+  assert.equal((await commit(f.request())).status,'already-applied');
+  assert.equal(f.snapshot(),snapshot);
+  await assert.rejects(commit(f.request(3,2)),/操作識別碼/);
+  assert.equal(f.snapshot(),snapshot);
+  f.docs.get('orders/O').inventoryReservationStatus='completed';
+  const amend=(a,b,attemptId)=>({...f.request(a,b,attemptId),mode:'amend'});
+  assert.equal((await commit(amend(1,4,'same_amend_exchange_12345'))).companyReservedDelta,0);
+  assert.deepEqual(f.docs.get('orders/O').items.map(x=>x.reservedQty),[1,4]);
+  assert.equal((await commit(amend(0,0,'same_amend_release_12345'))).companyReservedDelta,-5);
+  assert.deepEqual(['inventory/P','warehouseStocks/A__P','warehouseStocks/B__P']
+    .map(k=>f.docs.get(k).reserved),[0,0,0]);
+  const released=f.snapshot();
+  assert.equal((await commit(amend(1,4,'same_amend_exchange_12345'))).status,'already-applied');
+  assert.equal(f.snapshot(),released,'old same-warehouse receipt must not restore stock');
+});
+test('same-warehouse backend fails without any partial write when that warehouse has insufficient stock',async()=>{
+  const f=fixture();f.docs.get('orders/O').items[1].warehouseId='A';
+  f.docs.get('warehouseStocks/A__P').onHand=4;
+  const before=f.snapshot();
+  await assert.rejects(commitGroupedWarehouseReservation(f.db,'actor',f.request(),{
+    allowSameWarehouse:true}),/庫存不足/);
+  assert.equal(f.snapshot(),before);
+  assert.equal([...f.docs.keys()].filter(k=>k.startsWith('reservationOperationReceipts/')).length,0);
 });
 test('operation limit, intent quantities and unknown location ledger are rejected',async()=>{
   for(const input of [
@@ -208,6 +243,148 @@ test('CLOSE return does not produce replenishment demand and service product mas
 test('orders with inconsistent cancellation fields cannot reopen reservations',async()=>{
   const f=fixture();f.docs.get('orders/O').orderStatus='cancelled';
   await assert.rejects(f.commit(),/已取消/);
+});
+
+test('post-sync grouped amendments rebalance and release both warehouses atomically',async()=>{
+  const f=fixture();
+  await f.commit();
+  f.docs.get('orders/O').inventoryReservationStatus='completed';
+  const amend=(a,b,attemptId)=>({...f.request(a,b,attemptId),mode:'amend'});
+  const exchange=amend(1,4,'amend_exchange_123456789');
+  const first=await f.commit(exchange);
+  assert.equal(first.status,'applied');
+  assert.equal(first.companyReservedDelta,0);
+  assert.deepEqual(['inventory/P','warehouseStocks/A__P','warehouseStocks/B__P'].map(k=>f.docs.get(k).reserved),[5,1,4]);
+  assert.deepEqual(f.docs.get('orders/O').items.map(row=>row.reservedQty),[1,4]);
+  assert.equal(f.docs.get('reservationOperationReceipts/grouped-'+exchange.attemptId).action,'grouped_reservation_amend');
+  const snapshot=f.snapshot();
+  assert.equal((await f.commit(exchange)).status,'already-applied');
+  assert.equal(f.snapshot(),snapshot);
+  await assert.rejects(f.commit(amend(2,3,exchange.attemptId)),/操作識別碼/);
+  assert.equal(f.snapshot(),snapshot);
+  const release=amend(0,0,'amend_release_123456789');
+  assert.equal((await f.commit(release)).companyReservedDelta,-5);
+  assert.deepEqual(['inventory/P','warehouseStocks/A__P','warehouseStocks/B__P'].map(k=>f.docs.get(k).reserved),[0,0,0]);
+  const released=f.snapshot();
+  assert.equal((await f.commit(exchange)).status,'already-applied');
+  assert.equal(f.snapshot(),released,'old successful intent must not restore released stock');
+});
+
+test('post-sync amendment requires completed source, matching attempt and an operational role',async()=>{
+  for(const edit of [
+    o=>o.inventoryReservationStatus='pending',
+    o=>o.inventoryReservationStatus='failed',
+    o=>o.inventoryReservationAttemptId='newer_sync_attempt',
+    o=>o.status='cancelled'
+  ]){
+    const f=fixture(),order=f.docs.get('orders/O');
+    order.inventoryReservationStatus='completed';edit(order);
+    const before=f.snapshot();
+    await assert.rejects(f.commit({...f.request(1,2),mode:'amend'}),/同步狀態|已取消/);
+    assert.equal(f.snapshot(),before);
+  }
+  for(const role of ['sales','engineer']){
+    const f=fixture({role,owner:'actor'});
+    f.docs.get('orders/O').inventoryReservationStatus='completed';
+    const before=f.snapshot();
+    await assert.rejects(f.commit({...f.request(1,2),mode:'amend'}),/只有採購、倉管或管理員/);
+    assert.equal(f.snapshot(),before);
+  }
+});
+
+test('post-sync amendments reject fulfilled or supplied items without partial writes',async()=>{
+  for(const edit of [
+    item=>{item.supplyOrderedQty=1;},
+    item=>{item.receivedQty=1;},
+    item=>{item.deliveredQty=1;},
+    item=>{item.dispatchPreparedQty=1;},
+    item=>{item.warehouseShippedQty=1;},
+    item=>{item.transferPendingId='TRANSIT';}
+  ]){
+    const f=fixture(),order=f.docs.get('orders/O');
+    order.inventoryReservationStatus='completed';edit(order.items[0]);
+    const before=f.snapshot();
+    await assert.rejects(f.commit({...f.request(1,2),mode:'amend'}),/已履約|供應進度|途中/);
+    assert.equal(f.snapshot(),before);
+  }
+});
+
+test('post-sync amendment updates linked purchase demands in the SAME atomic transaction',async()=>{
+  const f=fixture();await f.commit();
+  f.docs.get('orders/O').inventoryReservationStatus='completed';
+  const demandId=itemId=>'procurementDemands/'+encodeURIComponent('SALES_ORDER:O:'+itemId);
+  const demand=(itemId,index,warehouseId,requestedQty)=>({
+    demandId:'SALES_ORDER:O:'+itemId,sourceType:'SALES_ORDER',sourceId:'O',
+    sourceItemId:itemId,sourceItemIndex:index,productKey:'P',warehouseId,
+    ownerUid:'sales1',salesCode:'S01',requestedQty,orderedQty:0,
+    receivedQty:0,status:'PENDING',scheduleDate:'2026-10-28',createdAt:'2026-10-01'
+  });
+  f.set(demandId('I1'),demand('I1',0,'A',3));
+  f.set(demandId('I2'),demand('I2',1,'B',2));
+  const request={...f.request(1,4,'amend_demand_123456789'),mode:'amend'};
+  assert.equal((await f.commit(request)).companyReservedDelta,0);
+  const first=f.docs.get(demandId('I1')),second=f.docs.get(demandId('I2'));
+  assert.deepEqual([first.requestedQty,first.remainingToOrderQty,
+    second.requestedQty,second.remainingToOrderQty],[4,4,1,1]);
+  assert.equal(first.scheduleDate,'2026-10-28');
+  assert.equal(second.createdAt,'2026-10-01');
+  const snapshot=f.snapshot();
+  assert.equal((await f.commit(request)).status,'already-applied');
+  assert.equal(f.snapshot(),snapshot);
+  const release={...f.request(0,0,'amend_demand_release_123456789'),mode:'amend'};
+  await f.commit(release);
+  assert.deepEqual([f.docs.get(demandId('I1')).requestedQty,
+    f.docs.get(demandId('I2')).requestedQty],[5,5]);
+  assert.deepEqual(['inventory/P','warehouseStocks/A__P','warehouseStocks/B__P']
+    .map(k=>f.docs.get(k).reserved),[0,0,0]);
+});
+
+test('post-sync amendment fails closed on recorded supplier progress or demand identity drift',async()=>{
+  const demandId='procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I1');
+  for(const edit of [
+    d=>{d.orderedQty=1;},
+    d=>{d.receivedQty=1;},
+    d=>{d.status='CANCELLED';},
+    d=>{d.sourceId='OTHER';},
+    d=>{d.productKey='OTHER';},
+    d=>{d.warehouseId='OTHER';}
+  ]){
+    const f=fixture();await f.commit();
+    f.docs.get('orders/O').inventoryReservationStatus='completed';
+    const record={demandId:'SALES_ORDER:O:I1',sourceType:'SALES_ORDER',sourceId:'O',
+      sourceItemId:'I1',productKey:'P',warehouseId:'A',ownerUid:'sales1',
+      salesCode:'S01',orderedQty:0,receivedQty:0,status:'PENDING'};
+    edit(record);f.set(demandId,record);
+    const before=f.snapshot();
+    await assert.rejects(f.commit({...f.request(1,4,'amend_demand_guard_123456789'),mode:'amend'}),
+      /已有採購承諾|採購需求與來源訂單不一致/);
+    assert.equal(f.snapshot(),before);
+  }
+});
+
+test('post-sync amendment creates missing shortage demand without inventing supplier history',async()=>{
+  const f=fixture();await f.commit();
+  f.docs.get('orders/O').inventoryReservationStatus='completed';
+  await f.commit({...f.request(1,4,'amend_create_demand_123456789'),mode:'amend'});
+  const demandId='procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I1');
+  const demand=f.docs.get(demandId);
+  assert.equal(demand.requestedQty,4);
+  assert.equal(demand.orderedQty,0);
+  assert.equal(demand.receivedQty,0);
+  assert.equal(demand.status,'PENDING');
+});
+
+test('original initial-sync receipt fingerprint is unchanged and modes cannot reuse one ID',async()=>{
+  const f=fixture(),intent=f.request();
+  assert.equal(normalizeIntent(intent).hash,normalizeIntent({...intent,mode:'initial'}).hash);
+  assert.notEqual(normalizeIntent(intent).hash,normalizeIntent({...intent,mode:'amend'}).hash);
+  for(const mode of ['',null,'restore','cancelled'])
+    assert.throws(()=>normalizeIntent({...intent,mode}),/模式不正確/);
+  await f.commit();
+  f.docs.get('orders/O').inventoryReservationStatus='completed';
+  const before=f.snapshot();
+  await assert.rejects(f.commit({...intent,mode:'amend'}),/操作識別碼/);
+  assert.equal(f.snapshot(),before);
 });
 
 test('stale or completed order sync attempt cannot mutate stock, including newer attempt replay',async()=>{

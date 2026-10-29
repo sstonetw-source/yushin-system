@@ -39,15 +39,17 @@ test('return plan cannot exceed a source lot or the selected shipments confirmed
   {shipment:{qty:4,lotAllocations:[{lotId:'L1',qty:2},{lotId:'L1',qty:2}]}}
  ])assert.throws(()=>inventory.planExplicitShipmentReturn({shipment:source(),confirmedQty:2,selections:[{lotId:'L1',qty:1}],...patch}));
 });
-test('reversal and return trace cannot run outside the demo Emulator or expose public Callables',async()=>{
- await assert.rejects(reverseShipmentDelivery({projectId:'production'},'actor',reverse()),/僅允許/);
+test('reversal and return trace reject unauthorized environments; return trace stays internal',async()=>{
+ await assert.rejects(reverseShipmentDelivery({projectId:'production'},'actor',reverse()),/未獲專案授權/);
  await assert.rejects(planLocationReturnTrace({projectId:'production'},'actor',trace()),/僅允許/);
  const host=process.env.FIRESTORE_EMULATOR_HOST;
  try{delete process.env.FIRESTORE_EMULATOR_HOST;
-  await assert.rejects(reverseShipmentDelivery({projectId:'demo-yushin'},'actor',reverse()),/僅允許/);
+  await assert.rejects(reverseShipmentDelivery({projectId:'demo-yushin'},'actor',reverse()),/未獲專案授權/);
   await assert.rejects(planLocationReturnTrace({projectId:'demo-yushin'},'actor',trace()),/僅允許/);
  }finally{if(host!==undefined)process.env.FIRESTORE_EMULATOR_HOST=host;}
- assert.doesNotMatch(fs.readFileSync('functions/index.js','utf8'),/reverseShipmentDelivery|planLocationReturnTrace/);
+ const index=fs.readFileSync('functions/index.js','utf8');
+ assert.match(index,/exports\.reverseV2ShipmentDelivery\s*=\s*createDeliveryReversalCallable/);
+ assert.doesNotMatch(index,/exports\.planLocationReturnTrace/);
 });
 
 test('return allowance exposes confirmed and previously returned quantities without leaking costs or inferring a delivered lot',()=>{
