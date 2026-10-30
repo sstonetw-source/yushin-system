@@ -15565,7 +15565,7 @@ window.renderPoList = function(normalizedItemsByOrder = null, filterContext = nu
                 <td data-th="採購人員">${escapeHtml(po.buyerName || '')}</td>
                 <td data-th="採購日期">${escapeHtml(po.poDate || '')}</td>
                 <td data-th="預計到貨">${escapeHtml(po.expectedDate || po.scheduleDate || '—')}${(po.expectedDate||po.scheduleDate)&&receiptProgress.remainingQty>0&&(po.expectedDate||po.scheduleDate)<localDateString()?'・逾期':''}</td>
-                <td data-th="等待天數">${receiptProgress.remainingQty > 0 ? escapeHtml(poWaitingDays(po)||'—') : '已到貨'}</td>
+                <td data-th="等待天數">${['DRAFT','CANCELLED','CLOSED','UNKNOWN'].includes(receiptProgress.status) ? escapeHtml(receiptProgress.label) : receiptProgress.remainingQty > 0 ? escapeHtml(poWaitingDays(po)||'—') : '已到貨'}</td>
                 <td data-th="產品資訊">${purchaseProductSummary(item, ordered, null)}</td>
                 <td data-th="品項金額" class="workflow-money">${workflowAmountSummary(item,ordered,{unit:Number(item.unitPrice||0)*1.05,total:itemTotal,label:'含稅單價',totalLabel:'含稅品項小計'})}</td>
                 <td data-th="文件狀態">${escapeHtml(purchaseOrderDocumentStatusLabel(po))}</td>

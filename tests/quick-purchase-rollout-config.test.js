@@ -7,7 +7,7 @@ const vm=require('node:vm');
 const root=path.join(__dirname,'..');
 const rollout=fs.readFileSync(path.join(root,'transaction-rollout-config.js'),'utf8');
 const html=fs.readFileSync(path.join(root,'index.html'),'utf8');
-const version='20261030-1';
+const version='20261030-po-res-2';
 
 test('reviewed production transaction flags are always disabled by default',()=>{
  const context={YUSHIN_PRODUCTION_QUICK_PURCHASE:true,YUSHIN_PREVIEW_QUICK_PURCHASE:true,
