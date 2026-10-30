@@ -2824,7 +2824,7 @@ for(const width of [1280,390])test('original V3 Custody '+width+'px shipment del
   stock:await read('warehouseStocks',encodeURIComponent(custody)+'__'+encodeURIComponent(key)),
   ledger:await read('inventoryReservations',orderId+'__I'),lot:await read('inventoryLots',lotId),
   cost:await read('inventoryLotCosts',lotId),transfer:await read('stockTransfers',transferId),
-  movements:(await db.collection('inventoryMovements').where('orderId','==',orderId).get()).docs
+  movements:(await db.collection('inventoryMovements').where('sourceId','==',orderId).get()).docs
    .map(doc=>({id:doc.id,...doc.data()})).sort((a,b)=>a.id.localeCompare(b.id))});
  const presentOrder=async()=>{
   await siteNav(page,'orders');
