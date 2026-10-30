@@ -173,7 +173,7 @@ test('authenticated owner V3 Custody shipment consumes original source and rerun
  assert.equal((await f.facts()).order.isDelivered,true);
  assert.equal((await f.facts()).inventory.onHand,beforeConfirmation.inventory.onHand);
 });
-test('real Auth 2-line V3 Custody shipment preserves both independent stock sources and rejects premature delivery',async()=>{
+test('real Auth 2-line V3 Custody shipment and distinct per-item customer acknowledgements preserve physical stock',async()=>{
  const f=await fixture('multi-shipment',{multi:true});
  const siblingKey='v3-ship-multi-shipment-Q',siblingLot='v3-ship-multi-shipment-HANDOFF-J-0';
  const second={...f.input('custody_real_multi_j_first',1),itemId:'J'};
@@ -196,10 +196,25 @@ test('real Auth 2-line V3 Custody shipment preserves both independent stock sour
  assert.deepEqual(order.items.map(row=>row.reservedQty),[2,1]);
  assert.equal((await f.read('inventoryLots',siblingLot)).remainingQty,1);
  assert.equal((await f.read('inventoryLots',f.lotId)).remainingQty,2);
- const beforeBlocked=await f.facts();
- await assert.rejects(f.confirm({...f.confirmation(second.operationId,'custody_real_multi_ack_guard',1),
-  itemId:'J'}),e=>e.code==='functions/failed-precondition');
- assert.deepEqual(await f.facts(),beforeBlocked);
+ const beforeDelivery=await f.facts();
+ const siblingBefore=await f.read('inventoryLots',siblingLot);
+ const jDelivery={...f.confirmation(second.operationId,'custody_real_multi_ack_j',1),itemId:'J'};
+ const confirmedJ=await f.confirm(jDelivery);
+ assert.equal(confirmedJ.status,'applied');
+ assert.equal(confirmedJ.confirmedQty,1);
+ assert.equal(confirmedJ.isDelivered,false);
+ assert.equal((await f.read('orders',f.orderId)).items[1].deliveredQty,1);
+ const receiptSnapshot=await f.facts();
+ assert.equal((await f.confirm(jDelivery)).status,'already-applied');
+ assert.deepEqual(await f.facts(),receiptSnapshot);
+ const confirmedI=await f.confirm(f.confirmation(main.operationId,'custody_real_multi_ack_i',1));
+ assert.equal(confirmedI.status,'applied');
+ const afterDelivery=await f.facts();
+ assert.deepEqual(afterDelivery.order.items.map(row=>row.deliveredQty??0),[1,1]);
+ assert.equal(afterDelivery.order.deliveredQty,2);
+ for(const key of ['inventory','stock','ledger','lot','extra','cost'])
+  assert.deepEqual(afterDelivery[key],beforeDelivery[key],key+' cannot change during customer confirmation');
+ assert.deepEqual(await f.read('inventoryLots',siblingLot),siblingBefore);
 });
 test('real Auth rejects other sales and a mutated cost provenance without inventory writes',async()=>{
  const f=await fixture('blocked'),first=f.input('ship_custody_guard_123',1);

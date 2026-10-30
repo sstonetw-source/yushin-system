@@ -80,7 +80,7 @@ function shipmentDeliveryContext(order,intent,{allowReturns=false,allowCancelled
 }
 // Shared whole-order projection for acknowledgement/correction and explicitly
 // opted-in CLOSE return readers. Cancellation never permits new delivery.
-function multiShipmentDeliveryContext(order,intent,{allowCancelledCloseReturn=false}={}){
+function multiShipmentDeliveryContext(order,intent,{allowCancelledCloseReturn=false,allowCustody=false}={}){
  const {orderId,itemId,syncAttemptId}=intent;
  if(order.inventoryReservationStatus!=='completed'||order.inventoryReservationAttemptId!==syncAttemptId)
   fault('庫存同步未完成或來源同步識別碼已變更');
@@ -94,6 +94,9 @@ function multiShipmentDeliveryContext(order,intent,{allowCancelledCloseReturn=fa
   fault('此試點僅支援來源完整的 2–5 品項實體倉訂單');
  if(!Array.isArray(order.deliveryRecords)||!Array.isArray(order.returnRecords))
   fault('出貨、送達或退貨紀錄格式不正確');
+ if(allowCustody&&order.items.some(row=>String(row.productType||row.type||'')
+  .trim().toUpperCase()==='SERVICE'))
+  fault('多品項 V3 保管送達目前只接受實體商品');
  const whole=core.projectOrderShipmentReturns({orderId,items:order.items,
   shipments:order.warehouseShipmentRecords??[],deliveries:order.deliveryRecords,returns:order.returnRecords});
  if((order.deliveredQty??0)!==whole.confirmedQty||(order.returnedQty??0)!==whole.returnedQty
@@ -104,7 +107,8 @@ function multiShipmentDeliveryContext(order,intent,{allowCancelledCloseReturn=fa
   const part=whole.items.find(row=>row.itemId===source.itemId);
   if(!part||(source.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
    ||String(source.productType||source.type||'').toUpperCase()==='SERVICE'
-   ||source.transferPendingId||source.custodyTransferId
+   ||source.transferPendingId||(source.custodyTransferId&&!allowCustody)
+   ||(allowCustody&&(!source.custodyTransferId||source.warehouseId!=='custody-'+order.ownerUid))
    ||(source.warehouseShippedQty??0)!==part.shippedQty
    ||(source.deliveredQty??0)!==part.confirmedQty
    ||(source.returnedQty??0)!==part.returnedQty
@@ -115,7 +119,7 @@ function multiShipmentDeliveryContext(order,intent,{allowCancelledCloseReturn=fa
  }
  const item=order.items.find(row=>row.itemId===itemId);
  const projection=whole.items.find(row=>row.itemId===itemId);
- return {item,productKey:projection.productKey,projection,whole,cancelled};
+ return {item,productKey:projection.productKey,projection,returnProjection:projection,whole,cancelled};
 }
 async function readShipmentProof(tx,db,order,intent,productKey) {
  const {orderId,itemId,shipmentId,syncAttemptId}=intent;
@@ -171,13 +175,13 @@ async function commitShipmentDelivery(db,uid,data,env=process.env,options={}){
   if((order.deliveryHistory||[]).some(row=>row.recordId===operationId||row.operationId===operationId))
    fault('此送達操作已有歷史紀錄，不能以原識別碼重新確認');
   const multi=Array.isArray(order.items)&&order.items.length>1;
-  const context=multi?multiShipmentDeliveryContext(order,intent):
+  const context=multi?multiShipmentDeliveryContext(order,intent,{allowCustody:custodyV3}):
    shipmentDeliveryContext(order,intent,{allowReturns:true,allowCustody:custodyV3});
   const {item,productKey}=context;
   if(custodyV3){
-   if(multi||!item.custodyTransferId||order.ownerUid===undefined||order.returnRecords.length
+   if(!item.custodyTransferId||order.ownerUid===undefined||order.returnRecords.length
      ||context.returnProjection.returnedQty!==0)
-    fault('V3 保管送達確認只接受未退貨的單品項業務交接');
+    fault('V3 保管送達確認只接受未退貨的同一負責人業務交接');
    await require('./custody-delivery-service').readCustodyDeliveryProofs(tx,db,order,context,intent);
   }
   await readLocationReturnProofs(tx,db,order,intent,productKey,{closedOnly:true});

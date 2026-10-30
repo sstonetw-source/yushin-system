@@ -1,6 +1,8 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
 const {custodyShipmentProject,commitCustodyShipment}=require('../functions/custody-shipment-service');
+const {commitCustodyDelivery}=require('../functions/custody-delivery-service');
+const {commitShipmentDelivery}=require('../functions/shipment-delivery-service');
 const env={GCLOUD_PROJECT:'demo-yushin',FUNCTIONS_EMULATOR:'true',
  FIRESTORE_EMULATOR_HOST:'127.0.0.1:8080',FIREBASE_AUTH_EMULATOR_HOST:'127.0.0.1:9099',
  ENABLE_V3_CUSTODY_SHIPMENT_EMULATOR:'true'};
@@ -236,4 +238,54 @@ test('V3 Custody 2-line shipment rejects sibling corruption and cross-item reuse
  const beforeService=service.snapshot();
  await assert.rejects(commitCustodyShipment(service.db,'SALES',service.itemInput('I','custody_multi_service'),env));
  assert.deepEqual(service.snapshot(),beforeService);
+});
+test('V3 Custody 2-line customer acknowledgement updates only commercial progress, preserving all stock and lots',async()=>{
+ const f=multiFixture();
+ const shipmentJ=f.itemInput('J','custody_multi_ack_j_ship',2);
+ const shipmentI=f.itemInput('I','custody_multi_ack_i_ship',3);
+ await commitCustodyShipment(f.db,'SALES',shipmentJ,env);
+ await commitCustodyShipment(f.db,'SALES',shipmentI,env);
+ const deliveryEnv={...env,ENABLE_V3_CUSTODY_DELIVERY_EMULATOR:'true'};
+ const intent=(itemId,shipmentId,operationId,quantity)=>({orderId:'ORDER',itemId,shipmentId,
+  operationId,quantity,date:'2026-10-30',notes:'客戶簽收',syncAttemptId:'sync_123456789'});
+ const beforeStocks=['inventory/P','inventory/Q','warehouseStocks/custody-SALES__P',
+  'warehouseStocks/custody-SALES__Q','inventoryLots/HANDOFF-0','inventoryLots/HANDOFF-J-0',
+  'inventoryLotCosts/HANDOFF-0','inventoryLotCosts/HANDOFF-J-0'].map(key=>[key,f.read(key)]);
+ const j=intent('J',shipmentJ.operationId,'custody_multi_ack_j_delivery',2);
+ const deliveredJ=await commitCustodyDelivery(f.db,'SALES',j,deliveryEnv);
+ assert.equal(deliveredJ.status,'applied');
+ assert.equal(deliveredJ.itemIsDelivered,true);
+ assert.equal(deliveredJ.isDelivered,false);
+ assert.deepEqual(f.read('orders/ORDER').items.map(row=>row.deliveredQty??0),[0,2]);
+ const snapshot=f.snapshot();
+ assert.equal((await commitCustodyDelivery(f.db,'SALES',j,deliveryEnv)).status,'already-applied');
+ assert.deepEqual(f.snapshot(),snapshot);
+ const deliveredI=await commitCustodyDelivery(f.db,'SALES',
+  intent('I',shipmentI.operationId,'custody_multi_ack_i_delivery',3),deliveryEnv);
+ assert.equal(deliveredI.itemIsDelivered,true);
+ assert.equal(deliveredI.isDelivered,true);
+ const order=f.read('orders/ORDER');
+ assert.equal(order.deliveredQty,5);
+ assert.equal(order.isDelivered,true);
+ assert.deepEqual(order.items.map(row=>row.deliveredQty),[3,2]);
+ for(const [key,original] of beforeStocks)assert.deepEqual(f.read(key),original,key+' is unchanged');
+});
+test('V3 multi-line delivery cannot use V2 entry or conceal a forged sibling shipment',async()=>{
+ const f=multiFixture();
+ const shipmentJ=f.itemInput('J','custody_multi_proof_j_ship');
+ const shipmentI=f.itemInput('I','custody_multi_proof_i_ship');
+ await commitCustodyShipment(f.db,'SALES',shipmentJ,env);
+ await commitCustodyShipment(f.db,'SALES',shipmentI,env);
+ const intent={orderId:'ORDER',itemId:'I',shipmentId:shipmentI.operationId,
+  operationId:'custody_multi_proof_i_ack',quantity:1,date:'2026-10-30',
+  notes:'客戶簽收',syncAttemptId:'sync_123456789'};
+ const deliveryEnv={...env,ENABLE_V3_CUSTODY_DELIVERY_EMULATOR:'true'};
+ const before=f.snapshot();
+ await assert.rejects(commitShipmentDelivery(f.db,'SALES',intent,deliveryEnv));
+ assert.deepEqual(f.snapshot(),before);
+ f.put('inventoryMovements/location-ship-'+shipmentJ.operationId,{
+  ...f.read('inventoryMovements/location-ship-'+shipmentJ.operationId),custodyTransferId:'FORGED'});
+ const tampered=f.snapshot();
+ await assert.rejects(commitCustodyDelivery(f.db,'SALES',intent,deliveryEnv));
+ assert.deepEqual(f.snapshot(),tampered);
 });
