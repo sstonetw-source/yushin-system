@@ -2440,3 +2440,19 @@ test('other invalidations still clear stale queues for a fresh load',()=>{
     assert.equal(x.purchasingViewLoaded.has('ordering'),false);
 });
 
+
+test('PO waiting column never reports draft, cancelled, closed or missing receipt evidence as arrived', () => {
+    const column = app.match(/<td data-th="等待天數">\$\{([^\n]+?)\}<\/td>/);
+    assert.ok(column, 'purchase history waiting column is present');
+    const display = (receiptProgress, waiting = '4 天') => vm.runInNewContext(column[1], {
+        receiptProgress, po: {poDate:'2026-10-26'},
+        escapeHtml: value => String(value), poWaitingDays: () => waiting
+    });
+    for (const [status,label] of [['DRAFT','尚未採購'],['CANCELLED','未到貨已取消'],['CLOSED','已結案'],['UNKNOWN','已建立']]) {
+        assert.equal(display({status,label,remainingQty:0}), label);
+    }
+    assert.equal(display({status:'ORDERED',remainingQty:1}), '4 天');
+    assert.equal(display({status:'PARTIALLY_RECEIVED',remainingQty:1}), '4 天');
+    assert.equal(display({status:'RECEIVED',remainingQty:0}), '已到貨');
+    assert.equal(display({status:'ORDERED',remainingQty:1}, ''), '—');
+});

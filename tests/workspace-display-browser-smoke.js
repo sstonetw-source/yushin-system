@@ -87,11 +87,16 @@ function fn(name){const a=source.indexOf('function '+name+'('),b=source.indexOf(
   await page.addScriptTag({content:`
    const purchasingView='history',poHistorySearchActive=false,poHistorySearchLoading=false,poHistorySearchResults=[],companyData={};
    const poListCache=[{id:'PO1',poNo:'PO-1',poDate:'2026-10-26',vendorName:'供應商',buyerName:'採購',status:'CONFIRMED',items:[{itemName:'採購品項',itemCode:'74104',qty:3,unitPrice:100}]}];
-   const purchaseItemsFromSavedPo=p=>p.items,purchaseOrderSupplierContact=()=>'',purchaseHistoryItemReceiptProgress=()=>({remainingQty:0,label:'已到貨'}),poWaitingDays=()=>'',purchaseOrderDocumentStatusLabel=()=> '已確認',canEditPage=()=>true,localDateString=()=> '2026-10-26';
+   const purchaseItemsFromSavedPo=p=>p.items,purchaseOrderSupplierContact=()=>'',purchaseHistoryItemReceiptProgress=()=>(globalThis.poReceiptFixture||{remainingQty:0,label:'已到貨'}),poWaitingDays=()=>'',purchaseOrderDocumentStatusLabel=()=> '已確認',canEditPage=()=>true,localDateString=()=> '2026-10-26';
   `});
   const listStart=source.indexOf('window.renderPoList = function('),listEnd=source.indexOf('\n};',listStart)+3;await page.addScriptTag({content:source.slice(listStart,listEnd)});
   await page.evaluate(()=>{document.getElementById('poListSearch').value='';document.getElementById('poListPanel').style.display='block';renderPoList();});
   assert.equal(await page.locator('#poListBody .workflow-product .workflow-quantity').count(),0);assert.match(await page.locator('#poListBody td[data-th="品項金額"]').innerText(),/105 × 3[\s\S]*315/);
+  for(const [status,label] of [['DRAFT','尚未採購'],['CANCELLED','未到貨已取消'],['CLOSED','已結案'],['UNKNOWN','已建立']]){
+   await page.evaluate(({status,label})=>{globalThis.poReceiptFixture={status,label,remainingQty:0};renderPoList();},{status,label});
+   assert.equal(await page.locator('#poListBody td[data-th="等待天數"]').innerText(),label);
+  }
+  await page.evaluate(()=>{delete globalThis.poReceiptFixture;renderPoList();});
   for(const role of ['sales','engineer','warehouse','purchaser','admin']){
    await page.evaluate(role=>{currentUserRole=role;renderPurchasingDispatchOrders();},role);
    assert.equal(await page.locator('#purchaseDispatchBody button[onclick^="markOrderItemDispatchPrepared"]').count(),['purchaser','admin'].includes(role)?1:0);
