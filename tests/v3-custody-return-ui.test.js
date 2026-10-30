@@ -2,17 +2,21 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const vm=require('node:vm'),fs=require('node:fs');
 const source=fs.readFileSync('src/services/custody-return.js','utf8');
-function fixture(){
+function fixture({multi=false}={}){
  const uid='SALES',orderId='ORDER',itemId='I',custody='custody-SALES';
  const lotId='TRANSFER-0',shipmentId='custody_ship_ui_123456',storage=new Map(),requests=[];
  let lost=false,writes=0;
  const order={status:'active',orderStatus:'normal',ownerUid:uid,salesCode:'S01',
   inventoryReservationStatus:'completed',inventoryReservationAttemptId:'sync_123456789',
   returnPending:false,returnRequests:[],returnRecords:[],
-  items:[{itemId,warehouseId:custody,custodyTransferId:'TRANSFER'}],
+  items:[{itemId,warehouseId:custody,custodyTransferId:'TRANSFER'},
+   ...(multi?[{itemId:'J',warehouseId:custody,custodyTransferId:'TRANSFER-J'}]:[])],
   warehouseShipmentRecords:[{id:shipmentId,itemId,warehouseId:custody,custodyTransferId:'TRANSFER',
-   lotAllocations:[{lotId,lotNo:'BATCH-001',qty:2}]}],
-  deliveryRecords:[{id:'confirm_ui_123456',shipmentId,qty:2}]};
+   lotAllocations:[{lotId,lotNo:'BATCH-001',qty:2}]},
+   ...(multi?[{id:'custody_ship_ui_j_123456',itemId:'J',warehouseId:custody,
+    custodyTransferId:'TRANSFER-J',lotAllocations:[{lotId:'TRANSFER-J-0',lotNo:'BATCH-J',qty:1}]}]:[])],
+  deliveryRecords:[{id:'confirm_ui_123456',shipmentId,qty:2},
+   ...(multi?[{id:'confirm_ui_j_123456',shipmentId:'custody_ship_ui_j_123456',qty:1}]:[])]};
  const appOptions={projectId:'demo-yushin'};
  const auth={app:{options:appOptions},emulatorConfig:{host:'127.0.0.1',port:9099},currentUser:{uid}};
  const functions={app:{options:appOptions},useEmulator(host,port){assert.equal(host,'127.0.0.1');assert.equal(port,5001);},
@@ -20,19 +24,21 @@ function fixture(){
    requests.push(structuredClone(intent));
    if(!order.returnRecords.find(row=>row.id===intent.operationId)){
     writes++;
-    order.returnRecords.push({id:intent.operationId,itemId,shipmentId,warehouseId:custody,
+    order.returnRecords.push({id:intent.operationId,itemId:intent.itemId,
+     shipmentId:intent.shipmentId,warehouseId:custody,
      qty:intent.selections[0].qty,settlement:'CLOSE',condition:'RESTOCKABLE',date:intent.date,
      reason:intent.reason,movementId:'location-return-'+intent.operationId,
      lotAllocations:structuredClone(intent.selections)});
    }
    if(lost){lost=false;throw Error('lost response');}
-   return{data:{status:requests.length===1?'applied':'already-applied',orderId,itemId,
-    shipmentId,warehouseId:custody,qty:intent.selections[0].qty,
+   return{data:{status:requests.length===1?'applied':'already-applied',orderId,itemId:intent.itemId,
+    shipmentId:intent.shipmentId,warehouseId:custody,qty:intent.selections[0].qty,
     movementId:'location-return-'+intent.operationId}};
   };}};
  const db={app:{options:appOptions},collection(name){return{doc(id){return{
   async get(){if(name==='orders')return{exists:true,data:()=>structuredClone(order)};
-   if(name==='inventoryReservations')return{exists:true,data:()=>({locationSchemaVersion:3,custodyTransferId:'TRANSFER'})};
+   if(name==='inventoryReservations')return{exists:true,data:()=>({locationSchemaVersion:3,
+    custodyTransferId:id.endsWith('__J')?'TRANSFER-J':'TRANSFER'})};
    throw Error('Unexpected '+name+'/'+id);}
  };}};}};
  const open=(mod={})=>{
@@ -65,6 +71,22 @@ test('V3 Custody return UI freezes the original lot, operator and intent across 
  assert.equal(f.requests[0].operationId,f.requests[1].operationId);
  assert.deepEqual(f.requests[0].selections,[{lotId:'TRANSFER-0',qty:1}]);
  assert.equal(f.requests[0].settlement,'CLOSE');
+});
+test('V3 Custody multi-line return candidates and recovery retain the selected sibling lot',async()=>{
+ const f=fixture({multi:true}),app=f.open({YUSHIN_V3_CUSTODY_RETURN_EMULATOR:true});
+ const candidates=app.v3CustodyReturnCandidates(f.order);
+ assert.equal(candidates.length,2);
+ assert.deepEqual(candidates.map(row=>row.itemId),['I','J']);
+ const selected={...f.input('custody_return_ui_multi_j'),itemId:'J',
+  shipmentId:'custody_ship_ui_j_123456',lotId:'TRANSFER-J-0'};
+ f.loseOnce();await assert.rejects(app.commitV3CustodyReturn(selected),/lost response/);
+ assert.equal(f.requests[0].itemId,'J');
+ assert.deepEqual(f.requests[0].selections,[{lotId:'TRANSFER-J-0',qty:1}]);
+ assert.equal(f.storage.size,1);
+ const reloaded=f.open({YUSHIN_V3_CUSTODY_RETURN_EMULATOR:true});
+ assert.equal((await reloaded.window.resumeV3CustodyReturn('ORDER','J')).returnRecords[0].itemId,'J');
+ assert.equal(f.storage.size,0);
+ assert.equal(f.writes(),1);
 });
 test('V3 Custody return is closed outside demo, changed login, and restricted roles',async()=>{
  const f=fixture(),intent=f.input('custody_return_ui_block');

@@ -60,7 +60,7 @@ async function commitV3CustodyShipment(input){
   const snap=await db.collection('orders').doc(orderId).get({source:'server'});check();
   if(!snap.exists)throw Error('保管訂單不存在。');
   const order=snap.data(),item=order.items?.find(row=>row.itemId===itemId);
-  if(order.items?.length!==1||!item||item.warehouseId!=='custody-'+order.ownerUid
+  if(!v3CustodyShipmentItems(order).length||!item||item.warehouseId!=='custody-'+order.ownerUid
     ||!item.custodyTransferId||['sales','engineer'].includes(role)&&order.ownerUid!==uid
     ||order.inventoryReservationStatus!=='completed'||!order.inventoryReservationAttemptId)
    throw Error('訂單不具備可驗證的 V3 業務保管來源。');
@@ -86,7 +86,7 @@ async function commitV3CustodyShipment(input){
  const proof=(order?.warehouseShipmentRecords||[]).find(row=>row.id===operationId);
  if(!proof||proof.itemId!==itemId||proof.warehouseId!==frozen.warehouseId
    ||proof.qty!==qty||proof.date!==date||String(proof.notes||'')!==notes
-   ||proof.custodyTransferId!==order?.items?.[0]?.custodyTransferId
+   ||proof.custodyTransferId!==order?.items?.find(row=>row.itemId===itemId)?.custodyTransferId
    ||proof.movementId!=='location-ship-'+operationId
    ||JSON.stringify(globalThis.YushinWarehouseLogistics.validatePlan(proof.deliveryPlan,true))!==JSON.stringify(plan))
   throw Error('V3 保管出貨結果尚未從權威訂單核對，保留原操作編號。');
@@ -99,25 +99,35 @@ window.resumeV3CustodyShipment=async function(orderId,itemId){
  return commitV3CustodyShipment({orderId,itemId,qty:prior.quantity,date:prior.date,
   notes:prior.notes,operationId:prior.operationId,expectedPlan:prior.expectedPlan});
 };
+function v3CustodyShipmentItems(order){
+ const items=order?.items,custody='custody-'+order?.ownerUid;
+ if(!Array.isArray(items)||!items.length||items.length>5
+   ||(order.returnRecords||[]).length||(order.deliveryRecords||[]).length)return [];
+ return items.every(item=>item?.custodyTransferId&&item.warehouseId===custody
+   &&!item.transferPendingId&&(item.fulfillmentType||'WAREHOUSE')==='WAREHOUSE'
+   &&String(item.productType||item.type||'').toUpperCase()!=='SERVICE')?items:[];
+}
 window.openV3CustodyShipment=async function(orderId){
- const order=ordersCache.find(row=>row.id===orderId),item=order?.items?.[0];
- if(!item||order.items.length!==1||!item.custodyTransferId
-   ||item.warehouseId!=='custody-'+order.ownerUid)return;
+ const order=ordersCache.find(row=>row.id===orderId),items=v3CustodyShipmentItems(order);
+ if(!items.length)return;
  try{
-  const prior=pendingV3CustodyShipment(orderId,item.itemId);
-  if(prior){
-   const saved=await window.resumeV3CustodyShipment(orderId,item.itemId);
+  const pending=items.find(item=>pendingV3CustodyShipment(orderId,item.itemId));
+  if(pending){
+   const saved=await window.resumeV3CustodyShipment(orderId,pending.itemId);
    const index=ordersCache.findIndex(row=>row.id===orderId);
    if(index>=0)ordersCache[index]={id:orderId,...saved};
    renderOrdersList();return;
   }
   v3CustodyShipmentTransport();
  }catch(error){alert('保管出貨無法繼續：'+error.message);return;}
- const remaining=Math.max(0,Number(item.reservedQty||0));
- if(!Number.isSafeInteger(remaining)||!remaining){alert('此品項已無待保管出貨量。');return;}
+ const candidates=items.filter(item=>Number.isSafeInteger(item.reservedQty)&&item.reservedQty>0);
+ if(!candidates.length){alert('此訂單已無待保管出貨品項。');return;}
+ const first=candidates[0],remaining=first.reservedQty;
  const modal=document.createElement('dialog');modal.className='modal';
  modal.innerHTML=`<form method="dialog" class="modal-content" style="max-width:420px">
-  <h3>業務保管實際出貨</h3><p>訂單：${escapeHtml(order.orderNo||orderId)}｜品項：${escapeHtml(item.itemName||item.itemCode||item.itemId)}</p>
+  <h3>業務保管實際出貨</h3><p>訂單：${escapeHtml(order.orderNo||orderId)}</p>
+  <label>出貨品項<select name="itemId" required>${candidates.map(item=>
+   `<option value="${escapeAttr(item.itemId)}">${escapeHtml(item.itemName||item.itemCode||item.itemId)}・待出貨 ${item.reservedQty}</option>`).join('')}</select></label>
   <label>出貨數量<input name="qty" type="number" min="1" max="${remaining}" step="1" value="${remaining}" required></label>
   <label>出貨日期<input name="date" type="date" value="${escapeAttr(typeof localDateString==='function'?localDateString():new Date().toISOString().slice(0,10))}" required></label>
   <label>客戶收件人<input name="contact" maxlength="1000" value="${escapeAttr(order.customerName||'')}" required></label>
@@ -130,19 +140,27 @@ window.openV3CustodyShipment=async function(orderId){
  </form>`;
  document.body.appendChild(modal);
  const form=modal.querySelector('form'),save=form.querySelector('button[type="submit"]');
+ const itemChoice=form.querySelector('select[name="itemId"]'),quantity=form.querySelector('input[name="qty"]');
+ itemChoice.addEventListener('change',()=>{
+  const selected=candidates.find(item=>item.itemId===itemChoice.value);
+  if(selected){quantity.max=String(selected.reservedQty);quantity.value=String(selected.reservedQty);}
+ });
  modal.querySelector('[data-action="cancel"]').addEventListener('click',()=>modal.close());
  modal.addEventListener('close',()=>modal.remove(),{once:true});
  form.addEventListener('submit',async event=>{
   event.preventDefault();if(save.disabled)return;
   save.disabled=true;
   const values=new FormData(form),qty=Number(values.get('qty'));
+  const selected=candidates.find(item=>item.itemId===String(values.get('itemId')||''));
   const date=String(values.get('date')||''),notes=String(values.get('notes')||'');
   const expectedPlan={mode:'CUSTOMER_SHIP',contact:String(values.get('contact')||''),
    phone:String(values.get('phone')||''),address:String(values.get('address')||''),
    warehouseId:'',packages:1,notes:''};
   const operationId='custody_ship_'+crypto.randomUUID().replaceAll('-','_');
   try{
-   const saved=await commitV3CustodyShipment({orderId,itemId:item.itemId,qty,date,notes,
+   if(!selected||!Number.isSafeInteger(qty)||qty<=0||qty>selected.reservedQty)
+    throw Error('請選擇有效的保管品項與出貨數量。');
+   const saved=await commitV3CustodyShipment({orderId,itemId:selected.itemId,qty,date,notes,
     operationId,expectedPlan});
    const index=ordersCache.findIndex(row=>row.id===orderId);
    if(index>=0)ordersCache[index]={id:orderId,...saved};
