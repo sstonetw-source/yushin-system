@@ -12948,7 +12948,8 @@ window.renderOrdersList = function() {
                         && (currentUserRole==='admin'||o.ownerUid===currentUser?.uid)
                         && allOrderItems.length===1&&allOrderItems[0].custodyTransferId
                         && allOrderItems[0].warehouseId==='custody-'+o.ownerUid
-                        && v3CustodyReturnCandidates(o).length>0
+                        && (v3CustodyReturnCandidates(o).length>0
+                            || unresolvedV3CustodyReturnExists(o.id,allOrderItems[0].itemId))
                         ? `<button type="button" class="btn-small" onclick="openV3CustodyReturn(${inlineJsValue(o.id)})">保管退貨實收／核對</button>`:''}
                     
                     ${canConfirmOrderDelivery && lifecycle.status === 'normal' && deliveryProgress.state !== 'complete' && (fulfillmentProgress.shippable>0 || deliveryPending) ? `<button type="button" class="btn-small" onclick="${useBatchDelivery ? 'openPartialDeliveryForOrder' : 'quickCompleteDelivery'}(${inlineJsValue(o.id)})" ${orderInventorySyncIncomplete(o) || lifecycle.status !== 'normal' || deliveryPending || deliveryProgress.state === 'complete' || fulfillmentProgress.shippable<=0 ? 'disabled' : ''}>${deliveryPending ? '處理中…' : useBatchDelivery ? '確認分批送達' : '確認送達'}</button>` : ''}
@@ -22031,6 +22032,10 @@ window.openV3CustodyShipment=async function(orderId){
 // Inventory, lot, reservation and cost authority all remain in one Callable.
 function v3CustodyReturnKey(orderId,itemId){
  return 'v3-custody-return:'+encodeURIComponent(currentUser?.uid||'')+':'+encodeURIComponent(orderId)+':'+encodeURIComponent(itemId);
+}
+function unresolvedV3CustodyReturnExists(orderId,itemId){
+ try{return typeof sessionStorage!=='undefined'&&sessionStorage.getItem(v3CustodyReturnKey(orderId,itemId))!==null;}
+ catch(_){return false;}
 }
 function pendingV3CustodyReturn(orderId,itemId){
  if(typeof sessionStorage==='undefined')return null;

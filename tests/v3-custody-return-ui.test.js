@@ -53,11 +53,15 @@ test('V3 Custody return UI freezes the original lot, operator and intent across 
  assert.equal(app.v3CustodyReturnCandidates(f.order).length,1);
  f.loseOnce();await assert.rejects(app.commitV3CustodyReturn(f.input('custody_return_ui_123456')),/lost response/);
  assert.equal(f.writes(),1);assert.equal(f.storage.size,1);
+ assert.equal(app.v3CustodyReturnCandidates(f.order).length,0,'after commit no new return is allowed');
+ assert.equal(app.unresolvedV3CustodyReturnExists('ORDER','I'),true,
+  'the original list must retain its recovery button even after the server commits');
  await assert.rejects(app.commitV3CustodyReturn(f.input('custody_return_ui_other')),/原操作編號/);
  assert.equal(f.writes(),1);
  const reloaded=f.open({YUSHIN_V3_CUSTODY_RETURN_EMULATOR:true});
  assert.equal((await reloaded.window.resumeV3CustodyReturn('ORDER','I')).returnRecords.length,1);
  assert.equal(f.writes(),1);assert.equal(f.storage.size,0);
+ assert.equal(reloaded.unresolvedV3CustodyReturnExists('ORDER','I'),false);
  assert.equal(f.requests[0].operationId,f.requests[1].operationId);
  assert.deepEqual(f.requests[0].selections,[{lotId:'TRANSFER-0',qty:1}]);
  assert.equal(f.requests[0].settlement,'CLOSE');
@@ -78,6 +82,7 @@ test('original order page separates Custody return receipt from generic client-s
  const build=fs.readFileSync('tools/build-app.cjs','utf8');
  assert.match(order,/openV3CustodyReturn/);
  assert.match(order,/YUSHIN_V3_CUSTODY_RETURN_EMULATOR/);
+ assert.match(order,/unresolvedV3CustodyReturnExists/);
  assert.match(build,/src\/services\/custody-return.js/);
  assert.match(source,/receiveV3CustodyReturn/);
  assert.doesNotMatch(source,/runRoleTransaction|transaction\.update\(|transaction\.set\(/);

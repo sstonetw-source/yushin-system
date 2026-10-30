@@ -1305,7 +1305,8 @@ window.renderOrdersList = function() {
                         && (currentUserRole==='admin'||o.ownerUid===currentUser?.uid)
                         && allOrderItems.length===1&&allOrderItems[0].custodyTransferId
                         && allOrderItems[0].warehouseId==='custody-'+o.ownerUid
-                        && v3CustodyReturnCandidates(o).length>0
+                        && (v3CustodyReturnCandidates(o).length>0
+                            || unresolvedV3CustodyReturnExists(o.id,allOrderItems[0].itemId))
                         ? `<button type="button" class="btn-small" onclick="openV3CustodyReturn(${inlineJsValue(o.id)})">保管退貨實收／核對</button>`:''}
                     
                     ${canConfirmOrderDelivery && lifecycle.status === 'normal' && deliveryProgress.state !== 'complete' && (fulfillmentProgress.shippable>0 || deliveryPending) ? `<button type="button" class="btn-small" onclick="${useBatchDelivery ? 'openPartialDeliveryForOrder' : 'quickCompleteDelivery'}(${inlineJsValue(o.id)})" ${orderInventorySyncIncomplete(o) || lifecycle.status !== 'normal' || deliveryPending || deliveryProgress.state === 'complete' || fulfillmentProgress.shippable<=0 ? 'disabled' : ''}>${deliveryPending ? '處理中…' : useBatchDelivery ? '確認分批送達' : '確認送達'}</button>` : ''}

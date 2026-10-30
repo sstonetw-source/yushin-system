@@ -2743,3 +2743,182 @@ for(const width of [1280,390])test('original owner handoff '+width+'px keeps sou
   assert.deepEqual(errors,[]);
  }finally{await context.close();}
 });
+
+// True original page and logged-in browser, following the SAME original V3
+// HANDOFF, receipt, lot and protected cost through customer shipment, delivery
+// acknowledgement and the original Custody return. Only the initial source
+// fixture and the presentation cache are seeded; no transaction writer is
+// mocked, and the browser talks to actual Auth/Functions/Firestore Emulators.
+for(const width of [1280,390])test('original V3 Custody '+width+'px shipment delivery and returned lot recover after lost replies',{timeout:240000},async()=>{
+ const tag='custody-v3-site-'+width,uid=tag+'-owner',email=uid+'@example.test';
+ const key=tag+'-P',orderId=tag+'-ORDER',transferId=tag+'-HANDOFF',custody='custody-'+uid,lotId=transferId+'-0';
+ await auth.createUser({uid,email,password});
+ const batch=db.batch(),put=(collection,id,data)=>batch.set(db.collection(collection).doc(id),data);
+ const originalPlan={mode:'PICKUP',contact:'',phone:'',address:'',warehouseId:'',packages:1,notes:''};
+ const sourceLocations=[{warehouseId:'A',reservedQty:1},{warehouseId:'B',reservedQty:2}];
+ const transfer={id:transferId,kind:'HANDOFF',status:'RECEIVED',orderId,itemId:'I',productKey:key,
+  ownerUid:uid,salesCode:'S01',qty:3,toWarehouseId:custody,deliveryPlan:originalPlan,
+  orderTransferIntentHash:'hash-original',reservationLocationSchemaVersion:2,custodyLocationSchemaVersion:3,
+  lifecycleWarehouseIds:['A','B'],sourceLocations:sourceLocations.map(row=>({warehouseId:row.warehouseId,qty:row.reservedQty})),
+  allocations:[{lotId:'ORIGINAL',targetLotId:lotId,qty:3,costLotId:'SOURCE-LOT'}]};
+ const cost={productKey:key,warehouseId:custody,sourceId:transferId,costSourceLotId:'SOURCE-LOT',unitCost:432};
+ put('users',uid,{role:'sales',active:true,name:'Custody Owner',email,code:'S01'});
+ put('products',key,{productType:'Goods',active:true,itemCode:tag,itemName:'原批次保管商品',nameCn:'原批次保管商品'});
+ put('warehouses',custody,{active:true,systemCustody:true,warehouseType:'CUSTODY',warehouseName:'業務保管',ownerUid:uid});
+ put('inventory',encodeURIComponent(key),{productKey:key,onHand:3,reserved:3});
+ put('warehouseStocks',encodeURIComponent(custody)+'__'+encodeURIComponent(key),{warehouseId:custody,productKey:key,onHand:3,reserved:3});
+ put('inventoryLots',lotId,{productKey:key,warehouseId:custody,sourceType:'WAREHOUSE_TRANSFER',
+  sourceId:transferId,transferId,qty:3,remainingQty:3,costLotId:'SOURCE-LOT',lotNo:'V3-LOT'});
+ put('inventoryLotCosts',lotId,cost);
+ put('stockTransfers',transferId,transfer);
+ put('reservationOperationReceipts','order-transfer-dispatch-'+transferId,
+  {kind:'ORDER_TRANSFER_DISPATCH',intentHash:'hash-original',transfer});
+ put('inventoryMovements',transferId+'-in',
+  {type:'warehouse_transfer_in',sourceType:'WAREHOUSE_TRANSFER',sourceId:transferId,
+   orderId,itemId:'I',productKey:key,warehouseId:custody,qty:3});
+ put('orders',orderId,{orderNo:orderId,customerName:'Custody E2E Customer',customerPhone:'0222334455',
+  customerAddress:'台北市測試地址',status:'active',orderStatus:'normal',
+  ownerUid:uid,salesCode:'S01',salesName:'Custody Owner',orderDate:'2026-10-30',
+  inventoryReservationStatus:'completed',inventoryReservationAttemptId:'sync_1234567890',
+  logisticsTransfersPending:0,warehouseShipmentRecords:[],deliveryRecords:[],returnRecords:[],
+  deliveredQty:0,returnedQty:0,isDelivered:false,
+  items:[{itemId:'I',qty:3,orderedQty:3,productId:key,productType:'Goods',itemCode:tag,
+   itemName:'原批次保管商品',brand:'Roche',warehouseId:custody,custodyTransferId:transferId,
+   reservedQty:3,shortageQty:0,dispatchPreparedQty:3,warehouseShippedQty:0,
+   deliveredQty:0,returnedQty:0,deliveryPlan:originalPlan}]});
+ put('inventoryReservations',orderId+'__I',{orderId,itemId:'I',productKey:key,
+  ownerUid:uid,salesCode:'S01',locationSchemaVersion:3,quantity:3,shortageQty:0,
+  status:'active',custodyTransferId:transferId,locations:[{warehouseId:custody,reservedQty:3}],
+  custodyOriginalQty:3,lifecycleWarehouseIds:['A','B'],sourceLocationSnapshot:sourceLocations});
+ await batch.commit();
+
+ const context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
+ const calls=[],errors=[],alerts=[],external=[];const dropAction=width===1280?'shipV3CustodyItem':'receiveV3CustodyReturn';
+ let dropped=false;
+ await context.addInitScript(()=>{
+  window.YUSHIN_LOCAL_EMULATOR=true;
+  window.YUSHIN_V3_CUSTODY_SHIPMENT_EMULATOR=true;
+  window.YUSHIN_V3_CUSTODY_DELIVERY_EMULATOR=true;
+  window.YUSHIN_V3_CUSTODY_RETURN_EMULATOR=true;
+ });
+ page.on('pageerror',error=>errors.push(error.message));
+ page.on('dialog',dialog=>{alerts.push(dialog.message());return dialog.dismiss();});
+ await context.route('**/*',async route=>{
+  const request=route.request(),url=new URL(request.url());
+  if(!['localhost','127.0.0.1'].includes(url.hostname)){external.push(url.hostname);await route.abort();return;}
+  if(url.port==='5001'&&request.method()==='POST'
+   &&/\/(shipV3CustodyItem|confirmV3CustodyDelivery|receiveV3CustodyReturn)$/.test(url.pathname)){
+   const action=url.pathname.split('/').at(-1),payload=request.postDataJSON().data;
+   assert.match((await request.allHeaders()).authorization||'',/^Bearer /);
+   assert.equal(payload.actorUid,undefined);assert.equal(payload.actorRole,undefined);
+   calls.push({action,payload});
+   if(action===dropAction&&!dropped){
+    dropped=true;const result=await route.fetch();assert.equal(result.status(),200,'real Callable committed before reply loss');
+    await route.abort('failed');return;
+   }
+  }
+  await route.continue();
+ });
+ const read=async(collection,id)=>(await db.collection(collection).doc(id).get()).data();
+ const facts=async()=>({order:await read('orders',orderId),inventory:await read('inventory',encodeURIComponent(key)),
+  stock:await read('warehouseStocks',encodeURIComponent(custody)+'__'+encodeURIComponent(key)),
+  ledger:await read('inventoryReservations',orderId+'__I'),lot:await read('inventoryLots',lotId),
+  cost:await read('inventoryLotCosts',lotId),transfer:await read('stockTransfers',transferId),
+  movements:(await db.collection('inventoryMovements').where('orderId','==',orderId).get()).docs
+   .map(doc=>({id:doc.id,...doc.data()})).sort((a,b)=>a.id.localeCompare(b.id))});
+ const presentOrder=async()=>{
+  await siteNav(page,'orders');
+  await page.waitForFunction(()=>!mainPageLoads.has('orders.list')&&!orderPageLoading);
+  await page.evaluate(async id=>{
+   const snapshot=await db.collection('orders').doc(id).get({source:'server'});
+   if(!snapshot.exists)throw Error('Original V3 order not available');
+   ordersCache=[{id,...snapshot.data()}];orderHistorySearchActive=false;
+   activeOrderWorkFilter='all';document.getElementById('orderSearch').value='';
+   renderOrdersList();
+  },orderId);
+  await page.locator('#ordersBody > tr').filter({hasText:orderId}).first().waitFor({state:'visible'});
+ };
+ const row=()=>page.locator('#ordersBody > tr').filter({hasText:orderId}).first();
+ const shipmentButton=()=>row().getByRole('button',{name:'業務保管出貨／核對',exact:true});
+ const returnButton=()=>row().getByRole('button',{name:'保管退貨實收／核對',exact:true});
+ try{
+  await siteOpen(page);await siteLogin(page,{uid,email},'sales');await presentOrder();
+  const before=await facts();assert.deepEqual(before.cost,cost);assert.deepEqual(before.transfer,transfer);
+  await shipmentButton().click();
+  const shipmentModal=page.locator('dialog[open]').filter({hasText:'業務保管實際出貨'});
+  await shipmentModal.waitFor({state:'visible'});
+  await shipmentModal.locator('input[name="qty"]').fill('1');
+  await shipmentModal.locator('input[name="date"]').fill('2026-10-30');
+  await shipmentModal.locator('input[name="contact"]').fill('測試收件人');
+  await shipmentModal.locator('input[name="phone"]').fill('0222334455');
+  await shipmentModal.locator('input[name="address"]').fill('台北市測試地址');
+  await shipmentModal.getByRole('button',{name:'確認已實際出貨'}).click();
+  if(width===1280){
+   await page.waitForFunction(()=>document.querySelector('dialog[open] [data-role="status"]')?.textContent.includes('結果未確認'),null,{timeout:45000});
+   assert.equal((await facts()).order.warehouseShipmentRecords.length,1);
+   assert.equal(await page.evaluate(id=>!!pendingV3CustodyShipment(id,'I'),orderId),true);
+   await siteOpen(page,'sales');await presentOrder();
+   await shipmentButton().click();
+   await page.waitForFunction(id=>!pendingV3CustodyShipment(id,'I'),orderId,{timeout:45000});
+   const shipmentCalls=calls.filter(call=>call.action==='shipV3CustodyItem');
+   assert.equal(shipmentCalls.length,2);assert.deepEqual(shipmentCalls[0].payload,shipmentCalls[1].payload);
+  }else await shipmentModal.waitFor({state:'hidden',timeout:45000});
+  const shipped=await facts(),shipment=shipped.order.warehouseShipmentRecords[0];
+  assert.ok(shipment?.id);assert.equal(shipment.qty,1);assert.equal(shipped.order.deliveryRecords.length,0);
+  assert.equal(shipped.inventory.onHand,2);assert.equal(shipped.inventory.reserved,2);
+  assert.equal(shipped.stock.onHand,2);assert.equal(shipped.stock.reserved,2);
+  assert.equal(shipped.ledger.quantity,2);assert.equal(shipped.lot.remainingQty,2);
+  assert.deepEqual(shipped.cost,cost);assert.deepEqual(shipped.transfer,transfer);
+
+  await page.evaluate(id=>openPartialDeliveryForOrder(id),orderId);
+  await page.locator('#deliveryModalOverlay.active').waitFor({state:'visible'});
+  await page.locator('#deliveryFormPanel').waitFor({state:'visible'});
+  await page.locator('#deliveryShipmentId').selectOption(shipment.id);
+  await page.locator('#deliveryDate').fill('2026-10-30');
+  await page.locator('#deliveryQty').fill('1');
+  await page.locator('#deliveryNotes').fill('客戶確認已收到 V3 保管出貨');
+  await page.locator('#deliveryFormPanel button[onclick="saveDeliveryRecord()"]').click();
+  await page.waitForFunction(id=>!pendingDeliveryOrderIds.size&&!pendingV2DeliveryConfirmation(id),orderId,{timeout:45000});
+  const delivered=await facts();
+  assert.equal(delivered.order.deliveryRecords.length,1);
+  assert.equal(delivered.order.deliveryRecords[0].shipmentId,shipment.id);
+  for(const field of ['inventory','stock','ledger','lot','cost','transfer'])
+   assert.deepEqual(delivered[field],shipped[field],'customer acknowledgement must not debit stock: '+field);
+  await page.locator('#deliveryModalOverlay.active').getByRole('button',{name:'關閉',exact:true}).click();
+  await returnButton().click();
+  const returnModal=page.locator('dialog[open]').filter({hasText:'業務保管退貨實際收回'});
+  await returnModal.waitFor({state:'visible'});
+  assert.match(await returnModal.locator('select[name="source"] option').first().textContent(),/V3-LOT/);
+  await returnModal.locator('input[name="qty"]').fill('1');
+  await returnModal.locator('input[name="date"]').fill('2026-10-30');
+  await returnModal.locator('textarea[name="reason"]').fill('實際收回原批次並結案');
+  await returnModal.getByRole('button',{name:'確認實際收回入庫'}).click();
+  if(width===390){
+   await page.waitForFunction(()=>document.querySelector('dialog[open] [data-role="status"]')?.textContent.includes('結果未確認'),null,{timeout:45000});
+   assert.equal((await facts()).order.returnRecords.length,1);
+   assert.equal(await page.evaluate(id=>!!pendingV3CustodyReturn(id,'I'),orderId),true);
+   await siteOpen(page,'sales');await presentOrder();
+   // The server already committed: the new-return candidate is gone, but the
+   // original order must still expose recovery of its frozen operation ID.
+   assert.equal(await page.evaluate(id=>v3CustodyReturnCandidates(ordersCache.find(o=>o.id===id)).length,orderId),0);
+   await returnButton().click();
+   await page.waitForFunction(id=>!pendingV3CustodyReturn(id,'I'),orderId,{timeout:45000});
+   const returnCalls=calls.filter(call=>call.action==='receiveV3CustodyReturn');
+   assert.equal(returnCalls.length,2);assert.deepEqual(returnCalls[0].payload,returnCalls[1].payload);
+  }else await returnModal.waitFor({state:'hidden',timeout:45000});
+  const returned=await facts();
+  assert.equal(returned.order.returnRecords.length,1);assert.equal(returned.order.returnRecords[0].qty,1);
+  assert.equal(returned.order.returnRecords[0].shipmentId,shipment.id);
+  assert.equal(returned.order.returnRecords[0].lotAllocations[0].lotId,lotId);
+  assert.equal(returned.order.deliveryRecords.length,1);assert.equal(returned.order.isDelivered,false);
+  assert.equal(returned.inventory.onHand,3);assert.equal(returned.inventory.reserved,2);
+  assert.equal(returned.stock.onHand,3);assert.equal(returned.stock.reserved,2);
+  assert.equal(returned.ledger.quantity,2);assert.equal(returned.lot.remainingQty,3);
+  assert.deepEqual(returned.cost,cost);assert.deepEqual(returned.transfer,transfer);
+  assert.equal(returned.movements.filter(row=>row.action==='location_customer_shipment').length,1);
+  assert.equal(returned.movements.filter(row=>row.action==='location_customer_return').length,1);
+  assert.equal(calls.filter(call=>call.action==='confirmV3CustodyDelivery').length,1);
+  assert.equal(external.length,0);assert.deepEqual(errors,[]);
+  console.log('Original '+width+'px V3 Custody: original login, shipment, distinct customer receipt, actual lot return and exact retry source succeeded.');
+ }finally{await context.close();}
+});

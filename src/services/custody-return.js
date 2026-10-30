@@ -3,6 +3,10 @@
 function v3CustodyReturnKey(orderId,itemId){
  return 'v3-custody-return:'+encodeURIComponent(currentUser?.uid||'')+':'+encodeURIComponent(orderId)+':'+encodeURIComponent(itemId);
 }
+function unresolvedV3CustodyReturnExists(orderId,itemId){
+ try{return typeof sessionStorage!=='undefined'&&sessionStorage.getItem(v3CustodyReturnKey(orderId,itemId))!==null;}
+ catch(_){return false;}
+}
 function pendingV3CustodyReturn(orderId,itemId){
  if(typeof sessionStorage==='undefined')return null;
  const raw=sessionStorage.getItem(v3CustodyReturnKey(orderId,itemId));
