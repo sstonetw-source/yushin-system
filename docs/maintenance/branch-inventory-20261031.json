@@ -1,0 +1,2009 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-31",
+  "repository": "sstonetw-source/yushin-system",
+  "mainHeadAtAudit": "47c471290370c3757041ac143d99f7321c9d3d95",
+  "parentIntegration": {
+    "pr": 234,
+    "mergedAt": "2026-10-24T14:17:31Z",
+    "headSha": "84bf26198fc4da79c6178aa69229e40c4165356e"
+  },
+  "summary": {
+    "total": 199,
+    "main": 1,
+    "nonMain": 198,
+    "eligible": 170,
+    "hold": 28,
+    "counts": {
+      "merged-to-main": 152,
+      "no-pr": 4,
+      "closed-unmerged-pr": 21,
+      "merged-before-parent-main": 18,
+      "branch-advanced-after-pr-merge": 2,
+      "merged-after-parent-main": 1
+    }
+  },
+  "criteria": "No deletion for unmerged or changed branch. Eligible only if branch SHA is exactly the latest head SHA of a merged PR whose base was main, or base was PR #234 branch and it merged before #234 merged to main. Deletion runtime must re-validate PR state, branch SHA and protected flag.",
+  "branches": [
+    {
+      "branch": "codex/concise-page-help-20261012",
+      "sha": "8987eaa80f057c7654d3338315055479217dd541",
+      "classification": "merged-to-main",
+      "pr": 48,
+      "prHeadSha": "8987eaa80f057c7654d3338315055479217dd541",
+      "prBase": "main",
+      "prMergedAt": "2026-10-12T00:18:46Z",
+      "cleanup": true
+    },
+    {
+      "branch": "codex/export-palette-20261012",
+      "sha": "5e7dcf22ce2169eff5f3962f537f566e3aca5e67",
+      "classification": "merged-to-main",
+      "pr": 50,
+      "prHeadSha": "5e7dcf22ce2169eff5f3962f537f566e3aca5e67",
+      "prBase": "main",
+      "prMergedAt": "2026-10-12T00:38:34Z",
+      "cleanup": true
+    },
+    {
+      "branch": "codex/mist-palette-20261012",
+      "sha": "3b63259cb46035a14ae3cb3a8f719f9b5f609d6f",
+      "classification": "merged-to-main",
+      "pr": 49,
+      "prHeadSha": "3b63259cb46035a14ae3cb3a8f719f9b5f609d6f",
+      "prBase": "main",
+      "prMergedAt": "2026-10-12T00:30:12Z",
+      "cleanup": true
+    },
+    {
+      "branch": "codex/page-title-help-20261011",
+      "sha": "b0afd2c50d02009ff0e5d01561131c90ed53a8b2",
+      "classification": "merged-to-main",
+      "pr": 47,
+      "prHeadSha": "b0afd2c50d02009ff0e5d01561131c90ed53a8b2",
+      "prBase": "main",
+      "prMergedAt": "2026-10-12T00:10:06Z",
+      "cleanup": true
+    },
+    {
+      "branch": "codex/remove-courier-fields-20261012",
+      "sha": "4c6039b7b831a521770e67d74f0909bdc26de7a0",
+      "classification": "merged-to-main",
+      "pr": 53,
+      "prHeadSha": "4c6039b7b831a521770e67d74f0909bdc26de7a0",
+      "prBase": "main",
+      "prMergedAt": "2026-10-12T06:22:14Z",
+      "cleanup": true
+    },
+    {
+      "branch": "codex/simple-shipping-20261012",
+      "sha": "99a563013194df516bfe3bbd6440a8758cc50662",
+      "classification": "merged-to-main",
+      "pr": 52,
+      "prHeadSha": "99a563013194df516bfe3bbd6440a8758cc50662",
+      "prBase": "main",
+      "prMergedAt": "2026-10-12T02:31:32Z",
+      "cleanup": true
+    },
+    {
+      "branch": "codex/unify-system-terminology-20261011",
+      "sha": "614694fec924412ae84f2c97267dde993c4c8f94",
+      "classification": "merged-to-main",
+      "pr": 46,
+      "prHeadSha": "614694fec924412ae84f2c97267dde993c4c8f94",
+      "prBase": "main",
+      "prMergedAt": "2026-10-11T13:54:42Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/customer-return-service-20261018",
+      "sha": "1d3d0cc2a89ff5d2b21406e14864b87353a75242",
+      "classification": "merged-to-main",
+      "pr": 169,
+      "prHeadSha": "1d3d0cc2a89ff5d2b21406e14864b87353a75242",
+      "prBase": "main",
+      "prMergedAt": "2026-10-18T12:06:16Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/customer-return-ui-service-20261019",
+      "sha": "956e8cb5fd72b2e2913cc9f34f17e0db123de7f0",
+      "classification": "merged-to-main",
+      "pr": 183,
+      "prHeadSha": "956e8cb5fd72b2e2913cc9f34f17e0db123de7f0",
+      "prBase": "main",
+      "prMergedAt": "2026-10-19T08:11:29Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/dispatch-ui-idempotent-20261018",
+      "sha": "51abe7ec9b6b1cddbd082318941959a28a6dee00",
+      "classification": "merged-to-main",
+      "pr": 168,
+      "prHeadSha": "51abe7ec9b6b1cddbd082318941959a28a6dee00",
+      "prBase": "main",
+      "prMergedAt": "2026-10-18T11:56:01Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/formal-po-multiline-server-20261020",
+      "sha": "83ad1d3b50ddfb9460c7b35ef39628e2e4d0327f",
+      "classification": "merged-to-main",
+      "pr": 202,
+      "prHeadSha": "83ad1d3b50ddfb9460c7b35ef39628e2e4d0327f",
+      "prBase": "main",
+      "prMergedAt": "2026-10-20T11:19:44Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/internal-delivery-reversal-return-trace-20261017",
+      "sha": "7e670ad0c00c7d5bfc0afe954723e1773657903e",
+      "classification": "merged-to-main",
+      "pr": 139,
+      "prHeadSha": "7e670ad0c00c7d5bfc0afe954723e1773657903e",
+      "prBase": "main",
+      "prMergedAt": "2026-10-17T06:47:39Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/internal-location-return-20261017",
+      "sha": "7af8202a6d0319162a8d37d774bd803e90ea3988",
+      "classification": "merged-to-main",
+      "pr": 140,
+      "prHeadSha": "7af8202a6d0319162a8d37d774bd803e90ea3988",
+      "prBase": "main",
+      "prMergedAt": "2026-10-17T07:02:10Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/internal-shipment-delivery-confirmation-20261017",
+      "sha": "711eeb9661951016c3af21386e470f31c3f7a9c4",
+      "classification": "merged-to-main",
+      "pr": 138,
+      "prHeadSha": "711eeb9661951016c3af21386e470f31c3f7a9c4",
+      "prBase": "main",
+      "prMergedAt": "2026-10-17T06:34:26Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/internal-single-item-two-warehouse-v2-20261017",
+      "sha": "b898246f55c0117dfc357ff3a9ae7ef8b00b04c0",
+      "classification": "merged-to-main",
+      "pr": 135,
+      "prHeadSha": "b898246f55c0117dfc357ff3a9ae7ef8b00b04c0",
+      "prBase": "main",
+      "prMergedAt": "2026-10-17T04:58:16Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/internal-two-warehouse-atomic-20261017",
+      "sha": "20f78c6d71a9f6759fbe95e2941e35b29f082d05",
+      "classification": "merged-to-main",
+      "pr": 136,
+      "prHeadSha": "20f78c6d71a9f6759fbe95e2941e35b29f082d05",
+      "prBase": "main",
+      "prMergedAt": "2026-10-17T05:46:05Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/internal-v2-location-shipment-20261017",
+      "sha": "967df84c047fdbb52b4d14648779a968a8d450a3",
+      "classification": "merged-to-main",
+      "pr": 137,
+      "prHeadSha": "967df84c047fdbb52b4d14648779a968a8d450a3",
+      "prBase": "main",
+      "prMergedAt": "2026-10-17T06:05:21Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/location-delivery-planning-20261017",
+      "sha": "1edb4cacac286af108539b670787ca0ec2853431",
+      "classification": "merged-to-main",
+      "pr": 126,
+      "prHeadSha": "1edb4cacac286af108539b670787ca0ec2853431",
+      "prBase": "main",
+      "prMergedAt": "2026-10-16T23:48:43Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/location-lifecycle-20261017",
+      "sha": "0219dedf1214597c4641308b36c3a5774ee4a8df",
+      "classification": "merged-to-main",
+      "pr": 130,
+      "prHeadSha": "0219dedf1214597c4641308b36c3a5774ee4a8df",
+      "prBase": "main",
+      "prMergedAt": "2026-10-17T01:27:00Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/location-receipt-allocation-20261017",
+      "sha": "0f801895a7e379ae14bb7606d6c83429d332f962",
+      "classification": "merged-to-main",
+      "pr": 129,
+      "prHeadSha": "0f801895a7e379ae14bb7606d6c83429d332f962",
+      "prBase": "main",
+      "prMergedAt": "2026-10-17T01:15:06Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/multi-item-cancelled-close-return-20261019",
+      "sha": "6fba35a83604743d989c579dce77affc3826e40f",
+      "classification": "merged-to-main",
+      "pr": 182,
+      "prHeadSha": "6fba35a83604743d989c579dce77affc3826e40f",
+      "prBase": "main",
+      "prMergedAt": "2026-10-19T07:37:33Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/multi-item-cancelled-receiving-20261019",
+      "sha": "bd5230ec05090e514064075941e2bbd0710fb687",
+      "classification": "merged-to-main",
+      "pr": 181,
+      "prHeadSha": "bd5230ec05090e514064075941e2bbd0710fb687",
+      "prBase": "main",
+      "prMergedAt": "2026-10-19T06:44:45Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/multi-item-close-followup-20261019",
+      "sha": "54aa0680365f334170fca4ea3afe79ff4c5e90d7",
+      "classification": "merged-to-main",
+      "pr": 180,
+      "prHeadSha": "54aa0680365f334170fca4ea3afe79ff4c5e90d7",
+      "prBase": "main",
+      "prMergedAt": "2026-10-19T06:22:43Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/multi-item-close-return-20261019",
+      "sha": "bc987a4eeb4c82d3c535a1e20c588e2b64e7097c",
+      "classification": "merged-to-main",
+      "pr": 179,
+      "prHeadSha": "bc987a4eeb4c82d3c535a1e20c588e2b64e7097c",
+      "prBase": "main",
+      "prMergedAt": "2026-10-19T05:51:07Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/multi-item-delivery-20261019",
+      "sha": "a5fb8b508dd3f3fc2a1c34d6b48a1c2cd479b5ab",
+      "classification": "merged-to-main",
+      "pr": 175,
+      "prHeadSha": "a5fb8b508dd3f3fc2a1c34d6b48a1c2cd479b5ab",
+      "prBase": "main",
+      "prMergedAt": "2026-10-18T22:39:36Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/multi-item-delivery-reversal-20261019",
+      "sha": "aca06f37d6545ecb5b7dddf4a2e7a063441b6bba",
+      "classification": "merged-to-main",
+      "pr": 176,
+      "prHeadSha": "aca06f37d6545ecb5b7dddf4a2e7a063441b6bba",
+      "prBase": "main",
+      "prMergedAt": "2026-10-19T00:11:19Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/multi-item-dispatch-20261018",
+      "sha": "9b83d9b7194d74d0eda5202d033c841ce35a68fb",
+      "classification": "merged-to-main",
+      "pr": 173,
+      "prHeadSha": "9b83d9b7194d74d0eda5202d033c841ce35a68fb",
+      "prBase": "main",
+      "prMergedAt": "2026-10-18T15:03:40Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/multi-item-initialization-20261018",
+      "sha": "908ab7698d1a5034f017c90f3669b3dabbfe817f",
+      "classification": "merged-to-main",
+      "pr": 171,
+      "prHeadSha": "908ab7698d1a5034f017c90f3669b3dabbfe817f",
+      "prBase": "main",
+      "prMergedAt": "2026-10-18T14:10:56Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/multi-item-lifecycle-20261019",
+      "sha": "b4ce84318d339d6484df6610cb8bf0d1c5ad4d65",
+      "classification": "merged-to-main",
+      "pr": 178,
+      "prHeadSha": "b4ce84318d339d6484df6610cb8bf0d1c5ad4d65",
+      "prBase": "main",
+      "prMergedAt": "2026-10-19T02:55:41Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/multi-item-location-reservation-20261018",
+      "sha": "34f9480b66eb053e2f45bac93ae2461ea46562a2",
+      "classification": "merged-to-main",
+      "pr": 170,
+      "prHeadSha": "34f9480b66eb053e2f45bac93ae2461ea46562a2",
+      "prBase": "main",
+      "prMergedAt": "2026-10-18T13:51:18Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/multi-item-receiving-20261018",
+      "sha": "ead9b5d42754a293c1b57a9ff40da57c1b921451",
+      "classification": "merged-to-main",
+      "pr": 172,
+      "prHeadSha": "ead9b5d42754a293c1b57a9ff40da57c1b921451",
+      "prBase": "main",
+      "prMergedAt": "2026-10-18T14:28:54Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/multi-item-receiving-after-shipment-20261019",
+      "sha": "3ef11d8f553bf6df1504217ecee7aa10d5a9cc62",
+      "classification": "merged-to-main",
+      "pr": 177,
+      "prHeadSha": "3ef11d8f553bf6df1504217ecee7aa10d5a9cc62",
+      "prBase": "main",
+      "prMergedAt": "2026-10-19T02:04:40Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/multi-item-shipment-20261018",
+      "sha": "ce2abda57a31a17d8d7d9a90a08aa02f10a280f3",
+      "classification": "no-pr",
+      "pr": null,
+      "prHeadSha": null,
+      "prBase": null,
+      "prMergedAt": null,
+      "cleanup": false
+    },
+    {
+      "branch": "feat/multi-item-shipment-integration-20261018",
+      "sha": "bc79a244d30fbf65d2f87fee1a6e40d4a48e29a0",
+      "classification": "merged-to-main",
+      "pr": 174,
+      "prHeadSha": "bc79a244d30fbf65d2f87fee1a6e40d4a48e29a0",
+      "prBase": "main",
+      "prMergedAt": "2026-10-18T15:25:48Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/multiwarehouse-safe-allocation-preview-20261017",
+      "sha": "0825fe7951730596960869c88cdebbabfc2e7f28",
+      "classification": "merged-to-main",
+      "pr": 124,
+      "prHeadSha": "0825fe7951730596960869c88cdebbabfc2e7f28",
+      "prBase": "main",
+      "prMergedAt": "2026-10-16T20:32:42Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/order-amount-details-20261025",
+      "sha": "13efc421ff7e95bcb08a895f328b24880e89e038",
+      "classification": "closed-unmerged-pr",
+      "pr": 283,
+      "prHeadSha": "13efc421ff7e95bcb08a895f328b24880e89e038",
+      "prBase": "main",
+      "prMergedAt": null,
+      "cleanup": false
+    },
+    {
+      "branch": "feat/preview-formal-purchase-199",
+      "sha": "0fa088bc0f51d983ceb1b4072b304b45b0b545e2",
+      "classification": "merged-to-main",
+      "pr": 250,
+      "prHeadSha": "0fa088bc0f51d983ceb1b4072b304b45b0b545e2",
+      "prBase": "main",
+      "prMergedAt": "2026-10-23T16:17:50Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/preview-grouped-reservation-client-20261017",
+      "sha": "a04d6715f1cfa5e10faed59447fb984943155a93",
+      "classification": "merged-to-main",
+      "pr": 133,
+      "prHeadSha": "a04d6715f1cfa5e10faed59447fb984943155a93",
+      "prBase": "main",
+      "prMergedAt": "2026-10-17T03:33:00Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/quick-purchase-preview-backend-gate-20261025",
+      "sha": "39f70f0153fe5f6a175c164265d3252fd9fea678",
+      "classification": "closed-unmerged-pr",
+      "pr": 290,
+      "prHeadSha": "39f70f0153fe5f6a175c164265d3252fd9fea678",
+      "prBase": "main",
+      "prMergedAt": null,
+      "cleanup": false
+    },
+    {
+      "branch": "feat/return-close-default-20261017",
+      "sha": "fa42c8e8426b9577e17ca4325cb3ac48380ef6fd",
+      "classification": "merged-to-main",
+      "pr": 141,
+      "prHeadSha": "fa42c8e8426b9577e17ca4325cb3ac48380ef6fd",
+      "prBase": "main",
+      "prMergedAt": "2026-10-17T07:22:36Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/server-grouped-reservation-20261017",
+      "sha": "6714e0b1052be83154a7e143ee77a66b104c7a2b",
+      "classification": "merged-to-main",
+      "pr": 132,
+      "prHeadSha": "6714e0b1052be83154a7e143ee77a66b104c7a2b",
+      "prBase": "main",
+      "prMergedAt": "2026-10-17T03:13:38Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/service-billing-date-20261023",
+      "sha": "9ebb09b6198466c7e05602e070fa50f7d3b332a2",
+      "classification": "merged-before-parent-main",
+      "pr": 249,
+      "prHeadSha": "9ebb09b6198466c7e05602e070fa50f7d3b332a2",
+      "prBase": "fix/service-order-no-physical-reservation-20261022",
+      "prMergedAt": "2026-10-23T15:00:08Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/service-billing-evidence-20261023",
+      "sha": "ff58a6b7c7b4bbb6bb7375e3971070cd7e8ef52d",
+      "classification": "merged-before-parent-main",
+      "pr": 247,
+      "prHeadSha": "ff58a6b7c7b4bbb6bb7375e3971070cd7e8ef52d",
+      "prBase": "fix/service-order-no-physical-reservation-20261022",
+      "prMergedAt": "2026-10-23T13:16:43Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/service-case-quantity-20261023",
+      "sha": "7faf05ed3c1df6a74873ae75082409f499904cc1",
+      "classification": "merged-before-parent-main",
+      "pr": 240,
+      "prHeadSha": "7faf05ed3c1df6a74873ae75082409f499904cc1",
+      "prBase": "fix/service-order-no-physical-reservation-20261022",
+      "prMergedAt": "2026-10-23T06:00:22Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/service-case-ui-20261023",
+      "sha": "99b1e1139c554a9bddc8e11639a4b81ced60be7b",
+      "classification": "merged-before-parent-main",
+      "pr": 241,
+      "prHeadSha": "99b1e1139c554a9bddc8e11639a4b81ced60be7b",
+      "prBase": "fix/service-order-no-physical-reservation-20261022",
+      "prMergedAt": "2026-10-23T08:33:40Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/service-fulfillment-projection-20261023",
+      "sha": "f4ce8c839714eea9750bda98d179a4c2a67c752f",
+      "classification": "merged-before-parent-main",
+      "pr": 243,
+      "prHeadSha": "f4ce8c839714eea9750bda98d179a4c2a67c752f",
+      "prBase": "fix/service-order-no-physical-reservation-20261022",
+      "prMergedAt": "2026-10-23T09:48:41Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/service-order-list-readonly-hint-20261023",
+      "sha": "bbd3cdadc2659dc57aab53397f056d239e84aa4d",
+      "classification": "merged-before-parent-main",
+      "pr": 245,
+      "prHeadSha": "bbd3cdadc2659dc57aab53397f056d239e84aa4d",
+      "prBase": "fix/service-order-no-physical-reservation-20261022",
+      "prMergedAt": "2026-10-23T12:22:04Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/service-order-verified-summary-20261023",
+      "sha": "0ee015e0785834c5f1830a05ac5e56905f636e79",
+      "classification": "merged-before-parent-main",
+      "pr": 246,
+      "prHeadSha": "0ee015e0785834c5f1830a05ac5e56905f636e79",
+      "prBase": "fix/service-order-no-physical-reservation-20261022",
+      "prMergedAt": "2026-10-23T12:48:17Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/v2-delivery-confirmation-auth-20261019",
+      "sha": "199da0caeed9b58683cc0b66eaff3efeb22a1d61",
+      "classification": "merged-to-main",
+      "pr": 187,
+      "prHeadSha": "199da0caeed9b58683cc0b66eaff3efeb22a1d61",
+      "prBase": "main",
+      "prMergedAt": "2026-10-19T12:40:11Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/v2-delivery-reversal-auth-20261019",
+      "sha": "cc71ccd71cc6785ecba812e2e41819f53a0da090",
+      "classification": "merged-to-main",
+      "pr": 188,
+      "prHeadSha": "cc71ccd71cc6785ecba812e2e41819f53a0da090",
+      "prBase": "main",
+      "prMergedAt": "2026-10-19T16:16:44Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/v2-delivery-reversal-ui-20261020",
+      "sha": "afe572ed63838ab488619a32f9c2a31245fa1db5",
+      "classification": "merged-to-main",
+      "pr": 189,
+      "prHeadSha": "afe572ed63838ab488619a32f9c2a31245fa1db5",
+      "prBase": "main",
+      "prMergedAt": "2026-10-20T00:23:00Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/v2-dispatch-auth-transport-20261019",
+      "sha": "db608dc240f6de2e7d45d1294c8a2faad21f30be",
+      "classification": "merged-to-main",
+      "pr": 184,
+      "prHeadSha": "db608dc240f6de2e7d45d1294c8a2faad21f30be",
+      "prBase": "main",
+      "prMergedAt": "2026-10-19T08:37:51Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/v2-dispatch-preparation-emulator-20261017",
+      "sha": "db49751959f0cec0fbd1763e5476387124a748db",
+      "classification": "merged-to-main",
+      "pr": 143,
+      "prHeadSha": "db49751959f0cec0fbd1763e5476387124a748db",
+      "prBase": "main",
+      "prMergedAt": "2026-10-17T07:52:27Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/v2-formal-po-atomic-emulator-20261020",
+      "sha": "82c67e856042242bf318ae936c970c52058ee07e",
+      "classification": "merged-to-main",
+      "pr": 201,
+      "prHeadSha": "82c67e856042242bf318ae936c970c52058ee07e",
+      "prBase": "main",
+      "prMergedAt": "2026-10-20T08:00:22Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/v2-formal-purchase-auth-gate-20261020",
+      "sha": "865a085bde80819a5c2e2ab23dfcaf51e15198a0",
+      "classification": "merged-to-main",
+      "pr": 200,
+      "prHeadSha": "865a085bde80819a5c2e2ab23dfcaf51e15198a0",
+      "prBase": "main",
+      "prMergedAt": "2026-10-20T07:03:42Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/v2-free-stock-recovery-ui-20261020",
+      "sha": "9e12dc2a5b2f576e46782035187f64e502d6f1f6",
+      "classification": "merged-to-main",
+      "pr": 192,
+      "prHeadSha": "9e12dc2a5b2f576e46782035187f64e502d6f1f6",
+      "prBase": "main",
+      "prMergedAt": "2026-10-20T01:43:54Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/v2-lifecycle-auth-20261020",
+      "sha": "d8f1e8bd225d27de80d1fc145a450299c9080339",
+      "classification": "merged-to-main",
+      "pr": 190,
+      "prHeadSha": "d8f1e8bd225d27de80d1fc145a450299c9080339",
+      "prBase": "main",
+      "prMergedAt": "2026-10-20T00:40:24Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/v2-lifecycle-supplier-commitments-20261017",
+      "sha": "dd7a970aec045e367a5a5cfa2762045e839f6a20",
+      "classification": "merged-to-main",
+      "pr": 147,
+      "prHeadSha": "dd7a970aec045e367a5a5cfa2762045e839f6a20",
+      "prBase": "main",
+      "prMergedAt": "2026-10-17T11:03:49Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/v2-lifecycle-ui-20261020",
+      "sha": "b3fff226c1fb2e6e90dc9c1fafb8891f396b573b",
+      "classification": "merged-to-main",
+      "pr": 191,
+      "prHeadSha": "b3fff226c1fb2e6e90dc9c1fafb8891f396b573b",
+      "prBase": "main",
+      "prMergedAt": "2026-10-20T00:58:25Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/v2-location-lifecycle-demand-sync-20261017",
+      "sha": "e8f08f351710d01e40c0cde4dbe86975e7af7766",
+      "classification": "merged-to-main",
+      "pr": 145,
+      "prHeadSha": "e8f08f351710d01e40c0cde4dbe86975e7af7766",
+      "prBase": "main",
+      "prMergedAt": "2026-10-17T09:31:22Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/v2-partial-delivery-lifecycle-20261017",
+      "sha": "a7564618d6ca6ecec654ed74952d8c6536130afd",
+      "classification": "merged-to-main",
+      "pr": 146,
+      "prHeadSha": "a7564618d6ca6ecec654ed74952d8c6536130afd",
+      "prBase": "main",
+      "prMergedAt": "2026-10-17T10:52:24Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/v2-post-receipt-lifecycle-20261017",
+      "sha": "de464a8e9a423be44e0ce6040039423835be57c9",
+      "classification": "merged-to-main",
+      "pr": 149,
+      "prHeadSha": "de464a8e9a423be44e0ce6040039423835be57c9",
+      "prBase": "main",
+      "prMergedAt": "2026-10-17T13:02:54Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/v2-receipt-after-shipment-20261017",
+      "sha": "96b2e7087662b1f0928eb0578ecd44faad257f2f",
+      "classification": "merged-to-main",
+      "pr": 150,
+      "prHeadSha": "96b2e7087662b1f0928eb0578ecd44faad257f2f",
+      "prBase": "main",
+      "prMergedAt": "2026-10-17T14:33:57Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/v2-shipment-auth-transport-20261019",
+      "sha": "ed1a2adf1217e451f08a3e99c87795062379bf2c",
+      "classification": "merged-to-main",
+      "pr": 185,
+      "prHeadSha": "ed1a2adf1217e451f08a3e99c87795062379bf2c",
+      "prBase": "main",
+      "prMergedAt": "2026-10-19T09:32:46Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/v2-single-item-lifecycle-20261017",
+      "sha": "5459115ddaf056e4b9c5186bf41aee5e5f2e8bd6",
+      "classification": "merged-to-main",
+      "pr": 144,
+      "prHeadSha": "5459115ddaf056e4b9c5186bf41aee5e5f2e8bd6",
+      "prBase": "main",
+      "prMergedAt": "2026-10-17T09:10:07Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/v2-source-receiving-20261017",
+      "sha": "9eac4b172c10c53e85de14e7f7f902c2ec22d18f",
+      "classification": "merged-to-main",
+      "pr": 148,
+      "prHeadSha": "9eac4b172c10c53e85de14e7f7f902c2ec22d18f",
+      "prBase": "main",
+      "prMergedAt": "2026-10-17T11:22:33Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feat/v2-warehouse-shipment-ui-20261019",
+      "sha": "b838804d6e03471e2a67709524b4176a95f96e63",
+      "classification": "merged-to-main",
+      "pr": 186,
+      "prHeadSha": "b838804d6e03471e2a67709524b4176a95f96e63",
+      "prBase": "main",
+      "prMergedAt": "2026-10-19T10:12:10Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feature/multi-location-ledger-design",
+      "sha": "1235bf33b4c9daec19ad7960b22ca4083d98e393",
+      "classification": "merged-to-main",
+      "pr": 77,
+      "prHeadSha": "1235bf33b4c9daec19ad7960b22ca4083d98e393",
+      "prBase": "main",
+      "prMergedAt": "2026-10-15T00:43:24Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feature/multi-location-ledger-validation",
+      "sha": "ef3304251372a6893d0e413a643b990e18c9b2df",
+      "classification": "merged-to-main",
+      "pr": 78,
+      "prHeadSha": "ef3304251372a6893d0e413a643b990e18c9b2df",
+      "prBase": "main",
+      "prMergedAt": "2026-10-15T00:52:41Z",
+      "cleanup": true
+    },
+    {
+      "branch": "feature/service-product-subtype-entry-20261023",
+      "sha": "9baa920fe7fe6680d0b752f34a6e425a7a5a1679",
+      "classification": "merged-before-parent-main",
+      "pr": 237,
+      "prHeadSha": "9baa920fe7fe6680d0b752f34a6e425a7a5a1679",
+      "prBase": "fix/service-order-no-physical-reservation-20261022",
+      "prMergedAt": "2026-10-23T01:08:46Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/199-po-admission-diagnostics-20261030",
+      "sha": "6a59ffb39f648040f4d47bbf92412db48a4b6545",
+      "classification": "merged-to-main",
+      "pr": 394,
+      "prHeadSha": "6a59ffb39f648040f4d47bbf92412db48a4b6545",
+      "prBase": "main",
+      "prMergedAt": "2026-10-30T14:21:15Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/20260920-critical-integrity",
+      "sha": "c31a415eef952d3cf928642714d9995a1a25a795",
+      "classification": "closed-unmerged-pr",
+      "pr": 26,
+      "prHeadSha": "c31a415eef952d3cf928642714d9995a1a25a795",
+      "prBase": "main",
+      "prMergedAt": null,
+      "cleanup": false
+    },
+    {
+      "branch": "fix/customer-return-warehouse-guard-20261015",
+      "sha": "3a94a56cb696a7481c128861b9ae37013e289d1f",
+      "classification": "merged-to-main",
+      "pr": 75,
+      "prHeadSha": "3a94a56cb696a7481c128861b9ae37013e289d1f",
+      "prBase": "main",
+      "prMergedAt": "2026-10-14T16:25:24Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/direct-redirect-warehouse-20261015",
+      "sha": "b5398ed542dc7dfeda3914f45233ced0e5674f5f",
+      "classification": "merged-to-main",
+      "pr": 76,
+      "prHeadSha": "b5398ed542dc7dfeda3914f45233ced0e5674f5f",
+      "prBase": "main",
+      "prMergedAt": "2026-10-15T00:02:40Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/forecast-search-toolbar-20261025",
+      "sha": "2052db4b271b5354c609798c1f7d19740a1aca42",
+      "classification": "merged-to-main",
+      "pr": 272,
+      "prHeadSha": "2052db4b271b5354c609798c1f7d19740a1aca42",
+      "prBase": "main",
+      "prMergedAt": "2026-10-25T06:48:08Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/forecast-ui-brand",
+      "sha": "306d5ef3429f28889d5aa271ed1acb6081144525",
+      "classification": "no-pr",
+      "pr": null,
+      "prHeadSha": null,
+      "prBase": null,
+      "prMergedAt": null,
+      "cleanup": false
+    },
+    {
+      "branch": "fix/formal-po-demand-serialized-20261016",
+      "sha": "fbe21c30a5aee416ba7a394c4448c68663c16474",
+      "classification": "merged-to-main",
+      "pr": 121,
+      "prHeadSha": "fbe21c30a5aee416ba7a394c4448c68663c16474",
+      "prBase": "main",
+      "prMergedAt": "2026-10-16T15:58:51Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/formal-po-multiline-source-order-20261024",
+      "sha": "a8d1beaa424897c5c1ffacadc51ccfafbd9bba43",
+      "classification": "merged-to-main",
+      "pr": 260,
+      "prHeadSha": "a8d1beaa424897c5c1ffacadc51ccfafbd9bba43",
+      "prBase": "main",
+      "prMergedAt": "2026-10-24T09:50:57Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/formal-po-production-gated-rollout-20261025",
+      "sha": "5045c1141b8714aa19fe23ea5ad020e1a13835e5",
+      "classification": "merged-to-main",
+      "pr": 267,
+      "prHeadSha": "5045c1141b8714aa19fe23ea5ad020e1a13835e5",
+      "prBase": "main",
+      "prMergedAt": "2026-10-24T23:51:34Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/formal-po-reservation-consistency-20261024",
+      "sha": "4d3723546391da9520828fe98e185606f49f4093",
+      "classification": "merged-to-main",
+      "pr": 259,
+      "prHeadSha": "4d3723546391da9520828fe98e185606f49f4093",
+      "prBase": "main",
+      "prMergedAt": "2026-10-24T09:40:24Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/formal-po-rules-limit-ui-20261020",
+      "sha": "d5add5404a3ad5bb6a927959817cfb5da643d204",
+      "classification": "merged-to-main",
+      "pr": 203,
+      "prHeadSha": "d5add5404a3ad5bb6a927959817cfb5da643d204",
+      "prBase": "main",
+      "prMergedAt": "2026-10-20T15:03:39Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/hosting-exclude-backend-before-preview-20261024",
+      "sha": "0a6e93237bf51f907a09f6f67ba6307711730f33",
+      "classification": "merged-to-main",
+      "pr": 251,
+      "prHeadSha": "0a6e93237bf51f907a09f6f67ba6307711730f33",
+      "prBase": "main",
+      "prMergedAt": "2026-10-23T16:54:54Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/incoming-rules-budget-20261024",
+      "sha": "68991b3cf33ca8733e67f66d287161cf1e65e6d5",
+      "classification": "merged-to-main",
+      "pr": 256,
+      "prHeadSha": "68991b3cf33ca8733e67f66d287161cf1e65e6d5",
+      "prBase": "main",
+      "prMergedAt": "2026-10-24T05:16:04Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/legacy-reservation-v2-failclosed-20261017",
+      "sha": "adf50b3e5991d8b1ee9703d86f85470073c49303",
+      "classification": "closed-unmerged-pr",
+      "pr": 123,
+      "prHeadSha": "adf50b3e5991d8b1ee9703d86f85470073c49303",
+      "prBase": "main",
+      "prMergedAt": null,
+      "cleanup": false
+    },
+    {
+      "branch": "fix/lifecycle-duplicate-item-identity-20261015",
+      "sha": "cde548ea3f25164070ff8d72e7af1092467b911c",
+      "classification": "closed-unmerged-pr",
+      "pr": 91,
+      "prHeadSha": "cde548ea3f25164070ff8d72e7af1092467b911c",
+      "prBase": "main",
+      "prMergedAt": null,
+      "cleanup": false
+    },
+    {
+      "branch": "fix/multi-service-work-index-20261024",
+      "sha": "ec22bd1168fb4a8f47c4a72c04ef64d137146ce1",
+      "classification": "merged-before-parent-main",
+      "pr": 253,
+      "prHeadSha": "ec22bd1168fb4a8f47c4a72c04ef64d137146ce1",
+      "prBase": "fix/service-order-no-physical-reservation-20261022",
+      "prMergedAt": "2026-10-24T01:38:26Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/order-autofill-batch-stock",
+      "sha": "e46aefc0b2974e622c85912fd943bfc2cfc585f4",
+      "classification": "no-pr",
+      "pr": null,
+      "prHeadSha": null,
+      "prBase": null,
+      "prMergedAt": null,
+      "cleanup": false
+    },
+    {
+      "branch": "fix/order-deletion-linked-record-integrity-20261015",
+      "sha": "fb088aa05d31d9bb9ab50bb1316b81cd3ea5d0b6",
+      "classification": "closed-unmerged-pr",
+      "pr": 89,
+      "prHeadSha": "fb088aa05d31d9bb9ab50bb1316b81cd3ea5d0b6",
+      "prBase": "main",
+      "prMergedAt": null,
+      "cleanup": false
+    },
+    {
+      "branch": "fix/order-entry-simplification-20261013",
+      "sha": "f674ecf2d6cd8352c61e9344935edf2145006d9e",
+      "classification": "merged-to-main",
+      "pr": 62,
+      "prHeadSha": "f674ecf2d6cd8352c61e9344935edf2145006d9e",
+      "prBase": "main",
+      "prMergedAt": "2026-10-14T00:45:36Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/order-modal-parent",
+      "sha": "1c1a6bbb4b2b7bf771ef2fa6e8d2e3d9bc4c8217",
+      "classification": "merged-to-main",
+      "pr": 44,
+      "prHeadSha": "1c1a6bbb4b2b7bf771ef2fa6e8d2e3d9bc4c8217",
+      "prBase": "main",
+      "prMergedAt": "2026-10-03T15:07:20Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/order-recipient-address",
+      "sha": "db3c7d5d74c1a7ac686cfa66bde525dad7eac787",
+      "classification": "merged-to-main",
+      "pr": 63,
+      "prHeadSha": "db3c7d5d74c1a7ac686cfa66bde525dad7eac787",
+      "prBase": "main",
+      "prMergedAt": "2026-10-14T00:21:21Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/order-reservation-production-cutover-311-20261030",
+      "sha": "c7cd1ee8f6f7f7ce1099d33ed2e625e738c604cd",
+      "classification": "closed-unmerged-pr",
+      "pr": 390,
+      "prHeadSha": "c7cd1ee8f6f7f7ce1099d33ed2e625e738c604cd",
+      "prBase": "main",
+      "prMergedAt": null,
+      "cleanup": false
+    },
+    {
+      "branch": "fix/order-reservation-reply-proof-20261030",
+      "sha": "e351380ad6646e2e623dd388e20ba2e1e2e0d00c",
+      "classification": "closed-unmerged-pr",
+      "pr": 385,
+      "prHeadSha": "e351380ad6646e2e623dd388e20ba2e1e2e0d00c",
+      "prBase": "main",
+      "prMergedAt": null,
+      "cleanup": false
+    },
+    {
+      "branch": "fix/original-lot-restoration-20261017",
+      "sha": "39dbad85af4c028b1b854cda81620573a4e2cb84",
+      "classification": "merged-to-main",
+      "pr": 127,
+      "prHeadSha": "39dbad85af4c028b1b854cda81620573a4e2cb84",
+      "prBase": "main",
+      "prMergedAt": "2026-10-17T00:21:30Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/pdf-file-only-share",
+      "sha": "ad29d8c96fb8eb52d3e5d9f903528f99f5966bc8",
+      "classification": "merged-to-main",
+      "pr": 60,
+      "prHeadSha": "ad29d8c96fb8eb52d3e5d9f903528f99f5966bc8",
+      "prBase": "main",
+      "prMergedAt": "2026-10-13T07:44:39Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/po-incoming-backend-20261029",
+      "sha": "921be3bb06128b09c0fd75831108c7969d635738",
+      "classification": "closed-unmerged-pr",
+      "pr": 377,
+      "prHeadSha": "921be3bb06128b09c0fd75831108c7969d635738",
+      "prBase": "main",
+      "prMergedAt": null,
+      "cleanup": false
+    },
+    {
+      "branch": "fix/preview-formal-po-fail-closed-20261024",
+      "sha": "55927948deffb865e39e1c54fc2d6b4c19a11842",
+      "classification": "merged-to-main",
+      "pr": 263,
+      "prHeadSha": "55927948deffb865e39e1c54fc2d6b4c19a11842",
+      "prBase": "main",
+      "prMergedAt": "2026-10-24T11:46:04Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/product-code-correction-20261013",
+      "sha": "4900b51520d40c6b2ee7ccc74248f0f0b96bdbcb",
+      "classification": "merged-to-main",
+      "pr": 61,
+      "prHeadSha": "4900b51520d40c6b2ee7ccc74248f0f0b96bdbcb",
+      "prBase": "main",
+      "prMergedAt": "2026-10-13T07:57:12Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/product-search-and-stock-diagnostics-20261014",
+      "sha": "e023f14b25b28ff86d42a82c19dd4f601d2b09ce",
+      "classification": "closed-unmerged-pr",
+      "pr": 65,
+      "prHeadSha": "e023f14b25b28ff86d42a82c19dd4f601d2b09ce",
+      "prBase": "main",
+      "prMergedAt": null,
+      "cleanup": false
+    },
+    {
+      "branch": "fix/product-stock-hints",
+      "sha": "687ada299f5008568cdbd7518c4687bfc0a5b00b",
+      "classification": "merged-to-main",
+      "pr": 59,
+      "prHeadSha": "687ada299f5008568cdbd7518c4687bfc0a5b00b",
+      "prBase": "main",
+      "prMergedAt": "2026-10-13T07:12:48Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/project-compliance-20261013",
+      "sha": "facdf0ba5287e2a405001afbea167d5e8666b804",
+      "classification": "merged-to-main",
+      "pr": 55,
+      "prHeadSha": "facdf0ba5287e2a405001afbea167d5e8666b804",
+      "prBase": "main",
+      "prMergedAt": "2026-10-13T03:56:24Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/quote-navigation-button-consistency-20261013",
+      "sha": "8764412a33707982bf93bc404548bb315ae26d4f",
+      "classification": "merged-to-main",
+      "pr": 56,
+      "prHeadSha": "8764412a33707982bf93bc404548bb315ae26d4f",
+      "prBase": "main",
+      "prMergedAt": "2026-10-13T04:50:34Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/reservation-authoritative-sync-20261017",
+      "sha": "794828f5ab83c7c8310dd337b7035f41341278a8",
+      "classification": "merged-to-main",
+      "pr": 125,
+      "prHeadSha": "794828f5ab83c7c8310dd337b7035f41341278a8",
+      "prBase": "main",
+      "prMergedAt": "2026-10-16T23:31:18Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/reservation-proof-coverage-311",
+      "sha": "c2c1d394fded8696113ccf2c8cc6f75efa4794b5",
+      "classification": "closed-unmerged-pr",
+      "pr": 338,
+      "prHeadSha": "c2c1d394fded8696113ccf2c8cc6f75efa4794b5",
+      "prBase": "main",
+      "prMergedAt": null,
+      "cleanup": false
+    },
+    {
+      "branch": "fix/reservation-return-accounting-20261017",
+      "sha": "4245bcb2da00b7ae43ad06c25aab137881ae7abb",
+      "classification": "merged-to-main",
+      "pr": 128,
+      "prHeadSha": "4245bcb2da00b7ae43ad06c25aab137881ae7abb",
+      "prBase": "main",
+      "prMergedAt": "2026-10-17T00:33:58Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/service-billing-client-protection-20261023",
+      "sha": "123d48ab03d89e5b6dc565b0660d350799190182",
+      "classification": "merged-before-parent-main",
+      "pr": 248,
+      "prHeadSha": "123d48ab03d89e5b6dc565b0660d350799190182",
+      "prBase": "fix/service-order-no-physical-reservation-20261022",
+      "prMergedAt": "2026-10-23T13:52:55Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/service-branch-purchase-safety-sync-20261024",
+      "sha": "bc09039c2bab57e432bc2b1e5f9ebb7ce01cea08",
+      "classification": "merged-before-parent-main",
+      "pr": 262,
+      "prHeadSha": "bc09039c2bab57e432bc2b1e5f9ebb7ce01cea08",
+      "prBase": "fix/service-order-no-physical-reservation-20261022",
+      "prMergedAt": "2026-10-24T10:31:27Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/service-case-query-race-20261023",
+      "sha": "07eb17249aba8d415177415cc23ae02a5a60ee14",
+      "classification": "merged-before-parent-main",
+      "pr": 242,
+      "prHeadSha": "07eb17249aba8d415177415cc23ae02a5a60ee14",
+      "prBase": "fix/service-order-no-physical-reservation-20261022",
+      "prMergedAt": "2026-10-23T09:09:51Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/service-case-read-eligibility-20261023",
+      "sha": "53fd5d5343b5118b6e57bafc2b2a65791344b2aa",
+      "classification": "merged-before-parent-main",
+      "pr": 244,
+      "prHeadSha": "53fd5d5343b5118b6e57bafc2b2a65791344b2aa",
+      "prBase": "fix/service-order-no-physical-reservation-20261022",
+      "prMergedAt": "2026-10-23T10:51:30Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/service-complete-list-display-20261024",
+      "sha": "cab6e68a22d80b84a08fb9d0428a3ea8b8dd7899",
+      "classification": "merged-before-parent-main",
+      "pr": 254,
+      "prHeadSha": "cab6e68a22d80b84a08fb9d0428a3ea8b8dd7899",
+      "prBase": "fix/service-order-no-physical-reservation-20261022",
+      "prMergedAt": "2026-10-24T02:17:57Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/service-independent-purchasing-20261024",
+      "sha": "784e6a443943be5f7942cd704d5cac0cb9a0047c",
+      "classification": "merged-to-main",
+      "pr": 266,
+      "prHeadSha": "784e6a443943be5f7942cd704d5cac0cb9a0047c",
+      "prBase": "main",
+      "prMergedAt": "2026-10-24T15:11:33Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/service-item-progress-acceptance-20261024",
+      "sha": "902c61769adf1d574cef7119a77c7c3f8c8ef859",
+      "classification": "merged-before-parent-main",
+      "pr": 255,
+      "prHeadSha": "902c61769adf1d574cef7119a77c7c3f8c8ef859",
+      "prBase": "fix/service-order-no-physical-reservation-20261022",
+      "prMergedAt": "2026-10-24T08:30:14Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/service-main-sync-20261024",
+      "sha": "aa7b8802ec4320dcd96d8f642e619d80c9d5fba3",
+      "classification": "merged-before-parent-main",
+      "pr": 257,
+      "prHeadSha": "aa7b8802ec4320dcd96d8f642e619d80c9d5fba3",
+      "prBase": "fix/service-order-no-physical-reservation-20261022",
+      "prMergedAt": "2026-10-24T08:06:50Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/service-single-line-work-category-20261024",
+      "sha": "1c92bd8ce88e91f1b0d93b86638e093b9087b447",
+      "classification": "merged-before-parent-main",
+      "pr": 252,
+      "prHeadSha": "1c92bd8ce88e91f1b0d93b86638e093b9087b447",
+      "prBase": "fix/service-order-no-physical-reservation-20261022",
+      "prMergedAt": "2026-10-23T19:22:55Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/service-work-category-writer-20261024",
+      "sha": "36a9e9e853fe0ba6b4e525114d6716a6a3b11350",
+      "classification": "merged-before-parent-main",
+      "pr": 258,
+      "prHeadSha": "36a9e9e853fe0ba6b4e525114d6716a6a3b11350",
+      "prBase": "fix/service-order-no-physical-reservation-20261022",
+      "prMergedAt": "2026-10-24T09:06:49Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/stock-replenishment-atomic-demand-20261016",
+      "sha": "fefdeb77eeabbf2ae637d1a555fc4e400f130c2e",
+      "classification": "merged-to-main",
+      "pr": 120,
+      "prHeadSha": "fefdeb77eeabbf2ae637d1a555fc4e400f130c2e",
+      "prBase": "main",
+      "prMergedAt": "2026-10-16T15:44:14Z",
+      "cleanup": true
+    },
+    {
+      "branch": "fix/stocked-order-purchase-queue-20261014",
+      "sha": "1374cc4ddf7865283be77c4139ace58ad92aa6db",
+      "classification": "closed-unmerged-pr",
+      "pr": 64,
+      "prHeadSha": "1374cc4ddf7865283be77c4139ace58ad92aa6db",
+      "prBase": "main",
+      "prMergedAt": null,
+      "cleanup": false
+    },
+    {
+      "branch": "fix/system-terminology",
+      "sha": "8521a92119f63f25de758017cbd79ffea803ae59",
+      "classification": "closed-unmerged-pr",
+      "pr": 51,
+      "prHeadSha": "8521a92119f63f25de758017cbd79ffea803ae59",
+      "prBase": "main",
+      "prMergedAt": null,
+      "cleanup": false
+    },
+    {
+      "branch": "fix/text-only-work-tabs-20261013",
+      "sha": "efb09dec3bfdd50f596a690f204533c7a7bb0acc",
+      "classification": "merged-to-main",
+      "pr": 58,
+      "prHeadSha": "efb09dec3bfdd50f596a690f204533c7a7bb0acc",
+      "prBase": "main",
+      "prMergedAt": "2026-10-13T05:33:59Z",
+      "cleanup": true
+    },
+    {
+      "branch": "improve/mobile-quote-actions",
+      "sha": "9ed5cf6fd59e1fa150d6f3a7a233210b94fe6fa6",
+      "classification": "merged-to-main",
+      "pr": 1,
+      "prHeadSha": "9ed5cf6fd59e1fa150d6f3a7a233210b94fe6fa6",
+      "prBase": "main",
+      "prMergedAt": "2026-09-16T16:17:52Z",
+      "cleanup": true
+    },
+    {
+      "branch": "merge/all-open-prs-20261025",
+      "sha": "9a1d51bf7041a116a03ad52df40e424bc8cbde13",
+      "classification": "closed-unmerged-pr",
+      "pr": 276,
+      "prHeadSha": "9a1d51bf7041a116a03ad52df40e424bc8cbde13",
+      "prBase": "main",
+      "prMergedAt": null,
+      "cleanup": false
+    },
+    {
+      "branch": "perf/rules-warehouse-stock-metadata-once-20261025",
+      "sha": "6f616199cab9cba6a175729d8d970ed57c5ab19c",
+      "classification": "closed-unmerged-pr",
+      "pr": 288,
+      "prHeadSha": "6f616199cab9cba6a175729d8d970ed57c5ab19c",
+      "prBase": "main",
+      "prMergedAt": null,
+      "cleanup": false
+    },
+    {
+      "branch": "preview/inventory-warehouse-forecast-20260920",
+      "sha": "ac5c85618952ad12bc98a9e13ffe7d6f2b035caf",
+      "classification": "branch-advanced-after-pr-merge",
+      "pr": 29,
+      "prHeadSha": "ac5c85618952ad12bc98a9e13ffe7d6f2b035caf",
+      "prBase": "main",
+      "prMergedAt": null,
+      "cleanup": false
+    },
+    {
+      "branch": "preview/multi-item-order-model-20260920",
+      "sha": "37171344b5a67721d1bf9f6de401c1e549534c87",
+      "classification": "merged-after-parent-main",
+      "pr": 28,
+      "prHeadSha": "37171344b5a67721d1bf9f6de401c1e549534c87",
+      "prBase": "preview/inventory-warehouse-forecast-20260920",
+      "prMergedAt": "2026-09-20T08:37:58Z",
+      "cleanup": false
+    },
+    {
+      "branch": "refactor/architecture-unification-20261015",
+      "sha": "ebdc997364eafb3bac323b41a239770f24094e2b",
+      "classification": "branch-advanced-after-pr-merge",
+      "pr": 94,
+      "prHeadSha": "ebdc997364eafb3bac323b41a239770f24094e2b",
+      "prBase": "main",
+      "prMergedAt": null,
+      "cleanup": false
+    },
+    {
+      "branch": "refactor/dispatch-service-boundary-20261015",
+      "sha": "ea8101dce60b5d3032fcdac57e2ab19dcd623f67",
+      "classification": "merged-to-main",
+      "pr": 98,
+      "prHeadSha": "ea8101dce60b5d3032fcdac57e2ab19dcd623f67",
+      "prBase": "main",
+      "prMergedAt": "2026-10-15T12:49:45Z",
+      "cleanup": true
+    },
+    {
+      "branch": "refactor/firestore-data-model-contract-20261015",
+      "sha": "5c105eac07dd942a46a792835e56643e2e488c98",
+      "classification": "merged-to-main",
+      "pr": 95,
+      "prHeadSha": "5c105eac07dd942a46a792835e56643e2e488c98",
+      "prBase": "main",
+      "prMergedAt": "2026-10-15T12:27:47Z",
+      "cleanup": true
+    },
+    {
+      "branch": "refactor/order-billing-service-20261015",
+      "sha": "7220befdde93a7b505c5e9f13d3ca1a413d7a0fb",
+      "classification": "merged-to-main",
+      "pr": 99,
+      "prHeadSha": "7220befdde93a7b505c5e9f13d3ca1a413d7a0fb",
+      "prBase": "main",
+      "prMergedAt": "2026-10-15T13:42:57Z",
+      "cleanup": true
+    },
+    {
+      "branch": "refactor/order-lifecycle-service-20261015",
+      "sha": "2235e29219d1c5d2b82436f3889d44d95ddf7b41",
+      "classification": "merged-to-main",
+      "pr": 100,
+      "prHeadSha": "2235e29219d1c5d2b82436f3889d44d95ddf7b41",
+      "prBase": "main",
+      "prMergedAt": "2026-10-15T13:51:06Z",
+      "cleanup": true
+    },
+    {
+      "branch": "refactor/order-quantity-authority-20261015",
+      "sha": "442f27530d4ac4984baa25d8f51648c03d892804",
+      "classification": "merged-to-main",
+      "pr": 96,
+      "prHeadSha": "442f27530d4ac4984baa25d8f51648c03d892804",
+      "prBase": "main",
+      "prMergedAt": "2026-10-15T12:33:39Z",
+      "cleanup": true
+    },
+    {
+      "branch": "refactor/shared-controls-and-tabs-20261013",
+      "sha": "d85e4e98b6335e21d764f2109af7913dc6850726",
+      "classification": "merged-to-main",
+      "pr": 57,
+      "prHeadSha": "d85e4e98b6335e21d764f2109af7913dc6850726",
+      "prBase": "main",
+      "prMergedAt": "2026-10-13T05:15:00Z",
+      "cleanup": true
+    },
+    {
+      "branch": "refactor/stock-transaction-boundary-20261015",
+      "sha": "57b94aa12042aee3be3b9c85d598cbbc3419b63c",
+      "classification": "merged-to-main",
+      "pr": 97,
+      "prHeadSha": "57b94aa12042aee3be3b9c85d598cbbc3419b63c",
+      "prBase": "main",
+      "prMergedAt": "2026-10-15T12:40:46Z",
+      "cleanup": true
+    },
+    {
+      "branch": "refactor/transaction-core-unification-20261015",
+      "sha": "6e190ba84cd11c3cb3550b0a258671bc933c4f3f",
+      "classification": "closed-unmerged-pr",
+      "pr": 92,
+      "prHeadSha": "6e190ba84cd11c3cb3550b0a258671bc933c4f3f",
+      "prBase": "main",
+      "prMergedAt": null,
+      "cleanup": false
+    },
+    {
+      "branch": "style/warm-gray-business-20261013",
+      "sha": "92ea1b25c1492eedc5ccdb70920712d263240fb1",
+      "classification": "merged-to-main",
+      "pr": 54,
+      "prHeadSha": "92ea1b25c1492eedc5ccdb70920712d263240fb1",
+      "prBase": "main",
+      "prMergedAt": "2026-10-13T00:33:23Z",
+      "cleanup": true
+    },
+    {
+      "branch": "test/full-site-emulator-boot-20261020",
+      "sha": "a4d3eba702125dd074100407a8ebec5007404a0a",
+      "classification": "merged-to-main",
+      "pr": 194,
+      "prHeadSha": "a4d3eba702125dd074100407a8ebec5007404a0a",
+      "prBase": "main",
+      "prMergedAt": "2026-10-20T03:14:36Z",
+      "cleanup": true
+    },
+    {
+      "branch": "test/full-site-purchase-draft-handoff-20261020",
+      "sha": "b4d7a814cfad421017c93d11d80081f3c0accf64",
+      "classification": "merged-to-main",
+      "pr": 197,
+      "prHeadSha": "b4d7a814cfad421017c93d11d80081f3c0accf64",
+      "prBase": "main",
+      "prMergedAt": "2026-10-20T05:32:31Z",
+      "cleanup": true
+    },
+    {
+      "branch": "test/full-site-restore-handoff-20261020",
+      "sha": "24edf04a148689dda11f706bd3bf029e06def445",
+      "classification": "merged-to-main",
+      "pr": 195,
+      "prHeadSha": "24edf04a148689dda11f706bd3bf029e06def445",
+      "prBase": "main",
+      "prMergedAt": "2026-10-20T04:47:37Z",
+      "cleanup": true
+    },
+    {
+      "branch": "test/grouped-reservation-five-line-20261017",
+      "sha": "f17a27074c5f63cf58c46b53055d360c22bac073",
+      "classification": "merged-to-main",
+      "pr": 142,
+      "prHeadSha": "f17a27074c5f63cf58c46b53055d360c22bac073",
+      "prBase": "main",
+      "prMergedAt": "2026-10-17T07:37:05Z",
+      "cleanup": true
+    },
+    {
+      "branch": "test/multi-item-lifecycle-rollback-20261022",
+      "sha": "aeeeb9e2b75be58b65c2bd81fc3f9ab6c262b5bb",
+      "classification": "merged-to-main",
+      "pr": 221,
+      "prHeadSha": "aeeeb9e2b75be58b65c2bd81fc3f9ab6c262b5bb",
+      "prBase": "main",
+      "prMergedAt": "2026-10-22T04:40:22Z",
+      "cleanup": true
+    },
+    {
+      "branch": "test/multi-item-return-isolation-20261022",
+      "sha": "d556d7d7d83cb44f222dc2c7c8c156015b33f92e",
+      "classification": "merged-to-main",
+      "pr": 222,
+      "prHeadSha": "d556d7d7d83cb44f222dc2c7c8c156015b33f92e",
+      "prBase": "main",
+      "prMergedAt": "2026-10-22T05:10:10Z",
+      "cleanup": true
+    },
+    {
+      "branch": "test/multi-item-return-procurement-demand-20261022",
+      "sha": "6e7ed1de5117eb33be37b2bbdc4de1507d07bbd5",
+      "classification": "merged-to-main",
+      "pr": 224,
+      "prHeadSha": "6e7ed1de5117eb33be37b2bbdc4de1507d07bbd5",
+      "prBase": "main",
+      "prMergedAt": "2026-10-22T05:10:19Z",
+      "cleanup": true
+    },
+    {
+      "branch": "test/preview-callable-auth-emulator-20261017",
+      "sha": "3943d9e1407c3423899156ed05d1205b2e931619",
+      "classification": "merged-to-main",
+      "pr": 134,
+      "prHeadSha": "3943d9e1407c3423899156ed05d1205b2e931619",
+      "prBase": "main",
+      "prMergedAt": "2026-10-17T04:39:37Z",
+      "cleanup": true
+    },
+    {
+      "branch": "test/restore-procurement-demand-site-20261020",
+      "sha": "e0a03194182ba11eeed457417c13d4b9eb42e860",
+      "classification": "merged-to-main",
+      "pr": 196,
+      "prHeadSha": "e0a03194182ba11eeed457417c13d4b9eb42e860",
+      "prBase": "main",
+      "prMergedAt": "2026-10-20T05:11:16Z",
+      "cleanup": true
+    },
+    {
+      "branch": "test/return-cross-warehouse-ledger-20261022",
+      "sha": "77a83f7a99208ed7d6ca293b17a7f22086c6310f",
+      "classification": "merged-to-main",
+      "pr": 223,
+      "prHeadSha": "77a83f7a99208ed7d6ca293b17a7f22086c6310f",
+      "prBase": "main",
+      "prMergedAt": "2026-10-22T05:10:15Z",
+      "cleanup": true
+    },
+    {
+      "branch": "test/v2-authenticated-order-creation-20261018",
+      "sha": "86a7b59b64fec851cfc50c694e372738651f0610",
+      "classification": "merged-to-main",
+      "pr": 167,
+      "prHeadSha": "86a7b59b64fec851cfc50c694e372738651f0610",
+      "prBase": "main",
+      "prMergedAt": "2026-10-18T09:54:37Z",
+      "cleanup": true
+    },
+    {
+      "branch": "test/v2-browser-auth-lifecycle-20261020",
+      "sha": "02317d7bc998d35e5ef0b588ec4dc7611ff16ff8",
+      "classification": "merged-to-main",
+      "pr": 193,
+      "prHeadSha": "02317d7bc998d35e5ef0b588ec4dc7611ff16ff8",
+      "prBase": "main",
+      "prMergedAt": "2026-10-20T02:22:15Z",
+      "cleanup": true
+    },
+    {
+      "branch": "ui/ux-guidelines-20261011",
+      "sha": "f1b5f4b8ea8bd8ed1d42f7281caf80fa6adff034",
+      "classification": "merged-to-main",
+      "pr": 45,
+      "prHeadSha": "f1b5f4b8ea8bd8ed1d42f7281caf80fa6adff034",
+      "prBase": "main",
+      "prMergedAt": "2026-10-11T13:04:26Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/admin-simplify-20260924",
+      "sha": "b92ee2a486ad6f6cbece34cd2ffd584393fbca1a",
+      "classification": "closed-unmerged-pr",
+      "pr": 41,
+      "prHeadSha": "b92ee2a486ad6f6cbece34cd2ffd584393fbca1a",
+      "prBase": "main",
+      "prMergedAt": null,
+      "cleanup": false
+    },
+    {
+      "branch": "upgrade/ci-integration-validation-20261028",
+      "sha": "7dfb393be39ec92ed466e454f65d796c674b1a6f",
+      "classification": "closed-unmerged-pr",
+      "pr": 344,
+      "prHeadSha": "7dfb393be39ec92ed466e454f65d796c674b1a6f",
+      "prBase": "main",
+      "prMergedAt": null,
+      "cleanup": false
+    },
+    {
+      "branch": "upgrade/discussion-fixes-20260923",
+      "sha": "dd6b76a1c047b568061232ada9a47abfd6805864",
+      "classification": "closed-unmerged-pr",
+      "pr": 40,
+      "prHeadSha": "dd6b76a1c047b568061232ada9a47abfd6805864",
+      "prBase": "main",
+      "prMergedAt": null,
+      "cleanup": false
+    },
+    {
+      "branch": "upgrade/final-ui-simplify-20260924",
+      "sha": "550726890486dccbc394c1204556dc71873329b5",
+      "classification": "closed-unmerged-pr",
+      "pr": 42,
+      "prHeadSha": "550726890486dccbc394c1204556dc71873329b5",
+      "prBase": "main",
+      "prMergedAt": null,
+      "cleanup": false
+    },
+    {
+      "branch": "upgrade/formal-po-service",
+      "sha": "f58c3e03672a466dd868e170f39f31218beebc57",
+      "classification": "merged-to-main",
+      "pr": 108,
+      "prHeadSha": "f58c3e03672a466dd868e170f39f31218beebc57",
+      "prBase": "main",
+      "prMergedAt": "2026-10-16T00:33:53Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/inventory-count-service",
+      "sha": "92a5c6103e1bedea12d0b009793f0f9435cf5533",
+      "classification": "merged-to-main",
+      "pr": 116,
+      "prHeadSha": "92a5c6103e1bedea12d0b009793f0f9435cf5533",
+      "prBase": "main",
+      "prMergedAt": "2026-10-16T11:37:40Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/inventory-lot-read-model",
+      "sha": "f7422dc9d51b94832c391ad388870812d5590736",
+      "classification": "merged-to-main",
+      "pr": 118,
+      "prHeadSha": "f7422dc9d51b94832c391ad388870812d5590736",
+      "prBase": "main",
+      "prMergedAt": "2026-10-16T13:49:01Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/inventory-planning-service",
+      "sha": "abd93eb376716a80adda48daf03ae8686ea95143",
+      "classification": "merged-to-main",
+      "pr": 119,
+      "prHeadSha": "abd93eb376716a80adda48daf03ae8686ea95143",
+      "prBase": "main",
+      "prMergedAt": "2026-10-16T15:36:51Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/lifecycle-reservation-integrity-20261015",
+      "sha": "96c01bd354982b88eb33d547514d503a8404ab7a",
+      "classification": "merged-to-main",
+      "pr": 83,
+      "prHeadSha": "96c01bd354982b88eb33d547514d503a8404ab7a",
+      "prBase": "main",
+      "prMergedAt": "2026-10-15T02:24:44Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/main-transfer-request-services",
+      "sha": "773ec3a473bf9ffaea934e673efc833ab8ad30b6",
+      "classification": "merged-to-main",
+      "pr": 105,
+      "prHeadSha": "773ec3a473bf9ffaea934e673efc833ab8ad30b6",
+      "prBase": "main",
+      "prMergedAt": "2026-10-16T00:01:39Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/manual-inventory-service",
+      "sha": "f8a5450f902fc30ff488379537467a97794c419a",
+      "classification": "merged-to-main",
+      "pr": 117,
+      "prHeadSha": "f8a5450f902fc30ff488379537467a97794c419a",
+      "prBase": "main",
+      "prMergedAt": "2026-10-16T11:53:31Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/multi-location-reservation-model-20261015",
+      "sha": "f5c03d7072f556d5be7917a9f459bc0bd7d13f2c",
+      "classification": "merged-to-main",
+      "pr": 79,
+      "prHeadSha": "f5c03d7072f556d5be7917a9f459bc0bd7d13f2c",
+      "prBase": "main",
+      "prMergedAt": "2026-10-15T00:57:37Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/order-creation-service",
+      "sha": "22e2c1264e9dfa09a60243b6dba06f4fbb3dae01",
+      "classification": "merged-to-main",
+      "pr": 115,
+      "prHeadSha": "22e2c1264e9dfa09a60243b6dba06f4fbb3dae01",
+      "prBase": "main",
+      "prMergedAt": "2026-10-16T11:18:43Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/purchase-cancellation-service",
+      "sha": "36cf2e120c129884f94ea715000c8e0a14ec59ed",
+      "classification": "merged-to-main",
+      "pr": 110,
+      "prHeadSha": "36cf2e120c129884f94ea715000c8e0a14ec59ed",
+      "prBase": "main",
+      "prMergedAt": "2026-10-16T05:50:54Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/purchase-incoming-checkpoint",
+      "sha": "8fc0626530f66a3ccac5c13803ce8556e5bcdbe8",
+      "classification": "merged-to-main",
+      "pr": 109,
+      "prHeadSha": "8fc0626530f66a3ccac5c13803ce8556e5bcdbe8",
+      "prBase": "main",
+      "prMergedAt": "2026-10-16T00:54:05Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/purchasing-layer-boundary",
+      "sha": "8354072c3e9984e5eea24da6c570323140539815",
+      "classification": "merged-to-main",
+      "pr": 114,
+      "prHeadSha": "8354072c3e9984e5eea24da6c570323140539815",
+      "prBase": "main",
+      "prMergedAt": "2026-10-16T11:01:52Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/purchasing-three-workspaces-20260924",
+      "sha": "c8db43e7f96802a21758dde0c99fe0f1b40e4c63",
+      "classification": "closed-unmerged-pr",
+      "pr": 43,
+      "prHeadSha": "c8db43e7f96802a21758dde0c99fe0f1b40e4c63",
+      "prBase": "main",
+      "prMergedAt": null,
+      "cleanup": false
+    },
+    {
+      "branch": "upgrade/quick-purchase-service",
+      "sha": "419dc9085fe0b489289a72436ba659b0797cbd05",
+      "classification": "merged-to-main",
+      "pr": 107,
+      "prHeadSha": "419dc9085fe0b489289a72436ba659b0797cbd05",
+      "prBase": "main",
+      "prMergedAt": "2026-10-16T00:23:08Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/rapid-phase4-20260923",
+      "sha": "d6abc31e5e32a830f31f559c239e299300bfd8a9",
+      "classification": "merged-to-main",
+      "pr": 36,
+      "prHeadSha": "d6abc31e5e32a830f31f559c239e299300bfd8a9",
+      "prBase": "main",
+      "prMergedAt": "2026-09-23T13:52:26Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/rapid-phase5-20260923",
+      "sha": "800b3ae64715a342da01ecc8a6f3e2462c9541f9",
+      "classification": "merged-to-main",
+      "pr": 37,
+      "prHeadSha": "800b3ae64715a342da01ecc8a6f3e2462c9541f9",
+      "prBase": "main",
+      "prMergedAt": "2026-09-23T14:01:33Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/rapid-phase6-20260923",
+      "sha": "a9dc066888cf56436d49a1353aa45f4e8f0b8a9d",
+      "classification": "merged-to-main",
+      "pr": 38,
+      "prHeadSha": "a9dc066888cf56436d49a1353aa45f4e8f0b8a9d",
+      "prBase": "main",
+      "prMergedAt": "2026-09-23T14:13:17Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/receipt-identity-retry",
+      "sha": "681a41480f075341a0185ced94196419ecf56a43",
+      "classification": "merged-to-main",
+      "pr": 111,
+      "prHeadSha": "681a41480f075341a0185ced94196419ecf56a43",
+      "prBase": "main",
+      "prMergedAt": "2026-10-16T10:22:14Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/receipt-source-stock-integrity",
+      "sha": "4388fa1c205cc138c9a2014aee00ac96b566eda9",
+      "classification": "merged-to-main",
+      "pr": 112,
+      "prHeadSha": "4388fa1c205cc138c9a2014aee00ac96b566eda9",
+      "prBase": "main",
+      "prMergedAt": "2026-10-16T10:36:28Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/receiving-layer-boundary",
+      "sha": "7d9b794a82fc6864c2018975c994ef5e34e1b19a",
+      "classification": "merged-to-main",
+      "pr": 113,
+      "prHeadSha": "7d9b794a82fc6864c2018975c994ef5e34e1b19a",
+      "prBase": "main",
+      "prMergedAt": "2026-10-16T10:50:57Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/reconcile-open-prs-20261015",
+      "sha": "f28792cdcc62169f9fa956150de3872526b4c731",
+      "classification": "merged-to-main",
+      "pr": 80,
+      "prHeadSha": "f28792cdcc62169f9fa956150de3872526b4c731",
+      "prBase": "main",
+      "prMergedAt": "2026-10-15T01:20:53Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/remove-product-line-assignment-20260923",
+      "sha": "577f817077a24ae77e0f85ff1b48b428ae4365e2",
+      "classification": "no-pr",
+      "pr": null,
+      "prHeadSha": null,
+      "prBase": null,
+      "prMergedAt": null,
+      "cleanup": false
+    },
+    {
+      "branch": "upgrade/reservation-location-compatibility-20261015",
+      "sha": "eb993a1d60dee938fef66718502b443328720578",
+      "classification": "merged-to-main",
+      "pr": 81,
+      "prHeadSha": "eb993a1d60dee938fef66718502b443328720578",
+      "prBase": "main",
+      "prMergedAt": "2026-10-15T01:53:26Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/reservation-stock-deltas-20261015",
+      "sha": "6b0c079f25ac1906c808fdbd2e7cbbece7423166",
+      "classification": "merged-to-main",
+      "pr": 82,
+      "prHeadSha": "6b0c079f25ac1906c808fdbd2e7cbbece7423166",
+      "prBase": "main",
+      "prMergedAt": "2026-10-15T02:05:11Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/reservation-warehouse-availability",
+      "sha": "602c319c2112ee23f04d6c7ed030dbd3d72442fe",
+      "classification": "merged-to-main",
+      "pr": 122,
+      "prHeadSha": "602c319c2112ee23f04d6c7ed030dbd3d72442fe",
+      "prBase": "main",
+      "prMergedAt": "2026-10-16T16:16:20Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/system-unification-phase1",
+      "sha": "8f967ebe07bf1f872a49c96e5a10924d5b112fc0",
+      "classification": "merged-to-main",
+      "pr": 21,
+      "prHeadSha": "8f967ebe07bf1f872a49c96e5a10924d5b112fc0",
+      "prBase": "main",
+      "prMergedAt": "2026-09-19T06:20:11Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/unify-delivery-record-services",
+      "sha": "555da84c7d7de5b0101198547e1b29c071d94c20",
+      "classification": "merged-to-main",
+      "pr": 102,
+      "prHeadSha": "555da84c7d7de5b0101198547e1b29c071d94c20",
+      "prBase": "main",
+      "prMergedAt": "2026-10-15T23:36:38Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/unify-lifecycle-form-and-legacy-delivery",
+      "sha": "33903f5978918b315fc687197c5afcf67021d59b",
+      "classification": "merged-to-main",
+      "pr": 101,
+      "prHeadSha": "33903f5978918b315fc687197c5afcf67021d59b",
+      "prBase": "main",
+      "prMergedAt": "2026-10-15T23:24:43Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/unify-self-order-supply",
+      "sha": "c045e198d3e791fec0a172084076d41c22b97301",
+      "classification": "merged-to-main",
+      "pr": 106,
+      "prHeadSha": "c045e198d3e791fec0a172084076d41c22b97301",
+      "prBase": "main",
+      "prMergedAt": "2026-10-16T00:14:08Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/unify-warehouse-shipment-service",
+      "sha": "668234fc19da6675f5d4bd8692cc8865a7259c78",
+      "classification": "merged-to-main",
+      "pr": 103,
+      "prHeadSha": "668234fc19da6675f5d4bd8692cc8865a7259c78",
+      "prBase": "main",
+      "prMergedAt": "2026-10-15T23:46:17Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/v2-allocation-checkpoint-integrity-20261018",
+      "sha": "7f82f60ec8cab54664fe336ac46bae5af579caf4",
+      "classification": "merged-to-main",
+      "pr": 158,
+      "prHeadSha": "7f82f60ec8cab54664fe336ac46bae5af579caf4",
+      "prBase": "main",
+      "prMergedAt": "2026-10-18T04:05:44Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/v2-allocation-operator-handoff-20261018",
+      "sha": "e11022ce8508fc9965b3196916794fca22c9311d",
+      "classification": "merged-to-main",
+      "pr": 159,
+      "prHeadSha": "e11022ce8508fc9965b3196916794fca22c9311d",
+      "prBase": "main",
+      "prMergedAt": "2026-10-18T04:23:20Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/v2-automatic-free-stock-checkpoint-20261018",
+      "sha": "fcbff9ebacccd813a3f86ac94cffe52d9443328d",
+      "classification": "merged-to-main",
+      "pr": 153,
+      "prHeadSha": "fcbff9ebacccd813a3f86ac94cffe52d9443328d",
+      "prBase": "main",
+      "prMergedAt": "2026-10-17T17:41:41Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/v2-cancelled-close-return-20261018",
+      "sha": "5e4cf3798c09889020d2454b39c7c7709a35d593",
+      "classification": "merged-to-main",
+      "pr": 163,
+      "prHeadSha": "5e4cf3798c09889020d2454b39c7c7709a35d593",
+      "prBase": "main",
+      "prMergedAt": "2026-10-18T06:14:40Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/v2-cancelled-return-trace-20261018",
+      "sha": "738e9dc6aaf4973d1eeca9f9fc9c6e09c0a8f471",
+      "classification": "merged-to-main",
+      "pr": 164,
+      "prHeadSha": "738e9dc6aaf4973d1eeca9f9fc9c6e09c0a8f471",
+      "prBase": "main",
+      "prMergedAt": "2026-10-18T06:27:13Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/v2-closed-return-lifecycle-20261018",
+      "sha": "2fa23e96b8ad1052221945959d570d3a5329959e",
+      "classification": "merged-to-main",
+      "pr": 161,
+      "prHeadSha": "2fa23e96b8ad1052221945959d570d3a5329959e",
+      "prBase": "main",
+      "prMergedAt": "2026-10-18T05:03:55Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/v2-closed-return-receiving-20261018",
+      "sha": "1c99a42721c2888e3c46af9e227cfb83643013f3",
+      "classification": "merged-to-main",
+      "pr": 162,
+      "prHeadSha": "1c99a42721c2888e3c46af9e227cfb83643013f3",
+      "prBase": "main",
+      "prMergedAt": "2026-10-18T05:57:15Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/v2-closed-return-remaining-fulfillment-20261018",
+      "sha": "1a92ef6a4249215aeae0c67ad78b9db701aeb0ba",
+      "classification": "merged-to-main",
+      "pr": 160,
+      "prHeadSha": "1a92ef6a4249215aeae0c67ad78b9db701aeb0ba",
+      "prBase": "main",
+      "prMergedAt": "2026-10-18T04:40:18Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/v2-fifo-paginated-scan-20261018",
+      "sha": "1f5ba418a1bc65e438e3e149e0d638eb980346fb",
+      "classification": "merged-to-main",
+      "pr": 154,
+      "prHeadSha": "1f5ba418a1bc65e438e3e149e0d638eb980346fb",
+      "prBase": "main",
+      "prMergedAt": "2026-10-17T19:08:45Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/v2-free-stock-to-shortage-20261018",
+      "sha": "da4eee80f4ab457a98030537e09f1c7719e6a6a3",
+      "classification": "merged-to-main",
+      "pr": 152,
+      "prHeadSha": "da4eee80f4ab457a98030537e09f1c7719e6a6a3",
+      "prBase": "main",
+      "prMergedAt": "2026-10-17T16:33:13Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/v2-real-initialization-20261018",
+      "sha": "e0e7fc16028dd7ffec4ad8fa0ee5f9fe3a493cb4",
+      "classification": "merged-to-main",
+      "pr": 166,
+      "prHeadSha": "e0e7fc16028dd7ffec4ad8fa0ee5f9fe3a493cb4",
+      "prBase": "main",
+      "prMergedAt": "2026-10-18T07:33:51Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/v2-receipt-free-stock-source-20261018",
+      "sha": "a0ec26e8daf938454c796bb2c872da1d9c6255aa",
+      "classification": "merged-to-main",
+      "pr": 156,
+      "prHeadSha": "a0ec26e8daf938454c796bb2c872da1d9c6255aa",
+      "prBase": "main",
+      "prMergedAt": "2026-10-17T21:34:08Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/v2-release-recovery-orchestration-20261018",
+      "sha": "47cf1c26f8ebf9096f1c965bc1c31b42b0882e08",
+      "classification": "merged-to-main",
+      "pr": 157,
+      "prHeadSha": "47cf1c26f8ebf9096f1c965bc1c31b42b0882e08",
+      "prBase": "main",
+      "prMergedAt": "2026-10-18T00:49:16Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/v2-release-source-outbox-20261018",
+      "sha": "835c9e4ad83a3f43dcbeb9ab84c84c9f02d6d39f",
+      "classification": "merged-to-main",
+      "pr": 155,
+      "prHeadSha": "835c9e4ad83a3f43dcbeb9ab84c84c9f02d6d39f",
+      "prBase": "main",
+      "prMergedAt": "2026-10-17T21:16:56Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/v2-replay-current-owner-20261017",
+      "sha": "1d4b52b93059f5f25e11eb21f3fc0b52097c4c41",
+      "classification": "merged-to-main",
+      "pr": 151,
+      "prHeadSha": "1d4b52b93059f5f25e11eb21f3fc0b52097c4c41",
+      "prBase": "main",
+      "prMergedAt": "2026-10-17T16:07:40Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/v2-return-auth-emulator-20261018",
+      "sha": "35634478243b3e3b12f83cfdc97a698b822cb068",
+      "classification": "merged-to-main",
+      "pr": 165,
+      "prHeadSha": "35634478243b3e3b12f83cfdc97a698b822cb068",
+      "prBase": "main",
+      "prMergedAt": "2026-10-18T07:11:47Z",
+      "cleanup": true
+    },
+    {
+      "branch": "upgrade/warehouse-transfer-services",
+      "sha": "7fe67f86386d3c41faa0ecf758dbe95be81d33e5",
+      "classification": "merged-to-main",
+      "pr": 104,
+      "prHeadSha": "7fe67f86386d3c41faa0ecf758dbe95be81d33e5",
+      "prBase": "main",
+      "prMergedAt": "2026-10-15T23:53:51Z",
+      "cleanup": true
+    }
+  ]
+}
