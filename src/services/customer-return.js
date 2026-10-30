@@ -45,6 +45,8 @@ async function readCommittedCustomerReturnRequest(intent,actorRole,assertCurrent
     assertCurrent();return confirmed;
 }
 async function commitCustomerReturnRequest({orderId,itemId,operationId,qty,date,reason=''}) {
+    if(typeof customerReturnRequestBackendRequired==='function'&&customerReturnRequestBackendRequired(orderId))
+        return commitCustomerReturnRequestBackend(orderId,'REQUEST',{orderId,itemId,operationId,qty,date,reason});
     const {actorUid,actorRole,assertCurrent}=customerReturnActorContext(()=>canManageOrderLifecycleCapability());
     if([orderId,itemId,operationId].some(id=>typeof id!=='string'||!id||id!==id.trim()||id.includes('/')||id.length>160)
         ||!Number.isFinite(qty)||qty<=0||typeof reason!=='string'
@@ -80,6 +82,8 @@ async function commitCustomerReturnRequest({orderId,itemId,operationId,qty,date,
     assertCurrent();return saved;
 }
 async function commitCustomerReturnWithdrawal({orderId,requestId}) {
+    if(typeof customerReturnRequestBackendRequired==='function'&&customerReturnRequestBackendRequired(orderId))
+        return commitCustomerReturnRequestBackend(orderId,'WITHDRAW',{orderId,requestId});
     const {actorUid,assertCurrent}=customerReturnActorContext(()=>canManageOrderLifecycleCapability());let saved;
     await runRoleTransaction(async tx=>{
         assertCurrent();const ref=db.collection('orders').doc(orderId),snap=await tx.get(ref);assertCurrent();
@@ -93,6 +97,8 @@ async function commitCustomerReturnWithdrawal({orderId,requestId}) {
     assertCurrent();return saved;
 }
 async function commitCancelledPurchaseKeepStock({supplyId,warehouseId,expectedDirect}) {
+    if(typeof cancelledPurchaseBackendRequired==='function'&&cancelledPurchaseBackendRequired(supplyId))
+        return commitCancelledPurchaseBackend(supplyId,{supplyId,warehouseId,expectedDirect});
     const {actorUid,assertCurrent}=customerReturnActorContext(()=>canCreatePurchaseOrderCapability());let saved;
     const actor=deliveryActor();
     if(typeof expectedDirect!=='boolean')throw new Error('缺少原採購收貨方式。');
@@ -157,6 +163,8 @@ async function assertActiveReturnWarehouse(tx,warehouseId){
         throw new Error('收貨倉庫不存在、已停用或屬於業務保管位置，請重新選擇。');
 }
 async function commitCustomerReturnReceipt({orderId,requestId,receiptId,qty,quality,warehouseId}){
+    if(typeof pendingV2CustomerReturnReceipt==='function'&&pendingV2CustomerReturnReceipt(orderId))
+        throw new Error('前次後端退貨尚未確認，請以原操作核對，禁止改用一般退貨入庫。');
     if(!canReceiveInventoryCapability())throw new Error('無收貨權限。');
     const actorUid=currentUser?.uid;
     await runRoleTransaction(async tx=>{

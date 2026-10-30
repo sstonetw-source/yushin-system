@@ -3,6 +3,10 @@ function poIncomingKey(item) {
     return String(item.productId || (item.itemCode ? `code:${normalizeHistoryItemCode(item.itemCode)}` : '')).trim();
 }
 async function registerPurchaseIncoming(poId, poRecord, {actorUid=currentUser?.uid,actorRole=currentUserRole,onStockCommitted=null}={}) {
+    // Explicit Emulator-only backend pilot. An unknown Callable result keeps
+    // the original formal-po-pending checkpoint and cannot fall back to SDK.
+    if(globalThis.YUSHIN_V2_PO_INCOMING_EMULATOR===true)
+        return registerFormalPurchaseIncomingBackend(poId,poRecord,{actorUid,actorRole,onStockCommitted});
     if (poRecord?.status==='DRAFT' || poRecord?.documentOnly===true) throw Error('採購文件尚未確認已採購，不能登記在途。');
     if (isPurchaseTerminalStatus(poRecord?.status)) return;
     const assertActor=()=>{
@@ -105,6 +109,52 @@ async function registerPurchaseIncoming(poId, poRecord, {actorUid=currentUser?.u
             if(committedStock)err.incomingCommitted=true;
             throw err;
         }
+    }
+}
+
+async function registerFormalPurchaseIncomingBackend(poId,poRecord,{actorUid,actorRole,onStockCommitted}){
+    const local=host=>['localhost','127.0.0.1'].includes(host);
+    const hostname=String(globalThis.location?.hostname||'').toLowerCase();
+    if(globalThis.YUSHIN_V2_PO_INCOMING_EMULATOR!==true||!local(hostname)
+        ||typeof APP_ENVIRONMENT==='undefined'||APP_ENVIRONMENT!=='emulator'
+        ||typeof firebase==='undefined'||!firebase.auth||!firebase.app
+        ||!formalPurchaseBackendPilotEnabled())
+        throw Error('正式 PO 在途後端僅開放隔離 Emulator，禁止回退舊寫入。');
+    const auth=firebase.auth(),app=firebase.app();
+    if(app.options?.projectId!=='demo-yushin'||auth.app?.options?.projectId!=='demo-yushin'
+        ||db?.app?.options?.projectId!=='demo-yushin'
+        ||!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099)
+        throw Error('正式 PO 在途 Auth／Firestore 專案或 Emulator 不一致。');
+    const check=()=>{
+        if(!actorUid||currentUser?.uid!==actorUid||auth.currentUser?.uid!==actorUid
+            ||currentUserRole!==actorRole||!['admin','purchaser'].includes(actorRole)
+            ||!canCreatePurchaseOrderCapability()||!canAccessPage('orders.po'))
+            throw Error('採購在途的登入身分或權限已變更。');
+    };
+    check();
+    if(!poRecord||poRecord.status!=='ORDERED'||poRecord.documentOnly===true
+        ||poRecord.poNo!==poId||!Array.isArray(poRecord.items)
+        ||poRecord.items.length<1||poRecord.items.length>5
+        ||!Array.isArray(poRecord.supplyOrderIds)||poRecord.supplyOrderIds.length!==poRecord.items.length)
+        throw Error('正式 PO 尚未具有完整後端採購與供應來源。');
+    await ensureFormalPurchaseFunctionsCompat();check();
+    const functions=app.functions('asia-east1');
+    if(functions.app?.options?.projectId!=='demo-yushin')throw Error('正式 PO 在途 Functions 專案不正確。');
+    functions.useEmulator('127.0.0.1',5001);
+    const result=(await functions.httpsCallable('registerV2FormalPurchaseIncoming')({poNo:poId}))?.data;
+    check();
+    if(!['applied','already-applied'].includes(result?.status)||result.poNo!==poId
+        ||result.receiptId!=='po-incoming-'+encodeURIComponent(poId)
+        ||JSON.stringify(result.supplyOrderIds)!==JSON.stringify(poRecord.supplyOrderIds))
+        throw Error('在途入帳結果不明，請保留原採購單號核對。');
+    for(const supplyId of result.supplyOrderIds){
+        const snap=await db.collection('supplyOrders').doc(supplyId).get({source:'server'});check();
+        const supply=snap.exists?snap.data():null;
+        if(!supply||supply.purchaseDocumentId!==poId
+            ||supply.incomingRegisteredQty!==((supply.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'?0:supply.qty-supply.receivedQty))
+            throw Error('原在途交易已回覆，但來源供應紀錄尚未可核對；請使用原單號重試。');
+        if((supply.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP')
+            onStockCommitted?.(supply.productKey,supply.warehouseId);
     }
 }
 

@@ -4,16 +4,29 @@ let customerReturnOrders = [];
 let customerReturnHasMore = false;
 let customerReturnCursor = null;
 function customerCancellationActions(supply) {
+    if(typeof pendingCancelledPurchase==='function'){
+        try{if(pendingCancelledPurchase(supply.id))return `<button type="button" onclick="keepCancelledPurchaseAsStock(${inlineJsValue(supply.id)})">確認前次採購處理結果</button>`;}
+        catch(error){return `<span role="alert">${escapeHtml(error.message)}</span>`;}
+    }
     if(supply.customerCancellationDisposition==='KEEP_STOCK')return `${supplyCancelActionHtml(supply)} <button type="button" onclick="openSupplyReceipt(${inlineJsValue(supply.id)})">到貨入庫</button>`;
     return `<strong>採購待確認</strong><button type="button" class="btn-danger" onclick="confirmSupplierCancellation(${inlineJsValue(supply.id)})">供應商同意取消</button><button type="button" class="btn-secondary" onclick="keepCancelledPurchaseAsStock(${inlineJsValue(supply.id)})">不同意取消・到貨轉庫存</button>`;
 }
 window.confirmSupplierCancellation=async function(id){
     if(!canCreatePurchaseOrderCapability())return;
+    if(typeof pendingCancelledPurchase==='function'&&pendingCancelledPurchase(id))return alert('前次轉備庫結果尚未確認，請先確認原操作。');
     if(!confirm('請確認供應商已同意取消此品項尚未到貨的數量。系統將扣除對應在途數量，保留已到貨及其他品項。'))return;
     await cancelSupplyOutstanding(id);
 };
 window.keepCancelledPurchaseAsStock=async function(id){
     if(!canCreatePurchaseOrderCapability()||customerReturnActionsPending.has(id))return;
+    if(typeof pendingCancelledPurchase==='function'){
+        try{if(pendingCancelledPurchase(id)){
+            customerReturnActionsPending.add(id);
+            try{await commitCancelledPurchaseBackend(id);try{await loadActiveReceivingSupplyCache(true);renderPurchasingView();}catch(_){markMainPageDirty('orders.po');}
+                showActionFeedback('原採購轉備庫已確認，到貨後轉庫存。','success');}
+            finally{customerReturnActionsPending.delete(id);}return;
+        }}catch(error){alert(error.message);return;}
+    }
     const cached=supplyReceivingCache.find(s=>s.id===id);
     await loadWarehouseMaster();
     const direct=cached?.fulfillmentType==='DIRECT_SHIP';
@@ -53,7 +66,17 @@ window.saveReturnRecord=async function(){
 function renderCustomerReturnRequests(order){
     const target=document.getElementById('returnRequestsSummary');if(!target)return;
     target.innerHTML=(order.returnRequests||[]).map(r=>`<p>${escapeHtml(r.date)}｜${escapeHtml(normalizedOrderItems(order).find(i=>i.itemId===r.itemId)?.itemName||r.itemId)}｜申請 ${Number(r.qty)}／實收 ${Number(r.receivedQty||0)}｜${r.status==='PENDING'?'退貨待收貨':r.status==='CANCELLED'?'已撤回':'退貨結案'} ${r.status==='PENDING'&&canManageOrderLifecycleCapability()?`<button class="btn-secondary" onclick="withdrawCustomerReturn(${inlineJsValue(order.id)},${inlineJsValue(r.id)})">撤回未收數量</button>`:''}</p>`).join('');
+    if(typeof pendingCustomerReturnRequestOperation==='function'){
+        try{if(pendingCustomerReturnRequestOperation(order.id))target.innerHTML+=`<p role="status">前次退貨申請／撤回結果待確認。<button type="button" onclick="resumeCustomerReturnRequest(${inlineJsValue(order.id)})">確認前次結果</button></p>`;}
+        catch(error){target.innerHTML+=`<p role="alert">${escapeHtml(error.message)}</p>`;}
+    }
 }
+window.resumeCustomerReturnRequest=async function(orderId){
+    if(!canManageOrderLifecycleCapability()||!canEditPage('orders.list')||customerReturnActionsPending.has(orderId))return;
+    customerReturnActionsPending.add(orderId);
+    try{await commitCustomerReturnRequestBackend(orderId);await refreshAffectedOrderCaches([orderId]);renderOrderLifecycleModal();}
+    catch(error){alert(error.message);}finally{customerReturnActionsPending.delete(orderId);}
+};
 const originalReturnModalRenderer=renderOrderLifecycleModal;
 renderOrderLifecycleModal=function(){originalReturnModalRenderer();const order=ordersCache.find(o=>o.id===currentLifecycleOrderId);if(order)renderCustomerReturnRequests(order);};
 window.withdrawCustomerReturn=async function(orderId,id){
@@ -67,7 +90,7 @@ window.loadCustomerReturnQueue=async function(more=false){
     const target=document.getElementById('customerReturnQueue');if(!target)return;
     if(!canReceiveInventoryCapability()){target.textContent='退貨收貨由管理員、採購或倉管確認。';return;}
     target.textContent='載入待收退貨…';
-    const recovery=globalThis.YUSHIN_V2_RETURN_RECEIPT_EMULATOR===true?customerReturnReceiptRecoveryHtml():'';
+    const recovery=typeof customerReturnReceiptRecoveryHtml==='function'?customerReturnReceiptRecoveryHtml():'';
     if(recovery)target.innerHTML=recovery+'<p>載入待收退貨…</p>';
     const queueGeneration=++customerReturnQueueGeneration;
     const role=currentUserRole,uid=currentUser?.uid;

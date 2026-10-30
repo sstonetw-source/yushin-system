@@ -951,8 +951,9 @@ service cloud.firestore {
           && data.get('warehouseId', '') == before.get('warehouseId', ''))
         || (data.get('quantity', 0) == 0 && before.get('quantity', 0) == 0)
         || (e.get('movementId', '') != '' && id in e.get('reservationIds', [])
-          && (e.get('crossWarehouse', false) != true || (id in e.get('warehouseReservationIds', [])
-            && (before.get('quantity', 0) == 0 || before.get('warehouseId', '') == data.warehouseId)))
+          // #311: this legacy client witness may no longer prove multi-warehouse
+          // reservation changes. Such writes use the trusted Callable only.
+          && e.get('crossWarehouse', false) != true
           && operationalReservationMovement(e.movementId, data, before, e));
     }
     // Validate the group once on its immutable movement rather than repeating
@@ -969,7 +970,7 @@ service cloud.firestore {
         && e.previousWarehouseStockId is string && e.previousWarehouseStockId.size() > 0
         && e.reservationIds is list && e.reservationIds.size() > 0 && e.reservationIds.size() <= 5
         && e.reservationIds.toSet().size() == e.reservationIds.size()
-        && e.get('crossWarehouse', false) is bool
+        && e.get('crossWarehouse', false) == false
         && request.resource.data.productKey == data.productKey
         && (e.get('crossWarehouse', false)
           ? crossWarehouseReservationStocks(e, data.productKey, data.warehouseId)

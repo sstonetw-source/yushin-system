@@ -49,7 +49,7 @@ test('v2 return adds source location to a ledger with only other warehouse holds
  for(const patch of [{deltaQty:1.5},{itemReservedQty:2},{aggregateStock:{onHand:5,reserved:6}},
   {warehouseStock:{onHand:1,reserved:1,transferFreeInTransit:1}}])assert.throws(()=>reservation.planReservationReturn({...input,...patch}));
 });
-test('physical return is unavailable outside demo Emulator and has no Callable export',async()=>{
+test('physical return rejects unauthorized projects and keeps its writer behind the guarded Callable',async()=>{
  await assert.rejects(commitLocationReturn({projectId:'production'},'actor',request()),/僅允許/);
  const host=process.env.FIRESTORE_EMULATOR_HOST;
  try{delete process.env.FIRESTORE_EMULATOR_HOST;await assert.rejects(commitLocationReturn({projectId:'demo-yushin'},'actor',request()),/僅允許/);}

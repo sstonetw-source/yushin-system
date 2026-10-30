@@ -44,9 +44,10 @@ async function readShipmentActorOrder(tx,db,uid,orderId,roles=['admin','sales','
   if(order.deliveryHistory!==undefined&&!Array.isArray(order.deliveryHistory))fault('送達歷史格式不正確');
   return {actorRole,orderRef,order};
 }
-function shipmentDeliveryContext(order,intent,{allowReturns=false,allowCancelledCloseReturn=false,allowMultiReturn=false}={}) {
+function shipmentDeliveryContext(order,intent,{allowReturns=false,allowCancelledCloseReturn=false,allowMultiReturn=false,allowCustody=false}={}) {
  if(allowMultiReturn&&Array.isArray(order.items)&&order.items.length>1){
-  const context=multiShipmentDeliveryContext(order,intent,{allowCancelledCloseReturn:allowReturns&&allowCancelledCloseReturn});
+  const context=multiShipmentDeliveryContext(order,intent,{
+   allowCancelledCloseReturn:allowReturns&&allowCancelledCloseReturn,allowCustody});
   return {...context,returnProjection:context.projection};
  }
  const {orderId,itemId,syncAttemptId}=intent;
@@ -61,7 +62,7 @@ function shipmentDeliveryContext(order,intent,{allowReturns=false,allowCancelled
   const item=order.items[0],productKey=id(item.inventoryProductKey||item.productId);
   if(item.itemId!==itemId||(item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
    ||String(item.productType||item.type||'').toUpperCase()==='SERVICE'
-   ||item.transferPendingId||item.custodyTransferId||(order.logisticsTransfersPending??0)!==0)
+   ||item.transferPendingId||(item.custodyTransferId&&!allowCustody)||(order.logisticsTransfersPending??0)!==0)
    fault('品項不是可確認的實體倉出貨');
   if(!Array.isArray(order.returnRecords)||(!allowReturns&&(order.returnRecords.length||(item.returnedQty??0)!==0)))
    fault('退貨或補送流程尚未開放');
@@ -80,7 +81,7 @@ function shipmentDeliveryContext(order,intent,{allowReturns=false,allowCancelled
 }
 // Shared whole-order projection for acknowledgement/correction and explicitly
 // opted-in CLOSE return readers. Cancellation never permits new delivery.
-function multiShipmentDeliveryContext(order,intent,{allowCancelledCloseReturn=false}={}){
+function multiShipmentDeliveryContext(order,intent,{allowCancelledCloseReturn=false,allowCustody=false}={}){
  const {orderId,itemId,syncAttemptId}=intent;
  if(order.inventoryReservationStatus!=='completed'||order.inventoryReservationAttemptId!==syncAttemptId)
   fault('庫存同步未完成或來源同步識別碼已變更');
@@ -94,6 +95,9 @@ function multiShipmentDeliveryContext(order,intent,{allowCancelledCloseReturn=fa
   fault('此試點僅支援來源完整的 2–5 品項實體倉訂單');
  if(!Array.isArray(order.deliveryRecords)||!Array.isArray(order.returnRecords))
   fault('出貨、送達或退貨紀錄格式不正確');
+ if(allowCustody&&order.items.some(row=>String(row.productType||row.type||'')
+  .trim().toUpperCase()==='SERVICE'))
+  fault('多品項 V3 保管送達目前只接受實體商品');
  const whole=core.projectOrderShipmentReturns({orderId,items:order.items,
   shipments:order.warehouseShipmentRecords??[],deliveries:order.deliveryRecords,returns:order.returnRecords});
  if((order.deliveredQty??0)!==whole.confirmedQty||(order.returnedQty??0)!==whole.returnedQty
@@ -104,7 +108,8 @@ function multiShipmentDeliveryContext(order,intent,{allowCancelledCloseReturn=fa
   const part=whole.items.find(row=>row.itemId===source.itemId);
   if(!part||(source.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
    ||String(source.productType||source.type||'').toUpperCase()==='SERVICE'
-   ||source.transferPendingId||source.custodyTransferId
+   ||source.transferPendingId||(source.custodyTransferId&&!allowCustody)
+   ||(allowCustody&&(!source.custodyTransferId||source.warehouseId!=='custody-'+order.ownerUid))
    ||(source.warehouseShippedQty??0)!==part.shippedQty
    ||(source.deliveredQty??0)!==part.confirmedQty
    ||(source.returnedQty??0)!==part.returnedQty
@@ -115,7 +120,7 @@ function multiShipmentDeliveryContext(order,intent,{allowCancelledCloseReturn=fa
  }
  const item=order.items.find(row=>row.itemId===itemId);
  const projection=whole.items.find(row=>row.itemId===itemId);
- return {item,productKey:projection.productKey,projection,whole,cancelled};
+ return {item,productKey:projection.productKey,projection,returnProjection:projection,whole,cancelled};
 }
 async function readShipmentProof(tx,db,order,intent,productKey) {
  const {orderId,itemId,shipmentId,syncAttemptId}=intent;
@@ -140,7 +145,13 @@ async function readWholeOrderShipmentProofs(tx,db,order,intent){
  for(const row of shipments)await readShipmentProof(tx,db,order,
   {...intent,itemId:row.itemId,shipmentId:row.id},row.productKey);
 }
-async function commitShipmentDelivery(db,uid,data,env=process.env){
+async function commitShipmentDelivery(db,uid,data,env=process.env,options={}){
+ const custodyV3=options.allowCustody===true;
+ if(custodyV3){
+  const {custodyDeliveryProject}=require('./custody-delivery-service');
+  if(!custodyDeliveryProject(env)||db.projectId!=='demo-yushin')
+   fault('V3 保管送達確認尚未在此專案啟用');
+ }
  const project=deliveryConfirmationBackendProject(env);
  // Existing direct-Service test fixtures use isolated local demo Firestore.
  // Externally callable requests cannot reach this path without their own gate.
@@ -165,15 +176,27 @@ async function commitShipmentDelivery(db,uid,data,env=process.env){
   if((order.deliveryHistory||[]).some(row=>row.recordId===operationId||row.operationId===operationId))
    fault('此送達操作已有歷史紀錄，不能以原識別碼重新確認');
   const multi=Array.isArray(order.items)&&order.items.length>1;
-  const context=multi?multiShipmentDeliveryContext(order,intent):
-   shipmentDeliveryContext(order,intent,{allowReturns:true});
+  const context=multi?multiShipmentDeliveryContext(order,intent,{allowCustody:custodyV3}):
+   shipmentDeliveryContext(order,intent,{allowReturns:true,allowCustody:custodyV3});
   const {item,productKey}=context;
+  if(custodyV3){
+   if(!item.custodyTransferId||order.ownerUid===undefined||order.returnRecords.length
+     ||context.returnProjection.returnedQty!==0)
+    fault('V3 保管送達確認只接受未退貨的同一負責人業務交接');
+   await require('./custody-delivery-service').readCustodyDeliveryProofs(tx,db,order,context,intent);
+  }
   await readLocationReturnProofs(tx,db,order,intent,productKey,{closedOnly:true});
   // All physical debits are checked, not merely the selected shipment.
   // This prevents a sibling's missing/corrupt immutable debit from being
   // concealed by an otherwise valid order-level delivery projection.
   if(multi)await readWholeOrderShipmentProofs(tx,db,order,intent);
   const shipment=await readShipmentProof(tx,db,order,intent,productKey);
+  // Give an explicit, retry-safe domain rejection for an over-confirmation.
+  // Shared projections still validate all event totals after the candidate
+  // is appended, but their raw Error must not become an opaque 500 here.
+  const pending=context.projection.shipments.find(row=>row.shipmentId===shipmentId)?.pendingQty;
+  if(!Number.isSafeInteger(pending)||intent.quantity>pending)
+   fault('送達量超過這筆實際出貨尚待簽收數量');
   const expectedMovementId=shipment.movementId;
   const now=new Date().toISOString();
   const record={id:operationId,orderId,itemId,productKey,shipmentId,warehouseId:shipment.warehouseId,

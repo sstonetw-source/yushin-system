@@ -158,10 +158,19 @@ test('single-item and mixed service/direct-ship orders have correct projections'
 test('new order backend is independently disabled by default, in production and without dual emulator',()=>{
  for(const env of [
   {},{ENABLE_ORDER_RESERVATION_BACKEND:'true',GCLOUD_PROJECT:'yu-shing-company'},
+  {ENABLE_PRODUCTION_ORDER_RESERVATION_BACKEND:'true',GCLOUD_PROJECT:'yu-shing-company'},
   {ENABLE_ORDER_RESERVATION_BACKEND:'true',GCLOUD_PROJECT:'demo-yushin'},
   {ENABLE_ORDER_RESERVATION_BACKEND:'true',GCLOUD_PROJECT:'demo-yushin',FIRESTORE_EMULATOR_HOST:'localhost:8080'}
  ])assert.equal(allowOrderReservationBackend(env),false);
  assert.equal(allowOrderReservationBackend({ENABLE_ORDER_RESERVATION_BACKEND:'true',GCLOUD_PROJECT:'preview-20135'}),true);
+ assert.equal(allowOrderReservationBackend({ENABLE_ORDER_RESERVATION_BACKEND:'true',
+  ENABLE_PRODUCTION_ORDER_RESERVATION_BACKEND:'true',GCLOUD_PROJECT:'yu-shing-company'}),true);
+ for(const env of [
+  {FIRESTORE_EMULATOR_HOST:'localhost:8080'},
+  {FIREBASE_AUTH_EMULATOR_HOST:'localhost:9099'},
+  {FUNCTIONS_EMULATOR:'true'}
+ ])assert.equal(allowOrderReservationBackend({ENABLE_ORDER_RESERVATION_BACKEND:'true',
+   ENABLE_PRODUCTION_ORDER_RESERVATION_BACKEND:'true',GCLOUD_PROJECT:'yu-shing-company',...env}),false);
  assert.equal(allowOrderReservationBackend({ENABLE_ORDER_RESERVATION_BACKEND:'true',GCLOUD_PROJECT:'demo-yushin',
   FUNCTIONS_EMULATOR:'true',FIRESTORE_EMULATOR_HOST:'localhost:8080',FIREBASE_AUTH_EMULATOR_HOST:'localhost:9099'}),true);
 });

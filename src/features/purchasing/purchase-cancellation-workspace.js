@@ -2,6 +2,8 @@
 const purchaseCancellationInProgress = new Set();
 
 window.cancelSupplyOutstanding = async function(supplyId) {
+    if(typeof pendingCancelledPurchase==='function'&&pendingCancelledPurchase(supplyId))
+        throw new Error('前次轉備庫結果尚未確認，禁止以取消採購接手。');
     if (!canCreatePurchaseOrderCapability()) {
         alert('只有管理員或採購可以取消採購的未到貨數量。');
         return;

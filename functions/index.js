@@ -14,6 +14,8 @@ const {createPreviewFormalPurchaseCallable}=require('./formal-purchase-preview-c
 // Production is disabled by default; only an independent explicit backend
 // rollout flag may enable the already-validated strict transactional writer.
 exports.commitV2FormalPurchase=createPreviewFormalPurchaseCallable({onCall,HttpsError,getDatabase:getFirestore});
+const {createFormalPurchaseIncomingCallable}=require('./formal-purchase-incoming-service');
+exports.registerV2FormalPurchaseIncoming=createFormalPurchaseIncomingCallable({onCall,HttpsError,getDatabase:getFirestore});
 const {commitGroupedWarehouseReservation}=require('./grouped-reservation-service');
 const {allowGroupedReservation,allowGroupedReservationAmend,
   allowGroupedReservationSameWarehouse}=require('./grouped-reservation-gate');
@@ -136,3 +138,61 @@ exports.shipV2WarehouseItem=createWarehouseShipmentCallable({onCall,HttpsError,g
 // transaction; the old client writer remains until a later rollout approval.
 const {createOrderLifecycleCallable}=require('./order-lifecycle-preview-callable');
 exports.setV2OrderLifecycle=createOrderLifecycleCallable({onCall,HttpsError,getDatabase:getFirestore});
+
+// V3 owner-Custody cancellation/restoration has its own strictly demo-only
+// authority gate until full shipment/return and Preview acceptance is complete.
+const {createCustodyLifecycleCallable}=require('./custody-lifecycle-service');
+exports.setV3CustodyOrderLifecycle=createCustodyLifecycleCallable({onCall,HttpsError,getDatabase:getFirestore});
+
+// After a verified physical V3 HANDOFF, the owner can separately ship from
+// Custody to the customer.  Demo Auth/Functions/Firestore Emulator only.
+const {createCustodyShipmentCallable}=require('./custody-shipment-service');
+exports.shipV3CustodyItem=createCustodyShipmentCallable({onCall,HttpsError,getDatabase:getFirestore});
+
+// V3 customer receipt is separate from Custody stock deduction. Demo only.
+const {createCustodyDeliveryCallable}=require('./custody-delivery-service');
+exports.confirmV3CustodyDelivery=createCustodyDeliveryCallable({onCall,HttpsError,getDatabase:getFirestore});
+
+// Return to the exact Custody source lot after customer receipt; no automatic
+// free-stock allocation or formal production enablement.
+const {createCustodyReturnCallable}=require('./custody-return-service');
+exports.receiveV3CustodyReturn=createCustodyReturnCallable({onCall,HttpsError,getDatabase:getFirestore});
+
+// Independent, default-closed return Preview; no second inventory writer.
+const {createCustomerReturnCallables}=require('./customer-return-callable');
+const customerReturnCallables=createCustomerReturnCallables({onCall,HttpsError,getDatabase:getFirestore});
+exports.previewV2CustomerReturn=customerReturnCallables.previewV2CustomerReturn;
+exports.receiveV2CustomerReturn=customerReturnCallables.receiveV2CustomerReturn;
+
+// Application/withdrawal is independently gated from physical receipt.
+const {createCustomerReturnRequestCallables}=require('./customer-return-request-callable');
+const customerReturnRequests=createCustomerReturnRequestCallables({onCall,HttpsError,getDatabase:getFirestore});
+exports.requestV2CustomerReturn=customerReturnRequests.requestV2CustomerReturn;
+exports.withdrawV2CustomerReturnRequest=customerReturnRequests.withdrawV2CustomerReturnRequest;
+
+const {createCancelledPurchaseCallable}=require('./cancelled-purchase-service');
+exports.keepV2CancelledPurchaseStock=createCancelledPurchaseCallable({onCall,HttpsError,getDatabase:getFirestore});
+
+const {createMainTransferRequestCallables}=require('./main-transfer-request-service');
+const mainTransferRequests=createMainTransferRequestCallables({onCall,HttpsError,getDatabase:getFirestore});
+exports.createV2MainTransferRequest=mainTransferRequests.createV2MainTransferRequest;
+exports.cancelV2MainTransferRequest=mainTransferRequests.cancelV2MainTransferRequest;
+
+// Physical dispatch and receipt retain independent gates and operation identities.
+const {createMainTransferPhysicalCallables}=require('./main-transfer-physical-service');
+const mainTransferPhysical=createMainTransferPhysicalCallables({onCall,HttpsError,getDatabase:getFirestore});
+exports.dispatchV2MainTransfer=mainTransferPhysical.dispatchV2MainTransfer;
+exports.receiveV2MainTransfer=mainTransferPhysical.receiveV2MainTransfer;
+
+const {createMainTransferAllocationCallable}=require('./main-transfer-allocation-callable');
+exports.resumeV2MainTransferAllocation=createMainTransferAllocationCallable({onCall,HttpsError,getDatabase:getFirestore});
+
+const {createMainTransferAllocationListCallable}=require('./main-transfer-allocation-list');
+exports.listV2MainTransferAllocations=createMainTransferAllocationListCallable({onCall,HttpsError,getDatabase:getFirestore});
+
+const {createOrderTransferPhysicalCallables}=require('./order-transfer-physical-service');
+const orderTransferPhysical=createOrderTransferPhysicalCallables({onCall,HttpsError,getDatabase:getFirestore});
+exports.dispatchOrderTransfer=orderTransferPhysical.dispatchOrderTransfer;
+exports.receiveOrderTransfer=orderTransferPhysical.receiveOrderTransfer;
+
+exports.handoffOrderTransfer=orderTransferPhysical.handoffOrderTransfer;

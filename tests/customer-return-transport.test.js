@@ -2,7 +2,8 @@
 const test=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
 const core=require('../modules/fulfillment-core');
 const source=fs.readFileSync('src/services/customer-return-transport.js','utf8');
-function fixture(){
+function fixture({preview=false}={}){
+ const project=preview?'preview-20135':'demo-yushin';
  const intent={orderId:'O',itemId:'I',shipmentId:'S',syncAttemptId:'sync',selections:[{lotId:'L',qty:1}],operationId:'return_receipt_001',warehouseId:'A',date:'2026-10-21',reason:'訂錯貨',condition:'RESTOCKABLE',settlement:'CLOSE',requestId:'Q'};
  const order={inventoryReservationStatus:'completed',inventoryReservationAttemptId:'sync',warehouseShipmentRecords:[{id:'S',itemId:'I',warehouseId:'A'}],returnRequests:[{id:'Q',itemId:'I',qty:1,receivedQty:0,status:'PENDING'}],returnRecords:[]};
  const storage=new Map(),calls=[];let proof,failSave=false,afterRead=()=>{},transport;
@@ -13,11 +14,11 @@ function fixture(){
   return {data:{status:'applied',orderId:'O',itemId:'I',shipmentId:'S',warehouseId:'A',requestId:'Q',receiptId:p.operationId,movementId:record.movementId,qty:1,settlement:'CLOSE'}};
  };transport=applied;
  const open=()=>{
-  const functions={app:{options:{projectId:'demo-yushin'}},useEmulator:(h,p)=>{assert.equal(h,'127.0.0.1');assert.equal(p,5001);},httpsCallable:name=>async p=>{assert.equal(name,'receiveV2CustomerReturn');calls.push(structuredClone(p));return transport(p,c);}};
-  const c=vm.createContext({YushinFulfillment:core,YUSHIN_V2_RETURN_RECEIPT_EMULATOR:true,location:{hostname:'localhost'},currentUser:{uid:'U'},currentUserRole:'warehouse',canReceiveInventoryCapability:()=>true,
-   firebase:{functions:()=>{throw Error('global API forbidden');},app:()=>({functions:region=>{assert.equal(region,'asia-east1');return functions;}}),auth:()=>({app:{options:{projectId:'demo-yushin'}},currentUser:{uid:'U'},emulatorConfig:{host:'localhost',port:9099}})},
+  const functions={app:{options:{projectId:project}},useEmulator:(h,p)=>{assert.equal(preview,false);assert.equal(h,'127.0.0.1');assert.equal(p,5001);},httpsCallable:name=>async p=>{assert.equal(name,'receiveV2CustomerReturn');calls.push(structuredClone(p));return transport(p,c);}};
+  const c=vm.createContext({YushinFulfillment:core,APP_ENVIRONMENT:preview?'preview':'development',YUSHIN_PREVIEW_CUSTOMER_RETURN:preview,YUSHIN_V2_RETURN_RECEIPT_EMULATOR:!preview,location:{hostname:preview?'preview-20135.web.app':'localhost'},currentUser:{uid:'U'},currentUserRole:'warehouse',canReceiveInventoryCapability:()=>true,
+   firebase:{functions:()=>{throw Error('global API forbidden');},app:()=>({options:{projectId:project},functions:region=>{assert.equal(region,'asia-east1');return functions;}}),auth:()=>({app:{options:{projectId:project}},currentUser:{uid:'U'},emulatorConfig:preview?null:{host:'localhost',port:9099}})},
    sessionStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>{if(failSave)throw Error('storage failed');storage.set(k,v);},removeItem:k=>storage.delete(k)},
-   db:{collection:n=>({doc:id=>({get:async options=>{assert.equal(options.source,'server');afterRead(c,n);const value=n==='orders'?order:proof;return {exists:!!value,data:()=>structuredClone(value)};}})})}});
+   db:{app:{options:{projectId:project}},collection:n=>({doc:id=>({get:async options=>{assert.equal(options.source,'server');afterRead(c,n);const value=n==='orders'?order:proof;return {exists:!!value,data:()=>structuredClone(value)};}})})}});
   vm.runInContext(source,c);return c;
  };
  return {intent,order,storage,calls,open,applied,getProof:()=>proof,setTransport:f=>transport=f,setSaveFailure:v=>failSave=v,setAfterRead:f=>afterRead=f};
@@ -77,4 +78,47 @@ test('return receipt refuses concurrent different intents before a second transm
  assert.equal(attempts.filter(r=>r.status==='fulfilled').length,1);assert.equal(f.calls.length,1);assert.equal(f.storage.size,0);
  const g=fixture(),d=g.open();await Promise.all([d.receiveV2CustomerReturnEmulator('O',g.intent),d.receiveV2CustomerReturnEmulator('O',g.intent)]);
  assert.equal(g.order.returnRecords.length,1);assert.equal(g.storage.size,0);
+});
+test('Preview receipt reuses immutable intent after lost reply without connecting to Emulator',async()=>{
+ const f=fixture({preview:true});f.setTransport(p=>{f.applied(p);throw Error('lost reply');});
+ await assert.rejects(f.open().receiveV2CustomerReturnEmulator('O',f.intent),/lost reply/);
+ const raw=[...f.storage.values()][0];assert.equal(JSON.parse(raw).backendProject,'preview-20135');
+ f.setTransport(p=>({data:{...f.applied(p).data,status:'already-applied'}}));
+ await f.open().receiveV2CustomerReturnEmulator('O');
+ assert.deepEqual(f.calls[0],f.calls[1]);assert.equal(f.storage.size,0);
+});
+test('Preview project changes and disabled flags preserve pending proof and prevent further transmission',async()=>{
+ for(const mode of ['flag','db','auth','functions','app','host']){
+  const f=fixture({preview:true}),c=f.open();f.setTransport(()=>{throw Error('lost reply');});
+  await assert.rejects(c.receiveV2CustomerReturnEmulator('O',f.intent));
+  if(mode==='flag')c.YUSHIN_PREVIEW_CUSTOMER_RETURN=false;
+  if(mode==='db')c.db.app.options.projectId='yu-shing-company';
+  if(mode==='auth')c.firebase.auth=()=>({app:{options:{projectId:'yu-shing-company'}}});
+  if(mode==='functions'){const app=c.firebase.app();app.functions=()=>({app:{options:{projectId:'yu-shing-company'}}});c.firebase.app=()=>app;}
+  if(mode==='app'){const app=c.firebase.app();app.options.projectId='yu-shing-company';c.firebase.app=()=>app;}
+  if(mode==='host')c.location.hostname='yu-shing-company.web.app';
+  assert.ok(c.pendingV2CustomerReturnReceipt('O'));
+  await assert.rejects(c.receiveV2CustomerReturnEmulator('O'));
+  assert.equal(f.calls.length,1,mode);assert.equal(f.storage.size,1,mode);
+ }
+});
+test('Preview refuses a checkpoint from another project and does not clear it',async()=>{
+ const f=fixture({preview:true}),c=f.open();
+ f.storage.set('v2-return-receipt:U:O',JSON.stringify({actorUid:'U',actorRole:'warehouse',backendProject:'demo-yushin',intent:f.intent}));
+ await assert.rejects(c.receiveV2CustomerReturnEmulator('O'),/其他專案/);
+ assert.equal(f.calls.length,0);assert.equal(f.storage.size,1);
+});
+test('legacy receipt cannot take over an unresolved backend return after a flag is disabled',async()=>{
+ const c=vm.createContext({pendingV2CustomerReturnReceipt:()=>({intent:{}})});
+ vm.runInContext(fs.readFileSync('src/services/customer-return.js','utf8'),c);
+ await assert.rejects(c.commitCustomerReturnReceipt({orderId:'O'}),/禁止改用一般退貨/);
+});
+test('Preview flag disabled after commit retains original proof until the same operation is resumed',async()=>{
+ const f=fixture({preview:true}),c=f.open();
+ f.setTransport((p,ctx)=>{const reply=f.applied(p);ctx.YUSHIN_PREVIEW_CUSTOMER_RETURN=false;return reply;});
+ await assert.rejects(c.receiveV2CustomerReturnEmulator('O',f.intent),/設定已變更/);
+ assert.equal(f.storage.size,1);assert.equal(f.order.returnRecords.length,1);
+ f.setTransport(p=>({data:{...f.applied(p).data,status:'already-applied'}}));
+ await f.open().receiveV2CustomerReturnEmulator('O');
+ assert.deepEqual(f.calls[0],f.calls[1]);assert.equal(f.order.returnRecords.length,1);assert.equal(f.storage.size,0);
 });

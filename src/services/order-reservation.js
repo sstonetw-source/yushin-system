@@ -326,15 +326,19 @@ async function reserveInventoryForNewOrder(orderId, order, actorUid = currentUse
         throw new Error('已有較新的庫存同步工作，請更新這筆訂單後確認結果。');
     const items=normalizedOrderItems(liveOrder);
     if(!items.length)throw new Error('訂單缺少正式 items 品項資料，請重新建立訂單。');
-    // Explicit Preview pilot: the Admin SDK writer owns the entire initial
+    // Explicit gated backend: the Admin SDK writer owns the entire initial
     // stock/reservation/demand transaction. Never fall back to the legacy
     // per-item Firestore SDK writer if a response is lost or an error occurs.
-    if(typeof orderReservationBackendPreviewEnabled==='function'
-        &&orderReservationBackendPreviewEnabled()){
-        await commitNewOrderReservationPreview(orderId,liveOrder,actorUid);
+    if(typeof orderReservationBackendEnabled==='function'
+        &&orderReservationBackendEnabled()){
+        const committed=await commitNewOrderReservationPreview(orderId,liveOrder,actorUid);
+        if(committed!==true)
+            throw new Error('後端預留旗標可能已變更，尚無提交確認；請保留原同步識別碼核對，禁止回退舊交易。');
         const latest=await firestoreReadWithTimeout(orderRef.get(),'讀取後端庫存同步結果');
         if(!latest.exists||currentUser?.uid!==actorUid)
             throw new Error('訂單已變更，請更新後確認同步結果。');
+        if(String(latest.data().inventoryReservationAttemptId||'')!==String(liveOrder.inventoryReservationAttemptId||''))
+            throw new Error('後端預留已回覆，但訂單已有較新的同步識別碼；請以原憑證核對，不得繼續舊操作。');
         Object.assign(order,{id:orderId,...latest.data()});
         if(normalizedOrderStatus(order)!=='normal')throw new Error('訂單已取消／作廢，停止後續自行訂貨。');
         for(const row of normalizedOrderItems(order)){
@@ -346,6 +350,14 @@ async function reserveInventoryForNewOrder(orderId, order, actorUid = currentUse
         await registerInitialSelfOrders(orderId,order,actorUid);
         return {...orderReservationSummary(order),items:order.items};
     }
+    // #311 integration candidate: never submit the original per-item SDK
+    // reservation from the production site, even before cutover flags are on.
+    // Until the new Callable is authorized this intentionally pauses new-order
+    // reservation; live SDK operations are not allowed to make an unsafe ledger.
+    if((typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='production')
+        || (typeof productionReservationLegacyWriterBlocked==='function'
+            &&productionReservationLegacyWriterBlocked()))
+        throw new Error('正式環境已停用舊版預留寫入；後端尚未啟用，請保留原操作編號並聯絡管理員。');
     if(items.some(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'
         &&String(item.productType||'').trim().toUpperCase()!=='SERVICE')){
         await loadWarehouseMaster(true);

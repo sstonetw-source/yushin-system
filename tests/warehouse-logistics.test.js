@@ -48,7 +48,7 @@ function fixture({retry=false}={}){
   ['inventoryReservations/O__A',{orderId:'O',itemId:'A',warehouseId:'MAIN',productKey:'P',quantity:4,status:'active'}]
  ]);
  const ref=(col,id)=>({id,path:col+'/'+id});let failCommit=false,commits=0;
- const c=vm.createContext({currentUser:{uid:'buyer'},currentUserRole:'purchaser',currentUserName:'Buyer',currentUserCode:'P01',warehouseMasterCache:[{id:'MAIN',active:true},{id:'EXT',active:true}],
+ const c=vm.createContext({YushinReservation:require('../modules/reservation-core'),currentUser:{uid:'buyer'},currentUserRole:'purchaser',currentUserName:'Buyer',currentUserCode:'P01',warehouseMasterCache:[{id:'MAIN',active:true},{id:'EXT',active:true}],
    canReceiveInventoryCapability:()=>true,canAccessPage:()=>true,deliveryActor:()=> 'Buyer',defaultWarehouse:()=>({id:'MAIN'}),allocateFreeReceiptStockToShortages:async()=>({affectedOrderIds:[]}),
    inventoryRefFor:i=>ref('inventory',i.productId),warehouseStockDocId:(w,p)=>w+'__'+p,
    normalizedOrderStatus:o=>o.status==='cancelled'?'cancelled':'normal',orderInventorySyncIncomplete:()=>false,
@@ -167,6 +167,41 @@ test('order transfer preserves commercial values and reservation, then changes w
  assert.equal(f.docs.get('inventory/P').onHand,10);assert.equal(f.docs.get('inventory/P').reserved,4);
  await f.c.commitWarehouseTransferReceipt('T');const after=f.docs.get('orders/O');assert.equal(after.items[0].warehouseId,'EXT');assert.equal(after.items[0].transferPendingId,'');assert.equal(after.items[0].qty,before.items[0].qty);assert.equal(after.ownerUid,before.ownerUid);assert.equal(after.deliveryRecords.length,0);assert.equal(after.logisticsTransfersPending,0);
  assert.equal(f.docs.get('inventoryReservations/O__A').warehouseId,'EXT');assert.equal(f.docs.get('warehouseStocks/EXT__P').reserved,4);
+});
+test('controlled v2 transfer resolves the actual moving warehouse even when the order display warehouse equals the destination',async()=>{
+ const f=fixture(),c=f.c,calls=[];
+ const order=f.docs.get('orders/O');order.items[0].reservedQty=4;
+ f.docs.set('inventoryReservations/O__A',{orderId:'O',itemId:'A',productKey:'P',quantity:4,shortageQty:0,status:'active',
+  locationSchemaVersion:2,lifecycleWarehouseIds:['MAIN','EXT'],locations:[{warehouseId:'MAIN',reservedQty:1},{warehouseId:'EXT',reservedQty:3}]});
+ let readCount=0,pending=[];
+ c.orderTransferBackendRequired=()=>true;c.pendingOrderTransferOperations=()=>pending;
+ c.commitOrderTransferBackend=async(action,transferId,payload)=>{calls.push({action,transferId,payload});return {status:'applied'};};
+ c.db={collection:name=>({doc:key=>({get:async()=>{readCount++;const data=f.docs.get(name+'/'+key);return {exists:!!data,data:()=>structuredClone(data)};}})})};
+ const input={id:'V2-MOVE',orderId:'O',itemId:'A',expectedWarehouseId:'MAIN',fromWarehouseId:'MAIN',toWarehouseId:'MAIN',qty:4,
+  expectedPlan:core.plan({mode:'PICKUP'})};
+ await c.commitWarehouseTransfer(input);
+ assert.equal(calls[0].action,'DISPATCH');assert.equal(calls[0].payload.fromWarehouseId,'EXT');
+ assert.equal(calls[0].payload.qty,4);assert.equal(readCount,2);
+ pending=[{id:input.id,action:'DISPATCH'}];await c.commitWarehouseTransfer(input);
+ assert.equal(calls[1].payload,undefined);assert.equal(readCount,2);
+});
+test('V2 salesperson handoff routes the actual held source into the V3 custody backend',async()=>{
+ const f=fixture(),c=f.c,calls=[];
+ const order=f.docs.get('orders/O');order.items[0].deliveryPlan={mode:'PICKUP'};
+ f.docs.set('inventoryReservations/O__A',{orderId:'O',itemId:'A',productKey:'P',ownerUid:'S',salesCode:'01',
+  status:'active',quantity:4,shortageQty:0,locationSchemaVersion:2,lifecycleWarehouseIds:['MAIN','EXT'],
+  locations:[{warehouseId:'EXT',reservedQty:4}]});
+ c.orderTransferBackendRequired=()=>true;c.pendingOrderTransferOperations=()=>[];
+ c.commitOrderTransferBackend=async(action,id,payload)=>{calls.push({action,id,payload});return {status:'applied'};};
+ c.db={collection:name=>({doc:key=>({get:async()=>{const data=f.docs.get(name+'/'+key);
+  return {exists:!!data,data:()=>structuredClone(data)};}})})};
+ const expectedPlan=core.plan({mode:'PICKUP'});
+ await c.commitWarehouseTransfer({id:'V3-HANDOFF',orderId:'O',itemId:'A',qty:4,handoff:true,
+  fromWarehouseId:'MAIN',expectedWarehouseId:'MAIN',expectedPlan});
+ assert.equal(calls[0].action,'HANDOFF');assert.equal(calls[0].payload.fromWarehouseId,'EXT');
+ assert.equal(calls[0].payload.toWarehouseId,'custody-S');assert.equal(calls[0].payload.qty,4);
+ assert.deepEqual(f.docs.get('inventoryReservations/O__A').locations,[{warehouseId:'EXT',reservedQty:4}]);
+ assert.equal(f.docs.has('stockTransfers/V3-HANDOFF'),false);
 });
 test('handoff keeps goods reserved in salesperson custody and does not mark customer delivery or expose them in warehouse shipping queue',async()=>{
  const f=fixture();f.docs.get('orders/O').items[0].deliveryPlan={mode:'PICKUP'};
@@ -419,4 +454,32 @@ test('multi-warehouse batch checks one shared dispatch allowance before submitti
  f.inputs[1].value='2';await f.c.confirmWarehouseShippingBatch(f.node('confirm'));
  assert.equal(f.calls.length,2);assert.equal(f.calls[0][1].expectedWarehouseId,'MAIN');assert.equal(f.calls[1][1].expectedWarehouseId,'OTHER');
  assert.deepEqual(f.calls.map(row=>row[1].qty),[3,2]);
+});
+
+test('shared transfer lots preserve original cost references, fractional quantities and custody destinations',()=>{
+ const transfer={id:'T',productKey:'P',productId:'PRODUCT',toWarehouseId:'custody-U',qty:1.5,itemCode:'OLD',itemName:'Name',
+  allocations:[{lotId:'SOURCE',targetLotId:'T-0',costLotId:'ORIGINAL-COST',qty:1.5,lotNo:'LOT',expiryDate:'2027-01-01',unbatched:true}]};
+ const before=structuredClone(transfer),rows=core.transferDestinationLots(transfer,{itemCode:'NEW'},'2026-10-29');
+ assert.deepEqual(transfer,before);assert.equal(rows.length,1);assert.equal(rows[0].lot.remainingQty,1.5);
+ assert.equal(rows[0].lot.warehouseId,'custody-U');assert.equal(rows[0].lot.itemCode,'NEW');assert.equal(rows[0].lot.unbatched,true);
+ assert.equal(rows[0].lot.costLotId,'ORIGINAL-COST');assert.equal(rows[0].cost.costSourceLotId,'ORIGINAL-COST');
+ assert.equal('unitCost' in rows[0].cost,false);assert.equal('cost' in rows[0].lot,false);
+ const changed=core.transferDestinationLots({...transfer,toWarehouseId:'MAIN'},transfer,'2026-10-29');assert.equal(changed[0].lot.lotNo,'LOT');assert.equal(changed[0].lot.expiryDate,'2027-01-01');
+});
+test('shared transfer lots validate all sources before exposing any destination writes',()=>{
+ const transfer={id:'T',productKey:'P',toWarehouseId:'MAIN',qty:2,allocations:[{lotId:'A',targetLotId:'T-0',costLotId:'C',qty:2}]};
+ for(const patch of [{qty:3},{allocations:[]},{allocations:[{...transfer.allocations[0],targetLotId:'OTHER'}]},
+  {allocations:[{...transfer.allocations[0],costLotId:'bad/id'}]},
+  {qty:4,allocations:[transfer.allocations[0],{...transfer.allocations[0],targetLotId:'T-1'}]},
+  {allocations:[{...transfer.allocations[0],qty:NaN}]}])assert.throws(()=>core.transferDestinationLots({...transfer,...patch},{},'date'));
+});
+
+test('legacy transfer rejects a mixed or v2 reservation without partially moving stock or lots',async()=>{
+ for(const mixed of [false,true]){
+  const f=fixture(),ledger=f.docs.get('inventoryReservations/O__A');
+  Object.assign(ledger,{locationSchemaVersion:2,locations:[{warehouseId:'MAIN',reservedQty:4}]});if(!mixed)delete ledger.warehouseId;
+  const before=JSON.stringify([...f.docs]);
+  await assert.rejects(f.c.commitWarehouseTransfer({id:'V2-BLOCK',orderId:'O',itemId:'A',qty:4,toWarehouseId:'EXT'}),/多倉/);
+  assert.equal(JSON.stringify([...f.docs]),before);
+ }
 });

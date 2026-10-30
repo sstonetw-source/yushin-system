@@ -1,8 +1,7 @@
 'use strict';
 // No export from index.js: exercised only by the isolated demo Emulator harness.
 const {projectIdFromEnvironment}=require('./grouped-reservation-gate');
-const {planLocationReturnTrace}=require('./location-return-trace-service');
-const {commitLocationReturn}=require('./location-return-service');
+const {createCustomerReturnCallables}=require('./customer-return-callable');
 const {commitLocationDispatchPreparation}=require('./location-dispatch-service');
 const {commitLocationShipment}=require('./location-shipment-service');
 const {commitShipmentDelivery,reverseShipmentDelivery}=require('./shipment-delivery-service');
@@ -30,7 +29,7 @@ function createV2ReturnCallables({onCall,HttpsError,getDatabase,env=process.env}
    throw new HttpsError('internal','交易查核或提交失敗');
   }
  });
- return {previewV2CustomerReturn:wrap(planLocationReturnTrace),receiveV2CustomerReturn:wrap(commitLocationReturn),
+ return {...createCustomerReturnCallables({onCall,HttpsError,getDatabase,env}),
   prepareV2OrderDispatch:wrap(commitLocationDispatchPreparation),
   shipV2WarehouseItem:wrap(commitLocationShipment),
   confirmV2ShipmentDelivery:wrap(commitShipmentDelivery),
