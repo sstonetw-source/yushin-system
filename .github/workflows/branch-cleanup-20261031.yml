@@ -1,0 +1,57 @@
+name: One-time verified merged-branch cleanup (2026-10-31)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/branch-cleanup-20261031.yml'
+permissions:
+  contents: write
+  pull-requests: read
+jobs:
+  cleanup:
+    if: github.repository == 'sstonetw-source/yushin-system' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const manifest = JSON.parse(fs.readFileSync('docs/maintenance/branch-inventory-20261031.json', 'utf8'));
+            const owner = context.repo.owner, repo = context.repo.repo;
+            if (context.repo.owner !== 'sstonetw-source' || repo !== 'yushin-system' || context.ref !== 'refs/heads/main' || context.eventName !== 'push') throw new Error('Unexpected repository/ref/event; refusing to prune');
+            if (manifest.schemaVersion !== 1 || manifest.repository !== `${owner}/${repo}` || manifest.branches.length !== 198 || manifest.branches.filter(x => x.cleanup).length !== 170) throw new Error('Manifest count or ownership changed; refusing to prune');
+            const parent = (await github.rest.pulls.get({owner, repo, pull_number:234})).data;
+            if (!parent.merged_at || parent.base.ref !== 'main' || parent.head.sha !== manifest.parentIntegration.headSha || parent.merged_at !== manifest.parentIntegration.mergedAt) throw new Error('Integrated parent #234 is not verified merged to main');
+            const openPRs = await github.paginate(github.rest.pulls.list, {owner,repo,state:'open',per_page:100});
+            const blocked = new Set(openPRs.filter(p=>p.head.repo?.full_name === `${owner}/${repo}`).map(p=>p.head.ref));
+            const summary = {deleted:[],skipped:[],failed:[]};
+            for (const entry of manifest.branches.filter(x => x.cleanup)) {
+              const name = entry.branch;
+              if (!name || name === 'main' || blocked.has(name) || !entry.sha || !/^[0-9a-f]{40}$/.test(entry.sha)) { summary.skipped.push(`${name}: unsafe name/open PR/invalid SHA`); continue; }
+              try {
+                const pull = (await github.rest.pulls.get({owner,repo,pull_number:entry.pr})).data;
+                const accepted = pull.merged_at && pull.head.ref === name && pull.head.repo?.full_name === `${owner}/${repo}` && pull.head.sha === entry.sha && (
+                  (entry.classification === 'merged-to-main' && pull.base.ref === 'main') ||
+                  (entry.classification === 'merged-before-parent-main' && pull.base.ref === 'fix/service-order-no-physical-reservation-20261022' && pull.merged_at < parent.merged_at)
+                );
+                if (!accepted) { summary.skipped.push(`${name}: PR not identical, merged, or on verified path to main`); continue; }
+                let branch;
+                try { branch = (await github.rest.repos.getBranch({owner,repo,branch:name})).data; }
+                catch (e) { if (e.status === 404) { summary.skipped.push(`${name}: already absent`); continue; } throw e; }
+                if (branch.protected || branch.commit.sha !== entry.sha) { summary.skipped.push(`${name}: protected or head moved`); continue; }
+                // Last check is the live exact reference. Never force update any ref.
+                const ref = (await github.rest.git.getRef({owner,repo,ref:`heads/${name}`})).data;
+                if (ref.object.sha !== entry.sha) { summary.skipped.push(`${name}: ref moved`); continue; }
+                await github.rest.git.deleteRef({owner,repo,ref:`heads/${name}`});
+                summary.deleted.push(name);
+                core.info(`DELETED ${name} @ ${entry.sha} (merged PR #${entry.pr})`);
+              } catch (e) {
+                summary.failed.push(`${name}: ${e.status || 'error'} ${e.message}`);
+                core.warning(`NOT DELETED ${name}: ${e.message}`);
+              }
+            }
+            core.info(`Merged-branch cleanup: deleted=${summary.deleted.length}, skipped=${summary.skipped.length}, failed=${summary.failed.length}, retained_for_review=${manifest.branches.filter(x=>!x.cleanup).length}`);
+            await core.summary.addHeading('One-time merged branch cleanup').addTable([['Status','Count'],['Deleted',String(summary.deleted.length)],['Skipped',String(summary.skipped.length)],['Failures',String(summary.failed.length)],['Retained for review','28']]).addRaw('No branch was deleted unless its exact head matched a merged PR and the live protected/ref checks passed.').write();
+            if (summary.failed.length) throw new Error(`Cleanup had ${summary.failed.length} errors; see logs and retry only after review`);
