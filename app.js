@@ -11059,7 +11059,9 @@ async function reserveInventoryForNewOrder(orderId, order, actorUid = currentUse
     // per-item Firestore SDK writer if a response is lost or an error occurs.
     if(typeof orderReservationBackendEnabled==='function'
         &&orderReservationBackendEnabled()){
-        await commitNewOrderReservationPreview(orderId,liveOrder,actorUid);
+        const committed=await commitNewOrderReservationPreview(orderId,liveOrder,actorUid);
+        if(committed!==true)
+            throw new Error('後端預留旗標可能已變更，尚無提交確認；請保留原同步識別碼核對，禁止回退舊交易。');
         const latest=await firestoreReadWithTimeout(orderRef.get(),'讀取後端庫存同步結果');
         if(!latest.exists||currentUser?.uid!==actorUid)
             throw new Error('訂單已變更，請更新後確認同步結果。');

@@ -81,6 +81,15 @@ test('unknown whole-order backend result never resumes legacy stock writing',asy
  assert.equal(JSON.stringify([...f.docs]),before);
  assert.equal(f.controls.selfCalls,0);
 });
+test('backend flag disabled after route selection cannot masquerade as a completed reservation',async()=>{
+ const f=fixture();let checks=0;
+ f.c.orderReservationBackendEnabled=()=>++checks===1;
+ f.c.commitNewOrderReservationPreview=async()=>false;
+ const before=JSON.stringify([...f.docs]);
+ await assert.rejects(f.sync(),/尚無提交確認/);
+ assert.equal(JSON.stringify([...f.docs]),before);
+ assert.equal(f.controls.selfCalls,0);
+});
 test('simultaneous retries and repeated same-product lines do not overwrite or overreserve',async()=>{
  const f=fixture({onHand:6,items:[{itemId:'I',productId:'P',warehouseId:'W',qty:5},{itemId:'J',productId:'P',warehouseId:'W',qty:5}]});
  await Promise.all([f.sync(),f.sync()]);

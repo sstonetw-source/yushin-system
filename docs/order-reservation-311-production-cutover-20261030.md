@@ -13,7 +13,7 @@
 - `transaction-rollout-config.js` 的 `YUSHIN_PRODUCTION_ORDER_RESERVATION_BACKEND=false`：未授權時維持原入口。
 - `YUSHIN_PRODUCTION_ORDER_RESERVATION_LEGACY_BLOCKED=false`：正式切換後要與後端旗標**同時**設為 `true`，否則前端不啟用新入口；日後後端故障／停用只能中止，不得將此永久封鎖旗標恢復成 `false` 以重啟舊 SDK。
 - Callable 生產環境需同時啟用 `ENABLE_ORDER_RESERVATION_BACKEND=true` 和 `ENABLE_PRODUCTION_ORDER_RESERVATION_BACKEND=true`，且後端專案必須是 `yu-shing-company`、不可混接 Emulator；角色仍於交易內重查。
-- 確認回覆不明、旗標在等待期間關閉或登入身分變更時停止，保留原 `syncAttemptId`；不改用舊前端交易。
+- 確認回覆不明、旗標在選路後／等待期間關閉、或登入身分變更時停止；後端回覆必須明確為已提交，保留原 `syncAttemptId`，不改用舊前端交易。
 
 ## 正式切換前必須確認
 
