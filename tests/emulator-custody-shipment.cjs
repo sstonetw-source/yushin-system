@@ -173,7 +173,7 @@ test('authenticated owner V3 Custody shipment consumes original source and rerun
  assert.equal((await f.facts()).order.isDelivered,true);
  assert.equal((await f.facts()).inventory.onHand,beforeConfirmation.inventory.onHand);
 });
-test('real Auth 2-line V3 Custody shipment and distinct per-item customer acknowledgements preserve physical stock',async()=>{
+test('real Auth 2-line V3 Custody shipment, customer acknowledgement and CLOSE receipt preserve sibling stock',async()=>{
  const f=await fixture('multi-shipment',{multi:true});
  const siblingKey='v3-ship-multi-shipment-Q',siblingLot='v3-ship-multi-shipment-HANDOFF-J-0';
  const second={...f.input('custody_real_multi_j_first',1),itemId:'J'};
@@ -215,6 +215,21 @@ test('real Auth 2-line V3 Custody shipment and distinct per-item customer acknow
  for(const key of ['inventory','stock','ledger','lot','extra','cost'])
   assert.deepEqual(afterDelivery[key],beforeDelivery[key],key+' cannot change during customer confirmation');
  assert.deepEqual(await f.read('inventoryLots',siblingLot),siblingBefore);
+ const close={...f.customerReturn(second.operationId,'custody_real_multi_return_j',1),
+  itemId:'J',selections:[{lotId:siblingLot,qty:1}]};
+ const receipt=await f.receiveReturn(close);
+ assert.equal(receipt.status,'applied');
+ assert.equal(receipt.qty,1);
+ assert.equal(receipt.settlement,'CLOSE');
+ assert.equal((await f.read('inventory',encodeURIComponent(siblingKey))).onHand,3);
+ assert.equal((await f.read('inventoryLots',siblingLot)).remainingQty,2);
+ assert.equal((await f.read('inventoryReservations',f.orderId+'__J')).quantity,1);
+ assert.equal((await f.read('orders',f.orderId)).returnedQty,1);
+ const afterReturn=await f.facts();
+ for(const key of ['inventory','stock','ledger','lot','extra','cost'])
+  assert.deepEqual(afterReturn[key],beforeDelivery[key],key+' cannot change for sibling close return');
+ assert.equal((await f.receiveReturn(close)).status,'already-applied');
+ assert.deepEqual(await f.facts(),afterReturn);
 });
 test('real Auth rejects other sales and a mutated cost provenance without inventory writes',async()=>{
  const f=await fixture('blocked'),first=f.input('ship_custody_guard_123',1);

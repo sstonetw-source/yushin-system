@@ -46,7 +46,8 @@ async function readShipmentActorOrder(tx,db,uid,orderId,roles=['admin','sales','
 }
 function shipmentDeliveryContext(order,intent,{allowReturns=false,allowCancelledCloseReturn=false,allowMultiReturn=false,allowCustody=false}={}) {
  if(allowMultiReturn&&Array.isArray(order.items)&&order.items.length>1){
-  const context=multiShipmentDeliveryContext(order,intent,{allowCancelledCloseReturn:allowReturns&&allowCancelledCloseReturn});
+  const context=multiShipmentDeliveryContext(order,intent,{
+   allowCancelledCloseReturn:allowReturns&&allowCancelledCloseReturn,allowCustody});
   return {...context,returnProjection:context.projection};
  }
  const {orderId,itemId,syncAttemptId}=intent;

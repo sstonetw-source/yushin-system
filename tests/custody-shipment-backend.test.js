@@ -3,6 +3,7 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const {custodyShipmentProject,commitCustodyShipment}=require('../functions/custody-shipment-service');
 const {commitCustodyDelivery}=require('../functions/custody-delivery-service');
 const {commitShipmentDelivery}=require('../functions/shipment-delivery-service');
+const {commitCustodyReturn}=require('../functions/custody-return-service');
 const env={GCLOUD_PROJECT:'demo-yushin',FUNCTIONS_EMULATOR:'true',
  FIRESTORE_EMULATOR_HOST:'127.0.0.1:8080',FIREBASE_AUTH_EMULATOR_HOST:'127.0.0.1:9099',
  ENABLE_V3_CUSTODY_SHIPMENT_EMULATOR:'true'};
@@ -55,6 +56,7 @@ function fixture(){
     return{size:rows.length,empty:!rows.length,docs:rows.map(([path,data])=>({id:path.split('/')[1],data:()=>clone(data)}))};}
    const data=docs.get(target.path);return{exists:data!==undefined,data:()=>clone(data)};
   },update(ref,data){pending.push({ref,data:clone(data),create:false});},
+  set(ref,data){pending.push({ref,data:clone(data),create:false});},
   create(ref,data){pending.push({ref,data:clone(data),create:true});}};
   const result=await fn(tx),next=new Map([...docs].map(([key,value])=>[key,clone(value)]));
   for(const row of pending){
@@ -288,4 +290,58 @@ test('V3 multi-line delivery cannot use V2 entry or conceal a forged sibling shi
  const tampered=f.snapshot();
  await assert.rejects(commitCustodyDelivery(f.db,'SALES',intent,deliveryEnv));
  assert.deepEqual(f.snapshot(),tampered);
+});
+test('V3 Custody 2-line CLOSE return restores exactly the selected provenance lot without sibling writes',async()=>{
+ const f=multiFixture();
+ const shipmentJ=f.itemInput('J','custody_multi_return_j_ship');
+ const shipmentI=f.itemInput('I','custody_multi_return_i_ship');
+ await commitCustodyShipment(f.db,'SALES',shipmentJ,env);
+ await commitCustodyShipment(f.db,'SALES',shipmentI,env);
+ await commitCustodyDelivery(f.db,'SALES',{orderId:'ORDER',itemId:'J',shipmentId:shipmentJ.operationId,
+  operationId:'custody_multi_return_j_ack',quantity:1,date:'2026-10-30',notes:'客戶簽收',
+  syncAttemptId:'sync_123456789'},{...env,ENABLE_V3_CUSTODY_DELIVERY_EMULATOR:'true'});
+ const originalP=['inventory/P','warehouseStocks/custody-SALES__P','inventoryReservations/ORDER__I',
+  'inventoryLots/HANDOFF-0','inventoryLotCosts/HANDOFF-0'].map(key=>[key,f.read(key)]);
+ const originalCostJ=f.read('inventoryLotCosts/HANDOFF-J-0');
+ const ret={orderId:'ORDER',itemId:'J',shipmentId:shipmentJ.operationId,
+  operationId:'custody_multi_return_j_receipt',warehouseId:'custody-SALES',date:'2026-10-30',
+  reason:'客戶退回原批次',condition:'RESTOCKABLE',settlement:'CLOSE',
+  syncAttemptId:'sync_123456789',selections:[{lotId:'HANDOFF-J-0',qty:1}]};
+ const returnEnv={...env,ENABLE_V3_CUSTODY_RETURN_EMULATOR:'true'};
+ const result=await commitCustodyReturn(f.db,'SALES',ret,returnEnv);
+ assert.equal(result.status,'applied');
+ assert.equal(result.qty,1);
+ assert.equal(result.settlement,'CLOSE');
+ assert.equal(f.read('inventory/Q').onHand,3);
+ assert.equal(f.read('warehouseStocks/custody-SALES__Q').onHand,2);
+ assert.equal(f.read('inventoryLots/HANDOFF-J-0').remainingQty,2);
+ assert.equal(f.read('inventoryReservations/ORDER__J').quantity,1);
+ assert.deepEqual(f.read('inventoryLotCosts/HANDOFF-J-0'),originalCostJ);
+ assert.equal(f.read('orders/ORDER').returnRecords[0].itemId,'J');
+ assert.equal(f.read('orders/ORDER').returnedQty,1);
+ assert.equal(f.read('orders/ORDER').items[0].returnedQty??0,0);
+ for(const [key,original] of originalP)assert.deepEqual(f.read(key),original,key+' unchanged');
+ const snapshot=f.snapshot();
+ assert.equal((await commitCustodyReturn(f.db,'SALES',ret,returnEnv)).status,'already-applied');
+ assert.deepEqual(f.snapshot(),snapshot);
+});
+test('V3 Custody multi-line return rejects a forged sibling reservation and REPLACE without partial restoration',async()=>{
+ const f=multiFixture(),shipment=f.itemInput('J','custody_multi_guard_return_ship');
+ await commitCustodyShipment(f.db,'SALES',shipment,env);
+ await commitCustodyDelivery(f.db,'SALES',{orderId:'ORDER',itemId:'J',shipmentId:shipment.operationId,
+  operationId:'custody_multi_guard_return_ack',quantity:1,date:'2026-10-30',notes:'簽收',
+  syncAttemptId:'sync_123456789'},{...env,ENABLE_V3_CUSTODY_DELIVERY_EMULATOR:'true'});
+ const ret={orderId:'ORDER',itemId:'J',shipmentId:shipment.operationId,
+  operationId:'custody_multi_guard_return_rec',warehouseId:'custody-SALES',date:'2026-10-30',
+  reason:'原批次退貨',condition:'RESTOCKABLE',settlement:'CLOSE',
+  syncAttemptId:'sync_123456789',selections:[{lotId:'HANDOFF-J-0',qty:1}]};
+ const returnEnv={...env,ENABLE_V3_CUSTODY_RETURN_EMULATOR:'true'};
+ const prior=f.snapshot();
+ await assert.rejects(commitCustodyReturn(f.db,'SALES',{...ret,settlement:'REPLACE'},returnEnv));
+ assert.deepEqual(f.snapshot(),prior);
+ f.put('inventoryReservations/ORDER__I',{
+  ...f.read('inventoryReservations/ORDER__I'),quantity:1});
+ const forged=f.snapshot();
+ await assert.rejects(commitCustodyReturn(f.db,'SALES',ret,returnEnv));
+ assert.deepEqual(f.snapshot(),forged);
 });

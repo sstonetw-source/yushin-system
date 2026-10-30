@@ -61,6 +61,30 @@ function assertLinkedReceipt(order,intent,record,receipt,uid,actorRole){
   ||!(order.returnRecords??[]).some(row=>isDeepStrictEqual(row,record)))
   fault('退貨申請實收缺少一致的原入庫憑證');
 }
+// V3 Custody has a different authoritative reservation schema from V2.
+// A CLOSE receipt must validate all sibling holds without rerunning the V2
+// physical-warehouse reader or manufacturing any replacement demand.
+async function readMultiCustodyReturnLedgers(tx,db,order,intent,context,selectedLedger){
+ if(!context.whole)return;
+ const custody='custody-'+order.ownerUid;
+ for(const source of order.items){
+  const part=context.whole.items.find(row=>row.itemId===source.itemId);
+  const snap=source.itemId===intent.itemId?null:await tx.get(
+   db.collection('inventoryReservations').doc(intent.orderId+'__'+source.itemId));
+  const ledger=snap?(snap.exists?snap.data():null):selectedLedger;
+  const held=ledger&&reservation.reservationLocations(ledger);
+  if(!part||!ledger||ledger.locationSchemaVersion!==3||ledger.warehouseId!==undefined
+    ||ledger.orderId!==intent.orderId||ledger.itemId!==source.itemId
+    ||ledger.productKey!==part.productKey||ledger.ownerUid!==order.ownerUid
+    ||ledger.salesCode!==order.salesCode||ledger.custodyTransferId!==source.custodyTransferId
+    ||ledger.custodyOriginalQty!==part.orderedQty||ledger.quantity!==source.reservedQty
+    ||ledger.shortageQty!==0||ledger.quantity!==part.outstandingQty
+    ||ledger.status!==(ledger.quantity?'active':'fulfilled')
+    ||held.length!==(ledger.quantity?1:0)
+    ||(ledger.quantity>0&&(held[0].warehouseId!==custody||held[0].qty!==ledger.quantity)))
+   fault('整單 V3 退貨缺少一致的業務保管預留來源');
+ }
+}
 async function commitLocationReturn(db,uid,data,env=process.env,options={}){
  const custodyV3=options.allowCustody===true;
  if(custodyV3){
@@ -92,12 +116,12 @@ async function commitLocationReturn(db,uid,data,env=process.env,options={}){
   if(receipt?.exists)fault('退貨收貨識別碼已用於其他交易','already-exists');
   const context=shipmentDeliveryContext(order,intent,{
    allowReturns:true,allowCancelledCloseReturn:intent.settlement==='CLOSE',
-   allowMultiReturn:!custodyV3,allowCustody:custodyV3});
+   allowMultiReturn:true,allowCustody:custodyV3});
   const {item,productKey,projection,returnProjection,cancelled,whole}=context;
   if(custodyV3){
-   if(cancelled||whole||!item.custodyTransferId||order.returnRecords.length
+   if(cancelled||!item.custodyTransferId||order.returnRecords.length
      ||(order.returnRequests??[]).length||order.returnPending===true)
-    fault('V3 保管退貨目前僅接受正常、未申請或未曾退貨的單品項訂單');
+    fault('V3 保管退貨目前只接受正常、未申請且尚未退貨的業務保管訂單');
    await require('./custody-delivery-service').readCustodyDeliveryProofs(tx,db,order,context,intent);
   }
   if(whole&&intent.settlement!=='CLOSE')fault('多品項退貨目前僅支援 CLOSE 結案，訂錯貨請另開新單');
@@ -143,7 +167,9 @@ async function commitLocationReturn(db,uid,data,env=process.env,options={}){
    ||qty(item.shortageQty)!==ledger.shortageQty
    ||inv.data().productKey!==productKey||stock.data().productKey!==productKey||stock.data().warehouseId!==warehouseId)
    fault('退貨預留來源、投影或公司／分倉帳目不一致');
-  await readMultiReturnSource(tx,db,order,intent,context,{ledger,inventory:inv.data(),warehouseStock:stock.data()});
+  if(custodyV3)await readMultiCustodyReturnLedgers(tx,db,order,intent,context,ledger);
+  else await readMultiReturnSource(tx,db,order,intent,context,
+   {ledger,inventory:inv.data(),warehouseStock:stock.data()});
   const stockPlan=reservation.planReservationReturn({operation:'CUSTOMER_RETURN',deltaQty:plan.returnQty,
    settlement:intent.settlement,orderStatus:cancelled?'cancelled':'normal',productKey,warehouseId,reservation:ledger,
    aggregateStock:inv.data(),warehouseStock:stock.data(),itemReservedQty:item.reservedQty});
