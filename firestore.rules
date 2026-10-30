@@ -2328,8 +2328,6 @@ service cloud.firestore {
       // Aggregate operational stock is shared, but cost fields must never be embedded here.
       // stockPolicy/safetyStock are planning master data: admin/purchaser manage them;
       // warehouse keeps those fields unchanged while performing physical stock work.
-      // #311: only the trusted Admin SDK backend may change reservation totals.
-      // Old/cached SDK clients may still read stock, but cannot change reserved.
       allow get: if safeStockReader(resource == null ? {} : resource.data);
       allow list: if active() && !('unitCost' in resource.data) && !('cost' in resource.data);
       allow create: if (
@@ -2337,13 +2335,11 @@ service cloud.firestore {
           || (warehouse() && warehouseInventoryPlanningDefaults(request.resource.data))
         )
         && nonNegativeInventory(request.resource.data)
-        && request.resource.data.get('reserved', 0) == 0
         // Administrators can restore archived records from an existing backup.
         && (!request.resource.data.keys().hasAny(inventoryArchiveKeys())
           || (admin() && request.resource.data.get('listArchived', false) is bool))
         && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
-      allow update: if request.resource.data.get('reserved', 0) == resource.data.get('reserved', 0)
-        && inventoryUpdateWriter(id)
+      allow update: if inventoryUpdateWriter(id)
         && validInventoryArchiveChange(id)
         && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
       allow delete: if false;
@@ -2353,12 +2349,10 @@ service cloud.firestore {
       allow get: if safeStockReader(resource == null ? {} : resource.data);
       allow list: if safeStockReader(resource.data);
       allow create: if canReceiveInventory() && validWarehouseStock(request.resource.data)
-        && request.resource.data.get('reserved', 0) == 0
         && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
       // Receiver validation already includes recovery metadata; business updates
       // validate it in their own branch, so neither path evaluates it twice.
-      allow update: if request.resource.data.get('reserved', 0) == resource.data.get('reserved', 0)
-        && ((canReceiveInventory() && validWarehouseStock(request.resource.data))
+      allow update: if ((canReceiveInventory() && validWarehouseStock(request.resource.data))
           || (businessWarehouseStockOperationalUpdate(id) && validStockRecoveryMetadata(request.resource.data)))
         && warehouseStockIdentityUnchanged()
         && validStockRecoveryUpdate()
@@ -2371,10 +2365,13 @@ service cloud.firestore {
       // A missing document contains no business data; existing documents stay owner-scoped.
       allow get: if (resource == null ? role() in ['admin','purchaser','warehouse','sales','engineer'] : operationalOrOwnedReader(resource.data));
       allow list: if operationalOrOwnedReader(resource.data);
-      // #311: all writes are now performed by authorized backend Callables.
-      // Firestore Rules cannot inspect/Admin-authorize a client SDK as the
-      // trusted writer; therefore even an admin browser cannot edit this ledger.
-      allow create, update, delete: if false;
+      // #311: new cross-warehouse reservation writes must go through the
+      // trusted Callable; native clients may not submit split warehouse proofs.
+      allow create: if request.resource.data.get('stockEvidence', {}).get('crossWarehouse', false) != true
+        && reservationCreateAllowed(id);
+      allow update: if request.resource.data.get('stockEvidence', {}).get('crossWarehouse', false) != true
+        && reservationUpdateAllowed(id);
+      allow delete: if admin();
     }
 
     match /inventoryLots/{id} {
@@ -2506,7 +2503,10 @@ service cloud.firestore {
     match /inventoryMovements/{id} {
       allow read: if admin() || purchaser() || warehouse()
         || (businessOwner() && owns(resource.data));
-      allow create: if inventoryMovementWriter(id)
+      // #311: block the vulnerable native cross-warehouse proof protocol;
+      // the Admin SDK keeps the complete atomic multi-warehouse writer.
+      allow create: if request.resource.data.get('reservationStockEvidence', {}).get('crossWarehouse', false) != true
+        && inventoryMovementWriter(id)
         && !('unitCost' in request.resource.data)
         && !('purchaseNetAmount' in request.resource.data)
         && !('cogs' in request.resource.data);

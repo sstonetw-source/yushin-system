@@ -1,4 +1,4 @@
-# #311 — 預留帳由可信任後端唯一寫入（Rules 候選）
+# #311 — 高風險跨倉預留改由後端唯一寫入（Rules 候選）
 
 狀態：**Draft 原型，未合併、未發布；須通過完整 Rules／Callable／UI 回歸和審查。**
 
@@ -6,20 +6,21 @@
 
 ## 規則切換
 
-- `inventoryReservations`：登入者仍依原權限讀取，**所有 SDK create／update／delete 拒絕**。新預留、取消、退貨、收貨與跨倉的 ledger 更新須由已有身分、角色、來源、操作編號驗證的 Admin SDK Callable 執行。
-- `inventory`、`warehouseStocks`：SDK 只能建立 `reserved=0` 的新紀錄，更新時不能改變 `reserved`；其餘既有角色、來源、驗證器和身份欄位限制保留。
+- `inventoryReservations`：禁止客戶端 SDK 建立或更新帶有 `stockEvidence.crossWarehouse=true` 的跨倉預留憑證；其餘既有合法操作與角色讀取限制保留。
+- `inventoryMovements`：禁止 SDK 建立帶有 `reservationStockEvidence.crossWarehouse=true` 的跨倉移動憑證。即使快取舊版瀏覽器繼續嘗試，整筆交易也無法藉由不完整的主／次倉憑證變更預留數。
+- `inventory`、`warehouseStocks` 的既有驗證規則保持不變；相對應跨倉預留須由已驗證身分、角色、來源及操作編號的 Admin SDK Callable 處理。
 - 保留後端 Admin SDK 的原子交易與冪等憑證；Rules 無法限制 Admin SDK，因此後端必須自行嚴格驗證。
-- 舊版尚未接後端的操作會失敗。此為本次使用者接受的故障中止語意，不能偷偷改回舊寫法，也不能刪掉既有 CI 測試來掩蓋問題。
+- 舊版直接使用 **crossWarehouse 憑證**的操作會失敗。單倉／非跨倉的舊功能暫時保留，避免一次切掉 76 項正常流程。完整後端接管後仍需獨立移除其他 SDK writer。
 
 ## 安全驗收矩陣
 
 | 檢查 | 目標 | 目前證據 |
 |---|---|---|
-| 原生 SDK 對預留帳建立、修改、刪除（包含 admin） | 全部拒絕 | 新增 Rules Emulator 負向案例，待 CI |
-| 原生 SDK 對公司、分倉 `reserved` 修改 | 全部拒絕 | 新增 Rules Emulator 負向案例，待 CI |
-| 同倉漏列、多倉拆分、重複主憑證 | 原子拒絕，帳面不變 | 已有 #338 反例；後端／Rules 分別驗證 |
+| 原生 SDK 建立或修改跨倉預留憑證（包含 admin） | 拒絕 | 改寫原生跨倉 Rules 反例，待 CI |
+| 原生 SDK 建立跨倉 movement | 拒絕 | 原生跨倉 Rules 反例，待 CI |
+| 跨倉漏列、多倉拆分、重複主憑證 | 原子拒絕，帳面不變 | #338 已知反例；本次以拒絕整個舊跨倉協定處理 |
 | 正常後端整單預留和後續交易 | 通過、冪等、數量相符 | 既有 Auth／Functions／Firestore Emulator 回歸，需重新執行 |
 | 角色、成本資料、匿名讀取、偽造欄位、負值、重播 | 維持原限制 | 既有 Rules 回歸，需重新執行 |
 | Chrome 電腦與手機 | 正確呈現未啟用／失敗；已切換走後端 | 既有原站 Emulator，需重新執行 |
 
-本候選不變更任何登入權限、產品主檔、正式集合 schema，也不修改或刪除營運資料。已知舊 Rules 測試中的合法 SDK 預留斷言與新政策衝突，須轉為「舊 SDK 拒絕＋後端成功」的對照驗收，不能把舊測試全綠誤當新契約已完成。
+本候選不變更任何登入權限、產品主檔、正式集合 schema，也不修改或刪除營運資料。已知舊 Rules 測試中的原生 SDK 跨倉成功斷言已轉為「舊跨倉 SDK 拒絕＋後端跨倉交易成功」的對照驗收。**此修補只封鎖 #311 已確認的跨倉原生憑證路徑，不能宣稱其他所有舊 SDK writer 都已消失。**

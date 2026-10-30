@@ -3914,7 +3914,7 @@ test('warehouse receiving UI matches Firestore receive capability', () => {
 });
 
 
-test('business reservation rules preserve reservation identity and narrow stock writes', () => {
+test('business reservation rules retain scoped writes and block native cross-warehouse proofs', () => {
     const helperStart=rulesSource.indexOf('function businessReservationOperationalUpdate()');
     const helperEnd=rulesSource.indexOf('\n\n    function businessInventoryLotOperationalUpdate',helperStart);
     const helper=rulesSource.slice(helperStart,helperEnd);
@@ -3937,7 +3937,8 @@ test('business reservation rules preserve reservation identity and narrow stock 
     const reservationStart=rulesSource.indexOf('match /inventoryReservations/{id}');
     const reservationEnd=rulesSource.indexOf('\n\n    match /inventoryLots/{id}',reservationStart);
     const reservationRule=rulesSource.slice(reservationStart,reservationEnd);
-    assert.match(reservationRule,/allow update: if reservationUpdateAllowed\(id\)/);
+    assert.match(reservationRule,/get\('crossWarehouse', false\) != true[\s\S]*?reservationUpdateAllowed\(id\)/);
+    assert.match(rulesSource,/match \/inventoryMovements\/\{id\} \{[\s\S]*?get\('crossWarehouse', false\) != true[\s\S]*?inventoryMovementWriter\(id\)/);
     const updateGuard=rulesSource.slice(rulesSource.indexOf('function reservationUpdateAllowed(id)'),rulesSource.indexOf('function inventoryMovementWriter(id)'));
     assert.match(updateGuard,/validReservationSource\(id, request.resource.data, userRole\)[\s\S]*?reservationIdentityUnchanged\(\)[\s\S]*?legacyReservationLocationShape\(resource.data\)[\s\S]*?reservationUpdateWriter\(id, userRole\)/);
     assert.match(rulesSource,/function reservationUpdateWriter\(id, userRole\)[\s\S]*?businessReservationOperationalUpdate\(\)/);
