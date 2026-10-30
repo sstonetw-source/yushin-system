@@ -14,6 +14,8 @@ const {createPreviewFormalPurchaseCallable}=require('./formal-purchase-preview-c
 // Production is disabled by default; only an independent explicit backend
 // rollout flag may enable the already-validated strict transactional writer.
 exports.commitV2FormalPurchase=createPreviewFormalPurchaseCallable({onCall,HttpsError,getDatabase:getFirestore});
+const {createFormalPurchaseIncomingCallable}=require('./formal-purchase-incoming-service');
+exports.registerV2FormalPurchaseIncoming=createFormalPurchaseIncomingCallable({onCall,HttpsError,getDatabase:getFirestore});
 const {commitGroupedWarehouseReservation}=require('./grouped-reservation-service');
 const {allowGroupedReservation,allowGroupedReservationAmend,
   allowGroupedReservationSameWarehouse}=require('./grouped-reservation-gate');

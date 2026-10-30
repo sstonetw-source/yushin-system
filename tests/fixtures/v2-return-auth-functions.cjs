@@ -25,6 +25,7 @@ module.exports={...standard,handoffOrderTransfer:service.handoffOrderTransfer,di
  setV3CustodyOrderLifecycle:service.setV3CustodyOrderLifecycle,shipV3CustodyItem:service.shipV3CustodyItem,
  confirmV3CustodyDelivery:service.confirmV3CustodyDelivery,receiveV3CustodyReturn:service.receiveV3CustodyReturn,
  receiveV2Supply:service.receiveV2Supply,commitV2FormalPurchase:previewPurchase,commitV2QuickPurchase:quickPurchase,
+ registerV2FormalPurchaseIncoming:service.registerV2FormalPurchaseIncoming,
  commitServiceCaseEvent:service.commitServiceCaseEvent,
  getServiceCaseStatus:service.getServiceCaseStatus,
  getServiceOrderProgress:service.getServiceOrderProgress,
