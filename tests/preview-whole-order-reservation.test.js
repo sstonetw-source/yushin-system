@@ -1,7 +1,7 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const source=fs.readFileSync('src/services/grouped-reservation.js','utf8');
-function fixture({environment='preview',enabled=false,productionEnabled=false,
+function fixture({environment='preview',enabled=false,productionEnabled=false,legacyBlocked=false,
  response='applied',projectId=environment==='production'?'yu-shing-company':'preview-20135',
  disableAfterResponse=false}={}){
  const calls=[],invalidated=[];let actor='sales1';
@@ -11,7 +11,8 @@ function fixture({environment='preview',enabled=false,productionEnabled=false,
   return {data:{status:response}};
  }});
  const globals={YUSHIN_PREVIEW_ORDER_RESERVATION_BACKEND:enabled,
-  YUSHIN_PRODUCTION_ORDER_RESERVATION_BACKEND:productionEnabled};
+  YUSHIN_PRODUCTION_ORDER_RESERVATION_BACKEND:productionEnabled,
+  YUSHIN_PRODUCTION_ORDER_RESERVATION_LEGACY_BLOCKED:legacyBlocked};
  const context=vm.createContext({APP_ENVIRONMENT:environment,
   currentUser:{get uid(){return actor;}},globalThis:globals,
   firebase:{functions,app:()=>({functions,options:{projectId}})},
@@ -28,19 +29,20 @@ test('whole-order Preview adapter is independently default-off and disabled in p
 });
 test('production reservation requires its own flag and exact Firebase project, then uses only the backend',async()=>{
  for(const options of [{environment:'production',productionEnabled:false},
-  {environment:'production',productionEnabled:true,projectId:'preview-20135'},
-  {environment:'preview',productionEnabled:true}]){
+  {environment:'production',productionEnabled:true,legacyBlocked:false},
+  {environment:'production',productionEnabled:true,legacyBlocked:true,projectId:'preview-20135'},
+  {environment:'preview',productionEnabled:true,legacyBlocked:true}]){
   const f=fixture(options);assert.equal(await f.run(),false);assert.equal(f.calls.length,0);
  }
- const enabled=fixture({environment:'production',productionEnabled:true});
+ const enabled=fixture({environment:'production',productionEnabled:true,legacyBlocked:true});
  assert.equal(await enabled.run(),true);
  assert.equal(enabled.calls.length,1);
  assert.deepEqual(Object.keys(enabled.calls[0].payload).sort(),['orderId','syncAttemptId']);
  assert.deepEqual(enabled.invalidated,['demand']);
- const ambiguous=fixture({environment:'production',productionEnabled:true,response:'unknown'});
+ const ambiguous=fixture({environment:'production',productionEnabled:true,legacyBlocked:true,response:'unknown'});
  await assert.rejects(ambiguous.run(),/回覆不明確/);
  assert.equal(ambiguous.calls.length,1);
- const disabledMidFlight=fixture({environment:'production',productionEnabled:true,disableAfterResponse:true});
+ const disabledMidFlight=fixture({environment:'production',productionEnabled:true,legacyBlocked:true,disableAfterResponse:true});
  await assert.rejects(disabledMidFlight.run(),/旗標已關閉/);
  assert.equal(disabledMidFlight.calls.length,1);
 });

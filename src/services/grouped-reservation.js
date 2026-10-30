@@ -21,6 +21,7 @@ function orderReservationBackendEnabled() {
     return orderReservationBackendPreviewEnabled()
         || (APP_ENVIRONMENT === 'production'
             && globalThis.YUSHIN_PRODUCTION_ORDER_RESERVATION_BACKEND === true
+            && globalThis.YUSHIN_PRODUCTION_ORDER_RESERVATION_LEGACY_BLOCKED === true
             && typeof firebase !== 'undefined'
             && firebase.app().options?.projectId === 'yu-shing-company');
 }
