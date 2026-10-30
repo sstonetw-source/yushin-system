@@ -61,12 +61,14 @@ async function commitCustodyShipment(db,uid,data,env=process.env){
     ||order.inventoryReservationStatus!=='completed'
     ||order.inventoryReservationAttemptId!==intent.syncAttemptId
     ||!order.ownerUid||!order.salesCode||!Array.isArray(order.items)
-    ||order.items.length!==1||order.items[0]?.itemId!==itemId
+    ||!order.items.length||order.items.length>5
+    ||order.items.filter(row=>row?.itemId===itemId).length!==1
     ||qty(order.logisticsTransfersPending??0,'調撥途中')!==0)
-   fail('V3 保管實際出貨目前僅支援正常且來源同步一致的單品項訂單');
+   fail('V3 保管實際出貨僅支援正常、來源同步一致的 1–5 品項訂單');
   const custodyId='custody-'+id(order.ownerUid,'業務負責人');
   if(warehouseId!==custodyId)fail('保管出貨不能從其他倉庫扣帳');
-  const item=order.items[0],productId=id(item.productId,'產品');
+  const itemIndex=order.items.findIndex(row=>row.itemId===itemId);
+  const item=order.items[itemIndex],productId=id(item.productId,'產品');
   const productKey=id(item.inventoryProductKey||productId,'庫存產品');
   const ordered=qty(item.qty??item.orderedQty,'訂購量');
   if(!ordered||(item.qty!==undefined&&item.orderedQty!==undefined&&item.qty!==item.orderedQty)
@@ -94,8 +96,41 @@ async function commitCustodyShipment(db,uid,data,env=process.env){
     ||order.isDelivered===true)
    fail('已有送達、退貨或更正紀錄，須等完整 V3 履約入口');
   const records=order.warehouseShipmentRecords??[];
+  // Multi-line Custody is an explicitly narrower physical-shipment phase:
+  // homogeneous owner-Custody goods, no commercial delivery/return yet.  The
+  // whole-order projection prevents unknown sibling events from being hidden
+  // by filtering to the selected line.
+  if(order.items.length>1){
+   for(const sibling of order.items){
+    const siblingOrdered=qty(sibling.qty??sibling.orderedQty,'其他品項訂購量');
+    if(!siblingOrdered||(sibling.qty!==undefined&&sibling.orderedQty!==undefined
+      &&sibling.qty!==sibling.orderedQty)
+      ||(sibling.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
+      ||String(sibling.productType||sibling.type||'').toUpperCase()==='SERVICE'
+      ||sibling.warehouseId!==custodyId||!sibling.custodyTransferId||sibling.transferPendingId
+      ||qty(sibling.shortageQty??0,'其他品項缺口')!==0
+      ||qty(sibling.supplyOrderedQty??0,'其他品項已採購')!==0
+      ||qty(sibling.receivedQty??0,'其他品項收貨')!==0)
+     fail('多品項出貨僅接受同一負責業務的完整實體保管品項');
+   }
+   const whole=fulfillmentCore.projectOrderShipmentReturns({orderId,items:order.items,
+    shipments:records,deliveries:[],returns:[]});
+   if(whole.confirmedQty!==0||whole.returnedQty!==0||whole.isDelivered)
+    fail('多品項保管出貨不得混入已送達或退貨紀錄');
+   for(const sibling of order.items){
+    const part=whole.items.find(row=>row.itemId===sibling.itemId);
+    const prepared=qty(sibling.dispatchPreparedQty??0,'其他品項打單量');
+    if(!part||qty(sibling.warehouseShippedQty??0,'其他品項累計出貨')!==part.shippedQty
+      ||qty(sibling.reservedQty,'其他品項預留')!==part.outstandingQty
+      ||qty(sibling.deliveredQty??0,'其他品項送達')!==0
+      ||qty(sibling.returnedQty??0,'其他品項退貨')!==0
+      ||prepared<part.shippedQty||prepared>part.orderedQty)
+     fail('多品項履約、打單或預留投影不一致');
+   }
+  }
+  const itemRecords=records.filter(row=>row.itemId===itemId);
   const projection=fulfillmentCore.projectShipmentReturns({orderId,itemId,productKey,orderedQty:ordered,
-   shipments:records,deliveries:[],returns:[]});
+   shipments:itemRecords,deliveries:[],returns:[]});
   const shipped=projection.shippedQty,held=qty(item.reservedQty,'品項預留');
   const prepared=qty(item.dispatchPreparedQty??0,'打單量');
   const state=fulfillmentCore.warehouseShipmentState({warehouseShippedQty:shipped,
@@ -164,15 +199,20 @@ async function commitCustodyShipment(db,uid,data,env=process.env){
    qty:intent.quantity,reservation:ledger,aggregateStock:company.data(),
    warehouseStock:stock.data(),itemReservedQty:held,requireReservation:true});
   for(const previous of records){
-   if(previous.custodyTransferId!==transferId||previous.warehouseId!==custodyId)
+   const sourceItem=order.items.find(row=>row.itemId===previous.itemId);
+   const sourceKey=sourceItem&&id(sourceItem.inventoryProductKey||sourceItem.productId,'前次產品');
+   if(!sourceItem||previous.custodyTransferId!==sourceItem.custodyTransferId
+     ||previous.warehouseId!==custodyId)
     fail('前次 V3 實際出貨來源不屬於原保管交接');
    const saved=await tx.get(ref('inventoryMovements','location-ship-'+id(previous.id,'原出貨')));
-   fulfillmentCore.validateShipmentMovement(previous,saved.exists?saved.data():null,{orderId,itemId,productKey});
-   const original=normalizeShipmentIntent({orderId,itemId,warehouseId:custodyId,
+   fulfillmentCore.validateShipmentMovement(previous,saved.exists?saved.data():null,
+    {orderId,itemId:previous.itemId,productKey:sourceKey});
+   const original=normalizeShipmentIntent({orderId,itemId:previous.itemId,warehouseId:custodyId,
     quantity:previous.qty,date:previous.date,notes:previous.notes,operationId:previous.id,
     syncAttemptId:intent.syncAttemptId,expectedPlan:previous.deliveryPlan});
    if(saved.data().intentHash!==original.hash||saved.data().custodyShipmentV3!==true
-    ||saved.data().custodyTransferId!==transferId)fail('前次保管出貨憑證不一致');
+    ||saved.data().custodyTransferId!==sourceItem.custodyTransferId)
+    fail('前次保管出貨憑證不一致');
   }
   const lotSnaps=await tx.get(db.collection('inventoryLots').where('productKey','==',productKey)
    .where('warehouseId','==',custodyId).limit(201));
@@ -209,20 +249,21 @@ async function commitCustodyShipment(db,uid,data,env=process.env){
   const now=new Date().toISOString();
   const result={orderId,itemId,warehouseId:custodyId,qty:intent.quantity,
    reservedQty:stockPlan.reservation.quantity,grossShippedQty:shipped+intent.quantity,lotAllocations};
-  const record={id:operationId,orderId,itemId,productKey,itemIndex:0,warehouseId:custodyId,
+  const record={id:operationId,orderId,itemId,productKey,itemIndex,warehouseId:custodyId,
    date:intent.date,qty:intent.quantity,notes:intent.notes,
    sourceType:'WAREHOUSE_CUSTOMER_SHIPMENT',deliveryPlan:intent.expectedPlan,
    custodyTransferId:transferId,createdBy:uid,createdByUid:uid,createdAt:now,
    movementId:movementRef.id,lotAllocations,cogs:0};
   const nextRecords=[...records,record];
-  fulfillmentCore.projectShipmentReturns({orderId,itemId,productKey,orderedQty:ordered,
+  fulfillmentCore.projectOrderShipmentReturns({orderId,items:order.items,
    shipments:nextRecords,deliveries:[],returns:[]});
   const nextLedger={...stockPlan.reservation,updatedAt:now};
   delete nextLedger.warehouseId;
   const nextItem={...item,reservedQty:nextLedger.quantity,shortageQty:0,
    warehouseShippedQty:shipped+intent.quantity};
+  const nextItems=order.items.map(row=>row.itemId===itemId?nextItem:row);
   const workIndex=await require('./service-order-fulfillment').mixedWorkIndex(db,tx,orderId,
-   {...order,items:[nextItem],warehouseShipmentRecords:nextRecords},{proofOrder:order});
+   {...order,items:nextItems,warehouseShipmentRecords:nextRecords},{proofOrder:order});
   tx.update(inventoryRef,{...stockPlan.aggregateStock,updatedAt:now});
   tx.update(stockRef,{...stockPlan.warehouseStock,updatedAt:now});
   tx.update(ledgerRef,{quantity:nextLedger.quantity,locations:nextLedger.locations,
@@ -231,7 +272,7 @@ async function commitCustodyShipment(db,uid,data,env=process.env){
    const lot=eligible.find(candidate=>candidate.id===row.lotId);
    tx.update(ref('inventoryLots',row.lotId),{remainingQty:lot.remainingQty-row.qty,updatedAt:now});
   }
-  tx.update(orderRef,{...workIndex,items:[nextItem],warehouseShipmentRecords:nextRecords,
+  tx.update(orderRef,{...workIndex,items:nextItems,warehouseShipmentRecords:nextRecords,
    warehouseShipmentRecordId:operationId,updatedAt:now});
   tx.create(movementRef,{action:'location_customer_shipment',type:'ship',qty:-intent.quantity,
    sourceType:'order',sourceId:orderId,itemId,productKey,warehouseId:custodyId,
