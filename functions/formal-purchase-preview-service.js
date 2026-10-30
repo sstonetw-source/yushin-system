@@ -53,12 +53,16 @@ async function validateV2FormalPurchaseTx(tx,db,uid,intent,{allowExistingPo=fals
   const order=await tx.get(ref('orders',intent.orderId));
   if(!order.exists)reject('not-found','來源訂單不存在');
   const source=order.data();
-  if(!source.ownerUid||!source.salesCode
-    ||source.status==='cancelled'||source.orderStatus==='cancelled'
+  if(!source.ownerUid||!source.salesCode)
+   reject('failed-precondition','來源訂單缺少業務歸屬資料，請先核對負責人與業務代碼');
+  if(source.status==='cancelled'||source.orderStatus==='cancelled'
     ||source.status==='voided'||source.orderStatus==='voided'
-    ||source.returnPending===true||source.inventoryReservationStatus!=='completed'
-    ||!Array.isArray(source.items)||source.items.length<1)
-   reject('failed-precondition','來源訂單不可建立正式採購單');
+    ||source.returnPending===true)
+   reject('failed-precondition','來源訂單已取消、作廢或退貨處理中，不可建立正式採購單');
+  if(source.inventoryReservationStatus!=='completed')
+   reject('failed-precondition','來源訂單庫存同步尚未完成，請先核對同步結果');
+  if(!Array.isArray(source.items)||source.items.length<1)
+   reject('failed-precondition','來源訂單缺少有效品項資料，請先核對原訂單');
   const matching=source.items.map((row,index)=>({row,index}))
    .filter(({row})=>row?.itemId===intent.itemId);
   if(matching.length!==1)reject('failed-precondition','來源品項不存在或重複');
