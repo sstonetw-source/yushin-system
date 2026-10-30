@@ -29,3 +29,12 @@
 ## 可復原性
 
 刪除分支 **不會刪除 Git Commit 或已合併的 PR 內容**；但歷史 dangling commits 可能遭 GitHub 垃圾回收，因此只清理具備合併證據且 exact head 不變的分支。此次不刪除保留清單，亦不透過強制推送修改歷史。
+
+## 實際執行與安全驗證（已完成）
+
+- PR [#397](https://github.com/sstonetw-source/yushin-system/pull/397) 已合併 `main`：`efe5a8cd86d5d3b64b27d2ac5d52f01dced2cf25`。合併前 CI 10/10 全綠，含 required `regression`。
+- 一次性 [GitHub Actions run #41095913044](https://github.com/sstonetw-source/yushin-system/actions/runs/41095913044) **completed/success**。原始 Job 日誌：`Merged-branch cleanup: deleted=170, skipped=0, failed=0, retained_for_review=28`。
+- 刪除後重新查詢 GitHub branches 共 **29 個**：main 1 + 待查 28；未發現超出清單的刪除。
+- 一次性 `.github/workflows/branch-cleanup-20261031.yml` 清理完成後由後續 PR 移除，以免倉庫長期留存 `contents:write` 的分支刪除流程。歷史 workflow 程式及審計日誌仍保留於 PR #397／run #41095913044。
+- 仍未證明的 28 分支全部保留，尤其 #28 晚於父 PR #27 進 main 的合併；要先進行逐項等效性比對再考慮刪除。此步驟未改 Firebase、Firestore Rules、正式資料、交易程式或正式旗標。
+
