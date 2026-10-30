@@ -53,3 +53,12 @@
 | `upgrade/remove-product-line-assignment-20260923` | 無 | 0/1 |
 
 特別注意 #338 的 Rules 原型與文件在 main 不同／缺少，不可將失敗的 1,000 expressions 實驗直接補回；#28 晚於父 PR 合併、無 PR 分支及原 head 已前進分支仍逐項追蹤。
+
+## 實際清理結果
+
+- PR [#399](https://github.com/sstonetw-source/yushin-system/pull/399) 的 10/10 CI（含 required regression）success，合併 main `0f9cdb1d09a92250d084a8b24c6657f8b3b31d86`。
+- [Actions #41144713724](https://github.com/sstonetw-source/yushin-system/actions/runs/41144713724) cleanup job `124367012835` completed/success。原始日誌：`deleted=4, skipped=0, failed=0, held=24`。四筆刪除的 SHA 均與清單相符。
+- 即時 GitHub branches 再核對 **25 個（main 1 + 待查 24）**；此次累計已刪除歷史分支 174 個（前批 170 + 本批 4），沒有刪除 24 個未證明等效的分支。
+- 此收尾 PR 移除 `.github/workflows/retained-branch-cleanup-20261031.yml`，保留完整盤點 JSON、查核證據與歷史 Action log，不長期保留刪除分支的高權限 workflow。
+- 本機同一段 workflow JS 的 6 個模擬情境通過：正常四筆；SHA 改變／分支保護／Open PR／main blob 改變／原 PR SHA 不符時，皆零刪除並停止。
+- 沒有 Firebase Functions/Rules 發布、交易旗標或正式資料異動；GitHub Pages 仍依既有 main 自動發布流程執行，與 Firebase 部署及正式角色驗收分開記錄。
