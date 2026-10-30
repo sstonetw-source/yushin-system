@@ -326,11 +326,11 @@ async function reserveInventoryForNewOrder(orderId, order, actorUid = currentUse
         throw new Error('已有較新的庫存同步工作，請更新這筆訂單後確認結果。');
     const items=normalizedOrderItems(liveOrder);
     if(!items.length)throw new Error('訂單缺少正式 items 品項資料，請重新建立訂單。');
-    // Explicit Preview pilot: the Admin SDK writer owns the entire initial
+    // Explicit gated backend: the Admin SDK writer owns the entire initial
     // stock/reservation/demand transaction. Never fall back to the legacy
     // per-item Firestore SDK writer if a response is lost or an error occurs.
-    if(typeof orderReservationBackendPreviewEnabled==='function'
-        &&orderReservationBackendPreviewEnabled()){
+    if(typeof orderReservationBackendEnabled==='function'
+        &&orderReservationBackendEnabled()){
         await commitNewOrderReservationPreview(orderId,liveOrder,actorUid);
         const latest=await firestoreReadWithTimeout(orderRef.get(),'讀取後端庫存同步結果');
         if(!latest.exists||currentUser?.uid!==actorUid)
@@ -346,6 +346,11 @@ async function reserveInventoryForNewOrder(orderId, order, actorUid = currentUse
         await registerInitialSelfOrders(orderId,order,actorUid);
         return {...orderReservationSummary(order),items:order.items};
     }
+    // After an approved production cutover, a disabled flag or unavailable
+    // backend must stop the operation, never reactivate the old SDK writer.
+    if(typeof productionReservationLegacyWriterBlocked==='function'
+        &&productionReservationLegacyWriterBlocked())
+        throw new Error('預留後端未啟用，已禁止回退舊版庫存交易；請保留原操作編號並聯絡管理員。');
     if(items.some(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'
         &&String(item.productType||'').trim().toUpperCase()!=='SERVICE')){
         await loadWarehouseMaster(true);

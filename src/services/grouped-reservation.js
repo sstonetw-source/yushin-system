@@ -15,6 +15,19 @@ function orderReservationBackendPreviewEnabled() {
     return APP_ENVIRONMENT === 'preview'
         && globalThis.YUSHIN_PREVIEW_ORDER_RESERVATION_BACKEND === true;
 }
+// Production remains independently default-closed. The server checks the
+// project and a separate production gate before accepting any transaction.
+function orderReservationBackendEnabled() {
+    return orderReservationBackendPreviewEnabled()
+        || (APP_ENVIRONMENT === 'production'
+            && globalThis.YUSHIN_PRODUCTION_ORDER_RESERVATION_BACKEND === true
+            && typeof firebase !== 'undefined'
+            && firebase.app().options?.projectId === 'yu-shing-company');
+}
+function productionReservationLegacyWriterBlocked() {
+    return APP_ENVIRONMENT === 'production'
+        && globalThis.YUSHIN_PRODUCTION_ORDER_RESERVATION_LEGACY_BLOCKED === true;
+}
 function initialGroupedReservationCandidates(order) {
     if (!groupedReservationPreviewEnabled()
         || order?.inventoryReservationStatus !== 'pending'
@@ -64,7 +77,7 @@ async function groupedReservationPreviewCallable() {
     return firebase.app().functions('asia-east1').httpsCallable('commitGroupedWarehouseReservation');
 }
 async function commitNewOrderReservationPreview(orderId,liveOrder,actorUid) {
-    if (!orderReservationBackendPreviewEnabled()) return false;
+    if (!orderReservationBackendEnabled()) return false;
     if (!actorUid || currentUser?.uid!==actorUid)
         throw new Error('登入身分已變更，停止後端庫存同步。');
     const syncAttemptId=String(liveOrder.inventoryReservationAttemptId||'');
@@ -74,10 +87,12 @@ async function commitNewOrderReservationPreview(orderId,liveOrder,actorUid) {
     // Reuse the Functions compat SDK loader; never run a client-side stock
     // transaction after a failed or ambiguous backend result.
     await ensureReservationFunctionsCompat();
-    if (!orderReservationBackendPreviewEnabled() || currentUser?.uid!==actorUid)
+    if (!orderReservationBackendEnabled() || currentUser?.uid!==actorUid)
         throw new Error('登入身分或測試環境已變更，停止後端庫存同步。');
     const callable=firebase.app().functions('asia-east1').httpsCallable('commitOrderReservationPreview');
     const reply=await callable({orderId,syncAttemptId});
+    if (!orderReservationBackendEnabled())
+        throw new Error('預留後端旗標已關閉，請保留原同步識別碼核對交易結果。');
     if (!['applied','already-applied'].includes(reply?.data?.status))
         throw new Error('後端預留回覆不明確，請重新讀取訂單後以原識別碼重試。');
     if (currentUser?.uid!==actorUid)

@@ -63,6 +63,24 @@ test('failed item transaction leaves stock, reservation, order and demand untouc
  const f=fixture();f.controls.fail=true;const before=JSON.stringify([...f.docs]);
  await assert.rejects(f.sync(),/permission-denied/);assert.equal(JSON.stringify([...f.docs]),before);assert.equal(f.controls.selfCalls,0);
 });
+test('post-cutover production outage stops instead of falling back to legacy per-item stock writes',async()=>{
+ const f=fixture();
+ f.c.orderReservationBackendEnabled=()=>false;
+ f.c.productionReservationLegacyWriterBlocked=()=>true;
+ const before=JSON.stringify([...f.docs]);
+ await assert.rejects(f.sync(),/禁止回退舊版庫存交易/);
+ assert.equal(JSON.stringify([...f.docs]),before);
+ assert.equal(f.controls.selfCalls,0);
+});
+test('unknown whole-order backend result never resumes legacy stock writing',async()=>{
+ const f=fixture();
+ f.c.orderReservationBackendEnabled=()=>true;
+ f.c.commitNewOrderReservationPreview=async()=>{throw Error('backend unknown receipt');};
+ const before=JSON.stringify([...f.docs]);
+ await assert.rejects(f.sync(),/backend unknown receipt/);
+ assert.equal(JSON.stringify([...f.docs]),before);
+ assert.equal(f.controls.selfCalls,0);
+});
 test('simultaneous retries and repeated same-product lines do not overwrite or overreserve',async()=>{
  const f=fixture({onHand:6,items:[{itemId:'I',productId:'P',warehouseId:'W',qty:5},{itemId:'J',productId:'P',warehouseId:'W',qty:5}]});
  await Promise.all([f.sync(),f.sync()]);

@@ -10570,6 +10570,19 @@ function orderReservationBackendPreviewEnabled() {
     return APP_ENVIRONMENT === 'preview'
         && globalThis.YUSHIN_PREVIEW_ORDER_RESERVATION_BACKEND === true;
 }
+// Production remains independently default-closed. The server checks the
+// project and a separate production gate before accepting any transaction.
+function orderReservationBackendEnabled() {
+    return orderReservationBackendPreviewEnabled()
+        || (APP_ENVIRONMENT === 'production'
+            && globalThis.YUSHIN_PRODUCTION_ORDER_RESERVATION_BACKEND === true
+            && typeof firebase !== 'undefined'
+            && firebase.app().options?.projectId === 'yu-shing-company');
+}
+function productionReservationLegacyWriterBlocked() {
+    return APP_ENVIRONMENT === 'production'
+        && globalThis.YUSHIN_PRODUCTION_ORDER_RESERVATION_LEGACY_BLOCKED === true;
+}
 function initialGroupedReservationCandidates(order) {
     if (!groupedReservationPreviewEnabled()
         || order?.inventoryReservationStatus !== 'pending'
@@ -10619,7 +10632,7 @@ async function groupedReservationPreviewCallable() {
     return firebase.app().functions('asia-east1').httpsCallable('commitGroupedWarehouseReservation');
 }
 async function commitNewOrderReservationPreview(orderId,liveOrder,actorUid) {
-    if (!orderReservationBackendPreviewEnabled()) return false;
+    if (!orderReservationBackendEnabled()) return false;
     if (!actorUid || currentUser?.uid!==actorUid)
         throw new Error('登入身分已變更，停止後端庫存同步。');
     const syncAttemptId=String(liveOrder.inventoryReservationAttemptId||'');
@@ -10629,10 +10642,12 @@ async function commitNewOrderReservationPreview(orderId,liveOrder,actorUid) {
     // Reuse the Functions compat SDK loader; never run a client-side stock
     // transaction after a failed or ambiguous backend result.
     await ensureReservationFunctionsCompat();
-    if (!orderReservationBackendPreviewEnabled() || currentUser?.uid!==actorUid)
+    if (!orderReservationBackendEnabled() || currentUser?.uid!==actorUid)
         throw new Error('登入身分或測試環境已變更，停止後端庫存同步。');
     const callable=firebase.app().functions('asia-east1').httpsCallable('commitOrderReservationPreview');
     const reply=await callable({orderId,syncAttemptId});
+    if (!orderReservationBackendEnabled())
+        throw new Error('預留後端旗標已關閉，請保留原同步識別碼核對交易結果。');
     if (!['applied','already-applied'].includes(reply?.data?.status))
         throw new Error('後端預留回覆不明確，請重新讀取訂單後以原識別碼重試。');
     if (currentUser?.uid!==actorUid)
@@ -11038,11 +11053,11 @@ async function reserveInventoryForNewOrder(orderId, order, actorUid = currentUse
         throw new Error('已有較新的庫存同步工作，請更新這筆訂單後確認結果。');
     const items=normalizedOrderItems(liveOrder);
     if(!items.length)throw new Error('訂單缺少正式 items 品項資料，請重新建立訂單。');
-    // Explicit Preview pilot: the Admin SDK writer owns the entire initial
+    // Explicit gated backend: the Admin SDK writer owns the entire initial
     // stock/reservation/demand transaction. Never fall back to the legacy
     // per-item Firestore SDK writer if a response is lost or an error occurs.
-    if(typeof orderReservationBackendPreviewEnabled==='function'
-        &&orderReservationBackendPreviewEnabled()){
+    if(typeof orderReservationBackendEnabled==='function'
+        &&orderReservationBackendEnabled()){
         await commitNewOrderReservationPreview(orderId,liveOrder,actorUid);
         const latest=await firestoreReadWithTimeout(orderRef.get(),'讀取後端庫存同步結果');
         if(!latest.exists||currentUser?.uid!==actorUid)
@@ -11058,6 +11073,11 @@ async function reserveInventoryForNewOrder(orderId, order, actorUid = currentUse
         await registerInitialSelfOrders(orderId,order,actorUid);
         return {...orderReservationSummary(order),items:order.items};
     }
+    // After an approved production cutover, a disabled flag or unavailable
+    // backend must stop the operation, never reactivate the old SDK writer.
+    if(typeof productionReservationLegacyWriterBlocked==='function'
+        &&productionReservationLegacyWriterBlocked())
+        throw new Error('預留後端未啟用，已禁止回退舊版庫存交易；請保留原操作編號並聯絡管理員。');
     if(items.some(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'
         &&String(item.productType||'').trim().toUpperCase()!=='SERVICE')){
         await loadWarehouseMaster(true);
