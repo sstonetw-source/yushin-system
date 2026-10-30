@@ -154,3 +154,86 @@ test('five-line multiwarehouse insufficiency rejects the whole transaction and c
   assert.equal((await db.doc('reservationOperationReceipts/grouped-'+request.attemptId).get()).exists,false);
   assert.equal((await db.doc('inventoryMovements/grouped-'+request.attemptId+'-B').get()).exists,false);
 });
+
+test('five same-product lines in ONE warehouse use the Admin writer without Rules proofs',async()=>{
+  const f=await fiveLineFixture('five-same');
+  await db.doc('orders/'+f.orderId).update({items:(await f.doc('orders/'+f.orderId)).items.map(item=>({...item,warehouseId:'A'}))});
+  const commit=data=>commitGroupedWarehouseReservation(db,f.uid,data,{allowSameWarehouse:true});
+  const initial=f.intent([2,3,1,4,2],'attempt_five_same_123456789');
+  await assert.rejects(f.call(initial),/尚未獨立啟用/);
+  assert.equal((await f.doc('inventory/'+f.productKey)).reserved,0);
+  assert.equal((await commit(initial)).companyReservedDelta,12);
+  assert.deepEqual(await f.balances(),{company:12,a:12,b:0,
+    order:[2,3,1,4,2],reservations:[2,3,1,4,2]});
+  assert.equal((await commit(initial)).status,'already-applied');
+  await db.doc('orders/'+f.orderId).update({inventoryReservationStatus:'completed'});
+  const amend=(values,attemptId)=>({...f.intent(values,attemptId),mode:'amend'});
+  assert.equal((await commit(amend([1,4,2,3,2],'amend_five_same_exchange_1234'))).companyReservedDelta,0);
+  assert.deepEqual(await f.balances(),{company:12,a:12,b:0,
+    order:[1,4,2,3,2],reservations:[1,4,2,3,2]});
+  const release=amend([0,0,0,0,0],'amend_five_same_release_1234');
+  assert.equal((await commit(release)).companyReservedDelta,-12);
+  const zero={company:0,a:0,b:0,order:[0,0,0,0,0],reservations:[0,0,0,0,0]};
+  assert.deepEqual(await f.balances(),zero);
+  assert.equal((await commit(release)).status,'already-applied');
+  assert.deepEqual(await f.balances(),zero);
+});
+
+test('five-line completed order can rebalance then release through gated server writer',async()=>{
+  const f=await fiveLineFixture('five-amend');
+  await f.call(f.intent([2,3,1,4,2]));
+  await db.doc('orders/'+f.orderId).update({inventoryReservationStatus:'completed'});
+  const amend=(values,attemptId)=>({...f.intent(values,attemptId),mode:'amend'});
+  const exchange=amend([1,4,2,3,2],'amend_five_exchange_123456789');
+  assert.equal((await f.call(exchange)).companyReservedDelta,0);
+  assert.deepEqual(await f.balances(),{company:12,a:7,b:5,
+    order:[1,4,2,3,2],reservations:[1,4,2,3,2]});
+  const receipt=await f.doc('reservationOperationReceipts/grouped-'+exchange.attemptId);
+  assert.equal(receipt.action,'grouped_reservation_amend');
+  assert.equal((await f.call(exchange)).status,'already-applied');
+  const release=amend([0,0,0,0,0],'amend_five_release_123456789');
+  assert.equal((await f.call(release)).companyReservedDelta,-12);
+  const zero={company:0,a:0,b:0,order:[0,0,0,0,0],reservations:[0,0,0,0,0]};
+  assert.deepEqual(await f.balances(),zero);
+  assert.equal((await f.call(exchange)).status,'already-applied');
+  assert.deepEqual(await f.balances(),zero,'lost-response replay cannot roll back a later release');
+});
+
+test('post-sync server writer rejects stale status and supplier progress without partial stock updates',async()=>{
+  const f=await fiveLineFixture('amend-guard');
+  const intent={...f.intent([1,1,1,1,1],'amend_guard_123456789'),mode:'amend'};
+  const before=await f.balances();
+  await assert.rejects(f.call(intent),/同步狀態/);
+  assert.deepEqual(await f.balances(),before);
+  await db.doc('orders/'+f.orderId).update({inventoryReservationStatus:'completed'});
+  await db.doc('orders/'+f.orderId).update({items:(await f.doc('orders/'+f.orderId)).items.map((item,i)=>
+    i===4?{...item,supplyOrderedQty:1}:item)});
+  await assert.rejects(f.call(intent),/供應進度/);
+  assert.deepEqual(await f.balances(),before);
+  assert.equal((await db.doc('reservationOperationReceipts/grouped-'+intent.attemptId).get()).exists,false);
+});
+
+test('Emulator amendment keeps linked demand and stock consistent, and blocks supplier progress',async()=>{
+  const f=await fiveLineFixture('amend-demand');
+  const initial=f.intent([2,3,1,4,2]);
+  await f.call(initial);
+  await db.doc('orders/'+f.orderId).update({inventoryReservationStatus:'completed'});
+  const demandId='SALES_ORDER:'+f.orderId+':I1';
+  const demandRef=db.doc('procurementDemands/'+encodeURIComponent(demandId));
+  await demandRef.set({demandId,sourceType:'SALES_ORDER',sourceId:f.orderId,
+    sourceItemId:'I1',sourceItemIndex:0,productKey:f.productKey,warehouseId:'A',
+    ownerUid:'sales1',salesCode:'S01',orderedQty:0,receivedQty:0,
+    requestedQty:3,status:'PENDING',scheduleDate:'2026-10-28',createdAt:'2026-10-01'});
+  const amend=(values,attemptId)=>({...f.intent(values,attemptId),mode:'amend'});
+  const exchange=amend([1,4,2,3,2],'amend_with_demand_123456789');
+  assert.equal((await f.call(exchange)).companyReservedDelta,0);
+  assert.equal((await demandRef.get()).data().requestedQty,4);
+  assert.deepEqual(await f.balances(),{company:12,a:7,b:5,
+    order:[1,4,2,3,2],reservations:[1,4,2,3,2]});
+  await demandRef.update({orderedQty:1,status:'PARTIALLY_ORDERED'});
+  const before=await f.balances();
+  const denied=amend([0,4,2,3,2],'amend_demand_denied_123456789');
+  await assert.rejects(f.call(denied),/已有採購承諾/);
+  assert.deepEqual(await f.balances(),before);
+  assert.equal((await db.doc('reservationOperationReceipts/grouped-'+denied.attemptId).get()).exists,false);
+});

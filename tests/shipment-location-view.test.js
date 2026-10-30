@@ -12,7 +12,7 @@ function fixture(){
   currentUser:{uid:'warehouse'},currentUserRole:'warehouse',canReceiveInventoryCapability:()=>true,canAccessPage:()=>true,
   firebase:{auth:()=>auth},normalizedOrderStatus:()=> 'normal',orderInventorySyncIncomplete:()=>false,normalizedOrderItems:o=>o.items,
   itemDispatchState:()=>({shippable:5}),inventoryProductKey:item=>item.productId,YushinReservation:reservation,
-  db:{collection:name=>({doc:id=>({get:async options=>{reads++;assert.equal(name,'inventoryReservations');assert.equal(options.source,'server');const data=await load(id);return {exists:!!data,data:()=>data};}})})}});
+  db:{app:{options:{projectId:'demo-yushin'}},collection:name=>({doc:id=>({get:async options=>{reads++;assert.equal(name,'inventoryReservations');assert.equal(options.source,'server');const data=await load(id);return {exists:!!data,data:()=>data};}})})}});
  c.window=c;vm.runInContext(source,c);
  return {c,order,item,ledger,auth,reads:()=>reads,setLoad:fn=>load=fn};
 }
@@ -44,6 +44,18 @@ test('location reads are bounded and cannot run against another account or remot
  await assert.rejects(f.c.loadV2WarehouseShipmentLocations(many),/200/);assert.equal(f.reads(),0);
  f.auth.currentUser.uid='other';await assert.rejects(f.c.loadV2WarehouseShipmentLocations([f.order]));assert.equal(f.reads(),0);
  f.c.YUSHIN_V2_SHIPMENT_EMULATOR=false;await f.c.loadV2WarehouseShipmentLocations([f.order]);assert.equal(f.reads(),0);
+});
+test('Preview location reads require the independent flag, canonical site, project and Auth',async()=>{
+ const f=fixture();f.c.YUSHIN_V2_SHIPMENT_EMULATOR=false;f.c.YUSHIN_PREVIEW_SHIPMENT=true;
+ f.c.APP_ENVIRONMENT='preview';f.c.location.hostname='preview-20135.web.app';
+ f.auth.app.options.projectId='preview-20135';f.c.db.app.options.projectId='preview-20135';
+ await f.c.loadV2WarehouseShipmentLocations([f.order]);assert.equal(f.reads(),1);
+ assert.equal(f.c.v2WarehouseShipmentLocations(f.order,f.item).length,2);
+ f.c.YUSHIN_PREVIEW_SHIPMENT=false;
+ assert.equal(f.c.v2WarehouseShipmentLocations(f.order,f.item),undefined);
+ f.c.YUSHIN_PREVIEW_SHIPMENT=true;f.c.location.hostname='example.com';
+ await assert.rejects(f.c.loadV2WarehouseShipmentLocations([f.order]),/受控/);
+ assert.equal(f.reads(),1);
 });
 test('unknown shipment reply remains on its original warehouse even when there is no remaining dispatch quota',()=>{
  const f=fixture(),helpers={status:()=> 'normal',incomplete:()=>false,items:o=>o.items,dispatch:()=>({shippable:0}),locations:()=>null,

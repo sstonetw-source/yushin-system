@@ -1758,9 +1758,6 @@ service cloud.firestore {
         && order.get('receivedQty', 0) == 0 && order.get('deliveredQty', 0) == 0
         && order.get('receiptEvents', []) == [] && order.get('deliveryRecords', []) == [];
     }
-    function receiptFreeGroup(a, b, c, d, e) {
-      return [a.get('receivedQty', 0), a.get('receiptEvents', []), b.get('receivedQty', 0), b.get('receiptEvents', []), c.get('receivedQty', 0), c.get('receiptEvents', []), d.get('receivedQty', 0), d.get('receiptEvents', []), e.get('receivedQty', 0), e.get('receiptEvents', [])] == [0, [], 0, [], 0, [], 0, [], 0, []];
-    }
     function orderBeforeFirstReceipt(order) {
       let items = order.get('items', []);
       let count = items.size();

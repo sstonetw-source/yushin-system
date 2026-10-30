@@ -10,6 +10,8 @@ function contextFor({environment='production',pilot=true}={}){
  const context={
   APP_ENVIRONMENT:environment,
   currentUser:{uid:'buyer'},currentUserRole:'purchaser',
+  currentUserName:'Buyer',localDateString:()=> '2026-10-28',
+  supplyOrdersCollection:()=>({doc:()=>({})}),quickPurchaseSupplyId:()=> 'manual-O-I',
   canCreatePurchaseOrderCapability:()=>true,
   canAccessPage:()=>true,
   runRoleTransaction:async()=>{legacyCalls++;throw Error('LEGACY_TRANSACTION_USED');},
@@ -26,6 +28,14 @@ test('pilot requested outside isolated emulator fails closed; never falls back t
  const x=contextFor({environment:'production'});
  await assert.rejects(x.context.commitQuickPurchase('O','I',details,'buyer','purchaser'),
   /禁止改用舊交易/);
+ assert.equal(x.legacyCalls(),0);
+});
+test('explicit production backend flag prevents any legacy retry when Callable cannot be reached',async()=>{
+ const x=contextFor({environment:'production',pilot:false});
+ x.context.YUSHIN_PRODUCTION_QUICK_PURCHASE=true;
+ x.context.location={hostname:'sstonetw-source.github.io',pathname:'/yushin-system/'};
+ await assert.rejects(x.context.commitQuickPurchase('O','I',details,'buyer','purchaser'),
+  /後端尚未在此授權專案及網站啟用/);
  assert.equal(x.legacyCalls(),0);
 });
 test('pilot requested in emulator without valid Auth/Functions connection fails closed',async()=>{
@@ -75,7 +85,7 @@ test('reload retains operation id after lost response, and only authoritative re
   const c={
    APP_ENVIRONMENT:'emulator',YUSHIN_QUICK_PURCHASE_EMULATOR:true,
    location:{hostname:'localhost'},firebase,sessionStorage,
-   db:{collection},currentUser:{uid:'buyer'},currentUserRole:'purchaser',
+   db:{app:{options:{projectId:'demo-yushin'}},collection},currentUser:{uid:'buyer'},currentUserRole:'purchaser',
    canCreatePurchaseOrderCapability:()=>true,canAccessPage:()=>true,
    ensureFormalPurchaseFunctionsCompat:async()=>{},
    quickPurchaseSupplyId:()=>supplyId,
@@ -104,4 +114,56 @@ test('reload retains operation id after lost response, and only authoritative re
  assert.deepEqual(operations.map(x=>x.operationId),[opId,opId,opId]);
  assert.equal(page.legacy(),0);
  assert.ok(reads.includes('orders')&&reads.includes('supplyOrders')&&reads.includes('procurementDemands'));
+});
+
+for(const environment of ['emulator','preview','production'])test(environment+' disabled backend cannot send a pending operation through legacy transaction',async()=>{
+ const key='quick-purchase-pending:buyer:O:I';
+ for(const raw of [JSON.stringify({version:1,operationId:'qp-12345678',
+  fingerprint:JSON.stringify(['buyer','O','I',4,'Vendor',19.99])}),'{corrupt','']){
+  const x=contextFor({environment,pilot:false}),storage=new Map([[key,raw]]);
+  x.context.sessionStorage={getItem:k=>storage.has(k)?storage.get(k):null};
+  for(const data of [details,{...details,expectedQty:3}]){
+   await assert.rejects(x.context.commitQuickPurchase('O','I',data,'buyer','purchaser'),/禁止改用舊交易/);
+   assert.equal(x.legacyCalls(),0);assert.equal(storage.get(key),raw);
+  }
+ }
+});
+test('pending checkpoint is scoped to the original actor/order/item; unrelated legacy purchases remain available',async()=>{
+ const x=contextFor({environment:'production',pilot:false});
+ const storage=new Map([['quick-purchase-pending:other:O:I','pending'],
+  ['quick-purchase-pending:buyer:OTHER:I','pending'],['quick-purchase-pending:buyer:O:OTHER','pending']]);
+ x.context.sessionStorage={getItem:k=>storage.get(k)??null};
+ await assert.rejects(x.context.commitQuickPurchase('O','I',details,'buyer','purchaser'),/LEGACY_TRANSACTION_USED/);
+ assert.equal(x.legacyCalls(),1);assert.equal(storage.size,3);
+});
+test('unreadable pending storage blocks unsafe legacy retry',async()=>{
+ const x=contextFor({environment:'production',pilot:false});
+ x.context.sessionStorage={getItem(){throw Error('storage denied');}};
+ await assert.rejects(x.context.commitQuickPurchase('O','I',details,'buyer','purchaser'),/憑證無法讀取/);
+ assert.equal(x.legacyCalls(),0);
+});
+test('recovery panel keeps pending operation visible during rollout suspension and restores only the authorized retry',()=>{
+ const x=contextFor({environment:'production',pilot:false}),key='quick-purchase-pending:buyer:O:I';
+ const raw=JSON.stringify({version:1,operationId:'qp-12345678',
+  fingerprint:JSON.stringify(['buyer','O','I',4,'Vendor',19.99])});
+ const storage=new Map([[key,raw]]),nodes=new Map();
+ const element=()=>({children:[],appendChild(child){this.children.push(child);},
+  replaceChildren(){this.children=[];},setAttribute(){}});
+ const root=element();root.insertBefore=child=>{nodes.set(child.id,child);};
+ nodes.set('purchasing-system',root);
+ x.context.document={getElementById:id=>nodes.get(id)||null,createElement:element};
+ x.context.sessionStorage={get length(){return storage.size;},key:i=>[...storage.keys()][i],getItem:k=>storage.get(k)??null};
+ const workspace=fs.readFileSync(require('node:path').join(__dirname,'../src/features/purchasing/purchasing-workspace.js'),'utf8');
+ vm.runInContext(workspace.slice(workspace.indexOf('function pendingQuickPurchaseAttempts()'),
+  workspace.indexOf('function quickPurchaseSupplyId(')),x.context);
+ x.context.renderQuickPurchaseRecovery();
+ const panel=nodes.get('quickPurchaseRecoveryPanel');
+ assert.equal(panel.hidden,false);assert.equal(panel.children[0].children.length,1);
+ assert.match(panel.children[0].children[0].textContent,/採購核對暫停/);
+ assert.equal(storage.get(key),raw);
+ x.context.YUSHIN_PRODUCTION_QUICK_PURCHASE=true;x.context.renderQuickPurchaseRecovery();
+ assert.equal(panel.hidden,false);assert.equal(panel.children[0].children.length,2);
+ assert.equal(panel.children[0].children[1].textContent,'確認前次採購結果');
+ x.context.currentUser={uid:'other'};x.context.renderQuickPurchaseRecovery();
+ assert.equal(panel.hidden,true);assert.equal(storage.get(key),raw);
 });

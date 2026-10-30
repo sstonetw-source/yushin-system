@@ -3,7 +3,7 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const core=require('../functions/shared/procurement-demand-core');
 const {commitV2QuickPurchase,purchaseIntent}=require('../functions/quick-purchase-commit-service');
-const {allowQuickPurchaseEmulator,allowPreviewQuickPurchase,createQuickPurchaseCallable}=require('../functions/quick-purchase-callable');
+const {allowQuickPurchaseEmulator,allowPreviewQuickPurchase,allowProductionQuickPurchase,createQuickPurchaseCallable}=require('../functions/quick-purchase-callable');
 function fixture({directShip=false}={}){
  const orderId='ORDER-1',itemId='I1',productId='P',warehouseId=directShip?'':'W';
  const item={itemId,productId,warehouseId,fulfillmentType:directShip?'DIRECT_SHIP':'WAREHOUSE',
@@ -183,4 +183,29 @@ test('preview quick purchase remains disabled by default and cannot be used in p
  const result=await make(preview,previewDb)({auth:{uid:'buyer'},data:x.data});
  assert.equal(result.status,'committed');
  assert.equal((await make(preview,previewDb)({auth:{uid:'buyer'},data:x.data})).status,'already-applied');
+});
+test('production quick purchase requires its own explicit flag, exact project and live Auth/Firestore',async()=>{
+ const production={GCLOUD_PROJECT:'yu-shing-company',ENABLE_PRODUCTION_QUICK_PURCHASE:'true'};
+ assert.equal(allowProductionQuickPurchase(production),true);
+ assert.equal(allowProductionQuickPurchase({GCLOUD_PROJECT:'yu-shing-company'}),false);
+ for(const bad of [{GCLOUD_PROJECT:'preview-20135'},{GCLOUD_PROJECT:'demo-yushin'},
+  {ENABLE_PRODUCTION_QUICK_PURCHASE:'false'},{FUNCTIONS_EMULATOR:'true'},
+  {FIRESTORE_EMULATOR_HOST:'127.0.0.1:8080'},
+  {FIREBASE_AUTH_EMULATOR_HOST:'127.0.0.1:9099'}])
+  assert.equal(allowProductionQuickPurchase({...production,...bad}),false);
+ assert.equal(allowPreviewQuickPurchase(production),false);
+ assert.equal(allowQuickPurchaseEmulator(production),false);
+ class HttpsError extends Error{constructor(code,message){super(message);this.code=code;}}
+ const make=(env,db)=>createQuickPurchaseCallable({onCall:(_options,handler)=>handler,
+  HttpsError,getDatabase:()=>db,env});
+ const x=fixture(),productionDb={...x.db,projectId:'yu-shing-company'};
+ await assert.rejects(make({...production,ENABLE_PRODUCTION_QUICK_PURCHASE:'false'},productionDb)
+  ({auth:{uid:'buyer'},data:x.data}),{code:'failed-precondition'});
+ await assert.rejects(make(production,x.db)({auth:{uid:'buyer'},data:x.data}),{code:'failed-precondition'});
+ await assert.rejects(make(production,productionDb)({data:x.data}),{code:'unauthenticated'});
+ await assert.rejects(make(production,productionDb)({auth:{uid:'seller'},data:x.data}),{code:'permission-denied'});
+ assert.equal(x.history.length,0);
+ const result=await make(production,productionDb)({auth:{uid:'buyer'},data:x.data});
+ assert.equal(result.status,'committed');
+ assert.equal((await make(production,productionDb)({auth:{uid:'buyer'},data:x.data})).status,'already-applied');
 });

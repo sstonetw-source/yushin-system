@@ -1,11 +1,12 @@
 'use strict';
-// Internal Emulator-only customer shipment. No Callable or browser entry.
+// Authoritative customer shipment accounting, exposed only by a gated Callable.
 const {createHash}=require('node:crypto');
 const reservationCore=require('./shared/reservation-core');
 const inventoryCore=require('./shared/inventory-core');
 const fulfillmentCore=require('./shared/fulfillment-core');
 const logisticsCore=require('./shared/warehouse-logistics');
 const {readLocationReturnProofs}=require('./location-return-trace-service');
+const {shipmentBackendProject}=require('./warehouse-shipment-gate');
 function fault(message,code='failed-precondition'){const e=new Error(message);e.code=code;throw e;}
 function id(value,label){
  if(typeof value!=='string'||!value||value!==value.trim()||value.includes('/')||value.length>160)
@@ -40,9 +41,15 @@ function normalizeShipmentIntent(data){
  if(intent.expectedPlan.mode!=='CUSTOMER_SHIP')fault('此試點僅限直接寄客戶');
  return {...intent,hash:createHash('sha256').update(JSON.stringify(intent)).digest('hex')};
 }
-async function commitLocationShipment(db,uid,data){
- if(!process.env.FIRESTORE_EMULATOR_HOST||db.projectId!=='demo-yushin')
-  fault('多倉分批出貨目前僅允許 demo-yushin Emulator');
+async function commitLocationShipment(db,uid,data,env=process.env){
+ const project=shipmentBackendProject(env);
+ // The original isolated direct-Service Emulator fixtures predate the Callable.
+ // No deployed Callable can bypass its independent Auth/project/feature gate.
+ const directDemo=db.projectId==='demo-yushin'
+  &&typeof env.FIRESTORE_EMULATOR_HOST==='string'
+  &&/^(127\.0\.0\.1|localhost):[0-9]+$/.test(env.FIRESTORE_EMULATOR_HOST);
+ if((!project||db.projectId!==project)&&!directDemo)
+  fault('多倉分批出貨後端未獲專案授權');
  id(uid,'登入者');
  const intent=normalizeShipmentIntent(data);
  const {orderId,itemId,warehouseId,operationId,syncAttemptId}=intent;

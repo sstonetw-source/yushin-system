@@ -58,7 +58,7 @@ test('formal receiving line cancellation targets just its supply, retaining anot
 test('cancelled order retains a customer-return entry while commercial role restrictions remain',()=>{
  for(const role of ['admin','sales','engineer','purchaser','warehouse']){
   const business=['admin','sales','engineer'].includes(role);
-  const c=vm.createContext({canManageOrderLifecycleCapability:()=>business,canEditPage:()=>business,pendingLifecycleOrderIds:new Set(),inlineJsValue:JSON.stringify});
+  const c=vm.createContext({canManageOrderLifecycleCapability:()=>business,canEditPage:()=>business,pendingLifecycleOrderIds:new Set(),inlineJsValue:JSON.stringify,lifecycleProtectedMode:()=>false});
   vm.runInContext(fn('orderLifecycleActionButtons'),c);
   const html=c.orderLifecycleActionButtons({id:'O1'},{status:'cancelled'},{remaining:2,delivered:1},{showReturn:true});
   assert.equal(html.includes('openReturnManagement'),business);
@@ -70,7 +70,7 @@ test('cancelled delivered order opens requested return form only for authorized 
  for(const business of [true,false]){
   const elements=new Map();const get=id=>{if(!elements.has(id))elements.set(id,{style:{},value:'',innerHTML:''});return elements.get(id);};
   const c=vm.createContext({ordersCache:[{id:'O1',returnRecords:[]}],currentLifecycleOrderId:'O1',canManageOrderLifecycleCapability:()=>business,canEditPage:()=>business,
-   orderReturnFormOpen:true,orderLifecycleFormOpen:false,deliveryProgressInfo:()=>({remaining:0,grossDelivered:2}),normalizedOrderStatus:()=> 'cancelled',normalizedOrderItems:()=>[{itemId:'I1'}],returnItemDeliveredQty:()=>2,returnItemReturnedQty:()=>1,customerReturnPendingQty:()=>0,labelOrderProgressRecords:()=>{},orderLifecycleInfo:()=>({status:'cancelled',effectiveDelivered:1,delivered:2,returned:1}),document:{getElementById:get},escapeHtml:String,savedReturnRecords:o=>o.returnRecords,populateReturnItemOptions:()=>{},updateReturnFormHint:()=>{},renderOrderLifecycleStatusOptions:()=>{},onOrderLifecycleStatusChange:()=>{}});
+   orderReturnFormOpen:true,orderLifecycleFormOpen:false,deliveryProgressInfo:()=>({remaining:0,grossDelivered:2}),normalizedOrderStatus:()=> 'cancelled',normalizedOrderItems:()=>[{itemId:'I1'}],returnItemDeliveredQty:()=>2,returnItemReturnedQty:()=>1,customerReturnPendingQty:()=>0,labelOrderProgressRecords:()=>{},orderLifecycleInfo:()=>({status:'cancelled',effectiveDelivered:1,delivered:2,returned:1}),document:{getElementById:get},escapeHtml:String,savedReturnRecords:o=>o.returnRecords,populateReturnItemOptions:()=>{},updateReturnFormHint:()=>{},renderOrderLifecycleStatusOptions:()=>{},onOrderLifecycleStatusChange:()=>{},lifecycleProtectedMode:()=>false});
   vm.runInContext(fn('renderOrderLifecycleModal'),c);c.renderOrderLifecycleModal();
   assert.equal(get('returnFormPanel').style.display,business?'':'none');
  }
@@ -137,7 +137,7 @@ test('settlement return adds free stock while preserving reservations for remain
    {remaining:0,grossDelivered:1,status:'cancelled',expected:true,label:'已取消'}
   ]){
    const elements={orderLifecycleStatus:{value:'cancelled'},orderLifecycleStatusHint:{}};
-   const c=vm.createContext({document:{getElementById:id=>elements[id]},deliveryProgressInfo:()=>row,normalizedOrderStatus:()=>row.status});
+   const c=vm.createContext({document:{getElementById:id=>elements[id]},deliveryProgressInfo:()=>row,normalizedOrderStatus:()=>row.status,lifecycleProtectedMode:()=>false});
    vm.runInContext(fn('renderOrderLifecycleStatusOptions'),c);c.renderOrderLifecycleStatusOptions({});
    assert.equal(elements.orderLifecycleStatus.innerHTML.includes('value="cancelled"'),row.expected);
    if(row.label)assert.ok(elements.orderLifecycleStatus.innerHTML.includes(row.label));

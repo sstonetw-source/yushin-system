@@ -71,8 +71,8 @@ const scripts=[read('src/shared/workspace-display.js'),read('modules/fulfillment
   });
   await page.route('http://127.0.0.1:4173/',route=>route.fulfill({contentType:'text/html',body:'<html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="order-system" class="active"><div id="orderActions"></div></div><div id="purchasing-system"><table><tbody id="purchaseDispatchBody"></tbody></table><div id="purchaseDispatchStatus"></div><button id="purchaseDispatchMoreBtn"></button></div></html>'}));
   async function loadV2(){await page.goto('http://127.0.0.1:4173/');for(const content of scripts)await page.addScriptTag({content});await page.evaluate(()=>{
-   globalThis.YUSHIN_V2_DISPATCH_EMULATOR=true;const app={options:{projectId:'demo-yushin'}};
-   globalThis.firebase={app(){return {functions:region=>this.functions(region)};},auth:()=>({app,currentUser:{uid:'buyer'},emulatorConfig:{host:'127.0.0.1',port:9099}}),functions:()=>({app,useEmulator:(host,port)=>{if(host!=='127.0.0.1'||port!==5001)throw Error('remote endpoint forbidden');},httpsCallable:name=>{if(name!=='prepareV2OrderDispatch')throw Error('wrong endpoint');return nativeV2Callable;}})};
+   globalThis.YUSHIN_V2_DISPATCH_EMULATOR=true;const app={options:{projectId:'demo-yushin'}};db.app=app;
+   globalThis.firebase={app(){return {...app,functions:region=>this.functions(region)};},auth:()=>({app,currentUser:{uid:'buyer'},emulatorConfig:{host:'127.0.0.1',port:9099}}),functions:()=>({app,useEmulator:(host,port)=>{if(host!=='127.0.0.1'||port!==5001)throw Error('remote endpoint forbidden');},httpsCallable:name=>{if(name!=='prepareV2OrderDispatch')throw Error('wrong endpoint');return nativeV2Callable;}})};
   });await page.evaluate(()=>reloadOrder());}
   await loadV2();assert.match(await page.locator('#orderActions button').first().textContent(),/× 2/);await page.locator('#orderActions button').first().click();await page.waitForFunction(()=>alerts.length===1);
   const id=calls[0].operationId;docs.get('orders/O').items[0].reservedQty=4;await loadV2();assert.match(await page.locator('#orderActions button').first().textContent(),/確認打單結果/);
@@ -96,7 +96,9 @@ const scripts=[read('src/shared/workspace-display.js'),read('modules/fulfillment
   await page.exposeFunction('shipmentCallable',payload=>{
    calls++;assert.equal(payload.warehouseId,'B');assert.equal(payload.syncAttemptId,'browser-sync');
    assert.equal(payload.actorUid,undefined);assert.equal(payload.actorRole,undefined);
-   if(!doc.warehouseShipmentRecords){doc.warehouseShipmentRecords=[{id:payload.operationId}];doc.items[0].warehouseShippedQty=2;stockWrites++;}
+   if(!doc.warehouseShipmentRecords){doc.warehouseShipmentRecords=[{id:payload.operationId,orderId:payload.orderId,
+    itemId:payload.itemId,warehouseId:payload.warehouseId,qty:payload.quantity,date:payload.date,
+    notes:payload.notes,deliveryPlan:payload.expectedPlan}];doc.items[0].warehouseShippedQty=2;stockWrites++;}
    if(lost){lost=false;throw Error('response lost after stock commit');}
    return {data:{status:'already-applied',orderId:'O',itemId:'I',warehouseId:'B',qty:2,movementId:'location-ship-'+payload.operationId}};
   });
@@ -106,9 +108,9 @@ const scripts=[read('src/shared/workspace-display.js'),read('modules/fulfillment
    await page.addScriptTag({content:`let currentUser={uid:'buyer'},currentUserRole='purchaser',orderWorkQueueCache=[],warehouseMasterCache=[{id:'B',active:true}];
     globalThis.YUSHIN_V2_SHIPMENT_EMULATOR=true;globalThis.locationSchemaFlag=true;
     const app={options:{projectId:'demo-yushin'}};
-    globalThis.firebase={app(){return {functions:region=>this.functions(region)};},auth:()=>({app,currentUser:{uid:'buyer'},emulatorConfig:{host:'127.0.0.1',port:9099}}),
+    globalThis.firebase={app(){return {options:app.options,functions:region=>this.functions(region)};},auth:()=>({app,currentUser:{uid:'buyer'},emulatorConfig:{host:'127.0.0.1',port:9099}}),
      functions:()=>({app,useEmulator:(host,port)=>{if(host!=='127.0.0.1'||port!==5001)throw Error('remote');},httpsCallable:()=>shipmentCallable})};
-    globalThis.db={collection:()=>({doc:()=>({get:async()=>{const data=await shipmentRead();return {exists:true,data:()=>data};}})})};
+    globalThis.db={app,collection:()=>({doc:()=>({get:async()=>{const data=await shipmentRead();return {exists:true,data:()=>data};}})})};
     const canReceiveInventoryCapability=()=>true,canAccessPage=()=>true,defaultWarehouse=()=>({id:'B'});
     const normalizedOrderStatus=()=> 'normal',orderInventorySyncIncomplete=()=>false,normalizedOrderItems=o=>o.items;
     const itemDispatchState=(o,i)=>({shippable:i.dispatchPreparedQty-i.warehouseShippedQty});

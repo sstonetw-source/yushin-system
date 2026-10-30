@@ -294,3 +294,11 @@ test('source receipt rejects corrupt free-transit balances before creating recei
   await assert.rejects(f.receive(),/數量不正確|核對/);assert.deepEqual([...f.records],before);
  }
 });
+
+test('direct partial and final arrivals keep physical shortage and reservations at zero',async()=>{
+ const f=setup({direct:true});await f.receive(2,'','','direct-first');
+ let item=f.records.get('orders/O').items[0];
+ assert.equal(item.receivedQty,2);assert.equal(item.deliveredQty,2);assert.equal(item.reservedQty,0);assert.equal(item.shortageQty,0);
+ await f.receive(3,'','','direct-final');item=f.records.get('orders/O').items[0];
+ assert.equal(item.receivedQty,5);assert.equal(item.deliveredQty,5);assert.equal(item.shortageQty,0);assert.equal(item.reservedQty,0);
+});

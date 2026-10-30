@@ -1,6 +1,11 @@
 // Read-only v2 shipment-location projection. The shipment Service remains authoritative.
 let v2ShipmentLocationCache=new Map(),v2ShipmentLocationGeneration=0,v2ShipmentLocationContext='';
 window.resetV2ShipmentLocations=function(){v2ShipmentLocationGeneration++;v2ShipmentLocationCache.clear();v2ShipmentLocationContext='';};
+function v2ShipmentLocationsEnabled(){
+    return globalThis.YUSHIN_V2_SHIPMENT_EMULATOR===true
+        ||(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'
+            &&globalThis.YUSHIN_PREVIEW_SHIPMENT===true);
+}
 function v2ShipmentSourceItem(order,item){
     return order.items?.find(row=>row.itemId===item.itemId)||item;
 }
@@ -10,13 +15,20 @@ function v2ShipmentLocationVersion(order,item){
         item.dispatchPreparedQty,item.warehouseShippedQty]);
 }
 window.loadV2WarehouseShipmentLocations=async function(orders){
-    if(globalThis.YUSHIN_V2_SHIPMENT_EMULATOR!==true)return;
+    if(!v2ShipmentLocationsEnabled())return;
     const uid=currentUser?.uid,role=currentUserRole,generation=++v2ShipmentLocationGeneration;
     const scope=JSON.stringify([uid,role]);
     if(!uid||!canReceiveInventoryCapability()||!canAccessPage('inventory'))return;
-    if(typeof APP_ENVIRONMENT==='undefined'||APP_ENVIRONMENT!=='emulator'
-        ||!['localhost','127.0.0.1'].includes(globalThis.location?.hostname)
-        ||firebase.auth().app?.options?.projectId!=='demo-yushin'||firebase.auth().currentUser?.uid!==uid)throw Error('多倉出貨位置僅限本機 demo-yushin。');
+    const emulator=globalThis.YUSHIN_V2_SHIPMENT_EMULATOR===true;
+    const host=String(globalThis.location?.hostname||'').toLowerCase();
+    const project=emulator?'demo-yushin':'preview-20135';
+    if((emulator&&(!['localhost','127.0.0.1'].includes(host)
+          ||(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT!=='emulator')))
+        ||(!emulator&&(typeof APP_ENVIRONMENT==='undefined'||APP_ENVIRONMENT!=='preview'
+          ||!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(host)))
+        ||firebase.auth().app?.options?.projectId!==project||db.app?.options?.projectId!==project
+        ||firebase.auth().currentUser?.uid!==uid||(!!firebase.auth().emulatorConfig&&!emulator))
+        throw Error('多倉出貨位置不符合受控 Emulator／Preview 專案與登入來源。');
     v2ShipmentLocationCache.clear();v2ShipmentLocationContext='';
     const current=()=>generation===v2ShipmentLocationGeneration&&uid===currentUser?.uid&&role===currentUserRole;
     const candidates=[];
@@ -50,7 +62,7 @@ window.loadV2WarehouseShipmentLocations=async function(orders){
     if(current()){v2ShipmentLocationCache=next;v2ShipmentLocationContext=scope;}
 };
 window.v2WarehouseShipmentLocations=function(order,item){
-    if(globalThis.YUSHIN_V2_SHIPMENT_EMULATOR!==true
+    if(!v2ShipmentLocationsEnabled()
         ||(item.deliveryPlan||order.shippingInstructions||{}).mode!=='CUSTOMER_SHIP')return undefined;
     if(v2ShipmentLocationContext!==JSON.stringify([currentUser?.uid,currentUserRole]))return null;
     const cached=v2ShipmentLocationCache.get(order.id+'__'+item.itemId);

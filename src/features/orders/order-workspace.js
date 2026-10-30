@@ -200,7 +200,8 @@ const pendingDispatchOrderIds = new Set();
 
 function itemDispatchState(order, item) {
     if(orderInventorySyncIncomplete(order))return {ordered:Number(item.orderedQty||item.qty||0),reserved:0,prepared:0,delivered:0,grossDelivered:0,returned:0,shippable:0,pending:0};
-    if(globalThis.YUSHIN_V2_DISPATCH_EMULATOR===true){
+    if(globalThis.YUSHIN_V2_DISPATCH_EMULATOR===true
+        ||(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'&&globalThis.YUSHIN_PREVIEW_DISPATCH===true)){
         // The Emulator bridge consumes physical shipments, not acknowledgements.
         const source=order.items?.find(row=>row.itemId===item.itemId)||item;
         return {...globalThis.YushinFulfillment.warehouseShipmentState(source),
@@ -235,7 +236,7 @@ function orderLifecycleActionButtons(order, lifecycle, progress, actions) {
     if (pendingLifecycleOrderIds.has(order.id)) return '<button type="button" disabled>處理中…</button>';
     const id = inlineJsValue(order.id);
     try{
-        const retry=globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true?pendingV2OrderLifecycle(order.id):null;
+        const retry=lifecycleProtectedMode()?pendingV2OrderLifecycle(order.id):null;
         if(retry)return `<button type="button" onclick="quickSetOrderLifecycle(${id}, ${inlineJsValue(retry.nextStatus)})">確認前次取消／恢復結果</button>`;
     }catch(err){return `<span role="alert">${escapeHtml(err.message)}</span>`;}
     const buttons = [];
@@ -273,7 +274,7 @@ function orderContextActionState(order, normalizedItems = null, dispatchStateByI
         return ordered > 0 && received > 0 && received < ordered && Number(state?.shippable || 0) > 0;
     });
     let showPartialDelivery=hasPartialArrival || (items.length > 1 && states.some(state => Number(state?.shippable || 0) > 0));
-    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true){
+    if(deliveryConfirmationProtectedMode()){
         try{
             // Customer acknowledgement consumes shipped quota. Once all printed
             // goods leave the warehouse, shippable is zero but arrival is pending.
@@ -322,8 +323,15 @@ window.markOrderItemDispatchPrepared = async function(orderId,itemId) {
     pendingDispatchOrderIds.add(key);
     try{
         const storageKey=dispatchPreparationStorageKey(orderId,itemId,actorUid);
-        let attempt=pendingDispatchPreparation(orderId,itemId);
+        const raw=sessionStorage.getItem(storageKey);
+        let attempt;
+        try{attempt=raw==null?null:JSON.parse(raw);}
+        catch(_){throw new Error('原打單操作憑證無法讀取，已停止提交，請保留此分頁並核對原紀錄。');}
+        if(raw!=null&&(!attempt||typeof attempt!=='object'||Array.isArray(attempt)))
+            throw new Error('原打單操作憑證不完整，已停止提交，請保留此分頁並核對原紀錄。');
         if(!attempt){
+            if(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'&&!dispatchBackendPilotEnabled())
+                throw new Error('Preview 出貨準備後端尚未啟用，禁止改走舊交易。');
             const order=ordersCache.find(o=>o.id===orderId)||purchasingDispatchCache.find(o=>o.id===orderId);
             const item=order&&normalizedOrderItems(order).find(i=>i.itemId===itemId);
             if(!item)throw new Error('找不到品項，請更新訂單後重試。');
@@ -331,7 +339,7 @@ window.markOrderItemDispatchPrepared = async function(orderId,itemId) {
             if(state.pending<=0)throw new Error('此品項目前沒有待打單數量。');
             attempt={operationId:'dispatch-ui-'+db.collection('dispatchRecords').doc().id,
                 orderId,itemId,actorUid,actorRole,quantity:state.pending,expectedPreparedQty:state.prepared};
-            if(globalThis.YUSHIN_V2_DISPATCH_EMULATOR===true)attempt.syncAttemptId=order.inventoryReservationAttemptId;
+            if(dispatchBackendPilotEnabled())attempt.syncAttemptId=order.inventoryReservationAttemptId;
             // If persistence is unavailable, do not submit an unresumable operation.
             sessionStorage.setItem(storageKey,JSON.stringify(attempt));
         }

@@ -326,6 +326,26 @@ async function reserveInventoryForNewOrder(orderId, order, actorUid = currentUse
         throw new Error('已有較新的庫存同步工作，請更新這筆訂單後確認結果。');
     const items=normalizedOrderItems(liveOrder);
     if(!items.length)throw new Error('訂單缺少正式 items 品項資料，請重新建立訂單。');
+    // Explicit Preview pilot: the Admin SDK writer owns the entire initial
+    // stock/reservation/demand transaction. Never fall back to the legacy
+    // per-item Firestore SDK writer if a response is lost or an error occurs.
+    if(typeof orderReservationBackendPreviewEnabled==='function'
+        &&orderReservationBackendPreviewEnabled()){
+        await commitNewOrderReservationPreview(orderId,liveOrder,actorUid);
+        const latest=await firestoreReadWithTimeout(orderRef.get(),'讀取後端庫存同步結果');
+        if(!latest.exists||currentUser?.uid!==actorUid)
+            throw new Error('訂單已變更，請更新後確認同步結果。');
+        Object.assign(order,{id:orderId,...latest.data()});
+        if(normalizedOrderStatus(order)!=='normal')throw new Error('訂單已取消／作廢，停止後續自行訂貨。');
+        for(const row of normalizedOrderItems(order)){
+            if((row.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
+                ||String(row.productType||'').toUpperCase()==='SERVICE')continue;
+            const key=inventoryProductKey(row),warehouseId=row.warehouseId||order.warehouseId;
+            if(key&&warehouseId)invalidateWarehouseStockCache(key,warehouseId);
+        }
+        await registerInitialSelfOrders(orderId,order,actorUid);
+        return {...orderReservationSummary(order),items:order.items};
+    }
     if(items.some(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'
         &&String(item.productType||'').trim().toUpperCase()!=='SERVICE')){
         await loadWarehouseMaster(true);

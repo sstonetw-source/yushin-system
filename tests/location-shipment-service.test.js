@@ -17,11 +17,11 @@ test('location shipment rejects forged actor, bad quantity, dates, recipient and
   {expectedPlan:{...plan,actorRole:'admin'}},{expectedPlan:{...plan,address:''}},
   {expectedPlan:{mode:'PICKUP'}},{expectedPlan:null}])assert.throws(()=>normalizeShipmentIntent(request(patch)));
 });
-test('location shipment remains Emulator-only and unexported by Functions entry',async()=>{
- await assert.rejects(commitLocationShipment({projectId:'production'},'actor',request()),/僅允許/);
+test('location shipment refuses unauthorized projects and direct production invocation',async()=>{
+ await assert.rejects(commitLocationShipment({projectId:'production'},'actor',request()),/未獲專案授權/);
  const host=process.env.FIRESTORE_EMULATOR_HOST;
  try{delete process.env.FIRESTORE_EMULATOR_HOST;
-  await assert.rejects(commitLocationShipment({projectId:'demo-yushin'},'actor',request()),/僅允許/);
+  await assert.rejects(commitLocationShipment({projectId:'demo-yushin'},'actor',request()),/未獲專案授權/);
  }finally{if(host!==undefined)process.env.FIRESTORE_EMULATOR_HOST=host;}
  assert.doesNotMatch(fs.readFileSync('functions/index.js','utf8'),/commitLocationShipment/);
 });
