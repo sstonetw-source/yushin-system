@@ -951,8 +951,9 @@ service cloud.firestore {
           && data.get('warehouseId', '') == before.get('warehouseId', ''))
         || (data.get('quantity', 0) == 0 && before.get('quantity', 0) == 0)
         || (e.get('movementId', '') != '' && id in e.get('reservationIds', [])
-          && (e.get('crossWarehouse', false) != true || (id in e.get('warehouseReservationIds', [])
-            && (before.get('quantity', 0) == 0 || before.get('warehouseId', '') == data.warehouseId)))
+          // #311: this legacy client witness may no longer prove multi-warehouse
+          // reservation changes. Such writes use the trusted Callable only.
+          && e.get('crossWarehouse', false) != true
           && operationalReservationMovement(e.movementId, data, before, e));
     }
     // Validate the group once on its immutable movement rather than repeating
@@ -969,7 +970,7 @@ service cloud.firestore {
         && e.previousWarehouseStockId is string && e.previousWarehouseStockId.size() > 0
         && e.reservationIds is list && e.reservationIds.size() > 0 && e.reservationIds.size() <= 5
         && e.reservationIds.toSet().size() == e.reservationIds.size()
-        && e.get('crossWarehouse', false) is bool
+        && e.get('crossWarehouse', false) == false
         && request.resource.data.productKey == data.productKey
         && (e.get('crossWarehouse', false)
           ? crossWarehouseReservationStocks(e, data.productKey, data.warehouseId)
@@ -2365,12 +2366,8 @@ service cloud.firestore {
       // A missing document contains no business data; existing documents stay owner-scoped.
       allow get: if (resource == null ? role() in ['admin','purchaser','warehouse','sales','engineer'] : operationalOrOwnedReader(resource.data));
       allow list: if operationalOrOwnedReader(resource.data);
-      // #311: new cross-warehouse reservation writes must go through the
-      // trusted Callable; native clients may not submit split warehouse proofs.
-      allow create: if request.resource.data.get('stockEvidence', {}).get('crossWarehouse', false) != true
-        && reservationCreateAllowed(id);
-      allow update: if request.resource.data.get('stockEvidence', {}).get('crossWarehouse', false) != true
-        && reservationUpdateAllowed(id);
+      allow create: if reservationCreateAllowed(id);
+      allow update: if reservationUpdateAllowed(id);
       allow delete: if admin();
     }
 
@@ -2503,10 +2500,7 @@ service cloud.firestore {
     match /inventoryMovements/{id} {
       allow read: if admin() || purchaser() || warehouse()
         || (businessOwner() && owns(resource.data));
-      // #311: block the vulnerable native cross-warehouse proof protocol;
-      // the Admin SDK keeps the complete atomic multi-warehouse writer.
-      allow create: if request.resource.data.get('reservationStockEvidence', {}).get('crossWarehouse', false) != true
-        && inventoryMovementWriter(id)
+      allow create: if inventoryMovementWriter(id)
         && !('unitCost' in request.resource.data)
         && !('purchaseNetAmount' in request.resource.data)
         && !('cogs' in request.resource.data);
