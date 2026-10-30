@@ -10,7 +10,7 @@
 |---|---|---|---:|---|
 | `feat/multi-item-shipment-20261018` | 無 | `7013df0` / #174 | 8/10 | 10 個變更檔中 8 個與主線 #174 完全相同；ARCHITECTURE 僅增加多品項出貨實作說明，Emulator test 將原本硬編碼 0/false 改為保留原 deliveredQty/isDelivered 的斷言，沒有移除案例或弱化數量／原子性檢查。 |
 | `feat/order-amount-details-20261025` | #283 | `69a6a64` / #292 | 23/26 | 26 個變更檔中 23 個與 #292 完全相同；其餘 app.js 僅加入 #290 Preview 採購路由，Rules 與 Rules test 僅增加 #288 metadata 去重及正反向測試。原訂單金額、商品明細與 15 品項變更完整保留。 |
-| `feat/quick-purchase-preview-backend-gate-20261025` | #290 | `69a6a64` / #292 | 5/6 | 6 個變更檔中 5 個與 #292 完全相同；唯一不同的 app.js 為同次整合的 #283 UI，quick-purchase.js 原始碼與 #292 相同，後續 main 另加獨立 production gate、專案綁定及 pending 禁止回退。 |
+| `feat/quick-purchase-preview-backend-gate-20261025` | #290 | `69a6a64` / #292 | 5/6 | 6 個變更檔中 5 個與 #292 完全相同；唯一不同的 app.js 為同次整合的 #283 訂單／採購介面、品項上限與編輯規則，quick-purchase.js 原始碼與 #292 相同，後續 main 另加獨立 production gate、專案綁定及 pending 禁止回退。 |
 | `preview/inventory-warehouse-forecast-20260920` | #29 | `7cf9104` | 1/1 | 所有變更僅 app.js；其 blob 與 main 歷史提交 7cf9104 完全相同。雖 #29 closed-unmerged，但修改確實以相同內容進入主線。 |
 | `preview/multi-item-order-model-20260920` | #28 | `7cf9104` | 1/1 | 所有變更僅 app.js；其 blob 與 main 歷史提交 7cf9104 完全相同。解除先前 #28 晚於父 PR 合併的疑慮，依實際主線內容而非父 PR 時間判定。 |
 | `refactor/architecture-unification-20261015` | #94 | `c1bac37` / #95 | 49/49 | 完整 49 個變更檔在主線 #95 的 c1bac37 同時逐檔完全相同，包含新增 DATA_MODEL 與契約測試；分支後續修改並未遺漏。 |
@@ -48,3 +48,12 @@
 | `upgrade/remove-product-line-assignment-20260923` | 無 |
 
 #338 的 Rules 原型與 #344 等包含該原型的分支仍保留，不把曾觸及運算上限的實驗直接合回主線；其餘分支需核對已重構的入口及測試意圖。
+
+## 實際清理結果
+
+- PR [#401](https://github.com/sstonetw-source/yushin-system/pull/401) 的 CI [#41146376252](https://github.com/sstonetw-source/yushin-system/actions/runs/41146376252) 10/10 success（含 required regression），合併 main `1b69c39447762ab7c9d4a010f778782fb33f68ca`。
+- 一次性 [Action #41147134135](https://github.com/sstonetw-source/yushin-system/actions/runs/41147134135) completed/success；job `124374744691` 的原始日誌為 `deleted=7, skipped=0, failed=0, held=17`，七筆 SHA 全部符合核定清單。
+- 即時 GitHub branches 再核對 **18 個（main 1 + 保留 17）**；17 個保留分支均仍存在且 SHA 未變。從起始 199 個分支，累計已清理 **181 個**（170 + 4 + 7）。
+- 收尾 PR 移除 `.github/workflows/branch-lineage-cleanup-20261031.yml`，保留完整 JSON、歷史整合證據及 Action 日誌，不長期保留刪除分支的高權限流程。
+- 同一段 workflow JS 的 11 個本機 API 模擬情境通過，包括分支／main 變更、分支保護、Open PR、錯誤原 PR、未合併整合 PR、非祖先、截斷 tree 及錯誤 manifest；只處理合法目標，非法目標跳過或中止。
+- 本輪未更動 Firebase Functions、Firestore Rules、正式交易旗標或正式資料；GitHub Pages 仍依原有 main 自動發布流程，不能替代正式角色驗收。#311/#199/#268 等原 Issue 保持追蹤，不因歷史分支清理而結案。
