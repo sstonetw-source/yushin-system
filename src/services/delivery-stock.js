@@ -22,6 +22,11 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
     const whSnap = await transaction.get(whRef);
     const reservationSnap = await transaction.get(deliveryReservationRef);
     if (!whSnap.exists) throw new Error('指定倉庫沒有這個產品的分倉庫存，請先入庫或以庫存調整建立分倉數量。');
+    const custodyV3=reservationSnap.exists&&reservationSnap.data().locationSchemaVersion===3;
+    if(custodyV3)throw new Error('V3 業務保管的實際出貨與客戶送達必須由獨立後端交易完成，禁止舊前端重複扣庫。');
+    if(custodyV3&&(warehouseId!=='custody-'+order.ownerUid
+      ||order.custodyTransferId!==reservationSnap.data().custodyTransferId))
+      throw new Error('V3 業務保管出貨與原交接憑證不一致。');
 
     const inv = inventoryNumbers(invSnap.exists ? invSnap.data() : {}), wh = inventoryNumbers(whSnap.data());
     const stockPlan=deltaQty>0?globalThis.YushinReservation.planReservationIssue({
@@ -78,7 +83,8 @@ async function applyInventoryDeliveryDeltaInTransaction(transaction, order, delt
         ownerUid:order.ownerUid||'',salesCode:order.salesCode||''
     }));
 
-    transaction.set(deliveryReservationRef,{...stockPlan.reservation,...inventoryReservationPayload(sourceId,order,newReservedRemaining,stockPlan.reservation.status),itemId:deliveryItemId,warehouseId},{merge:true});
+    transaction.set(deliveryReservationRef,{...stockPlan.reservation,...inventoryReservationPayload(sourceId,order,newReservedRemaining,stockPlan.reservation.status),
+        itemId:deliveryItemId,...(custodyV3?{}:{warehouseId})},{merge:true});
     return { reservedDelta,newReservedQty:newReservedRemaining,lotAllocations,cogs,movementId:movementRef.id };
 }
 function applyInventoryDeliveryInTransaction(transaction, orderRef, order, deliveryQty, actor, sourceId) {
@@ -100,6 +106,10 @@ async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQ
     const whSnap = await transaction.get(whRef);
     const reservationSnap = await transaction.get(reservationRef);
     if (!whSnap.exists) throw new Error('找不到原出貨倉庫庫存。');
+    const custodyV3=reservationSnap.exists&&reservationSnap.data().locationSchemaVersion===3;
+    if(custodyV3&&(warehouseId!=='custody-'+order.ownerUid
+      ||order.custodyTransferId!==reservationSnap.data().custodyTransferId))
+      throw new Error('V3 業務保管退貨與原交接憑證不一致。');
     const inv=inventoryNumbers(invSnap.exists?invSnap.data():{}), wh=inventoryNumbers(whSnap.data());
     const stockPlan=globalThis.YushinReservation.planReservationReturn({operation:'CUSTOMER_RETURN',deltaQty,
         orderStatus:normalizedOrderStatus(order),settlement:order.customerReturnSettlement||'REPLACE',
@@ -133,7 +143,8 @@ async function applyInventoryReturnDeltaInTransaction(transaction, order, deltaQ
     const nextReservation=stockPlan.reservation.quantity,reservationDelta=stockPlan.reservedDelta;
     transaction.set(invRef,{onHand:stockPlan.aggregateStock.onHand,reserved:stockPlan.aggregateStock.reserved,incoming:inv.incoming,updatedAt:now},{merge:true});
     transaction.set(whRef,{warehouseId,productKey,onHand:stockPlan.warehouseStock.onHand,reserved:stockPlan.warehouseStock.reserved,incoming:wh.incoming,updatedAt:now},{merge:true});
-    transaction.set(reservationRef,{...stockPlan.reservation,...inventoryReservationPayload(sourceId,order,nextReservation,stockPlan.reservation.status),itemId:deliveryItemId,warehouseId},{merge:true});
+    transaction.set(reservationRef,{...stockPlan.reservation,...inventoryReservationPayload(sourceId,order,nextReservation,stockPlan.reservation.status),
+        itemId:deliveryItemId,...(custodyV3?{}:{warehouseId})},{merge:true});
     transaction.set(db.collection('inventoryMovements').doc(),{
         type:deltaQty>0?'return_in':'return_reversal',qty:deltaQty,productKey,warehouseId,
         fulfillmentType:'WAREHOUSE',sourceType:DOCUMENT_TYPES.ORDER,sourceId,

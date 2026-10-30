@@ -18,9 +18,14 @@ const previewPurchase=require(path.join(root,'functions/formal-purchase-preview-
  .createPreviewFormalPurchaseCallable({onCall,HttpsError,getDatabase:getFirestore});
 const quickPurchase=require(path.join(root,'functions/quick-purchase-callable'))
  .createQuickPurchaseCallable({onCall,HttpsError,getDatabase:getFirestore});
-module.exports={...standard,prepareV2OrderDispatch:service.prepareV2OrderDispatch,
- shipV2WarehouseItem:service.shipV2WarehouseItem,
+module.exports={...standard,handoffOrderTransfer:service.handoffOrderTransfer,dispatchOrderTransfer:service.dispatchOrderTransfer,receiveOrderTransfer:service.receiveOrderTransfer,previewV2CustomerReturn:service.previewV2CustomerReturn,
+ requestV2CustomerReturn:service.requestV2CustomerReturn,withdrawV2CustomerReturnRequest:service.withdrawV2CustomerReturnRequest,
+ receiveV2CustomerReturn:service.receiveV2CustomerReturn,prepareV2OrderDispatch:service.prepareV2OrderDispatch,
+ shipV2WarehouseItem:service.shipV2WarehouseItem,setV2OrderLifecycle:service.setV2OrderLifecycle,
+ setV3CustodyOrderLifecycle:service.setV3CustodyOrderLifecycle,shipV3CustodyItem:service.shipV3CustodyItem,
+ confirmV3CustodyDelivery:service.confirmV3CustodyDelivery,receiveV3CustodyReturn:service.receiveV3CustodyReturn,
  receiveV2Supply:service.receiveV2Supply,commitV2FormalPurchase:previewPurchase,commitV2QuickPurchase:quickPurchase,
+ registerV2FormalPurchaseIncoming:service.registerV2FormalPurchaseIncoming,
  commitServiceCaseEvent:service.commitServiceCaseEvent,
  getServiceCaseStatus:service.getServiceCaseStatus,
  getServiceOrderProgress:service.getServiceOrderProgress,

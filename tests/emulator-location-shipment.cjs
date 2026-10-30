@@ -2088,7 +2088,7 @@ test('cancelled multi-item CLOSE uses original post-commit recovery while receip
  const x=await cancelledMultiReturnFixture('recovery');const result=await commitLocationReturnAndRecover(db,x.adminUid,x.returnRequest());assert.equal(result.status,'applied');assert.equal(result.postCommitAllocation.sources.length,1);
  const once=await cancelledMultiReturnSnapshot(x);await commitLocationReturnAndRecover(db,x.adminUid,x.returnRequest());assert.deepEqual((await x.read('orders',x.orderId)).returnRecords,once.order.returnRecords);
  const real={projectId:'production-yushin'};const before=await cancelledMultiReturnSnapshot(x);
- await assert.rejects(x.receiveReturn(x.returnRequest('I2',1,'blocked'),x.adminUid,real),/僅允許 demo-yushin/);await assert.rejects(x.traceReturn(x.traceRequest('I2'),x.adminUid,real),/僅允許 demo-yushin/);assert.deepEqual(await cancelledMultiReturnSnapshot(x),before);
+ await assert.rejects(x.receiveReturn(x.returnRequest('I2',1,'blocked'),x.adminUid,real),e=>e.code==='failed-precondition'&&/僅允許已授權/.test(e.message));await assert.rejects(x.traceReturn(x.traceRequest('I2'),x.adminUid,real),e=>e.code==='failed-precondition'&&/僅允許已授權/.test(e.message));assert.deepEqual(await cancelledMultiReturnSnapshot(x),before);
 });
 test('multi-item CLOSE restores original lots and only selected counters while whole-order returned totals include every item',async()=>{
  const x=await multiReturnFixture('normal'),before=await multiShipmentSnapshot(x);

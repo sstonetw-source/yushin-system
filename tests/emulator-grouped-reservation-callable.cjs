@@ -37,6 +37,7 @@ async function seeded(tag,{role='purchaser',owner='buyer'}={}){
  const functions=getFunctions(client,'asia-east1');
  connectFunctionsEmulator(functions,'127.0.0.1',5001);
  const call=httpsCallable(functions,'commitGroupedWarehouseReservation');
+ const callWholeOrder=httpsCallable(functions,'commitOrderReservationPreview');
  const orderId='order-'+tag,productKey='product-'+tag,attemptId='attempt_'+tag+'_callable_123';
  const syncAttemptId='sync_'+tag+'_123456789';
  const batch=db.batch();
@@ -58,7 +59,7 @@ async function seeded(tag,{role='purchaser',owner='buyer'}={}){
  await batch.commit();
  const intent=(quantityA=2,quantityB=3,override={})=>({orderId,attemptId,syncAttemptId,
   items:[{itemId:'I1',quantity:quantityA},{itemId:'I2',quantity:quantityB}],...override});
- return {uid,call,intent,orderId,productKey,attemptId,
+ return {uid,call,callWholeOrder,intent,orderId,productKey,attemptId,syncAttemptId,
   data:async path=>(await db.doc(path).get()).data()};
 }
 test('signed-in purchaser: Callable transaction + idempotency + company/warehouse/order updates',async()=>{
@@ -102,4 +103,54 @@ test('Callable rejects changed sync checkpoint and cannot bypass disabled featur
  await db.doc('orders/'+f.orderId).update({inventoryReservationAttemptId:'superseding-attempt'});
  await assert.rejects(f.call(f.intent()),e=>e.code==='functions/failed-precondition');
  assert.equal((await f.data('inventory/'+f.productKey)).reserved,0);
+});
+test('initial grouped rollout alone never enables the separate post-sync amendment mode',async()=>{
+ const f=await seeded('amend-not-enabled');
+ await db.doc('orders/'+f.orderId).update({inventoryReservationStatus:'completed'});
+ const intent=f.intent(1,4,{mode:'amend',attemptId:'amend_not_enabled_123456789'});
+ await assert.rejects(f.call(intent),e=>e.code==='functions/failed-precondition');
+ assert.equal((await f.data('inventory/'+f.productKey)).reserved,0);
+ assert.equal((await db.doc('reservationOperationReceipts/grouped-'+intent.attemptId).get()).exists,false);
+});
+test('original two-warehouse Callable flag does not authorize same-warehouse grouped writes',async()=>{
+ const f=await seeded('same-not-enabled');
+ await db.doc('orders/'+f.orderId).update({items:(await f.data('orders/'+f.orderId)).items
+  .map(item=>({...item,warehouseId:'A'}))});
+ await assert.rejects(f.call(f.intent(2,3)),e=>e.code==='functions/failed-precondition');
+ assert.equal((await f.data('inventory/'+f.productKey)).reserved,0);
+ assert.equal((await db.doc('reservationOperationReceipts/grouped-'+f.attemptId).get()).exists,false);
+});
+test('explicitly enabled same-warehouse Callable atomically commits and replays with real Auth',{
+ skip:process.env.ENABLE_GROUPED_RESERVATION_SAME_WAREHOUSE!=='true'
+},async()=>{
+ const f=await seeded('same-enabled');
+ await db.doc('orders/'+f.orderId).update({items:(await f.data('orders/'+f.orderId)).items
+  .map(item=>({...item,warehouseId:'A'}))});
+ const first=(await f.call(f.intent(2,3))).data;
+ assert.equal(first.status,'applied');assert.equal(first.companyReservedDelta,5);
+ assert.equal((await f.call(f.intent(2,3))).data.status,'already-applied');
+ assert.equal((await f.data('inventory/'+f.productKey)).reserved,5);
+ assert.equal((await f.data('warehouseStocks/A__'+f.productKey)).reserved,5);
+ assert.equal((await f.data('warehouseStocks/B__'+f.productKey)).reserved,0);
+});
+test('whole-order backend flag is default-off even when grouped reservation is enabled',{
+ skip:process.env.ENABLE_ORDER_RESERVATION_BACKEND==='true'
+},async()=>{
+ const f=await seeded('whole-order-disabled');
+ await assert.rejects(f.callWholeOrder({orderId:f.orderId,syncAttemptId:f.syncAttemptId}),
+  e=>e.code==='functions/failed-precondition');
+ assert.equal((await f.data('inventory/'+f.productKey)).reserved,0);
+});
+test('explicitly enabled whole-order Callable atomically reserves and replays with real Auth',{
+ skip:process.env.ENABLE_ORDER_RESERVATION_BACKEND!=='true'
+},async()=>{
+ const f=await seeded('whole-order-enabled');
+ const first=(await f.callWholeOrder({orderId:f.orderId,syncAttemptId:f.syncAttemptId})).data;
+ assert.equal(first.status,'applied');assert.equal(first.reservedQty,10);
+ assert.equal((await f.callWholeOrder({orderId:f.orderId,syncAttemptId:f.syncAttemptId})).data.status,'already-applied');
+ assert.equal((await f.data('inventory/'+f.productKey)).reserved,10);
+ assert.equal((await f.data('warehouseStocks/A__'+f.productKey)).reserved,5);
+ assert.equal((await f.data('warehouseStocks/B__'+f.productKey)).reserved,5);
+ await assert.rejects(f.callWholeOrder({orderId:f.orderId,syncAttemptId:f.syncAttemptId,actorRole:'admin'}),
+  e=>e.code==='functions/invalid-argument');
 });

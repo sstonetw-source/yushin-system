@@ -99,10 +99,26 @@
     }
     return {status:x.status,receiptStatus,orderedQty,receivedQty,remainingQty,percent:orderedQty>0?Math.min(100,(receivedQty/orderedQty)*100):0,label};
   }
+  // Strict proposal for a cancelled customer purchase. No stock writes here.
+  function planCancelledPurchaseKeepStock(supply,{expectedDirect,warehouseId}={}){
+    if(typeof expectedDirect!=='boolean')throw Error('缺少原採購收貨方式。');
+    if(!['WAREHOUSE','DIRECT_SHIP'].includes(supply.fulfillmentType))throw Error('採購收貨方式不正確。');
+    const direct=supply.fulfillmentType==='DIRECT_SHIP';
+    if(direct!==expectedDirect)throw Error('採購收貨方式已變更。');
+    if(['CANCELLED','CLOSED','RECEIVED'].includes(supply.status))throw Error('採購已取消／結案。');
+    if(!Number.isSafeInteger(supply.qty)||supply.qty<=0||!Number.isSafeInteger(supply.receivedQty??0)
+      ||(supply.receivedQty??0)<0||(supply.receivedQty??0)>supply.qty)throw Error('採購數量或已收數量不正確。');
+    const remaining=supply.qty-(supply.receivedQty??0);
+    if(!remaining)throw Error('此品項已全部到貨。');
+    if(direct&&(typeof warehouseId!=='string'||!warehouseId||warehouseId!==warehouseId.trim()
+      ||warehouseId.includes('/')||warehouseId.startsWith('custody-')||warehouseId.length>160))throw Error('缺少有效實體收貨倉。');
+    if(direct&&(supply.incomingRegisteredQty??0)!==0)throw Error('直送採購已有倉庫在途，必須先核對。');
+    return {redirect:direct,remainingQty:remaining,warehouseId:direct?warehouseId:supply.warehouseId};
+  }
   return {
     METHODS,SOURCES,
     // TYPES 暫時只作程式內同義名稱，資料上不再把補庫當 type。
     TYPES:METHODS,
-    normalize,validate,applyReceipt,createsCustomerDispatch,canCreate,demandLabel,receiptProgress
+    normalize,validate,applyReceipt,createsCustomerDispatch,canCreate,demandLabel,receiptProgress,planCancelledPurchaseKeepStock
   };
 });

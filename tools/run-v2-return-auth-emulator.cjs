@@ -5,8 +5,8 @@ const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{spa
 const root=path.resolve(__dirname,'..');
 // Local iteration may select a layer. CI deliberately calls with no arguments.
 const suites={
- all:['tests/emulator-v2-return-callable.cjs','tests/emulator-receiving-fifteen.cjs','tests/emulator-v2-lifecycle-browser.cjs'],
- callable:['tests/emulator-v2-return-callable.cjs','tests/emulator-receiving-fifteen.cjs'],
+ all:['tests/emulator-order-transfer-callable.cjs','tests/emulator-custody-lifecycle.cjs','tests/emulator-custody-shipment.cjs','tests/emulator-v2-return-callable.cjs','tests/emulator-receiving-fifteen.cjs','tests/emulator-v2-lifecycle-browser.cjs'],
+ callable:['tests/emulator-order-transfer-callable.cjs','tests/emulator-custody-lifecycle.cjs','tests/emulator-custody-shipment.cjs','tests/emulator-v2-return-callable.cjs','tests/emulator-receiving-fifteen.cjs'],
  receiving:['tests/emulator-receiving-fifteen.cjs'],
  browser:['tests/emulator-v2-lifecycle-browser.cjs']
 };
@@ -29,7 +29,7 @@ try{
  fs.mkdirSync(source);
  fs.writeFileSync(path.join(source,'checkout.json'),JSON.stringify({root}));
  fs.writeFileSync(path.join(source,'.env.local'),
-  'ENABLE_V2_RETURN_AUTH_EMULATOR=true\nENABLE_V2_SHIPMENT_AUTH_EMULATOR=true\nENABLE_SERVICE_CASE_EMULATOR=true\nENABLE_PREVIEW_FORMAL_PURCHASE=true\nENABLE_QUICK_PURCHASE_EMULATOR=true\n');
+  'ENABLE_ORDER_TRANSFER_HANDOFF_EMULATOR=true\nENABLE_ORDER_TRANSFER_V2_EMULATOR=true\nENABLE_ORDER_TRANSFER_DISPATCH_EMULATOR=true\nENABLE_ORDER_TRANSFER_RECEIVE_EMULATOR=true\nENABLE_V3_CUSTODY_LIFECYCLE_EMULATOR=true\nENABLE_V3_CUSTODY_SHIPMENT_EMULATOR=true\nENABLE_V3_CUSTODY_DELIVERY_EMULATOR=true\nENABLE_V3_CUSTODY_RETURN_EMULATOR=true\nENABLE_V2_RETURN_AUTH_EMULATOR=true\nENABLE_V2_RETURN_REQUEST_AUTH_EMULATOR=true\nENABLE_V2_SHIPMENT_AUTH_EMULATOR=true\nENABLE_V2_LIFECYCLE_AUTH_EMULATOR=true\nENABLE_SERVICE_CASE_EMULATOR=true\nENABLE_PREVIEW_FORMAL_PURCHASE=true\nENABLE_QUICK_PURCHASE_EMULATOR=true\nENABLE_V2_PO_INCOMING_EMULATOR=true\n');
  const runtime=path.join(root,'functions/node_modules');
  if(!fs.existsSync(path.join(runtime,'firebase-functions')))throw Error('Install functions dependencies before running the Emulator');
  fs.symlinkSync(runtime,path.join(source,'node_modules'),'dir');
@@ -44,8 +44,8 @@ try{
  const result=spawnSync('npx',['--yes','firebase-tools@15','emulators:exec','--config',config,
   '--only','firestore,auth,functions','--project','demo-yushin',
   'node --test --test-concurrency=1 '+(pattern?'--test-name-pattern='+shellQuote(pattern)+' ':'')+testFiles.map(shellQuote).join(' ')],{cwd:root,stdio:'inherit',env:{...process.env,
-   ENABLE_V2_RETURN_AUTH_EMULATOR:'true',ENABLE_V2_SHIPMENT_AUTH_EMULATOR:'true',ENABLE_SERVICE_CASE_EMULATOR:'true',
-   ENABLE_PREVIEW_FORMAL_PURCHASE:'true',ENABLE_QUICK_PURCHASE_EMULATOR:'true'}});
+   ENABLE_ORDER_TRANSFER_HANDOFF_EMULATOR:'true',ENABLE_ORDER_TRANSFER_V2_EMULATOR:'true',ENABLE_ORDER_TRANSFER_DISPATCH_EMULATOR:'true',ENABLE_ORDER_TRANSFER_RECEIVE_EMULATOR:'true',ENABLE_V3_CUSTODY_LIFECYCLE_EMULATOR:'true',ENABLE_V3_CUSTODY_SHIPMENT_EMULATOR:'true',ENABLE_V3_CUSTODY_DELIVERY_EMULATOR:'true',ENABLE_V3_CUSTODY_RETURN_EMULATOR:'true',ENABLE_V2_RETURN_AUTH_EMULATOR:'true',ENABLE_V2_RETURN_REQUEST_AUTH_EMULATOR:'true',ENABLE_V2_SHIPMENT_AUTH_EMULATOR:'true',ENABLE_V2_LIFECYCLE_AUTH_EMULATOR:'true',ENABLE_SERVICE_CASE_EMULATOR:'true',
+   ENABLE_PREVIEW_FORMAL_PURCHASE:'true',ENABLE_QUICK_PURCHASE_EMULATOR:'true',ENABLE_V2_PO_INCOMING_EMULATOR:'true'}});
  if(result.error)throw result.error;
  process.exitCode=result.status??1;
 }finally{fs.rmSync(temporary,{recursive:true,force:true});}

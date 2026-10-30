@@ -1,0 +1,306 @@
+'use strict';
+// A real authenticated Callable, not a direct Admin method pretending to be
+// a client.  The suite also verifies the same operation ID after a lost reply.
+const test=require('node:test'),assert=require('node:assert/strict');
+const admin=require('firebase-admin');
+const {getFirestore}=require('firebase-admin/firestore');
+const {getAuth:adminAuth}=require('firebase-admin/auth');
+const {initializeApp,deleteApp}=require('firebase/app');
+const {getAuth,connectAuthEmulator,signInWithEmailAndPassword}=require('firebase/auth');
+const {getFunctions,connectFunctionsEmulator,httpsCallable}=require('firebase/functions');
+const clients=[];let server,db,accounts;
+test.before(()=>{
+ assert.match(process.env.FIRESTORE_EMULATOR_HOST||'',/^(127\.0\.0\.1|localhost):[0-9]+$/);
+ assert.match(process.env.FIREBASE_AUTH_EMULATOR_HOST||'',/^(127\.0\.0\.1|localhost):[0-9]+$/);
+ assert.equal(process.env.GCLOUD_PROJECT||process.env.GCP_PROJECT,'demo-yushin');
+ server=admin.initializeApp({projectId:'demo-yushin'},'v3-custody-shipment-auth');
+ db=getFirestore(server);accounts=adminAuth(server);
+});
+test.after(async()=>{await Promise.all(clients.map(deleteApp));if(server)await server.delete();});
+async function fixture(tag,{multi=false}={}){
+ const prefix='v3-ship-'+tag,uid=prefix+'-OWNER',other=prefix+'-OTHER';
+ const orderId=prefix+'-ORDER',productKey=prefix+'-P',transferId=prefix+'-HANDOFF';
+ const custody='custody-'+uid,lotId=transferId+'-0';
+ const apps=[];
+ for(const user of [uid,other]){
+  await accounts.createUser({uid:user,email:user+'@example.test',password:'EmulatorOnly!123456'});
+  const app=initializeApp({apiKey:'demo-api-key',projectId:'demo-yushin',appId:user},user);
+  clients.push(app);apps.push(app);
+  const auth=getAuth(app);connectAuthEmulator(auth,'http://127.0.0.1:9099',{disableWarnings:true});
+  await signInWithEmailAndPassword(auth,user+'@example.test','EmulatorOnly!123456');
+ }
+ const originalPlan={mode:'PICKUP',contact:'',phone:'',address:'',warehouseId:'',packages:1,notes:''};
+ const batch=db.batch(),put=(name,key,data)=>batch.set(db.collection(name).doc(key),data);
+ for(const user of [uid,other])put('users',user,{active:true,role:'sales'});
+ put('products',productKey,{active:true,productType:'Goods'});
+ put('warehouses',custody,{active:true,systemCustody:true,warehouseType:'CUSTODY',ownerUid:uid});
+ put('inventory',encodeURIComponent(productKey),{productKey,onHand:7,reserved:4});
+ put('warehouseStocks',encodeURIComponent(custody)+'__'+encodeURIComponent(productKey),
+  {warehouseId:custody,productKey,onHand:5,reserved:3});
+ const firstItem={itemId:'I',qty:3,productId:productKey,warehouseId:custody,custodyTransferId:transferId,
+  reservedQty:3,shortageQty:0,dispatchPreparedQty:3,warehouseShippedQty:0,deliveryPlan:originalPlan};
+ const secondItem=multi?{itemId:'J',qty:2,productId:prefix+'-Q',warehouseId:custody,
+  custodyTransferId:prefix+'-HANDOFF-J',reservedQty:2,shortageQty:0,dispatchPreparedQty:2,
+  warehouseShippedQty:0,deliveryPlan:originalPlan}:null;
+ put('orders',orderId,{status:'active',orderStatus:'normal',inventoryReservationStatus:'completed',
+  inventoryReservationAttemptId:'sync_1234567890',ownerUid:uid,salesCode:'S01',logisticsTransfersPending:0,
+  warehouseShipmentRecords:[],deliveryRecords:[],returnRecords:[],deliveredQty:0,returnedQty:0,isDelivered:false,
+  items:multi?[firstItem,secondItem]:[firstItem]});
+ put('inventoryReservations',orderId+'__I',{orderId,itemId:'I',productKey,ownerUid:uid,salesCode:'S01',
+  locationSchemaVersion:3,quantity:3,shortageQty:0,status:'active',custodyTransferId:transferId,
+  locations:[{warehouseId:custody,reservedQty:3}],custodyOriginalQty:3,
+  lifecycleWarehouseIds:['A','B'],sourceLocationSnapshot:[{warehouseId:'A',reservedQty:1},{warehouseId:'B',reservedQty:2}]});
+ const transfer={id:transferId,kind:'HANDOFF',status:'RECEIVED',orderId,itemId:'I',productKey,
+  ownerUid:uid,salesCode:'S01',qty:3,toWarehouseId:custody,deliveryPlan:originalPlan,
+  orderTransferIntentHash:'hash-original',reservationLocationSchemaVersion:2,custodyLocationSchemaVersion:3,
+  lifecycleWarehouseIds:['A','B'],sourceLocations:[{warehouseId:'A',qty:1},{warehouseId:'B',qty:2}],
+  allocations:[{lotId:'ORIGINAL',targetLotId:lotId,qty:3,costLotId:'SOURCE-LOT'}]};
+ put('stockTransfers',transferId,transfer);
+ put('reservationOperationReceipts','order-transfer-dispatch-'+transferId,{
+  kind:'ORDER_TRANSFER_DISPATCH',intentHash:'hash-original',transfer});
+ put('inventoryMovements',transferId+'-in',{type:'warehouse_transfer_in',sourceType:'WAREHOUSE_TRANSFER',
+  sourceId:transferId,orderId,itemId:'I',productKey,warehouseId:custody,qty:3});
+ put('inventoryLots',lotId,{productKey,warehouseId:custody,sourceType:'WAREHOUSE_TRANSFER',
+  sourceId:transferId,transferId,qty:3,remainingQty:3,costLotId:'SOURCE-LOT'});
+ put('inventoryLotCosts',lotId,{productKey,warehouseId:custody,sourceId:transferId,
+  costSourceLotId:'SOURCE-LOT',unitCost:432});
+ if(multi){
+  const siblingKey=prefix+'-Q',siblingTransfer=prefix+'-HANDOFF-J',siblingLot=siblingTransfer+'-0';
+  put('products',siblingKey,{active:true,productType:'Goods'});
+  put('inventory',encodeURIComponent(siblingKey),{productKey:siblingKey,onHand:3,reserved:2});
+  put('warehouseStocks',encodeURIComponent(custody)+'__'+encodeURIComponent(siblingKey),
+   {warehouseId:custody,productKey:siblingKey,onHand:2,reserved:2});
+  put('inventoryReservations',orderId+'__J',{orderId,itemId:'J',productKey:siblingKey,
+   ownerUid:uid,salesCode:'S01',locationSchemaVersion:3,quantity:2,shortageQty:0,status:'active',
+   custodyTransferId:siblingTransfer,locations:[{warehouseId:custody,reservedQty:2}],
+   custodyOriginalQty:2,lifecycleWarehouseIds:['A','B'],
+   sourceLocationSnapshot:[{warehouseId:'A',reservedQty:2}]});
+  const source={id:siblingTransfer,kind:'HANDOFF',status:'RECEIVED',orderId,itemId:'J',
+   productKey:siblingKey,ownerUid:uid,salesCode:'S01',qty:2,toWarehouseId:custody,
+   deliveryPlan:originalPlan,orderTransferIntentHash:'hash-sibling',
+   reservationLocationSchemaVersion:2,custodyLocationSchemaVersion:3,
+   lifecycleWarehouseIds:['A','B'],sourceLocations:[{warehouseId:'A',qty:2}],
+   allocations:[{lotId:'ORIGINAL-J',targetLotId:siblingLot,qty:2,costLotId:'SOURCE-LOT-J'}]};
+  put('stockTransfers',siblingTransfer,source);
+  put('reservationOperationReceipts','order-transfer-dispatch-'+siblingTransfer,
+   {kind:'ORDER_TRANSFER_DISPATCH',intentHash:'hash-sibling',transfer:source});
+  put('inventoryMovements',siblingTransfer+'-in',{type:'warehouse_transfer_in',
+   sourceType:'WAREHOUSE_TRANSFER',sourceId:siblingTransfer,orderId,itemId:'J',
+   productKey:siblingKey,warehouseId:custody,qty:2});
+  put('inventoryLots',siblingLot,{productKey:siblingKey,warehouseId:custody,
+   sourceType:'WAREHOUSE_TRANSFER',sourceId:siblingTransfer,transferId:siblingTransfer,
+   qty:2,remainingQty:2,costLotId:'SOURCE-LOT-J'});
+  put('inventoryLotCosts',siblingLot,{productKey:siblingKey,warehouseId:custody,
+   sourceId:siblingTransfer,costSourceLotId:'SOURCE-LOT-J',unitCost:981});
+ }
+ // A second unrelated transfer in the same owner's Custody MUST NOT be
+ // silently consumed by this order's reservation.
+ put('inventoryLots',prefix+'-OTHER-LOT',{productKey,warehouseId:custody,sourceType:'WAREHOUSE_TRANSFER',
+  sourceId:'OTHER-TRANSFER',transferId:'OTHER-TRANSFER',qty:2,remainingQty:2,costLotId:'OTHER-SOURCE'});
+ await batch.commit();
+ const makeCalls=app=>{
+  const fn=getFunctions(app,'asia-east1');connectFunctionsEmulator(fn,'127.0.0.1',5001);
+  return{
+   ship:value=>httpsCallable(fn,'shipV3CustodyItem',{timeout:60000})(value).then(response=>response.data),
+   confirm:value=>httpsCallable(fn,'confirmV3CustodyDelivery',{timeout:60000})(value).then(response=>response.data),
+   receiveReturn:value=>httpsCallable(fn,'receiveV3CustodyReturn',{timeout:60000})(value).then(response=>response.data)
+  };
+ };
+ const ownerCalls=makeCalls(apps[0]),otherCalls=makeCalls(apps[1]);
+ const input=(operationId,quantity)=>({orderId,itemId:'I',warehouseId:custody,quantity,
+  operationId,syncAttemptId:'sync_1234567890',date:'2026-10-29',notes:'原業務送出',
+  expectedPlan:{mode:'CUSTOMER_SHIP',contact:'收件人',phone:'0222334455',
+   address:'測試收件地址',warehouseId:'',packages:1,notes:''}});
+ const confirmation=(shipmentId,operationId,quantity)=>({orderId,itemId:'I',shipmentId,operationId,
+  quantity,syncAttemptId:'sync_1234567890',date:'2026-10-30',notes:'客戶已收貨'});
+ const customerReturn=(shipmentId,operationId,quantity)=>({orderId,itemId:'I',shipmentId,operationId,
+  syncAttemptId:'sync_1234567890',selections:[{lotId,qty:quantity}],warehouseId:custody,
+  date:'2026-10-30',reason:'已實際收回客戶退貨',condition:'RESTOCKABLE',settlement:'CLOSE'});
+ const read=async(name,key)=>(await db.collection(name).doc(key).get()).data();
+ const facts=async()=>({order:await read('orders',orderId),inventory:await read('inventory',encodeURIComponent(productKey)),
+  stock:await read('warehouseStocks',encodeURIComponent(custody)+'__'+encodeURIComponent(productKey)),
+  ledger:await read('inventoryReservations',orderId+'__I'),lot:await read('inventoryLots',lotId),
+  extra:await read('inventoryLots',prefix+'-OTHER-LOT'),cost:await read('inventoryLotCosts',lotId)});
+ return{uid,other,orderId,productKey,custody,transferId,lotId,
+  call:ownerCalls.ship,otherCall:otherCalls.ship,confirm:ownerCalls.confirm,otherConfirm:otherCalls.confirm,
+  receiveReturn:ownerCalls.receiveReturn,otherReturn:otherCalls.receiveReturn,
+  input,confirmation,customerReturn,read,facts};
+}
+test('authenticated owner V3 Custody shipment consumes original source and reruns original ID only once',async()=>{
+ const f=await fixture('flow');
+ const before=await f.facts(),first=f.input('ship_custody_auth_1234',1);
+ const [a,b]=await Promise.all([f.call(first),f.call(first)]);
+ assert.deepEqual([a.status,b.status].sort(),['already-applied','applied']);
+ const after=await f.facts();
+ assert.equal(after.inventory.onHand,before.inventory.onHand-1);
+ assert.equal(after.inventory.reserved,before.inventory.reserved-1);
+ assert.equal(after.stock.onHand,before.stock.onHand-1);
+ assert.equal(after.stock.reserved,before.stock.reserved-1);
+ assert.equal(after.ledger.quantity,2);
+ assert.equal(after.lot.remainingQty,2);
+ assert.deepEqual(after.extra,before.extra);
+ assert.deepEqual(after.cost,before.cost);
+ assert.equal(after.order.items[0].warehouseShippedQty,1);
+ assert.deepEqual(after.order.deliveryRecords,[]);
+ assert.equal(after.order.isDelivered,false);
+ const movement=await f.read('inventoryMovements','location-ship-'+first.operationId);
+ assert.equal(movement.costPending,true);
+ assert.equal(movement.custodyTransferId,f.transferId);
+ assert.deepEqual(movement.lotAllocations.map(x=>x.costLotId),['SOURCE-LOT']);
+ assert.equal((await f.call(first)).status,'already-applied');
+ assert.deepEqual(await f.facts(),after);
+ const last=await f.call(f.input('ship_custody_auth_5678',2));
+ assert.equal(last.status,'applied');
+ assert.equal((await f.facts()).ledger.status,'fulfilled');
+ assert.equal((await f.facts()).lot.remainingQty,0);
+ assert.equal((await f.facts()).extra.remainingQty,2);
+ assert.equal((await f.facts()).order.deliveredQty,0);
+ const beforeConfirmation=await f.facts();
+ const confirmed1=f.confirmation(first.operationId,'custody_delivered_12345',1);
+ const delivered=await f.confirm(confirmed1);
+ assert.equal(delivered.status,'applied');assert.equal(delivered.confirmedQty,1);
+ const afterFirstConfirmation=await f.facts();
+ for(const key of ['inventory','stock','ledger','lot','extra','cost'])
+  assert.deepEqual(afterFirstConfirmation[key],beforeConfirmation[key],key+' is not a delivery-side stock writer');
+ assert.equal(afterFirstConfirmation.order.deliveredQty,1);
+ assert.equal(afterFirstConfirmation.order.items[0].deliveredQty,1);
+ assert.equal(afterFirstConfirmation.order.isDelivered,false);
+ assert.equal((await f.confirm(confirmed1)).status,'already-applied');
+ assert.deepEqual(await f.facts(),afterFirstConfirmation);
+ const confirmed2=f.confirmation('ship_custody_auth_5678','custody_delivered_56789',2);
+ assert.equal((await f.confirm(confirmed2)).status,'applied');
+ assert.equal((await f.facts()).order.deliveredQty,3);
+ assert.equal((await f.facts()).order.isDelivered,true);
+ assert.equal((await f.facts()).inventory.onHand,beforeConfirmation.inventory.onHand);
+});
+test('real Auth 2-line V3 Custody shipment, customer acknowledgement and CLOSE receipt preserve sibling stock',async()=>{
+ const f=await fixture('multi-shipment',{multi:true});
+ const siblingKey='v3-ship-multi-shipment-Q',siblingLot='v3-ship-multi-shipment-HANDOFF-J-0';
+ const second={...f.input('custody_real_multi_j_first',1),itemId:'J'};
+ const first=await f.call(second);
+ assert.equal(first.status,'applied');
+ assert.equal((await f.read('orders',f.orderId)).items.length,2);
+ assert.equal((await f.read('orders',f.orderId)).warehouseShipmentRecords[0].itemIndex,1);
+ assert.equal((await f.read('orders',f.orderId)).items[0].reservedQty,3);
+ assert.equal((await f.read('inventory',encodeURIComponent(siblingKey))).onHand,2);
+ assert.equal((await f.read('inventory',encodeURIComponent(f.productKey))).onHand,7);
+ assert.equal((await f.read('inventoryLots',siblingLot)).remainingQty,1);
+ const saved=await f.facts();
+ assert.equal((await f.call(second)).status,'already-applied');
+ assert.deepEqual(await f.facts(),saved);
+ const main=f.input('custody_real_multi_i_first',1);
+ assert.equal((await f.call(main)).status,'applied');
+ const order=await f.read('orders',f.orderId);
+ assert.deepEqual(order.warehouseShipmentRecords.map(row=>row.itemId),['J','I']);
+ assert.deepEqual(order.items.map(row=>row.warehouseShippedQty),[1,1]);
+ assert.deepEqual(order.items.map(row=>row.reservedQty),[2,1]);
+ assert.equal((await f.read('inventoryLots',siblingLot)).remainingQty,1);
+ assert.equal((await f.read('inventoryLots',f.lotId)).remainingQty,2);
+ const beforeDelivery=await f.facts();
+ const siblingBefore=await f.read('inventoryLots',siblingLot);
+ const jDelivery={...f.confirmation(second.operationId,'custody_real_multi_ack_j',1),itemId:'J'};
+ const confirmedJ=await f.confirm(jDelivery);
+ assert.equal(confirmedJ.status,'applied');
+ assert.equal(confirmedJ.confirmedQty,1);
+ assert.equal(confirmedJ.isDelivered,false);
+ assert.equal((await f.read('orders',f.orderId)).items[1].deliveredQty,1);
+ const receiptSnapshot=await f.facts();
+ assert.equal((await f.confirm(jDelivery)).status,'already-applied');
+ assert.deepEqual(await f.facts(),receiptSnapshot);
+ const confirmedI=await f.confirm(f.confirmation(main.operationId,'custody_real_multi_ack_i',1));
+ assert.equal(confirmedI.status,'applied');
+ const afterDelivery=await f.facts();
+ assert.deepEqual(afterDelivery.order.items.map(row=>row.deliveredQty??0),[1,1]);
+ assert.equal(afterDelivery.order.deliveredQty,2);
+ for(const key of ['inventory','stock','ledger','lot','extra','cost'])
+  assert.deepEqual(afterDelivery[key],beforeDelivery[key],key+' cannot change during customer confirmation');
+ assert.deepEqual(await f.read('inventoryLots',siblingLot),siblingBefore);
+ const close={...f.customerReturn(second.operationId,'custody_real_multi_return_j',1),
+  itemId:'J',selections:[{lotId:siblingLot,qty:1}]};
+ const receipt=await f.receiveReturn(close);
+ assert.equal(receipt.status,'applied');
+ assert.equal(receipt.qty,1);
+ assert.equal(receipt.settlement,'CLOSE');
+ assert.equal((await f.read('inventory',encodeURIComponent(siblingKey))).onHand,3);
+ assert.equal((await f.read('inventoryLots',siblingLot)).remainingQty,2);
+ assert.equal((await f.read('inventoryReservations',f.orderId+'__J')).quantity,1);
+ assert.equal((await f.read('orders',f.orderId)).returnedQty,1);
+ const afterReturn=await f.facts();
+ for(const key of ['inventory','stock','ledger','lot','extra','cost'])
+  assert.deepEqual(afterReturn[key],beforeDelivery[key],key+' cannot change for sibling close return');
+ assert.equal((await f.receiveReturn(close)).status,'already-applied');
+ assert.deepEqual(await f.facts(),afterReturn);
+});
+test('real Auth rejects other sales and a mutated cost provenance without inventory writes',async()=>{
+ const f=await fixture('blocked'),first=f.input('ship_custody_guard_123',1);
+ const before=await f.facts();
+ await assert.rejects(f.otherCall(first),error=>error.code==='functions/permission-denied');
+ assert.deepEqual(await f.facts(),before);
+ await db.collection('inventoryLotCosts').doc(f.lotId).update({costSourceLotId:'FORGED'});
+ const tampered=await f.facts();
+ await assert.rejects(f.call(first),error=>error.code==='functions/failed-precondition');
+ assert.deepEqual(await f.facts(),tampered);
+});
+test('real Custody delivery Callable refuses other owner, unshipped quantities and forged physical proof',async()=>{
+ const f=await fixture('delivery-guard'),shipment=f.input('custody_ship_guard_12345',1);
+ await f.call(shipment);
+ const receipt=f.confirmation(shipment.operationId,'custody_ack_guard_12345',1);
+ const before=await f.facts();
+ await assert.rejects(f.otherConfirm(receipt),e=>e.code==='functions/permission-denied');
+ assert.deepEqual(await f.facts(),before);
+ await assert.rejects(f.confirm({...receipt,quantity:2}),e=>e.code==='functions/failed-precondition');
+ assert.deepEqual(await f.facts(),before);
+ await db.collection('inventoryMovements').doc('location-ship-'+shipment.operationId)
+  .update({custodyTransferId:'FORGED'});
+ const altered=await f.facts();
+ await assert.rejects(f.confirm(receipt),e=>e.code==='functions/failed-precondition');
+ assert.deepEqual(await f.facts(),altered);
+});
+test('real Auth V3 Custody CLOSE return restores the original lot and exactly one company/custody unit',async()=>{
+ const f=await fixture('return-flow');
+ const ship=f.input('custody_return_ship_123',1);
+ await f.call(ship);
+ await f.confirm(f.confirmation(ship.operationId,'custody_return_ack_123',1));
+ const before=await f.facts(),request=f.customerReturn(ship.operationId,'custody_return_receipt_123',1);
+ const [first,retry]=await Promise.all([f.receiveReturn(request),f.receiveReturn(request)]);
+ assert.deepEqual([first.status,retry.status].sort(),['already-applied','applied']);
+ const after=await f.facts();
+ assert.equal(after.inventory.onHand,before.inventory.onHand+1);
+ assert.equal(after.inventory.reserved,before.inventory.reserved);
+ assert.equal(after.stock.onHand,before.stock.onHand+1);
+ assert.equal(after.stock.reserved,before.stock.reserved);
+ assert.equal(after.lot.remainingQty,before.lot.remainingQty+1);
+ assert.deepEqual(after.extra,before.extra);
+ assert.deepEqual(after.cost,before.cost);
+ assert.equal(after.ledger.quantity,before.ledger.quantity);
+ assert.equal(after.order.returnedQty,1);
+ assert.equal(after.order.items[0].returnedQty,1);
+ assert.equal(after.order.isDelivered,false);
+ assert.equal(after.order.returnRecords.length,1);
+ assert.equal(after.order.deliveryRecords.length,before.order.deliveryRecords.length);
+ assert.equal(after.order.warehouseShipmentRecords.length,before.order.warehouseShipmentRecords.length);
+ const movement=await f.read('inventoryMovements','location-return-'+request.operationId);
+ assert.equal(movement.action,'location_customer_return');
+ assert.equal(movement.returnRecord.shipmentId,ship.operationId);
+ assert.equal(movement.v2FreeStockSource,undefined);
+ assert.equal((await f.receiveReturn(request)).status,'already-applied');
+ assert.deepEqual(await f.facts(),after);
+ await assert.rejects(f.receiveReturn({...request,operationId:'custody_return_twice_123'}),
+  e=>e.code==='functions/failed-precondition');
+ assert.deepEqual(await f.facts(),after);
+});
+test('V3 Custody return rejects another owner, unconfirmed shipment, forged cost and REPLACE without stock mutation',async()=>{
+ const f=await fixture('return-guard'),ship=f.input('custody_return_guard_ship_123',1);
+ await f.call(ship);
+ const request=f.customerReturn(ship.operationId,'custody_return_guard_123',1);
+ const before=await f.facts();
+ await assert.rejects(f.receiveReturn(request),e=>e.code==='functions/failed-precondition');
+ await assert.rejects(f.otherReturn(request),e=>e.code==='functions/permission-denied');
+ await assert.rejects(f.receiveReturn({...request,settlement:'REPLACE'}),e=>e.code==='functions/failed-precondition');
+ assert.deepEqual(await f.facts(),before);
+ await f.confirm(f.confirmation(ship.operationId,'custody_guard_confirm_123',1));
+ await db.collection('inventoryLotCosts').doc(f.lotId).update({costSourceLotId:'FORGED'});
+ const tampered=await f.facts();
+ await assert.rejects(f.receiveReturn(request),e=>e.code==='functions/failed-precondition');
+ assert.deepEqual(await f.facts(),tampered);
+});

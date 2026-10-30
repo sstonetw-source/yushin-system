@@ -11,7 +11,7 @@ function fixture(){
   deliveryRecords:[{...source,id:'D',shipmentId:'S',sourceType:'WAREHOUSE_SHIPMENT_CONFIRMATION'}],returnRecords:[]};
  const c=vm.createContext({currentUser:{uid:'U'},currentUserRole:'warehouse',sessionDataGeneration:1,YUSHIN_V2_RETURN_RECEIPT_EMULATOR:true,
   YushinFulfillment:require('../modules/fulfillment-core'),YushinInventory:require('../modules/inventory-core'),
-  canReceiveInventoryCapability:()=>['warehouse','purchaser','admin'].includes(c.currentUserRole),v2CustomerReturnTransport:()=>{if(!c.canReceiveInventoryCapability())throw Error('role changed');return {uid:c.currentUser.uid,role:c.currentUserRole};},
+  customerReturnBackendEnabled:()=>c.YUSHIN_V2_RETURN_RECEIPT_EMULATOR===true,canReceiveInventoryCapability:()=>['warehouse','purchaser','admin'].includes(c.currentUserRole),v2CustomerReturnTransport:()=>{if(!c.canReceiveInventoryCapability())throw Error('role changed');return {uid:c.currentUser.uid,role:c.currentUserRole};},
   pendingV2CustomerReturnReceipt:()=>{if(pending instanceof Error)throw pending;return pending;},normalizeV2CustomerReturnReceipt:intent=>c.YushinFulfillment.normalizeLocationReturnIntent(intent),
   sessionStorage:{get length(){return storage.size;},key:i=>[...storage.keys()][i],getItem:k=>storage.get(k)??null},
   document:{getElementById:element},escapeHtml:x=>String(x).replaceAll('<','&lt;'),escapeAttr:x=>String(x).replaceAll('"','&quot;'),inlineJsValue:JSON.stringify,

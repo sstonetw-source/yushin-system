@@ -60,6 +60,7 @@ test('legacy correction UI locks repeated calls and releases lock after service 
   const action=actions.slice(actions.indexOf('window.clearLegacyDelivery ='),actions.indexOf('function lifecycleRecordId'));
   let calls=0,fail,renders=0;
   const c=vm.createContext({window:{},canManageOrderLifecycleCapability:()=>true,canEditPage:()=>true,
+    deliveryConfirmationProtectedMode:()=>false,
     confirm:()=>true,alert:()=>{},ordersCache:[{id:'O1'}],currentDeliveryOrderId:'O1',returnedQuantity:()=>0,
     pendingDeliveryOrderIds:new Set(),renderOrdersList:()=>renders++,
     renderDeliveryModal:()=>{},renderOrderLifecycleModal:()=>{},resetDeliveryForm:()=>{},

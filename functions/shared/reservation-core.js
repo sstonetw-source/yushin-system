@@ -107,6 +107,27 @@
      if(reservation.locations!==undefined||reservation.allocations!==undefined)throw new Error('多倉預留缺少位置版本，不可當成舊單覆寫。');
      return quantity>0?[{warehouseId:locationId(reservation.warehouseId),qty:quantity}]:[];
    }
+   if(reservation.locationSchemaVersion===3){
+     const ownerUid=locationId(reservation.ownerUid),custodyTransferId=locationId(reservation.custodyTransferId);
+     if(ownerUid.includes('/')||custodyTransferId.includes('/')||reservation.warehouseId!==undefined
+       ||!Array.isArray(reservation.locations)||!Array.isArray(reservation.sourceLocationSnapshot)
+       ||reservation.sourceLocationSnapshot.length<1||reservation.sourceLocationSnapshot.length>2
+       ||!Array.isArray(reservation.lifecycleWarehouseIds)||reservation.lifecycleWarehouseIds.length!==2
+       ||new Set(reservation.lifecycleWarehouseIds).size!==2)
+       throw Error('V3 業務保管預留缺少原實體倉或操作憑證。');
+     const original=validateMultiLocationLedger({requestedQty:locationQty(reservation.custodyOriginalQty),
+       locations:reservation.sourceLocationSnapshot});
+     if(original.reservedQty!==reservation.custodyOriginalQty||quantity>original.reservedQty
+       ||original.locations.some(row=>!reservation.lifecycleWarehouseIds.includes(row.warehouseId))
+       ||reservation.lifecycleWarehouseIds.some(w=>locationId(w).includes('/')||w.startsWith('custody-')))
+       throw Error('V3 業務保管的原實體倉預留不一致。');
+     const custodyId='custody-'+ownerUid;
+     if(reservation.locations.length!==(quantity>0?1:0)
+       ||quantity>0&&(reservation.locations[0]?.warehouseId!==custodyId
+         ||reservation.locations[0]?.reservedQty!==quantity))
+       throw Error('V3 業務保管必須完整記錄在同一負責人保管倉。');
+     return quantity>0?[{warehouseId:custodyId,qty:quantity}]:[];
+   }
    if(reservation.locationSchemaVersion!==2||!Array.isArray(reservation.locations))
      throw new Error('不支援的多倉預留位置版本。');
    for(const row of reservation.locations)locationId(row?.warehouseId);
@@ -115,6 +136,141 @@
      throw new Error('多倉預留總量與各倉數量不一致，請先稽核。');
    return ledger.locations.map(row=>({warehouseId:row.warehouseId,qty:row.reservedQty}))
      .sort((a,b)=>a.warehouseId.localeCompare(b.warehouseId));
+ }
+ function planCustodyHandoffLedger({reservation,item,orderId,itemId,productKey,qty,ownerUid,transferId}={}){
+   const toWarehouseId='custody-'+locationId(ownerUid);
+   locationId(transferId);
+   if(transferId.includes('/')||ownerUid.includes('/')||reservation?.ownerUid!==ownerUid)
+     throw Error('保管操作與訂單負責人不一致。');
+   const plan=planOrderTransferTarget({reservation,item,orderId,itemId,productKey,qty,
+     toWarehouseId,action:'HANDOFF',ownerUid});
+   if(plan.schemaVersion!==2||reservation.status!=='active'||locationQty(reservation.shortageQty)!==0)
+     throw Error('只有完整預留的 V2 訂單可轉為 V3 保管。');
+   const next={...reservation,locationSchemaVersion:3,quantity:plan.orderQty,shortageQty:0,
+     locations:[{warehouseId:toWarehouseId,reservedQty:plan.orderQty}],
+     sourceLocationSnapshot:plan.sourceLocations.map(row=>({warehouseId:row.warehouseId,reservedQty:row.qty})),
+     custodyOriginalQty:plan.orderQty,custodyTransferId:transferId};
+   const deltas=reservationStockDeltas(reservation,next);
+   if(deltas.companyReservedDelta!==0)throw Error('業務保管不得改變公司預留數量。');
+   return {reservation:next,plan,warehouseDeltas:deltas.warehouseDeltas};
+ }
+ // Pure V3 lifecycle projection. The trusted transaction caller must still
+ // establish the order's unfulfilled quantity, current role, shipment/return
+ // history and lot provenance from authoritative reads before using this plan.
+ function planCustodyLifecycleReservation({reservation,productKey,ownerUid,custodyTransferId,
+   nextStatus,targetQty,itemReservedQty,aggregateStock,custodyStock}={}){
+   if(!reservation||reservation.locationSchemaVersion!==3||!productKey||!ownerUid||!custodyTransferId
+     ||reservation.productKey!==productKey||reservation.ownerUid!==ownerUid
+     ||reservation.custodyTransferId!==custodyTransferId||ownerUid.includes('/')||custodyTransferId.includes('/'))
+     throw Error('V3 保管取消恢復與原交接來源不一致。');
+   if(!['normal','cancelled'].includes(nextStatus))throw Error('保管取消恢復狀態不正確。');
+   const custodyId='custody-'+ownerUid,existing=locationQty(reservation.quantity);
+   // Also validates both immutable physical source legs and the sole custody
+   // position for zero and nonzero holds. Never fall back to a legacy ledger.
+   reservationLocations(reservation);
+   if(itemReservedQty!==existing)throw Error('保管品項與預留憑證數量不一致。');
+   const original=locationQty(reservation.custodyOriginalQty);
+   const target=nextStatus==='cancelled'?0:locationQty(targetQty);
+   if(target>original)throw Error('恢復數量超過原保管交接數量。');
+   const checked=(stock,warehouseId)=>{
+     if(!stock||stock.productKey!==undefined&&stock.productKey!==productKey
+       ||warehouseId&&stock.warehouseId!==warehouseId)
+       throw Error('保管取消恢復缺少正確的公司或保管倉來源。');
+     const onHand=locationQty(stock.onHand),reserved=locationQty(stock.reserved);
+     const transit=locationQty(stock.transferFreeInTransit??0);
+     if(reserved<existing||reserved+transit>onHand)
+       throw Error('公司或保管倉預留與實貨不一致。');
+     return {onHand,reserved,transit};
+   };
+   const company=checked(aggregateStock,''),custody=checked(custodyStock,custodyId);
+   const delta=target-existing;
+   if(delta>0&&(company.onHand-company.reserved-company.transit<delta
+     ||custody.onHand-custody.reserved-custody.transit<delta))
+     throw Error('公司或保管倉可用量不足，不得重複預留。');
+   const next={...reservation,quantity:target,shortageQty:0,
+     locations:target?[{warehouseId:custodyId,reservedQty:target}]:[],
+     status:nextStatus==='cancelled'?'released':target?'active':'fulfilled'};
+   const changes=reservationStockDeltas(reservation,next);
+   if(changes.companyReservedDelta!==delta||changes.warehouseDeltas.some(row=>row.warehouseId!==custodyId))
+     throw Error('保管取消恢復不得改變原雙倉或其他倉的預留。');
+   return {reservation:next,companyReservedDelta:delta,warehouseDeltas:changes.warehouseDeltas};
+ }
+ // Resolve a whole-item transfer source without flattening a v2 ledger.
+ // This validates source only; it does not authorize a legacy writer to move v2.
+ // Resolve every authoritative held location before composing a physical transfer.
+ // This is a read-only source check: a v2 ledger must never be flattened into a legacy warehouseId.
+ function orderTransferReservationSources({reservation,item,orderId,itemId,productKey,qty}={}){
+   if(!reservation||!item||typeof qty!=='number'||!Number.isFinite(qty)||qty<=0)
+     throw Error('訂單調撥預留來源不正確。');
+   for(const [field,expected] of [['orderId',orderId],['itemId',itemId],['productKey',productKey]]){
+     if(typeof expected!=='string'||!expected||expected.includes('/')
+       ||(reservation[field]!==undefined&&reservation[field]!==expected)
+       ||(reservation.locationSchemaVersion===2&&reservation[field]!==expected))
+       throw Error('訂單調撥預留來源識別不一致。');
+   }
+   if(item.itemId!==itemId||item.transferPendingId||item.custodyTransferId)
+     throw Error('訂單品項已有調撥或交接，不能重複移動。');
+   const held=legacyReservationQty(reservation.quantity),projected=legacyReservationQty(item.reservedQty);
+   if(Math.abs(held-qty)>1e-9||Math.abs(projected-qty)>1e-9
+     ||legacyReservationQty(reservation.shortageQty??0)!==0)
+     throw Error('訂單調撥須全數預留，數量或缺貨狀態不一致。');
+   if(reservation.locationSchemaVersion===undefined){
+     if(reservation.locations!==undefined||reservation.allocations!==undefined)
+       throw Error('單倉調撥不可混用多倉預留格式。');
+     const warehouseId=reservation.warehouseId;
+     if(typeof warehouseId!=='string'||!warehouseId||warehouseId!==warehouseId.trim()
+       ||warehouseId.includes('/')||warehouseId.startsWith('custody-'))
+       throw Error('單倉調撥預留位置不一致。');
+     return {schemaVersion:1,qty,sources:[{warehouseId,qty}]};
+   }
+   if(reservation.locationSchemaVersion!==2||reservation.warehouseId!==undefined)
+     throw Error('多倉預留版本或單倉欄位不一致。');
+   const sources=reservationLocations(reservation);
+   if(!sources.length||sources.some(row=>row.warehouseId.includes('/')||row.warehouseId.startsWith('custody-')))
+     throw Error('多倉調撥來源位置不正確。');
+   return {schemaVersion:2,qty,sources};
+ }
+ // Build source legs without changing a v2 reservation, moving only quantities
+ // outside the selected destination. No physical or ledger write is authorized here.
+ function planOrderTransferTarget({reservation,item,orderId,itemId,productKey,qty,toWarehouseId,action='DISPATCH',ownerUid=''}={}){
+   if(!['DISPATCH','HANDOFF'].includes(action)
+     ||typeof toWarehouseId!=='string'||!toWarehouseId||toWarehouseId!==toWarehouseId.trim()||toWarehouseId.includes('/'))
+     throw Error('訂單調撥目的位置或動作不正確。');
+   const source=orderTransferReservationSources({reservation,item,orderId,itemId,productKey,qty});
+   const isCustody=toWarehouseId.startsWith('custody-');
+   if(action==='HANDOFF'){
+     if(typeof ownerUid!=='string'||!ownerUid||ownerUid.includes('/')
+       ||toWarehouseId!=='custody-'+ownerUid)throw Error('業務交接目的地必須屬於目前訂單負責人。');
+   }else if(isCustody)throw Error('一般倉庫調撥不得直接寫入業務保管位置。');
+   if(source.schemaVersion===2){
+     const candidates=reservation.lifecycleWarehouseIds;
+     if(!Array.isArray(candidates)||candidates.length!==2||new Set(candidates).size!==2
+       ||candidates.some(w=>typeof w!=='string'||!w||w!==w.trim()||w.includes('/')||w.startsWith('custody-'))
+       ||!candidates.includes(item.warehouseId)
+       ||source.sources.some(row=>!candidates.includes(row.warehouseId))
+       ||(action==='DISPATCH'&&!candidates.includes(toWarehouseId)))
+       throw Error('多倉調撥來源與原兩個候選實體倉不一致。');
+   }else if(item.warehouseId!==source.sources[0].warehouseId)
+     throw Error('原單倉調撥位置與訂單指定倉不一致。');
+   const keptQty=source.sources.find(row=>row.warehouseId===toWarehouseId)?.qty||0;
+   const moveLegs=source.sources.filter(row=>row.warehouseId!==toWarehouseId)
+     .map(row=>({warehouseId:row.warehouseId,qty:row.qty}));
+   const movingQty=moveLegs.reduce((sum,row)=>sum+row.qty,0);
+   if(!moveLegs.length||Math.abs(movingQty+keptQty-source.qty)>1e-9)
+     throw Error('調撥沒有需要移動的預留，或分倉總量不一致。');
+   return {schemaVersion:source.schemaVersion,orderQty:source.qty,destinationWarehouseId:toWarehouseId,
+     sourceLocations:source.sources,moveLegs,movingQty,keptQty};
+ }
+ // Compatibility guard: existing single-source callers must not silently start moving distributed holds.
+ function orderTransferReservationSource(input={}){
+   const warehouseId=input.warehouseId;
+   if(typeof warehouseId!=='string'||!warehouseId||warehouseId!==warehouseId.trim()||warehouseId.includes('/'))
+     throw Error('訂單調撥預留來源不正確。');
+   const resolved=orderTransferReservationSources(input);
+   if(resolved.sources.length!==1||resolved.sources[0].warehouseId!==warehouseId
+     ||Math.abs(resolved.sources[0].qty-resolved.qty)>1e-9)
+     throw Error('調撥來源仍分散於多倉，須由受控後端處理。');
+   return {schemaVersion:resolved.schemaVersion,warehouseId,qty:resolved.qty};
  }
  // Legacy stock and fulfillment can contain fractional quantities. Validate
  // without clamping corrupt values into a smaller release or a new reservation.
@@ -154,7 +310,7 @@
    requireReservation=true,itemReservedQty}={}){
    validateReservationStockIdentity({productKey,warehouseId,reservation,aggregateStock,warehouseStock});
    if(typeof requireReservation!=='boolean')throw Error('出貨預留要求格式不正確。');
-   const multi=reservation.locationSchemaVersion===2;
+   const multi=[2,3].includes(reservation.locationSchemaVersion);
    // Reuse canonical format checks, including unknown/mixed location markers.
    reservationStockDeltas(reservation,reservation);
    const quantity=legacyReservationQty(reservation.quantity);
@@ -210,7 +366,7 @@
    // in every other warehouse. Corrections/cancellation still use a separate
    // lifecycle contract; a cancelled CLOSE receipt requires an already empty
    // released ledger and must never recreate or silently release a hold.
-   if(reservation.locationSchemaVersion===2&&operation==='CUSTOMER_RETURN'&&delta>0){
+   if([2,3].includes(reservation.locationSchemaVersion)&&operation==='CUSTOMER_RETURN'&&delta>0){
      reservationStockDeltas(reservation,reservation);
      if(reservation.warehouseId!==undefined)throw Error('多倉預留不可含單倉位置。');
      const amount=locationQty(delta),existing=locationQty(reservation.quantity),shortage=locationQty(reservation.shortageQty);
@@ -244,7 +400,7 @@
      (operation==='SHIP_REVERSAL'||settlement!=='CLOSE'?existing+delta:existing);
    quantity=legacyReservationQty(quantity);
    const next={...reservation,quantity,status:orderStatus==='cancelled'?'released':quantity>0?'active':'fulfilled'};
-   if(reservation.locationSchemaVersion===2){
+   if([2,3].includes(reservation.locationSchemaVersion)){
      locationQty(quantity);
      next.locations=quantity>0?[{warehouseId,reservedQty:quantity}]:[];
    }else if(quantity>0)next.warehouseId=warehouseId;
@@ -269,6 +425,7 @@
    if(typeof addsStock!=='boolean')throw Error('收貨庫存異動模式不正確。');
    validateReservationStockIdentity({productKey,warehouseId,reservation,aggregateStock,warehouseStock});
    const held=reservationStockDeltas({},reservation),multi=reservation.locationSchemaVersion===2;
+   if(reservation.locationSchemaVersion===3)throw Error('保管中的訂單不能經由實體倉收貨重新分配。');
    const quantity=legacyReservationQty(reservation.quantity),shortage=legacyReservationQty(reservation.shortageQty);
    const amount=legacyReservationQty(qty),requested=legacyReservationQty(requestedReserveQty);
    if(itemReservedQty!==undefined&&Math.abs(legacyReservationQty(itemReservedQty)-quantity)>1e-9)
@@ -339,7 +496,7 @@
  // stock projection, not permission to move stock or complete a transfer.
  function reservationStockDeltas(before={},after={}){
    const project=record=>{
-     if(record.locationSchemaVersion===2){
+     if([2,3].includes(record.locationSchemaVersion)){
        if(Object.hasOwn(record,'allocations')||Object.hasOwn(record,'warehouseAllocations'))
          throw Error('多倉預留同時含不同位置格式，請先核對資料。');
        return reservationLocations(record);
@@ -471,5 +628,5 @@
    const plan=planShortageAllocation(reservations,availableQty);
    return {allocations:plan.allocations.map(row=>({...row,id:row.reservationId})),allocatedQty:plan.allocatedQty,unallocatedQty:plan.remainingQty};
  }
- return {planReservationReceipt,planReservationReturn,planReservationIssue,validateReservationBalance,physicalWarehouse,planMainTransferHold,planReservationLifecycle,reservationStockDeltas,validateMultiLocationLedger,planLocationReservation,reservationLocations,planMultiWarehouseReservation,planReservation,planShortageAllocation,allocateReceiptToShortages,reservationLocationCanChange,selectSingleWarehouse,compareReservationPriority};
+ return {orderTransferReservationSource,orderTransferReservationSources,planOrderTransferTarget,planCustodyHandoffLedger,planCustodyLifecycleReservation,planReservationReceipt,planReservationReturn,planReservationIssue,validateReservationBalance,physicalWarehouse,planMainTransferHold,planReservationLifecycle,reservationStockDeltas,validateMultiLocationLedger,planLocationReservation,reservationLocations,planMultiWarehouseReservation,planReservation,planShortageAllocation,allocateReceiptToShortages,reservationLocationCanChange,selectSingleWarehouse,compareReservationPriority};
 });

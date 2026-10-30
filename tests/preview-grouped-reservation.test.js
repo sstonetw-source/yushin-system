@@ -2,7 +2,7 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const source=fs.readFileSync('src/services/grouped-reservation.js','utf8');
 const Reservation=require('../modules/reservation-core.js'),Inventory=require('../modules/inventory-core.js');
-function fixture({environment='preview',enabled=true}={}){
+function fixture({environment='preview',enabled=true,sameWarehouseEnabled=false}={}){
  const calls=[],invalidated=[],reads=[];
  let actor='sales1';
  const docs={
@@ -16,6 +16,7 @@ function fixture({environment='preview',enabled=true}={}){
    {itemId:'I2',productId:'P',warehouseId:'B',qty:5,reservedQty:0}
   ]};
  const globals={YUSHIN_PREVIEW_GROUPED_RESERVATION:enabled,
+  YUSHIN_PREVIEW_SAME_WAREHOUSE_RESERVATION:sameWarehouseEnabled,
   YushinReservation:Reservation,YushinInventory:Inventory};
  const context=vm.createContext({
   APP_ENVIRONMENT:environment,currentUser:{get uid(){return actor;}},console,
@@ -57,11 +58,33 @@ test('eligible two-warehouse initial order sends only IDs and shared Core planne
  assert.deepEqual(f.invalidated,[['P','A'],['P','B'],'demand']);
  assert.deepEqual(Object.keys(payload).sort(),['attemptId','items','orderId','syncAttemptId']);
 });
+test('same-warehouse multi-line Preview is independently default-off and uses one warehouse stock read',async()=>{
+ const disabled=fixture();disabled.order.items[1].warehouseId='A';
+ assert.equal(await disabled.run(),false);assert.equal(disabled.calls.length,0);
+ const f=fixture({sameWarehouseEnabled:true});f.order.items[1].warehouseId='A';
+ assert.equal(await f.run(),true);
+ assert.equal(f.reads.length,2);
+ assert.deepEqual(Array.from(f.calls[0].payload.items,x=>[x.itemId,x.quantity]),[['I1',3],['I2',0]]);
+ assert.equal(f.calls[0].payload.attemptId,'sync_AAAAAAAA123456_same_0');
+ assert.deepEqual(f.invalidated,[['P','A'],'demand']);
+});
+test('adding same-warehouse groups never renumbers an existing two-warehouse receipt ID',async()=>{
+ const f=fixture({sameWarehouseEnabled:true});
+ f.docs['inventory/Q']={productKey:'Q',onHand:10,reserved:0};
+ f.docs['warehouseStocks/A__Q']={productKey:'Q',warehouseId:'A',onHand:10,reserved:0};
+ f.order.items.unshift({itemId:'Q1',productId:'Q',warehouseId:'A',qty:2,reservedQty:0},
+  {itemId:'Q2',productId:'Q',warehouseId:'A',qty:2,reservedQty:0});
+ assert.equal(await f.run(),true);
+ assert.equal(f.calls.length,2);
+ assert.deepEqual(f.calls.map(x=>x.payload.attemptId),[
+  'sync_AAAAAAAA123456_same_0','sync_AAAAAAAA123456_group_0']);
+});
 test('unsupported, pending progress or changed login fail closed without remote writes',async()=>{
  for(const change of [
   o=>o.inventoryReservationStatus='completed',
   o=>o.items[0].deliveredQty=1,
   o=>o.items[0].reservedQty=1,
+  o=>o.items[0].warehouseShippedQty=1,
   o=>o.items[1].fulfillmentType='DIRECT_SHIP',
   o=>o.items[0].warehouseId='B',
   o=>o.items[0].qty=1.5

@@ -1285,6 +1285,30 @@ async function requestedReturnFixture(tag,{qty=2,multi=false}={}){
   date:'2026-10-21',reason:'原介面申請，交倉庫分批實收'});
  return {...x,client,requestId,intent:{...x.intent,requestId,date:'2026-10-21'}};
 }
+test('canonical Auth return application and withdrawal preserve partial physical receipt and original IDs',{timeout:120000},async()=>{
+ const x=await fixture('request-backend',{cancelled:false}),before=await snapshot(x);
+ const intent={orderId:x.orderId,itemId:'I',operationId:'request_backend_123456',syncAttemptId:x.intent.syncAttemptId,
+  qty:2,date:'2026-10-21',reason:'後端退貨申請'};
+ const request=payload=>httpsCallable(x.actor.functions,'requestV2CustomerReturn')(payload).then(r=>r.data);
+ assert.equal((await request(intent)).status,'applied');const once=await snapshot(x);
+ assert.deepEqual(once.documents.slice(1),before.documents.slice(1));assert.deepEqual(once.movements,before.movements);
+ assert.equal((await request(intent)).status,'already-applied');assert.deepEqual(await snapshot(x),once);
+ await assert.rejects(request({...intent,qty:3}),code('already-exists'));
+ await assert.rejects(request({...intent,qty:3,operationId:'request_backend_223456'}),code('failed-precondition'));
+ assert.deepEqual(await snapshot(x),once);
+ const receiver=await identity('request-backend-receiver','warehouse');
+ await assert.rejects(httpsCallable(receiver.functions,'requestV2CustomerReturn')(intent),code('permission-denied'));
+ await receiver.receive({...x.intent,requestId:intent.operationId,date:'2026-10-21'});
+ const received=await snapshot(x);
+ const withdrawal={orderId:x.orderId,requestId:intent.operationId,operationId:'withdraw_backend_12345',syncAttemptId:x.intent.syncAttemptId};
+ const withdraw=()=>httpsCallable(x.actor.functions,'withdrawV2CustomerReturnRequest')(withdrawal).then(r=>r.data);
+ assert.equal((await withdraw()).status,'applied');const cancelled=await snapshot(x);
+ assert.deepEqual(cancelled.documents.slice(1),received.documents.slice(1));
+ assert.deepEqual(cancelled.movements,received.movements);assert.deepEqual(cancelled.returnReceipts,received.returnReceipts);
+ const record=cancelled.documents[0].returnRequests.find(r=>r.id===intent.operationId);
+ assert.equal(record.status,'CANCELLED');assert.equal(record.receivedQty,1);
+ assert.equal((await withdraw()).status,'already-applied');assert.deepEqual(await snapshot(x),cancelled);
+});
 function assertRequestedStockIncrease(before,after,amount){
  assert.equal(after.documents[1].onHand,before.documents[1].onHand+amount);
  assert.equal(after.documents[3].onHand,before.documents[3].onHand+amount);
@@ -1435,9 +1459,9 @@ function originalReturnReceiptClient(receiver,role,storage,{loseReply=false}={})
  const c=vm.createContext({YUSHIN_V2_RETURN_RECEIPT_EMULATOR:true,location:{hostname:'localhost'},
   currentUser:{uid:receiver.uid},currentUserRole:role,YushinFulfillment:require('../modules/fulfillment-core'),
   canReceiveInventoryCapability:()=>['admin','purchaser','warehouse'].includes(c.currentUserRole),
-  firebase:{auth:()=>receiver.auth,functions:()=>{throw Error('Use compat app regional API');},app:()=>({functions:region=>{assert.equal(region,'asia-east1');return functions;}})},
+  firebase:{auth:()=>receiver.auth,functions:()=>{throw Error('Use compat app regional API');},app:()=>({options:receiver.app.options,functions:region=>{assert.equal(region,'asia-east1');return functions;}})},
   sessionStorage:{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},
-  db:{collection:name=>({doc:id=>({get:async options=>{
+  db:{app:receiver.app,collection:name=>({doc:id=>({get:async options=>{
    assert.equal(options.source,'server');const snap=await getDocFromServer(doc(live,name,id));return {exists:snap.exists(),data:()=>snap.data()};
   }})})}});
  vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/services/customer-return-transport.js'),'utf8'),c);

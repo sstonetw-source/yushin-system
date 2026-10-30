@@ -13,9 +13,11 @@
 1. 前置：本批與 #319 經審查、完整 CI 全綠並整合指定 main；核對合併後產物。main #307 已提供正式 Callable 與獨立旗標，但合併不等於啟用。
 2. 先在隔離 Preview 完成授權的部署與瀏覽器驗收，查核 Auth/Firestore/Functions 同屬 `preview-20135`。Emulator 或 project facade 不能代替真實 Preview。
 3. 取得明確正式發布授權，記錄指定 commit、網站版本及 Functions 修訂。以正式專案 `yu-shing-company` 部署既有 `commitV2QuickPurchase`，前端正式旗標仍保持關閉；不部署 Rules、Index 或其他 Functions 作為本次附帶變更。
-4. 確認後端部署及環境後，按授權設定 `ENABLE_PRODUCTION_QUICK_PURCHASE=true`。前端透過可審閱的載入設定、於 app.js 執行前設定 `YUSHIN_PRODUCTION_QUICK_PURCHASE=true`；這個前端設定變更尚未建立或執行，須在發布前確認網站來源及快取更新方式。
-5. 以授權的原 purchaser 操作核對來源訂單、採購需求、公司／分倉 incoming、唯一供應與 movement，保留原 operationId、提交及回讀證據；admin 成功不代替 purchaser 403 驗收。
-6. 正式驗收通過後，再以獨立 PR 移除舊 client writer，保留原後端冪等憑證與復原入口。
+4. 已新增獨立 `transaction-rollout-config.js`，由 `index.html` 以 `?v=20261028-1` 同步載入、在 `app.js` 前執行；**目前明確設定 `YUSHIN_PRODUCTION_QUICK_PURCHASE=false`，並未切換**。實際切換須另以授權的獨立變更把它設為 `true`，與後端 `ENABLE_PRODUCTION_QUICK_PURCHASE=true` 配套發布。
+5. 切換前記錄 Git commit、前端網站入口、`index.html` 版本、`app.js?v=` 版本、`transaction-rollout-config.js?v=` 版本、Functions 版號及部署時間，實際由目標網站載入後核對 Network 200、回應本文與 Cache-Control／瀏覽器快取；兩個 JS 的版本參數需在切換批次一同更新。不得只在 Console 臨時輸入旗標取代可追蹤的發布。
+6. **舊分頁、離線副本與快取仍可執行舊前端交易**。前端旗標與版本參數不是安全規則，無法保證所有既存客戶端已切換；真正停止舊 writer 須另以授權的後端／Rules 拒絕舊寫入並驗證相容性，不可聲稱本設定已消除 403 或完成 Legacy 移除。
+7. 以授權的原 purchaser 操作核對來源訂單、採購需求、公司／分倉 incoming、唯一供應與 movement，保留原 operationId、提交及回讀證據；admin 成功不代替 purchaser 403 驗收。
+8. 正式驗收通過後，再以獨立 PR 移除舊 client writer，保留原後端冪等憑證與復原入口。
 
 ### 中止／恢復
 

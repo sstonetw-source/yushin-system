@@ -1,6 +1,6 @@
 'use strict';
-// Internal-only, bounded v2 lifecycle. Do not export Callable or
-// connect legacy pages until supplier commitments and broader fulfillment paths are unified.
+// Bounded v2 lifecycle uses one backend writer. The exported Callable is
+// independently gated to demo Emulator / fixed Preview, never production.
 const {createHash}=require('node:crypto');
 const core=require('./shared/reservation-core');
 const demandCore=require('./shared/procurement-demand-core');
@@ -9,6 +9,7 @@ const receivingCore=require('./shared/receiving-core');
 const fulfillmentCore=require('./shared/fulfillment-core');
 const {readShipmentProof}=require('./shipment-delivery-service');
 const {readLocationReturnProofs}=require('./location-return-trace-service');
+const {orderLifecycleBackendProject}=require('./order-lifecycle-preview-gate');
 function fault(message,code='failed-precondition'){const e=new Error(message);e.code=code;throw e;}
 function ident(value,name){
  if(typeof value!=='string'||!value||value!==value.trim()||value.includes('/')||value.length>160)
@@ -54,10 +55,14 @@ function normalizeOrderLifecycleIntent(data){
  return {...intent,hash:createHash('sha256').update(JSON.stringify(intent)).digest('hex')};
 }
 async function commitSingleItemLocationLifecycle(db,uid,data){return runLocationLifecycle(db,uid,data,false);}
-async function commitOrderLocationLifecycle(db,uid,data){return runLocationLifecycle(db,uid,data,true);}
-async function runLocationLifecycle(db,uid,data,wholeOrder){
- if(!process.env.FIRESTORE_EMULATOR_HOST||db.projectId!=='demo-yushin')
-  fault('v2 雙倉訂單取消與恢復僅允許 demo-yushin Emulator');
+async function commitOrderLocationLifecycle(db,uid,data,env=process.env){return runLocationLifecycle(db,uid,data,true,env);}
+async function runLocationLifecycle(db,uid,data,wholeOrder,env=process.env){
+ const project=wholeOrder?orderLifecycleBackendProject(env):'';
+ const directDemo=db.projectId==='demo-yushin'
+  &&typeof env.FIRESTORE_EMULATOR_HOST==='string'
+  &&/^(127\.0\.0\.1|localhost):[0-9]+$/.test(env.FIRESTORE_EMULATOR_HOST);
+ if((!wholeOrder&&!directDemo)||(wholeOrder&&(!project||db.projectId!==project)&&!directDemo))
+  fault('v2 雙倉訂單取消與恢復後端未獲專案授權');
  ident(uid,'登入者');
  const intent=wholeOrder?normalizeOrderLifecycleIntent(data):normalizeLifecycleIntent(data);
  const {orderId,warehouseIds,nextStatus,operationId,syncAttemptId}=intent;
@@ -528,9 +533,9 @@ async function commitSingleItemLocationLifecycleAndRecover(db,uid,input){
  return {...committed,postCommitAllocation};
 }
 
-async function commitOrderLocationLifecycleAndRecover(db,uid,input){
+async function commitOrderLocationLifecycleAndRecover(db,uid,input,env=process.env){
  const intent=normalizeOrderLifecycleIntent(input);
- const committed=await commitOrderLocationLifecycle(db,uid,input);
+ const committed=await commitOrderLocationLifecycle(db,uid,input,env);
  if(intent.nextStatus!=='cancelled')return {...committed,postCommitAllocation:{status:'not-applicable',sources:[]}};
  const releaseIds=committed.items.flatMap(item=>item.warehouseDeltas.filter(row=>row.reservedDelta<0)
   .map(row=>'single-v2-life-'+intent.operationId+'-'+encodeURIComponent(item.itemId)+'-'+encodeURIComponent(row.warehouseId)));

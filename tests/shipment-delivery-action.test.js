@@ -14,6 +14,7 @@ function fixture(){
  const c=vm.createContext({YUSHIN_V2_DELIVERY_EMULATOR:true,YushinFulfillment:core,
   normalizedOrderItems:o=>o.items,normalizedOrderStatus:o=>o.status,orderInventorySyncIncomplete:()=>false,
   itemDispatchState:()=>({shippable:0,grossDelivered:4,returned:4}),pendingV2DeliveryConfirmation:()=>null});
+ c.deliveryConfirmationProtectedMode=()=>c.YUSHIN_V2_DELIVERY_EMULATOR===true;
  vm.runInContext(action,c);return {c,order,identity};
 }
 test('original delivery action remains available after all prepared goods ship from another warehouse and CLOSE return',()=>{
@@ -50,7 +51,8 @@ function completedFormFixture(){
   pendingV2DeliveryConfirmation:()=>({orderId:'O',quantity:3,shipmentId:'last',operationId:'frozen'}),
   document:{getElementById:id=>fields[id]},alert:s=>alerts.push(s),selectOrderProgressTab(){},
   renderDeliveryModal(){fields.deliveryQty.value='3';}});
- c.window=c;vm.runInContext(code,c);return {c,fields,alerts};
+ c.window=c;c.deliveryConfirmationProtectedMode=()=>c.YUSHIN_V2_DELIVERY_EMULATOR===true;
+ vm.runInContext(code,c);return {c,fields,alerts};
 }
 test('completed order can open its frozen successful-delivery confirmation after reload',()=>{
  const f=completedFormFixture();f.c.openPartialDeliveryForm();

@@ -3169,38 +3169,108 @@ async function crossWarehouseEvidenceFixture(uid,role,count=2,{mutate=null,inven
  const snapshot=()=>Promise.all(paths.map(async p=>{const s=await getDoc(doc(db('admin'),p));return s.exists()?s.data():null;}));
  return {id,productKey,items,run,snapshot};
 }
-test('actual cross-warehouse wrapper retains authorized five-role access with one company and separate warehouse totals',async()=>{
+test('#311 operational native cross-warehouse proof is rejected; separately checked business stock operations remain scoped',async()=>{
  for(const [uid,role] of [['admin','admin'],['buyer1','purchaser'],['wh1','warehouse'],['sales1','sales'],['eng1','engineer']]){
-  const f=await crossWarehouseEvidenceFixture(uid,role);await assertSucceeds(f.run([2,3]));
+  const f=await crossWarehouseEvidenceFixture(uid,role),before=await f.snapshot();
+  // The operational purchaser/warehouse SDK builds the vulnerable crossWarehouse
+  // evidence. Admin and commercial role paths use separate legacy protocols.
+  const operational=['purchaser','warehouse'].includes(role);
+  if(operational){await assertFails(f.run([2,3]));assert.deepEqual(await f.snapshot(),before);}
+  else await assertSucceeds(f.run([2,3]));
   const [company,a,b,...reservations]=await f.snapshot();
-  assert.equal(company.reserved,5);assert.equal(a.reserved,2);assert.equal(b.reserved,3);
+  assert.equal(company.reserved,operational?0:5);
+  assert.equal(a.reserved,operational?0:2);assert.equal(b.reserved,operational?0:3);
   assert.equal(company.onHand,40);assert.equal(a.onHand,20);
-  if(['purchaser','warehouse'].includes(role))for(const r of reservations){
-   assert.equal(r.stockEvidence.crossWarehouse,true);
-   assert.equal(r.stockEvidence.companyMovementId,f.id+'-1-A');
-   const representative=(await getDoc(doc(db('admin'),'inventoryReservations/'+r.stockEvidence.reservationIds[0]))).data();
-   assert.equal(representative.warehouseId,r.warehouseId);
-  }
+  if(operational)assert.ok(reservations.every(r=>r===null));
  }
 });
-test('five operational reservations across two warehouses stay within Rules evaluation and document access limits',async()=>{
+test('#311 old SDK five-line cross-warehouse updates are blocked without Rules budget exhaustion',async()=>{
  for(const [uid,role] of [['buyer1','purchaser'],['wh1','warehouse']]){
   const f=await crossWarehouseEvidenceFixture(uid,role,5);
-  for(const quantities of [[1,2,1,2,1],[1,1,1,1,1],[2,0,1,1,1],[0,0,0,0,0]]){
-   await assertSucceeds(f.run(quantities));const [company,a,b]=await f.snapshot();
-   assert.equal(company.reserved,quantities.reduce((a,b)=>a+b,0));
-   assert.equal(a.reserved,quantities[0]+quantities[2]+quantities[4]);assert.equal(b.reserved,quantities[1]+quantities[3]);
+  const before=await f.snapshot();
+  for(const quantities of [[1,2,1,2,1],[1,1,1,1,1],[2,0,1,1,1]]){
+   await assertFails(f.run(quantities));assert.deepEqual(await f.snapshot(),before);
   }
  }
 });
-test('operational warehouse-specific proofs permit partial release and a zero-company exchange but reject movement reuse',async()=>{
+test('#311 old warehouse proof cannot be replayed as a new cross-warehouse reservation',async()=>{
  for(const [uid,role] of [['buyer1','purchaser'],['wh1','warehouse']]){
-  const f=await crossWarehouseEvidenceFixture(uid,role);await assertSucceeds(f.run([2,3]));
-  const before=await f.snapshot();await assertFails(f.run([1,4],{movementAttempt:1}));assert.deepEqual(await f.snapshot(),before);
-  for(const quantities of [[1,2],[2,1],[0,0]]){
-   await assertSucceeds(f.run(quantities));const [company,a,b]=await f.snapshot();
-   assert.equal(company.reserved,quantities[0]+quantities[1]);assert.equal(a.reserved,quantities[0]);assert.equal(b.reserved,quantities[1]);
+  const f=await crossWarehouseEvidenceFixture(uid,role),before=await f.snapshot();
+  await assertFails(f.run([2,3]));assert.deepEqual(await f.snapshot(),before);
+  await assertFails(f.run([1,4],{movementAttempt:1}));assert.deepEqual(await f.snapshot(),before);
+  for(const quantities of [[1,2],[2,1]]){
+   await assertFails(f.run(quantities));assert.deepEqual(await f.snapshot(),before);
   }
+ }
+});
+// #311 direct reproduction: split one warehouse's changed reservations across
+// separate native Client SDK primary/linked movement proofs. The old Rules
+// accepted a partial local list; the trusted backend is now the only writer.
+async function splitSameWarehouseProofFixture(uid,kind,complete=false){
+ const orderId='proof-'+uid+'-'+kind+(complete?'-complete':'');
+ const warehouseIds=kind==='linked'?['A','B','B']:['A','A'];
+ const productKey='P-'+orderId,ids=warehouseIds.map((_,i)=>orderId+'__I'+i);
+ const groups=kind==='linked'?(complete?[[0],[1,2]]:[[0],[1],[2]])
+  :kind==='duplicate'?[[0,1],[0,1]]:(complete?[[0,1]]:[[0],[1]]);
+ await seed('orders/'+orderId,{ownerUid:'sales1',salesCode:'S01',status:'active',inventoryReservationStatus:'completed',
+  items:warehouseIds.map((warehouseId,i)=>({itemId:'I'+i,productId:productKey,warehouseId,qty:5}))});
+ await seed('inventory/'+productKey,{productKey,onHand:20,reserved:0,incoming:0});
+ for(const wh of new Set(warehouseIds))await seed('warehouseStocks/'+wh+'__'+productKey,{productKey,warehouseId:wh,onHand:20,reserved:0,incoming:0});
+ const client=db(uid),batch=writeBatch(client),movementIds=groups.map((_,i)=>orderId+'-M'+i);
+ const proofs=groups.map((indices,i)=>{
+  const warehouseId=warehouseIds[indices[0]],primary=kind==='primary'||i===0;
+  return {inventoryId:productKey,warehouseStockId:warehouseId+'__'+productKey,
+   previousWarehouseStockId:warehouseId+'__'+productKey,movementId:movementIds[i],crossWarehouse:true,
+   companyMovementId:primary?movementIds[i]:movementIds[0],
+   reservationIds:[...indices.map(j=>ids[j]),...ids.filter((_,j)=>!indices.includes(j))],
+   warehouseReservationIds:indices.map(j=>ids[j])};
+ });
+ batch.update(doc(client,'inventory/'+productKey),{reserved:warehouseIds.length});
+ for(const wh of new Set(warehouseIds)){
+  const total=kind==='duplicate'?warehouseIds.filter(w=>w===wh).length
+   :groups.reduce((sum,indices)=>sum+(warehouseIds[indices[0]]===wh?indices.length:0),0);
+  batch.update(doc(client,'warehouseStocks/'+wh+'__'+productKey),{reserved:total});
+ }
+ groups.forEach((indices,i)=>batch.set(doc(client,'inventoryMovements/'+movementIds[i]),{
+  productKey,warehouseId:warehouseIds[indices[0]],sourceId:orderId,sourceType:'order',type:'reserve',
+  ownerUid:'sales1',salesCode:'S01',qty:indices.length,reservationStockEvidence:proofs[i]
+ }));
+ warehouseIds.forEach((warehouseId,i)=>{
+  const proof=proofs[kind==='duplicate'?i:groups.findIndex(indices=>indices.includes(i))];
+  batch.set(doc(client,'inventoryReservations/'+ids[i]),{orderId,itemId:'I'+i,orderItemIndex:i,
+   productKey,warehouseId,quantity:1,shortageQty:4,ownerUid:'sales1',salesCode:'S01',stockEvidence:proof});
+ });
+ const snapshot=async()=>({
+  company:(await getDoc(doc(db('admin'),'inventory/'+productKey))).data().reserved,
+  warehouses:await Promise.all([...new Set(warehouseIds)].map(async wh=>
+   (await getDoc(doc(db('admin'),'warehouseStocks/'+wh+'__'+productKey))).data().reserved)),
+  reservations:await Promise.all(ids.map(async id=>(await getDoc(doc(db('admin'),'inventoryReservations/'+id))).exists())),
+  movements:await Promise.all(movementIds.map(async id=>(await getDoc(doc(db('admin'),'inventoryMovements/'+id))).exists()))
+ });
+ return {run:()=>batch.commit(),snapshot};
+}
+test('#311 exact same-warehouse split-primary exploit is atomically denied by backend-only fence',async()=>{
+ for(const uid of ['buyer1','wh1']){
+  const f=await splitSameWarehouseProofFixture(uid,'primary'),before=await f.snapshot();
+  await assertFails(f.run());assert.deepEqual(await f.snapshot(),before);
+ }
+});
+test('#311 exact same-warehouse duplicate-primary proof is atomically denied',async()=>{
+ for(const uid of ['buyer1','wh1']){
+  const f=await splitSameWarehouseProofFixture(uid,'duplicate'),before=await f.snapshot();
+  await assertFails(f.run());assert.deepEqual(await f.snapshot(),before);
+ }
+});
+test('#311 exact linked-warehouse partial local proof is atomically denied',async()=>{
+ for(const uid of ['buyer1','wh1']){
+  const f=await splitSameWarehouseProofFixture(uid,'linked'),before=await f.snapshot();
+  await assertFails(f.run());assert.deepEqual(await f.snapshot(),before);
+ }
+});
+test('#311 even complete native cross-warehouse proof must use the backend',async()=>{
+ for(const uid of ['buyer1','wh1']){
+  const f=await splitSameWarehouseProofFixture(uid,'linked',true),before=await f.snapshot();
+  await assertFails(f.run());assert.deepEqual(await f.snapshot(),before);
  }
 });
 test('native corruption of company warehouse or proof metadata cannot bypass cross-warehouse reservation evidence',async()=>{
@@ -3213,7 +3283,10 @@ test('native corruption of company warehouse or proof metadata cannot bypass cro
   (path,data)=>{const key=data.stockEvidence?'stockEvidence':data.reservationStockEvidence?'reservationStockEvidence':'';return key?{...data,[key]:{...data[key],crossWarehouse:false}}:data;},
   (path,data)=>{const key=data.stockEvidence?'stockEvidence':data.reservationStockEvidence?'reservationStockEvidence':'';return key?{...data,[key]:{...data[key],warehouseReservationIds:[]}}:data;},
   (path,data)=>{const key=data.stockEvidence?'stockEvidence':data.reservationStockEvidence?'reservationStockEvidence':'';return key?{...data,[key]:{...data[key],warehouseReservationIds:[...data[key].reservationIds]}}:data;},
-  (path,data)=>{const key=data.stockEvidence?'stockEvidence':data.reservationStockEvidence?'reservationStockEvidence':'';return key?{...data,[key]:{...data[key],companyMovementId:'nonexistent-primary'}}:data;}
+  (path,data)=>{const key=data.stockEvidence?'stockEvidence':data.reservationStockEvidence?'reservationStockEvidence':'';return key?{...data,[key]:{...data[key],companyMovementId:'nonexistent-primary'}}:data;},
+  // #311: two incomplete "primary" movements must never split one company hold.
+  (path,data)=>{const key=data.stockEvidence?'stockEvidence':data.reservationStockEvidence?'reservationStockEvidence':'';
+   return key&&data.warehouseId==='B'?{...data,[key]:{...data[key],companyMovementId:data[key].movementId}}:data;}
  ];
  for(const [uid,role] of [['buyer1','purchaser'],['wh1','warehouse']])for(const mutate of mutations){
   const f=await crossWarehouseEvidenceFixture(uid,role,2,{mutate}),before=await f.snapshot();
@@ -3243,15 +3316,12 @@ test('native grouped proofs cannot conceal a nonrepresentative reservation move 
   assert.equal((await getDoc(doc(db('admin'),'warehouseStocks/A__P'))).data().reserved,1);
  }
 });
-test('zero-company exchanges use the actual noncanonical inventory document without writing unchanged stock',async()=>{
+test('#311 retired native zero-company exchange cannot bypass a noncanonical inventory document',async()=>{
  for(const [uid,role] of [['buyer1','purchaser'],['wh1','warehouse']]){
   const inventoryId='actual-ledger-'+uid,f=await crossWarehouseEvidenceFixture(uid,role,2,{inventoryId});
-  await assertSucceeds(f.run([2,3]));
-  const before=(await f.snapshot())[0];
-  await assertSucceeds(f.run([3,2],{skipCompany:true}));
-  const [company,a,b,...reservations]=await f.snapshot();assert.deepEqual(company,before);
-  assert.equal(a.reserved,3);assert.equal(b.reserved,2);
-  for(const r of reservations)assert.equal(r.stockEvidence.inventoryId,inventoryId);
+  const before=await f.snapshot();
+  await assertFails(f.run([2,3]));assert.deepEqual(await f.snapshot(),before);
+  await assertFails(f.run([3,2],{skipCompany:true}));assert.deepEqual(await f.snapshot(),before);
   assert.equal((await getDoc(doc(db('admin'),'inventory/'+f.productKey))).exists(),false);
  }
 });
@@ -3338,17 +3408,18 @@ test('typed reservation results reject a foreign live sibling even when its nume
   await assertSucceeds(operationalReserveBatch(uid).commit());
  }
 });
-test('primary cross-warehouse proof validates a fifth nonlocal sibling even when its stock delta is zero',async()=>{
+test('#311 native cross-warehouse proof cannot use even a valid fifth sibling to bypass backend ownership',async()=>{
  for(const [uid,role] of [['buyer1','purchaser'],['wh1','warehouse']]){
   const sibling='unchanged-sibling-'+uid;
   const f=await crossWarehouseEvidenceFixture(uid,role,4,{mutate:(path,data)=>{
    const key=data.stockEvidence?'stockEvidence':data.reservationStockEvidence?'reservationStockEvidence':'';
    return key?{...data,[key]:{...data[key],reservationIds:[...data[key].reservationIds,sibling]}}:data;
   }});
-  // Control: an unchanged sibling of the same product contributes a valid zero.
+  // The former valid native proof is now deliberately backend-only.
   const held={productKey:f.productKey,warehouseId:'A',quantity:1};
   await seed('inventoryReservations/'+sibling,held);
-  await assertSucceeds(f.run([1,2,1,2]));
+  const initial=await f.snapshot();
+  await assertFails(f.run([1,2,1,2]));assert.deepEqual(await f.snapshot(),initial);
   // Only its product identity changes; quantities, proof size and access count stay identical.
   await seed('inventoryReservations/'+sibling,{...held,productKey:'OTHER'});
   const before=await f.snapshot();

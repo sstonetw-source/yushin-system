@@ -63,6 +63,69 @@
     if(!Number.isFinite(reservedQty)||reservedQty<0||reservedQty>qty)throw Error('預留數量不正確。');
     if(Number(stock.onHand||0)<qty||Number(stock.reserved||0)<reservedQty||Number(stock.onHand||0)-Number(stock.reserved||0)<qty-reservedQty)throw Error('來源倉庫可移動庫存不足。');
   }
+  // Shared physical stock projection; transfer receipt is independent of order allocation.
+  function transferBalances(stock={}){
+    const result={};
+    for(const field of ['onHand','reserved','incoming','transferReserved','transferInTransit','transferFreeInTransit']){
+      const value=stock[field]??0;
+      if(typeof value!=='number'||!Number.isFinite(value)||value<0)throw Error('調撥庫存數量不正確。');
+      result[field]=value;
+    }
+    if(result.transferReserved>result.reserved||result.reserved+result.transferFreeInTransit>result.onHand
+      ||result.transferFreeInTransit>result.transferInTransit)throw Error('調撥庫存彙總不一致。');
+    return result;
+  }
+  function planTransferDispatch({aggregateStock,warehouseStock,qty,reservedQty=0,heldQty=0}){
+    const company=transferBalances(aggregateStock),source=transferBalances(warehouseStock);
+    if(!Number.isFinite(heldQty)||heldQty<0||reservedQty<0||!Number.isFinite(reservedQty)||reservedQty+heldQty>qty)
+      throw Error('調撥預留數量不正確。');
+    transferable(source,qty,reservedQty+heldQty);
+    if(company.onHand<source.onHand||company.reserved<source.reserved||company.transferReserved<source.transferReserved
+      ||source.transferReserved<heldQty||company.transferReserved<heldQty)throw Error('調回保留數量不一致。');
+    return {source:{onHand:source.onHand-qty,reserved:source.reserved-reservedQty-heldQty,
+      ...(heldQty?{transferReserved:source.transferReserved-heldQty}:{})},
+      aggregate:{...(heldQty?{reserved:company.reserved-heldQty,transferReserved:company.transferReserved-heldQty}:{}),
+        transferInTransit:company.transferInTransit+qty,transferFreeInTransit:company.transferFreeInTransit+qty-reservedQty}};
+  }
+  function planTransferReceipt({aggregateStock,warehouseStock={},qty,reservedQty=0}){
+    const company=transferBalances(aggregateStock),target=transferBalances(warehouseStock);
+    if(!Number.isFinite(qty)||qty<=0||!Number.isFinite(reservedQty)||reservedQty<0||reservedQty>qty)
+      throw Error('調撥收貨數量不正確。');
+    if(company.onHand<target.onHand+qty||company.reserved<target.reserved+reservedQty||company.transferInTransit<qty||company.transferFreeInTransit<qty-reservedQty)
+      throw Error('調撥途中數量不一致。');
+    return {aggregate:{transferInTransit:company.transferInTransit-qty,transferFreeInTransit:company.transferFreeInTransit-(qty-reservedQty)},
+      target:{onHand:target.onHand+qty,reserved:target.reserved+reservedQty,incoming:target.incoming}};
+  }
+  // Shared destination-lot projection for main stock transfers and order handoff.
+  // Cost remains a reference to its original source; no cost amount is exposed.
+  function transferDestinationLots(transfer,inventory,now){
+    const id=value=>typeof value==='string'&&!!value&&value===value.trim()&&!value.includes('/');
+    if(!transfer||!id(transfer.id)||!id(transfer.productKey)||!id(transfer.toWarehouseId)
+      ||!Number.isFinite(transfer.qty)||transfer.qty<=0||typeof now!=='string'||!now
+      ||!Array.isArray(transfer.allocations)||!transfer.allocations.length||transfer.allocations.length>201)
+      throw Error('調撥目的倉批次來源不正確。');
+    const seen=new Set();let total=0;
+    const rows=transfer.allocations.map((a,index)=>{
+      if(!a||!id(a.lotId)||!id(a.costLotId)||a.targetLotId!==transfer.id+'-'+index
+        ||seen.has(a.lotId)||!Number.isFinite(a.qty)||a.qty<=0)throw Error('調撥批次重複或數量不正確。');
+      seen.add(a.lotId);total+=a.qty;
+      const lot={productKey:transfer.productKey,productId:transfer.productId,warehouseId:transfer.toWarehouseId,
+        lotNo:a.lotNo||'',expiryDate:a.expiryDate||'',qty:a.qty,remainingQty:a.qty,
+        ...(a.unbatched?{unbatched:true}:{}),receivedAt:now,createdAt:now,sourceType:'WAREHOUSE_TRANSFER',
+        sourceId:transfer.id,costLotId:a.costLotId,transferId:transfer.id,
+        itemCode:inventory.itemCode||transfer.itemCode,itemName:inventory.itemName||transfer.itemName};
+      const cost={lotId:a.targetLotId,productKey:transfer.productKey,warehouseId:transfer.toWarehouseId,
+        sourceType:'WAREHOUSE_TRANSFER',sourceId:transfer.id,costSourceLotId:a.costLotId,createdAt:now};
+      return {lotId:a.targetLotId,lot,cost};
+    });
+    if(Math.abs(total-transfer.qty)>1e-8)throw Error('調撥批次總量不一致。');
+    return rows;
+  }
+  function planTransferHandoff({aggregateStock,warehouseStock,targetStock={},qty}){
+    const dispatch=planTransferDispatch({aggregateStock,warehouseStock,qty,reservedQty:qty});
+    const receipt=planTransferReceipt({aggregateStock:{...aggregateStock,...dispatch.aggregate},warehouseStock:targetStock,qty,reservedQty:qty});
+    return {source:dispatch.source,target:receipt.target,aggregate:{...dispatch.aggregate,...receipt.aggregate}};
+  }
   function batchJobs(list,getPlan,batchId){
     if(!list.length||list.length>100)throw Error('每批請勾選 1 至 100 個品項。');
     const seen=new Set();
@@ -97,7 +160,7 @@
     if((order.logisticsHistory||[]).some(h=>h.itemId===item.itemId&&h.action==='倉庫調撥收貨'))return '已轉倉・待送客戶';
     return '';
   }
-  const api={modes,plan,executionPlan,transferRequirements,businessDeliveryState,aggregateRows,validatePlan,bundleKey,partition,transferable,batchJobs,processBatch,csvDocument,shippingStatus};root.YushinWarehouseLogistics=api;
+  const api={planTransferHandoff,transferDestinationLots,transferBalances,planTransferDispatch,planTransferReceipt,modes,plan,executionPlan,transferRequirements,businessDeliveryState,aggregateRows,validatePlan,bundleKey,partition,transferable,batchJobs,processBatch,csvDocument,shippingStatus};root.YushinWarehouseLogistics=api;
   if(typeof module==='object'&&module.exports)module.exports=api;
   if(typeof document==='undefined')return;
   const $=id=>document.getElementById(id);
@@ -111,27 +174,54 @@
   function canSetPlan(order){return allowed()||(root.YushinOrderCommercialDetails.beforeReceipt(order)&&canManageOrderLifecycleCapability()&&canEditPage('orders.list')&&order.ownerUid===currentUser?.uid);}
   function context(){return currentUser?.uid+'|'+currentUserRole;}
   root.resetWarehouseLogistics=function(){transfers=[];selected.clear();visibleRows=[];shippingBatch=null;queueReady=false;queueError='';queueContext='';queuePromise=null;editor=null;root.resetDeliverySettings?.();root.resetMainTransferRequests?.();$('warehouseLogisticsOverlay')?.remove();};
+
+  let allocationRows=[],allocationAfterId='',allocationHasMore=false,allocationLoading=false,allocationEpoch=0;
+  const originalLogisticsReset=root.resetWarehouseLogistics;
+  root.resetWarehouseLogistics=function(){allocationRows=[];allocationAfterId='';allocationHasMore=false;allocationLoading=false;allocationEpoch++;return originalLogisticsReset.apply(this,arguments);};
+  root.loadMoreMainTransferAllocations=async function(){
+    if(!allowed()||allocationLoading||!allocationHasMore)return;
+    const ctx=context(),epoch=allocationEpoch,cursor=allocationAfterId;allocationLoading=true;root.renderWarehouseTransfers();
+    try{const page=await readMainTransferAllocationPage(cursor);
+      if(ctx!==context()||epoch!==allocationEpoch)return;
+      const keyed=new Map(allocationRows.map(r=>[r.status==='blocked'?r.receiptId:r.transferId,r]));
+      for(const row of page.rows)keyed.set(row.status==='blocked'?row.receiptId:row.transferId,row);
+      allocationRows=[...keyed.values()];allocationAfterId=page.afterId;allocationHasMore=page.hasMore;queueError='';
+    }catch(err){if(ctx===context()&&epoch===allocationEpoch)queueError='分配清單讀取失敗：'+err.message;}
+    finally{if(ctx===context()&&epoch===allocationEpoch){allocationLoading=false;root.renderWarehouseTransfers();}}
+  };
   root.loadWarehouseTransferQueue=async function(force=false){
     if(!allowed())return;
     const ctx=context();if(queueContext!==ctx){root.resetWarehouseLogistics();queueContext=ctx;}
     if(queuePromise)return queuePromise;if(queueReady&&!force)return root.renderWarehouseTransfers();
-    queueReady=false;queueError='';root.renderWarehouseTransfers();
+    queueReady=false;queueError='';allocationEpoch++;allocationRows=[];allocationAfterId='';allocationHasMore=false;allocationLoading=false;root.renderWarehouseTransfers();
     const task=(async()=>{try{
-      const [snapshot,allocationSnapshot]=await Promise.all([
+      const authority=typeof mainTransferAllocationListRequired==='function'&&mainTransferAllocationListRequired();
+      const [snapshot,allocationSnapshot,allocationPage]=await Promise.all([
         firestoreReadWithTimeout(db.collection('stockTransfers').where('status','==','IN_TRANSIT').limit(50).get(),'倉庫調撥收貨'),
-        firestoreReadWithTimeout(db.collection('stockTransfers').where('status','==','RECEIVED').where('allocationCompleted','==',false).limit(50).get(),'調撥入庫後分配進度')
+        firestoreReadWithTimeout(db.collection('stockTransfers').where('status','==','RECEIVED').where('allocationCompleted','==',false).limit(50).get(),'調撥入庫後分配進度'),
+        authority?readMainTransferAllocationPage():Promise.resolve(null)
       ]);
       if(ctx!==context())return;
-      transfers=[...snapshot.docs,...allocationSnapshot.docs].map(doc=>({...doc.data(),id:doc.id}));queueReady=true;
+      transfers=[...snapshot.docs,...allocationSnapshot.docs.filter(doc=>!authority||!doc.data().dispatchIntentHash)].map(doc=>({...doc.data(),id:doc.id}));
+      if(allocationPage){allocationRows=allocationPage.rows;allocationAfterId=allocationPage.afterId;allocationHasMore=allocationPage.hasMore;}queueReady=true;
     }catch(err){if(ctx!==context())return;queueError=err.code==='permission-denied'?'調撥功能所需的 Firestore 規則尚未部署。':'調撥資料讀取失敗：'+err.message;
     }finally{if(ctx===context()){queuePromise=null;root.renderWarehouseTransfers();root.updateInventoryWorkspaceBadges?.();}}})();queuePromise=task;return task;
   };
-  root.warehouseTransferQueueState=()=>({ready:queueReady,error:queueError,count:transfers.length,hasMore:transfers.length>=50});
+  root.warehouseTransferQueueState=()=>({ready:queueReady,error:queueError,count:transfers.length+allocationRows.length,hasMore:transfers.length>=50||allocationHasMore});
   root.renderWarehouseTransfers=function(){
     const body=$('inventoryTransferReceivingBody');if(!body)return;
-    body.innerHTML=transfers.map(t=>`<tr><td data-th="來源">${escapeHtml(t.orderId?'業務訂單':'庫存調撥')}<br>${escapeHtml(t.orderNo||t.id)}<br>${escapeHtml(t.salesName||'')}</td><td data-th="寄出方／目的倉">${escapeHtml(warehouseName(t.fromWarehouseId))} → ${escapeHtml(warehouseName(t.toWarehouseId))}</td><td data-th="品項">${escapeHtml(t.itemCode)}<br>${escapeHtml(t.itemName)}</td><td data-th="待收數量">${t.status==='RECEIVED'?'已入庫・待分配':t.qty}</td><td data-th="操作"><button type="button" onclick="receiveWarehouseTransfer(${inlineJsValue(t.id)},this)">${t.status==='RECEIVED'?'重試庫存分配':'已收貨'}</button></td></tr>`).join('');
-    $('inventoryTransferReceivingStatus').textContent=queueError||(!queueReady?'讀取中…':`${transfers.length} 筆調撥收貨／待分配${transfers.length>=50?'，各類先顯示 50 筆；處理後補入下一批':''}。已入庫的重試只處理分配，不重複入庫。`);
-    const card=$('inventoryTransferReceivingTab');if(card)card.innerHTML=`<span>調撥收貨</span><strong>${queueError?'—':queueReady?transfers.length+' 筆':'…'}</strong>`;
+    const recovery=typeof pendingMainTransferPhysicalOperations==='function'?pendingMainTransferPhysicalOperations().filter(r=>r.action==='RECEIVE'):[];
+    const recoveryHtml=recovery.map(r=>`<tr><td colspan="5">${r.error?escapeHtml(r.error):`前次調撥入庫結果待確認 <button type="button" onclick="resumeMainTransferPhysical('RECEIVE',${inlineJsValue(r.id)},this)">確認前次入庫結果</button>`}</td></tr>`).join('');
+    const allocationRecovery=typeof pendingMainTransferAllocations==='function'?pendingMainTransferAllocations():[];
+    const allocationHtml=allocationRecovery.map(r=>`<tr><td colspan="5">${r.error?escapeHtml(r.error):`分配結果待核對 <button type="button" onclick="resumeMainTransferAllocation(${inlineJsValue(r.id)},this)">核對／續傳分配</button>`}</td></tr>`).join('');
+    
+    const authorityHtml=allocationRows.map(r=>'<tr><td colspan="5">'+(r.status==='blocked'?escapeHtml(r.errorMessage)+'｜'+escapeHtml(r.receiptId):escapeHtml(r.transferId)+'｜待分配 '+(r.quantity-r.allocatedQty)+' <button type="button" onclick="resumeMainTransferAllocation('+inlineJsValue(r.transferId)+',this)">核對／續傳分配</button>')+'</td></tr>').join('');
+    const moreHtml=allocationHasMore?'<tr><td colspan="5"><button type="button" onclick="loadMoreMainTransferAllocations()" '+(allocationLoading?'disabled':'')+'>'+(allocationLoading?'讀取中…':'讀取下一頁分配紀錄')+'</button></td></tr>':'';
+    const orderRecovery=typeof pendingOrderTransferOperations==='function'?pendingOrderTransferOperations().filter(p=>p.action==='RECEIVE'||p.error):[];
+    const orderHtml=orderRecovery.map(p=>`<tr><td colspan="5">${p.error?escapeHtml(p.error):`訂單調撥收貨結果待確認 <button type="button" onclick="resumeOrderTransferOperation('RECEIVE',${inlineJsValue(p.id)},this)">確認原收貨結果</button>`}</td></tr>`).join('');
+    body.innerHTML=orderHtml+recoveryHtml+allocationHtml+authorityHtml+moreHtml+transfers.map(t=>`<tr><td data-th="來源">${escapeHtml(t.orderId?'業務訂單':'庫存調撥')}<br>${escapeHtml(t.orderNo||t.id)}<br>${escapeHtml(t.salesName||'')}</td><td data-th="寄出方／目的倉">${escapeHtml(warehouseName(t.fromWarehouseId))} → ${escapeHtml(warehouseName(t.toWarehouseId))}</td><td data-th="品項">${escapeHtml(t.itemCode)}<br>${escapeHtml(t.itemName)}</td><td data-th="待收數量">${t.status==='RECEIVED'?'已入庫・分配另行核對':t.qty}</td><td data-th="操作"><button type="button" onclick="${t.status==='RECEIVED'&&t.dispatchIntentHash?'resumeMainTransferAllocation':'receiveWarehouseTransfer'}(${inlineJsValue(t.id)},this)">${t.status==='RECEIVED'?(t.dispatchIntentHash?'核對／續傳分配':'重試庫存分配'):'已收貨'}</button></td></tr>`).join('');
+    $('inventoryTransferReceivingStatus').textContent=queueError||(!queueReady?'讀取中…':`${transfers.length+allocationRows.length} 筆調撥收貨／待分配${recovery.length?'；有未確認入庫結果':''}${transfers.length>=50?'，各類先顯示 50 筆；處理後補入下一批':''}。已入庫的重試只處理分配，不重複入庫。`);
+    const card=$('inventoryTransferReceivingTab');if(card)card.innerHTML=`<span>調撥收貨</span><strong>${queueError?'—':queueReady?(transfers.length+allocationRows.length)+' 筆':'…'}</strong>`;
   };
   function warehouseName(id){return warehouseMasterCache.find(w=>w.id===id)?.warehouseName||id;}
   function modal(html){let overlay=$('warehouseLogisticsOverlay');if(!overlay){overlay=document.createElement('div');overlay.id='warehouseLogisticsOverlay';overlay.className='eq-modal-overlay no-print';overlay.addEventListener('click',e=>{if(e.target===overlay)root.closeWarehouseLogistics();});document.body.appendChild(overlay);}overlay.innerHTML=`<div class="eq-modal-box warehouse-logistics-modal">${html}</div>`;overlay.classList.add('active');}
@@ -314,9 +404,15 @@
     catch(err){showActionFeedback('調撥未完成：'+err.message,'warning');}finally{endActionButton(button,bs);}
   };
   root.receiveWarehouseTransfer=async function(id,button){
-    if(!allowed()||pending.has(id))return;if(!confirm('已點收這筆調撥貨品，確認全部入庫？'))return;
+    if(!allowed()||pending.has(id))return;
+    let checkpoint=null;try{checkpoint=typeof pendingMainTransferPhysical==='function'?pendingMainTransferPhysical('RECEIVE',id):null;}catch(err){showActionFeedback(err.message,'warning');return;}
+    if(checkpoint)return root.resumeMainTransferPhysical('RECEIVE',id,button);
+    if(!confirm('已點收這筆調撥貨品，確認全部入庫？'))return;
     pending.add(id);const bs=beginActionButton(button,'入庫中…');
-    try{const result=await root.commitWarehouseTransferReceipt(id,{onStockCommitted:invalidateWarehouseStockCache});await refreshRows(result.orderId);await refreshAffectedOrderCaches(result.affectedOrderIds||[]);await loadInventory(true);await root.loadWarehouseTransferQueue(true);showActionFeedback(result.orderId?'調撥已入庫，原訂單預留已移到收貨倉庫。':'調撥已入庫，缺貨訂單分配與採購需求已同步。');}
+    try{const result=await root.commitWarehouseTransferReceipt(id,{onStockCommitted:invalidateWarehouseStockCache});
+      try{await refreshRows(result.orderId);await refreshAffectedOrderCaches(result.affectedOrderIds||[]);await loadInventory(true);await root.loadWarehouseTransferQueue(true);}
+      catch(_){showActionFeedback('調撥入庫結果已確認，但清單更新失敗；請重新開啟庫存頁。','warning');return;}
+      showActionFeedback(result.physicalReceiptOnly?'實貨已入庫；請另按「核對／續傳分配」處理缺貨訂單。':result.orderId?'調撥已入庫，原訂單預留已移到收貨倉庫。':'調撥已入庫，缺貨訂單分配與採購需求已同步。',result.physicalReceiptOnly?'warning':'success');}
     catch(err){showActionFeedback('調撥收貨未完成：'+err.message,'warning');}finally{pending.delete(id);endActionButton(button,bs);}
   };
 })(typeof globalThis!=='undefined'?globalThis:this);

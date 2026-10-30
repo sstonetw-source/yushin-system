@@ -33,7 +33,7 @@ test.before(async()=>{
   const vendor={'/vendor/html2canvas.js':'html2canvas/dist/html2canvas.min.js','/vendor/jspdf.js':'jspdf/dist/jspdf.umd.min.js'}[pathname];
   if(vendor){response.writeHead(200,{'Content-Type':'application/javascript'});response.end(fs.readFileSync(require.resolve(vendor)));return;}
   if(request.url==='/sdk.js'){response.writeHead(200,{'Content-Type':'application/javascript'});response.end(sdk);return;}
-  if(/^\/(app\.js|styles\.css|modules\/[\w.-]+\.js|assets\/[\w./-]+)$/.test(pathname)){
+  if(/^\/(app\.js|transaction-rollout-config\.js|styles\.css|modules\/[\w.-]+\.js|assets\/[\w./-]+)$/.test(pathname)){
    const file=path.resolve(root,'.'+pathname);
    if(file.startsWith(root+path.sep)&&fs.existsSync(file)&&fs.statSync(file).isFile()){
     response.writeHead(200,{'Content-Type':({'.js':'application/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png'})[path.extname(file)]||'application/octet-stream'});
@@ -1781,7 +1781,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
 for(const width of [1280,390])test('full site '+width+'px original multi-item purchasing receipt dispatch shipment and delivery keep same-product lines separate',{timeout:300000},async()=>{
  const x=await multiReceiptSiteFixture(width),context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
  const errors=[],external=[],calls=[],purchaseCalls=[],dialogs=[],logisticsCalls=[],dropLogistics=new Set();let lose=false,losePurchase=true;
- await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_FORMAL_PURCHASE_EMULATOR=true;window.YUSHIN_V2_RECEIVING_EMULATOR=true;window.YUSHIN_V2_DISPATCH_EMULATOR=true;window.YUSHIN_V2_SHIPMENT_EMULATOR=true;window.YUSHIN_V2_DELIVERY_EMULATOR=true;window.YUSHIN_V2_RETURN_RECEIPT_EMULATOR=true;window.YUSHIN_V2_LIFECYCLE_EMULATOR=true;});
+ await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_FORMAL_PURCHASE_EMULATOR=true;window.YUSHIN_V2_PO_INCOMING_EMULATOR=true;window.YUSHIN_V2_RECEIVING_EMULATOR=true;window.YUSHIN_V2_DISPATCH_EMULATOR=true;window.YUSHIN_V2_SHIPMENT_EMULATOR=true;window.YUSHIN_V2_DELIVERY_EMULATOR=true;window.YUSHIN_V2_RETURN_RECEIPT_EMULATOR=true;window.YUSHIN_V2_LIFECYCLE_EMULATOR=true;});
  page.on('pageerror',error=>errors.push(error.message));page.on('dialog',d=>{dialogs.push(d.message());return d.type()==='confirm'?d.accept():d.dismiss();});
  await context.route('**/*',async route=>{
   const request=route.request(),url=new URL(request.url());
@@ -2580,5 +2580,477 @@ for(const width of [1280,390])test('full site '+width+'px fifteen-line original 
   assert.equal(calls.length,5);assert.equal(await button(0).count(),0);assert.equal(await button(13).count(),0);await button(1).waitFor({state:'visible'});
   assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
   console.log('Full site '+width+'px fifteen-line receipt: original warehouse UI, two actual warehouses, first/final HTTP replies aborted after commit, refresh retries original ID, three receipts/lots/costs and six units held once; twelve untouched goods lines and service identical. Admin source fixture; no >5-line PO/initialization or production acceptance claim.');
+ }finally{await context.close();}
+});
+
+
+async function assertOriginalTransferStockAndCostProof({tag,key,orderId,from,to,transferId,kind}){
+ const read=async(name,id)=>{const snap=await db.collection(name).doc(id).get();assert.ok(snap.exists,name+'/'+id+' must exist');return snap.data();};
+ const company=await read('inventory',key),source=await read('warehouseStocks',from+'__'+key),destination=await read('warehouseStocks',to+'__'+key);
+ assert.equal(company.onHand,3);assert.equal(company.reserved,3);assert.equal(company.transferInTransit??0,0);
+ assert.equal(source.onHand,0);assert.equal(source.reserved,0);assert.equal(destination.onHand,3);assert.equal(destination.reserved,3);
+ assert.equal(company.onHand,source.onHand+destination.onHand,'company physical balance must equal the two affected locations');
+ assert.equal(company.reserved,source.reserved+destination.reserved,'company holds must equal the two affected locations');
+ const order=await read('orders',orderId),ledger=await read('inventoryReservations',orderId+'__I'),transfer=await read('stockTransfers',transferId);
+ assert.equal(order.items[0].warehouseId,to);assert.equal(order.items[0].reservedQty,3);
+ assert.equal(order.logisticsTransfersPending??0,0);assert.deepEqual(order.deliveryRecords,[]);
+ assert.equal(ledger.warehouseId,to);assert.equal(ledger.quantity,3);assert.equal(ledger.status,'active');
+ assert.equal(transfer.kind,kind);assert.equal(transfer.status,'RECEIVED');assert.equal(transfer.qty,3);assert.equal(transfer.orderId,orderId);
+ assert.equal(transfer.allocations.length,1);assert.equal(transfer.allocations[0].costLotId,tag+'-L');
+ const originLot=await read('inventoryLots',tag+'-L'),movedLot=await read('inventoryLots',transferId+'-0');
+ assert.equal(originLot.remainingQty,0);assert.equal(movedLot.remainingQty,3);
+ assert.equal(movedLot.warehouseId,to);assert.equal(movedLot.lotNo,'SITE');assert.equal(movedLot.expiryDate,'2027-01-01');
+ assert.equal(movedLot.costLotId,tag+'-L');assert.equal(movedLot.sourceId,transferId);
+ const originCost=await read('inventoryLotCosts',tag+'-L'),movedCost=await read('inventoryLotCosts',transferId+'-0');
+ assert.equal(originCost.unitCost,42);assert.equal(originCost.warehouseId,from);
+ assert.equal(movedCost.costSourceLotId,tag+'-L');assert.equal(movedCost.warehouseId,to);assert.equal(movedCost.sourceId,transferId);
+ assert.equal(Object.hasOwn(movedCost,'unitCost'),false,'destination cost is a source reference, not an exposed amount');
+ const out=await read('inventoryMovements',transferId+'-out'),incoming=await read('inventoryMovements',transferId+'-in');
+ assert.equal(out.qty,-3);assert.equal(out.type,'warehouse_transfer_out');assert.equal(out.warehouseId,from);
+ assert.equal(incoming.qty,3);assert.equal(incoming.type,'warehouse_transfer_in');assert.equal(incoming.warehouseId,to);
+ assert.equal(out.sourceId,transferId);assert.equal(incoming.sourceId,transferId);
+ const proof=await read('reservationOperationReceipts','order-transfer-dispatch-'+transferId);
+ assert.equal(proof.transfer.id,transferId);assert.equal(proof.intentHash,transfer.orderTransferIntentHash);
+ if(kind==='TRANSFER'){
+  assert.match(transfer.receiptOperationId,/^[A-Za-z0-9_-]{12,96}$/);
+  const receipt=await read('reservationOperationReceipts','order-transfer-receipt-'+transfer.receiptOperationId);
+  assert.equal(receipt.transferId,transferId);
+ }
+}
+
+for(const width of [1280,390])test('original order transfer '+width+'px keeps source IDs through dropped replies and reload',{timeout:240000},async()=>{
+ const tag='order-transfer-site-'+width,uid=tag+'-warehouse',email=uid+'@example.test',key=tag+'-P',orderId=tag+'-O',from=tag+'-A',to=tag+'-MAIN';
+ await auth.createUser({uid,email,password});const setup=db.batch(),put=(name,id,data)=>setup.set(db.collection(name).doc(id),data);
+ put('users',uid,{role:'warehouse',active:true,name:'Warehouse',email,code:uid});put('products',key,{productType:'Goods',active:true,itemCode:tag,itemName:'調撥驗證商品'});
+ put('warehouses',from,{active:true,warehouseName:'測試分倉',contact:'Branch',phone:'123',address:'Taipei'});put('warehouses',to,{active:true,isDefault:true,warehouseName:'測試主倉',contact:'Main',phone:'456',address:'Taipei Main'});
+ put('inventory',key,{productKey:key,productId:key,onHand:3,reserved:3});put('warehouseStocks',from+'__'+key,{productKey:key,productId:key,warehouseId:from,onHand:3,reserved:3});
+ put('inventoryLots',tag+'-L',{productKey:key,productId:key,warehouseId:from,remainingQty:3,qty:3,lotNo:'SITE',expiryDate:'2027-01-01'});
+  put('inventoryLotCosts',tag+'-L',{lotId:tag+'-L',productKey:key,warehouseId:from,unitCost:42,sourceType:'TEST_RECEIPT',sourceId:tag+'-origin'});
+ put('orders',orderId,{orderNo:'YS-'+tag,customerName:'調撥測試客戶',status:'active',orderStatus:'normal',ownerUid:uid,salesCode:uid,salesName:'Warehouse',inventoryReservationStatus:'completed',inventoryReservationAttemptId:tag+'-sync',orderDate:'2026-10-29',workCategories:['delivery'],deliveryRecords:[],returnRecords:[],items:[{itemId:'I',productId:key,productType:'Goods',itemCode:tag,itemName:'調撥驗證商品',qty:3,orderedQty:3,reservedQty:3,shortageQty:0,warehouseId:from,dispatchPreparedQty:3,deliveredQty:0,returnedQty:0,deliveryPlan:{mode:'PICKUP',warehouseId:to}}]});
+ put('inventoryReservations',orderId+'__I',{orderId,itemId:'I',productKey:key,warehouseId:from,quantity:3,shortageQty:0,status:'active'});await setup.commit();
+ const context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage(),calls=[],errors=[];
+ let dropped=false;const dropAction=width===1280?'dispatchOrderTransfer':'receiveOrderTransfer';
+ await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_ORDER_TRANSFER_DISPATCH_EMULATOR=true;window.YUSHIN_ORDER_TRANSFER_RECEIVE_EMULATOR=true;});
+ page.on('dialog',dialog=>dialog.accept());page.on('pageerror',error=>errors.push(error.message));
+ await context.route('**/*',async route=>{
+  const request=route.request(),url=new URL(request.url());if(!['localhost','127.0.0.1'].includes(url.hostname)){await route.abort();return;}
+  if(url.port==='5001'&&request.method()==='POST'&&/\/(dispatchOrderTransfer|receiveOrderTransfer)$/.test(url.pathname)){
+   const action=url.pathname.split('/').at(-1);calls.push({action,payload:request.postDataJSON().data});assert.match((await request.allHeaders()).authorization||'',/^Bearer /);
+   if(action===dropAction&&!dropped){dropped=true;const response=await route.fetch();assert.equal(response.status(),200);await route.abort('failed');return;}
+  }
+  await route.continue();
+ });
+ // Scope presentation caches to source documents read from the real server.
+ // No transaction, Callable or rendering handler is replaced by a stub.
+ const shipping=async()=>{
+  await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();await page.selectOption('#inventoryShippingScope','transfer');
+  await page.evaluate(async({orderId,from,to})=>{
+   await loadInventoryWorkspace();
+   const order=await db.collection('orders').doc(orderId).get({source:'server'});
+   warehouseMasterCache=await Promise.all([from,to].map(async id=>({id,...(await db.collection('warehouses').doc(id).get({source:'server'})).data()})));
+   orderWorkQueueCache=[{id:orderId,...order.data()}];renderMainTransferRequests();
+  },{orderId,from,to});
+ };
+ const receiving=async()=>{await siteNav(page,'inventory');await page.locator('#inventoryReceivingTabBtn').click();await page.locator('#inventoryTransferReceivingTab').click();await page.evaluate(()=>loadWarehouseTransferQueue(true));};
+ try{
+  await siteOpen(page);await siteLogin(page,{uid,email},'warehouse');await shipping();
+  await page.locator('#mainTransferRequestBody').getByRole('button',{name:'登記出貨',exact:true}).click();
+  await page.waitForFunction(drop=>{const text=document.getElementById('actionFeedback')?.textContent||'';return text.includes(drop?'調撥未完成':'已出貨至主倉');},width===1280);
+  if(width===1280){
+   await siteOpen(page,'warehouse');await shipping();
+   await page.locator('#mainTransferRequestBody').getByRole('button',{name:'確認原寄出結果',exact:true}).click();
+   await page.waitForFunction(()=>!pendingOrderTransferOperations().length);
+   assert.deepEqual(calls[0],calls[1]);
+  }
+  const transferId=calls[0].payload.id;assert.ok(transferId);
+  await receiving();await page.locator('#inventoryTransferReceivingBody tr').filter({hasText:tag}).getByRole('button',{name:'已收貨',exact:true}).click();
+  await page.waitForFunction(drop=>{const text=document.getElementById('actionFeedback')?.textContent||'';return text.includes(drop?'調撥收貨未完成':'原訂單預留已移到收貨倉庫');},width===390);
+  if(width===390){
+   await siteOpen(page,'warehouse');await receiving();
+   await page.evaluate(()=>{globalThis.YUSHIN_ORDER_TRANSFER_RECEIVE_EMULATOR=false;});const before=calls.length;
+   await page.locator('#inventoryTransferReceivingBody').getByRole('button',{name:'確認原收貨結果',exact:true}).click();
+   await page.waitForFunction(()=>document.getElementById('actionFeedback')?.textContent?.includes('禁止回退舊交易'));
+   assert.equal(calls.length,before);assert.equal(await page.evaluate(()=>pendingOrderTransferOperations().length),1);
+   await siteOpen(page,'warehouse');await receiving();await page.locator('#inventoryTransferReceivingBody').getByRole('button',{name:'確認原收貨結果',exact:true}).click();
+   await page.waitForFunction(()=>!pendingOrderTransferOperations().length);
+   const receipts=calls.filter(c=>c.action==='receiveOrderTransfer');assert.equal(receipts.length,2);assert.deepEqual(receipts[0],receipts[1]);
+  }
+  const order=(await db.doc('orders/'+orderId).get()).data(),stock=(await db.doc('warehouseStocks/'+to+'__'+key).get()).data();
+  assert.equal(order.items[0].warehouseId,to);assert.equal(order.logisticsTransfersPending,0);assert.deepEqual(order.deliveryRecords,[]);assert.equal(stock.onHand,3);assert.equal(stock.reserved,3);
+  assert.equal((await db.doc('inventory/'+key).get()).data().onHand,3);assert.equal((await db.doc('inventory/'+key).get()).data().reserved,3);
+  await assertOriginalTransferStockAndCostProof({tag,key,orderId,from,to,transferId,kind:'TRANSFER'});
+  assert.equal(await page.evaluate(()=>pendingOrderTransferOperations().length),0);assert.deepEqual(errors,[]);
+ }finally{await context.close();}
+});
+
+for(const width of [1280,390])test('original owner handoff '+width+'px keeps source IDs through dropped replies and reload',{timeout:240000},async()=>{
+ const tag='owner-handoff-site-'+width,uid=tag+'-warehouse',email=uid+'@example.test',key=tag+'-P',orderId=tag+'-O',from=tag+'-A',to=tag+'-MAIN';
+ await auth.createUser({uid,email,password});const setup=db.batch(),put=(name,id,data)=>setup.set(db.collection(name).doc(id),data);
+ put('users',uid,{role:'warehouse',active:true,name:'Warehouse',email,code:uid});put('products',key,{productType:'Goods',active:true,itemCode:tag,itemName:'調撥驗證商品'});
+ put('warehouses',from,{active:true,isDefault:true,warehouseName:'測試分倉',contact:'Branch',phone:'123',address:'Taipei'});put('warehouses',to,{active:true,warehouseName:'測試主倉',contact:'Main',phone:'456',address:'Taipei Main'});
+ put('inventory',key,{productKey:key,productId:key,onHand:3,reserved:3});put('warehouseStocks',from+'__'+key,{productKey:key,productId:key,warehouseId:from,onHand:3,reserved:3});
+ put('inventoryLots',tag+'-L',{productKey:key,productId:key,warehouseId:from,remainingQty:3,qty:3,lotNo:'SITE',expiryDate:'2027-01-01'});
+  put('inventoryLotCosts',tag+'-L',{lotId:tag+'-L',productKey:key,warehouseId:from,unitCost:42,sourceType:'TEST_RECEIPT',sourceId:tag+'-origin'});
+ put('orders',orderId,{orderNo:'YS-'+tag,customerName:'調撥測試客戶',status:'active',orderStatus:'normal',ownerUid:uid,salesCode:uid,salesName:'Warehouse',inventoryReservationStatus:'completed',inventoryReservationAttemptId:tag+'-sync',orderDate:'2026-10-29',workCategories:['delivery'],deliveryRecords:[],returnRecords:[],items:[{itemId:'I',productId:key,productType:'Goods',itemCode:tag,itemName:'調撥驗證商品',qty:3,orderedQty:3,reservedQty:3,shortageQty:0,warehouseId:from,dispatchPreparedQty:3,deliveredQty:0,returnedQty:0,deliveryPlan:{mode:'SALES_SHIP',contact:'Owner',phone:'123',address:'Taipei'}}]});
+ put('inventoryReservations',orderId+'__I',{orderId,itemId:'I',productKey:key,warehouseId:from,quantity:3,shortageQty:0,status:'active'});await setup.commit();
+ const context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage(),calls=[],errors=[];
+ let dropped=false;const dropAction='handoffOrderTransfer';
+ await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_ORDER_TRANSFER_HANDOFF_EMULATOR=true;window.YUSHIN_ORDER_TRANSFER_DISPATCH_EMULATOR=true;window.YUSHIN_ORDER_TRANSFER_RECEIVE_EMULATOR=true;});
+ page.on('dialog',dialog=>dialog.accept());page.on('pageerror',error=>errors.push(error.message));
+ await context.route('**/*',async route=>{
+  const request=route.request(),url=new URL(request.url());if(!['localhost','127.0.0.1'].includes(url.hostname)){await route.abort();return;}
+  if(url.port==='5001'&&request.method()==='POST'&&/\/(handoffOrderTransfer)$/.test(url.pathname)){
+   const action=url.pathname.split('/').at(-1);calls.push({action,payload:request.postDataJSON().data});assert.match((await request.allHeaders()).authorization||'',/^Bearer /);
+   if(action===dropAction&&!dropped){dropped=true;const response=await route.fetch();assert.equal(response.status(),200);await route.abort('failed');return;}
+  }
+  await route.continue();
+ });
+ // Scope presentation caches to source documents read from the real server.
+ // No transaction, Callable or rendering handler is replaced by a stub.
+ const shipping=async()=>{
+  await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();await page.selectOption('#inventoryShippingScope','customer');
+  await page.evaluate(async({orderId,from,to})=>{
+   await loadInventoryWorkspace();
+   const order=await db.collection('orders').doc(orderId).get({source:'server'});
+   warehouseMasterCache=await Promise.all([from,to].map(async id=>({id,...(await db.collection('warehouses').doc(id).get({source:'server'})).data()})));
+   orderWorkQueueCache=[{id:orderId,...order.data()}];renderInventoryShipping();renderMainTransferRequests();
+  },{orderId,from,to});
+ };
+ try{
+  await siteOpen(page);await siteLogin(page,{uid,email},'warehouse');await shipping();
+  await page.locator('#inventoryShippingBody tr').filter({hasText:tag}).getByRole('checkbox').check();
+  await page.locator('#warehouseShippingBatchBtn').click();await page.locator('#warehouseShippingBatchConfirm').click();
+  await page.waitForFunction(()=>document.getElementById('actionFeedback')?.textContent?.includes('未完成項目'));
+  assert.equal(calls.length,1);assert.equal(await page.evaluate(()=>pendingOrderTransferOperations()[0].action),'HANDOFF');
+  await siteOpen(page,'warehouse');await shipping();await page.selectOption('#inventoryShippingScope','transfer');
+  await page.evaluate(()=>renderMainTransferRequests());
+  if(width===390){
+   await page.evaluate(()=>{globalThis.YUSHIN_ORDER_TRANSFER_HANDOFF_EMULATOR=false;});
+   await page.getByRole('button',{name:'確認原交接結果',exact:true}).click();
+   await page.waitForFunction(()=>document.getElementById('actionFeedback')?.textContent?.includes('禁止回退舊交易'));
+   assert.equal(calls.length,1);assert.equal(await page.evaluate(()=>pendingOrderTransferOperations().length),1);
+   await page.evaluate(()=>{globalThis.YUSHIN_ORDER_TRANSFER_HANDOFF_EMULATOR=true;});
+  }
+  await page.getByRole('button',{name:'確認原交接結果',exact:true}).click();
+  await page.waitForFunction(()=>!pendingOrderTransferOperations().length);
+  assert.equal(calls.length,2);assert.deepEqual(calls[0],calls[1]);
+  const target='custody-'+uid,order=(await db.doc('orders/'+orderId).get()).data(),transfer=(await db.doc('stockTransfers/'+calls[0].payload.id).get()).data();
+  assert.equal(transfer.kind,'HANDOFF');assert.equal(transfer.status,'RECEIVED');assert.equal(calls[0].payload.toWarehouseId,target);
+  assert.equal(order.items[0].warehouseId,target);assert.deepEqual(order.deliveryRecords,[]);
+  assert.equal((await db.doc('inventory/'+key).get()).data().onHand,3);assert.equal((await db.doc('inventory/'+key).get()).data().reserved,3);
+  const stock=(await db.doc('warehouseStocks/'+target+'__'+key).get()).data();assert.equal(stock.onHand,3);assert.equal(stock.reserved,3);
+  await assertOriginalTransferStockAndCostProof({tag,key,orderId,from,to:target,transferId:calls[0].payload.id,kind:'HANDOFF'});
+  assert.deepEqual(errors,[]);
+ }finally{await context.close();}
+});
+
+// True original page and logged-in browser, following the SAME original V3
+// HANDOFF, receipt, lot and protected cost through customer shipment, delivery
+// acknowledgement and the original Custody return. Only the initial source
+// fixture and the presentation cache are seeded; no transaction writer is
+// mocked, and the browser talks to actual Auth/Functions/Firestore Emulators.
+for(const width of [1280,390])test('original V3 Custody '+width+'px shipment delivery and returned lot recover after lost replies',{timeout:240000},async()=>{
+ const tag='custody-v3-site-'+width,uid=tag+'-owner',email=uid+'@example.test';
+ const key=tag+'-P',orderId=tag+'-ORDER',transferId=tag+'-HANDOFF',custody='custody-'+uid,lotId=transferId+'-0';
+ await auth.createUser({uid,email,password});
+ const batch=db.batch(),put=(collection,id,data)=>batch.set(db.collection(collection).doc(id),data);
+ const originalPlan={mode:'PICKUP',contact:'',phone:'',address:'',warehouseId:'',packages:1,notes:''};
+ const sourceLocations=[{warehouseId:'A',reservedQty:1},{warehouseId:'B',reservedQty:2}];
+ const transfer={id:transferId,kind:'HANDOFF',status:'RECEIVED',orderId,itemId:'I',productKey:key,
+  ownerUid:uid,salesCode:'S01',qty:3,toWarehouseId:custody,deliveryPlan:originalPlan,
+  orderTransferIntentHash:'hash-original',reservationLocationSchemaVersion:2,custodyLocationSchemaVersion:3,
+  lifecycleWarehouseIds:['A','B'],sourceLocations:sourceLocations.map(row=>({warehouseId:row.warehouseId,qty:row.reservedQty})),
+  allocations:[{lotId:'ORIGINAL',targetLotId:lotId,qty:3,costLotId:'SOURCE-LOT'}]};
+ const cost={productKey:key,warehouseId:custody,sourceId:transferId,costSourceLotId:'SOURCE-LOT',unitCost:432};
+ put('users',uid,{role:'sales',active:true,name:'Custody Owner',email,code:'S01'});
+ put('products',key,{productType:'Goods',active:true,itemCode:tag,itemName:'原批次保管商品',nameCn:'原批次保管商品'});
+ put('warehouses',custody,{active:true,systemCustody:true,warehouseType:'CUSTODY',warehouseName:'業務保管',ownerUid:uid});
+ put('inventory',encodeURIComponent(key),{productKey:key,onHand:3,reserved:3});
+ put('warehouseStocks',encodeURIComponent(custody)+'__'+encodeURIComponent(key),{warehouseId:custody,productKey:key,onHand:3,reserved:3});
+ put('inventoryLots',lotId,{productKey:key,warehouseId:custody,sourceType:'WAREHOUSE_TRANSFER',
+  sourceId:transferId,transferId,qty:3,remainingQty:3,costLotId:'SOURCE-LOT',lotNo:'V3-LOT'});
+ put('inventoryLotCosts',lotId,cost);
+ put('stockTransfers',transferId,transfer);
+ put('reservationOperationReceipts','order-transfer-dispatch-'+transferId,
+  {kind:'ORDER_TRANSFER_DISPATCH',intentHash:'hash-original',transfer});
+ put('inventoryMovements',transferId+'-in',
+  {type:'warehouse_transfer_in',sourceType:'WAREHOUSE_TRANSFER',sourceId:transferId,
+   orderId,itemId:'I',productKey:key,warehouseId:custody,qty:3});
+ put('orders',orderId,{orderNo:orderId,customerName:'Custody E2E Customer',customerPhone:'0222334455',
+  customerAddress:'台北市測試地址',status:'active',orderStatus:'normal',
+  ownerUid:uid,salesCode:'S01',salesName:'Custody Owner',orderDate:'2026-10-30',
+  inventoryReservationStatus:'completed',inventoryReservationAttemptId:'sync_1234567890',
+  logisticsTransfersPending:0,warehouseShipmentRecords:[],deliveryRecords:[],returnRecords:[],
+  deliveredQty:0,returnedQty:0,isDelivered:false,
+  items:[{itemId:'I',qty:3,orderedQty:3,productId:key,productType:'Goods',itemCode:tag,
+   itemName:'原批次保管商品',brand:'Roche',warehouseId:custody,custodyTransferId:transferId,
+   reservedQty:3,shortageQty:0,dispatchPreparedQty:3,warehouseShippedQty:0,
+   deliveredQty:0,returnedQty:0,deliveryPlan:originalPlan}]});
+ put('inventoryReservations',orderId+'__I',{orderId,itemId:'I',productKey:key,
+  ownerUid:uid,salesCode:'S01',locationSchemaVersion:3,quantity:3,shortageQty:0,
+  status:'active',custodyTransferId:transferId,locations:[{warehouseId:custody,reservedQty:3}],
+  custodyOriginalQty:3,lifecycleWarehouseIds:['A','B'],sourceLocationSnapshot:sourceLocations});
+ await batch.commit();
+
+ const context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
+ const calls=[],errors=[],alerts=[],external=[];const dropAction=width===1280?'shipV3CustodyItem':'receiveV3CustodyReturn';
+ let dropped=false;
+ await context.addInitScript(()=>{
+  window.YUSHIN_LOCAL_EMULATOR=true;
+  window.YUSHIN_V3_CUSTODY_SHIPMENT_EMULATOR=true;
+  window.YUSHIN_V3_CUSTODY_DELIVERY_EMULATOR=true;
+  window.YUSHIN_V3_CUSTODY_RETURN_EMULATOR=true;
+ });
+ page.on('pageerror',error=>errors.push(error.message));
+ page.on('dialog',dialog=>{alerts.push(dialog.message());return dialog.dismiss();});
+ await context.route('**/*',async route=>{
+  const request=route.request(),url=new URL(request.url());
+  if(!['localhost','127.0.0.1'].includes(url.hostname)){external.push(url.hostname);await route.abort();return;}
+  if(url.port==='5001'&&request.method()==='POST'
+   &&/\/(shipV3CustodyItem|confirmV3CustodyDelivery|receiveV3CustodyReturn)$/.test(url.pathname)){
+   const action=url.pathname.split('/').at(-1),payload=request.postDataJSON().data;
+   assert.match((await request.allHeaders()).authorization||'',/^Bearer /);
+   assert.equal(payload.actorUid,undefined);assert.equal(payload.actorRole,undefined);
+   calls.push({action,payload});
+   if(action===dropAction&&!dropped){
+    dropped=true;const result=await route.fetch();assert.equal(result.status(),200,'real Callable committed before reply loss');
+    await route.abort('failed');return;
+   }
+  }
+  await route.continue();
+ });
+ const read=async(collection,id)=>(await db.collection(collection).doc(id).get()).data();
+ const facts=async()=>({order:await read('orders',orderId),inventory:await read('inventory',encodeURIComponent(key)),
+  stock:await read('warehouseStocks',encodeURIComponent(custody)+'__'+encodeURIComponent(key)),
+  ledger:await read('inventoryReservations',orderId+'__I'),lot:await read('inventoryLots',lotId),
+  cost:await read('inventoryLotCosts',lotId),transfer:await read('stockTransfers',transferId),
+  movements:(await db.collection('inventoryMovements').where('sourceId','==',orderId).get()).docs
+   .map(doc=>({id:doc.id,...doc.data()})).sort((a,b)=>a.id.localeCompare(b.id))});
+ const presentOrder=async()=>{
+  await siteNav(page,'orders');
+  await page.waitForFunction(()=>!mainPageLoads.has('orders.list')&&!orderPageLoading);
+  await page.evaluate(async id=>{
+   const snapshot=await db.collection('orders').doc(id).get({source:'server'});
+   if(!snapshot.exists)throw Error('Original V3 order not available');
+   ordersCache=[{id,...snapshot.data()}];orderHistorySearchActive=false;
+   activeOrderWorkFilter='all';document.getElementById('orderSearch').value='';
+   renderOrdersList();
+  },orderId);
+  await page.locator('#ordersBody > tr').filter({hasText:orderId}).first().waitFor({state:'visible'});
+ };
+ const row=()=>page.locator('#ordersBody > tr').filter({hasText:orderId}).first();
+ const shipmentButton=()=>row().getByRole('button',{name:'業務保管出貨／核對',exact:true});
+ const returnButton=()=>row().getByRole('button',{name:'保管退貨實收／核對',exact:true});
+ try{
+  await siteOpen(page);await siteLogin(page,{uid,email},'sales');await presentOrder();
+  const before=await facts();assert.deepEqual(before.cost,cost);assert.deepEqual(before.transfer,transfer);
+  await shipmentButton().click();
+  const shipmentModal=page.locator('dialog[open]').filter({hasText:'業務保管實際出貨'});
+  await shipmentModal.waitFor({state:'visible'});
+  await shipmentModal.locator('input[name="qty"]').fill('1');
+  await shipmentModal.locator('input[name="date"]').fill('2026-10-30');
+  await shipmentModal.locator('input[name="contact"]').fill('測試收件人');
+  await shipmentModal.locator('input[name="phone"]').fill('0222334455');
+  await shipmentModal.locator('input[name="address"]').fill('台北市測試地址');
+  await shipmentModal.getByRole('button',{name:'確認已實際出貨'}).click();
+  if(width===1280){
+   await page.waitForFunction(()=>document.querySelector('dialog[open] [data-role="status"]')?.textContent.includes('結果未確認'),null,{timeout:45000});
+   assert.equal((await facts()).order.warehouseShipmentRecords.length,1);
+   assert.equal(await page.evaluate(id=>!!pendingV3CustodyShipment(id,'I'),orderId),true);
+   await siteOpen(page,'sales');await presentOrder();
+   await shipmentButton().click();
+   await page.waitForFunction(id=>!pendingV3CustodyShipment(id,'I'),orderId,{timeout:45000});
+   const shipmentCalls=calls.filter(call=>call.action==='shipV3CustodyItem');
+   assert.equal(shipmentCalls.length,2);assert.deepEqual(shipmentCalls[0].payload,shipmentCalls[1].payload);
+  }else await shipmentModal.waitFor({state:'hidden',timeout:45000});
+  const shipped=await facts(),shipment=shipped.order.warehouseShipmentRecords[0];
+  assert.ok(shipment?.id);assert.equal(shipment.qty,1);assert.equal(shipped.order.deliveryRecords.length,0);
+  assert.equal(shipped.inventory.onHand,2);assert.equal(shipped.inventory.reserved,2);
+  assert.equal(shipped.stock.onHand,2);assert.equal(shipped.stock.reserved,2);
+  assert.equal(shipped.ledger.quantity,2);assert.equal(shipped.lot.remainingQty,2);
+  assert.deepEqual(shipped.cost,cost);assert.deepEqual(shipped.transfer,transfer);
+
+  await page.evaluate(id=>openPartialDeliveryForOrder(id),orderId);
+  await page.locator('#deliveryModalOverlay.active').waitFor({state:'visible'});
+  await page.locator('#deliveryFormPanel').waitFor({state:'visible'});
+  await page.locator('#deliveryShipmentId').selectOption(shipment.id);
+  await page.locator('#deliveryDate').fill('2026-10-30');
+  await page.locator('#deliveryQty').fill('1');
+  await page.locator('#deliveryNotes').fill('客戶確認已收到 V3 保管出貨');
+  await page.locator('#deliveryFormPanel button[onclick="saveDeliveryRecord()"]').click();
+  await page.waitForFunction(id=>!pendingDeliveryOrderIds.size&&!pendingV2DeliveryConfirmation(id),orderId,{timeout:45000});
+  const delivered=await facts();
+  assert.equal(delivered.order.deliveryRecords.length,1);
+  assert.equal(delivered.order.deliveryRecords[0].shipmentId,shipment.id);
+  for(const field of ['inventory','stock','ledger','lot','cost','transfer'])
+   assert.deepEqual(delivered[field],shipped[field],'customer acknowledgement must not debit stock: '+field);
+  await page.locator('#deliveryModalOverlay.active').getByRole('button',{name:'關閉',exact:true}).click();
+  await returnButton().click();
+  const returnModal=page.locator('dialog[open]').filter({hasText:'業務保管退貨實際收回'});
+  await returnModal.waitFor({state:'visible'});
+  assert.match(await returnModal.locator('select[name="source"] option').first().textContent(),/V3-LOT/);
+  await returnModal.locator('input[name="qty"]').fill('1');
+  await returnModal.locator('input[name="date"]').fill('2026-10-30');
+  await returnModal.locator('textarea[name="reason"]').fill('實際收回原批次並結案');
+  await returnModal.getByRole('button',{name:'確認實際收回入庫'}).click();
+  if(width===390){
+   await page.waitForFunction(()=>document.querySelector('dialog[open] [data-role="status"]')?.textContent.includes('結果未確認'),null,{timeout:45000});
+   assert.equal((await facts()).order.returnRecords.length,1);
+   assert.equal(await page.evaluate(id=>!!pendingV3CustodyReturn(id,'I'),orderId),true);
+   await siteOpen(page,'sales');await presentOrder();
+   // The server already committed: the new-return candidate is gone, but the
+   // original order must still expose recovery of its frozen operation ID.
+   assert.equal(await page.evaluate(id=>v3CustodyReturnCandidates(ordersCache.find(o=>o.id===id)).length,orderId),0);
+   await returnButton().click();
+   await page.waitForFunction(id=>!pendingV3CustodyReturn(id,'I'),orderId,{timeout:45000});
+   const returnCalls=calls.filter(call=>call.action==='receiveV3CustodyReturn');
+   assert.equal(returnCalls.length,2);assert.deepEqual(returnCalls[0].payload,returnCalls[1].payload);
+  }else await returnModal.waitFor({state:'hidden',timeout:45000});
+  const returned=await facts();
+  assert.equal(returned.order.returnRecords.length,1);assert.equal(returned.order.returnRecords[0].qty,1);
+  assert.equal(returned.order.returnRecords[0].shipmentId,shipment.id);
+  assert.equal(returned.order.returnRecords[0].lotAllocations[0].lotId,lotId);
+  assert.equal(returned.order.deliveryRecords.length,1);assert.equal(returned.order.isDelivered,false);
+  assert.equal(returned.inventory.onHand,3);assert.equal(returned.inventory.reserved,2);
+  assert.equal(returned.stock.onHand,3);assert.equal(returned.stock.reserved,2);
+  assert.equal(returned.ledger.quantity,2);assert.equal(returned.lot.remainingQty,3);
+  assert.deepEqual(returned.cost,cost);assert.deepEqual(returned.transfer,transfer);
+  assert.equal(returned.movements.filter(row=>row.action==='location_customer_shipment').length,1);
+  assert.equal(returned.movements.filter(row=>row.action==='location_customer_return').length,1);
+  assert.equal(calls.filter(call=>call.action==='confirmV3CustodyDelivery').length,1);
+  assert.equal(external.length,0);assert.deepEqual(errors,[]);
+  console.log('Original '+width+'px V3 Custody: original login, shipment, distinct customer receipt, actual lot return and exact retry source succeeded.');
+ }finally{await context.close();}
+});
+
+// Real original-site multi-line selection, not only a direct Callable test.
+// The selected J line must never debit or restore sibling I stock or lots.
+for(const width of [1280,390])test('original V3 Custody multi-line '+width+'px selects one shipment, receipt and CLOSE source',{timeout:240000},async()=>{
+ const tag='custody-multi-site-'+width,uid=tag+'-owner',email=uid+'@example.test';
+ const orderId=tag+'-ORDER',custody='custody-'+uid;
+ await auth.createUser({uid,email,password});
+ const batch=db.batch(),put=(collection,id,data)=>batch.set(db.collection(collection).doc(id),data);
+ const plan={mode:'PICKUP',contact:'',phone:'',address:'',warehouseId:'',packages:1,notes:''};
+ put('users',uid,{role:'sales',active:true,name:'Custody Multi Owner',email,code:'S01'});
+ put('warehouses',custody,{active:true,systemCustody:true,warehouseType:'CUSTODY',ownerUid:uid});
+ const items=[];
+ for(const [itemId,ordered] of [['I',2],['J',1]]){
+  const productKey=tag+'-'+itemId,transferId=tag+'-HANDOFF-'+itemId,lotId=transferId+'-0';
+  const legs=[{warehouseId:'A',reservedQty:ordered}];
+  const transfer={id:transferId,kind:'HANDOFF',status:'RECEIVED',orderId,itemId,productKey,
+   ownerUid:uid,salesCode:'S01',qty:ordered,toWarehouseId:custody,deliveryPlan:plan,
+   orderTransferIntentHash:'hash-'+itemId,reservationLocationSchemaVersion:2,
+   custodyLocationSchemaVersion:3,lifecycleWarehouseIds:['A','B'],
+   sourceLocations:[{warehouseId:'A',qty:ordered}],
+   allocations:[{lotId:'ORIGINAL-'+itemId,targetLotId:lotId,qty:ordered,costLotId:'SOURCE-'+itemId}]};
+  put('products',productKey,{productType:'Goods',active:true,itemCode:productKey,
+   itemName:'多品項 '+itemId,nameCn:'多品項 '+itemId});
+  put('inventory',encodeURIComponent(productKey),{productKey,onHand:ordered,reserved:ordered});
+  put('warehouseStocks',encodeURIComponent(custody)+'__'+encodeURIComponent(productKey),
+   {warehouseId:custody,productKey,onHand:ordered,reserved:ordered});
+  put('inventoryLots',lotId,{productKey,warehouseId:custody,sourceType:'WAREHOUSE_TRANSFER',
+   sourceId:transferId,transferId,qty:ordered,remainingQty:ordered,
+   costLotId:'SOURCE-'+itemId,lotNo:'V3-MULTI-'+itemId});
+  put('inventoryLotCosts',lotId,{productKey,warehouseId:custody,sourceId:transferId,
+   costSourceLotId:'SOURCE-'+itemId,unitCost:itemId==='I'?300:800});
+  put('stockTransfers',transferId,transfer);
+  put('reservationOperationReceipts','order-transfer-dispatch-'+transferId,
+   {kind:'ORDER_TRANSFER_DISPATCH',intentHash:'hash-'+itemId,transfer});
+  put('inventoryMovements',transferId+'-in',{type:'warehouse_transfer_in',sourceType:'WAREHOUSE_TRANSFER',
+   sourceId:transferId,orderId,itemId,productKey,warehouseId:custody,qty:ordered});
+  put('inventoryReservations',orderId+'__'+itemId,{orderId,itemId,productKey,ownerUid:uid,
+   salesCode:'S01',locationSchemaVersion:3,quantity:ordered,shortageQty:0,status:'active',
+   custodyTransferId:transferId,locations:[{warehouseId:custody,reservedQty:ordered}],
+   custodyOriginalQty:ordered,lifecycleWarehouseIds:['A','B'],sourceLocationSnapshot:legs});
+  items.push({itemId,qty:ordered,orderedQty:ordered,productId:productKey,productType:'Goods',
+   itemCode:productKey,itemName:'多品項 '+itemId,brand:'Roche',warehouseId:custody,
+   custodyTransferId:transferId,reservedQty:ordered,shortageQty:0,dispatchPreparedQty:ordered,
+   warehouseShippedQty:0,deliveredQty:0,returnedQty:0,deliveryPlan:plan});
+ }
+ put('orders',orderId,{orderNo:orderId,customerName:'Multi Custody E2E Customer',
+  customerPhone:'0222334455',customerAddress:'台北市測試地址',status:'active',orderStatus:'normal',
+  ownerUid:uid,salesCode:'S01',salesName:'Custody Multi Owner',orderDate:'2026-10-30',
+  inventoryReservationStatus:'completed',inventoryReservationAttemptId:'sync_1234567890',
+  logisticsTransfersPending:0,warehouseShipmentRecords:[],deliveryRecords:[],returnRecords:[],
+  deliveredQty:0,returnedQty:0,isDelivered:false,items});
+ await batch.commit();
+ const context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
+ const errors=[],external=[];
+ await context.addInitScript(()=>{
+  window.YUSHIN_LOCAL_EMULATOR=true;
+  window.YUSHIN_V3_CUSTODY_SHIPMENT_EMULATOR=true;
+  window.YUSHIN_V3_CUSTODY_DELIVERY_EMULATOR=true;
+  window.YUSHIN_V3_CUSTODY_RETURN_EMULATOR=true;
+ });
+ page.on('pageerror',error=>errors.push(error.message));
+ page.on('dialog',dialog=>dialog.dismiss());
+ await context.route('**/*',async route=>{
+  const url=new URL(route.request().url());
+  if(!['localhost','127.0.0.1'].includes(url.hostname)){
+   external.push(url.hostname);await route.abort();return;
+  }
+  await route.continue();
+ });
+ const read=async(collection,id)=>(await db.collection(collection).doc(id).get()).data();
+ const present=async()=>{
+  await siteNav(page,'orders');
+  await page.waitForFunction(()=>!mainPageLoads.has('orders.list')&&!orderPageLoading);
+  await page.evaluate(async id=>{
+   const snapshot=await db.collection('orders').doc(id).get({source:'server'});
+   ordersCache=[{id,...snapshot.data()}];orderHistorySearchActive=false;
+   activeOrderWorkFilter='all';document.getElementById('orderSearch').value='';renderOrdersList();
+  },orderId);
+ };
+ const row=()=>page.locator('#ordersBody > tr').filter({hasText:orderId}).first();
+ try{
+  await siteOpen(page);await siteLogin(page,{uid,email},'sales');await present();
+  await row().getByRole('button',{name:'業務保管出貨／核對',exact:true}).click();
+  const shipmentModal=page.locator('dialog[open]').filter({hasText:'業務保管實際出貨'});
+  await shipmentModal.waitFor({state:'visible'});
+  await shipmentModal.locator('select[name="itemId"]').selectOption('J');
+  await shipmentModal.locator('input[name="qty"]').fill('1');
+  await shipmentModal.locator('input[name="date"]').fill('2026-10-30');
+  await shipmentModal.locator('input[name="contact"]').fill('測試收件人');
+  await shipmentModal.locator('input[name="phone"]').fill('0222334455');
+  await shipmentModal.locator('input[name="address"]').fill('台北市測試地址');
+  await shipmentModal.getByRole('button',{name:'確認已實際出貨'}).click();
+  await shipmentModal.waitFor({state:'hidden',timeout:45000});
+  const shipped=await read('orders',orderId),shipment=shipped.warehouseShipmentRecords[0];
+  assert.equal(shipment.itemId,'J');assert.equal(shipment.itemIndex,1);
+  assert.deepEqual(shipped.items.map(item=>item.warehouseShippedQty),[0,1]);
+  assert.equal((await read('inventory',encodeURIComponent(tag+'-I'))).onHand,2);
+  assert.equal((await read('inventory',encodeURIComponent(tag+'-J'))).onHand,0);
+  await page.evaluate(id=>openPartialDeliveryForOrder(id),orderId);
+  await page.locator('#deliveryFormPanel').waitFor({state:'visible'});
+  await page.locator('#deliveryItemId').selectOption('J');
+  await page.locator('#deliveryShipmentId').selectOption(shipment.id);
+  await page.locator('#deliveryDate').fill('2026-10-30');
+  await page.locator('#deliveryQty').fill('1');
+  await page.locator('#deliveryNotes').fill('多品項 J 客戶已簽收');
+  await page.locator('#deliveryFormPanel button[onclick="saveDeliveryRecord()"]').click();
+  await page.waitForFunction(id=>!pendingDeliveryOrderIds.size&&!pendingV2DeliveryConfirmation(id),orderId,{timeout:45000});
+  const delivered=await read('orders',orderId);
+  assert.deepEqual(delivered.items.map(item=>item.deliveredQty),[0,1]);
+  assert.equal(delivered.deliveredQty,1);
+  await page.locator('#deliveryModalOverlay.active').getByRole('button',{name:'關閉',exact:true}).click();
+  await row().getByRole('button',{name:'保管退貨實收／核對',exact:true}).click();
+  const returnModal=page.locator('dialog[open]').filter({hasText:'業務保管退貨實際收回'});
+  await returnModal.waitFor({state:'visible'});
+  assert.match(await returnModal.locator('select[name="source"] option').first().textContent(),/多品項 J/);
+  await returnModal.locator('input[name="qty"]').fill('1');
+  await returnModal.locator('input[name="date"]').fill('2026-10-30');
+  await returnModal.locator('textarea[name="reason"]').fill('J 原保管批次實際收回');
+  await returnModal.getByRole('button',{name:'確認實際收回入庫'}).click();
+  await returnModal.waitFor({state:'hidden',timeout:45000});
+  const returned=await read('orders',orderId);
+  assert.equal(returned.returnRecords.length,1);assert.equal(returned.returnRecords[0].itemId,'J');
+  assert.equal(returned.returnedQty,1);
+  assert.equal((await read('inventory',encodeURIComponent(tag+'-I'))).onHand,2);
+  assert.equal((await read('inventory',encodeURIComponent(tag+'-J'))).onHand,1);
+  assert.equal((await read('inventoryLots',tag+'-HANDOFF-I-0')).remainingQty,2);
+  assert.equal((await read('inventoryLots',tag+'-HANDOFF-J-0')).remainingQty,1);
+  assert.equal((await read('inventoryLotCosts',tag+'-HANDOFF-J-0')).unitCost,800);
+  assert.equal(external.length,0);assert.deepEqual(errors,[]);
+  console.log('Original '+width+'px V3 multi Custody shipment, delivery and CLOSE provenance completed.');
  }finally{await context.close();}
 });

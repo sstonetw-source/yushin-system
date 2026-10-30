@@ -74,6 +74,22 @@ test('v2 customer return restores its source hold without erasing a pending othe
  assert.equal(result.aggregateStock.reserved,9);assert.equal(result.warehouseStock.reserved,6);
  assert.throws(()=>plan({...base(),reservation,operation:'SHIP_REVERSAL'}),/不能以單倉作業修改其他位置/);
 });
+test('V3 custody customer return keeps original two-warehouse and transfer provenance',()=>{
+ const original={productKey:'P',locationSchemaVersion:3,ownerUid:'OWNER',custodyTransferId:'HANDOFF',
+  lifecycleWarehouseIds:['W','OTHER'],sourceLocationSnapshot:[{warehouseId:'W',reservedQty:1},{warehouseId:'OTHER',reservedQty:2}],
+  custodyOriginalQty:3,quantity:2,shortageQty:0,status:'active',
+  locations:[{warehouseId:'custody-OWNER',reservedQty:2}]};
+ const source={...base(),warehouseId:'custody-OWNER',reservation:original,itemReservedQty:2,deltaQty:1,
+  aggregateStock:{onHand:10,reserved:7},warehouseStock:{warehouseId:'custody-OWNER',onHand:7,reserved:4}};
+ const replace=plan(source),closed=plan({...source,settlement:'CLOSE'});
+ assert.equal(replace.reservation.locationSchemaVersion,3);assert.equal(replace.reservation.quantity,3);
+ assert.deepEqual(replace.reservation.sourceLocationSnapshot,original.sourceLocationSnapshot);
+ assert.equal(replace.reservation.custodyTransferId,'HANDOFF');
+ assert.deepEqual(replace.reservation.locations,[{warehouseId:'custody-OWNER',reservedQty:3}]);
+ assert.equal(core.reservationStockDeltas(original,replace.reservation).companyReservedDelta,1);
+ assert.equal(closed.reservation.quantity,2);assert.deepEqual(closed.reservation.locations,original.locations);
+ assert.throws(()=>plan({...source,deltaQty:2}),/原實體倉|不一致/);
+});
 test('restoration conserves own and unrelated holds across lifecycle settlement and direction combinations',()=>{
  for(const orderStatus of ['normal','cancelled'])for(const settlement of ['CLOSE','REPLACE'])
  for(const operation of ['CUSTOMER_RETURN','SHIP_REVERSAL'])for(const deltaQty of operation==='SHIP_REVERSAL'?[1,2]:[-2,-1,1,2]){
