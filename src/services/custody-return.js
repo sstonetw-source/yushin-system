@@ -42,22 +42,28 @@ function v3CustodyReturnTransport(){
  check();return{uid,role,functions,check};
 }
 function v3CustodyReturnCandidates(order){
- if(!order||order.items?.length!==1||!Array.isArray(order.warehouseShipmentRecords)
+ if(!order||!Array.isArray(order.items)||!order.items.length||order.items.length>5
+   ||!Array.isArray(order.warehouseShipmentRecords)
    ||!Array.isArray(order.deliveryRecords)||!Array.isArray(order.returnRecords)
    ||order.returnRecords.length||(order.returnRequests||[]).length||order.returnPending===true)
   return [];
- const item=order.items[0],custody='custody-'+order.ownerUid;
- if(!item.custodyTransferId||item.warehouseId!==custody
+ const custody='custody-'+order.ownerUid;
+ if(order.items.some(item=>!item.custodyTransferId||item.warehouseId!==custody
+   ||(item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
+   ||String(item.productType||item.type||'').toUpperCase()==='SERVICE')
    ||!['active','normal'].includes(order.status)
    ||!['',undefined,'normal','active'].includes(order.orderStatus))return [];
  return order.warehouseShipmentRecords.flatMap(shipment=>{
+  const item=order.items.find(row=>row.itemId===shipment.itemId);
+  if(!item)return [];
   if(shipment.itemId!==item.itemId||shipment.warehouseId!==custody
     ||shipment.custodyTransferId!==item.custodyTransferId)return [];
   const delivered=order.deliveryRecords.filter(row=>row.shipmentId===shipment.id)
    .reduce((total,row)=>total+Number(row.qty||0),0);
   if(!Number.isSafeInteger(delivered)||delivered<=0)return [];
   return (shipment.lotAllocations||[]).filter(row=>Number.isSafeInteger(row.qty)&&row.qty>0)
-   .map(row=>({shipmentId:shipment.id,lotId:row.lotId,lotNo:row.lotNo||'',
+   .map(row=>({itemId:item.itemId,itemName:item.itemName||item.itemCode||item.itemId,
+    shipmentId:shipment.id,lotId:row.lotId,lotNo:row.lotNo||'',
     expiryDate:row.expiryDate||'',maxQty:Math.min(delivered,row.qty)}));
  });
 }
@@ -83,12 +89,13 @@ async function commitV3CustodyReturn(input){
  }else{
   const snapshot=await db.collection('orders').doc(orderId).get({source:'server'});check();
   if(!snapshot.exists)throw Error('保管訂單不存在。');
-  const order=snapshot.data(),item=order.items?.[0];
-  if(order.items?.length!==1||item?.itemId!==itemId
+  const order=snapshot.data(),item=order.items?.find(row=>row.itemId===itemId);
+  if(!item||!v3CustodyReturnCandidates(order).length
     ||['sales','engineer'].includes(role)&&order.ownerUid!==uid
     ||order.inventoryReservationStatus!=='completed'||!order.inventoryReservationAttemptId)
    throw Error('此訂單尚未符合保管退貨的原始來源條件。');
-  const matching=v3CustodyReturnCandidates(order).find(row=>row.shipmentId===shipmentId
+  const matching=v3CustodyReturnCandidates(order).find(row=>row.itemId===itemId
+    &&row.shipmentId===shipmentId
     &&row.lotId===lotId&&qty<=row.maxQty);
   if(!matching)throw Error('退貨數量超過該筆已確認送達的原批次，或已經辦理退貨。');
   const ledger=await db.collection('inventoryReservations').doc(orderId+'__'+itemId).get({source:'server'});check();
@@ -131,12 +138,12 @@ window.resumeV3CustodyReturn=async function(orderId,itemId){
   reason:prior.reason,operationId:prior.operationId});
 };
 window.openV3CustodyReturn=async function(orderId){
- const cached=ordersCache.find(row=>row.id===orderId),item=cached?.items?.[0];
- if(cached?.items?.length!==1||!item?.custodyTransferId)return;
+ const cached=ordersCache.find(row=>row.id===orderId);
+ if(!cached?.items?.length||cached.items.length>5)return;
  try{
-  const prior=pendingV3CustodyReturn(orderId,item.itemId);
-  if(prior){
-   const saved=await window.resumeV3CustodyReturn(orderId,item.itemId);
+  const pending=cached.items.find(item=>pendingV3CustodyReturn(orderId,item.itemId));
+  if(pending){
+   const saved=await window.resumeV3CustodyReturn(orderId,pending.itemId);
    const index=ordersCache.findIndex(row=>row.id===orderId);
    if(index>=0)ordersCache[index]={id:orderId,...saved};
    renderOrdersList();return;
@@ -148,9 +155,9 @@ window.openV3CustodyReturn=async function(orderId){
  const modal=document.createElement('dialog');modal.className='modal';
  modal.innerHTML=`<form method="dialog" class="modal-content" style="max-width:420px">
   <h3>業務保管退貨實際收回</h3>
-  <p>訂單：${escapeHtml(cached.orderNo||orderId)}｜${escapeHtml(item.itemName||item.itemCode||item.itemId)}</p>
+  <p>訂單：${escapeHtml(cached.orderNo||orderId)}</p>
   <label>原出貨批次<select name="source" required>${candidates.map((row,index)=>
-   `<option value="${index}">${escapeHtml(row.lotNo||row.lotId)}・原出貨 ${escapeHtml(row.shipmentId)}・本次最多 ${row.maxQty}</option>`).join('')}</select></label>
+   `<option value="${index}">${escapeHtml(row.itemName)}｜${escapeHtml(row.lotNo||row.lotId)}・原出貨 ${escapeHtml(row.shipmentId)}・本次最多 ${row.maxQty}</option>`).join('')}</select></label>
   <label>已實際收回數量<input name="qty" type="number" min="1" max="${candidates[0].maxQty}" value="${candidates[0].maxQty}" step="1" required></label>
   <label>實收日期<input name="date" type="date" value="${escapeAttr(typeof localDateString==='function'?localDateString():new Date().toISOString().slice(0,10))}" required></label>
   <label>退貨原因<textarea name="reason" maxlength="1000" required></textarea></label>
@@ -176,7 +183,7 @@ window.openV3CustodyReturn=async function(orderId){
   try{
    if(!candidate||!Number.isSafeInteger(qty)||qty<=0||qty>candidate.maxQty)
     throw Error('實收量超過原出貨批次或已送達量。');
-   const saved=await commitV3CustodyReturn({orderId,itemId:item.itemId,
+   const saved=await commitV3CustodyReturn({orderId,itemId:candidate.itemId,
     shipmentId:candidate.shipmentId,lotId:candidate.lotId,qty,date,reason,
     operationId:'custody_return_'+crypto.randomUUID().replaceAll('-','_')});
    const index=ordersCache.findIndex(row=>row.id===orderId);

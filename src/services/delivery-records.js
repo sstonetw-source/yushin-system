@@ -97,8 +97,11 @@ async function confirmV2ShipmentDeliveryEmulator(orderId,{date,qty,notes='',item
     throw Error('訂單尚未具備完整的 v2 送達來源。');
   const source=(order.warehouseShipmentRecords||[]).find(s=>s.id===shipmentId&&s.itemId===resolvedItemId);
   if(!source)throw Error('請先選擇這個品項的實際出貨紀錄。');
-  if(custodyV3&&(rows.length!==1||!rows[0].custodyTransferId
-    ||source.custodyTransferId!==rows[0].custodyTransferId
+  const custodyItem=rows.find(row=>row.itemId===resolvedItemId);
+  if(custodyV3&&(!rows.length||rows.length>5
+    ||rows.some(row=>!row.custodyTransferId||row.warehouseId!=='custody-'+order.ownerUid
+      ||String(row.productType||row.type||'').toUpperCase()==='SERVICE')
+    ||!custodyItem||source.custodyTransferId!==custodyItem.custodyTransferId
     ||source.warehouseId!=='custody-'+order.ownerUid
     ||['sales','engineer'].includes(role)&&order.ownerUid!==uid))
    throw Error('V3 客戶送達缺少原業務保管實際出貨來源。');

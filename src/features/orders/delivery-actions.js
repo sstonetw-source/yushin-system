@@ -299,9 +299,12 @@ window.saveDeliveryRecord = async function() {
     pendingDeliveryOrderIds.add(orderId);
     if (saveButton) { saveButton.disabled = true; saveButton.textContent = '儲存中…'; }
     try {
+        const deliveryOrder=ordersCache.find(row=>row.id===orderId);
+        const custodyItems=deliveryOrder?.items||[];
         const custodyV3=globalThis.YUSHIN_V3_CUSTODY_DELIVERY_EMULATOR===true
-            &&ordersCache.find(row=>row.id===orderId)?.items?.length===1
-            &&!!ordersCache.find(row=>row.id===orderId)?.items?.[0]?.custodyTransferId;
+            &&custodyItems.length>0&&custodyItems.length<=5
+            &&custodyItems.every(row=>row.custodyTransferId
+                &&row.warehouseId==='custody-'+deliveryOrder.ownerUid);
         const savedOrder=await saveOrderDeliveryRecord(orderId,{date,qty,notes,editId,itemId,recordId,shipmentId,custodyV3});
         const index = ordersCache.findIndex(item => item.id === orderId);
         if (index >= 0) ordersCache[index] = { id: orderId, ...savedOrder };

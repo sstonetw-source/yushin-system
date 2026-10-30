@@ -17,7 +17,7 @@ test.before(()=>{
  db=getFirestore(server);accounts=adminAuth(server);
 });
 test.after(async()=>{await Promise.all(clients.map(deleteApp));if(server)await server.delete();});
-async function fixture(tag){
+async function fixture(tag,{multi=false}={}){
  const prefix='v3-ship-'+tag,uid=prefix+'-OWNER',other=prefix+'-OTHER';
  const orderId=prefix+'-ORDER',productKey=prefix+'-P',transferId=prefix+'-HANDOFF';
  const custody='custody-'+uid,lotId=transferId+'-0';
@@ -37,11 +37,15 @@ async function fixture(tag){
  put('inventory',encodeURIComponent(productKey),{productKey,onHand:7,reserved:4});
  put('warehouseStocks',encodeURIComponent(custody)+'__'+encodeURIComponent(productKey),
   {warehouseId:custody,productKey,onHand:5,reserved:3});
+ const firstItem={itemId:'I',qty:3,productId:productKey,warehouseId:custody,custodyTransferId:transferId,
+  reservedQty:3,shortageQty:0,dispatchPreparedQty:3,warehouseShippedQty:0,deliveryPlan:originalPlan};
+ const secondItem=multi?{itemId:'J',qty:2,productId:prefix+'-Q',warehouseId:custody,
+  custodyTransferId:prefix+'-HANDOFF-J',reservedQty:2,shortageQty:0,dispatchPreparedQty:2,
+  warehouseShippedQty:0,deliveryPlan:originalPlan}:null;
  put('orders',orderId,{status:'active',orderStatus:'normal',inventoryReservationStatus:'completed',
   inventoryReservationAttemptId:'sync_1234567890',ownerUid:uid,salesCode:'S01',logisticsTransfersPending:0,
   warehouseShipmentRecords:[],deliveryRecords:[],returnRecords:[],deliveredQty:0,returnedQty:0,isDelivered:false,
-  items:[{itemId:'I',qty:3,productId:productKey,warehouseId:custody,custodyTransferId:transferId,
-   reservedQty:3,shortageQty:0,dispatchPreparedQty:3,warehouseShippedQty:0,deliveryPlan:originalPlan}]});
+  items:multi?[firstItem,secondItem]:[firstItem]});
  put('inventoryReservations',orderId+'__I',{orderId,itemId:'I',productKey,ownerUid:uid,salesCode:'S01',
   locationSchemaVersion:3,quantity:3,shortageQty:0,status:'active',custodyTransferId:transferId,
   locations:[{warehouseId:custody,reservedQty:3}],custodyOriginalQty:3,
@@ -60,6 +64,35 @@ async function fixture(tag){
   sourceId:transferId,transferId,qty:3,remainingQty:3,costLotId:'SOURCE-LOT'});
  put('inventoryLotCosts',lotId,{productKey,warehouseId:custody,sourceId:transferId,
   costSourceLotId:'SOURCE-LOT',unitCost:432});
+ if(multi){
+  const siblingKey=prefix+'-Q',siblingTransfer=prefix+'-HANDOFF-J',siblingLot=siblingTransfer+'-0';
+  put('products',siblingKey,{active:true,productType:'Goods'});
+  put('inventory',encodeURIComponent(siblingKey),{productKey:siblingKey,onHand:3,reserved:2});
+  put('warehouseStocks',encodeURIComponent(custody)+'__'+encodeURIComponent(siblingKey),
+   {warehouseId:custody,productKey:siblingKey,onHand:2,reserved:2});
+  put('inventoryReservations',orderId+'__J',{orderId,itemId:'J',productKey:siblingKey,
+   ownerUid:uid,salesCode:'S01',locationSchemaVersion:3,quantity:2,shortageQty:0,status:'active',
+   custodyTransferId:siblingTransfer,locations:[{warehouseId:custody,reservedQty:2}],
+   custodyOriginalQty:2,lifecycleWarehouseIds:['A','B'],
+   sourceLocationSnapshot:[{warehouseId:'A',reservedQty:2}]});
+  const source={id:siblingTransfer,kind:'HANDOFF',status:'RECEIVED',orderId,itemId:'J',
+   productKey:siblingKey,ownerUid:uid,salesCode:'S01',qty:2,toWarehouseId:custody,
+   deliveryPlan:originalPlan,orderTransferIntentHash:'hash-sibling',
+   reservationLocationSchemaVersion:2,custodyLocationSchemaVersion:3,
+   lifecycleWarehouseIds:['A','B'],sourceLocations:[{warehouseId:'A',qty:2}],
+   allocations:[{lotId:'ORIGINAL-J',targetLotId:siblingLot,qty:2,costLotId:'SOURCE-LOT-J'}]};
+  put('stockTransfers',siblingTransfer,source);
+  put('reservationOperationReceipts','order-transfer-dispatch-'+siblingTransfer,
+   {kind:'ORDER_TRANSFER_DISPATCH',intentHash:'hash-sibling',transfer:source});
+  put('inventoryMovements',siblingTransfer+'-in',{type:'warehouse_transfer_in',
+   sourceType:'WAREHOUSE_TRANSFER',sourceId:siblingTransfer,orderId,itemId:'J',
+   productKey:siblingKey,warehouseId:custody,qty:2});
+  put('inventoryLots',siblingLot,{productKey:siblingKey,warehouseId:custody,
+   sourceType:'WAREHOUSE_TRANSFER',sourceId:siblingTransfer,transferId:siblingTransfer,
+   qty:2,remainingQty:2,costLotId:'SOURCE-LOT-J'});
+  put('inventoryLotCosts',siblingLot,{productKey:siblingKey,warehouseId:custody,
+   sourceId:siblingTransfer,costSourceLotId:'SOURCE-LOT-J',unitCost:981});
+ }
  // A second unrelated transfer in the same owner's Custody MUST NOT be
  // silently consumed by this order's reservation.
  put('inventoryLots',prefix+'-OTHER-LOT',{productKey,warehouseId:custody,sourceType:'WAREHOUSE_TRANSFER',
@@ -139,6 +172,64 @@ test('authenticated owner V3 Custody shipment consumes original source and rerun
  assert.equal((await f.facts()).order.deliveredQty,3);
  assert.equal((await f.facts()).order.isDelivered,true);
  assert.equal((await f.facts()).inventory.onHand,beforeConfirmation.inventory.onHand);
+});
+test('real Auth 2-line V3 Custody shipment, customer acknowledgement and CLOSE receipt preserve sibling stock',async()=>{
+ const f=await fixture('multi-shipment',{multi:true});
+ const siblingKey='v3-ship-multi-shipment-Q',siblingLot='v3-ship-multi-shipment-HANDOFF-J-0';
+ const second={...f.input('custody_real_multi_j_first',1),itemId:'J'};
+ const first=await f.call(second);
+ assert.equal(first.status,'applied');
+ assert.equal((await f.read('orders',f.orderId)).items.length,2);
+ assert.equal((await f.read('orders',f.orderId)).warehouseShipmentRecords[0].itemIndex,1);
+ assert.equal((await f.read('orders',f.orderId)).items[0].reservedQty,3);
+ assert.equal((await f.read('inventory',encodeURIComponent(siblingKey))).onHand,2);
+ assert.equal((await f.read('inventory',encodeURIComponent(f.productKey))).onHand,7);
+ assert.equal((await f.read('inventoryLots',siblingLot)).remainingQty,1);
+ const saved=await f.facts();
+ assert.equal((await f.call(second)).status,'already-applied');
+ assert.deepEqual(await f.facts(),saved);
+ const main=f.input('custody_real_multi_i_first',1);
+ assert.equal((await f.call(main)).status,'applied');
+ const order=await f.read('orders',f.orderId);
+ assert.deepEqual(order.warehouseShipmentRecords.map(row=>row.itemId),['J','I']);
+ assert.deepEqual(order.items.map(row=>row.warehouseShippedQty),[1,1]);
+ assert.deepEqual(order.items.map(row=>row.reservedQty),[2,1]);
+ assert.equal((await f.read('inventoryLots',siblingLot)).remainingQty,1);
+ assert.equal((await f.read('inventoryLots',f.lotId)).remainingQty,2);
+ const beforeDelivery=await f.facts();
+ const siblingBefore=await f.read('inventoryLots',siblingLot);
+ const jDelivery={...f.confirmation(second.operationId,'custody_real_multi_ack_j',1),itemId:'J'};
+ const confirmedJ=await f.confirm(jDelivery);
+ assert.equal(confirmedJ.status,'applied');
+ assert.equal(confirmedJ.confirmedQty,1);
+ assert.equal(confirmedJ.isDelivered,false);
+ assert.equal((await f.read('orders',f.orderId)).items[1].deliveredQty,1);
+ const receiptSnapshot=await f.facts();
+ assert.equal((await f.confirm(jDelivery)).status,'already-applied');
+ assert.deepEqual(await f.facts(),receiptSnapshot);
+ const confirmedI=await f.confirm(f.confirmation(main.operationId,'custody_real_multi_ack_i',1));
+ assert.equal(confirmedI.status,'applied');
+ const afterDelivery=await f.facts();
+ assert.deepEqual(afterDelivery.order.items.map(row=>row.deliveredQty??0),[1,1]);
+ assert.equal(afterDelivery.order.deliveredQty,2);
+ for(const key of ['inventory','stock','ledger','lot','extra','cost'])
+  assert.deepEqual(afterDelivery[key],beforeDelivery[key],key+' cannot change during customer confirmation');
+ assert.deepEqual(await f.read('inventoryLots',siblingLot),siblingBefore);
+ const close={...f.customerReturn(second.operationId,'custody_real_multi_return_j',1),
+  itemId:'J',selections:[{lotId:siblingLot,qty:1}]};
+ const receipt=await f.receiveReturn(close);
+ assert.equal(receipt.status,'applied');
+ assert.equal(receipt.qty,1);
+ assert.equal(receipt.settlement,'CLOSE');
+ assert.equal((await f.read('inventory',encodeURIComponent(siblingKey))).onHand,3);
+ assert.equal((await f.read('inventoryLots',siblingLot)).remainingQty,2);
+ assert.equal((await f.read('inventoryReservations',f.orderId+'__J')).quantity,1);
+ assert.equal((await f.read('orders',f.orderId)).returnedQty,1);
+ const afterReturn=await f.facts();
+ for(const key of ['inventory','stock','ledger','lot','extra','cost'])
+  assert.deepEqual(afterReturn[key],beforeDelivery[key],key+' cannot change for sibling close return');
+ assert.equal((await f.receiveReturn(close)).status,'already-applied');
+ assert.deepEqual(await f.facts(),afterReturn);
 });
 test('real Auth rejects other sales and a mutated cost provenance without inventory writes',async()=>{
  const f=await fixture('blocked'),first=f.input('ship_custody_guard_123',1);

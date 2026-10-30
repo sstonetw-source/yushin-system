@@ -24,10 +24,12 @@ async function readCustodyDeliveryProofs(tx,db,order,context,intent){
  const transferId=id(item.custodyTransferId,'交接來源');
  const custody='custody-'+owner;
  const ref=(name,key)=>db.collection(name).doc(key);
+ const itemShipments=Array.isArray(order.warehouseShipmentRecords)
+  ?order.warehouseShipmentRecords.filter(row=>row.itemId===itemId):[];
  if(item.warehouseId!==custody||item.itemId!==itemId
    ||item.transferPendingId||item.productId===undefined
    ||order.logisticsTransfersPending!==undefined&&order.logisticsTransfersPending!==0
-   ||!Array.isArray(order.warehouseShipmentRecords)||!order.warehouseShipmentRecords.length
+   ||!Array.isArray(order.warehouseShipmentRecords)||!itemShipments.length
    ||order.warehouseShipmentRecords.length>40
    ||!Array.isArray(order.deliveryRecords)||!Array.isArray(order.returnRecords)
    ||order.returnRecords.length||!Number.isSafeInteger(item.reservedQty)
@@ -71,13 +73,17 @@ async function readCustodyDeliveryProofs(tx,db,order,context,intent){
    ||inbound.data().qty!==ledger.custodyOriginalQty)
   fail('原 V3 實際交接來源無法證明');
  for(const shipment of order.warehouseShipmentRecords){
-  if(shipment.custodyTransferId!==transferId||shipment.warehouseId!==custody
+  const shipmentItem=order.items.find(row=>row.itemId===shipment.itemId);
+  const shipmentTransfer=shipmentItem?.custodyTransferId;
+  const shipmentKey=shipmentItem?.inventoryProductKey||shipmentItem?.productId;
+  if(!shipmentItem||shipment.custodyTransferId!==shipmentTransfer||shipment.warehouseId!==custody
     ||shipment.deliveryPlan?.mode!=='CUSTOMER_SHIP')
    fail('保管出貨與原保管倉來源不一致');
   const movement=await tx.get(ref('inventoryMovements','location-ship-'+id(shipment.id,'出貨 ID')));
   const sourceMovement=movement.exists?movement.data():null;
-  fulfillmentCore.validateShipmentMovement(shipment,sourceMovement,{orderId,itemId,productKey});
-  if(sourceMovement.custodyShipmentV3!==true||sourceMovement.custodyTransferId!==transferId)
+  fulfillmentCore.validateShipmentMovement(shipment,sourceMovement,
+   {orderId,itemId:shipment.itemId,productKey:shipmentKey});
+  if(sourceMovement.custodyShipmentV3!==true||sourceMovement.custodyTransferId!==shipmentTransfer)
    fail('原 V3 實際扣庫憑證不一致');
  }
 }
