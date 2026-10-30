@@ -505,3 +505,16 @@ test('formal PO recovery refreshes the visible demand queue once after committin
     assert.equal(x.incoming.size,1);
   }
 });
+
+
+test('shipped production rollout routes PO to callable without legacy writes',async()=>{
+ const x=productionSetup();
+ delete x.c.YUSHIN_PRODUCTION_FORMAL_PURCHASE;
+ vm.runInContext(fs.readFileSync(path.join(__dirname,'../transaction-rollout-config.js'),'utf8'),x.c);
+ await x.c.commitFormalPurchaseOrder(x.po);
+ assert.equal(x.calls.filter(row=>row.name==='commitV2FormalPurchase').length,1);
+ assert.equal(x.writes.length,0);
+ x.functions.httpsCallable=()=>async()=>{throw Error('lost production reply');};
+ await assert.rejects(x.c.commitFormalPurchaseOrder(x.po),/lost production reply/);
+ assert.equal(x.writes.length,0);
+});
