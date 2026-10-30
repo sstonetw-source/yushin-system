@@ -1,0 +1,27 @@
+name: Operational reset safety checks
+
+on:
+  pull_request:
+    paths:
+      - 'functions/operational-reset-policy.js'
+      - 'functions/scripts/one-time-operational-reset.js'
+      - 'tests/operational-reset-policy.test.js'
+      - 'docs/one-time-operational-reset.md'
+      - '.github/workflows/operational-reset-safety.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check operational reset script syntax
+        run: node --check functions/scripts/one-time-operational-reset.js
+      - name: Verify allowlists and stock reset policy
+        run: node --test tests/operational-reset-policy.test.js
