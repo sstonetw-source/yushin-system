@@ -335,6 +335,8 @@ async function reserveInventoryForNewOrder(orderId, order, actorUid = currentUse
         const latest=await firestoreReadWithTimeout(orderRef.get(),'讀取後端庫存同步結果');
         if(!latest.exists||currentUser?.uid!==actorUid)
             throw new Error('訂單已變更，請更新後確認同步結果。');
+        if(String(latest.data().inventoryReservationAttemptId||'')!==String(liveOrder.inventoryReservationAttemptId||''))
+            throw new Error('後端預留已回覆，但訂單已有較新的同步識別碼；請以原憑證核對，不得繼續舊操作。');
         Object.assign(order,{id:orderId,...latest.data()});
         if(normalizedOrderStatus(order)!=='normal')throw new Error('訂單已取消／作廢，停止後續自行訂貨。');
         for(const row of normalizedOrderItems(order)){

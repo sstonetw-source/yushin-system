@@ -78,8 +78,11 @@ async function commitNewOrderReservationPreview(orderId,liveOrder,actorUid) {
         throw new Error('登入身分或測試環境已變更，停止後端庫存同步。');
     const callable=firebase.app().functions('asia-east1').httpsCallable('commitOrderReservationPreview');
     const reply=await callable({orderId,syncAttemptId});
-    if (!['applied','already-applied'].includes(reply?.data?.status))
-        throw new Error('後端預留回覆不明確，請重新讀取訂單後以原識別碼重試。');
+    if (!orderReservationBackendPreviewEnabled())
+        throw new Error('整單預留後端旗標已關閉，請保留原識別碼核對交易結果。');
+    if (!['applied','already-applied'].includes(reply?.data?.status)
+        || reply.data.receiptId!=='order-sync-'+orderId+'__'+syncAttemptId)
+        throw new Error('後端預留回覆不明確或原憑證不符，請以原識別碼核對結果。');
     if (currentUser?.uid!==actorUid)
         throw new Error('後端預留可能已提交，但登入身分已變更，請重新讀取結果。');
     invalidateProcurementDemandQueue();
