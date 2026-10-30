@@ -133,6 +133,32 @@ function db(uid) {
   return env.authenticatedContext(uid).firestore();
 }
 
+test('#311 server-only reservation cutover denies old SDK ledger and reserved-balance writes atomically',async()=>{
+ const initial={productKey:'p-order',onHand:10,reserved:0,incoming:0};
+ const warehouse={...initial,warehouseId:'W1'};
+ const ledger={orderId:'retired-sdk',itemId:'I1',productKey:'p-order',warehouseId:'W1',
+  ownerUid:'sales1',salesCode:'S01',quantity:0,shortageQty:3};
+ await seed('inventory/p-order',initial);
+ await seed('warehouseStocks/W1__p-order',warehouse);
+ await seed('inventoryReservations/retired-sdk__I1',ledger);
+ for(const uid of ['admin','buyer1','wh1','sales1','eng1']){
+  const client=db(uid);
+  await assertFails(setDoc(doc(client,'inventoryReservations/new-'+uid+'__I1'),ledger));
+  await assertFails(updateDoc(doc(client,'inventoryReservations/retired-sdk__I1'),{quantity:2}));
+  await assertFails(deleteDoc(doc(client,'inventoryReservations/retired-sdk__I1')));
+  await assertFails(updateDoc(doc(client,'inventory/p-order'),{reserved:1}));
+  await assertFails(updateDoc(doc(client,'warehouseStocks/W1__p-order'),{reserved:1}));
+ }
+ const client=db('buyer1'),b=writeBatch(client);
+ b.update(doc(client,'inventory/p-order'),{reserved:2});
+ b.update(doc(client,'warehouseStocks/W1__p-order'),{reserved:2});
+ b.update(doc(client,'inventoryReservations/retired-sdk__I1'),{quantity:2});
+ await assertFails(b.commit());
+ assert.equal((await getDoc(doc(db('admin'),'inventory/p-order'))).data().reserved,0);
+ assert.equal((await getDoc(doc(db('admin'),'warehouseStocks/W1__p-order'))).data().reserved,0);
+ assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/retired-sdk__I1'))).data().quantity,0);
+});
+
 test('server-only grouped reservation receipts reject browser SDK reads and writes for all roles',async()=>{
  const path='reservationOperationReceipts/grouped-test_123456789';
  await env.withSecurityRulesDisabled(async ctx=>{
