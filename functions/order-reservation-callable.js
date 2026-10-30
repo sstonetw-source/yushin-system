@@ -6,7 +6,7 @@ const {commitOrderReservation}=require('./order-reservation-service');
 function createOrderReservationCallable({onCall,HttpsError,getDatabase,env=process.env}){
   return onCall({region:'asia-east1'},async request=>{
     if(!allowOrderReservationBackend(env))
-      throw new HttpsError('failed-precondition','整單後端預留尚未在 Preview 啟用');
+      throw new HttpsError('failed-precondition','整單後端預留尚未在此環境啟用');
     if(!request.auth?.uid)throw new HttpsError('unauthenticated','請先登入');
     const db=getDatabase();
     if(db.projectId!==projectIdFromEnvironment(env))

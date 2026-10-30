@@ -63,6 +63,43 @@ test('failed item transaction leaves stock, reservation, order and demand untouc
  const f=fixture();f.controls.fail=true;const before=JSON.stringify([...f.docs]);
  await assert.rejects(f.sync(),/permission-denied/);assert.equal(JSON.stringify([...f.docs]),before);assert.equal(f.controls.selfCalls,0);
 });
+test('post-cutover production outage stops instead of falling back to legacy per-item stock writes',async()=>{
+ const f=fixture();
+ f.c.orderReservationBackendEnabled=()=>false;
+ f.c.productionReservationLegacyWriterBlocked=()=>true;
+ const before=JSON.stringify([...f.docs]);
+ await assert.rejects(f.sync(),/停用舊版預留寫入/);
+ assert.equal(JSON.stringify([...f.docs]),before);
+ assert.equal(f.controls.selfCalls,0);
+});
+test('production never uses the legacy per-item writer even before the legacy fence flag activates',async()=>{
+ const f=fixture();
+ f.c.APP_ENVIRONMENT='production';
+ f.c.orderReservationBackendEnabled=()=>false;
+ f.c.productionReservationLegacyWriterBlocked=()=>false;
+ const before=JSON.stringify([...f.docs]);
+ await assert.rejects(f.sync(),/正式環境已停用舊版預留寫入/);
+ assert.equal(JSON.stringify([...f.docs]),before);
+ assert.equal(f.controls.selfCalls,0);
+});
+test('unknown whole-order backend result never resumes legacy stock writing',async()=>{
+ const f=fixture();
+ f.c.orderReservationBackendEnabled=()=>true;
+ f.c.commitNewOrderReservationPreview=async()=>{throw Error('backend unknown receipt');};
+ const before=JSON.stringify([...f.docs]);
+ await assert.rejects(f.sync(),/backend unknown receipt/);
+ assert.equal(JSON.stringify([...f.docs]),before);
+ assert.equal(f.controls.selfCalls,0);
+});
+test('backend flag disabled after route selection cannot masquerade as a completed reservation',async()=>{
+ const f=fixture();let checks=0;
+ f.c.orderReservationBackendEnabled=()=>++checks===1;
+ f.c.commitNewOrderReservationPreview=async()=>false;
+ const before=JSON.stringify([...f.docs]);
+ await assert.rejects(f.sync(),/尚無提交確認/);
+ assert.equal(JSON.stringify([...f.docs]),before);
+ assert.equal(f.controls.selfCalls,0);
+});
 test('simultaneous retries and repeated same-product lines do not overwrite or overreserve',async()=>{
  const f=fixture({onHand:6,items:[{itemId:'I',productId:'P',warehouseId:'W',qty:5},{itemId:'J',productId:'P',warehouseId:'W',qty:5}]});
  await Promise.all([f.sync(),f.sync()]);
