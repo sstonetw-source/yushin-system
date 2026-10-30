@@ -104,6 +104,29 @@ test('warehouse purchase refuses overbooked reserved and shortage quantities bef
  }
 });
 
+test('source admission identifies repair prerequisites without writing purchase data',async()=>{
+ const cases=[
+  [{ownerUid:''},'來源訂單缺少業務歸屬資料，請先核對負責人與業務代碼'],
+  [{salesCode:''},'來源訂單缺少業務歸屬資料，請先核對負責人與業務代碼'],
+  ...['pending','failed',undefined].map(inventoryReservationStatus=>[
+   {inventoryReservationStatus},'來源訂單庫存同步尚未完成，請先核對同步結果']),
+  ...[{status:'cancelled'},{orderStatus:'cancelled'},{status:'voided'},
+   {orderStatus:'voided'},{returnPending:true}].map(patch=>[
+   patch,'來源訂單已取消、作廢或退貨處理中，不可建立正式採購單']),
+  ...[undefined,[],{}].map(items=>[
+   {items},'來源訂單缺少有效品項資料，請先核對原訂單'])
+ ];
+ for(const [patch,message] of cases){
+  const x=writeFixture();
+  Object.assign(x.records.get('orders/ORDER-1'),patch);
+  const before=structuredClone([...x.records]);
+  await assert.rejects(previewV2FormalPurchase(x.db,'buyer',x.input),{code:'failed-precondition',message});
+  await assert.rejects(commitV2FormalPurchase(x.db,'buyer',x.data),{code:'failed-precondition',message});
+  assert.equal(x.history.length,0);
+  assert.deepEqual([...x.records],before);
+ }
+});
+
 test('strict PO request allows only a bounded four-field identity',()=>{
  const input={poNo:'PO-1',orderId:'O-1',itemId:'S',qty:4};
  assert.deepEqual(strictRequest(input),input);
