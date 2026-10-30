@@ -1,0 +1,780 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-31",
+  "mainAtAudit": "710c40226cc742fcb3419dae3922f200aa959161",
+  "summary": {
+    "audited": 24,
+    "verifiedIntegrated": 7,
+    "held": 17,
+    "previousDeleted": 174,
+    "expectedTotalDeleted": 181
+  },
+  "candidates": [
+    {
+      "branch": "feat/multi-item-shipment-20261018",
+      "sha": "ce2abda57a31a17d8d7d9a90a08aa02f10a280f3",
+      "originalPr": null,
+      "integrationCommit": "7013df0c6753fe04715d3d5345a81417bb88ffbb",
+      "integrationPr": 174,
+      "decision": "verified-integrated",
+      "historicalExactFiles": 8,
+      "changedFiles": 10,
+      "evidence": "10 個變更檔中 8 個與主線 #174 完全相同；ARCHITECTURE 僅增加多品項出貨實作說明，Emulator test 將原本硬編碼 0/false 改為保留原 deliveredQty/isDelivered 的斷言，沒有移除案例或弱化數量／原子性檢查。",
+      "files": [
+        {
+          "path": "docs/ARCHITECTURE.md",
+          "branchBlobSha": "40120064ceb4dfe974d6397740418b7d73c2b3fd",
+          "integrationBlobSha": "19c24274f01f5f561628525eb3b2a8aceba7a172",
+          "mainBlobSha": "740e30b29a352eef46a4242515ecb6b496f4c448"
+        },
+        {
+          "path": "docs/DEVELOPMENT_RULES.md",
+          "branchBlobSha": "411b9fd3e35cf473faece492a9984270aa679eb3",
+          "integrationBlobSha": "411b9fd3e35cf473faece492a9984270aa679eb3",
+          "mainBlobSha": "b5100a7f99b7d7cb85d4746dc058ac3e65359593"
+        },
+        {
+          "path": "docs/multi-item-dispatch-20261018.md",
+          "branchBlobSha": "b1343525ccc51f79abc638bf47f811832dd3ee77",
+          "integrationBlobSha": "b1343525ccc51f79abc638bf47f811832dd3ee77",
+          "mainBlobSha": "b1343525ccc51f79abc638bf47f811832dd3ee77"
+        },
+        {
+          "path": "functions/location-dispatch-service.js",
+          "branchBlobSha": "fa3479bd2cd31a9a471f9d910950580cf0d83acd",
+          "integrationBlobSha": "fa3479bd2cd31a9a471f9d910950580cf0d83acd",
+          "mainBlobSha": "e37431b88516a498e0b871f8f0d6c829f301ae70"
+        },
+        {
+          "path": "functions/location-return-trace-service.js",
+          "branchBlobSha": "b5cf7ea0c13ba78317d266ed20034b1d690b004e",
+          "integrationBlobSha": "b5cf7ea0c13ba78317d266ed20034b1d690b004e",
+          "mainBlobSha": "863feb158ccffbbfdd0d0b468cd6a8d0129631d1"
+        },
+        {
+          "path": "functions/location-shipment-service.js",
+          "branchBlobSha": "d99e3f562328e541192946b10b6a603291b9b8cf",
+          "integrationBlobSha": "d99e3f562328e541192946b10b6a603291b9b8cf",
+          "mainBlobSha": "10c0437e06777c61b69ee50656bbe8ef8001be4b"
+        },
+        {
+          "path": "functions/shared/fulfillment-core.js",
+          "branchBlobSha": "b675ffee18410c83015472d28814942a7dc8342c",
+          "integrationBlobSha": "b675ffee18410c83015472d28814942a7dc8342c",
+          "mainBlobSha": "6136f13da83aca43faab01400abc269f5716ed36"
+        },
+        {
+          "path": "modules/fulfillment-core.js",
+          "branchBlobSha": "b675ffee18410c83015472d28814942a7dc8342c",
+          "integrationBlobSha": "b675ffee18410c83015472d28814942a7dc8342c",
+          "mainBlobSha": "6136f13da83aca43faab01400abc269f5716ed36"
+        },
+        {
+          "path": "tests/emulator-location-shipment.cjs",
+          "branchBlobSha": "9deb7293fe2c71fa604a026d767a8c3765522bf7",
+          "integrationBlobSha": "43a9ad6759122250f5dd9ffd38f4230bcbb5033d",
+          "mainBlobSha": "50bc6a78f4c326592dd1ced4c67ed3806ccde71f"
+        },
+        {
+          "path": "tests/v2-fulfillment-core.test.js",
+          "branchBlobSha": "3389f7ca1ce421981f4f7b09f9a4aa34e9ac0064",
+          "integrationBlobSha": "3389f7ca1ce421981f4f7b09f9a4aa34e9ac0064",
+          "mainBlobSha": "9f54bcb2e35a8ab40ddab90d1ff8b39fa25327b9"
+        }
+      ]
+    },
+    {
+      "branch": "feat/order-amount-details-20261025",
+      "sha": "13efc421ff7e95bcb08a895f328b24880e89e038",
+      "originalPr": 283,
+      "integrationCommit": "69a6a64af8f4d50da4a9a99b1d4e4661ec32fb0b",
+      "integrationPr": 292,
+      "decision": "verified-integrated",
+      "historicalExactFiles": 23,
+      "changedFiles": 26,
+      "evidence": "26 個變更檔中 23 個與 #292 完全相同；其餘 app.js 僅加入 #290 Preview 採購路由，Rules 與 Rules test 僅增加 #288 metadata 去重及正反向測試。原訂單金額、商品明細與 15 品項變更完整保留。",
+      "files": [
+        {
+          "path": "app.js",
+          "branchBlobSha": "00041a4ac64b0f5a90b4c48cc8c8c0136f68e0a7",
+          "integrationBlobSha": "a17f6c3d6b7cf6d2a8edbeb9d08d260454e958c1",
+          "mainBlobSha": "cd756075e7d73732a615b7006e0e782b478fd163"
+        },
+        {
+          "path": "docs/releases/order-amount-details-20261025.md",
+          "branchBlobSha": "a204fbb6bad0624ab5951bb14954a318b78b68dd",
+          "integrationBlobSha": "a204fbb6bad0624ab5951bb14954a318b78b68dd",
+          "mainBlobSha": "a204fbb6bad0624ab5951bb14954a318b78b68dd"
+        },
+        {
+          "path": "firestore.rules",
+          "branchBlobSha": "158cbe5b948d3e5c40e617963c13f2fd7ff81726",
+          "integrationBlobSha": "65039666adf1772c9695ed34fafdb00a412f22ec",
+          "mainBlobSha": "3e197bd6016f481f7a8a38f6e4cc6d0d88642568"
+        },
+        {
+          "path": "functions/shared/warehouse-logistics.js",
+          "branchBlobSha": "21966d943cd22cfa3ab31adb39998763796e69af",
+          "integrationBlobSha": "21966d943cd22cfa3ab31adb39998763796e69af",
+          "mainBlobSha": "a612bab51de7cba0b50e2a3c1770403f97b15772"
+        },
+        {
+          "path": "index.html",
+          "branchBlobSha": "5533ddf4ead7088babe494a4c61b5c84e5b526f8",
+          "integrationBlobSha": "5533ddf4ead7088babe494a4c61b5c84e5b526f8",
+          "mainBlobSha": "8f8e3398b0574b526cd0cf8a40064e77116d8eb9"
+        },
+        {
+          "path": "modules/delivery-settings.js",
+          "branchBlobSha": "ad246d01763207450dcdc5fea8e4de6cdbf26247",
+          "integrationBlobSha": "ad246d01763207450dcdc5fea8e4de6cdbf26247",
+          "mainBlobSha": "47402a499727b5ef4c441e97c3d0b53e3bce4396"
+        },
+        {
+          "path": "modules/order-commercial-details.js",
+          "branchBlobSha": "a718343f0676065f284a78af42912925dca01e82",
+          "integrationBlobSha": "a718343f0676065f284a78af42912925dca01e82",
+          "mainBlobSha": "a718343f0676065f284a78af42912925dca01e82"
+        },
+        {
+          "path": "modules/warehouse-logistics.js",
+          "branchBlobSha": "21966d943cd22cfa3ab31adb39998763796e69af",
+          "integrationBlobSha": "21966d943cd22cfa3ab31adb39998763796e69af",
+          "mainBlobSha": "a612bab51de7cba0b50e2a3c1770403f97b15772"
+        },
+        {
+          "path": "src/app/bootstrap.js",
+          "branchBlobSha": "4f3d5ad3f0d88e7a654a2b56d19f9e18511f20f7",
+          "integrationBlobSha": "4f3d5ad3f0d88e7a654a2b56d19f9e18511f20f7",
+          "mainBlobSha": "2d0162b029f34111057909ff937a2b9a609bfa33"
+        },
+        {
+          "path": "src/features/orders/delivery-actions.js",
+          "branchBlobSha": "1f9cf4afcfaff27885ebcae058095fd393a2c2b5",
+          "integrationBlobSha": "1f9cf4afcfaff27885ebcae058095fd393a2c2b5",
+          "mainBlobSha": "dbf4b260123156526c2cd77313c5d65ed38be7bb"
+        },
+        {
+          "path": "src/features/orders/order-creation.js",
+          "branchBlobSha": "5479902aca6e916a79e0ba34e0ead60e2ee29637",
+          "integrationBlobSha": "5479902aca6e916a79e0ba34e0ead60e2ee29637",
+          "mainBlobSha": "18d4eafa1071d872cf0bb63e03f77492133ffdf6"
+        },
+        {
+          "path": "src/features/orders/order-workspace.js",
+          "branchBlobSha": "bc2d9db8b2f0b53ce2b416c7ac214eadbf63078b",
+          "integrationBlobSha": "bc2d9db8b2f0b53ce2b416c7ac214eadbf63078b",
+          "mainBlobSha": "b7d082bb616fc4e4c8897413f92c898dd332d43c"
+        },
+        {
+          "path": "src/features/purchasing/purchasing-workspace.js",
+          "branchBlobSha": "675c232acbd504f069f43264655655991b54d53d",
+          "integrationBlobSha": "675c232acbd504f069f43264655655991b54d53d",
+          "mainBlobSha": "a9c6bddbe7deb389906c41686c28af89dd6c65b3"
+        },
+        {
+          "path": "src/services/order-creation.js",
+          "branchBlobSha": "4597b4ce792c13cd28eda21769928042cb966066",
+          "integrationBlobSha": "4597b4ce792c13cd28eda21769928042cb966066",
+          "mainBlobSha": "4597b4ce792c13cd28eda21769928042cb966066"
+        },
+        {
+          "path": "styles.css",
+          "branchBlobSha": "0fbace13db68d0caa2b499233d0cd30cdaab1efc",
+          "integrationBlobSha": "0fbace13db68d0caa2b499233d0cd30cdaab1efc",
+          "mainBlobSha": "b7cea31e560141255cd3ba6b1ff35eb65faa3bf1"
+        },
+        {
+          "path": "tests/delivery-settings.test.js",
+          "branchBlobSha": "a80380c470b49799adc10d3d27f5471b135ac27e",
+          "integrationBlobSha": "a80380c470b49799adc10d3d27f5471b135ac27e",
+          "mainBlobSha": "40fff36e189eeeece21627496cb4b2eb11b5819b"
+        },
+        {
+          "path": "tests/dispatch-preparation-browser-smoke.js",
+          "branchBlobSha": "7f4f6eefde2b844ee0360de211f9b64ac6bade42",
+          "integrationBlobSha": "7f4f6eefde2b844ee0360de211f9b64ac6bade42",
+          "mainBlobSha": "1e45de1a974072b2d22b0eeb95b32c39f1072372"
+        },
+        {
+          "path": "tests/emulator-v2-lifecycle-browser.cjs",
+          "branchBlobSha": "0fba924c9a73b8f092bbbaa0a090e5bce0c8be33",
+          "integrationBlobSha": "0fba924c9a73b8f092bbbaa0a090e5bce0c8be33",
+          "mainBlobSha": "c8a2dcb248a5ee18ad702334cf4f4cef0bdb3bb2"
+        },
+        {
+          "path": "tests/firestore-rules.test.js",
+          "branchBlobSha": "ac139d8e705f8330cb6c6412f4bf6a2e7cb20336",
+          "integrationBlobSha": "b0be2affa1a63efbd1423782ea55d2b0cdfed75e",
+          "mainBlobSha": "13621ed67c71d44d03fa5989a7e1c7ece8f4e925"
+        },
+        {
+          "path": "tests/order-commercial-details.test.js",
+          "branchBlobSha": "57d258b8018bd2f94d5d659887764b6df7903ebf",
+          "integrationBlobSha": "57d258b8018bd2f94d5d659887764b6df7903ebf",
+          "mainBlobSha": "57d258b8018bd2f94d5d659887764b6df7903ebf"
+        },
+        {
+          "path": "tests/order-creation-service.test.js",
+          "branchBlobSha": "f36a784c37a5ff927d44f9188be5c42e39061b5f",
+          "integrationBlobSha": "f36a784c37a5ff927d44f9188be5c42e39061b5f",
+          "mainBlobSha": "f36a784c37a5ff927d44f9188be5c42e39061b5f"
+        },
+        {
+          "path": "tests/order-entry-core.test.js",
+          "branchBlobSha": "73bed856bf3efba99bc8edda31ea53b083982413",
+          "integrationBlobSha": "73bed856bf3efba99bc8edda31ea53b083982413",
+          "mainBlobSha": "73bed856bf3efba99bc8edda31ea53b083982413"
+        },
+        {
+          "path": "tests/phase1.test.js",
+          "branchBlobSha": "3ab203a4b310c075f054d5e5afb984d47fb4394d",
+          "integrationBlobSha": "3ab203a4b310c075f054d5e5afb984d47fb4394d",
+          "mainBlobSha": "404e405009e0730788cc0b01b5edf86f6c592e77"
+        },
+        {
+          "path": "tests/purchasing-workflow.test.js",
+          "branchBlobSha": "ff3fe8a1ba7454dcacadf1efca2b8ab0211d4cce",
+          "integrationBlobSha": "ff3fe8a1ba7454dcacadf1efca2b8ab0211d4cce",
+          "mainBlobSha": "ca397effc11a9cc0a1c100f7dcf6ed6316e711d5"
+        },
+        {
+          "path": "tests/service-progress-browser-smoke.js",
+          "branchBlobSha": "c24838d7ab7a446a40b2d102b4da12139cc11bf2",
+          "integrationBlobSha": "c24838d7ab7a446a40b2d102b4da12139cc11bf2",
+          "mainBlobSha": "eeaed8ee74986effa25b83f7759a9ee30d3dc707"
+        },
+        {
+          "path": "tests/ui-design-guidelines.test.js",
+          "branchBlobSha": "6d19b5e009a28e1f48e51f49562effae8c5e3bf8",
+          "integrationBlobSha": "6d19b5e009a28e1f48e51f49562effae8c5e3bf8",
+          "mainBlobSha": "c9f7cd2638fc31fe924bd51c6955a5b9d38020a1"
+        }
+      ]
+    },
+    {
+      "branch": "feat/quick-purchase-preview-backend-gate-20261025",
+      "sha": "39f70f0153fe5f6a175c164265d3252fd9fea678",
+      "originalPr": 290,
+      "integrationCommit": "69a6a64af8f4d50da4a9a99b1d4e4661ec32fb0b",
+      "integrationPr": 292,
+      "decision": "verified-integrated",
+      "historicalExactFiles": 5,
+      "changedFiles": 6,
+      "evidence": "6 個變更檔中 5 個與 #292 完全相同；唯一不同的 app.js 為同次整合的 #283 UI，quick-purchase.js 原始碼與 #292 相同，後續 main 另加獨立 production gate、專案綁定及 pending 禁止回退。",
+      "files": [
+        {
+          "path": "app.js",
+          "branchBlobSha": "fe52eb5ce316322fb633db7d1efbdda8fb617126",
+          "integrationBlobSha": "a17f6c3d6b7cf6d2a8edbeb9d08d260454e958c1",
+          "mainBlobSha": "cd756075e7d73732a615b7006e0e782b478fd163"
+        },
+        {
+          "path": "functions/quick-purchase-callable.js",
+          "branchBlobSha": "74b5fd73de19f977281b3015c53dd53d701a66f2",
+          "integrationBlobSha": "74b5fd73de19f977281b3015c53dd53d701a66f2",
+          "mainBlobSha": "a6c59bf4a417684395eda099cc21f3ac9cea5e5c"
+        },
+        {
+          "path": "src/services/quick-purchase.js",
+          "branchBlobSha": "987e53c2be1d0512ec2b5dd71deee3cab03cfadb",
+          "integrationBlobSha": "987e53c2be1d0512ec2b5dd71deee3cab03cfadb",
+          "mainBlobSha": "0987f11fd1dbaea9f047b5e2ef965b46d443c304"
+        },
+        {
+          "path": "tests/quick-purchase-backend.test.js",
+          "branchBlobSha": "b48b4014d37b3d6722265b7c1f960342bc5f542f",
+          "integrationBlobSha": "b48b4014d37b3d6722265b7c1f960342bc5f542f",
+          "mainBlobSha": "51f0b2b5e4afdf76941d0c3b72808628ec36a4ce"
+        },
+        {
+          "path": "tests/quick-purchase-no-fallback.test.js",
+          "branchBlobSha": "d397b7d6ec48f8b07c94f1b8c787a7b99f5811b0",
+          "integrationBlobSha": "d397b7d6ec48f8b07c94f1b8c787a7b99f5811b0",
+          "mainBlobSha": "70f153fa5a30b0df260731e507d4e36e4a1a9221"
+        },
+        {
+          "path": "tests/quick-purchase-preview-routing.test.js",
+          "branchBlobSha": "4fa72293bf308ca584b2dc70f8971335bfc89de3",
+          "integrationBlobSha": "4fa72293bf308ca584b2dc70f8971335bfc89de3",
+          "mainBlobSha": "e1905320baa3301b1ac70d44be725e6a7a219bc0"
+        }
+      ]
+    },
+    {
+      "branch": "preview/inventory-warehouse-forecast-20260920",
+      "sha": "ac5c85618952ad12bc98a9e13ffe7d6f2b035caf",
+      "originalPr": 29,
+      "integrationCommit": "7cf91049ac3dee5b24b9560241d941f24e648c6e",
+      "integrationPr": null,
+      "decision": "verified-integrated",
+      "historicalExactFiles": 1,
+      "changedFiles": 1,
+      "evidence": "所有變更僅 app.js；其 blob 與 main 歷史提交 7cf9104 完全相同。雖 #29 closed-unmerged，但修改確實以相同內容進入主線。",
+      "files": [
+        {
+          "path": "app.js",
+          "branchBlobSha": "d2c0419fb87dd39e30d50b5064f3f0a39d8a7b08",
+          "integrationBlobSha": "d2c0419fb87dd39e30d50b5064f3f0a39d8a7b08",
+          "mainBlobSha": "cd756075e7d73732a615b7006e0e782b478fd163"
+        }
+      ]
+    },
+    {
+      "branch": "preview/multi-item-order-model-20260920",
+      "sha": "37171344b5a67721d1bf9f6de401c1e549534c87",
+      "originalPr": 28,
+      "integrationCommit": "7cf91049ac3dee5b24b9560241d941f24e648c6e",
+      "integrationPr": null,
+      "decision": "verified-integrated",
+      "historicalExactFiles": 1,
+      "changedFiles": 1,
+      "evidence": "所有變更僅 app.js；其 blob 與 main 歷史提交 7cf9104 完全相同。解除先前 #28 晚於父 PR 合併的疑慮，依實際主線內容而非父 PR 時間判定。",
+      "files": [
+        {
+          "path": "app.js",
+          "branchBlobSha": "d2c0419fb87dd39e30d50b5064f3f0a39d8a7b08",
+          "integrationBlobSha": "d2c0419fb87dd39e30d50b5064f3f0a39d8a7b08",
+          "mainBlobSha": "cd756075e7d73732a615b7006e0e782b478fd163"
+        }
+      ]
+    },
+    {
+      "branch": "refactor/architecture-unification-20261015",
+      "sha": "ebdc997364eafb3bac323b41a239770f24094e2b",
+      "originalPr": 94,
+      "integrationCommit": "c1bac371666782893ce411c289918cbe84c00973",
+      "integrationPr": 95,
+      "decision": "verified-integrated",
+      "historicalExactFiles": 49,
+      "changedFiles": 49,
+      "evidence": "完整 49 個變更檔在主線 #95 的 c1bac37 同時逐檔完全相同，包含新增 DATA_MODEL 與契約測試；分支後續修改並未遺漏。",
+      "files": [
+        {
+          "path": ".github/workflows/regression.yml",
+          "branchBlobSha": "9053b5ec70003183b17332f3753a59f9793319b4",
+          "integrationBlobSha": "9053b5ec70003183b17332f3753a59f9793319b4",
+          "mainBlobSha": "ff10a60f5a8bf4887c20eb99f9660f1d79ea86dc"
+        },
+        {
+          "path": "README.md",
+          "branchBlobSha": "c231e7e41226565d0a8ec1daef72fbd18960c209",
+          "integrationBlobSha": "c231e7e41226565d0a8ec1daef72fbd18960c209",
+          "mainBlobSha": "a15772b534830667a3ef3e1c3d4598204ab958c5"
+        },
+        {
+          "path": "app.js",
+          "branchBlobSha": "30fa4c1f008f68e5dc4acf522ad7355c4cebc159",
+          "integrationBlobSha": "30fa4c1f008f68e5dc4acf522ad7355c4cebc159",
+          "mainBlobSha": "cd756075e7d73732a615b7006e0e782b478fd163"
+        },
+        {
+          "path": "docs/ARCHITECTURE.md",
+          "branchBlobSha": "c62c2a96c2877d5e62f6b3f3e485a4a32b49febc",
+          "integrationBlobSha": "c62c2a96c2877d5e62f6b3f3e485a4a32b49febc",
+          "mainBlobSha": "740e30b29a352eef46a4242515ecb6b496f4c448"
+        },
+        {
+          "path": "docs/BUSINESS_RULES.md",
+          "branchBlobSha": "7f4208c9a503a9a3956fa7912adc9080b0e72375",
+          "integrationBlobSha": "7f4208c9a503a9a3956fa7912adc9080b0e72375",
+          "mainBlobSha": "503f033297b89219db58feda9874d76ed9ff877a"
+        },
+        {
+          "path": "docs/DATA_MODEL.md",
+          "branchBlobSha": "7591cd8b6169bbbcb81f161925de3913ca9d3b7b",
+          "integrationBlobSha": "7591cd8b6169bbbcb81f161925de3913ca9d3b7b",
+          "mainBlobSha": "aa8ffd2688909076bceedff5bd440ece68db14bd"
+        },
+        {
+          "path": "docs/DEVELOPMENT_RULES.md",
+          "branchBlobSha": "822512724a1150110c36c03cd603c7a271e38a63",
+          "integrationBlobSha": "822512724a1150110c36c03cd603c7a271e38a63",
+          "mainBlobSha": "b5100a7f99b7d7cb85d4746dc058ac3e65359593"
+        },
+        {
+          "path": "docs/lifecycle-reservation-integrity-20261015.md",
+          "branchBlobSha": "18f35542196b7d64d0ad2f14f54a594f3dc996fc",
+          "integrationBlobSha": "18f35542196b7d64d0ad2f14f54a594f3dc996fc",
+          "mainBlobSha": "18f35542196b7d64d0ad2f14f54a594f3dc996fc"
+        },
+        {
+          "path": "docs/transaction-core-unification-20261015.md",
+          "branchBlobSha": "f72f4c2ff3a55bfc02dce49b731b45b8948f414d",
+          "integrationBlobSha": "f72f4c2ff3a55bfc02dce49b731b45b8948f414d",
+          "mainBlobSha": "3553a52a4b1ddca07928313dcf996ec5f1e71436"
+        },
+        {
+          "path": "firebase.json",
+          "branchBlobSha": "9b0174cbd1eed9f5808e5ee80b8dd3fa54598e64",
+          "integrationBlobSha": "9b0174cbd1eed9f5808e5ee80b8dd3fa54598e64",
+          "mainBlobSha": "67d879bd2d9ccb39243be8b7bf16e1517fd9fd9e"
+        },
+        {
+          "path": "index.html",
+          "branchBlobSha": "7f0ffc777a605aa02bf166f58d159ceaf585db9b",
+          "integrationBlobSha": "7f0ffc777a605aa02bf166f58d159ceaf585db9b",
+          "mainBlobSha": "8f8e3398b0574b526cd0cf8a40064e77116d8eb9"
+        },
+        {
+          "path": "modules/fulfillment-core.js",
+          "branchBlobSha": "07399fd6a963dc39f255f91978bb681615a24db2",
+          "integrationBlobSha": "07399fd6a963dc39f255f91978bb681615a24db2",
+          "mainBlobSha": "6136f13da83aca43faab01400abc269f5716ed36"
+        },
+        {
+          "path": "modules/workflow-core.js",
+          "branchBlobSha": "d30daefa99cf6c6f81e573990c26a2f31ed1db00",
+          "integrationBlobSha": "d30daefa99cf6c6f81e573990c26a2f31ed1db00",
+          "mainBlobSha": "177465ee7a1bd11c3b9b7c84799596a3d4ab0ed8"
+        },
+        {
+          "path": "src/app/bootstrap.js",
+          "branchBlobSha": "4f690c13d06347d7893eb4a79d11a22d717e8e1d",
+          "integrationBlobSha": "4f690c13d06347d7893eb4a79d11a22d717e8e1d",
+          "mainBlobSha": "2d0162b029f34111057909ff937a2b9a609bfa33"
+        },
+        {
+          "path": "src/app/navigation.js",
+          "branchBlobSha": "2da3a389509b81403eb7bd0c1db83e6b6d536006",
+          "integrationBlobSha": "2da3a389509b81403eb7bd0c1db83e6b6d536006",
+          "mainBlobSha": "7358d8bf3325c70a33cf6f69311962df91f24b90"
+        },
+        {
+          "path": "src/features/administration/brand-settings.js",
+          "branchBlobSha": "70a1ac390ebc562e3d68e4f3bb63dfca40b591ad",
+          "integrationBlobSha": "70a1ac390ebc562e3d68e4f3bb63dfca40b591ad",
+          "mainBlobSha": "80c2580bae7f77578014e6ab62a4e4d3f74d847b"
+        },
+        {
+          "path": "src/features/administration/user-and-system-settings.js",
+          "branchBlobSha": "c6eef2169b7cdd67b6d914de05c7f67ccd270dd9",
+          "integrationBlobSha": "c6eef2169b7cdd67b6d914de05c7f67ccd270dd9",
+          "mainBlobSha": "a063dcf1634979f4735eac97adebc51ef9b7d53f"
+        },
+        {
+          "path": "src/features/analytics/sales-reports.js",
+          "branchBlobSha": "ef9d9d7267070f6979f85f79a02fe2cda6486968",
+          "integrationBlobSha": "ef9d9d7267070f6979f85f79a02fe2cda6486968",
+          "mainBlobSha": "6a59e373f6b282ff5984186a23cb0102ffa81ee8"
+        },
+        {
+          "path": "src/features/equipment/equipment-workspace.js",
+          "branchBlobSha": "7ae5256f51207dee41f135e7a850387e1199a298",
+          "integrationBlobSha": "7ae5256f51207dee41f135e7a850387e1199a298",
+          "mainBlobSha": "7ae5256f51207dee41f135e7a850387e1199a298"
+        },
+        {
+          "path": "src/features/forecasts/forecast-head.js",
+          "branchBlobSha": "61fdc82ebb33ced72389f9e215ad926373f6b8d1",
+          "integrationBlobSha": "61fdc82ebb33ced72389f9e215ad926373f6b8d1",
+          "mainBlobSha": "61fdc82ebb33ced72389f9e215ad926373f6b8d1"
+        },
+        {
+          "path": "src/features/forecasts/forecast-workspace.js",
+          "branchBlobSha": "e1fe0e7e1b82fde19abed1d4abc576253dd3daa4",
+          "integrationBlobSha": "e1fe0e7e1b82fde19abed1d4abc576253dd3daa4",
+          "mainBlobSha": "6300560706e187c6187dfdd5667e903a2086ef9d"
+        },
+        {
+          "path": "src/features/inventory/inventory-workspace.js",
+          "branchBlobSha": "9b270f288c651b49202bb0a374923a1529d35dc3",
+          "integrationBlobSha": "9b270f288c651b49202bb0a374923a1529d35dc3",
+          "mainBlobSha": "a88c5ffc76182f60d5165a6c71fb513ca03284f1"
+        },
+        {
+          "path": "src/features/orders/delivery-actions.js",
+          "branchBlobSha": "d35e5d02e7a711f9fe9a5da05f41783e7d9cb667",
+          "integrationBlobSha": "d35e5d02e7a711f9fe9a5da05f41783e7d9cb667",
+          "mainBlobSha": "dbf4b260123156526c2cd77313c5d65ed38be7bb"
+        },
+        {
+          "path": "src/features/orders/lifecycle-workspace.js",
+          "branchBlobSha": "b8a49cb6da21a1e6782206a97ecd1a0cd70a591d",
+          "integrationBlobSha": "b8a49cb6da21a1e6782206a97ecd1a0cd70a591d",
+          "mainBlobSha": "f1f6b97a0fec4dc85ab2b997040874a6e3492a56"
+        },
+        {
+          "path": "src/features/orders/order-creation.js",
+          "branchBlobSha": "cbf2252111efd505ccabb92e57681066339c0a9c",
+          "integrationBlobSha": "cbf2252111efd505ccabb92e57681066339c0a9c",
+          "mainBlobSha": "18d4eafa1071d872cf0bb63e03f77492133ffdf6"
+        },
+        {
+          "path": "src/features/orders/order-progress.js",
+          "branchBlobSha": "be53224fff8fa3ff98c4a9d1309e269f4262e360",
+          "integrationBlobSha": "be53224fff8fa3ff98c4a9d1309e269f4262e360",
+          "mainBlobSha": "9adf30b3ca11ca4906bad0bb949376660f04b0ba"
+        },
+        {
+          "path": "src/features/orders/order-status.js",
+          "branchBlobSha": "477a88ce1787f7e2be34229c5c109afd5f03ab32",
+          "integrationBlobSha": "477a88ce1787f7e2be34229c5c109afd5f03ab32",
+          "mainBlobSha": "5c494e25c0ac16b34851ce27926999c5b60e2c91"
+        },
+        {
+          "path": "src/features/orders/order-workspace.js",
+          "branchBlobSha": "e9c9f53a2b0a9f743931c565702a8e4b09980ea6",
+          "integrationBlobSha": "e9c9f53a2b0a9f743931c565702a8e4b09980ea6",
+          "mainBlobSha": "b7d082bb616fc4e4c8897413f92c898dd332d43c"
+        },
+        {
+          "path": "src/features/products/product-management.js",
+          "branchBlobSha": "a0672fb4fd1efb0c24133963e5f0a181772bc522",
+          "integrationBlobSha": "a0672fb4fd1efb0c24133963e5f0a181772bc522",
+          "mainBlobSha": "0a4a2b709a3e36f43f7813cdb06085bba877693e"
+        },
+        {
+          "path": "src/features/products/product-master-import.js",
+          "branchBlobSha": "14adcea8b7591f451cc5cab56ef869dd4a22625d",
+          "integrationBlobSha": "14adcea8b7591f451cc5cab56ef869dd4a22625d",
+          "mainBlobSha": "14adcea8b7591f451cc5cab56ef869dd4a22625d"
+        },
+        {
+          "path": "src/features/purchasing/purchase-order-editor.js",
+          "branchBlobSha": "860aa1c7507c213efab9d954d570562c08b34bc8",
+          "integrationBlobSha": "860aa1c7507c213efab9d954d570562c08b34bc8",
+          "mainBlobSha": "ca6b824664d33d0224cf2b00835f0bc5d76328d8"
+        },
+        {
+          "path": "src/features/purchasing/purchasing-workspace.js",
+          "branchBlobSha": "587b1f74ef4a07e0c78d1b6b20e9c83c773c68f6",
+          "integrationBlobSha": "587b1f74ef4a07e0c78d1b6b20e9c83c773c68f6",
+          "mainBlobSha": "a9c6bddbe7deb389906c41686c28af89dd6c65b3"
+        },
+        {
+          "path": "src/features/quotations/next-quotation.js",
+          "branchBlobSha": "4f5d9776275b93be14f7bc3c0d6798fe6eb8b1ed",
+          "integrationBlobSha": "4f5d9776275b93be14f7bc3c0d6798fe6eb8b1ed",
+          "mainBlobSha": "4f5d9776275b93be14f7bc3c0d6798fe6eb8b1ed"
+        },
+        {
+          "path": "src/features/quotations/quotation-workspace.js",
+          "branchBlobSha": "8873de60ea1b649620a386d014d208617a6336ec",
+          "integrationBlobSha": "8873de60ea1b649620a386d014d208617a6336ec",
+          "mainBlobSha": "cc0e8b0ab05da92b5d226326d1cb89558a43a690"
+        },
+        {
+          "path": "src/infrastructure/firebase.js",
+          "branchBlobSha": "f75271429c8c29a9156cd502c4538b147df47046",
+          "integrationBlobSha": "f75271429c8c29a9156cd502c4538b147df47046",
+          "mainBlobSha": "62a643ccc461bab40980802d878be6cc83660682"
+        },
+        {
+          "path": "src/services/delivery-stock.js",
+          "branchBlobSha": "206c9e2c947457090b2b3c6a8f1c6e5b66bcf04f",
+          "integrationBlobSha": "206c9e2c947457090b2b3c6a8f1c6e5b66bcf04f",
+          "mainBlobSha": "46c3e6cc552a12c29f6fe5c8aadac5379d91a70e"
+        },
+        {
+          "path": "src/services/order-lifecycle-reservation.js",
+          "branchBlobSha": "4fb5aafa651e0ee4080e19d9f7d6080fab8c39dc",
+          "integrationBlobSha": "4fb5aafa651e0ee4080e19d9f7d6080fab8c39dc",
+          "mainBlobSha": "467f42d49db93c711e21c06d802ab0f0027b64bb"
+        },
+        {
+          "path": "src/services/order-reservation.js",
+          "branchBlobSha": "d0f892907e6389e9dd3dc2bcb5062eb67b327357",
+          "integrationBlobSha": "d0f892907e6389e9dd3dc2bcb5062eb67b327357",
+          "mainBlobSha": "f57cf193642cfcfbde0b5f6fb703cc98ddb4f78d"
+        },
+        {
+          "path": "src/services/receiving.js",
+          "branchBlobSha": "8d6eacd8b3180ad9f0234917075d1a314318db5c",
+          "integrationBlobSha": "8d6eacd8b3180ad9f0234917075d1a314318db5c",
+          "mainBlobSha": "96b08be86c0e404b3d0e1a6d8c46f8655c337da8"
+        },
+        {
+          "path": "src/services/supply-order.js",
+          "branchBlobSha": "b305c43ed30ee7347f5d70a9bc2b91f26ba05db2",
+          "integrationBlobSha": "b305c43ed30ee7347f5d70a9bc2b91f26ba05db2",
+          "mainBlobSha": "b5d497312b14ed4ca2c0f7949778de5ff9481dda"
+        },
+        {
+          "path": "src/shared/action-feedback.js",
+          "branchBlobSha": "cc068651ffbc19c064277f94707dc4137742b4a5",
+          "integrationBlobSha": "cc068651ffbc19c064277f94707dc4137742b4a5",
+          "mainBlobSha": "cc068651ffbc19c064277f94707dc4137742b4a5"
+        },
+        {
+          "path": "tests/app-source-integrity.test.js",
+          "branchBlobSha": "d8b55278d33c3a7fae3927766cbe4d352475691a",
+          "integrationBlobSha": "d8b55278d33c3a7fae3927766cbe4d352475691a",
+          "mainBlobSha": "d8b55278d33c3a7fae3927766cbe4d352475691a"
+        },
+        {
+          "path": "tests/customer-cancellations.test.js",
+          "branchBlobSha": "6cbb8f9d6e6fec0802836bbf4306b51ea9f91069",
+          "integrationBlobSha": "6cbb8f9d6e6fec0802836bbf4306b51ea9f91069",
+          "mainBlobSha": "7409f9b28d285e7e9c1c9b96cd877d547158b230"
+        },
+        {
+          "path": "tests/data-model-contract.test.js",
+          "branchBlobSha": "184e10d736bc6604855d12fd21ba16d017c5c12f",
+          "integrationBlobSha": "184e10d736bc6604855d12fd21ba16d017c5c12f",
+          "mainBlobSha": "27e91e426667ac54b26aa8b1cd7b79031e427866"
+        },
+        {
+          "path": "tests/order-delivery-projection.test.js",
+          "branchBlobSha": "4ab31189a8f5fcc55544a9907e27b2e71c2a45a0",
+          "integrationBlobSha": "4ab31189a8f5fcc55544a9907e27b2e71c2a45a0",
+          "mainBlobSha": "4ab31189a8f5fcc55544a9907e27b2e71c2a45a0"
+        },
+        {
+          "path": "tests/purchasing-workflow.test.js",
+          "branchBlobSha": "917c171e58c82c14da40527796c3ff3abc77b469",
+          "integrationBlobSha": "917c171e58c82c14da40527796c3ff3abc77b469",
+          "mainBlobSha": "ca397effc11a9cc0a1c100f7dcf6ed6316e711d5"
+        },
+        {
+          "path": "tests/reservation-lifecycle-integrity.test.js",
+          "branchBlobSha": "8432ad68be0146ec7768c172aff0175fefab7add",
+          "integrationBlobSha": "8432ad68be0146ec7768c172aff0175fefab7add",
+          "mainBlobSha": "b5ff9d6a63147f1082da9b54a31e5d29126c35f3"
+        },
+        {
+          "path": "tests/transaction-quantity-contract.test.js",
+          "branchBlobSha": "c1eb7fb659bb558e9c156bc853b59b589589881e",
+          "integrationBlobSha": "c1eb7fb659bb558e9c156bc853b59b589589881e",
+          "mainBlobSha": "c1eb7fb659bb558e9c156bc853b59b589589881e"
+        },
+        {
+          "path": "tools/build-app.cjs",
+          "branchBlobSha": "0519de3a0fbf37ad630ca47956121a575b82207b",
+          "integrationBlobSha": "0519de3a0fbf37ad630ca47956121a575b82207b",
+          "mainBlobSha": "3f5b5e582344f128a6cc538b67196c7762000f99"
+        }
+      ]
+    },
+    {
+      "branch": "refactor/transaction-core-unification-20261015",
+      "sha": "6e190ba84cd11c3cb3550b0a258671bc933c4f3f",
+      "originalPr": 92,
+      "integrationCommit": "3610ddd34b616c9e6677fe26c41ca82b53cc60a0",
+      "integrationPr": null,
+      "decision": "verified-integrated",
+      "historicalExactFiles": 4,
+      "changedFiles": 5,
+      "evidence": "5 個變更檔中 4 個與主線 3610ddd 完全相同；index.html 唯一差異是 app.js 資產版號由 20261015-11 升到 20261015-15，沒有移除原入口或商業邏輯。",
+      "files": [
+        {
+          "path": "docs/transaction-core-unification-20261015.md",
+          "branchBlobSha": "f72f4c2ff3a55bfc02dce49b731b45b8948f414d",
+          "integrationBlobSha": "f72f4c2ff3a55bfc02dce49b731b45b8948f414d",
+          "mainBlobSha": "3553a52a4b1ddca07928313dcf996ec5f1e71436"
+        },
+        {
+          "path": "index.html",
+          "branchBlobSha": "543d4b3d9ccdb425915d7505c14d556b671d6e32",
+          "integrationBlobSha": "7f0ffc777a605aa02bf166f58d159ceaf585db9b",
+          "mainBlobSha": "8f8e3398b0574b526cd0cf8a40064e77116d8eb9"
+        },
+        {
+          "path": "modules/fulfillment-core.js",
+          "branchBlobSha": "07399fd6a963dc39f255f91978bb681615a24db2",
+          "integrationBlobSha": "07399fd6a963dc39f255f91978bb681615a24db2",
+          "mainBlobSha": "6136f13da83aca43faab01400abc269f5716ed36"
+        },
+        {
+          "path": "modules/workflow-core.js",
+          "branchBlobSha": "d30daefa99cf6c6f81e573990c26a2f31ed1db00",
+          "integrationBlobSha": "d30daefa99cf6c6f81e573990c26a2f31ed1db00",
+          "mainBlobSha": "177465ee7a1bd11c3b9b7c84799596a3d4ab0ed8"
+        },
+        {
+          "path": "tests/transaction-quantity-contract.test.js",
+          "branchBlobSha": "c1eb7fb659bb558e9c156bc853b59b589589881e",
+          "integrationBlobSha": "c1eb7fb659bb558e9c156bc853b59b589589881e",
+          "mainBlobSha": "c1eb7fb659bb558e9c156bc853b59b589589881e"
+        }
+      ]
+    }
+  ],
+  "held": [
+    {
+      "branch": "fix/20260920-critical-integrity",
+      "sha": "c31a415eef952d3cf928642714d9995a1a25a795",
+      "originalPr": 26
+    },
+    {
+      "branch": "fix/forecast-ui-brand",
+      "sha": "306d5ef3429f28889d5aa271ed1acb6081144525",
+      "originalPr": null
+    },
+    {
+      "branch": "fix/legacy-reservation-v2-failclosed-20261017",
+      "sha": "adf50b3e5991d8b1ee9703d86f85470073c49303",
+      "originalPr": 123
+    },
+    {
+      "branch": "fix/lifecycle-duplicate-item-identity-20261015",
+      "sha": "cde548ea3f25164070ff8d72e7af1092467b911c",
+      "originalPr": 91
+    },
+    {
+      "branch": "fix/order-autofill-batch-stock",
+      "sha": "e46aefc0b2974e622c85912fd943bfc2cfc585f4",
+      "originalPr": null
+    },
+    {
+      "branch": "fix/order-deletion-linked-record-integrity-20261015",
+      "sha": "fb088aa05d31d9bb9ab50bb1316b81cd3ea5d0b6",
+      "originalPr": 89
+    },
+    {
+      "branch": "fix/product-search-and-stock-diagnostics-20261014",
+      "sha": "e023f14b25b28ff86d42a82c19dd4f601d2b09ce",
+      "originalPr": 65
+    },
+    {
+      "branch": "fix/reservation-proof-coverage-311",
+      "sha": "c2c1d394fded8696113ccf2c8cc6f75efa4794b5",
+      "originalPr": 338
+    },
+    {
+      "branch": "fix/stocked-order-purchase-queue-20261014",
+      "sha": "1374cc4ddf7865283be77c4139ace58ad92aa6db",
+      "originalPr": 64
+    },
+    {
+      "branch": "fix/system-terminology",
+      "sha": "8521a92119f63f25de758017cbd79ffea803ae59",
+      "originalPr": 51
+    },
+    {
+      "branch": "merge/all-open-prs-20261025",
+      "sha": "9a1d51bf7041a116a03ad52df40e424bc8cbde13",
+      "originalPr": 276
+    },
+    {
+      "branch": "upgrade/admin-simplify-20260924",
+      "sha": "b92ee2a486ad6f6cbece34cd2ffd584393fbca1a",
+      "originalPr": 41
+    },
+    {
+      "branch": "upgrade/ci-integration-validation-20261028",
+      "sha": "7dfb393be39ec92ed466e454f65d796c674b1a6f",
+      "originalPr": 344
+    },
+    {
+      "branch": "upgrade/discussion-fixes-20260923",
+      "sha": "dd6b76a1c047b568061232ada9a47abfd6805864",
+      "originalPr": 40
+    },
+    {
+      "branch": "upgrade/final-ui-simplify-20260924",
+      "sha": "550726890486dccbc394c1204556dc71873329b5",
+      "originalPr": 42
+    },
+    {
+      "branch": "upgrade/purchasing-three-workspaces-20260924",
+      "sha": "c8db43e7f96802a21758dde0c99fe0f1b40e4c63",
+      "originalPr": 43
+    },
+    {
+      "branch": "upgrade/remove-product-line-assignment-20260923",
+      "sha": "577f817077a24ae77e0f85ff1b48b428ae4365e2",
+      "originalPr": null
+    }
+  ]
+}
