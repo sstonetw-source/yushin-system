@@ -6,7 +6,7 @@
 
 ## 規則切換
 
-- `inventoryReservations`：在既有 `operationalReservationStockEvidence` 驗證內拒絕 `stockEvidence.crossWarehouse=true`；其餘既有合法操作與角色讀取限制保留。
+- `inventoryReservations`：在既有 `operationalReservationStockEvidence` 驗證內拒絕 `stockEvidence.crossWarehouse=true`；其餘既有合法操作與角色讀取限制保留。這包含 #311 真正重現的「同倉兩筆品項拆成不完整的跨倉型主要憑證」，不只是兩個倉庫之間調配。
 - `inventoryMovements`：在既有 `validOperationalMovementEvidence` 驗證內拒絕 `reservationStockEvidence.crossWarehouse=true`。即使快取舊版瀏覽器繼續嘗試，整筆交易也無法藉由不完整的主／次倉憑證變更預留數。沒有在每筆寫入的 match 層新增檢查，以免讓合法交易超過 Firestore Rules 運算預算。
 - `inventory`、`warehouseStocks` 的既有驗證規則保持不變；相對應跨倉預留須由已驗證身分、角色、來源及操作編號的 Admin SDK Callable 處理。
 - 保留後端 Admin SDK 的原子交易與冪等憑證；Rules 無法限制 Admin SDK，因此後端必須自行嚴格驗證。
@@ -17,6 +17,7 @@
 | 檢查 | 目標 | 目前證據 |
 |---|---|---|
 | purchaser／warehouse 原生 SDK 建立或修改跨倉預留憑證 | 拒絕 | 改寫原生跨倉 Rules 反例，待 CI |
+| #311 同倉兩筆拆分 primary／重複 primary、第二倉漏列 local ID | 原子拒絕、公司與分倉數量不變 | 直接引用 #338 原生 SDK 重現 fixture，改為後端唯一 writer 的負向驗收，待 CI |
 | 原生 SDK 建立跨倉 movement | 拒絕 | 原生跨倉 Rules 反例，待 CI |
 | 跨倉漏列、多倉拆分、重複主憑證 | 原子拒絕，帳面不變 | #338 已知反例；本次以拒絕整個舊跨倉協定處理 |
 | 正常後端整單預留和後續交易 | 通過、冪等、數量相符 | 既有 Auth／Functions／Firestore Emulator 回歸，需重新執行 |
