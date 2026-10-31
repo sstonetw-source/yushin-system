@@ -26,7 +26,8 @@ function canManageEquipmentCapability(role = currentUserRole) {
 
 // 採購代辦沿用負責業務的單據歸屬；工程師也是商業單據負責業務。
 function isSelectableCommercialOwner(person) {
-    return !!person && ['sales', 'engineer'].includes(person.role)
+    return !!person && ['admin', 'sales', 'engineer'].includes(person.role)
+        && typeof person.name === 'string' && !!person.name.trim()
         && person.active !== false && person.disabled !== true
         && !!person.uid && !!person.code;
 }
@@ -52,8 +53,8 @@ function salesCodeForName(salesName) {
     const normalizedName = stripPhoneSuffix(salesName || '');
     if (!normalizedName) return '';
     if (normalizedName === stripPhoneSuffix(currentUserName || '') && currentUserCode) return currentUserCode;
-    const match = salesList.find(person => stripPhoneSuffix(person.name || '') === normalizedName);
-    return String(match?.code || '').trim();
+    const matches = salesList.filter(person => stripPhoneSuffix(person.name || '') === normalizedName);
+    return matches.length === 1 ? String(matches[0].code || '').trim() : '';
 }
 
 function normalizeCustomerKey(value) {
@@ -85,9 +86,7 @@ function syncCustomerMaster(customerName, extra = {}) {
 
 function canUseQuote(record = {}) {
     return canViewAllData('quotes')
-        || belongsToCurrentUser(record.salesName, record.ownerUid, record.salesCode)
-        || (currentUserRole === 'engineer' && record.createdByUid === currentUser?.uid
-            && record.createdByRole === 'engineer');
+        || belongsToCurrentUser(record.salesName, record.ownerUid, record.salesCode);
 }
 
 function belongsToCurrentUser(salesName, ownerUid, salesCode = '') {
@@ -457,7 +456,7 @@ function ensureQuoteFormInitialized() {
         if (!document.getElementById('quoteItems').rows.length) addQuoteRow();
         switchCompany('yushin');
     }
-    if (currentUserRole === 'admin' || currentUserRole === 'purchaser' || currentUserRole === 'engineer') {
+    if (currentUserRole === 'admin' || currentUserRole === 'purchaser') {
         ensureSalesListLoaded().then(() => {
             populateSalesDropdown();
             if (draft) restoreQuoteDraft(draft);

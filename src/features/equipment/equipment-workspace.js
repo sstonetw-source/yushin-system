@@ -305,11 +305,8 @@ function escapeHtml(str) {
 // 這是必要的設計：一般業務只看得到自己的儀器清單，如果編號單純依序累加，
 // 不同業務各自算出來的「下一個編號」會撞在一起（例如兩人都算出 EQ00001）；
 // 用代號當前綴後，就算彼此看不到對方的資料，編號也不會重複。
-function getNextAssetId(salesName) {
-    const match = salesList.find(s => s.name === salesName);
-    const code = (salesName === currentUserName && currentUserCode)
-        ? currentUserCode
-        : ((match && match.code) ? match.code : 'NA');
+function getNextAssetId(salesCode) {
+    const code = salesCode || 'NA';
     const prefix = `EQ-${code}-`;
 
     let maxSeq = 0;
@@ -370,7 +367,7 @@ window.openEquipmentModal = function(eqId) {
         document.getElementById('eqCustomer').value = eq.customerName || '';
         document.getElementById('eqModel').value = eq.model || '';
         document.getElementById('eqSerial').value = eq.serialNo || '';
-        document.getElementById('eqSales').value = eq.salesName || '';
+        setEquipmentOwnerSelection(eq);
         document.getElementById('eqLocation').value = eq.location || '';
         document.getElementById('eqInstallDate').value = eq.installDate || '';
         document.getElementById('eqCycle').value = eq.cycleMonths || 12;
@@ -393,7 +390,7 @@ window.openEquipmentModal = function(eqId) {
         document.getElementById('eqCycle').value = 12;
         document.getElementById('eqNoMaintenance').checked = false;
         onEqNoMaintenanceChange();
-        if (!canViewAllEquipment()) document.getElementById('eqSales').value = currentUserName || '';
+        setEquipmentOwnerSelection(null);
         deleteBtn.style.display = 'none';
         logSection.style.display = 'none';
     }
@@ -407,8 +404,7 @@ window.openEquipmentModal = function(eqId) {
             selectBrandInDropdown(document.getElementById('eqBrand'), eq.brand);
             onEqBrandSelectChange();
         }
-        if (eq?.salesName) document.getElementById('eqSales').value = eq.salesName;
-        else if (!canViewAllEquipment()) document.getElementById('eqSales').value = currentUserName || '';
+        setEquipmentOwnerSelection(eq);
     }, '儀器表單背景初始化');
 };
 
@@ -441,6 +437,7 @@ function renderEquipmentLogTable(eq) {
 window.saveEquipmentFromModal = async function() {
     if (equipmentActionsPending.has('save')) return;
     const editId = document.getElementById('eqModalOverlay').dataset.editId;
+    const preserveOwner = document.getElementById('eqSales')?.selectedOptions?.[0]?.dataset.historical === 'true';
     if (editId && equipmentActionsPending.has(editId)) return;
     const data = {
         customerName: document.getElementById('eqCustomer').value.trim(),
@@ -448,8 +445,7 @@ window.saveEquipmentFromModal = async function() {
         brand: getBrandFieldValue('eqBrand', 'eqBrandOther'),
         model: document.getElementById('eqModel').value.trim(),
         serialNo: document.getElementById('eqSerial').value.trim(),
-        salesName: document.getElementById('eqSales').value.trim(),
-        salesCode: salesCodeForName(document.getElementById('eqSales').value.trim()),
+        ...equipmentOwnerFromSelection(),
         location: document.getElementById('eqLocation').value.trim(),
         installDate: document.getElementById('eqInstallDate').value,
         cycleMonths: parseInt(document.getElementById('eqCycle').value) || 12,
@@ -475,8 +471,18 @@ window.saveEquipmentFromModal = async function() {
     await runEquipmentAction(editId || 'save', '儀器儲存', data.customerName + '／' + data.model, async () => {
         await db.runTransaction(async tx => {
             const snapshot = await tx.get(ref);
-            if (snapshot.exists) tx.update(ref, data);
-            else tx.set(ref, { ...data, assetId: getNextAssetId(data.salesName), logs: [] });
+            if (snapshot.exists) {
+                const update = {...data};
+                if (preserveOwner) {
+                    const existing = snapshot.data();
+                    for (const key of ['ownerUid','salesCode','salesName']) {
+                        if (Object.hasOwn(existing,key)) update[key] = existing[key];
+                        else delete update[key];
+                    }
+                    update.searchTokens = buildFullHistorySearchTokens('equipment', update);
+                }
+                tx.update(ref, update);
+            } else tx.set(ref, { ...data, assetId: getNextAssetId(data.salesCode), logs: [] });
         });
         const stillEditing = overlay.dataset.editId === editId && (editId || overlay.dataset.pendingCreateId === ref.id);
         if (stillEditing) { overlay.dataset.editId = ref.id; currentEquipmentId = ref.id; }
@@ -707,9 +713,8 @@ window.handleEquipmentExcelUpload = async function(input) {
                     }
                 });
 
-                function nextIdForSales(salesName) {
-                    const match = salesList.find(s => s.name === salesName);
-                    const code = (match && match.code) ? match.code : 'NA';
+                function nextIdForSales(salesCode) {
+                    const code = salesCode || 'NA';
                     const prefix = `EQ-${code}-`;
                     const next = (maxSeqByPrefix[prefix] || 0) + 1;
                     maxSeqByPrefix[prefix] = next;
@@ -755,7 +760,7 @@ window.handleEquipmentExcelUpload = async function(input) {
                     if (matchedId) {
                         updateOps.push({ docId: matchedId, data: recordData });
                     } else {
-                        const assetId = assetIdInFile || nextIdForSales(recordData.salesName);
+                        const assetId = assetIdInFile || nextIdForSales(recordData.salesCode);
                         insertRecords.push({
                             ...recordData,
                             assetId,

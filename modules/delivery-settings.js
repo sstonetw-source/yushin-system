@@ -11,7 +11,7 @@
   const $=id=>document.getElementById(id);let customerGeneration=0,customerRows=[],customerKey='',changed=false,profileUid='';
   root.resetDeliverySettings=function(){customerGeneration++;customerRows=[];customerKey='';changed=false;profileUid='';personalActor=null;$('deliverySettingsOverlay')?.remove();};
   const previousSet=root.setOrderShippingInstructions;
-  const owner=()=>salesList.find(s=>s.uid===(currentUserRole==='purchaser'?$('orderOwnerUid')?.value:currentUser?.uid));
+  const owner=()=>salesList.find(s=>s.uid===(['admin','purchaser'].includes(currentUserRole)?$('orderOwnerUid')?.value:currentUser?.uid));
   function replaceRecipient(p){for(const key of ['contact','phone','address'])if($('orderShipping'+key[0].toUpperCase()+key.slice(1)))$('orderShipping'+key[0].toUpperCase()+key.slice(1)).value=p[key]||'';}
   function controls(p){
     const host=$('orderShippingFields');if(!host)return;
@@ -36,7 +36,7 @@
     if(fill){customerGeneration++;changed=true;if(customer){replaceRecipient({});root.loadOrderCustomerAddresses();}else{const p=salespersonPlan(owner(),defaultWarehouse()?.id||'');const d=owner()?.deliveryDefaults||{};replaceRecipient(mode==='SALES_SHIP'?{...p,address:d.address||''}:{});$('orderShippingWarehouse').value=defaultWarehouse()?.id||'';}}
   };
   root.initializeOrderDeliveryDefaults=function(existing){
-    if((existing&&Object.keys(existing).length)||changed||(currentUserRole==='purchaser'&&!owner()))return;const p=salespersonPlan(owner(),defaultWarehouse()?.id||'');previousSet(p);controls(root.YushinWarehouseLogistics.plan(p));changed=false;
+    if((existing&&Object.keys(existing).length)||changed||(['admin','purchaser'].includes(currentUserRole)&&!owner()))return;const p=salespersonPlan(owner(),defaultWarehouse()?.id||'');previousSet(p);controls(root.YushinWarehouseLogistics.plan(p));changed=false;
     if($('orderCustomer')?.value&&$('orderShippingMode')?.value==='CUSTOMER_SHIP')root.loadOrderCustomerAddresses();
   };
   root.orderDeliveryOwnerChanged=function(){

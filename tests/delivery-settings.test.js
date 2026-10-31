@@ -42,7 +42,7 @@ test('admin personnel reload and shared cache retain every salesperson delivery 
  const src=fs.readFileSync(require('node:path').join(__dirname,'../app.js'),'utf8');
  const defaults={mode:'SALES_SHIP',contact:'南區業務',phone:'123',address:'高雄地址'};
  const rows=[{id:'S',name:'南區業務',code:'01',deliveryDefaults:defaults},{id:'N',name:'北區業務',code:'02'}];
- const c=vm.createContext({window:{},sessionDataGeneration:0,readCollectionInBatches:async()=>rows,trueUserRole:'admin',allUsersCache:[],salesList:[],
+ const c=vm.createContext({window:{},document:{getElementById:()=>null},sessionDataGeneration:0,readCollectionInBatches:async()=>rows,trueUserRole:'admin',allUsersCache:[],salesList:[],
   populateSalesDropdown(){},populateEquipmentSalesDropdown(){},syncSalesCodeMasterFromUsers:async()=>{},loadSalesCodeMaster:async()=>{},
   renderAdminSalesTable(){},populateTransferDropdowns(){},console,mainPageLoadFailed(){throw Error('reload failed');}});
  vm.runInContext(src.slice(src.indexOf('function applySalesRows('),src.indexOf('function applyCompanyTheme(')),c);
@@ -140,4 +140,14 @@ test('personal phone save refreshes own profile cache only after Firestore confi
  await f.c.savePersonalSettings({});
  assert.equal(writes.length,1);assert.equal(cached.phone,'0988123456');assert.equal(f.c.currentUserPhone,'0988123456');
  assert.match(f.node('personalSettingsStatus').textContent,/儲存失敗/);
+});
+
+test('administrator delegation uses the chosen owner recipient and never the administrator defaults',()=>{
+ const f=uiFixture();f.c.currentUserRole='admin';
+ f.c.salesList.push({uid:'BOSS',name:'主管',deliveryDefaults:{mode:'SALES_SHIP',contact:'主管收件人',phone:'555',address:'主管地址'}});
+ f.c.initializeOrderDeliveryDefaults();assert.equal(f.node('orderShippingMode').value,'');
+ f.node('orderOwnerUid').value='BOSS';f.c.orderDeliveryOwnerChanged();
+ assert.equal(f.node('orderShippingContact').value,'主管收件人');assert.equal(f.node('orderShippingAddress').value,'主管地址');
+ f.node('orderOwnerUid').value='S';f.c.orderDeliveryOwnerChanged();assert.equal(f.node('orderShippingAddress').value,'業務地址');
+ f.node('orderOwnerUid').value='';f.c.orderDeliveryOwnerChanged();assert.equal(f.node('orderShippingAddress').value,'');
 });

@@ -17,10 +17,11 @@ function context(storage,{id=null,logs=[]}={}){
   const values={eqCustomer:'客戶',eqModel:'M1',eqBrand:'Roche',eqSales:'工程師',eqCycle:'12',eqLogDate:'2026-10-13',eqLogType:'維修',eqLogTech:'工程師',eqLogDesc:'紀錄'};
   for(const name of [...Object.keys(values),'eqModalOverlay','eqSaveHint','eqSaveBtn','eqAddLogBtn','eqSerial','eqLocation','eqInstallDate','eqLastService','eqNoMaintenance','eqNotes'])nodes[name]={value:values[name]||'',dataset:{},checked:false,textContent:'儲存'};
   nodes.eqModalOverlay.dataset.editId=id||'';
+  nodes.eqSales.selectedOptions=[{dataset:{historical:id?'true':''}}];
   const local=id?[{id,model:'M1',logs:structuredClone(logs)}]:[];
   const c=vm.createContext({window:{},document:{getElementById:id=>nodes[id]},equipmentList:local,currentEquipmentId:id,
     db:storage.db,alert:s=>alerts.push(s),confirm:()=>true,currentUser:{uid:'E1',email:'e1'},currentUserName:'工程師',
-    getBrandFieldValue:()=> 'Roche',customerIdForName:()=> 'C1',salesCodeForName:()=> 'E1',syncCustomerMaster:()=> 'C1',
+    equipmentOwnerFromSelection:()=>({salesName:'工程師',salesCode:'E1',ownerUid:'E1'}),getBrandFieldValue:()=> 'Roche',customerIdForName:()=> 'C1',salesCodeForName:()=> 'E1',syncCustomerMaster:()=> 'C1',
     buildFullHistorySearchTokens:()=>[],getNextAssetId:()=> 'EQ-E1-00001',rememberRecentCustomerName:()=>{},
     loadEquipmentFromCloudThenReopen:()=>{},showActionFeedback:()=>{},writeAppDataCache:()=>{},renderEquipmentList:()=>{},
     openEquipmentModal:()=>{},closeEquipmentModal:()=>{},actionButtonFromEventOrSelector:()=>null,
@@ -53,4 +54,12 @@ test('failed equipment writes keep the visible data and restore controls',async(
   await f.c.addEquipmentLogFromModal();assert.equal(f.local[0].logs.length,0);assert.equal(f.nodes.eqAddLogBtn.disabled,false);
   await f.c.deleteEquipment('EQ');assert.equal(f.local.length,1);assert.equal(d.docs.get('EQ').active,undefined);
   assert.match(f.alerts[0],/EQ/);assert.match(f.alerts[0],/重試/);
+});
+
+test('historical equipment save preserves the latest owner and never backfills absent ownership',async()=>{
+ const d=database();d.docs.set('EQ',{ownerUid:'BOSS',salesCode:'N6',salesName:'主管',logs:[]});
+ const f=context(d,{id:'EQ'});await f.c.saveEquipmentFromModal();
+ assert.equal(d.docs.get('EQ').ownerUid,'BOSS');assert.equal(d.docs.get('EQ').salesCode,'N6');assert.equal(d.docs.get('EQ').salesName,'主管');
+ d.docs.set('LEGACY',{logs:[]});const g=context(d,{id:'LEGACY'});await g.c.saveEquipmentFromModal();
+ for(const key of ['ownerUid','salesCode','salesName'])assert.equal(Object.hasOwn(d.docs.get('LEGACY'),key),false);
 });

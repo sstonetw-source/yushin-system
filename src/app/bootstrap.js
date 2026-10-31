@@ -49,7 +49,7 @@ let salesListLoadPromise = null;
 let quickProductTarget = null;
 let quoteFormInitialized = false;
 let draftSaveTimer = null;
-const APP_CACHE_VERSION = 1;
+const APP_CACHE_VERSION = 2;
 const APP_ASSET_VERSION = (() => {
     try {
         const script = [...document.scripts].find(node => /\/app\.js(?:\?|$)/.test(node.src || ''));

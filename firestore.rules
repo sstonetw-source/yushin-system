@@ -28,7 +28,6 @@ service cloud.firestore {
 
     function admin() { return role() == 'admin'; }
     function sales() { return role() == 'sales'; }
-    function engineer() { return role() == 'engineer'; }
     function purchaser() { return role() == 'purchaser'; }
     function warehouse() { return role() == 'warehouse'; }
     // Customer arrival is a commercial fact, not a warehouse receipt.
@@ -95,31 +94,19 @@ service cloud.firestore {
         && (profile.get('role', '') == 'admin' || !data.keys().hasAny(['unitCost','cost']));
     }
 
-    function validSalesOwner(data) {
-      return validQuoteOwner(data)
-        && get(/databases/$(database)/documents/users/$(data.ownerUid)).data.role == 'sales';
-    }
-
-    // Both quotes and customer orders may belong to an active salesperson or engineer.
-    // Purchaser assistance preserves the owner; creator fields retain the actual operator.
+    // Commercial owners retain their identity when promoted to administrator.
+    // The live profile, UID and matching nonempty code remain authoritative.
     function validQuoteOwner(data) {
-      return data.get('ownerUid', '') is string && data.get('ownerUid', '').size() > 0
-        && data.get('salesCode', '') is string && data.get('salesCode', '').size() > 0
-        && exists(/databases/$(database)/documents/users/$(data.ownerUid))
-        && profileEnabled(get(/databases/$(database)/documents/users/$(data.ownerUid)).data)
-        && get(/databases/$(database)/documents/users/$(data.ownerUid)).data.role in ['sales', 'engineer']
-        && get(/databases/$(database)/documents/users/$(data.ownerUid)).data.get(
-          'salesCode',
-          get(/databases/$(database)/documents/users/$(data.ownerUid)).data.get('code', null)
-        ) == data.salesCode;
-    }
-
-    // Engineer may assist a salesperson with a quote, but only quotes the engineer created.
-    // Ownership remains with the salesperson; orders are intentionally not covered here.
-    function engineerAssistedSalesQuote(data) {
-      return engineer()
-        && data.get('createdByUid', '') == request.auth.uid
-        && data.get('createdByRole', '') == 'engineer';
+      let ownerUid = data.get('ownerUid', '');
+      let ownerCode = data.get('salesCode', '');
+      let owner = ownerUid is string && ownerUid.size() > 0
+        ? get(/databases/$(database)/documents/users/$(ownerUid)).data : {};
+      return ownerUid is string && ownerUid.size() > 0
+        && ownerCode is string && ownerCode.size() > 0
+        && profileEnabled(owner)
+        && owner.get('role', '') in ['admin', 'sales', 'engineer']
+        && (owner.get('role', '') != 'admin' || (owner.get('name', '') is string && owner.get('name', '').size() > 0))
+        && owner.get('salesCode', owner.get('code', null)) == ownerCode;
     }
 
     function validOwnedCommercialCreate(data) {
@@ -1262,19 +1249,13 @@ service cloud.firestore {
     }
 
     match /quotes/{id} {
-      allow get: if canPurchase() || (commercialDocumentOwner() && resource == null) || owns(resource.data)
-        || engineerAssistedSalesQuote(resource.data);
-      allow list: if canPurchase() || owns(resource.data)
-        || engineerAssistedSalesQuote(resource.data);
-      allow create: if canCreateCommercialDoc() && (
-        validOwnedCommercialCreate(request.resource.data)
-        || (engineerAssistedSalesQuote(request.resource.data) && validSalesOwner(request.resource.data))
-        || (purchaser() && validQuoteOwner(request.resource.data)
-          && request.resource.data.ownerUid != request.auth.uid)
-      );
+      allow get: if canPurchase() || (commercialDocumentOwner() && resource == null) || owns(resource.data);
+      allow list: if canPurchase() || owns(resource.data);
+      allow create: if canCreateCommercialDoc() && validOwnedCommercialCreate(request.resource.data)
+        && request.resource.data.get('createdByUid', request.auth.uid) == request.auth.uid
+        && request.resource.data.get('createdByRole', role()) == role();
       allow update: if admin()
         || (commercialDocumentOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner() && preservesCreator())
-        || (engineerAssistedSalesQuote(resource.data) && sameCommercialOwner() && preservesCreator())
         || (purchaser() && sameCommercialOwner() && preservesCreator()
           && (resource.data.get('dealClosed', false) != true
             || request.resource.data.get('dealClosed', false) == true));

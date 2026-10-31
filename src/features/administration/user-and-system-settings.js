@@ -111,7 +111,7 @@ window.reloadSalesFromUsers = function() {
         if (generation !== sessionDataGeneration) return;
         salesList = rows
             .filter(d => d.name && d.code)
-            .map(d => ({ uid:d.id, code:d.code, name:d.name, phone:d.phone || '', deliveryDefaults:d.deliveryDefaults || {}, role:d.role || 'sales', active:d.active !== false }))
+            .map(d => ({ uid:d.id, code:d.code, name:d.name, phone:d.phone || '', deliveryDefaults:d.deliveryDefaults || {}, role:d.role || 'sales', active:d.active !== false, disabled:!!d.disabled }))
             .sort((a,b)=>String(a.code||'').localeCompare(String(b.code||'')));
 
         allUsersCache = rows.map(d => ({
@@ -128,6 +128,7 @@ window.reloadSalesFromUsers = function() {
         // Admin users 查詢同時就是一般頁面的 salesList 資料來源，兩邊共用，不再重查 users。
         applySalesRows(rows);
         salesListLoadPromise = Promise.resolve(salesList);
+        if (document.getElementById('admin-statistics')?.style.display === 'block') populateSalesStatisticsFilters();
         if (trueUserRole === 'admin') await syncSalesCodeMasterFromUsers().catch(err => console.warn('同步業務代號主檔失敗：', err));
         if (generation !== sessionDataGeneration) return;
         await loadSalesCodeMaster().catch(err => { console.warn('讀取業務代號主檔失敗：', err); salesCodeMasterCache = []; });
