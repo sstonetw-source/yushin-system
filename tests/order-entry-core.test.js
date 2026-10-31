@@ -143,7 +143,7 @@ test('printing validates current transaction information before writing a dispat
 });
 test('invoice choice is for printing and does not block business billing confirmation',async()=>{
  const order={id:'O',transactionType:'借',isBilled:false,statusHistory:[]};const writes=[],alerts=[];
- const c=vm.createContext({window:{},YushinOrderEntry:core,ordersCache:[order],pendingOrderStatusKeys:new Set(),activeOrderWorkFilter:'all',currentUserName:'Sales',currentUser:null,currentDeliveryOrderId:null,
+ const c=vm.createContext({window:{},YushinOrderEntry:core,ordersCache:[order],pendingOrderStatusKeys:new Set(),pendingOrderReservationIds:new Set(),activeOrderWorkFilter:'all',currentUserName:'Sales',currentUser:null,currentDeliveryOrderId:null,
   canManageOrderLifecycleCapability:()=>true,canEditPage:()=>true,normalizedOrderStatus:()=> 'normal',orderBillingDate:()=>'',localDateString:()=> '2026-10-13',BUSINESS_STATUS:{ACTIVE:'active'},writeAppDataCache(){},renderOrdersList(){},alert:x=>alerts.push(x),
   firebase:{firestore:{FieldValue:{arrayUnion:x=>[x]}}},orderWorkIndexFields:()=>({}),
   db:{collection:()=>({doc:()=>({})})},runRoleTransaction:async fn=>fn({get:async()=>({exists:true,data:()=>({...order,isBilled:false,transactionType:''})}),update:(...x)=>writes.push(x)})});

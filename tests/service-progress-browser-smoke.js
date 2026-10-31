@@ -18,7 +18,7 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
    const items=[{itemId:'I',itemName:'檢測',unitPrice:100,productType:'SERVICE',qty:2,orderedQty:2},{itemId:'J',itemName:'校正',unitPrice:200,productType:'SERVICE',qty:2,orderedQty:2}];
    let ordersCache=[{id:'O',orderNo:'YS-1',customerName:'驗收客戶',items,totalPrice:400,isBilled:false}],activeOrderWorkFilter='all';
    const orderHistorySearchActive=false,orderHistorySearchResults=[],orderHistorySearchLoading=false,orderWorkQueueReady=true,orderWorkQueueError='';
-   const pendingDeliveryOrderIds=new Set(),pendingOrderStatusKeys=new Set(),pendingLifecycleOrderIds=new Set();
+   const pendingDeliveryOrderIds=new Set(),pendingOrderStatusKeys=new Set(),pendingOrderReservationIds=new Set(),pendingLifecycleOrderIds=new Set();
    const canReceiveInventoryCapability=()=>['admin','purchaser','warehouse'].includes(currentUserRole);
    const loadVisibleProductCost=async()=>null,findPriceItemForOrder=()=>null,formatProfitPercent=()=>'';
    const canEditPage=()=>true,canManageOrderLifecycleCapability=()=>false,populatePurchaserOrderFilters=()=>[],normalizedOrderItems=o=>o.items;
