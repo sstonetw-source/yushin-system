@@ -142,6 +142,22 @@ function db(uid) {
   return env.authenticatedContext(uid).firestore();
 }
 
+test('shipped quote number generator respects real Rules for sales and assisted engineers',async()=>{
+ const {quoteNumberGenerator}=require('./helpers/quote-number-generator.cjs');
+ await seed('quotes/number-code',{quoteNo:'YS-20261031-S01-05',salesCode:'S01'});
+ await seed('quotes/number-owner',{quoteNo:'YS-20261031-S01-07',ownerUid:'sales1'});
+ await seed('quotes/number-other',{quoteNo:'YS-20261031-S01-99',ownerUid:'sales2',salesCode:'S02'});
+ await seed('quotes/number-assisted',{quoteNo:'YS-20261031-S02-04',ownerUid:'sales2',salesCode:'S02',createdByUid:'eng1',createdByRole:'engineer'});
+ await seed('quotes/number-other-engineer',{quoteNo:'YS-20261031-S02-09',ownerUid:'sales2',salesCode:'S02',createdByUid:'eng2',createdByRole:'engineer'});
+ await assertFails(db('sales1').collection('quotes').where('quoteNo','>=','YS-20261031-S01-').where('quoteNo','<=','YS-20261031-S01-\uf8ff').orderBy('quoteNo','desc').limit(1).get());
+ assert.equal(await quoteNumberGenerator(db('sales1')).generate(),'YS-20261031-S01-08');
+ assert.equal(await quoteNumberGenerator(db('eng1'),{role:'engineer',uid:'eng1',code:'E01',selectedCode:'S02'}).generate(),'YS-20261031-S02-05');
+ for(const [uid,role] of [['admin','admin'],['buyer1','purchaser']])
+  assert.equal(await quoteNumberGenerator(db(uid),{uid,role}).generate(),'YS-20261031-S01-100');
+ for(const [uid,role] of [['wh1','warehouse'],['off1','sales']])
+  assert.equal(await quoteNumberGenerator(db(uid),{uid,role}).generate(),'');
+});
+
 test('server-only grouped reservation receipts reject browser SDK reads and writes for all roles',async()=>{
  const path='reservationOperationReceipts/grouped-test_123456789';
  await env.withSecurityRulesDisabled(async ctx=>{

@@ -108,27 +108,38 @@ window.generateQuoteNo = async function() {
     const prefix = `${info.prefix}-${dateStr}-${salesCode}-`;
 
     try {
-        const snapshot = await firestoreReadWithTimeout(
-            db.collection('quotes')
-                .where('quoteNo', '>=', prefix)
-                .where('quoteNo', '<=', prefix + '\uf8ff')
-                .orderBy('quoteNo', 'desc')
-                .limit(1)
-                .get(),
-            '估價單號'
-        );
+        const newestInPrefix = () => db.collection('quotes')
+            .where('quoteNo', '>=', prefix)
+            .where('quoteNo', '<=', prefix + '\uf8ff')
+            .orderBy('quoteNo', 'desc')
+            .limit(1);
+        const queries = [];
+        if (canViewAllData('quotes')) {
+            queries.push(newestInPrefix());
+        } else {
+            // Match the same ownership paths as the quote list and Rules.
+            // Each path reads at most one record, including legacy code ownership
+            // and engineer-created assisted quotes. Never issue an unscoped read.
+            if (currentUserCode) queries.push(newestInPrefix().where('salesCode', '==', currentUserCode));
+            if (currentUser?.uid) queries.push(newestInPrefix().where('ownerUid', '==', currentUser.uid));
+            if (currentUserRole === 'engineer' && currentUser?.uid) {
+                queries.push(newestInPrefix().where('createdByUid', '==', currentUser.uid).where('createdByRole', '==', 'engineer'));
+            }
+            if (!queries.length) throw new Error('目前帳號缺少可用的資料歸屬資訊');
+        }
+        const snapshots = await Promise.all(queries.map(query => firestoreReadWithTimeout(query.get(), '估價單號')));
 
         // 用「目前已存在的最大流水號 + 1」而非「筆數 + 1」：
         // 因為 Firestore 是拿 quoteNo 當文件 ID，如果中間有一張估價單被刪除，
         // 用筆數計算會讓新單號跟既有的某張估價單撞號，寫入時直接覆蓋掉那張舊資料
         let maxSeq = 0;
-        snapshot.forEach(doc => {
+        snapshots.forEach(snapshot => snapshot.forEach(doc => {
             const seqStr = (doc.data().quoteNo || '').split('-').pop();
             const seq = parseInt(seqStr, 10);
             if (!isNaN(seq) && seq > maxSeq) {
                 maxSeq = seq;
             }
-        });
+        }));
         const count = maxSeq + 1;
         if (quoteNoInput) quoteNoInput.value = `${prefix}${String(count).padStart(2, '0')}`;
         const outputStatus = document.getElementById('quoteOutputStatus');
