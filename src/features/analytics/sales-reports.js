@@ -23,6 +23,10 @@ function applyTradeAnalysisSnapshot(snapshot) {
 }
 window.loadSalesStatistics = function(force = false) {
     if (currentUserRole !== 'admin') return Promise.resolve();
+    // Owner options are staff identities, not a side effect of loaded sales history.
+    void ensureSalesListLoaded().then(() => {
+        if (currentUserRole === 'admin' && tradeAnalysisReady) populateSalesStatisticsFilters();
+    }).catch(err => console.warn('讀取商務負責人名單失敗：', err));
     if(force){tradeAnalysisSnapshots.clear();tradeAnalysisRevision++;}
     if (salesStatisticsLoadPromise) return salesStatisticsLoadPromise;
     const filters=tradeAnalysisAppliedFilters||(tradeAnalysisAppliedFilters=readTradeAnalysisFilters());
@@ -1261,7 +1265,10 @@ function populateSalesStatisticsFilters(rows = buildTradeAnalysisRows()) {
     const brand = document.getElementById('salesStatsBrandFilter')?.value || '';
     const classified = rows.filter(row=>!brand||row.brand===brand);
     const selects = [
-        { id: 'salesStatsSalesFilter', label: '全部負責業務', values: rows.filter(row=>['sales','pending'].includes(row.kind)).map(row=>row.sales) },
+        { id: 'salesStatsSalesFilter', label: '全部負責業務', values: [
+            ...salesList.filter(isSelectableCommercialOwner).map(person => person.name),
+            ...rows.filter(row=>['sales','pending'].includes(row.kind)).map(row=>row.sales)
+        ] },
         { id: 'salesStatsBrandFilter', label: '全部廠牌', values: [...getPrimaryBrandNames(), OTHER_BRAND_OPTION_KEY] },
         { id: 'salesStatsTypeFilter', label: '全部產品類型', values: classified.map(row=>row.type) },
         { id: 'salesStatsLineFilter', label: '全部產品線', values: classified.map(row=>row.line) }

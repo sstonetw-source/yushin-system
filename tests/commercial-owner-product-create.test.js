@@ -63,3 +63,24 @@ test('engineer creator-only legacy quote access is removed in client and Rules, 
   assert.match(quotes,/allow list: if canPurchase\(\) \|\| owns\(resource\.data\)/);
   assert.match(quotes,/preservesCreator\(\)/);
 });
+
+test('admin analytics owner selector includes active commercial admins without loaded orders',()=>{
+  const ids=['salesStatsSalesFilter','salesStatsBrandFilter','salesStatsTypeFilter','salesStatsLineFilter'];
+  const selects=Object.fromEntries(ids.map(id=>[id,{value:'',innerHTML:''}]));
+  const ctx=vm.createContext({
+    salesList:[{uid:'admin1',name:'主管',code:'A01',role:'admin',active:true},
+      {uid:'pure',name:'純管理',code:'',role:'admin',active:true},
+      {uid:'sales1',name:'業務',code:'S01',role:'sales',active:true}],
+    document:{getElementById:id=>selects[id]||null},getPrimaryBrandNames:()=>[],
+    OTHER_BRAND_OPTION_KEY:'其他',escapeAttr:s=>s,escapeHtml:s=>s,
+    buildTradeAnalysisRows:()=>[]
+  });
+  vm.runInContext(fn('isSelectableCommercialOwner')+fn('populateSalesStatisticsFilters'),ctx);
+  ctx.populateSalesStatisticsFilters([]);
+  assert.match(selects.salesStatsSalesFilter.innerHTML,/主管/);
+  assert.match(selects.salesStatsSalesFilter.innerHTML,/業務/);
+  assert.doesNotMatch(selects.salesStatsSalesFilter.innerHTML,/純管理/);
+  ctx.populateSalesStatisticsFilters([{kind:'sales',sales:'歷史業務'}]);
+  assert.match(selects.salesStatsSalesFilter.innerHTML,/歷史業務/);
+  assert.match(source,/void ensureSalesListLoaded\(\)\.then/);
+});

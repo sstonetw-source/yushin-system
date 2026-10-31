@@ -4931,5 +4931,5 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
  #appContainer .inventory-secondary-list > summary { min-height:44px; display:flex; align-items:center; color:var(--ys-muted); cursor:pointer; }
 }
 .product-master-create-actions { display:flex; justify-content:flex-start; margin:0 0 14px; }
-.product-master-create-actions button { background:var(--ys-primary); color:#fff; font-weight:700; min-height:42px; }
+.product-master-create-actions button { background:var(--ys-primary); color:#fff; font-weight:700; min-height:44px; }
 @media (max-width:600px) { .product-master-create-actions button { width:100%; } }
