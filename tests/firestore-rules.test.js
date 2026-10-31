@@ -6,9 +6,15 @@ const {
   assertSucceeds,
   assertFails
 } = require('@firebase/rules-unit-testing');
-const { arrayUnion, collection, deleteDoc, deleteField, doc, getDoc, getDocs, limit, orderBy, query, setDoc, startAfter, updateDoc, where, writeBatch } = require('firebase/firestore');
+const { arrayUnion, collection, deleteDoc, deleteField, doc, getDoc, getDocs, limit, orderBy, query, setDoc, setLogLevel, startAfter, updateDoc, where, writeBatch } = require('firebase/firestore');
+const { initializeApp: initializeAdminApp, deleteApp: deleteAdminApp } = require('firebase-admin/app');
+const { getFirestore: getAdminFirestore } = require('firebase-admin/firestore');
+const { commitOrderReservation } = require('../functions/order-reservation-service');
 
 let env;
+let adminApp,adminDatabase;
+// Expected PERMISSION_DENIED attack probes should not bury the test summary.
+setLogLevel('silent');
 
 test('members sync only their own Auth token email without changing protected profile fields',async()=>{
  const client=env.authenticatedContext('sales1',{email:'sales1@example.com'}).firestore();
@@ -38,7 +44,7 @@ async function seedOperationalReserve(count=1){
   await deleteDoc(doc(ctx.firestore(),'inventoryMovements/RESERVE-EVIDENCE'));
  });
  const items=Array.from({length:count},(_,i)=>({itemId:'I'+i,productId:'p-order',qty:5,warehouseId:'W1'}));
- await seed('orders/evidence',{ownerUid:'sales1',salesCode:'S01',items});
+ await seed('orders/evidence',{ownerUid:'sales1',salesCode:'S01',inventoryReservationStatus:'completed',items});
  await seed('inventory/p-order',{productKey:'p-order',onHand:20,reserved:0,incoming:0});
  await seed('warehouseStocks/W1__p-order',{productKey:'p-order',warehouseId:'W1',onHand:20,reserved:0,incoming:0});
 }
@@ -107,10 +113,13 @@ test.before(async () => {
     projectId,
     firestore: { rules: fs.readFileSync('firestore.rules', 'utf8') }
   });
+  adminApp=initializeAdminApp({projectId},'rules-backend-only-initial-reservation');
+  adminDatabase=getAdminFirestore(adminApp);
 });
 
 test.after(async () => {
   await env.cleanup();
+  if(adminApp)await deleteAdminApp(adminApp);
 });
 
 test.beforeEach(async () => {
@@ -911,7 +920,7 @@ test('purchase communication timeline is purchaser-only and immutable', async ()
 });
 
 test('procurement demands reject false sources, rewritten identities and inconsistent quantities for operational roles',async()=>{
- await seed('orders/source',{ownerUid:'sales1',salesCode:'S01',items:[{itemId:'A',productId:'p-order',qty:5,warehouseId:'W1'}]});
+ await seed('orders/source',{ownerUid:'sales1',salesCode:'S01',inventoryReservationStatus:'completed',items:[{itemId:'A',productId:'p-order',qty:5,warehouseId:'W1'}]});
  const base={demandId:'SALES_ORDER:source:A',sourceType:'SALES_ORDER',sourceId:'source',sourceItemId:'A',sourceItemIndex:0,
   ownerUid:'sales1',salesCode:'S01',productId:'p-order',productKey:'p-order',requestedQty:5,orderedQty:2,receivedQty:1,
   remainingToOrderQty:3,remainingToReceiveQty:1,perOrdered:40,perReceived:20,status:'PARTIALLY_RECEIVED'};
@@ -928,7 +937,7 @@ test('procurement demands reject false sources, rewritten identities and inconsi
  }
 });
 test('operational reservations bind to the exact source item and follow its warehouse through atomic transfer',async()=>{
- await seed('orders/source',{ownerUid:'sales1',salesCode:'S01',items:[{itemId:'A',productId:'p-order',qty:5,warehouseId:'W1'}]});
+ await seed('orders/source',{ownerUid:'sales1',salesCode:'S01',inventoryReservationStatus:'completed',items:[{itemId:'A',productId:'p-order',qty:5,warehouseId:'W1'}]});
  const base={orderId:'source',itemId:'A',orderItemIndex:0,productKey:'p-order',ownerUid:'sales1',salesCode:'S01',warehouseId:'W1',quantity:2,shortageQty:3};
  for(const uid of ['admin','buyer1','wh1']){
   const client=db(uid),ref=doc(client,'inventoryReservations/source__A');
@@ -940,12 +949,12 @@ test('operational reservations bind to the exact source item and follow its ware
  const client=db('admin'),b=writeBatch(client);
  b.update(doc(client,'orders/source'),{items:[{itemId:'A',productId:'p-order',qty:5,warehouseId:'W2'}]});
  b.update(doc(client,'inventoryReservations/source__A'),{warehouseId:'W2'});await assertSucceeds(b.commit());
- await seed('orders/source',{ownerUid:'sales1',salesCode:'S01',status:'cancelled',items:[{itemId:'A',productId:'p-order',qty:5,warehouseId:'W2'}]});
+ await seed('orders/source',{ownerUid:'sales1',salesCode:'S01',inventoryReservationStatus:'completed',status:'cancelled',items:[{itemId:'A',productId:'p-order',qty:5,warehouseId:'W2'}]});
  await assertFails(updateDoc(doc(client,'inventoryReservations/source__A'),{quantity:1}));
  await assertSucceeds(updateDoc(doc(client,'inventoryReservations/source__A'),{quantity:0,shortageQty:0}));
 });
 test('procurement demand permissions follow ERP ownership', async () => {
-  await seed('orders/o1',{ownerUid:'sales1',salesCode:'S01',items:[{itemId:'i1',productId:'p-order',qty:5,warehouseId:'W1'}]});
+  await seed('orders/o1',{ownerUid:'sales1',salesCode:'S01',inventoryReservationStatus:'completed',items:[{itemId:'i1',productId:'p-order',qty:5,warehouseId:'W1'}]});
   const base={
     demandId:'SALES_ORDER:o1:i1',sourceType:'SALES_ORDER',sourceId:'o1',sourceItemId:'i1',
     sourceItemIndex:0,productKey:'p-order',productId:'p-order',
@@ -1180,6 +1189,7 @@ test('all receiving roles reject live reservations when either order status is c
   for(const status of [{status:'cancelled',orderStatus:'normal'},{status:'voided',orderStatus:'normal'},
     {status:'active',orderStatus:'cancelled'},{status:'active',orderStatus:'voided'}]){
     await seed('orders/cancelled-reservation',{...status,ownerUid:'sales1',salesCode:'S01',
+      inventoryReservationStatus:'completed',
       items:[{itemId:'I1',productId:'P1',qty:1,warehouseId:'W1'}]});
     const data={orderId:'cancelled-reservation',itemId:'I1',orderItemIndex:0,productKey:'P1',warehouseId:'W1',
       ownerUid:'sales1',salesCode:'S01',quantity:1,shortageQty:0,status:'active'};
@@ -1356,10 +1366,15 @@ test('actual count service keeps stock lots and immutable operation aligned for 
   assert.equal((await getDoc(doc(db(uid),'warehouseStocks/W1__'+key))).data().onHand,7);
  }
 });
+let initializationFixtureSequence=0;
 async function orderInitializationFixture(uid,role,{qty=5,onHand=3,direct=false,ownerUid=uid}={}){
- const id='init-'+uid,productKey='init-product',warehouseId=direct?'':'W1';
+ // Receipt IDs are durable and must not be recycled when one test resets the
+ // same role's order: a backend replay cannot be treated as a fresh attempt.
+ const id='init-'+uid+'-'+(++initializationFixtureSequence),productKey='init-product',warehouseId=direct?'':'W1';
  await seed('orders/'+id,{ownerUid,salesCode:ownerUid==='eng1'?'E01':'S01',status:'active',inventoryReservationStatus:'pending',
+  inventoryReservationAttemptId:'rules_initial_'+id,
   items:[{itemId:'I',productId:productKey,itemCode:'INIT',qty,fulfillmentType:direct?'DIRECT_SHIP':'WAREHOUSE',warehouseId}]});
+ await seed('products/'+productKey,{productId:productKey,productType:'Goods',active:true,status:'ACTIVE'});
  if(!direct){
   await seed('warehouses/W1',{active:true,isDefault:true});
   await seed('inventory/'+productKey,{productKey,onHand,reserved:0,incoming:0});
@@ -1383,9 +1398,82 @@ async function orderInitializationFixture(uid,role,{qty=5,onHand=3,direct=false,
  // It is intentionally absent from the live app and order-reservation Service.
  vm.runInContext(fs.readFileSync('tests/fixtures/legacy-order-reservation-writer.js','utf8'),context);
  vm.runInContext(fs.readFileSync('src/services/order-reservation.js','utf8'),context);
- return {context,id,client,run:()=>context.reserveSingleOrderItem(id,{}, {itemId:'I'},0)};
+ // Positive lifecycle setup exercises the real Admin SDK whole-order writer.
+ // The cached browser implementation remains separately available as runLegacy
+ // solely for denial/atomicity assertions against Firestore Rules.
+ return {context,id,client,
+  run:()=>commitOrderReservation(adminDatabase,uid,{orderId:id,syncAttemptId:'rules_initial_'+id}),
+  runLegacy:()=>context.reserveSingleOrderItem(id,{inventoryReservationAttemptId:'rules_initial_'+id},{itemId:'I'},0)};
 }
-test('real order initialization atomically publishes item reservation and demand for authorized roles',async()=>{
+test('no client role may create or transition an order into server-only reservation completed',async()=>{
+ for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['admin','admin']]){
+  const ownerUid=role==='engineer'?uid:'sales1',salesCode=role==='engineer'?'E01':'S01';
+  const id='untrusted-terminal-'+uid,client=db(uid);
+  const data={...validOrderProduct,ownerUid,salesCode,status:'active',createdByUid:uid,createdByRole:role,createdByName:uid,
+   inventoryReservationAttemptId:'client_attempt_'+uid,inventoryReservationStatus:'pending'};
+  await assertSucceeds(setDoc(doc(client,'orders/'+id),data));
+  await assertFails(updateDoc(doc(client,'orders/'+id),{inventoryReservationStatus:'completed'}));
+  await assertFails(setDoc(doc(client,'orders/'+id+'-forged'),{...data,inventoryReservationStatus:'completed'}));
+  assert.equal((await getDoc(doc(db('admin'),'orders/'+id))).data().inventoryReservationStatus,'pending');
+ }
+});
+test('incomplete sources cannot claim reserved quantities by editing items without a backend receipt',async()=>{
+ for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['admin','admin']]){
+  const f=await orderInitializationFixture(uid,role,{ownerUid:role==='purchaser'?'sales1':uid});
+  const original=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+  await assertFails(updateDoc(doc(db(uid),'orders/'+f.id),{items:[{...original.items[0],reservedQty:3,shortageQty:2}],updatedAt:'2026-10-31T05:00:00Z'}));
+  assert.deepEqual((await getDoc(doc(db('admin'),'orders/'+f.id))).data().items,original.items);
+ }
+});
+test('cached per-item SDK writer fails atomically for all former initial-reservation roles',async()=>{
+ for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['admin','admin']]){
+  const f=await orderInitializationFixture(uid,role,{ownerUid:role==='purchaser'?'sales1':uid});
+  await assert.rejects(f.runLegacy(),uid+' cached writer must be rejected');
+  const client=db('admin'),order=(await getDoc(doc(client,'orders/'+f.id))).data();
+  assert.equal(order.inventoryReservationStatus,'pending');
+  assert.equal(order.items[0].reservedQty||0,0);
+  assert.equal((await getDoc(doc(client,'inventory/init-product'))).data().reserved,0);
+  assert.equal((await getDoc(doc(client,'warehouseStocks/W1__init-product'))).data().reserved,0);
+  assert.equal((await getDoc(doc(client,'inventoryReservations/'+f.id+'__I'))).exists(),false);
+  assert.equal((await getDoc(doc(client,'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).exists(),false);
+ }
+});
+test('direct-only cached initial demand is rejected even without physical stock writes',async()=>{
+ for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['admin','admin']]){
+  const f=await orderInitializationFixture(uid,role,{direct:true,ownerUid:role==='purchaser'?'sales1':uid});
+  await assert.rejects(f.runLegacy());
+  assert.equal((await getDoc(doc(db('admin'),'orders/'+f.id))).data().inventoryReservationStatus,'pending');
+  assert.equal((await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).exists(),false);
+ }
+});
+test('new sales-order demand is creatable only after authoritative completion, not on pending or failed',async()=>{
+ const f=await orderInitializationFixture('buyer1','purchaser',{onHand:0,ownerUid:'sales1'});
+ const order=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+ const demand=demandCore.demandDocument({sourceType:'SALES_ORDER',sourceId:f.id,sourceItemId:'I',sourceItemIndex:0,
+  productId:'init-product',productKey:'init-product',fulfillmentType:'WAREHOUSE',warehouseId:'W1',
+  ownerUid:'sales1',salesCode:'S01',shortageQty:5,supplyOrderedQty:0,receivedQty:0});
+ const ref=doc(db('buyer1'),'procurementDemands/'+encodeURIComponent(demand.demandId));
+ await seed('orders/'+f.id,{...order,inventoryReservationStatus:'completed'});
+ await assertSucceeds(setDoc(ref,demand));
+ await env.withSecurityRulesDisabled(async ctx=>deleteDoc(doc(ctx.firestore(),ref.path)));
+ for(const status of ['pending','failed']){
+  await seed('orders/'+f.id,{...order,inventoryReservationStatus:status});
+  for(const uid of ['buyer1','admin','sales1'])await assertFails(setDoc(doc(db(uid),ref.path),demand));
+ }
+ assert.equal((await getDoc(doc(db('admin'),ref.path))).exists(),false);
+});
+test('operational reservation proof cannot create a hold for an incomplete or statusless order',async()=>{
+ for(const status of ['pending','failed','']){
+  await seedOperationalReserve();
+  const before=(await getDoc(doc(db('admin'),'orders/evidence'))).data();
+  await seed('orders/evidence',{...before,inventoryReservationStatus:status});
+  for(const uid of ['buyer1','wh1','admin'])await assertFails(operationalReserveBatch(uid).commit());
+  assert.equal((await getDoc(doc(db('admin'),'inventory/p-order'))).data().reserved,0);
+  assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/evidence__I0'))).exists(),false);
+ }
+ await seedOperationalReserve();await assertSucceeds(operationalReserveBatch('buyer1').commit());
+});
+test('authoritative whole-order backend atomically publishes item reservation and demand for authorized roles',async()=>{
  for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['admin','admin']]){
   const f=await orderInitializationFixture(uid,role,{ownerUid:role==='purchaser'?'sales1':uid});
   try{await assertSucceeds(f.run());}catch(error){throw new Error(uid+' initialization: '+error.message);}
@@ -1396,7 +1484,7 @@ test('real order initialization atomically publishes item reservation and demand
   assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,3);
  }
 });
-test('real client initialization refuses an old attempt before stock writes and accepts the current attempt',async()=>{
+test('cached old client refuses stale attempts and Rules reject current-attempt initial writes for every role',async()=>{
  for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['admin','admin']]){
   const f=await orderInitializationFixture(uid,role,{ownerUid:role==='purchaser'?'sales1':uid});
   const source=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
@@ -1404,8 +1492,9 @@ test('real client initialization refuses an old attempt before stock writes and 
   await assert.rejects(f.context.reserveSingleOrderItem(f.id,{inventoryReservationAttemptId:'old-attempt'},{itemId:'I'},0),/較新的庫存同步/);
   assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,0);
   assert.equal((await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).exists(),false);
-  await assertSucceeds(f.context.reserveSingleOrderItem(f.id,{inventoryReservationAttemptId:'current-attempt'},{itemId:'I'},0));
-  assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,3);
+  await assert.rejects(f.context.reserveSingleOrderItem(f.id,{inventoryReservationAttemptId:'current-attempt'},{itemId:'I'},0));
+  assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,0);
+  assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).exists(),false);
  }
 });
 const unactivatedLocationPatches=[{locationSchemaVersion:2},{locationSchemaVersion:0},{locations:[]},
@@ -1423,7 +1512,7 @@ test('direct operational and admin batches cannot introduce location fields with
   await assertSucceeds(operationalReserveBatch(uid).commit());
  }
 });
-test('business callers cannot bypass the runtime guard by injecting location data into native writes',async()=>{
+test('cached business writer is rejected with plain or injected location data',async()=>{
  for(const [uid,role] of [['sales1','sales'],['eng1','engineer']]){
   for(const patch of unactivatedLocationPatches){
    const f=await orderInitializationFixture(uid,role),originalRun=f.client.runTransaction;
@@ -1431,12 +1520,12 @@ test('business callers cannot bypass the runtime guard by injecting location dat
     const record=ref.path.startsWith('inventoryReservations/')?{...data,...patch}:data;
     return options?tx.set(ref,record,options):tx.set(ref,record);
    }}));
-   await assertFails(f.run());
+   await assert.rejects(f.runLegacy());
    const admin=db('admin');assert.equal((await getDoc(doc(admin,'inventory/init-product'))).data().reserved,0);
    assert.equal((await getDoc(doc(admin,'inventoryReservations/'+f.id+'__I'))).exists(),false);
    assert.equal((await getDoc(doc(admin,'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).exists(),false);
   }
-  const legal=await orderInitializationFixture(uid,role);await assertSucceeds(legal.run());
+  const legacy=await orderInitializationFixture(uid,role);await assert.rejects(legacy.runLegacy());
  }
 });
 test('unknown existing location metadata stays readable for audit but cannot be stripped to bypass the single-warehouse writer',async()=>{
@@ -1457,14 +1546,14 @@ test('actual initialization rejects unmatched company free stock without creatin
  for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['admin','admin']]){
   const f=await orderInitializationFixture(uid,role,{onHand:0,ownerUid:role==='purchaser'?'sales1':uid});
   await seed('inventory/init-product',{productKey:'init-product',onHand:5,reserved:0,incoming:0});
-  await assert.rejects(f.run(),/核對分倉庫存/);
+  await assert.rejects(f.run(),/核對庫存/);
   const client=db('admin');assert.equal((await getDoc(doc(client,'inventory/init-product'))).data().reserved,0);
   assert.equal((await getDoc(doc(client,'warehouseStocks/W1__init-product'))).data().reserved,0);
   assert.equal((await getDoc(doc(client,'inventoryReservations/'+f.id+'__I'))).exists(),false);
   assert.equal((await getDoc(doc(client,'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).exists(),false);
  }
 });
-test('direct initialization does not need stock writes and purchaser can build it for responsible business owner',async()=>{
+test('whole-order backend initializes direct-shipment demand without stock writes',async()=>{
  for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['admin','admin']]){
   const f=await orderInitializationFixture(uid,role,{direct:true,qty:3,ownerUid:role==='purchaser'?'sales1':uid});
   await assertSucceeds(f.run());
@@ -1472,7 +1561,7 @@ test('direct initialization does not need stock writes and purchaser can build i
   assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).exists(),false);
  }
 });
-test('additional stock during pending retry clears demand through reservation evidence and rejects forged quantity',async()=>{
+test('completed backend receipt does not reallocate new stock on an identical attempt replay',async()=>{
  for(const [uid,role] of [['sales1','sales'],['eng1','engineer']]){
   const f=await orderInitializationFixture(uid,role);await f.run();
   const demandRef=doc(db(uid),'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I'));
@@ -1480,8 +1569,8 @@ test('additional stock during pending retry clears demand through reservation ev
   await seed('inventory/init-product',{productKey:'init-product',onHand:5,reserved:3,incoming:0});
   await seed('warehouseStocks/W1__init-product',{productKey:'init-product',warehouseId:'W1',onHand:5,reserved:3,incoming:0});
   await assertSucceeds(f.run());
-  assert.equal((await getDoc(demandRef)).data().remainingToOrderQty,0);
-  assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,5);
+  assert.equal((await getDoc(demandRef)).data().remainingToOrderQty,2);
+  assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,3);
  }
 });
 async function addInitializationWarehouse(f,qty,master={}){
@@ -1489,7 +1578,7 @@ async function addInitializationWarehouse(f,qty,master={}){
  await seed('warehouseStocks/W2__init-product',{productKey:'init-product',warehouseId:'W2',onHand:qty,reserved:0,incoming:0});
  f.context.warehouseMasterCache.push({id:'W2',active:true});
 }
-test('real initialization selects another stocked warehouse for all authorized commercial operators',async()=>{
+test('whole-order backend selects another stocked warehouse for all authorized roles',async()=>{
  for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['admin','admin']]){
   const f=await orderInitializationFixture(uid,role,{onHand:0,ownerUid:role==='purchaser'?'sales1':uid});
   await addInitializationWarehouse(f,5);await seed('inventory/init-product',{productKey:'init-product',onHand:5,reserved:0,incoming:0});
@@ -1500,14 +1589,14 @@ test('real initialization selects another stocked warehouse for all authorized c
   assert.equal((await getDoc(doc(db('admin'),'warehouseStocks/W2__init-product'))).data().reserved,5);
  }
 });
-test('unheld pending reservation and demand can atomically change warehouse on retry without broadening stock ownership',async()=>{
+test('whole-order backend replay never reopens an already committed zero-stock source',async()=>{
  for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['admin','admin']]){
   const f=await orderInitializationFixture(uid,role,{onHand:0,ownerUid:role==='purchaser'?'sales1':uid});await f.run();
   await addInitializationWarehouse(f,5);await seed('inventory/init-product',{productKey:'init-product',onHand:5,reserved:0,incoming:0});
   try{await assertSucceeds(f.run());await assertSucceeds(f.run());}catch(err){throw Error(uid+' remote zero recovery: '+err.message);}
   const d=(await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).data();
-  assert.equal(d.warehouseId,'W2');assert.equal(d.requestedQty,0);assert.equal(d.remainingToOrderQty,0);
-  const r=(await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).data();assert.equal(r.quantity,5);assert.equal(r.warehouseId,'W2');
+  assert.equal(d.requestedQty,5);assert.equal(d.remainingToOrderQty,5);
+  const r=(await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).data();assert.equal(r.quantity,0);assert.equal(r.warehouseId,'W1');
  }
 });
 test('initialization rejects multi-location stock before publishing false purchasing; disabled warehouse is not selected',async()=>{
@@ -1517,7 +1606,7 @@ test('initialization rejects multi-location stock before publishing false purcha
  assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,0);
  assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).exists(),false);
  assert.equal((await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).exists(),false);
- await seed('warehouses/W2',{active:false});await assert.rejects(f.run(),/核對分倉庫存/);
+ await seed('warehouses/W2',{active:false});await assert.rejects(f.run(),/核對庫存/);
  assert.equal((await getDoc(doc(db('admin'),'orders/'+f.id))).data().items[0].warehouseId,'W1');
  assert.equal((await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).exists(),false);
 });
@@ -1593,14 +1682,18 @@ for(const [uid,role] of [['buyer1','purchaser'],['wh1','warehouse']])test(role+'
  assert.equal((await getDoc(doc(db('admin'),'receipts/PAGED'))).data().allocationCompleted,true);
  assert.equal((await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).data().remainingToOrderQty,2);
 });
-test('warehouse and unrelated business owner cannot initialize another owner order, cancellation stops admin as well',async()=>{
+test('cached warehouse and unrelated business writers are denied; authoritative backend enforces ownership and cancellation',async()=>{
  for(const [uid,role] of [['wh1','warehouse'],['sales2','sales']]){
   const f=await orderInitializationFixture(uid,role,{ownerUid:'sales1'});
-  await assert.rejects(f.run());assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,0);
+  await assert.rejects(f.runLegacy());
+  if(role==='warehouse')await assertSucceeds(f.run());
+  else await assert.rejects(f.run());
+  assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,role==='warehouse'?3:0);
  }
  const f=await orderInitializationFixture('admin','admin');
- await seed('orders/'+f.id,{ownerUid:'admin',status:'cancelled',items:[{itemId:'I',productId:'init-product',warehouseId:'W1',qty:5}]});
- await assert.rejects(f.run(),/取消／作廢/);assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,0);
+ const source=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
+ await seed('orders/'+f.id,{...source,status:'cancelled',orderStatus:'cancelled'});
+ await assert.rejects(f.run(),/已取消或結案/);assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,0);
 });
 test('missing demand may be read for deterministic transaction creation but existing documents and lists remain owner scoped',async()=>{
  await assertSucceeds(getDoc(doc(db('sales1'),'procurementDemands/MISSING-INIT')));
@@ -1619,9 +1712,10 @@ test('inventory synchronization outcomes reject completed regression, old attemp
   await assertFails(updateDoc(refFor(uid),patch('completed','OLD')));
   await assertSucceeds(updateDoc(refFor(uid),patch('pending','B')));
   await assertFails(updateDoc(refFor(uid),patch('failed','A')));
-  await assertSucceeds(updateDoc(refFor(uid),patch('completed','B')));
-  await assertFails(updateDoc(refFor(uid),patch('failed','B')));
-  await assertFails(updateDoc(refFor(uid),patch('pending','C')));
+  await assertFails(updateDoc(refFor(uid),patch('completed','B')));
+  await assertSucceeds(updateDoc(refFor(uid),patch('failed','B')));
+  await assertSucceeds(updateDoc(refFor(uid),patch('pending','C')));
+  await assertFails(updateDoc(refFor(uid),patch('completed','C')));
   for(const field of ['status','orderStatus']){
    await seed('orders/sync-outcome',{...base,[field]:'cancelled'});
    await assertFails(updateDoc(refFor(uid),patch('completed')));
@@ -1632,17 +1726,17 @@ test('inventory synchronization outcomes reject completed regression, old attemp
  for(const uid of ['wh1','sales2','eng1'])await assertFails(updateDoc(refFor(uid),patch('pending','B')));
  await assertFails(updateDoc(refFor('sales1'),{...patch('pending','B'),inventoryReservationError:'x'.repeat(1001)}));
 });
-test('real shared synchronization starts, completes and recovers terminal results for business, engineer and purchaser',async()=>{
+test('shared synchronization consumes an authoritative completed receipt without invoking retired SDK stock writes',async()=>{
  const app=fs.readFileSync('app.js','utf8');
  for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser']]){
   const f=await orderInitializationFixture(uid,role,{ownerUid:role==='purchaser'?'sales1':uid});
+  await assertSucceeds(f.run());
   Object.assign(f.context,{currentUserRole:role,orderReservationSummary:o=>({reservedQty:o.items.reduce((s,i)=>s+Number(i.reservedQty||0),0)}),console:{error(){}},
-   reserveInventoryForNewOrder:async()=>f.run()});
+   reserveInventoryForNewOrder:async()=>{throw Error('completed order must not invoke old stock writer');}});
   vm.runInContext(app.slice(app.indexOf('function canRetryOrderInventorySync('),app.indexOf('function orderInventorySyncStatusHtml(')),f.context);
   const order={id:f.id,...(await getDoc(doc(db(uid),'orders/'+f.id))).data()};
   await assertSucceeds(f.context.synchronizeOrderInventory(f.id,order,uid));
   assert.equal(order.inventoryReservationStatus,'completed');assert.ok(order.inventoryReservationAttemptId);
-  f.context.reserveInventoryForNewOrder=async()=>{throw Error('must not repeat completed operation');};
   await assertSucceeds(f.context.synchronizeOrderInventory(f.id,order,uid));
   assert.equal((await getDoc(doc(db('admin'),'inventory/init-product'))).data().reserved,3);
  }
@@ -1743,7 +1837,7 @@ test('source-only Forecast recovery retains owner access and cannot complete a m
  assert.equal((await getDoc(doc(db('admin'),'forecasts/'+id))).exists(),false);
 });
 async function seedStockWorkflow(){
-  await seed('orders/stock-order',{ownerUid:'sales1',salesCode:'S01',deliveredQty:0,returnedQty:0,
+  await seed('orders/stock-order',{ownerUid:'sales1',salesCode:'S01',inventoryReservationStatus:'completed',deliveredQty:0,returnedQty:0,
     items:[{itemId:'item-1',productId:'p1',qty:5,warehouseId:'w1'}]});
   await seed('inventory/p1',{productKey:'p1',productId:'p1',onHand:10,reserved:0,incoming:0});
   await seed('warehouseStocks/w1-p1',{productKey:'p1',warehouseId:'w1',onHand:10,reserved:0,incoming:0});
@@ -1797,7 +1891,7 @@ test('stock witness cannot be reused for a second stock change',async()=>{
 test('commercial wrapper rejects inconsistent reserved deltas before commit and still permits the valid atomic flow',async()=>{
  for(const [uid,role,code] of [['sales1','sales','S01'],['eng1','engineer','E01']]){
   await seedStockWorkflow();
-  await seed('orders/stock-order',{ownerUid:uid,salesCode:code,items:[{itemId:'item-1',productId:'p1',qty:5,warehouseId:'w1'}]});
+  await seed('orders/stock-order',{ownerUid:uid,salesCode:code,inventoryReservationStatus:'completed',items:[{itemId:'item-1',productId:'p1',qty:5,warehouseId:'w1'}]});
   const client=compatDb(uid);
   const attempt=(company,warehouse)=>stockPermissions.run(client,async tx=>{
    const inv=client.collection('inventory').doc('p1'),wh=client.collection('warehouseStocks').doc('w1-p1');
@@ -1882,7 +1976,7 @@ test('operational line validation supports fifteen lines without losing commerci
 test('multi-product reservation uses the matching product movement for each stock witness',async()=>{
  const client=compatDb('sales1');
  const items=['p1','p2'].map((productId,i)=>({itemId:'item-'+(i+1),productId,qty:5,warehouseId:'w1'}));
- await seed('orders/multi-stock',{ownerUid:'sales1',salesCode:'S01',items});
+ await seed('orders/multi-stock',{ownerUid:'sales1',salesCode:'S01',inventoryReservationStatus:'completed',items});
  for(const productId of ['p1','p2']){
   await seed('inventory/'+productId,{productKey:productId,onHand:10,reserved:0});
   await seed('warehouseStocks/w1-'+productId,{productKey:productId,warehouseId:'w1',onHand:10,reserved:0});
@@ -2082,9 +2176,9 @@ test('handoff creates scoped custody location without broadening warehouse maste
 });
 
 
-test('responsible salesperson retains scoped stock access after warehouse handoff',async()=>{
+test('responsible salesperson retains scoped stock access after completed-order warehouse handoff',async()=>{
  await seedStockWorkflow();
- await seed('orders/stock-order',{ownerUid:'sales1',salesCode:'S01',deliveredQty:0,returnedQty:0,warehouseLogisticsId:'H',logisticsTransfersPending:0,logisticsHistory:[{id:'H'}],items:[{itemId:'item-1',productId:'p1',qty:5,warehouseId:'custody-sales1'}]});
+ await seed('orders/stock-order',{ownerUid:'sales1',salesCode:'S01',inventoryReservationStatus:'completed',deliveredQty:0,returnedQty:0,warehouseLogisticsId:'H',logisticsTransfersPending:0,logisticsHistory:[{id:'H'}],items:[{itemId:'item-1',productId:'p1',qty:5,warehouseId:'custody-sales1'}]});
  await seed('warehouseStocks/w1-p1',{productKey:'p1',warehouseId:'custody-sales1',onHand:10,reserved:0,incoming:0});
  await seed('inventoryLots/l1',{productKey:'p1',warehouseId:'custody-sales1',remainingQty:10});
  await assertSucceeds(stockWorkflow(0,5,'reserve','custody-sales1'));
@@ -2362,6 +2456,9 @@ test('admin permanent deletion atomically releases stock and deletes all linked 
   const reservation='inventoryReservations/'+f.id+'__I';
   const demand='procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I');
   if(status==='cancelled')await seed(demand,{...(await getDoc(doc(db('admin'),demand))).data(),status:'CANCELLED',remainingToOrderQty:0});
+  const linked=(await getDoc(doc(db('admin'),demand))).data();
+  assert.deepEqual([linked.sourceType,linked.sourceId,linked.sourceItemId,linked.productKey,linked.ownerUid,linked.salesCode,linked.demandId],
+   ['SALES_ORDER',f.id,'I','init-product',order.ownerUid,order.salesCode,'SALES_ORDER:'+f.id+':I']);
   await assertSucceeds(loadActualPermanentDelete(f)());
   assert.equal((await getDoc(doc(db('admin'),'orders/'+f.id))).exists(),false);
   assert.equal((await getDoc(doc(db('admin'),reservation))).exists(),false);
@@ -2560,9 +2657,8 @@ test('actual initialization refuses a locked custody master before any stock or 
  for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['admin','admin']]){
   const f=await orderInitializationFixture(uid,role,{ownerUid:role==='purchaser'?'sales1':uid});
   await seed('warehouses/W1',{active:true,warehouseType:'CUSTODY'});
-  const admin=db('admin'),orderRef=doc(admin,'orders/'+f.id),before=(await getDoc(orderRef)).data();
-  await seed('orders/'+f.id,{...before,items:[{...before.items[0],supplyOrderedQty:1}]});
-  await assert.rejects(f.run(),/啟用的庫存倉庫/);
+  const admin=db('admin');
+  await assert.rejects(f.run(),/啟用的實體倉庫/);
   assert.equal((await getDoc(doc(admin,'inventory/init-product'))).data().reserved,0);
   assert.equal((await getDoc(doc(admin,'warehouseStocks/W1__init-product'))).data().reserved,0);
   assert.equal((await getDoc(doc(admin,'inventoryReservations/'+f.id+'__I'))).exists(),false);
@@ -2570,7 +2666,7 @@ test('actual initialization refuses a locked custody master before any stock or 
  }
 });
 
-test('actual reservation sync refuses insufficient company and warehouse balances for authorized roles',async()=>{
+test('committed backend receipt replay never rewrites a subsequently inconsistent stock ledger',async()=>{
  for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['admin','admin']]){
   const f=await orderInitializationFixture(uid,role,{ownerUid:role==='purchaser'?'sales1':uid});
   await assertSucceeds(f.run());
@@ -2582,7 +2678,7 @@ test('actual reservation sync refuses insufficient company and warehouse balance
    const paths=['orders/'+f.id,'inventory/init-product','warehouseStocks/W1__init-product',
     'inventoryReservations/'+f.id+'__I','procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')];
    const before=await Promise.all(paths.map(async path=>(await getDoc(doc(db('admin'),path))).data()));
-   await assert.rejects(f.run(),/不足|核對/);
+   const replay=await f.run();assert.equal(replay.status,'already-applied');
    const after=await Promise.all(paths.map(async path=>(await getDoc(doc(db('admin'),path))).data()));
    assert.deepEqual(after,before,uid+' must not erase the ledger discrepancy');
    await seed(path,original);

@@ -404,28 +404,9 @@ service cloud.firestore {
         'receiptEvents', 'purchaseEvents', 'reservationStatus', 'reservationError', 'inventoryProductKey',
         'linkedDocuments', 'procurementStatus', 'perOrdered', 'perReceived'];
     }
-    function purchaserInitialLocationItems(orderId) {
-      let before = resource.data.get('items', []);
-      let after = request.resource.data.get('items', []);
-      let changed = after.removeAll(before);
-      let prior = before.removeAll(after);
-      let item = changed[0];
-      let old = prior[0];
-      let held = getAfter(/databases/$(database)/documents/inventoryReservations/$(orderId + '__' + item.itemId)).data;
-      let target = get(/databases/$(database)/documents/warehouses/$(item.warehouseId)).data;
-      return resource.data.get('inventoryReservationStatus', '') in ['pending','failed']
-        && !orderIsCancelled(resource.data) && before.size() == after.size()
-        && changed.size() == 1 && prior.size() == 1 && uncommittedOrderItem(old)
-        && resource.data.get('deliveryRecords', []).size() == 0 && resource.data.get('returnRecords', []).size() == 0
-        && item.diff(old).affectedKeys().hasOnly(['orderedQty','reservedQty','shortageQty','inventoryProductKey','warehouseId'])
-        && item.warehouseId != old.get('warehouseId', '')
-        && target.get('active', true) && !target.get('systemCustody', false) && !(item.warehouseId.matches('custody-.*'))
-        && held.orderId == orderId && held.itemId == item.itemId && held.warehouseId == item.warehouseId
-        && held.quantity == item.reservedQty && held.shortageQty == item.shortageQty;
-    }
     function purchaserOrderWorkflowUpdate(id) {
       return purchaser()
-        && (operationalItemsOnly(purchasingItemFields()) || purchaserInitialLocationItems(id))
+        && operationalItemsOnly(purchasingItemFields())
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'items', 'itemCount', 'orderSchemaVersion',
           'purchaseOrderNo', 'purchaseOrderNos', 'purchaseOrderedQty', 'purchaseStatus',
@@ -678,30 +659,12 @@ service cloud.firestore {
         && request.resource.data.get('orderId', '') == resource.data.get('orderId', '')
         && request.resource.data.get('itemId', '') == resource.data.get('itemId', '')
         && request.resource.data.get('productKey', '') == resource.data.get('productKey', '')
-        && (request.resource.data.get('warehouseId', '') == resource.data.get('warehouseId', '')
-          || businessUnheldReservationLocationChange())
+        && request.resource.data.get('warehouseId', '') == resource.data.get('warehouseId', '')
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'quantity', 'shortageQty', 'status', 'updatedAt', 'orderItemIndex', 'stockOperationId', 'warehouseStockId', 'warehouseId'
         ])
         && request.resource.data.get('quantity', 0) >= 0
         && request.resource.data.get('shortageQty', 0) >= 0;
-    }
-
-    function uncommittedOrderItem(item) {
-      return item.get('reservedQty', 0) == 0 && item.get('supplyOrderedQty', 0) == 0
-        && item.get('receivedQty', 0) == 0 && item.get('dispatchPreparedQty', 0) == 0
-        && item.get('deliveredQty', 0) == 0 && item.get('returnedQty', 0) == 0
-        && item.get('transferPendingId', '') == '' && item.get('custodyTransferId', '') == '';
-    }
-    function businessUnheldReservationLocationChange() {
-      let order = get(/databases/$(database)/documents/orders/$(resource.data.orderId)).data;
-      let master = get(/databases/$(database)/documents/warehouses/$(request.resource.data.warehouseId)).data;
-      return resource.data.get('quantity', 0) == 0
-        && order.ownerUid == request.auth.uid && order.get('inventoryReservationStatus', '') in ['pending','failed']
-        && order.get('deliveryRecords', []).size() == 0 && order.get('returnRecords', []).size() == 0
-        && uncommittedOrderItem(order.items[request.resource.data.orderItemIndex])
-        && master.get('active', true) && !master.get('systemCustody', false)
-        && !(request.resource.data.warehouseId.matches('custody-.*'));
     }
 
     function businessInventoryLotOperationalUpdate(id) {
@@ -769,6 +732,15 @@ service cloud.firestore {
             && data.get('sourceItemId', '') == '' && data.get('demandId', '') == 'STOCK_REPLENISHMENT:' + data.sourceId));
     }
 
+    // Initial SALES_ORDER demand belongs to the authoritative whole-order
+    // backend. Client transactions may only create follow-up demand after the
+    // original source is already committed by that backend.
+    function clientDemandSourceReady(data) {
+      return data.get('sourceType', '') != 'SALES_ORDER'
+        || getAfter(/databases/$(database)/documents/orders/$(data.sourceId)).data
+          .get('inventoryReservationStatus', '') == 'completed';
+    }
+
     function demandIdentityUnchanged() {
       return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
         'demandId','sourceType','sourceId','sourceItemId','productKey','productId','ownerUid','salesCode'
@@ -787,7 +759,8 @@ service cloud.firestore {
       let item = order.items[index];
       return legacyReservationLocationShape(data)
         && index is int && index >= 0 && index < order.items.size()
-        && (userRole != 'warehouse' || !(order.get('inventoryReservationStatus', '') in ['pending', 'failed']))
+        // Initial pending/failed reservation writes belong to the Admin SDK.
+        && !(order.get('inventoryReservationStatus', '') in ['pending', 'failed'])
         && id == data.orderId + '__' + data.itemId
         && data.itemId == item.get('itemId', 'item-' + string(index + 1))
         && data.productKey == item.get('productId', item.get('inventoryProductKey', ''))
@@ -1037,7 +1010,11 @@ service cloud.firestore {
     }
     function reservationCreateAllowed(id) {
       let userRole = role();
-      return validReservationSource(id, request.resource.data, userRole)
+      // A client may only create subsequent operational reservation evidence
+      // after the authoritative whole-order transaction has completed.
+      return getAfter(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data
+          .get('inventoryReservationStatus', '') == 'completed'
+        && validReservationSource(id, request.resource.data, userRole)
         && reservationCreateWriter(id, userRole);
     }
     function reservationUpdateAllowed(id) {
@@ -1075,35 +1052,6 @@ service cloud.firestore {
         && request.resource.data.get('receivedQty', 0) == resource.data.get('receivedQty', 0)
         && request.resource.data.get('orderedQty', 0) >= resource.data.get('orderedQty', 0)
         && request.resource.data.get('orderedQty', 0) <= request.resource.data.get('requestedQty', 0);
-    }
-
-    function businessReservationDemandUpdate() {
-      let d = request.resource.data;
-      let orderPath = /databases/$(database)/documents/orders/$(d.sourceId);
-      let before = get(orderPath).data;
-      let after = getAfter(orderPath).data;
-      let index = d.sourceItemIndex;
-      let oldItem = before.items[index];
-      let item = after.items[index];
-      let held = getAfter(/databases/$(database)/documents/inventoryReservations/$(d.sourceId + '__' + d.sourceItemId)).data;
-      let delivered = item.get('deliveredQty', 0) - item.get('returnedQty', 0);
-      let shortage = item.qty - (delivered > 0 ? delivered : 0) - held.quantity;
-      return businessOwner() && resource.data.get('status', '') != 'CANCELLED' && d.get('status', '') != 'CANCELLED'
-        && before.get('ownerUid', '') == request.auth.uid && after.get('ownerUid', '') == request.auth.uid
-        && before.get('inventoryReservationStatus', '') in ['pending', 'failed']
-        && after.get('inventoryReservationStatus', '') in ['pending', 'failed'] && !orderIsCancelled(after)
-        && d.fulfillmentType == 'WAREHOUSE' && d.orderedQty == resource.data.orderedQty && d.receivedQty == resource.data.receivedQty
-        && d.orderedQty == item.get('supplyOrderedQty', 0) && d.receivedQty == item.get('receivedQty', 0)
-        && item.get('qty', 0) == oldItem.get('qty', 0) && item.get('deliveredQty', 0) == oldItem.get('deliveredQty', 0)
-        && item.get('returnedQty', 0) == oldItem.get('returnedQty', 0)
-        && item.get('supplyOrderedQty', 0) == oldItem.get('supplyOrderedQty', 0) && item.get('receivedQty', 0) == oldItem.get('receivedQty', 0)
-        && held.orderId == d.sourceId && held.itemId == d.sourceItemId && held.productKey == d.productKey
-        && held.warehouseId == item.warehouseId && held.quantity == item.reservedQty
-        && d.warehouseId == item.warehouseId
-        && (d.warehouseId == resource.data.get('warehouseId', '') || uncommittedOrderItem(oldItem))
-        && item.shortageQty == (shortage > 0 ? shortage : 0)
-        && d.requestedQty == (d.orderedQty > d.receivedQty + item.shortageQty ? d.orderedQty : d.receivedQty + item.shortageQty)
-        && d.diff(resource.data).affectedKeys().hasOnly(['requestedQty','remainingToOrderQty','remainingToReceiveQty','perOrdered','perReceived','status','updatedAt','sourceItemIndex','warehouseId']);
     }
 
     function businessLifecycleDemandCancelUpdate() {
@@ -1900,8 +1848,7 @@ service cloud.firestore {
             ? after.inventoryReservationAttemptId != before.get('inventoryReservationAttemptId', '') && after.inventoryReservationError == ''
             : before.get('inventoryReservationStatus', '') == 'pending'
               && after.inventoryReservationAttemptId == before.get('inventoryReservationAttemptId', '')
-              && after.get('inventoryReservationStatus', '') in ['completed','failed']
-              && (after.inventoryReservationStatus != 'completed' || after.inventoryReservationError == '')));
+              && after.get('inventoryReservationStatus', '') == 'failed'));
     }
 
     function validOrderSourceSyncTransition(id, userRole) {
@@ -2013,6 +1960,8 @@ service cloud.firestore {
       allow get: if (resource == null ? role() in ['admin','purchaser','warehouse','sales','engineer'] : operationalOrOwnedReader(resource.data));
       allow list: if operationalOrOwnedReader(resource.data);
       allow create: if canCreateCommercialDoc()
+        // Client SDK must not forge the terminal server-only checkpoint.
+        && request.resource.data.get('inventoryReservationStatus', '') != 'completed'
         && request.resource.data.get('items', []).size() <= 15
         && validOrderTransactionType(request.resource.data)
         && validClientBillingCreate(request.resource.data)
@@ -2023,7 +1972,11 @@ service cloud.firestore {
       // Commercial owner edits commercial data; purchaser/warehouse must use scoped
       // workflow collections below instead of broad order mutation.
       // Transaction type validation is inside the scoped update paths, evaluated once.
-      allow update: if orderUpdateAllowed(id);
+      allow update: if (!(resource.data.get('inventoryReservationStatus', '') in ['pending','failed'])
+          || request.resource.data.get('items', []) == resource.data.get('items', []))
+        && (resource.data.get('inventoryReservationStatus', '') == 'completed'
+          || request.resource.data.get('inventoryReservationStatus', '') != 'completed')
+        && orderUpdateAllowed(id);
       allow delete: if admin();
     }
 
@@ -2050,13 +2003,14 @@ service cloud.firestore {
       // Transactions read the deterministic ID before creating a demand. Missing data carries no customer information.
       allow get: if (resource == null ? role() in ['admin','purchaser','warehouse','sales','engineer'] : operationalOrOwnedReader(resource.data));
       allow list: if operationalOrOwnedReader(resource.data);
-      allow create: if validProcurementDemand(request.resource.data) && (canReceiveInventory()
+      allow create: if validProcurementDemand(request.resource.data)
+        && clientDemandSourceReady(request.resource.data) && (canReceiveInventory()
         || businessProcurementDemandCreate(request.resource.data));
       allow update: if validProcurementDemand(request.resource.data) && demandIdentityUnchanged()
         && (((resource.data.get('fulfillmentType', '') == 'DIRECT_SHIP'
             && request.resource.data.get('receivedQty', 0) > resource.data.get('receivedQty', 0))
             ? (admin() || businessDirectDemandReceiptUpdate())
-            : (canReceiveInventory() || businessProcurementDemandOperationalUpdate() || businessReservationDemandUpdate()))
+            : (canReceiveInventory() || businessProcurementDemandOperationalUpdate()))
           || (request.resource.data.get('status', '') == 'CANCELLED' && businessLifecycleDemandCancelUpdate())
           || (resource.data.get('status', '') == 'CANCELLED' && businessLifecycleDemandRestoreUpdate()));
       allow delete: if admin();
