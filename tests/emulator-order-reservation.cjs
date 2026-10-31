@@ -102,3 +102,18 @@ test('production-shaped administrator order with empty sales code atomically res
  const stock=await f.get('inventory/'+f.productKey);assert.equal(stock.reserved,10);
  assert.equal((await f.call()).status,'already-applied');assert.deepEqual(await f.get('inventory/'+f.productKey),stock);
 });
+
+test('code-free administrator demand continues into the existing formal purchasing transaction',async()=>{
+ const f=await seed('admin-purchase');
+ await db.doc('users/'+f.uid).update({role:'admin'});
+ await db.doc('orders/'+f.orderId).update({ownerUid:f.uid,salesCode:''});
+ await f.call();
+ const buyer='buyer-admin-source';await db.doc('users/'+buyer).set({role:'purchaser',active:true});
+ const {commitV2FormalPurchase}=require('../functions/formal-purchase-commit-service');
+ const intent={poNo:'PO-admin-source',poDate:'2026-10-31',orderId:f.orderId,itemId:'I3',qty:1,supplier:'Test supplier',unitCost:1};
+ const result=await commitV2FormalPurchase(db,buyer,intent);
+ assert.equal(result.status,'committed');
+ const order=await f.get('orders/'+f.orderId),demand=await f.get('procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.orderId+':I3'));
+ assert.equal(order.ownerUid,f.uid);assert.equal(order.salesCode,'');assert.equal(order.items[2].supplyOrderedQty,1);
+ assert.equal(demand.ownerUid,f.uid);assert.equal(demand.salesCode,'');assert.equal(demand.orderedQty,1);
+});

@@ -296,3 +296,17 @@ test('missing salesperson code stays rejected for commercial roles, assistants, 
   await assert.rejects(()=>f.run(),error=>error.code==='failed-precondition');assert.equal(f.snapshot(),before);
  }
 });
+
+test('authorized purchasing can reserve an active administrator-owned order without reassigning its blank code',async()=>{
+ const f=fixture(),order=f.docs.get('orders/O');
+ f.put('users/owner-admin',{active:true,role:'admin'});
+ f.put('orders/O',{...order,ownerUid:'owner-admin',salesCode:''});
+ assert.equal((await f.run()).status,'applied');
+ assert.equal(f.docs.get('orders/O').ownerUid,'owner-admin');
+ assert.equal(f.docs.get('orders/O').salesCode,'');
+ for(const profile of [null,{role:'sales',active:true},{role:'admin',active:false},{role:'admin',disabled:true}]){
+  const bad=fixture();bad.put('orders/O',{...bad.docs.get('orders/O'),ownerUid:'owner-admin',salesCode:'',createdByRole:'admin'});
+  if(profile)bad.put('users/owner-admin',profile);
+  const before=bad.snapshot();await assert.rejects(()=>bad.run(),error=>error.code==='failed-precondition');assert.equal(bad.snapshot(),before);
+ }
+});

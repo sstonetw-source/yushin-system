@@ -492,3 +492,21 @@ test('direct shipment document upgrade checks original fulfillment mode before w
  await assert.rejects(commitV2FormalPurchase(y.db,'buyer',two.data),{code:'failed-precondition'});
  assert.equal(y.history.length,0);
 });
+
+test('formal purchasing accepts a live administrator owner with an explicit blank code and preserves other identity restrictions',async()=>{
+ const f=fixture(),demandPath='procurementDemands/'+encodeURIComponent(f.demandId);
+ f.records.set('orders/'+f.input.orderId,{...f.order,ownerUid:'admin',salesCode:''});
+ f.records.set(demandPath,{...f.demand,ownerUid:'admin',salesCode:''});
+ assert.equal((await previewV2FormalPurchase(f.db,'buyer',f.input)).status,'preview-only');
+ assert.equal((await previewV2FormalPurchase(f.db,'admin',f.input)).status,'preview-only');
+ assert.equal(f.writes(),0);
+ for(const profile of [{role:'sales',active:true},{role:'admin',active:false},{role:'admin',disabled:true}]){
+  f.records.set('users/admin',profile);
+  await assert.rejects(()=>previewV2FormalPurchase(f.db,'buyer',f.input),error=>error.code==='failed-precondition');
+ }
+ f.records.set('users/admin',{role:'admin',active:true});
+ f.records.set('orders/'+f.input.orderId,{...f.order,ownerUid:'admin',createdByRole:'admin'});
+ delete f.records.get('orders/'+f.input.orderId).salesCode;
+ await assert.rejects(()=>previewV2FormalPurchase(f.db,'buyer',f.input),error=>error.code==='failed-precondition');
+ assert.equal(f.writes(),0);
+});
