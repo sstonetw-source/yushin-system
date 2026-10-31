@@ -51,11 +51,11 @@ service cloud.firestore {
     }
 
     function canCreateCommercialDoc() {
-      return admin() || commercialDocumentOwner() || businessAssistant();
+      return role() in ['admin','sales','engineer','purchaser'];
     }
 
     function canPurchase() {
-      return admin() || purchaser();
+      return role() in ['admin','purchaser'];
     }
 
     function canReceiveInventory() {
@@ -63,7 +63,7 @@ service cloud.firestore {
     }
 
     function canManageEquipment() {
-      return admin() || engineer();
+      return role() in ['admin','engineer'];
     }
 
     function salesCode() {
@@ -72,11 +72,13 @@ service cloud.firestore {
     }
 
     function owns(data) {
+      let profile = signedIn() ? userDoc().data : {};
+      let code = profile.get('salesCode', profile.get('code', null));
       let ownerUid = data.get('ownerUid', '');
       let ownerSalesCode = data.get('salesCode', '');
-      return active() && (
+      return signedIn() && profileEnabled(profile) && (
         (ownerUid != '' && ownerUid == request.auth.uid) ||
-        (salesCode() != null && ownerSalesCode != '' && ownerSalesCode == salesCode())
+        (code != null && ownerSalesCode != '' && ownerSalesCode == code)
       );
     }
 
@@ -377,25 +379,29 @@ service cloud.firestore {
 
     // Rules cannot iterate lists; keep this bounded to stay below the evaluator limit.
     // Larger operational item changes require an administrator.
+    function operationalChangedFields(before, after) {
+      return after[0].diff(before[0]).affectedKeys()
+        .union(after[1].diff(before[1]).affectedKeys())
+        .union(after[2].diff(before[2]).affectedKeys())
+        .union(after[3].diff(before[3]).affectedKeys())
+        .union(after[4].diff(before[4]).affectedKeys())
+        .union(after[5].diff(before[5]).affectedKeys())
+        .union(after[6].diff(before[6]).affectedKeys())
+        .union(after[7].diff(before[7]).affectedKeys())
+        .union(after[8].diff(before[8]).affectedKeys())
+        .union(after[9].diff(before[9]).affectedKeys())
+        .union(after[10].diff(before[10]).affectedKeys())
+        .union(after[11].diff(before[11]).affectedKeys())
+        .union(after[12].diff(before[12]).affectedKeys())
+        .union(after[13].diff(before[13]).affectedKeys())
+        .union(after[14].diff(before[14]).affectedKeys());
+    }
     function operationalItemsOnly(allowed) {
       let before = resource.data.get('items', []);
       let after = request.resource.data.get('items', []);
+      let padding = [{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}];
       return before == after || (before.size() == after.size() && before.size() <= 15
-        && (before.size() <= 0 || after[0].diff(before[0]).affectedKeys().hasOnly(allowed))
-        && (before.size() <= 1 || after[1].diff(before[1]).affectedKeys().hasOnly(allowed))
-        && (before.size() <= 2 || after[2].diff(before[2]).affectedKeys().hasOnly(allowed))
-        && (before.size() <= 3 || after[3].diff(before[3]).affectedKeys().hasOnly(allowed))
-        && (before.size() <= 4 || after[4].diff(before[4]).affectedKeys().hasOnly(allowed))
-        && (before.size() <= 5 || after[5].diff(before[5]).affectedKeys().hasOnly(allowed))
-        && (before.size() <= 6 || after[6].diff(before[6]).affectedKeys().hasOnly(allowed))
-        && (before.size() <= 7 || after[7].diff(before[7]).affectedKeys().hasOnly(allowed))
-        && (before.size() <= 8 || after[8].diff(before[8]).affectedKeys().hasOnly(allowed))
-        && (before.size() <= 9 || after[9].diff(before[9]).affectedKeys().hasOnly(allowed))
-        && (before.size() <= 10 || after[10].diff(before[10]).affectedKeys().hasOnly(allowed))
-        && (before.size() <= 11 || after[11].diff(before[11]).affectedKeys().hasOnly(allowed))
-        && (before.size() <= 12 || after[12].diff(before[12]).affectedKeys().hasOnly(allowed))
-        && (before.size() <= 13 || after[13].diff(before[13]).affectedKeys().hasOnly(allowed))
-        && (before.size() <= 14 || after[14].diff(before[14]).affectedKeys().hasOnly(allowed)));
+        && operationalChangedFields(before.concat(padding), after.concat(padding)).hasOnly(allowed));
     }
     function purchasingItemFields() {
       return ['orderedQty', 'reservedQty', 'shortageQty', 'dispatchPreparedQty',
@@ -406,7 +412,6 @@ service cloud.firestore {
     }
     function purchaserOrderWorkflowUpdate(id) {
       return purchaser()
-        && operationalItemsOnly(purchasingItemFields())
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'items', 'itemCount', 'orderSchemaVersion',
           'purchaseOrderNo', 'purchaseOrderNos', 'purchaseOrderedQty', 'purchaseStatus',
@@ -422,7 +427,6 @@ service cloud.firestore {
     function warehouseOrderWorkflowUpdate() {
       return warehouse()
         && !(resource.data.get('inventoryReservationStatus', '') in ['pending', 'failed'])
-        && operationalItemsOnly(['orderedQty', 'reservedQty', 'shortageQty', 'receivedQty', 'receiptEvents', 'reservationStatus', 'inventoryProductKey'])
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'items', 'itemCount', 'orderSchemaVersion',
           'inventoryReservedQty', 'inventoryShortageQty',
@@ -430,6 +434,13 @@ service cloud.firestore {
           'workCategories', 'workCategoryUpdatedAt', 'updatedAt'
         ])
         && sameCommercialOwner();
+    }
+
+    // Share the bounded item walk; role-specific document whitelists stay separate.
+    function operationalOrderWorkflowUpdate(id, userRole) {
+      return operationalItemsOnly(userRole == 'purchaser' ? purchasingItemFields()
+          : ['orderedQty', 'reservedQty', 'shortageQty', 'receivedQty', 'receiptEvents', 'reservationStatus', 'inventoryProductKey'])
+        && (userRole == 'purchaser' ? purchaserOrderWorkflowUpdate(id) : warehouseOrderWorkflowUpdate());
     }
 
     function productPath(id) {
@@ -1233,27 +1244,27 @@ service cloud.firestore {
     // Searchable product master. Cost is intentionally stored separately.
     match /products/{id} {
       allow read: if active();
-      allow create: if admin() || purchaser() || businessTemporaryProduct(id, request.resource.data);
-      allow update: if admin() || purchaser();
+      allow create: if canPurchase() || businessTemporaryProduct(id, request.resource.data);
+      allow update: if canPurchase();
       allow delete: if admin();
     }
 
     // 公司標準產品成本只提供採購／管理員；業務自行調貨成本存在自己的訂單交易中。
     match /productCosts/{id} {
-      allow read: if admin() || purchaser();
-      allow create, update: if admin() || purchaser();
+      allow read: if canPurchase();
+      allow create, update: if canPurchase();
       allow delete: if admin();
     }
 
     match /priceHistory/{id} {
-      allow read, create: if admin() || purchaser();
+      allow read, create: if canPurchase();
       allow update, delete: if false;
     }
 
     match /quotes/{id} {
-      allow get: if admin() || purchaser() || (commercialDocumentOwner() && resource == null) || owns(resource.data)
+      allow get: if canPurchase() || (commercialDocumentOwner() && resource == null) || owns(resource.data)
         || engineerAssistedSalesQuote(resource.data);
-      allow list: if admin() || purchaser() || owns(resource.data)
+      allow list: if canPurchase() || owns(resource.data)
         || engineerAssistedSalesQuote(resource.data);
       allow create: if canCreateCommercialDoc() && (
         validOwnedCommercialCreate(request.resource.data)
@@ -1332,17 +1343,15 @@ service cloud.firestore {
     // cost or identity enter the additional Service binding validation.
     function commercialItemIdentityAndCostProtected(before, after, method) {
       let changed = after.diff(before).affectedKeys();
-      return before == after || ((!changed.hasAny(['deliveryPlan']) || before.get('deliveryPlan', {}) == after.get('deliveryPlan', {}))
-        && (!changed.hasAny(['receivedQty']) || before.get('receivedQty', 0) == after.get('receivedQty', 0))
-        && (!changed.hasAny(['receiptEvents']) || before.get('receiptEvents', []) == after.get('receiptEvents', [])) && before.get('procurementType', method) == after.get('procurementType', method)
-        && (!changed.hasAny([
-            'costPrice','costSource','unitCost','cost','itemId','productId','productType','serviceKind'
-          ]) || ((!changed.hasAny(['itemId','productId','productType','serviceKind'])
-              || !isServiceBillingItem(before) && !isServiceBillingItem(after))
-            && (!changed.hasAny(['costPrice','costSource','unitCost','cost'])
-              || (before.get('procurementType', method) == 'SALES_SELF_ORDER'
-                && !changed.hasAny(['unitCost','cost'])
-                && after.get('costPrice', null) is number && after.costPrice >= 0)))));
+      return before == after || (
+        [before.get('deliveryPlan', {}), before.get('receivedQty', 0), before.get('receiptEvents', []), before.get('procurementType', method)]
+          == [after.get('deliveryPlan', {}), after.get('receivedQty', 0), after.get('receiptEvents', []), after.get('procurementType', method)]
+        && (!changed.hasAny(['itemId','productId','productType','serviceKind'])
+          || !isServiceBillingItem(before) && !isServiceBillingItem(after))
+        && (!changed.hasAny(['costPrice','costSource','unitCost','cost'])
+          || before.get('procurementType', method) == 'SALES_SELF_ORDER'
+            && !changed.hasAny(['unitCost','cost'])
+            && after.get('costPrice', null) is number && after.costPrice >= 0));
     }
     function validCommercialOrderCostUpdate() {
       let before = resource.data.get('items', []);
@@ -1350,21 +1359,21 @@ service cloud.firestore {
       return request.resource.data.get('procurementType', 'PURCHASING_PO') == resource.data.get('procurementType', 'PURCHASING_PO')
         && commercialItemIdentityAndCostProtected(resource.data, request.resource.data, 'PURCHASING_PO')
         && (before == after || (before is list && after is list && before.size() == after.size() && before.size() <= 15
-          && (before.size() <= 0 || commercialItemIdentityAndCostProtected(before[0], after[0], resource.data.get('procurementType', 'PURCHASING_PO')))
-          && (before.size() <= 1 || commercialItemIdentityAndCostProtected(before[1], after[1], resource.data.get('procurementType', 'PURCHASING_PO')))
-          && (before.size() <= 2 || commercialItemIdentityAndCostProtected(before[2], after[2], resource.data.get('procurementType', 'PURCHASING_PO')))
-          && (before.size() <= 3 || commercialItemIdentityAndCostProtected(before[3], after[3], resource.data.get('procurementType', 'PURCHASING_PO')))
-          && (before.size() <= 4 || commercialItemIdentityAndCostProtected(before[4], after[4], resource.data.get('procurementType', 'PURCHASING_PO')))
-          && (before.size() <= 5 || commercialItemIdentityAndCostProtected(before[5], after[5], resource.data.get('procurementType', 'PURCHASING_PO')))
-          && (before.size() <= 6 || commercialItemIdentityAndCostProtected(before[6], after[6], resource.data.get('procurementType', 'PURCHASING_PO')))
-          && (before.size() <= 7 || commercialItemIdentityAndCostProtected(before[7], after[7], resource.data.get('procurementType', 'PURCHASING_PO')))
-          && (before.size() <= 8 || commercialItemIdentityAndCostProtected(before[8], after[8], resource.data.get('procurementType', 'PURCHASING_PO')))
-          && (before.size() <= 9 || commercialItemIdentityAndCostProtected(before[9], after[9], resource.data.get('procurementType', 'PURCHASING_PO')))
-          && (before.size() <= 10 || commercialItemIdentityAndCostProtected(before[10], after[10], resource.data.get('procurementType', 'PURCHASING_PO')))
-          && (before.size() <= 11 || commercialItemIdentityAndCostProtected(before[11], after[11], resource.data.get('procurementType', 'PURCHASING_PO')))
-          && (before.size() <= 12 || commercialItemIdentityAndCostProtected(before[12], after[12], resource.data.get('procurementType', 'PURCHASING_PO')))
-          && (before.size() <= 13 || commercialItemIdentityAndCostProtected(before[13], after[13], resource.data.get('procurementType', 'PURCHASING_PO')))
-          && (before.size() <= 14 || commercialItemIdentityAndCostProtected(before[14], after[14], resource.data.get('procurementType', 'PURCHASING_PO')))));
+          && (before.size() <= 0 || before[0] == after[0] || commercialItemIdentityAndCostProtected(before[0], after[0], resource.data.get('procurementType', 'PURCHASING_PO')))
+          && (before.size() <= 1 || before[1] == after[1] || commercialItemIdentityAndCostProtected(before[1], after[1], resource.data.get('procurementType', 'PURCHASING_PO')))
+          && (before.size() <= 2 || before[2] == after[2] || commercialItemIdentityAndCostProtected(before[2], after[2], resource.data.get('procurementType', 'PURCHASING_PO')))
+          && (before.size() <= 3 || before[3] == after[3] || commercialItemIdentityAndCostProtected(before[3], after[3], resource.data.get('procurementType', 'PURCHASING_PO')))
+          && (before.size() <= 4 || before[4] == after[4] || commercialItemIdentityAndCostProtected(before[4], after[4], resource.data.get('procurementType', 'PURCHASING_PO')))
+          && (before.size() <= 5 || before[5] == after[5] || commercialItemIdentityAndCostProtected(before[5], after[5], resource.data.get('procurementType', 'PURCHASING_PO')))
+          && (before.size() <= 6 || before[6] == after[6] || commercialItemIdentityAndCostProtected(before[6], after[6], resource.data.get('procurementType', 'PURCHASING_PO')))
+          && (before.size() <= 7 || before[7] == after[7] || commercialItemIdentityAndCostProtected(before[7], after[7], resource.data.get('procurementType', 'PURCHASING_PO')))
+          && (before.size() <= 8 || before[8] == after[8] || commercialItemIdentityAndCostProtected(before[8], after[8], resource.data.get('procurementType', 'PURCHASING_PO')))
+          && (before.size() <= 9 || before[9] == after[9] || commercialItemIdentityAndCostProtected(before[9], after[9], resource.data.get('procurementType', 'PURCHASING_PO')))
+          && (before.size() <= 10 || before[10] == after[10] || commercialItemIdentityAndCostProtected(before[10], after[10], resource.data.get('procurementType', 'PURCHASING_PO')))
+          && (before.size() <= 11 || before[11] == after[11] || commercialItemIdentityAndCostProtected(before[11], after[11], resource.data.get('procurementType', 'PURCHASING_PO')))
+          && (before.size() <= 12 || before[12] == after[12] || commercialItemIdentityAndCostProtected(before[12], after[12], resource.data.get('procurementType', 'PURCHASING_PO')))
+          && (before.size() <= 13 || before[13] == after[13] || commercialItemIdentityAndCostProtected(before[13], after[13], resource.data.get('procurementType', 'PURCHASING_PO')))
+          && (before.size() <= 14 || before[14] == after[14] || commercialItemIdentityAndCostProtected(before[14], after[14], resource.data.get('procurementType', 'PURCHASING_PO')))));
     }
 
     function supplierCancellationResolution(userRole) {
@@ -1650,12 +1659,11 @@ service cloud.firestore {
             && after.get('logisticsTransfersPending', 0) == before.get('logisticsTransfersPending', 0) - 1));
     }
 
-    function logisticsItemProtected(oldItems, newItems, index) {
-      return index >= oldItems.size() || (index < newItems.size()
-        && newItems[index].get('warehouseId', '') == oldItems[index].get('warehouseId', '')
-        && newItems[index].get('transferPendingId', '') == oldItems[index].get('transferPendingId', '')
-        && newItems[index].get('custodyTransferId', '') == oldItems[index].get('custodyTransferId', '')
-        && (!oldItems[index].get('warehouseId', '').matches('custody-.*') || newItems[index].get('deliveryPlan', {}) == oldItems[index].get('deliveryPlan', {})));
+    // Compare the protected projection once; callers guard each existing line.
+    function logisticsItemProtected(old, next) {
+      return old == next || ([next.get('warehouseId', ''), next.get('transferPendingId', ''), next.get('custodyTransferId', '')]
+          == [old.get('warehouseId', ''), old.get('transferPendingId', ''), old.get('custodyTransferId', '')]
+        && (!old.get('warehouseId', '').matches('custody-.*') || next.get('deliveryPlan', {}) == old.get('deliveryPlan', {})));
     }
     function custodyItemClear(items, index) {
       return index >= items.size() || items[index].get('reservedQty', 0) == 0
@@ -1666,21 +1674,21 @@ service cloud.firestore {
       let after = request.resource.data;
       return before.get('warehouseLogisticsId', '') == '' || before.get('items', []) == after.get('items', []) || (before.items.size() <= 15
         && before.items.size() == after.items.size()
-        && logisticsItemProtected(before.items, after.items, 0)
-        && logisticsItemProtected(before.items, after.items, 1)
-        && logisticsItemProtected(before.items, after.items, 2)
-        && logisticsItemProtected(before.items, after.items, 3)
-        && logisticsItemProtected(before.items, after.items, 4)
-        && logisticsItemProtected(before.items, after.items, 5)
-        && logisticsItemProtected(before.items, after.items, 6)
-        && logisticsItemProtected(before.items, after.items, 7)
-        && logisticsItemProtected(before.items, after.items, 8)
-        && logisticsItemProtected(before.items, after.items, 9)
-        && logisticsItemProtected(before.items, after.items, 10)
-        && logisticsItemProtected(before.items, after.items, 11)
-        && logisticsItemProtected(before.items, after.items, 12)
-        && logisticsItemProtected(before.items, after.items, 13)
-        && logisticsItemProtected(before.items, after.items, 14));
+        && (before.items.size() <= 0 || logisticsItemProtected(before.items[0], after.items[0]))
+        && (before.items.size() <= 1 || logisticsItemProtected(before.items[1], after.items[1]))
+        && (before.items.size() <= 2 || logisticsItemProtected(before.items[2], after.items[2]))
+        && (before.items.size() <= 3 || logisticsItemProtected(before.items[3], after.items[3]))
+        && (before.items.size() <= 4 || logisticsItemProtected(before.items[4], after.items[4]))
+        && (before.items.size() <= 5 || logisticsItemProtected(before.items[5], after.items[5]))
+        && (before.items.size() <= 6 || logisticsItemProtected(before.items[6], after.items[6]))
+        && (before.items.size() <= 7 || logisticsItemProtected(before.items[7], after.items[7]))
+        && (before.items.size() <= 8 || logisticsItemProtected(before.items[8], after.items[8]))
+        && (before.items.size() <= 9 || logisticsItemProtected(before.items[9], after.items[9]))
+        && (before.items.size() <= 10 || logisticsItemProtected(before.items[10], after.items[10]))
+        && (before.items.size() <= 11 || logisticsItemProtected(before.items[11], after.items[11]))
+        && (before.items.size() <= 12 || logisticsItemProtected(before.items[12], after.items[12]))
+        && (before.items.size() <= 13 || logisticsItemProtected(before.items[13], after.items[13]))
+        && (before.items.size() <= 14 || logisticsItemProtected(before.items[14], after.items[14])));
     }
     function noCustodyForCancellation() {
       let before = resource.data;
@@ -1777,12 +1785,15 @@ service cloud.firestore {
         : userRole in ['sales','engineer'] && changed.hasAny(['isBilled','billingDate'])
           && changed.hasOnly(['isBilled','billingDate','statusHistory','updatedAt',
             'status','workCategories','workCategoryUpdatedAt']) ? owns(resource.data)
-        : userRole == 'purchaser' ? (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) && warehouseDeliveryPlanUpdate()) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['warehouseLogisticsId','warehouseLogisticsEventId']) && warehouseLogisticsOrderUpdate(id)) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id)) || purchaserOrderWorkflowUpdate(id) || returnReceiptOrderUpdate(id)
-        : userRole == 'warehouse' ? (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) && warehouseDeliveryPlanUpdate()) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['warehouseLogisticsId','warehouseLogisticsEventId']) && warehouseLogisticsOrderUpdate(id)) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id)) || warehouseOrderWorkflowUpdate() || returnReceiptOrderUpdate(id)
+        // Delivery-plan and warehouse-logistics success paths already returned above.
+        // Their own changed-key whitelists make the duplicate branches unreachable.
+        : userRole in ['purchaser','warehouse'] ? (changed.hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id))
+          || operationalOrderWorkflowUpdate(id, userRole)
+          || returnReceiptOrderUpdate(id)
         : userRole in ['sales', 'engineer'] && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId'])
           && (changed.hasOnly(['returnRequests', 'returnPending', 'returnRequestMutationIndex', 'updatedAt'])
             && (changed.size() == 0 || changed.hasAny(['returnRequests', 'returnPending']))
-            ? commercialReturnRequestOnlyUpdate() : ((request.resource.data.diff(resource.data).affectedKeys().hasAny(['deliveryRecords']) && directShipReceiptOrderUpdate(id)) || (owns(resource.data) && (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) ? warehouseDeliveryPlanUpdate() : (sameCommercialOwner() && preservesCreator()
+            ? commercialReturnRequestOnlyUpdate() : ((request.resource.data.diff(resource.data).affectedKeys().hasAny(['deliveryRecords']) && directShipReceiptOrderUpdate(id)) || (owns(resource.data) && (changed.hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) ? false : (sameCommercialOwner() && preservesCreator()
               // Pure delivery ledger updates cannot change item identity or cost.
               // Keep all delivery, ownership, stock witness and custody proofs below.
               && (deliveryLedgerOnly || validCommercialOrderCostUpdate())
@@ -1989,7 +2000,7 @@ service cloud.firestore {
 
     // Formal supplier PO. Sales/engineer self-order does NOT grant purchase-order privilege.
     match /purchaseOrders/{id} {
-      allow read: if admin() || purchaser();
+      allow read: if canPurchase();
       allow create: if canPurchase();
       // The PO is an immutable document snapshot for warehouse users. Receiving
       // progress belongs to supplyOrders and receipts, never back on the PO.
@@ -2000,7 +2011,7 @@ service cloud.firestore {
     // ERP-style communication timeline. Browser share/mailto can prove only that
     // the handoff was prepared, not that an email was actually delivered.
     match /purchaseOrderCommunications/{id} {
-      allow read: if admin() || purchaser();
+      allow read: if canPurchase();
       allow write: if false;
     }
 
@@ -2077,11 +2088,11 @@ service cloud.firestore {
 
     // Unified source/order evidence: PURCHASING_PO, PURCHASING_MANUAL, SALES_SELF_ORDER, STOCK_REPLENISHMENT.
     match /supplyOrders/{id} {
-      allow read: if admin() || purchaser()
+      allow read: if canPurchase()
         || (businessOwner()
           && resource.data.type == 'SALES_SELF_ORDER'
           && resource.data.ownerUid == request.auth.uid);
-      allow create: if purchaserSupplySourceReady() && (((admin() || purchaser()) && validQuickPurchaseCost())
+      allow create: if purchaserSupplySourceReady() && (((canPurchase()) && validQuickPurchaseCost())
         && validSelfOrderSupplyCreate()
         || (businessOwner()
           && request.resource.data.type == 'SALES_SELF_ORDER'
@@ -2109,9 +2120,9 @@ service cloud.firestore {
           && (data.get('fulfillmentType', '') == 'DIRECT_SHIP' || data.get('type', '') == 'SALES_SELF_ORDER'));
     }
     match /receivingSupplyOrders/{id} {
-      allow get: if admin() || purchaser() || warehouse()
+      allow get: if canReceiveInventory()
         || (businessOwner() && (resource == null || businessReceivingView(resource.data)));
-      allow list: if admin() || purchaser() || warehouse() || businessReceivingView(resource.data);
+      allow list: if canReceiveInventory() || businessReceivingView(resource.data);
       allow create, update: if receivingViewWriter(request.resource.data)
         && !request.resource.data.keys().hasAny(['unitCost', 'cost', 'costPrice'])
         && request.resource.data.diff(getAfter(/databases/$(database)/documents/supplyOrders/$(id)).data)
@@ -2173,7 +2184,7 @@ service cloud.firestore {
     }
     match /stockTransferRequests/{id} {
       allow read: if canReceiveInventory();
-      allow create: if (admin() || purchaser()) && validMainTransferRequest(request.resource.data)
+      allow create: if (canPurchase()) && validMainTransferRequest(request.resource.data)
         && request.resource.data.id == id && request.resource.data.status == 'PENDING'
         && request.resource.data.createdByUid == request.auth.uid
         && !request.resource.data.keys().hasAny(['transferId','shippedAt','shippedByUid','cancelledAt','cancelledByUid'])
@@ -2190,7 +2201,7 @@ service cloud.firestore {
           && request.resource.data.transferId is string && request.resource.data.transferId.size() <= 128
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','transferId','shippedAt','shippedByUid'])
           && mainTransferDispatch(request.resource.data))
-        || ((admin() || purchaser()) && request.resource.data.status == 'CANCELLED'
+        || ((canPurchase()) && request.resource.data.status == 'CANCELLED'
           && request.resource.data.cancelledByUid == request.auth.uid
           && request.resource.data.cancelledAt is string && request.resource.data.cancelledAt.size() <= 40
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','cancelledAt','cancelledByUid'])
@@ -2290,7 +2301,7 @@ service cloud.firestore {
       allow get: if safeStockReader(resource == null ? {} : resource.data);
       allow list: if active() && !('unitCost' in resource.data) && !('cost' in resource.data);
       allow create: if (
-          ((admin() || purchaser()) && validInventoryStockPolicy(request.resource.data))
+          ((canPurchase()) && validInventoryStockPolicy(request.resource.data))
           || (warehouse() && warehouseInventoryPlanningDefaults(request.resource.data))
         )
         && nonNegativeInventory(request.resource.data)
@@ -2331,7 +2342,7 @@ service cloud.firestore {
 
     match /inventoryLots/{id} {
       // Operational lot data is readable for fulfillment, but cost must never live here.
-      allow read: if admin() || purchaser() || warehouse() || (businessOwner() && !('unitCost' in resource.data));
+      allow read: if canReceiveInventory() || (businessOwner() && !('unitCost' in resource.data));
       allow create: if canReceiveInventory() && validInventoryLot(request.resource.data);
       allow update: if (canReceiveInventory() || businessInventoryLotOperationalUpdate(id))
         && validInventoryLot(request.resource.data) && inventoryLotIdentityUnchanged();
@@ -2341,8 +2352,8 @@ service cloud.firestore {
     // Actual receipt/lot cost is physically separated from operational lot data.
     // Client-side fulfillment never requires this collection.
     match /inventoryLotCosts/{id} {
-      allow read: if admin() || purchaser();
-      allow create: if admin() || purchaser() || (warehouse() && (
+      allow read: if canPurchase();
+      allow create: if canPurchase() || (warehouse() && (
         (request.resource.data.get('sourceType', '') == 'SUPPLY_ORDER'
           && !request.resource.data.keys().hasAny(['unitCost', 'cost', 'costPrice'])
           && request.resource.data.get('costSourceSupplyId', '') == request.resource.data.get('sourceId', '')
@@ -2358,7 +2369,7 @@ service cloud.firestore {
           && request.resource.data.lotId == id
           && getAfter(/databases/$(database)/documents/inventoryLots/$(id)).data.get('sourceType', '') == 'INITIAL_STOCK')
       ));
-      allow update: if admin() || purchaser();
+      allow update: if canPurchase();
       allow delete: if admin();
     }
 
@@ -2397,9 +2408,9 @@ service cloud.firestore {
     }
 
     match /receipts/{id} {
-      allow get: if admin() || purchaser() || warehouse()
+      allow get: if canReceiveInventory()
         || (businessOwner() && (resource == null || owns(resource.data)));
-      allow list: if admin() || purchaser() || warehouse()
+      allow list: if canReceiveInventory()
         || (businessOwner() && owns(resource.data));
       allow create: if (request.resource.data.get('fulfillmentType', '') == 'DIRECT_SHIP'
         ? validDirectShipReceipt(id, request.resource.data) : canReceiveInventory())
@@ -2419,28 +2430,20 @@ service cloud.firestore {
 
     // 外倉出貨通知：資料與訂單分離；下載 PDF 不寫入狀態。
     // 只有實際確認通知時建立 NOTIFIED；SHIPPED 需與訂單/庫存交易同時提交。
-    match /externalDispatchNotices/{id} {
-      allow get: if admin() || purchaser() || warehouse()
-        || (businessOwner() && (resource == null || owns(resource.data)));
-      allow list: if admin() || purchaser() || warehouse()
-        || (businessOwner() && owns(resource.data));
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
-    }
+
 
     // Purchaser records completion of the company's existing shipping paperwork.
     match /dispatchRecords/{id} {
-      allow read: if admin() || purchaser() || warehouse()
+      allow read: if canReceiveInventory()
         || (businessOwner() && owns(resource.data));
-      allow create: if admin() || purchaser();
+      allow create: if canPurchase();
       allow update: if false;
       allow delete: if admin();
     }
 
     // Physical delivery is recorded by the responsible business owner.
     match /deliveries/{id} {
-      allow read: if admin() || purchaser() || warehouse()
+      allow read: if canReceiveInventory()
         || (businessOwner() && owns(resource.data));
       allow create: if admin()
         || (businessOwner() && owns(request.resource.data));
@@ -2448,15 +2451,11 @@ service cloud.firestore {
       allow delete: if admin();
     }
 
-    match /pendingInventoryItems/{id} {
-      allow read: if admin() || purchaser() || warehouse();
-      allow create, update: if admin() || purchaser() || warehouse();
-      allow delete: if admin();
-    }
+
 
     // Immutable stock ledger.
     match /inventoryMovements/{id} {
-      allow read: if admin() || purchaser() || warehouse()
+      allow read: if canReceiveInventory()
         || (businessOwner() && owns(resource.data));
       allow create: if inventoryMovementWriter(id)
         && !('unitCost' in request.resource.data)
@@ -2468,8 +2467,8 @@ service cloud.firestore {
 
     // Immutable operational audit trail.
     match /stockOperations/{id} {
-      allow get: if active() && (resource == null || admin() || purchaser() || warehouse() || resource.data.actorUid == request.auth.uid);
-      allow list: if admin() || purchaser() || warehouse() || (active() && resource.data.actorUid == request.auth.uid);
+      allow get: if active() && (resource == null || canReceiveInventory() || resource.data.actorUid == request.auth.uid);
+      allow list: if canReceiveInventory() || (active() && resource.data.actorUid == request.auth.uid);
       allow create: if admin() || validStockOperation(request.resource.data);
       allow update, delete: if false;
     }

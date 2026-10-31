@@ -1514,11 +1514,11 @@ test('phase 18 statistics avoid all-history downloads and important writes stamp
 
 test('phase 19 Firestore rules enforce role boundaries for PO inventory reservations and equipment', () => {
     assert.match(rulesSource, /match \/purchaseOrders\/\{id\}/);
-    assert.match(rulesSource, /allow read: if admin\(\) \|\| purchaser\(\) \|\| warehouse\(\)/);
+    assert.match(rulesSource, /allow read: if canReceiveInventory\(\)/);
     assert.match(rulesSource, /match \/inventoryReservations\/\{id\}/);
     assert.match(rulesSource, /businessReservationOperationalUpdate\(\)/);
     assert.match(rulesSource, /match \/equipment\/\{id\}/);
-    assert.match(rulesSource, /function canManageEquipment\(\)[\s\S]*?return admin\(\) \|\| engineer\(\)/);
+    assert.match(rulesSource, /function canManageEquipment\(\)[\s\S]*?return role\(\) in \['admin','engineer'\]/);
     assert.match(rulesSource, /allow read: if canManageEquipment\(\) \|\| \(businessOwner\(\) && owns\(resource\.data\)\)/);
     assert.match(rulesSource, /allow read, write: if false/);
 });
@@ -1773,8 +1773,8 @@ test('sales self-order uses manual transaction cost independent of brand agency 
 });
 
 test('Firestore rules keep Product Master standard costs purchaser/admin only', () => {
-    assert.match(rulesSource, /match \/productCosts\/\{id\}[\s\S]*?allow read: if admin\(\) \|\| purchaser\(\)/);
-    assert.match(rulesSource, /allow create, update: if admin\(\) \|\| purchaser\(\)/);
+    assert.match(rulesSource, /match \/productCosts\/\{id\}[\s\S]*?allow read: if canPurchase\(\)/);
+    assert.match(rulesSource, /allow create, update: if canPurchase\(\)/);
     assert.match(rulesSource, /match \/productLines\/\{id\}/);
     assert.doesNotMatch(rulesSource, /visibleNonAuthorizedCost|ownTemporaryNonAuthorizedCost/);
     assert.doesNotMatch(rulesSource, /assignedProductLine|productLineIds/);
@@ -3815,7 +3815,7 @@ test('self-order capability is aligned between frontend and Firestore rules', ()
     const ruleStart=rulesSource.indexOf('match /supplyOrders/{id}');
     const ruleEnd=rulesSource.indexOf('\n    match /inventory/{id}',ruleStart);
     const ruleSource=rulesSource.slice(ruleStart,ruleEnd);
-    assert.match(ruleSource,/allow create: if purchaserSupplySourceReady\(\) && \(\(\(admin\(\) \|\| purchaser\(\)\) && validQuickPurchaseCost\(\)\)[\s\S]*?businessOwner\(\)[\s\S]*?SALES_SELF_ORDER/);
+    assert.match(ruleSource,/allow create: if purchaserSupplySourceReady\(\) && \(\(\(canPurchase\(\)\) && validQuickPurchaseCost\(\)\)[\s\S]*?businessOwner\(\)[\s\S]*?SALES_SELF_ORDER/);
     assert.match(ruleSource,/request\.resource\.data\.ownerUid == request\.auth\.uid/);
     assert.match(ruleSource,/request\.resource\.data\.salesCode == salesCode\(\)/);
     assert.doesNotMatch(ruleSource,/allow create: if admin\(\) \|\| purchaser\(\)[\s\S]*?\|\| \(sales\(\)/);
@@ -3897,7 +3897,7 @@ test('warehouse receiving capability is separate from purchase editing', () => {
 });
 
 test('warehouse receiving UI matches Firestore receive capability', () => {
-    assert.match(rulesSource,/function canReceiveInventory\(\) \{[\s\S]*?admin\(\) \|\| purchaser\(\) \|\| warehouse\(\)/);
+    assert.match(rulesSource,/function canReceiveInventory\(\) \{[\s\S]*?role\(\) in \['admin', 'purchaser', 'warehouse'\]/);
     assert.match(appSource,/倉管模式：可收貨、出貨、調撥點收及盤點/);
     assert.match(appSource,/window\.receiveSupplyOrder = function\(supplyId\) \{[\s\S]*?canReceiveInventoryCapability\(\)/);
 });
@@ -4154,9 +4154,9 @@ test('critical role matrix stays aligned between UI capabilities and Firestore r
     const ruleHelperEnd=rulesSource.indexOf('\n\n    function salesCode()',ruleHelperStart);
     const helperSource=rulesSource.slice(ruleHelperStart,ruleHelperEnd);
     assert.match(helperSource,/return role\(\) in \['sales', 'engineer'\]/);
-    assert.match(helperSource,/function canPurchase\(\)[\s\S]*?admin\(\) \|\| purchaser\(\)/);
+    assert.match(helperSource,/function canPurchase\(\)[\s\S]*?role\(\) in \['admin','purchaser'\]/);
     assert.match(helperSource,/function canReceiveInventory\(\)[\s\S]*?role\(\) in \['admin', 'purchaser', 'warehouse'\]/);
-    assert.match(helperSource,/function canManageEquipment\(\)[\s\S]*?admin\(\) \|\| engineer\(\)/);
+    assert.match(helperSource,/function canManageEquipment\(\)[\s\S]*?role\(\) in \['admin','engineer'\]/);
 
     const purchaseRuleStart=rulesSource.indexOf('match /purchaseOrders/{id}');
     const purchaseRuleEnd=rulesSource.indexOf('\n\n    // Unified source/order evidence',purchaseRuleStart);
