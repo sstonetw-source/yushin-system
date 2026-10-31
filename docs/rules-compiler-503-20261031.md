@@ -18,6 +18,8 @@
 
 沒有減少品項上限、開放舊 SDK 初始化、變更角色或資料；沒有修改 quotes、產品、價格、Index、Cloud Functions、網站開關。
 
-最新版已兩次通過正式 test API，並以 Firebase CLI `deploy --only firestore:rules --project yu-shing-company --dry-run` 成功編譯。這是對實際失敗路徑的修復證據，並非對 Google 內部 503 機制的斷言。
+首版曾兩次通過正式 test API，但重試仍出現 503，因此未合併或發布。後續刪除無現行呼叫的 externalDispatchNotices、pendingInventoryItems 專屬 match（保留資料並由預設 deny 接手），共用固定角色判斷，並以集合 union 合併 15 筆操作欄位白名單，降低重複展開。最新刪減版本以 Firebase CLI `deploy --only firestore:rules --project yu-shing-company --dry-run` 成功編譯。這是對實際失敗路徑的修復證據，並非對 Google 內部 503 機制的斷言。
 
-新增 15 筆首／中／末物流欄位、保管運送指示與跨業務竄改的 Emulator 回歸。完整 CI 必須通過才可合併及發布正式規則；正式回讀及交易驗收另記於 Issue #311。
+新增 15 筆首／中／末物流欄位、保管運送指示與跨業務竄改的 Emulator 回歸；正向使用現行 UI 的 scoped 收件人變更事件，而非 UI 不會送出的品項 notes 任意更新。首輪 CI 新增的任意 notes 更新曾觸發 1000 expressions，未以該測試宣稱支援此非現行操作。兩個退役集合另驗證五角色讀寫均拒絕。這兩組針對性 Emulator 已通過。完整 CI 必須通過才可合併及發布正式規則；正式回讀及交易驗收另記於 Issue #311。
+
+正式 API 仍觀察到間歇 503，不能宣稱 Google 內部根因已確定；發布必須由正常 CLI 完整編譯成功，不跳過驗證或直接切換到診斷版本。
