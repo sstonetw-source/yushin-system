@@ -4,6 +4,8 @@
 // Unlike the former browser per-item transactions, every stock, reservation,
 // purchase-demand and order-item projection commits together or not at all.
 const demandCore=require('./shared/procurement-demand-core.js');
+const fulfillmentCore=require('./shared/fulfillment-core.js');
+const workflowCore=require('./shared/workflow-core.js');
 
 function fault(code,message){const error=new Error(message);error.code=code;throw error;}
 function ident(value,label,max=160){
@@ -38,6 +40,30 @@ function productKeyOf(item,productId){
   if(item.inventoryProductKey&&item.inventoryProductKey!==key)
     fault('failed-precondition','來源品項產品識別與主檔／貨號不一致');
   return key;
+}
+
+function initialOrderWorkIndex(order,items,now){
+  // Reuse the same item/dispatch core as the order screen. The status change
+  // must not strand a newly reserved line outside its work queue.
+  const hasService=items.some(item=>String(item.productType||'').toUpperCase()==='SERVICE');
+  if(hasService&&Array.isArray(order.workCategories)
+    &&(order.workCategoryUpdatedAt||order.workCategories.some(c=>c==='billing'||c==='complete')))
+    return {};
+  const categories=[...new Set(items.flatMap((source,index)=>{
+    const item=fulfillmentCore.normalizeItem(source,index);
+    const dispatch=fulfillmentCore.dispatchState(item);
+    const category=workflowCore.itemWorkCategory({lifecycleStatus:'normal',
+      returnedQty:dispatch.returned,effectiveDeliveredQty:dispatch.delivered,
+      orderedQty:item.orderedQty,deliveredQty:dispatch.grossDelivered,
+      isBilled:!!order.isBilled,fulfillmentType:item.fulfillmentType||order.fulfillmentType||'WAREHOUSE',
+      productType:item.productType||order.productType||'',reservedQty:item.reservedQty,
+      shortageQty:item.shortageQty,supplyOrderedQty:item.supplyOrderedQty,receivedQty:item.receivedQty});
+    const warehouse=(item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'
+      &&String(item.productType||'').toUpperCase()!=='SERVICE';
+    return warehouse&&['ordering','arrival','delivery'].includes(category)&&dispatch.pending>0
+      ? [category,'dispatch'] : [category];
+  }))];
+  return {workCategories:categories.length?categories:['ordering'],workCategoryUpdatedAt:now};
 }
 
 async function commitOrderReservation(db,uid,data){
@@ -223,7 +249,11 @@ async function commitOrderReservation(db,uid,data){
       else if(write.type==='update')tx.update(write.ref,write.data);
       else tx.create(write.ref,write.data);
     }
-    tx.update(orderRef,{items:nextItems,itemCount:nextItems.length,updatedAt:now});
+    // The receipt, stock, demand and source completion are one authoritative
+    // result. A lost response must never leave a committed ledger marked pending.
+    tx.update(orderRef,{items:nextItems,itemCount:nextItems.length,
+      inventoryReservationStatus:'completed',inventoryReservationError:'',
+      inventoryReservationUpdatedAt:now,...initialOrderWorkIndex(order,nextItems,now),updatedAt:now});
     tx.create(receiptRef,{action:'order_initial_reservation',orderId,syncAttemptId,
       actorUid:uid,actorRole:role,reservedQty,shortageQty,createdAt:now,status:'applied'});
     return {status:'applied',receiptId:receiptRef.id,reservedQty,shortageQty};

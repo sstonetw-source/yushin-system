@@ -50,7 +50,12 @@ test('one backend transaction reserves all warehouse items and reconciles all su
  assert.equal(response.status,'applied');assert.equal(response.reservedQty,6);assert.equal(response.shortageQty,3);
  const order=f.docs.get('orders/O');
  assert.deepEqual(order.items.map(x=>[x.reservedQty,x.shortageQty]),[[3,0],[1,2],[2,1],[0,0]]);
- assert.equal(order.inventoryReservationStatus,'pending');
+ assert.equal(order.inventoryReservationStatus,'completed');
+ assert.equal(order.inventoryReservationError,'');
+ assert.equal(order.inventoryReservationUpdatedAt!==undefined,true);
+ assert.ok(order.workCategories.includes('ordering'));
+ assert.ok(order.workCategories.includes('dispatch'));
+ assert.equal(typeof order.workCategoryUpdatedAt,'string');
  assert.equal(f.docs.get('inventory/P').reserved,4);
  assert.equal(f.docs.get('warehouseStocks/A__P').reserved,4);
  assert.equal(f.docs.get('inventory/Q').reserved,2);
@@ -154,6 +159,17 @@ test('single-item and mixed service/direct-ship orders have correct projections'
  const single=fixture(),original=single.docs.get('orders/O');
  single.put('orders/O',{...original,items:[original.items[0]]});
  assert.equal((await single.run()).reservedQty,3);
+});
+test('initial reservation never overwrites an existing authoritative Service work queue',async()=>{
+ const f=fixture(),order=f.docs.get('orders/O');
+ f.put('products/S',{productId:'S',productType:'SERVICE',active:true});
+ f.put('orders/O',{...order,items:[{itemId:'S',productId:'S',productType:'SERVICE',qty:1}],
+  workCategories:['billing'],workCategoryUpdatedAt:'2026-10-30T00:00:00.000Z'});
+ await f.run();
+ const saved=f.docs.get('orders/O');
+ assert.equal(saved.inventoryReservationStatus,'completed');
+ assert.deepEqual(saved.workCategories,['billing']);
+ assert.equal(saved.workCategoryUpdatedAt,'2026-10-30T00:00:00.000Z');
 });
 test('new order backend is independently disabled by default, in production and without dual emulator',()=>{
  for(const env of [
