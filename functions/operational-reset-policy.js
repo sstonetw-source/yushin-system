@@ -5,7 +5,7 @@ const DELETE_COLLECTIONS = Object.freeze([
   'orders', 'purchaseOrders', 'procurementDemands', 'supplyOrders',
   'inventoryReservations', 'inventoryLots', 'inventoryLotCosts',
   'receipts', 'customerReturnReceipts', 'dispatchRecords', 'deliveries',
-  'inventoryMovements', 'receivingSupplyOrders', 'forecasts', 'quotes',
+  'inventoryMovements', 'receivingSupplyOrders', 'forecasts',
   'stockTransfers', 'stockTransferRequests', 'stockOperations',
   'reservationOperationReceipts', 'purchaseOrderCommunications',
   'externalDispatchNotices', 'serviceCases', 'pendingInventoryItems',
@@ -14,7 +14,7 @@ const DELETE_COLLECTIONS = Object.freeze([
 
 const PRESERVE_COLLECTIONS = Object.freeze([
   'brandSupplierMappings', 'brands', 'customers', 'equipment',
-  'priceHistory', 'productCosts', 'products', 'productLines',
+  'priceHistory', 'productCosts', 'products', 'productLines', 'quotes',
   'salesCodes', 'settings', 'suppliers', 'users', 'warehouses'
 ]);
 
