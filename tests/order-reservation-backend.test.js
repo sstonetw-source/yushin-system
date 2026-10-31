@@ -274,3 +274,25 @@ test('new order backend is independently disabled by default, in production and 
  assert.equal(allowOrderReservationBackend({ENABLE_ORDER_RESERVATION_BACKEND:'true',GCLOUD_PROJECT:'demo-yushin',
   FUNCTIONS_EMULATOR:'true',FIRESTORE_EMULATOR_HOST:'localhost:8080',FIREBASE_AUTH_EMULATOR_HOST:'localhost:9099'}),true);
 });
+
+test('authenticated admin reserves their own explicitly code-free order without changing ownership',async()=>{
+ const f=fixture(),order=f.docs.get('orders/O');
+ f.put('users/actor',{active:true,role:'admin'});
+ f.put('orders/O',{...order,ownerUid:'actor',salesCode:'',createdByRole:'admin',createdByUid:'actor'});
+ const result=await f.run();assert.equal(result.status,'applied');
+ const saved=f.docs.get('orders/O');assert.equal(saved.ownerUid,'actor');assert.equal(saved.salesCode,'');
+ assert.equal(saved.inventoryReservationStatus,'completed');assert.equal(f.docs.get('inventory/P').reserved,4);
+ const demand=f.docs.get('procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I2'));
+ assert.equal(demand.ownerUid,'actor');assert.equal(demand.salesCode,'');
+ const before=f.snapshot();assert.equal((await f.run()).status,'already-applied');assert.equal(f.snapshot(),before);
+});
+
+test('missing salesperson code stays rejected for commercial roles, assistants, foreign owners and forged admin metadata',async()=>{
+ for(const [role,owner,code] of [['sales','actor',''],['engineer','actor',''],['purchaser','actor',''],['warehouse','actor',''],['admin','sales1',''],['admin','actor',undefined]]){
+  const f=fixture(),order=f.docs.get('orders/O');f.put('users/actor',{active:true,role});
+  const next={...order,ownerUid:owner,createdByRole:'admin',createdByUid:'actor'};
+  if(code===undefined)delete next.salesCode;else next.salesCode=code;
+  f.put('orders/O',next);const before=f.snapshot();
+  await assert.rejects(()=>f.run(),error=>error.code==='failed-precondition');assert.equal(f.snapshot(),before);
+ }
+});

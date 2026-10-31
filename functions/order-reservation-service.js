@@ -90,7 +90,11 @@ async function commitOrderReservation(db,uid,data){
     const orderRef=ref('orders',orderId),orderSnap=await tx.get(orderRef);
     if(!orderSnap.exists)fault('not-found','來源訂單不存在');
     const order=orderSnap.data();
-    if(!order.ownerUid||!order.salesCode||!Array.isArray(order.items)
+    // Production administrators may own orders without a salesperson code.
+    // Authenticate the exception from the trusted profile and exact owner UID;
+    // never infer it from order.createdByRole or relax another owner's identity.
+    const adminOwnedWithoutSalesCode=role==='admin'&&order.ownerUid===uid&&order.salesCode==='';
+    if(!order.ownerUid||(!order.salesCode&&!adminOwnedWithoutSalesCode)||!Array.isArray(order.items)
       ||order.items.length<1||order.items.length>50)
       fault('failed-precondition','訂單所有權、業務代碼或品項資料不完整');
     if(['cancelled','canceled','void','voided','deleted','completed','closed','已取消','作廢','已完成','結案']

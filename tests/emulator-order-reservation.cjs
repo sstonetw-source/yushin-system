@@ -88,3 +88,17 @@ test('changed checkpoint and supplier commitments reject all writes',async()=>{
  assert.equal((await f.get('inventory/'+f.productKey)).reserved,0);
  assert.equal((await db.doc('reservationOperationReceipts/order-sync-'+f.orderId+'__'+f.intent.syncAttemptId).get()).exists,false);
 });
+
+test('production-shaped administrator order with empty sales code atomically reserves and replays once',async()=>{
+ const f=await seed('admin-no-code');
+ await db.doc('users/'+f.uid).update({role:'admin'});
+ await db.doc('orders/'+f.orderId).update({ownerUid:f.uid,salesCode:'',createdByRole:'admin',createdByUid:f.uid});
+ const result=await f.call();assert.equal(result.status,'applied');
+ const order=await f.get('orders/'+f.orderId);assert.equal(order.inventoryReservationStatus,'completed');
+ assert.equal(order.ownerUid,f.uid);assert.equal(order.salesCode,'');
+ assert.deepEqual(order.items.map(x=>[x.reservedQty,x.shortageQty]),[[3,0],[1,0],[6,2]]);
+ const demand=await f.get('procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.orderId+':I3'));
+ assert.equal(demand.ownerUid,f.uid);assert.equal(demand.salesCode,'');
+ const stock=await f.get('inventory/'+f.productKey);assert.equal(stock.reserved,10);
+ assert.equal((await f.call()).status,'already-applied');assert.deepEqual(await f.get('inventory/'+f.productKey),stock);
+});
