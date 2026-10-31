@@ -548,3 +548,16 @@ test('actual lifecycle leaves stock, reservation, demand and order untouched on 
   assert.deepEqual([...f.docs],before);assert.equal(f.writes.length,0);
  }
 });
+
+test('legacy lifecycle refuses multi-location or mixed ledgers before any stock or demand writes',async()=>{
+ for(const nextStatus of ['normal','cancelled'])for(const marker of [
+  {locationSchemaVersion:2,locations:[{warehouseId:'A',reservedQty:3}]},
+  {locationSchemaVersion:3,locations:[]},{locations:[]},{allocations:[]},{warehouseAllocations:[]}
+ ]){
+  const f=fixture({held:3,status:nextStatus==='normal'?'cancelled':'active'});
+  Object.assign(f.docs.get('inventoryReservations/O__I'),marker);
+  const before=structuredClone([...f.docs]);
+  await assert.rejects(f.run(nextStatus),/尚未啟用的位置資料/);
+  assert.deepEqual([...f.docs],before);assert.equal(f.writes.length,0);
+ }
+});
