@@ -1077,17 +1077,12 @@ test('phase 5 inventory uses on-hand reserved available incoming and transaction
 });
 
 test('phase 5 order creation reserves only available stock and records shortage', () => {
-    const start=appSource.indexOf('async function reserveSingleOrderItem');
-    const end=appSource.indexOf('async function reserveInventoryForNewOrder',start);
-    const s=appSource.slice(start,end);
-    assert.match(s,/globalThis\.YushinReservation\?\.planReservation/);
-    assert.match(s,/globalThis\.YushinReservation\.planReservation/);
-    assert.match(s,/plan\.additionalReserveQty/);
-    assert.match(s,/plan\.releaseQty/);
-    assert.match(s,/oldProductKey/);
-    assert.match(s,/oldWarehouseId/);
-    assert.doesNotMatch(s,/const preservedQty=/);
-    assert.doesNotMatch(s,/const additionalReservable=/);
+    const backend=fs.readFileSync('functions/order-reservation-service.js','utf8');
+    assert.match(backend,/selectSingleWarehouse/);
+    assert.match(backend,/reserve=Math\.min\(orderedQty,aggregate\.available,location\.available\)/);
+    assert.match(backend,/shortage=orderedQty-reserve/);
+    assert.match(backend,/inventoryReservationStatus:'completed'/);
+    assert.doesNotMatch(appSource,/async function reserveSingleOrderItem/);
     assert.match(appSource,/await synchronizeOrderInventory\(docRef\.id, data, savingUid\)/);
 });
 
@@ -1391,15 +1386,11 @@ test('inventory reservation is traceable to occupying orders without order-level
 });
 
 test('unknown order items do not create inventory before purchase receipt', () => {
-    const start = appSource.indexOf('async function reserveSingleOrderItem');
-    const end = appSource.indexOf('async function reserveInventoryForNewOrder', start);
-    const s = appSource.slice(start, end);
-    const missingProductReturn=s.indexOf('if(!productKey){publish');
-    const stockRead=s.indexOf('const aggregateSnap=');
-    assert.ok(missingProductReturn>=0 && stockRead>missingProductReturn);
-    assert.match(s.slice(missingProductReturn,stockRead), /reservationError:'missing_product_master'/);
-    assert.match(s,/globalThis\.YushinReservation\.planReservation/);
-    assert.doesNotMatch(s, /tx\.set\(warehouseRef[\s\S]*?onHand/);
+    const backend=fs.readFileSync('functions/order-reservation-service.js','utf8');
+    assert.match(backend,/else if\(!service&&!direct\)\{[\s\S]*?shortage=orderedQty/);
+    assert.match(backend,/next\.reservationError='missing_product_master'/);
+    assert.doesNotMatch(backend,/tx\.set\(warehouseRef[\s\S]*?onHand/);
+    assert.doesNotMatch(appSource,/reserveSingleOrderItem/);
 });
 
 test('period semantics are shared across Quote Order and PO while Forecast uses status/history search', () => {
@@ -1833,13 +1824,11 @@ test('direct-ship purchase analysis counts only received supply quantity', () =>
 });
 
 test('Phase 2-6 direct ship bypasses inventory reservation, incoming and receiving', () => {
-    const reserveStart = appSource.indexOf('async function reserveSingleOrderItem');
-    const reserveEnd = appSource.indexOf('async function reserveInventoryForNewOrder', reserveStart);
-    const reserve = appSource.slice(reserveStart, reserveEnd);
-    assert.match(reserve, /fulfillmentType\|\|'WAREHOUSE'\)===\'DIRECT_SHIP\'/);
-    assert.match(reserve, /reservedQty\s*:\s*0/);
-    assert.doesNotMatch(reserve, /inventoryReservedQty\s*:\s*0/);
-    assert.match(reserve, /warehouseId\s*:\s*''/);
+    const backend=fs.readFileSync('functions/order-reservation-service.js','utf8');
+    assert.match(backend,/direct=fulfillmentType==='DIRECT_SHIP'/);
+    assert.match(backend,/if\(service\|\|direct\)next\.reservationStatus='not_required'/);
+    assert.match(backend,/inventoryProductKey:service\|\|direct\?'':productKey/);
+    assert.doesNotMatch(backend,/inventoryReservedQty\s*:\s*0/);
 
     const incomingStart = appSource.indexOf('async function registerPurchaseIncoming');
     const incomingEnd = appSource.indexOf('window.receivePurchaseOrder', incomingStart);
@@ -5189,11 +5178,9 @@ test('rules allow business stock reads when inventory documents do not exist', (
 });
 
 test('new order inventory reservation writes explicit ownership metadata', () => {
-    const start = appSource.indexOf('async function reserveSingleOrderItem');
-    const end = appSource.indexOf('function orderReservationSummary', start);
-    const source = appSource.slice(start, end);
-    assert.match(source, /ownerUid:order\.ownerUid\|\|currentUser\?\.uid\|\|''/);
-    assert.match(source, /salesCode:order\.salesCode\|\|salesCodeForName\(order\.salesName\)\|\|''/);
+    const backend=fs.readFileSync('functions/order-reservation-service.js','utf8');
+    assert.match(backend,/ownerUid:order\.ownerUid,salesCode:order\.salesCode/);
+    assert.match(backend,/actorUid:uid,actorRole:role/);
 });
 
 
