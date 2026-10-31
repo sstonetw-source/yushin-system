@@ -10567,6 +10567,10 @@ function orderReservationBackendPreviewEnabled() {
 
 function orderReservationBackendEnabled() {
     return orderReservationBackendPreviewEnabled()
+        || (APP_ENVIRONMENT === 'emulator'
+            && globalThis.YUSHIN_ORDER_RESERVATION_EMULATOR === true
+            && typeof firebase !== 'undefined'
+            && firebase.app().options?.projectId === 'demo-yushin')
         || (APP_ENVIRONMENT === 'production'
             && globalThis.YUSHIN_PRODUCTION_ORDER_RESERVATION_BACKEND === true
             && globalThis.YUSHIN_PRODUCTION_ORDER_RESERVATION_LEGACY_BLOCKED === true
