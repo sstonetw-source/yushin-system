@@ -5,8 +5,8 @@
 ## 範圍
 
 - 正式專案 `yu-shing-company`，Firestore `(default)`，Standard，`nam5`。Preview `preview-20135` 於 2026-10-28 的 Firebase Console 顯示「最近已遭刪除」；不要嘗試自動復原。
-- 刪除：舊訂單、採購、供應、報價、預測、進出貨、預留、批次、調撥、服務、操作憑證、稽核日誌等 `operational-reset-policy.js` 列出的交易根集合；包含文件底下的子集合。
-- 保留：商品、供應商、客戶、使用者、倉庫、成本主檔、品牌、設定等主檔。`inventory` / `warehouseStocks` 文件保留，但庫存數量欄位設為 0；若有內嵌 `lots`，清空陣列。
+- 刪除：舊訂單、採購、供應、預測、進出貨、預留、批次、調撥、服務、操作憑證、稽核日誌等 `operational-reset-policy.js` 列出的交易根集合；包含文件底下的子集合。
+- 保留：**估價單 `quotes`（含子集合）**、商品、價格與成本歷史（`priceHistory`／`productCosts`）、品牌價格表對應（`brandSupplierMappings`）、供應商、客戶、使用者、倉庫、設定等主檔。`inventory` / `warehouseStocks` 文件保留，但庫存數量欄位設為 0；若有內嵌 `lots`，清空陣列。
 - 只允許列在 policy 的頂層集合；發現未知根集合必須先審查並修改 PR，不能直接執行。
 
 ## 驗收前置條件
@@ -15,7 +15,7 @@
 2. 必須先阻止網頁、Cloud Functions、排程與其他所有程式對交易／庫存集合寫入；命令的 `--writes-frozen` 是操作者聲明，**不是自動鎖定**。
 3. 在執行機器設定 Firebase Admin SDK Application Default Credentials（例如使用 `gcloud auth application-default login`，與 `firebase login` 不同），且身分必須對指定專案有讀取／刪除／更新 Firestore 的必要權限。不要將金鑰、登入代碼或憑證放入 GitHub 及對話。
 4. 先在 Emulator 上以可控制的測試資料完成 dry-run、刪除及殘留驗證；再對正式專案跑 dry-run 審閱筆數。
-5. 先確定 `products` 等主檔中的內嵌交易欄位及主檔子集合是否需要清理；目前腳本刻意不修改主檔，這些內容可能仍需另外盤點。
+5. 先確定保留的 `quotes`、`products`、價格與成本歷史，以及其他主檔中的內嵌交易欄位和子集合；目前腳本刻意不修改保留集合。估價單可能參照要刪除的訂單／預測，這些引用須單獨盤點，**不得因引用無效而刪估價單**。
 
 ## 使用
 
@@ -40,7 +40,7 @@ node functions/scripts/one-time-operational-reset.js --project=yu-shing-company 
 - 工具輸出 `status: VERIFIED`，待刪根集合從 Firestore 不再出現。
 - 保留根集合仍存在；`inventory` / `warehouseStocks` 每筆 `onHand/reserved/available/incoming/shortage` 為 0，內嵌 `lots` 為空。
 - 另外以管理端獨立查核 29 個先前存在的根集合及任何巢狀交易集合、交易入口和前端列表。確認不會被舊寫入工作重建後才解除凍結。
-- 目前 29 個正式頂層集合中：15 個刪除、12 個保留、2 個歸零；未出現的潛在交易集合在 policy 內仍須處理。
+- 目前 29 個正式頂層集合中：14 個刪除、13 個保留、2 個歸零；未出現的潛在交易集合在 policy 內仍須處理。
 
 ## 限制
 
