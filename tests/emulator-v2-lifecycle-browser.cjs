@@ -2504,9 +2504,11 @@ for(const width of [1280,390])test('full site '+width+'px original UI gated PO p
   await siteOpen(page,'sales');await siteNav(page,'orders');
   assert.deepEqual((await db.collection('orders').doc(orderId).get()).data(),done);assert.deepEqual(await physical(),before);
   assert.equal((await db.collection('receipts').where('supplyOrderId','==',supplyId).get()).size,2);
-  assert.equal(functions.length,4);assert.match(functions[0],/commitV2FormalPurchase/);assert.ok(functions.slice(1).every(path=>/receiveV2Supply/.test(path)));assert.deepEqual(external,[]);assert.deepEqual(errors,[]);
+  assert.equal(functions.length,5);assert.match(functions[0],/commitOrderReservationPreview/);
+  assert.match(functions[1],/commitV2FormalPurchase/);assert.ok(functions.slice(2).every(path=>/receiveV2Supply/.test(path)));
+  assert.deepEqual(external,[]);assert.deepEqual(errors,[]);
   assert.ok(dialogs.every(message=>message.startsWith('確認採購單 ')),JSON.stringify(dialogs));
-  console.log('Full site '+width+'px: original direct source sync, DRAFT/PDF, explicit demo-gated backend purchase and owner arrival 1+2 complete; company/warehouse/lot/movement/reservation unchanged, reload read-only, one gated PO and three gated receipt Functions calls (lost first reply, original intent replay, final arrival). Source form input and physical PDF output remain explicit fixture boundaries.');
+  console.log('Full site '+width+'px: original direct source sync through one whole-order Callable, DRAFT/PDF, demo-gated backend purchase and owner arrival 1+2 complete; company/warehouse/lot/movement/reservation unchanged, reload read-only, one gated PO and three gated receipt Functions calls (lost first reply, original intent replay, final arrival). Source form input and physical PDF output remain explicit fixture boundaries.');
  }catch(error){
   console.log('Direct entry '+width+'px diagnostic:',JSON.stringify(await page.evaluate(()=>({role:typeof currentUserRole==='undefined'?'none':currentUserRole,
    feedback:document.getElementById('actionFeedback')?.textContent,po:document.getElementById('poSaveStatus')?.textContent,
