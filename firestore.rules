@@ -72,12 +72,13 @@ service cloud.firestore {
 
     function salesCode() {
       let data = userDoc().data;
-      return profileEnabled(data) ? businessCode(data) : null;
+      // Keep this hot path inexpensive for 30-line transaction Rules budgets.
+      return profileEnabled(data) ? data.get('salesCode', data.get('code', null)) : null;
     }
 
     function owns(data) {
       let profile = signedIn() ? userDoc().data : {};
-      let code = businessCode(profile);
+      let code = profile.get('salesCode', profile.get('code', null));
       let ownerUid = data.get('ownerUid', '');
       let ownerSalesCode = data.get('salesCode', '');
       return signedIn() && profileEnabled(profile) && (
