@@ -2894,7 +2894,7 @@ test('quote number lookup has bounded Firestore wait', () => {
     const start=appSource.indexOf('window.generateQuoteNo = async function()');
     const end=appSource.indexOf('\nwindow.onSalesChange',start);
     const source=appSource.slice(start,end);
-    assert.match(source,/firestoreReadWithTimeout\([\s\S]*?collection\('quotes'\)[\s\S]*?'估價單號'/);
+    assert.match(source,/queries\.map\(query => firestoreReadWithTimeout\(query\.get\(\), '估價單號'\)\)/);
 });
 
 

@@ -65,5 +65,5 @@ test('reviewed production environment keeps formal purchasing enabled and other 
  assert.deepEqual(Object.fromEntries(lines.map(line=>line.split('='))),{
   ENABLE_ORDER_RESERVATION_BACKEND:'true',ENABLE_PRODUCTION_ORDER_RESERVATION_BACKEND:'true',ENABLE_PRODUCTION_FORMAL_PURCHASE:'true'
  });
- assert.match(html,/<script src="app\.js\?v=20261031-414"/);
+ assert.match(html,/<script src="app\.js\?v=20261031-415"/);
 });

@@ -746,6 +746,52 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "quotes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "salesCode",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "quoteNo",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "quotes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "ownerUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "quoteNo",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "quotes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "createdByUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdByRole",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "quoteNo",
+          "order": "DESCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": []
