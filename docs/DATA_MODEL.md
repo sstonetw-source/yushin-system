@@ -94,10 +94,8 @@ Rules 新增管理員／採購對「不存在 audit ID」的單筆 get；未開�
 | `inventoryLotCosts` | 批次成本（受權限保護） |
 | `customerReturnReceipts` | 客戶退貨收貨憑證 |
 | `receipts` | 採購到貨憑證 |
-| `externalDispatchNotices` | 對外倉送貨通知 |
 | `dispatchRecords` | 打單／出貨記錄 |
 | `deliveries` | 交付事件（需與訂單中 deliveryRecords 欄位分清用途） |
-| `pendingInventoryItems` | 暫待處理的庫存項目 |
 | `inventoryMovements` | 庫存異動明細／來源憑證 |
 | `stockOperations` | 安全交易的操作證明（Rules 檢查） |
 | `reservationOperationReceipts` | 僅後端 Cloud Functions 可建立與讀取的雙倉預留原子操作憑證／冪等 checkpoint；尚未啟用 |
@@ -536,3 +534,7 @@ KEEP_STOCK 沿原採購決策／來源及倉庫驗證。原直送轉原選定實
 新案首次交易多讀一份索引並寫入它，後續事件及已綁定查詢最多再讀 100 份已註冊案件；這是有界的權威核對成本。歷史查詢回傳 serviceQty 與 itemProgress；未綁數量的舊試點案件仍可依原授權唯讀，itemProgress=null，不推定完成量。索引失聯、來源不符、缺少案件或訂單縮量小於已綁量均拒絕，不自動刪索引或釋放額度。Client 對該集合原有全面拒絕 Rules 不變，Callable 仍限 demo-yushin Emulator。
 
 本機完整 Node 1751/1751 通過，零失敗／略過；建置一致性及 diff 通過。新增真 Auth／Callable 的不同案件搶最後餘量、同案並行重送、分批完成、改量／縮單／索引損壞零寫入與 Client 索引讀寫拒絕驗收，結果須以本批最新 head 完整 CI 為準。尚未完成：原 UI 開案與數量輸入、既有主檔分類、服務交付／核銷、混合單與 Preview 完整驗收。PR #234 仍為整合 Draft，未合併 main、未部署 Firebase、未操作正式資料。
+
+### 已退役的集合
+
+`externalDispatchNotices`（外倉通知）、`pendingInventoryItems`（舊待建庫存）已無現行前端讀寫，於 2026-10-31 移除專屬存取規則，由預設拒絕保護。歷史文件保留；本次不執行資料清理。
