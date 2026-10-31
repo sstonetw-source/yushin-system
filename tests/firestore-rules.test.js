@@ -484,6 +484,15 @@ test('enabled administrator with business identity can own and delegate quotes a
   await seed('users/admin',{role:'admin',active:true,name:'admin'});
   await assertFails(setDoc(doc(db('buyer1'),'quotes/pure-admin'),{...adminOwned,createdByUid:'buyer1'}));
   await assertFails(setDoc(doc(db('buyer1'),'orders/pure-admin'),{...validOrderProduct,...adminOwned,createdByUid:'buyer1'}));
+  // Some established users have a business code in `code` while salesCode is blank.
+  // Browser selection and Rules must agree, without editing their real profile.
+  await seed('users/admin',{role:'admin',active:true,name:'主管',salesCode:'',code:'A01'});
+  await assertSucceeds(setDoc(doc(db('buyer1'),'quotes/admin-code-alias'),{
+    ...adminOwned,salesCode:'A01',createdByUid:'buyer1',createdByRole:'purchaser'}));
+  await assertSucceeds(setDoc(doc(db('admin'),'orders/admin-code-alias'),{
+    ...validOrderProduct,...adminOwned,salesCode:'A01'}));
+  await assertFails(setDoc(doc(db('buyer1'),'quotes/admin-wrong-code'),{
+    ...adminOwned,salesCode:'ADM',createdByUid:'buyer1'}));
 });
 
 test('only admin can permanently delete Product Master and its standard cost', async () => {

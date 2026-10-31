@@ -65,14 +65,19 @@ service cloud.firestore {
       return role() in ['admin','engineer'];
     }
 
+    function businessCode(data) {
+      let assigned = data.get('salesCode', '');
+      return assigned is string && assigned.size() > 0 ? assigned : data.get('code', null);
+    }
+
     function salesCode() {
       let data = userDoc().data;
-      return profileEnabled(data) ? data.get('salesCode', data.get('code', null)) : null;
+      return profileEnabled(data) ? businessCode(data) : null;
     }
 
     function owns(data) {
       let profile = signedIn() ? userDoc().data : {};
-      let code = profile.get('salesCode', profile.get('code', null));
+      let code = businessCode(profile);
       let ownerUid = data.get('ownerUid', '');
       let ownerSalesCode = data.get('salesCode', '');
       return signedIn() && profileEnabled(profile) && (
@@ -105,10 +110,7 @@ service cloud.firestore {
         && (get(/databases/$(database)/documents/users/$(data.ownerUid)).data.role != 'admin'
           || (get(/databases/$(database)/documents/users/$(data.ownerUid)).data.get('name', '') is string
             && get(/databases/$(database)/documents/users/$(data.ownerUid)).data.get('name', '').size() > 0))
-        && get(/databases/$(database)/documents/users/$(data.ownerUid)).data.get(
-          'salesCode',
-          get(/databases/$(database)/documents/users/$(data.ownerUid)).data.get('code', null)
-        ) == data.salesCode;
+        && businessCode(get(/databases/$(database)/documents/users/$(data.ownerUid)).data) == data.salesCode;
     }
 
     function validOwnedCommercialCreate(data) {
