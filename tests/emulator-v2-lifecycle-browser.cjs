@@ -228,6 +228,12 @@ for(const width of [1280,390])test('real browser '+width+'px original login canc
 
 async function siteOpen(page,role){
  await page.goto(origin+'/site');
+ // Explicit demo-only opt-in: exercise the shipped UI against the real
+ // authenticated whole-order Callable, never resurrect the retired SDK writer.
+ await page.evaluate(()=>{
+  if(APP_ENVIRONMENT!=='emulator'||firebase.app().options.projectId!=='demo-yushin')throw Error('isolated Emulator required');
+  window.YUSHIN_ORDER_RESERVATION_EMULATOR=true;
+ });
  if(role){await page.locator('#appContainer').waitFor({state:'visible'});await page.waitForFunction(value=>currentUserRole===value,role);}
  else await page.locator('#loginScreen').waitFor({state:'visible'});
  assert.equal(await page.evaluate(()=>APP_ENVIRONMENT),'emulator');
@@ -2199,9 +2205,9 @@ for(const width of [1280,390])test('full site '+width+'px original multi-item pu
  }finally{await context.close();}
 });
 
-// Exercise the existing production-path manual form and initialization too.
-// This is the single-warehouse legacy contract, not the v2 transport fixture.
-for(const multi of [false,true])for(const width of [1280,390])test('full site '+width+'px original '+(multi?'multi-item ':'')+'manual order form creates and reserves through real Client Rules',{timeout:120000},async()=>{
+// Run the original manual form against the real Auth-protected whole-order
+// backend on demo-yushin. No browser-side initial stock writer remains.
+for(const multi of [false,true])for(const width of [1280,390])test('full site '+width+'px original '+(multi?'multi-item ':'')+'manual order form reserves through whole-order Callable',{timeout:120000},async()=>{
  const tag=(multi?'manual-multi-':'manual-entry-')+width,uid=tag+'-sales',email=uid+'@example.test',key=tag+'-product',warehouseId='MANUAL-ENTRY',otherWarehouse='MANUAL-ENTRY-B',code=(multi?'MULTI':'MANUAL')+width;
  await auth.createUser({uid,email,password});await db.collection('users').doc(uid).set({role:'sales',active:true,name:'手動建單業務',email,code:'B'});
  const batch=db.batch(),put=(name,id,data)=>batch.set(db.collection(name).doc(id),data);
@@ -2294,9 +2300,9 @@ for(const multi of [false,true])for(const width of [1280,390])test('full site '+
   await page.locator('#ordersBody > tr').filter({hasText:tag+'客戶'}).first().waitFor({state:'visible'});
   assert.equal((await db.collection('orders').where('createdByUid','==',uid).get()).size,1);
   assert.deepEqual((await db.collection('orders').doc(orderId).get()).data(),order);assert.deepEqual(await physical(),held);
-  assert.deepEqual(functions,[],'manual production path does not use isolated v2 callables');
+  assert.deepEqual(functions.filter(name=>name.endsWith('/commitOrderReservationPreview')).length,1,'manual order commits once through the authenticated whole-order Callable');
   assert.deepEqual(dialogs,[]);assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
-  console.log('Full site '+width+'px '+(multi?'three lines/two products/two warehouses':'single line')+': actual manual blank form/product lookup created one owned order and initialized the original per-item warehouse holds through Client Rules; physical stock/lots unchanged, reload read-only, no v2 initialization fixture or Callable.');
+  console.log('Full site '+width+'px '+(multi?'three lines/two products/two warehouses':'single line')+': actual manual form committed one authoritative whole-order hold through the real demo Callable; physical stock/lots unchanged, reload read-only.');
  }catch(error){
   console.log('Manual entry '+width+'px diagnostic:',JSON.stringify(await page.evaluate(()=>({feedback:document.getElementById('actionFeedback')?.textContent,
    check:document.getElementById('orderProductCheckStatus')?.textContent,warehouse:document.getElementById('orderWarehouse')?.value,
@@ -2304,7 +2310,8 @@ for(const multi of [false,true])for(const width of [1280,390])test('full site '+
  }finally{await context.close();}
 });
 
-// Service sales use the original Client creation/sync path, without fake stock.
+// Service sales use the original form with a real whole-order backend commit,
+// without creating virtual stock for Service items.
 for(const mixed of [false,true])for(const width of [1280,390])test('full site '+width+'px original '+(mixed?'Goods plus Service':'Service-only')+' entry has no virtual stock',{timeout:120000},async()=>{
  const tag='service-entry-'+width+'-'+mixed,uid=tag+'-sales',email=uid+'@example.test',serviceKey=tag+'-service',goodsKey=tag+'-goods',warehouseId='SERVICE-ENTRY',code='SVC'+width+(mixed?'M':'S');
  await auth.createUser({uid,email,password});
@@ -2378,7 +2385,8 @@ for(const mixed of [false,true])for(const width of [1280,390])test('full site '+
   await page.locator('#ordersBody > tr').filter({hasText:tag+'客戶'}).first().waitFor({state:'visible'});
   assert.deepEqual((await db.collection('orders').doc(orderId).get()).data(),order);
   assert.equal((await db.collection('orders').where('createdByUid','==',uid).get()).size,1);
-  assert.deepEqual(dialogs,[]);assert.deepEqual(errors,[]);assert.deepEqual(functions,[]);
+  assert.deepEqual(dialogs,[]);assert.deepEqual(errors,[]);
+  assert.equal(functions.filter(name=>name.endsWith('/commitOrderReservationPreview')).length,1,'Service/Goods order commits once through the whole-order Callable');
  }catch(error){console.log('Service entry diagnostic',JSON.stringify({tag,dialogs,errors,functions}));throw error;}
  finally{await context.close();}
 });
@@ -2496,9 +2504,11 @@ for(const width of [1280,390])test('full site '+width+'px original UI gated PO p
   await siteOpen(page,'sales');await siteNav(page,'orders');
   assert.deepEqual((await db.collection('orders').doc(orderId).get()).data(),done);assert.deepEqual(await physical(),before);
   assert.equal((await db.collection('receipts').where('supplyOrderId','==',supplyId).get()).size,2);
-  assert.equal(functions.length,4);assert.match(functions[0],/commitV2FormalPurchase/);assert.ok(functions.slice(1).every(path=>/receiveV2Supply/.test(path)));assert.deepEqual(external,[]);assert.deepEqual(errors,[]);
+  assert.equal(functions.length,5);assert.match(functions[0],/commitOrderReservationPreview/);
+  assert.match(functions[1],/commitV2FormalPurchase/);assert.ok(functions.slice(2).every(path=>/receiveV2Supply/.test(path)));
+  assert.deepEqual(external,[]);assert.deepEqual(errors,[]);
   assert.ok(dialogs.every(message=>message.startsWith('確認採購單 ')),JSON.stringify(dialogs));
-  console.log('Full site '+width+'px: original direct source sync, DRAFT/PDF, explicit demo-gated backend purchase and owner arrival 1+2 complete; company/warehouse/lot/movement/reservation unchanged, reload read-only, one gated PO and three gated receipt Functions calls (lost first reply, original intent replay, final arrival). Source form input and physical PDF output remain explicit fixture boundaries.');
+  console.log('Full site '+width+'px: original direct source sync through one whole-order Callable, DRAFT/PDF, demo-gated backend purchase and owner arrival 1+2 complete; company/warehouse/lot/movement/reservation unchanged, reload read-only, one gated PO and three gated receipt Functions calls (lost first reply, original intent replay, final arrival). Source form input and physical PDF output remain explicit fixture boundaries.');
  }catch(error){
   console.log('Direct entry '+width+'px diagnostic:',JSON.stringify(await page.evaluate(()=>({role:typeof currentUserRole==='undefined'?'none':currentUserRole,
    feedback:document.getElementById('actionFeedback')?.textContent,po:document.getElementById('poSaveStatus')?.textContent,

@@ -1379,6 +1379,9 @@ async function orderInitializationFixture(uid,role,{qty=5,onHand=3,direct=false,
  const app=fs.readFileSync('app.js','utf8');
  context.window={};
  vm.runInContext(app.slice(app.indexOf('function procurementDemandForOrderItem('),app.indexOf('function purchasingLifecycleSnapshot(')),context);
+ // Exercise the previously cached browser implementation against Rules only.
+ // It is intentionally absent from the live app and order-reservation Service.
+ vm.runInContext(fs.readFileSync('tests/fixtures/legacy-order-reservation-writer.js','utf8'),context);
  vm.runInContext(fs.readFileSync('src/services/order-reservation.js','utf8'),context);
  return {context,id,client,run:()=>context.reserveSingleOrderItem(id,{}, {itemId:'I'},0)};
 }

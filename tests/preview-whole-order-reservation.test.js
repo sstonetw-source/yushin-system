@@ -92,14 +92,14 @@ test('fresh order read cannot finish an obsolete reservation attempt or launch s
  await assert.rejects(context.reserveInventoryForNewOrder('O',initial,'sales1'),/較新的同步識別碼/);
  assert.equal(backendCalls,1);assert.equal(selfOrders,0);assert.equal(oldWrites,0);
 });
-test('new-order Preview backend runs before the legacy per-item stock writer',()=>{
+test('new-order Preview backend is the exclusive writer, with no legacy fallback',()=>{
  const source=fs.readFileSync('src/services/order-reservation.js','utf8');
  assert.match(source,/orderReservationBackendEnabled\(\)/);
  const preview=source.indexOf('await commitNewOrderReservationPreview(orderId,liveOrder,actorUid)');
- const legacy=source.indexOf('await reserveSingleOrderItem(orderId,liveOrder,items[i],i,actorUid)');
- const stop=source.indexOf('productionReservationLegacyWriterBlocked()',preview);
- assert.ok(preview>0&&legacy>preview);
- assert.ok(stop>preview&&stop<legacy,'production cutover fence must run before legacy SDK writes');
+ const stop=source.indexOf('舊版逐筆 SDK 寫入已停用');
+ assert.ok(preview>stop&&stop>0,'a closed backend gate must refuse before any invocation');
+ assert.equal(source.indexOf('reserveSingleOrderItem'),-1);
+ assert.equal(source.indexOf('commitInitialGroupedReservationPreview'),-1);
  const close=source.indexOf('return {...orderReservationSummary(order),items:order.items};',preview);
- assert.ok(close>preview&&close<legacy,'Preview path must return before legacy writer');
+ assert.ok(close>preview,'a confirmed backend response is the only successful path');
 });

@@ -10553,85 +10553,47 @@ async function commitInventoryListArchive({inventoryId,productKey,archived,opera
     try{assertActor();}catch(err){err.inventoryListCommitted=true;err.operationId=operationId;throw err;}
     return result;
 }
-// Gated bridge to the authenticated Cloud Function. Production remains
-// default-closed; legacy new-order SDK submissions are blocked separately.
-// This bridge uses the same Reservation Core for initial quantity proposals;
-// the server must independently reread and validate ALL authoritative data.
-let groupedReservationFunctionsScriptPromise = null;
-function groupedReservationPreviewEnabled() {
-    return APP_ENVIRONMENT === 'preview'
-        && globalThis.YUSHIN_PREVIEW_GROUPED_RESERVATION === true;
-}
-function sameWarehouseReservationPreviewEnabled() {
-    return groupedReservationPreviewEnabled()
-        && globalThis.YUSHIN_PREVIEW_SAME_WAREHOUSE_RESERVATION === true;
-}
+// Authenticated whole-order reservation bridge. Both Preview and production
+// require explicit gates; no browser-side fallback may write initial stock.
+
+let orderReservationFunctionsScriptPromise = null;
+
 function orderReservationBackendPreviewEnabled() {
     return APP_ENVIRONMENT === 'preview'
         && globalThis.YUSHIN_PREVIEW_ORDER_RESERVATION_BACKEND === true;
 }
 // Production remains independently default-closed. The server checks the
 // project and a separate production gate before accepting any transaction.
+
 function orderReservationBackendEnabled() {
     return orderReservationBackendPreviewEnabled()
+        || (APP_ENVIRONMENT === 'emulator'
+            && globalThis.YUSHIN_ORDER_RESERVATION_EMULATOR === true
+            && typeof firebase !== 'undefined'
+            && firebase.app().options?.projectId === 'demo-yushin')
         || (APP_ENVIRONMENT === 'production'
             && globalThis.YUSHIN_PRODUCTION_ORDER_RESERVATION_BACKEND === true
             && globalThis.YUSHIN_PRODUCTION_ORDER_RESERVATION_LEGACY_BLOCKED === true
             && typeof firebase !== 'undefined'
             && firebase.app().options?.projectId === 'yu-shing-company');
 }
-function productionReservationLegacyWriterBlocked() {
-    return APP_ENVIRONMENT === 'production'
-        && globalThis.YUSHIN_PRODUCTION_ORDER_RESERVATION_LEGACY_BLOCKED === true;
-}
-function initialGroupedReservationCandidates(order) {
-    if (!groupedReservationPreviewEnabled()
-        || order?.inventoryReservationStatus !== 'pending'
-        || !/^[a-zA-Z0-9_-]{12,80}$/.test(String(order.inventoryReservationAttemptId||''))
-        || normalizedOrderStatus(order) !== 'normal'
-        || !Array.isArray(order.items)) return [];
-    const groups = new Map();
-    for (const [index, item] of order.items.entries()) {
-        if (!item || (item.fulfillmentType||'WAREHOUSE') !== 'WAREHOUSE'
-            || String(item.productType||'').toUpperCase() === 'SERVICE'
-            || !item.warehouseId || String(item.warehouseId).startsWith('custody-')) continue;
-        const untouched = ['reservedQty','deliveredQty','returnedQty','supplyOrderedQty',
-            'receivedQty','dispatchPreparedQty','warehouseShippedQty'].every(key=>Number(item[key]||0)===0);
-        const requested = Number(item.qty??item.orderedQty);
-        if (!untouched || item.transferPendingId || item.custodyTransferId
-            || !Number.isSafeInteger(requested) || requested<=0 || requested>1000000) continue;
-        const productKey=inventoryProductKey(item);
-        if (!productKey || !item.productId) continue;
-        const itemId=String(item.itemId||`item-${index+1}`);
-        if (!groups.has(productKey)) groups.set(productKey,[]);
-        groups.get(productKey).push({itemId,warehouseId:item.warehouseId,requested});
-    }
-    return [...groups].filter(([,rows])=>rows.length>=2&&rows.length<=5
-        && new Set(rows.map(row=>row.itemId)).size===rows.length
-        && (new Set(rows.map(row=>row.warehouseId)).size===2
-            || (sameWarehouseReservationPreviewEnabled()
-                && new Set(rows.map(row=>row.warehouseId)).size===1)))
-        .map(([productKey,rows])=>({productKey,rows}));
-}
+
 async function ensureReservationFunctionsCompat() {
     if (!firebase.functions) {
-        if (!groupedReservationFunctionsScriptPromise) {
-            groupedReservationFunctionsScriptPromise=new Promise((resolve,reject)=>{
+        if (!orderReservationFunctionsScriptPromise) {
+            orderReservationFunctionsScriptPromise=new Promise((resolve,reject)=>{
                 const script=document.createElement('script');
                 script.src='https://www.gstatic.com/firebasejs/10.8.0/firebase-functions-compat.js';
                 script.onload=resolve;
-                script.onerror=()=>reject(new Error('無法載入 Firebase Functions，跨倉同步未提交。'));
+                script.onerror=()=>reject(new Error('無法載入 Firebase Functions，整單預留未提交。'));
                 document.head.appendChild(script);
-            }).catch(error=>{groupedReservationFunctionsScriptPromise=null;throw error;});
+            }).catch(error=>{orderReservationFunctionsScriptPromise=null;throw error;});
         }
-        await groupedReservationFunctionsScriptPromise;
+        await orderReservationFunctionsScriptPromise;
     }
     if (!firebase.functions) throw new Error('Firebase Functions 尚未初始化，後端預留未提交。');
 }
-async function groupedReservationPreviewCallable() {
-    await ensureReservationFunctionsCompat();
-    return firebase.app().functions('asia-east1').httpsCallable('commitGroupedWarehouseReservation');
-}
+
 async function commitNewOrderReservationPreview(orderId,liveOrder,actorUid) {
     if (!orderReservationBackendEnabled()) return false;
     if (!actorUid || currentUser?.uid!==actorUid)
@@ -10656,321 +10618,6 @@ async function commitNewOrderReservationPreview(orderId,liveOrder,actorUid) {
         throw new Error('後端預留可能已提交，但登入身分已變更，請重新讀取結果。');
     invalidateProcurementDemandQueue();
     return true;
-}
-async function commitInitialGroupedReservationPreview(orderId,liveOrder,actorUid) {
-    const groups=initialGroupedReservationCandidates(liveOrder);
-    if (!groups.length) return false;
-    if (!actorUid || currentUser?.uid!==actorUid)
-        throw new Error('登入身分已變更，停止跨倉庫存同步。');
-    if (!globalThis.YushinReservation?.planReservation || !globalThis.YushinInventory?.normalizeStock)
-        throw new Error('預留或庫存核心尚未載入。');
-    const operationAttempt=liveOrder.inventoryReservationAttemptId;
-    let committed=false,crossIndex=0,sameIndex=0;
-    for (const group of groups) {
-        const {productKey,rows}=group;
-        const warehouses=[...new Set(rows.map(row=>row.warehouseId))].sort();
-        const sameWarehouse=warehouses.length===1;
-        // Preserve legacy two-warehouse attempt IDs even if a same-warehouse
-        // group appears earlier in the order. Replays must never swap intents.
-        const groupIndex=sameWarehouse?sameIndex++:crossIndex++;
-        const companyRef=db.collection('inventory').doc(encodeURIComponent(productKey));
-        const warehouseRefs=warehouses.map(wh=>db.collection('warehouseStocks').doc(warehouseStockDocId(wh,productKey)));
-        const snaps=await Promise.all([companyRef,...warehouseRefs].map(ref=>
-            firestoreReadWithTimeout(ref.get(),'讀取雙倉庫存')));
-        if (!snaps[0].exists || warehouseRefs.some((_,i)=>!snaps[i+1].exists))
-            throw new Error('雙倉預留缺少公司或實體分倉庫存，請先核對庫存。');
-        const balance = data=>{
-            const stock=globalThis.YushinInventory.normalizeStock(data);
-            for (const field of ['onHand','reserved','transferFreeInTransit']) {
-                const value=Number(data[field]||0);
-                if (!Number.isSafeInteger(value)||value<0)
-                    throw new Error('雙倉庫存來源數量不正確，停止自動預留。');
-            }
-            if (Number(data.reserved||0)+Number(data.transferFreeInTransit||0)>Number(data.onHand||0))
-                throw new Error('雙倉庫存來源預留及途中帳目超過實貨。');
-            return stock.available;
-        };
-        let companyAvailable=balance(snaps[0].data());
-        const byWarehouse=new Map(warehouses.map((wh,i)=>[wh,balance(snaps[i+1].data())]));
-        const items=[];
-        for(const row of rows) {
-            const plan=globalThis.YushinReservation.planReservation({
-                requestedQty:row.requested,existingQty:0,sameStock:true,
-                availableQty:Math.min(companyAvailable,byWarehouse.get(row.warehouseId)),
-                inTransitQty:0
-            });
-            if (!Number.isSafeInteger(plan.reservedQty))
-                throw new Error('雙倉預留計算結果不是整數。');
-            companyAvailable-=plan.reservedQty;
-            byWarehouse.set(row.warehouseId,byWarehouse.get(row.warehouseId)-plan.reservedQty);
-            items.push({itemId:row.itemId,quantity:plan.reservedQty});
-        }
-        // No stock to hold; use the existing item-level Service to publish
-        // the shortage and procurement demand without adding server writes.
-        if (!items.some(row=>row.quantity>0)) continue;
-        if (currentUser?.uid!==actorUid || !groupedReservationPreviewEnabled()
-            || (sameWarehouse&&!sameWarehouseReservationPreviewEnabled()))
-            throw new Error('登入身分或測試環境已變更，停止跨倉庫存同步。');
-        const callable=await groupedReservationPreviewCallable();
-        // Derive a stable per-product-group ID from the persisted order sync
-        // attempt. Never create a new ID on network retry.
-        const attemptId=operationAttempt+(sameWarehouse?'_same_':'_group_')+groupIndex;
-        const reply=await callable({orderId,attemptId,syncAttemptId:operationAttempt,items});
-        if (!['applied','already-applied'].includes(reply?.data?.status))
-            throw new Error('雙倉交易回覆不明確；請重新讀取訂單後使用相同識別碼重試。');
-        committed=true;
-        if (currentUser?.uid!==actorUid)
-            throw new Error('跨倉交易可能已提交，但登入身分已變更；請重新讀取結果。');
-        for (const warehouseId of warehouses)
-            invalidateWarehouseStockCache(productKey,warehouseId);
-    }
-    if(committed)invalidateProcurementDemandQueue();
-    return committed;
-}
-async function reserveSingleOrderItem(orderId, order, item, itemIndex, actorUid = currentUser?.uid) {
-    const itemId=String(item.itemId||`item-${itemIndex+1}`);
-    if(!globalThis.YushinReservation?.planReservation){
-        throw new Error('Reservation core 未載入，無法計算庫存預留。');
-    }
-    const orderRef=db.collection('orders').doc(orderId);
-    const syncUid=actorUid;
-    const syncAttemptId=String(order.inventoryReservationAttemptId||'');
-    const actor=currentUserName||currentUser?.email||'';
-    let result,stockToInvalidate=null;
-    let releasedStock=null;
-
-    await runRoleTransaction(async tx=>{
-        result=undefined;stockToInvalidate=null;releasedStock=null;
-        // Read the current source in every retry. Never publish a caller's full-item snapshot.
-        const orderSnap=await tx.get(orderRef);
-        if(currentUser?.uid!==syncUid)throw new Error('登入身份已變更，請以原帳號重試同步。');
-        if(!orderSnap.exists)throw new Error('訂單已不存在，無法同步庫存。');
-        order={id:orderId,...orderSnap.data()};
-        if(normalizedOrderStatus(order)!=='normal')throw new Error('已取消／作廢的訂單不可同步庫存。');
-        itemIndex=(order.items||[]).findIndex((row,index)=>String(row.itemId||`item-${index+1}`)===itemId);
-        if(itemIndex<0)throw new Error('訂單品項已變更，請重新讀取後重試同步。');
-        item={...order.items[itemIndex],itemId};
-        if(order.inventoryReservationStatus==='completed'){result=item;return;}
-        if(syncAttemptId&&(order.inventoryReservationStatus!=='pending'||String(order.inventoryReservationAttemptId||'')!==syncAttemptId))
-            throw new Error('已有較新的庫存同步工作，請更新這筆訂單後確認結果。');
-        if(item.transferPendingId)throw new Error('調撥途中不可重新配置訂單庫存。');
-        const normalized=normalizedOrderItems(order)[itemIndex];
-        const orderedQty=Math.max(0,Number(normalized.qty||0));
-        const effectiveDelivered=Math.max(0,Number(normalized.deliveredQty||0)-Number(normalized.returnedQty||0));
-        const requested=Math.max(0,orderedQty-effectiveDelivered);
-        const productKey=inventoryProductKey(item);
-        let warehouseId=item.warehouseId||order.warehouseId||defaultWarehouse()?.id||'';
-        const now=new Date().toISOString();
-        const demandId=globalThis.YushinProcurementDemand.demandIdForSource({sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId});
-        const demandRef=procurementDemandRef(demandId);
-        const demandSnap=await tx.get(demandRef);
-        const currentDemand=demandSnap.exists?demandSnap.data():null;
-        const publish=nextItem=>{
-            if(currentUser?.uid!==syncUid)throw new Error('登入身份已變更，請以原帳號重試同步。');
-            result=nextItem;
-            const items=order.items.map((row,index)=>index===itemIndex?nextItem:row);
-            const nextOrder={...order,items};
-            const updates={items,itemCount:items.length,orderSchemaVersion:2,...orderWorkIndexFields(nextOrder),updatedAt:now};
-            const demandDoc=orderItemProcurementDemandDocument(nextOrder,nextItem,currentDemand,now);
-            if(currentDemand||demandDoc.requestedQty>0||demandDoc.orderedQty>0||demandDoc.receivedQty>0)tx.set(demandRef,demandDoc,{merge:true});
-            tx.update(orderRef,updates);
-        };
-        // Service master data is not physical stock. Verify it against the live
-        // product document before skipping warehouse reservation and procurement.
-        // An old physical/supplier commitment must be audited, not erased.
-        if(String(item.productType||'').trim().toUpperCase()==='SERVICE'){
-            const productId=String(item.productId||'').trim();
-            if(!productId||productId.includes('/'))throw new Error('服務型品項缺少有效產品主檔。');
-            if((item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE')
-                throw new Error('服務型品項尚不支援原廠直送或實貨履約入口。');
-            const [productSnap,reservationSnap]=await Promise.all([
-                tx.get(db.collection('products').doc(productId)),
-                tx.get(db.collection('inventoryReservations').doc(`${orderId}__${itemId}`))
-            ]);
-            if(!productSnap.exists||productSnap.data().active===false
-                ||String(productSnap.data().productType||productSnap.data().type||'').trim().toUpperCase()!=='SERVICE')
-                throw new Error('服務型品項與啟用的產品主檔不符，不能建立虛擬實貨。');
-            const hasProgress=[reservationSnap.exists?reservationSnap.data().quantity:0,
-                item.reservedQty,item.dispatchPreparedQty,item.warehouseShippedQty,
-                item.supplyOrderedQty,item.receivedQty,currentDemand?.orderedQty,currentDemand?.receivedQty]
-                .some(value=>value!==undefined&&value!==null&&Number(value)!==0);
-            if(hasProgress)throw new Error('服務型品項已有實貨預留或供應進度，請先稽核，不能自動抹除。');
-            publish({...item,orderedQty,reservedQty:0,shortageQty:0,
-                inventoryProductKey:'',warehouseId:'',reservationStatus:'not_required'});
-            return;
-        }
-        // Verify the inverse case, too: a Service product must not be disguised
-        // as Goods and accidentally allocated company stock. Only live master
-        // data, re-read inside the transaction, can determine this boundary.
-        if(item.productId){
-            const productId=String(item.productId).trim();
-            if(!productId||productId.includes('/'))throw new Error('產品主檔識別碼不正確。');
-            const productSnap=await tx.get(db.collection('products').doc(productId));
-            if(productSnap.exists&&String(productSnap.data().productType||productSnap.data().type||'').trim().toUpperCase()==='SERVICE')
-                throw new Error('產品主檔為服務型，訂單品項不可冒充商品預留實貨；請修正產品類型後重試。');
-        }
-        if(!productKey){publish({...item,orderedQty,reservedQty:0,shortageQty:requested,inventoryProductKey:'',reservationError:'missing_product_master'});return;}
-        if((item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP'){
-            publish({...item,orderedQty,reservedQty:0,shortageQty:0,inventoryProductKey:productKey,warehouseId:'',reservationStatus:'not_required'});return;
-        }
-        if(!warehouseId)throw new Error('找不到有效倉庫，無法安全配置庫存。');
-        const aggregateRef=inventoryRefFor(item);
-        const reservationRef=db.collection('inventoryReservations').doc(`${orderId}__${itemId}`);
-        const aggregateSnap=aggregateRef?await tx.get(aggregateRef):null;
-        const reservationSnap=await tx.get(reservationRef);
-        const aggregate=inventoryNumbers(aggregateSnap?.exists?aggregateSnap.data():{});
-        const existing=reservationSnap.exists?reservationSnap.data():{};
-        const canChoose=globalThis.YushinReservation.reservationLocationCanChange({...item,
-            deliveredQty:Math.max(Number(item.deliveredQty||0),Number(normalized.deliveredQty||0)),
-            returnedQty:Math.max(Number(item.returnedQty||0),Number(normalized.returnedQty||0))},existing,currentDemand||{});
-        const candidateIds=[...new Set([warehouseId,...(canChoose?warehouseMasterCache
-            .filter(w=>w.active!==false&&!w.systemCustody&&!String(w.id).startsWith('custody-')).map(w=>w.id):[])])].filter(Boolean);
-        const warehouseContexts=await Promise.all(candidateIds.map(async id=>{
-            const ref=db.collection('warehouseStocks').doc(warehouseStockDocId(id,productKey));
-            const [master,snapshot]=await Promise.all([tx.get(db.collection('warehouses').doc(id)),tx.get(ref)]);
-            return {id,ref,snapshot,master:master.exists?{...master.data(),id}:null};
-        }));
-        if(canChoose){
-          const eligibleLocations=warehouseContexts.filter(row=>row.master&&globalThis.YushinReservation.physicalWarehouse(row.master));
-          const availableAtEligibleLocations=eligibleLocations
-              .reduce((sum,row)=>sum+inventoryNumbers(row.snapshot.exists?row.snapshot.data():{}).available,0);
-          if(eligibleLocations.length&&aggregateSnap?.exists&&aggregate.available>availableAtEligibleLocations+1e-8)
-              throw new Error('公司可用庫存與啟用分倉可用量不一致，請先核對分倉庫存或停用倉庫，避免誤列待採購。');
-          const selection=globalThis.YushinReservation.selectSingleWarehouse({
-            warehouses:warehouseContexts.map(row=>row.master).filter(Boolean),
-            stocks:Object.fromEntries(warehouseContexts.map(row=>[row.id,row.snapshot.exists?row.snapshot.data():{}])),
-            currentWarehouseId:warehouseId,requestedQty:requested,aggregateAvailableQty:aggregateSnap?.exists?aggregate.available:0
-          });
-          if(selection.requiresMultipleLocations){
-            // Read-only diagnostic from the existing reservation Core. This plan is
-            // not a reservation ledger and must not mutate stock or demand.
-            const preview=globalThis.YushinReservation.planMultiWarehouseReservation({
-              warehouses:eligibleLocations.map(row=>row.master),
-              stocks:Object.fromEntries(eligibleLocations.map(row=>[row.id,row.snapshot.exists?row.snapshot.data():{}])),
-              currentWarehouseId:warehouseId,requestedQty:requested,
-              aggregateStock:aggregateSnap?.exists?aggregateSnap.data():{onHand:0,reserved:0}
-            });
-            const names=new Map(eligibleLocations.map(row=>[row.id,row.master.warehouseName||row.id]));
-            const detail=preview.allocations.map(row=>String(names.get(row.warehouseId)||row.warehouseId)+' '+row.qty).join('、');
-            throw new Error('此品項需要多倉分配：需求 '+requested+'、目前各倉可配置 '+preview.allocatedQty
-              +(detail?'（'+detail+'）':'')+'、仍缺 '+preview.shortageQty
-              +'。現行系統尚未啟用同一品項的多倉預留及分批出貨；請先核對並完成實體倉庫調撥後重試，未變更任何預留或採購需求。');
-          }
-          warehouseId=selection.warehouseId;
-        }
-        const selected=warehouseContexts.find(row=>row.id===warehouseId);
-        if(!selected?.master||!globalThis.YushinReservation.physicalWarehouse(selected.master))throw new Error('找不到啟用的庫存倉庫，請先確認倉庫主檔後重試。');
-        const warehouseRef=selected.ref,warehouseSnap=selected.snapshot;
-        const warehouse=inventoryNumbers(warehouseSnap.exists?warehouseSnap.data():{});
-        const existingQty=existing.quantity===undefined?0:existing.quantity;
-        const oldProductKey=String(existing.productKey||'');
-        const oldWarehouseId=String(existing.warehouseId||'');
-        const sameStock=oldProductKey===productKey&&oldWarehouseId===warehouseId;
-        if(existingQty>0&&sameStock&&(!aggregateSnap?.exists||!warehouseSnap?.exists)){
-            throw new Error('既有預留缺少對應公司或分倉庫存，請先稽核後重試。');
-        }
-
-        const plan=globalThis.YushinReservation.planReservation({
-            requestedQty:requested,
-            existingQty,
-            sameStock,
-            availableQty:aggregateSnap?.exists?Math.min(warehouse.available,aggregate.available+(oldProductKey===productKey&&!sameStock?existingQty:0)):0,
-            inTransitQty:Math.max(0,Number(item.supplyOrderedQty||0)-Number(item.receivedQty||0))
-        });
-
-        let oldAggregateRef=null,oldAggregateSnap=null,oldAggregate=null;
-        let oldWarehouseRef=null,oldWarehouseSnap=null,oldWarehouse=null;
-        if(plan.releaseQty>0&&!sameStock){
-            if(!oldProductKey||!oldWarehouseId){
-                throw new Error('舊庫存預留缺少產品或倉庫資訊，無法安全重新分配。');
-            }
-            oldAggregateRef=oldProductKey===productKey
-                ? aggregateRef
-                : db.collection('inventory').doc(encodeURIComponent(oldProductKey));
-            oldWarehouseRef=db.collection('warehouseStocks').doc(warehouseStockDocId(oldWarehouseId,oldProductKey));
-            oldAggregateSnap=oldProductKey===productKey
-                ? aggregateSnap
-                : await tx.get(oldAggregateRef);
-            oldWarehouseSnap=await tx.get(oldWarehouseRef);
-            if(!oldWarehouseSnap?.exists){
-                throw new Error('找不到舊庫存預留所在倉庫，無法安全重新分配。');
-            }
-            oldAggregate=inventoryNumbers(oldAggregateSnap?.exists?oldAggregateSnap.data():{});
-            oldWarehouse=inventoryNumbers(oldWarehouseSnap.data());
-        }
-
-        // Share the lifecycle balance contract; raw snapshots must be checked
-        // before any clamping or release can hide a corrupt reservation account.
-        if(!sameStock)globalThis.YushinReservation.validateReservationBalance({
-            existingQty:0,
-            aggregateStock:aggregateSnap?.exists?aggregateSnap.data():undefined,
-            warehouseStock:warehouseSnap.exists?warehouseSnap.data():undefined
-        });
-        globalThis.YushinReservation.validateReservationBalance({
-            existingQty,itemReservedQty:Object.hasOwn(item,'reservedQty')?item.reservedQty:existingQty,
-            aggregateStock:sameStock?(aggregateSnap?.exists?aggregateSnap.data():undefined):oldAggregateSnap?.data(),
-            warehouseStock:sameStock?(warehouseSnap.exists?warehouseSnap.data():undefined):oldWarehouseSnap?.data()
-        });
-
-        if(aggregateRef&&aggregateSnap?.exists){
-            let nextReserved=aggregate.reserved;
-            if(plan.releaseQty>0&&oldProductKey===productKey)nextReserved=nextReserved-plan.releaseQty;
-            nextReserved+=plan.additionalReserveQty;
-            if(nextReserved!==aggregate.reserved)tx.update(aggregateRef,{reserved:nextReserved,updatedAt:now});
-        }
-        if(plan.releaseQty>0&&oldProductKey&&oldProductKey!==productKey&&oldAggregateRef&&oldAggregateSnap?.exists){
-            tx.update(oldAggregateRef,{reserved:oldAggregate.reserved-plan.releaseQty,updatedAt:now});
-        }
-
-        if(warehouseRef&&warehouseSnap?.exists){
-            let nextReserved=warehouse.reserved;
-            if(plan.releaseQty>0&&sameStock)nextReserved=nextReserved-plan.releaseQty;
-            nextReserved+=plan.additionalReserveQty;
-            if(nextReserved!==warehouse.reserved)tx.update(warehouseRef,{reserved:nextReserved,updatedAt:now});
-        }
-        if(plan.releaseQty>0&&!sameStock&&oldWarehouseRef&&oldWarehouseSnap?.exists){
-            tx.update(oldWarehouseRef,{reserved:oldWarehouse.reserved-plan.releaseQty,updatedAt:now});
-            releasedStock={productKey:oldProductKey,warehouseId:oldWarehouseId};
-        }
-
-        if(plan.releaseQty>0){
-            tx.set(db.collection('inventoryMovements').doc(),inventoryMovementRecord(
-                'release',-plan.releaseQty,orderId,oldProductKey||productKey,actor,
-                {
-                    reason:'reservation_reconcile',warehouseId:oldWarehouseId||warehouseId,itemId,
-                    fulfillmentType:'WAREHOUSE',ownerUid:order.ownerUid||currentUser?.uid||'',
-                    salesCode:order.salesCode||salesCodeForName(order.salesName)||''
-                }
-            ));
-        }
-        if(plan.additionalReserveQty>0){
-            tx.set(db.collection('inventoryMovements').doc(),inventoryMovementRecord(
-                'reserve',plan.additionalReserveQty,orderId,productKey,actor,
-                {
-                    warehouseId,itemId,fulfillmentType:'WAREHOUSE',
-                    ownerUid:order.ownerUid||currentUser?.uid||'',
-                    salesCode:order.salesCode||salesCodeForName(order.salesName)||''
-                }
-            ));
-        }
-
-        tx.set(reservationRef,{
-            orderId,itemId,orderNo:order.orderNo||order.quoteNo||orderId,productKey,
-            itemCode:item.itemCode||'',itemName:item.itemName||'',customerName:order.customerName||'',
-            ownerUid:order.ownerUid||currentUser?.uid||'',
-            salesCode:order.salesCode||salesCodeForName(order.salesName),salesName:order.salesName||'',
-            orderDate:order.orderDate||'',quantity:plan.reservedQty,shortageQty:plan.shortageQty,
-            status:plan.status,warehouseId,updatedAt:now
-        },{merge:true});
-
-        publish({...item,itemId,orderedQty,reservedQty:plan.reservedQty,shortageQty:plan.shortageQty,inventoryProductKey:productKey,warehouseId});
-        stockToInvalidate={productKey,warehouseId};
-    });
-
-    if(releasedStock)invalidateWarehouseStockCache(releasedStock.productKey,releasedStock.warehouseId);
-    if(stockToInvalidate)invalidateWarehouseStockCache(stockToInvalidate.productKey,stockToInvalidate.warehouseId);
-    invalidateProcurementDemandQueue();
-    return result;
 }
 function orderReservationSummary(order) {
     const items=normalizedOrderItems(order);
@@ -11053,60 +10700,33 @@ async function reserveInventoryForNewOrder(orderId, order, actorUid = currentUse
     if(expectedAttemptId&&liveOrder.inventoryReservationStatus!=='completed'
         &&(liveOrder.inventoryReservationStatus!=='pending'||String(liveOrder.inventoryReservationAttemptId||'')!==expectedAttemptId))
         throw new Error('已有較新的庫存同步工作，請更新這筆訂單後確認結果。');
-    const items=normalizedOrderItems(liveOrder);
-    if(!items.length)throw new Error('訂單缺少正式 items 品項資料，請重新建立訂單。');
-    // Explicit gated backend: the Admin SDK writer owns the entire initial
-    // stock/reservation/demand transaction. Never fall back to the legacy
-    // per-item Firestore SDK writer if a response is lost or an error occurs.
-    if(typeof orderReservationBackendEnabled==='function'
-        &&orderReservationBackendEnabled()){
-        const committed=await commitNewOrderReservationPreview(orderId,liveOrder,actorUid);
-        if(committed!==true)
-            throw new Error('後端預留旗標可能已變更，尚無提交確認；請保留原同步識別碼核對，禁止回退舊交易。');
-        const latest=await firestoreReadWithTimeout(orderRef.get(),'讀取後端庫存同步結果');
-        if(!latest.exists||currentUser?.uid!==actorUid)
-            throw new Error('訂單已變更，請更新後確認同步結果。');
-        if(String(latest.data().inventoryReservationAttemptId||'')!==String(liveOrder.inventoryReservationAttemptId||''))
-            throw new Error('後端預留已回覆，但訂單已有較新的同步識別碼；請以原憑證核對，不得繼續舊操作。');
-        Object.assign(order,{id:orderId,...latest.data()});
-        if(normalizedOrderStatus(order)!=='normal')throw new Error('訂單已取消／作廢，停止後續自行訂貨。');
-        for(const row of normalizedOrderItems(order)){
-            if((row.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
-                ||String(row.productType||'').toUpperCase()==='SERVICE')continue;
-            const key=inventoryProductKey(row),warehouseId=row.warehouseId||order.warehouseId;
-            if(key&&warehouseId)invalidateWarehouseStockCache(key,warehouseId);
-        }
-        await registerInitialSelfOrders(orderId,order,actorUid);
-        return {...orderReservationSummary(order),items:order.items};
-    }
-    // #311 integration candidate: never submit the original per-item SDK
-    // reservation from the production site, even before cutover flags are on.
-    // Until the new Callable is authorized this intentionally pauses new-order
-    // reservation; live SDK operations are not allowed to make an unsafe ledger.
-    if((typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='production')
-        || (typeof productionReservationLegacyWriterBlocked==='function'
-            &&productionReservationLegacyWriterBlocked()))
-        throw new Error('正式環境已停用舊版預留寫入；後端尚未啟用，請保留原操作編號並聯絡管理員。');
-    if(items.some(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'
-        &&String(item.productType||'').trim().toUpperCase()!=='SERVICE')){
-        await loadWarehouseMaster(true);
-        if(!warehouseMasterLoadPromise)throw new Error('倉庫主檔讀取失敗，請重試同步。');
-    }
-    if(currentUser?.uid!==actorUid)throw new Error('登入身份已變更，請以原帳號重試同步。');
-    // Preview-only grouped initial reservation; all existing per-item demand
-    // reconciliation still runs using fresh snapshots and original checkpoints.
-    // Historical isolated Service tests do not load the optional adapter.
-    // In the real built app it is defined immediately before this Service.
-    if(typeof commitInitialGroupedReservationPreview==='function')
-        await commitInitialGroupedReservationPreview(orderId,liveOrder,actorUid);
-    for(let i=0;i<items.length;i++)await reserveSingleOrderItem(orderId,liveOrder,items[i],i,actorUid);
-    // Each item transaction has already published stock, reservation, order and demand atomically.
-    // Read the result for self-order processing and UI; never overwrite the source with reservedItems.
-    const latest=await firestoreReadWithTimeout(orderRef.get(),'讀取庫存同步結果');
-    if(!latest.exists)throw new Error('訂單已不存在。');
-    if(currentUser?.uid!==actorUid)throw new Error('登入身份已變更，請以原帳號重試同步。');
+    if(!normalizedOrderItems(liveOrder).length)
+        throw new Error('訂單缺少正式 items 品項資料，請重新建立訂單。');
+
+    // The authenticated whole-order Callable is the ONLY initial reservation
+    // writer. A disabled gate or ambiguous response must never use browser SDK
+    // stock/demand transactions, including in Preview and older clients.
+    if(typeof orderReservationBackendEnabled!=='function'||!orderReservationBackendEnabled())
+        throw new Error('新訂單預留後端尚未啟用，舊版逐筆 SDK 寫入已停用；請保留原操作編號並聯絡管理員。');
+    const committed=await commitNewOrderReservationPreview(orderId,liveOrder,actorUid);
+    if(committed!==true)
+        throw new Error('後端預留旗標可能已變更，尚無提交確認；請保留原同步識別碼核對，禁止回退舊交易。');
+
+    const latest=await firestoreReadWithTimeout(orderRef.get(),'讀取後端庫存同步結果');
+    if(!latest.exists||currentUser?.uid!==actorUid)
+        throw new Error('訂單已變更，請更新後確認同步結果。');
+    if(String(latest.data().inventoryReservationAttemptId||'')!==String(liveOrder.inventoryReservationAttemptId||''))
+        throw new Error('後端預留已回覆，但訂單已有較新的同步識別碼；請以原憑證核對，不得繼續舊操作。');
+    if(latest.data().inventoryReservationStatus!=='completed')
+        throw new Error('後端尚未確認整單預留完成；請保留原同步識別碼核對，不得自行補寫庫存。');
     Object.assign(order,{id:orderId,...latest.data()});
     if(normalizedOrderStatus(order)!=='normal')throw new Error('訂單已取消／作廢，停止後續自行訂貨。');
+    for(const row of normalizedOrderItems(order)){
+        if((row.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
+            ||String(row.productType||'').toUpperCase()==='SERVICE')continue;
+        const key=inventoryProductKey(row),warehouseId=row.warehouseId||order.warehouseId;
+        if(key&&warehouseId)invalidateWarehouseStockCache(key,warehouseId);
+    }
     await registerInitialSelfOrders(orderId,order,actorUid);
     return {...orderReservationSummary(order),items:order.items};
 }

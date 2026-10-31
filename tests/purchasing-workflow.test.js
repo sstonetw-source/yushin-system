@@ -560,7 +560,10 @@ test('self-order receipt keeps reservation from fulfillment core without adding 
 test('new order reservation persists derived work category index after item reservation is known',()=>{
     assert.match(app,/function orderWorkIndexFields\(order\)/);
     assert.match(app,/workCategories:categories/);
-    assert.match(app,/const updates=\{items,itemCount:items\.length,orderSchemaVersion:2,\.\.\.orderWorkIndexFields\(nextOrder\),updatedAt:now\}/);
+    const backend=require('node:fs').readFileSync('functions/order-reservation-service.js','utf8');
+    assert.match(backend,/function initialOrderWorkIndex\(order,items,now\)/);
+    assert.match(backend,/\.\.\.initialOrderWorkIndex\(order,nextItems,now\)/);
+    assert.match(backend,/inventoryReservationStatus:'completed'/);
 });
 
 

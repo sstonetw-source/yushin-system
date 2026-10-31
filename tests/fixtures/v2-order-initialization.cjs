@@ -1,7 +1,8 @@
 'use strict';
-// Emulator-only SDK/backend adapters around the real browser initialization.
-// The only reservation writer is the existing v2 Service; source state and
-// procurement demand writes execute the actual src functions in a VM.
+// Emulator-only setup for V2 multi-location downstream lifecycle tests.
+// The V2 backend seeds multi-location stock/demand, then the real browser
+// coordinator checks its completed source. This is NOT a proof of the new
+// initial whole-order transaction (tested in emulator-order-reservation.cjs).
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),{createHash}=require('node:crypto');
 const {commitSingleItemTwoWarehouse,commitOrderTwoWarehouse}=require('../../functions/single-item-location-service');
 const root=path.resolve(__dirname,'../..');
@@ -57,10 +58,9 @@ async function synchronizeV2OrderFixture(db,uid,{orderId,warehouseIds,hooks={}})
   if(completed&&hooks.completionResponseLost){hooks.completionResponseLost=false;throw Error('初始化完成回覆遺失');}
   return result;
  });
- // Emulator transport only, not a production Callable or feature flag. Multi-line
- // sources use ONE whole-order transaction before any demand is published. The
- // real coordinator still owns its per-line demand/checkpoint recovery; this
- // does not claim that stock and all demands are one atomic transaction.
+ // The V2 multi-location service remains the isolated test setup for
+ // cancellation, return and shipment. It is never called from shipped code.
+ // Multi-line sources use one V2 transaction before demand projection.
  const sourceItems=c.normalizedOrderItems(initial.data());
  let wholeReservation;
  c.reserveSingleOrderItem=async(id,liveOrder,item)=>{
@@ -81,6 +81,25 @@ async function synchronizeV2OrderFixture(db,uid,{orderId,warehouseIds,hooks={}})
   await c.persistOrderProcurementDemands(id,liveOrder,[item],{actorUid:uid,syncAttemptId:liveOrder.inventoryReservationAttemptId});
   if(hooks.afterDemand)await hooks.afterDemand({context:c,order:liveOrder,item});
   return result;
+ };
+ // The retired SDK entry no longer exists in production. Retain this adapter
+ // only for downstream V2 lifecycle fixtures; the whole-order backend's
+ // authoritative reservation/receipt is independently covered by Emulator.
+ c.orderReservationBackendEnabled=()=>true;
+ c.commitNewOrderReservationPreview=async(id,liveOrder,actorUid)=>{
+  if(actorUid!==uid)fault('初始化身分已變更');
+  for(const item of sourceItems)await c.reserveSingleOrderItem(id,liveOrder,item);
+  const latest=await sourceRef.get();
+  if(!latest.exists)fault('初始化後訂單已不存在','not-found');
+  const finished={id,...latest.data(),inventoryReservationStatus:'completed'};
+  await sourceRef.update({inventoryReservationStatus:'completed',
+   inventoryReservationError:'',inventoryReservationUpdatedAt:new Date().toISOString(),
+   ...c.orderWorkIndexFields(finished)});
+  if(hooks.completionResponseLost){
+   hooks.completionResponseLost=false;
+   throw Error('初始化完成回覆遺失');
+  }
+  return true;
  };
  const order={id:orderId,...initial.data()},summary=await c.synchronizeOrderInventory(orderId,order,uid);
  return {order,summary};
