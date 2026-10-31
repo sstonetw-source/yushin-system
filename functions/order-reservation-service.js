@@ -6,6 +6,7 @@
 const demandCore=require('./shared/procurement-demand-core.js');
 const fulfillmentCore=require('./shared/fulfillment-core.js');
 const workflowCore=require('./shared/workflow-core.js');
+const reservationCore=require('./shared/reservation-core.js');
 
 function fault(code,message){const error=new Error(message);error.code=code;throw error;}
 function ident(value,label,max=160){
@@ -102,7 +103,7 @@ async function commitOrderReservation(db,uid,data){
 
     const now=new Date().toISOString();
     const productMasters=new Map(),warehouseMasters=new Map();
-    const companyStocks=new Map(),warehouseStocks=new Map();
+    const companyStocks=new Map(),warehouseStocks=new Map(),warehouseCandidates=new Map();
     const writes=[],nextItems=[],seenItems=new Set();
     let reservedQty=0,shortageQty=0;
     async function master(collection,key,cache){
@@ -127,6 +128,59 @@ async function commitOrderReservation(db,uid,data){
         }
       }
       return cache.get(key);
+    }
+    async function chooseSingleWarehouse(productKey,preferredId,requested,aggregateAvailable){
+      // A single item's legacy ledger can point to only ONE physical location.
+      // Read every stocked candidate inside this transaction; source warehouse
+      // IDs and client-side stock estimates cannot authorize an allocation.
+      if(!warehouseCandidates.has(productKey)){
+        const query=db.collection('warehouseStocks').where('productKey','==',productKey);
+        const matches=await tx.get(query),candidates=new Map();
+        for(const snapshot of matches.docs){
+          const record=snapshot.data(),id=ident(record.warehouseId,'分倉庫存位置',200);
+          const key=encodeURIComponent(id)+'__'+encodeURIComponent(productKey);
+          if(snapshot.id!==key||record.productKey!==productKey||candidates.has(id))
+            fault('failed-precondition','分倉庫存識別不一致，請先稽核');
+          let stock=warehouseStocks.get(key);
+          if(!stock){
+            stock={ref:ref('warehouseStocks',key),exists:true,warehouseId:id,productKey,
+              ...stockNumbers(record,id)};
+            warehouseStocks.set(key,stock);
+          }
+          candidates.set(id,stock);
+        }
+        warehouseCandidates.set(productKey,candidates);
+      }
+      const candidates=warehouseCandidates.get(productKey);
+      if(!candidates.has(preferredId)){
+        const key=encodeURIComponent(preferredId)+'__'+encodeURIComponent(productKey);
+        candidates.set(preferredId,await trackedStock('warehouseStocks',key,warehouseStocks,preferredId,
+          {warehouseId:preferredId,productKey}));
+      }
+      const physical=[],stocks={};
+      let totalAvailable=0;
+      for(const [id,stock] of candidates){
+        const warehouse=await master('warehouses',id,warehouseMasters);
+        if(!warehouse||warehouse.active===false||warehouse.systemCustody
+          ||warehouse.warehouseType==='CUSTODY'||id.startsWith('custody-'))continue;
+        physical.push({...warehouse,id});
+        totalAvailable+=stock.available;
+        // The shared selector recomputes availability from stock fields, so
+        // include reservations planned earlier in this same whole-order pass.
+        stocks[id]={onHand:stock.onHand,reserved:stock.reserved+stock.delta,
+          transferFreeInTransit:stock.transferFreeInTransit};
+      }
+      if(!physical.some(warehouse=>warehouse.id===preferredId))
+        fault('failed-precondition','來源不是啟用的實體倉庫');
+      if(aggregateAvailable>totalAvailable)
+        fault('failed-precondition','公司可用庫存高於啟用分倉總可用量，請先核對庫存，避免誤列待採購');
+      const selected=reservationCore.selectSingleWarehouse({
+        warehouses:physical,stocks,currentWarehouseId:preferredId,
+        requestedQty:requested,aggregateAvailableQty:aggregateAvailable
+      });
+      if(selected.requiresMultipleLocations)
+        fault('failed-precondition','此品項需要多倉分配，請先調撥後重試；未提交任何預留或採購需求');
+      return selected.warehouseId;
     }
     for(const [index,source] of order.items.entries()){
       if(!source||typeof source!=='object')fault('failed-precondition','訂單品項格式不正確');
@@ -153,15 +207,12 @@ async function commitOrderReservation(db,uid,data){
       if(product?.active===false)fault('failed-precondition','產品主檔已停用');
       const service=type==='SERVICE',direct=fulfillmentType==='DIRECT_SHIP';
       if(service&&direct)fault('failed-precondition','服務型品項不支援原廠直送');
-      const warehouseId=service||direct?'':ident(source.warehouseId||order.warehouseId,'實體倉庫',200);
+      let warehouseId=service||direct?'':ident(source.warehouseId||order.warehouseId,'實體倉庫',200);
       let reserve=0,shortage=0;
       if(!service&&!direct&&productKey){
         if(productId&&!product)fault('failed-precondition','來源品項缺少有效產品主檔');
-        const masterData=await master('warehouses',warehouseId,warehouseMasters);
-        if(!masterData||masterData.active===false||masterData.systemCustody
-          ||masterData.warehouseType==='CUSTODY'||warehouseId.startsWith('custody-'))
-          fault('failed-precondition','來源不是啟用的實體倉庫');
         const aggregate=await trackedStock('inventory',encodeURIComponent(productKey),companyStocks,'公司');
+        warehouseId=await chooseSingleWarehouse(productKey,warehouseId,orderedQty,aggregate.available);
         const warehouseKey=encodeURIComponent(warehouseId)+'__'+encodeURIComponent(productKey);
         const location=await trackedStock('warehouseStocks',warehouseKey,warehouseStocks,warehouseId,
           {warehouseId,productKey});
