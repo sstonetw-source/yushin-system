@@ -19,10 +19,15 @@ const observedFormalRoots = [
 test('every observed formal root has exactly one safe action', () => {
   const plan = classifyRootCollections(observedFormalRoots);
   assert.deepEqual(plan.unknown, []);
-  assert.equal(plan.deleting.length, 15);
-  assert.equal(plan.preserving.length, 12);
+  assert.equal(plan.deleting.length, 14);
+  assert.equal(plan.preserving.length, 13);
   assert.equal(plan.zeroing.length, 2);
-  assert.ok(plan.deleting.includes('quotes'));
+  assert.ok(plan.preserving.includes('quotes'));
+  assert.ok(!plan.deleting.includes('quotes'));
+  assert.ok(plan.preserving.includes('priceHistory'));
+  assert.ok(plan.preserving.includes('productCosts'));
+  assert.ok(plan.preserving.includes('brandSupplierMappings'));
+  assert.ok(plan.preserving.includes('productLines'));
   assert.ok(plan.deleting.includes('stockTransfers'));
   assert.ok(plan.preserving.includes('products'));
   assert.ok(plan.preserving.includes('users'));
