@@ -1297,9 +1297,11 @@ service cloud.firestore {
     }
 
     function validNewItemCost(item, method) {
-      // The existing cost check also fences backend-owned projection fields.
-      // Existing order-entry clients may submit an explicit zero reservedQty.
-      return !item.keys().hasAny(['unitCost', 'cost', 'shortageQty', 'reservationStatus'])
+      // The existing cost check also fences backend-owned reservation results.
+      // New-order clients normalize an initial shortageQty (often the full qty)
+      // before the server reconciles it; it is never proof of a stock hold.
+      // They may also explicitly submit zero reservedQty.
+      return !item.keys().hasAny(['unitCost', 'cost', 'reservationStatus'])
         && item.get('reservedQty', 0) == 0
         && (!('costPrice' in item) || (item.get('procurementType', method) == 'SALES_SELF_ORDER'
           && item.costPrice is number && item.costPrice >= 0));

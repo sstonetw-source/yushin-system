@@ -1416,7 +1416,12 @@ test('no client role may create or transition an order into server-only reservat
   await assertFails(setDoc(doc(client,'orders/'+id+'-forged'),{...data,inventoryReservationStatus:'completed'}));
   const item={itemId:'A',productId:'p-order',qty:5,orderedQty:5};
   await assertSucceeds(setDoc(doc(client,'orders/'+id+'-clean-line'),{...data,items:[item]}));
-  for(const patch of [{reservedQty:3},{shortageQty:2},{reservationStatus:'completed'}])
+  // The actual order form computes the initial shortage optimistically; the
+  // backend overwrites it during whole-order initialization.
+  await assertSucceeds(setDoc(doc(client,'orders/'+id+'-initial-shortage'),{
+   ...data,items:[{...item,reservedQty:0,shortageQty:5}]
+  }));
+  for(const patch of [{reservedQty:3},{reservationStatus:'completed'}])
    await assertFails(setDoc(doc(client,'orders/'+id+'-forged-line-'+Object.keys(patch)[0]),{...data,items:[{...item,...patch}]}));
   assert.equal((await getDoc(doc(db('admin'),'orders/'+id))).data().inventoryReservationStatus,'pending');
  }
