@@ -27,7 +27,8 @@ test('every observed formal root has exactly one safe action', () => {
   assert.ok(plan.preserving.includes('priceHistory'));
   assert.ok(plan.preserving.includes('productCosts'));
   assert.ok(plan.preserving.includes('brandSupplierMappings'));
-  assert.ok(plan.preserving.includes('productLines'));
+  assert.ok(PRESERVE_COLLECTIONS.includes('productLines'));
+  assert.ok(PRESERVE_COLLECTIONS.includes('quotes'));
   assert.ok(plan.deleting.includes('stockTransfers'));
   assert.ok(plan.preserving.includes('products'));
   assert.ok(plan.preserving.includes('users'));
