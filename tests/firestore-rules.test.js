@@ -3568,3 +3568,21 @@ test('active members update only their own bounded personal phone and delivery d
  await assertFails(setDoc(doc(db('new-user'),'users/new-user'),{role:'sales',...patch}));
  await assertFails(updateDoc(doc(env.unauthenticatedContext().firestore(),'users/sales1'),patch));
 });
+
+test('all fifteen logistics lines preserve warehouse, transit and custody fields during commercial item edits', async()=>{
+ await seedWarehouseLogistics();
+ const ref=doc(db('sales1'),'orders/logistics');
+ const old=(await getDoc(ref)).data();
+ const items=Array.from({length:15},(_,i)=>({...old.items[0],itemId:'L'+i,warehouseId:i===14?'custody-sales1':'MAIN',custodyTransferId:i===14?'HAND':'',deliveryPlan:{mode:'PICKUP'}}));
+ const base={...old,inventoryReservationStatus:'completed',warehouseLogisticsId:'HAND',logisticsTransfersPending:0,logisticsHistory:[{id:'HAND'}],items};
+ await seed('orders/logistics',base);
+ const edited=items.map((row,i)=>i===7?{...row,notes:'內部備註'}:row);
+ await assertSucceeds(updateDoc(ref,{items:edited}));
+ await assertFails(updateDoc(doc(db('sales2'),'orders/logistics'),{items:edited.map(row=>({...row,notes:'越權'}))}));
+ for(const index of [0,7,14]){
+  for(const patch of [{warehouseId:'OTHER'},{transferPendingId:'FAKE'},{custodyTransferId:'FAKE'}]){
+   await assertFails(updateDoc(ref,{items:edited.map((row,i)=>i===index?{...row,...patch}:row)}));
+  }
+ }
+ await assertFails(updateDoc(ref,{items:edited.map((row,i)=>i===14?{...row,deliveryPlan:{mode:'TRANSFER'}}:row)}));
+});

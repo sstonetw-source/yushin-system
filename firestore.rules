@@ -51,11 +51,11 @@ service cloud.firestore {
     }
 
     function canCreateCommercialDoc() {
-      return admin() || commercialDocumentOwner() || businessAssistant();
+      return role() in ['admin','sales','engineer','purchaser'];
     }
 
     function canPurchase() {
-      return admin() || purchaser();
+      return role() in ['admin','purchaser'];
     }
 
     function canReceiveInventory() {
@@ -63,7 +63,7 @@ service cloud.firestore {
     }
 
     function canManageEquipment() {
-      return admin() || engineer();
+      return role() in ['admin','engineer'];
     }
 
     function salesCode() {
@@ -72,11 +72,13 @@ service cloud.firestore {
     }
 
     function owns(data) {
+      let profile = signedIn() ? userDoc().data : {};
+      let code = profile.get('salesCode', profile.get('code', null));
       let ownerUid = data.get('ownerUid', '');
       let ownerSalesCode = data.get('salesCode', '');
-      return active() && (
+      return signedIn() && profileEnabled(profile) && (
         (ownerUid != '' && ownerUid == request.auth.uid) ||
-        (salesCode() != null && ownerSalesCode != '' && ownerSalesCode == salesCode())
+        (code != null && ownerSalesCode != '' && ownerSalesCode == code)
       );
     }
 
@@ -406,7 +408,6 @@ service cloud.firestore {
     }
     function purchaserOrderWorkflowUpdate(id) {
       return purchaser()
-        && operationalItemsOnly(purchasingItemFields())
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'items', 'itemCount', 'orderSchemaVersion',
           'purchaseOrderNo', 'purchaseOrderNos', 'purchaseOrderedQty', 'purchaseStatus',
@@ -422,7 +423,6 @@ service cloud.firestore {
     function warehouseOrderWorkflowUpdate() {
       return warehouse()
         && !(resource.data.get('inventoryReservationStatus', '') in ['pending', 'failed'])
-        && operationalItemsOnly(['orderedQty', 'reservedQty', 'shortageQty', 'receivedQty', 'receiptEvents', 'reservationStatus', 'inventoryProductKey'])
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'items', 'itemCount', 'orderSchemaVersion',
           'inventoryReservedQty', 'inventoryShortageQty',
@@ -430,6 +430,13 @@ service cloud.firestore {
           'workCategories', 'workCategoryUpdatedAt', 'updatedAt'
         ])
         && sameCommercialOwner();
+    }
+
+    // Share the bounded item walk; role-specific document whitelists stay separate.
+    function operationalOrderWorkflowUpdate(id, userRole) {
+      return operationalItemsOnly(userRole == 'purchaser' ? purchasingItemFields()
+          : ['orderedQty', 'reservedQty', 'shortageQty', 'receivedQty', 'receiptEvents', 'reservationStatus', 'inventoryProductKey'])
+        && (userRole == 'purchaser' ? purchaserOrderWorkflowUpdate(id) : warehouseOrderWorkflowUpdate());
     }
 
     function productPath(id) {
@@ -1332,17 +1339,15 @@ service cloud.firestore {
     // cost or identity enter the additional Service binding validation.
     function commercialItemIdentityAndCostProtected(before, after, method) {
       let changed = after.diff(before).affectedKeys();
-      return before == after || ((!changed.hasAny(['deliveryPlan']) || before.get('deliveryPlan', {}) == after.get('deliveryPlan', {}))
-        && (!changed.hasAny(['receivedQty']) || before.get('receivedQty', 0) == after.get('receivedQty', 0))
-        && (!changed.hasAny(['receiptEvents']) || before.get('receiptEvents', []) == after.get('receiptEvents', [])) && before.get('procurementType', method) == after.get('procurementType', method)
-        && (!changed.hasAny([
-            'costPrice','costSource','unitCost','cost','itemId','productId','productType','serviceKind'
-          ]) || ((!changed.hasAny(['itemId','productId','productType','serviceKind'])
-              || !isServiceBillingItem(before) && !isServiceBillingItem(after))
-            && (!changed.hasAny(['costPrice','costSource','unitCost','cost'])
-              || (before.get('procurementType', method) == 'SALES_SELF_ORDER'
-                && !changed.hasAny(['unitCost','cost'])
-                && after.get('costPrice', null) is number && after.costPrice >= 0)))));
+      return before == after || (
+        [before.get('deliveryPlan', {}), before.get('receivedQty', 0), before.get('receiptEvents', []), before.get('procurementType', method)]
+          == [after.get('deliveryPlan', {}), after.get('receivedQty', 0), after.get('receiptEvents', []), after.get('procurementType', method)]
+        && (!changed.hasAny(['itemId','productId','productType','serviceKind'])
+          || !isServiceBillingItem(before) && !isServiceBillingItem(after))
+        && (!changed.hasAny(['costPrice','costSource','unitCost','cost'])
+          || before.get('procurementType', method) == 'SALES_SELF_ORDER'
+            && !changed.hasAny(['unitCost','cost'])
+            && after.get('costPrice', null) is number && after.costPrice >= 0));
     }
     function validCommercialOrderCostUpdate() {
       let before = resource.data.get('items', []);
@@ -1650,12 +1655,11 @@ service cloud.firestore {
             && after.get('logisticsTransfersPending', 0) == before.get('logisticsTransfersPending', 0) - 1));
     }
 
-    function logisticsItemProtected(oldItems, newItems, index) {
-      return index >= oldItems.size() || (index < newItems.size()
-        && newItems[index].get('warehouseId', '') == oldItems[index].get('warehouseId', '')
-        && newItems[index].get('transferPendingId', '') == oldItems[index].get('transferPendingId', '')
-        && newItems[index].get('custodyTransferId', '') == oldItems[index].get('custodyTransferId', '')
-        && (!oldItems[index].get('warehouseId', '').matches('custody-.*') || newItems[index].get('deliveryPlan', {}) == oldItems[index].get('deliveryPlan', {})));
+    // Compare the protected projection once; callers guard each existing line.
+    function logisticsItemProtected(old, next) {
+      return [next.get('warehouseId', ''), next.get('transferPendingId', ''), next.get('custodyTransferId', '')]
+          == [old.get('warehouseId', ''), old.get('transferPendingId', ''), old.get('custodyTransferId', '')]
+        && (!old.get('warehouseId', '').matches('custody-.*') || next.get('deliveryPlan', {}) == old.get('deliveryPlan', {}));
     }
     function custodyItemClear(items, index) {
       return index >= items.size() || items[index].get('reservedQty', 0) == 0
@@ -1666,21 +1670,21 @@ service cloud.firestore {
       let after = request.resource.data;
       return before.get('warehouseLogisticsId', '') == '' || before.get('items', []) == after.get('items', []) || (before.items.size() <= 15
         && before.items.size() == after.items.size()
-        && logisticsItemProtected(before.items, after.items, 0)
-        && logisticsItemProtected(before.items, after.items, 1)
-        && logisticsItemProtected(before.items, after.items, 2)
-        && logisticsItemProtected(before.items, after.items, 3)
-        && logisticsItemProtected(before.items, after.items, 4)
-        && logisticsItemProtected(before.items, after.items, 5)
-        && logisticsItemProtected(before.items, after.items, 6)
-        && logisticsItemProtected(before.items, after.items, 7)
-        && logisticsItemProtected(before.items, after.items, 8)
-        && logisticsItemProtected(before.items, after.items, 9)
-        && logisticsItemProtected(before.items, after.items, 10)
-        && logisticsItemProtected(before.items, after.items, 11)
-        && logisticsItemProtected(before.items, after.items, 12)
-        && logisticsItemProtected(before.items, after.items, 13)
-        && logisticsItemProtected(before.items, after.items, 14));
+        && (before.items.size() <= 0 || logisticsItemProtected(before.items[0], after.items[0]))
+        && (before.items.size() <= 1 || logisticsItemProtected(before.items[1], after.items[1]))
+        && (before.items.size() <= 2 || logisticsItemProtected(before.items[2], after.items[2]))
+        && (before.items.size() <= 3 || logisticsItemProtected(before.items[3], after.items[3]))
+        && (before.items.size() <= 4 || logisticsItemProtected(before.items[4], after.items[4]))
+        && (before.items.size() <= 5 || logisticsItemProtected(before.items[5], after.items[5]))
+        && (before.items.size() <= 6 || logisticsItemProtected(before.items[6], after.items[6]))
+        && (before.items.size() <= 7 || logisticsItemProtected(before.items[7], after.items[7]))
+        && (before.items.size() <= 8 || logisticsItemProtected(before.items[8], after.items[8]))
+        && (before.items.size() <= 9 || logisticsItemProtected(before.items[9], after.items[9]))
+        && (before.items.size() <= 10 || logisticsItemProtected(before.items[10], after.items[10]))
+        && (before.items.size() <= 11 || logisticsItemProtected(before.items[11], after.items[11]))
+        && (before.items.size() <= 12 || logisticsItemProtected(before.items[12], after.items[12]))
+        && (before.items.size() <= 13 || logisticsItemProtected(before.items[13], after.items[13]))
+        && (before.items.size() <= 14 || logisticsItemProtected(before.items[14], after.items[14])));
     }
     function noCustodyForCancellation() {
       let before = resource.data;
@@ -1777,12 +1781,15 @@ service cloud.firestore {
         : userRole in ['sales','engineer'] && changed.hasAny(['isBilled','billingDate'])
           && changed.hasOnly(['isBilled','billingDate','statusHistory','updatedAt',
             'status','workCategories','workCategoryUpdatedAt']) ? owns(resource.data)
-        : userRole == 'purchaser' ? (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) && warehouseDeliveryPlanUpdate()) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['warehouseLogisticsId','warehouseLogisticsEventId']) && warehouseLogisticsOrderUpdate(id)) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id)) || purchaserOrderWorkflowUpdate(id) || returnReceiptOrderUpdate(id)
-        : userRole == 'warehouse' ? (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) && warehouseDeliveryPlanUpdate()) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['warehouseLogisticsId','warehouseLogisticsEventId']) && warehouseLogisticsOrderUpdate(id)) || (request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id)) || warehouseOrderWorkflowUpdate() || returnReceiptOrderUpdate(id)
+        // Delivery-plan and warehouse-logistics success paths already returned above.
+        // Their own changed-key whitelists make the duplicate branches unreachable.
+        : userRole in ['purchaser','warehouse'] ? (changed.hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id))
+          || operationalOrderWorkflowUpdate(id, userRole)
+          || returnReceiptOrderUpdate(id)
         : userRole in ['sales', 'engineer'] && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId'])
           && (changed.hasOnly(['returnRequests', 'returnPending', 'returnRequestMutationIndex', 'updatedAt'])
             && (changed.size() == 0 || changed.hasAny(['returnRequests', 'returnPending']))
-            ? commercialReturnRequestOnlyUpdate() : ((request.resource.data.diff(resource.data).affectedKeys().hasAny(['deliveryRecords']) && directShipReceiptOrderUpdate(id)) || (owns(resource.data) && (request.resource.data.diff(resource.data).affectedKeys().hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) ? warehouseDeliveryPlanUpdate() : (sameCommercialOwner() && preservesCreator()
+            ? commercialReturnRequestOnlyUpdate() : ((request.resource.data.diff(resource.data).affectedKeys().hasAny(['deliveryRecords']) && directShipReceiptOrderUpdate(id)) || (owns(resource.data) && (changed.hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) ? false : (sameCommercialOwner() && preservesCreator()
               // Pure delivery ledger updates cannot change item identity or cost.
               // Keep all delivery, ownership, stock witness and custody proofs below.
               && (deliveryLedgerOnly || validCommercialOrderCostUpdate())

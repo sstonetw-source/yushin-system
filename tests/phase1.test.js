@@ -1518,7 +1518,7 @@ test('phase 19 Firestore rules enforce role boundaries for PO inventory reservat
     assert.match(rulesSource, /match \/inventoryReservations\/\{id\}/);
     assert.match(rulesSource, /businessReservationOperationalUpdate\(\)/);
     assert.match(rulesSource, /match \/equipment\/\{id\}/);
-    assert.match(rulesSource, /function canManageEquipment\(\)[\s\S]*?return admin\(\) \|\| engineer\(\)/);
+    assert.match(rulesSource, /function canManageEquipment\(\)[\s\S]*?return role\(\) in \['admin','engineer'\]/);
     assert.match(rulesSource, /allow read: if canManageEquipment\(\) \|\| \(businessOwner\(\) && owns\(resource\.data\)\)/);
     assert.match(rulesSource, /allow read, write: if false/);
 });
@@ -4154,9 +4154,9 @@ test('critical role matrix stays aligned between UI capabilities and Firestore r
     const ruleHelperEnd=rulesSource.indexOf('\n\n    function salesCode()',ruleHelperStart);
     const helperSource=rulesSource.slice(ruleHelperStart,ruleHelperEnd);
     assert.match(helperSource,/return role\(\) in \['sales', 'engineer'\]/);
-    assert.match(helperSource,/function canPurchase\(\)[\s\S]*?admin\(\) \|\| purchaser\(\)/);
+    assert.match(helperSource,/function canPurchase\(\)[\s\S]*?role\(\) in \['admin','purchaser'\]/);
     assert.match(helperSource,/function canReceiveInventory\(\)[\s\S]*?role\(\) in \['admin', 'purchaser', 'warehouse'\]/);
-    assert.match(helperSource,/function canManageEquipment\(\)[\s\S]*?admin\(\) \|\| engineer\(\)/);
+    assert.match(helperSource,/function canManageEquipment\(\)[\s\S]*?role\(\) in \['admin','engineer'\]/);
 
     const purchaseRuleStart=rulesSource.indexOf('match /purchaseOrders/{id}');
     const purchaseRuleEnd=rulesSource.indexOf('\n\n    // Unified source/order evidence',purchaseRuleStart);
