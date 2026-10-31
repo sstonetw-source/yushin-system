@@ -6,10 +6,19 @@ const {allowOrderReservationBackend}=require('../functions/order-reservation-gat
 function clone(v){return structuredClone(v);}
 function fixture(){
  const docs=new Map(),put=(path,value)=>docs.set(path,clone(value));
- const db={collection:name=>({doc:id=>({path:name+'/'+id,id})}),
+ const db={collection:name=>({
+  doc:id=>({path:name+'/'+id,id}),
+  where:(field,op,value)=>({query:name,field,op,value})}),
   async runTransaction(work){
    const writes=[],tx={async get(ref){
     if(writes.length)throw Error('read after write: '+ref.path);
+    if(ref.query){
+     assert.equal(ref.op,'==');
+     return {docs:[...docs].filter(([path,data])=>
+      path.startsWith(ref.query+'/')&&!path.slice(ref.query.length+1).includes('/')
+      &&data[ref.field]===ref.value).map(([path,value])=>({
+       id:path.slice(ref.query.length+1),data:()=>clone(value)}))};
+    }
     const value=docs.get(ref.path);
     return {exists:value!==undefined,data:()=>clone(value)};
    },set(ref,data,opts){writes.push({type:'set',path:ref.path,data:clone(data),opts});},
@@ -36,9 +45,9 @@ function fixture(){
   ]});
  for(const p of ['P','Q','D'])put('products/'+p,{productId:p,productType:'Goods',active:true});
  put('warehouses/A',{active:true});put('warehouses/B',{active:true});
- put('inventory/P',{productKey:'P',onHand:7,reserved:0,transferFreeInTransit:0});
+ put('inventory/P',{productKey:'P',onHand:4,reserved:0,transferFreeInTransit:0});
  put('warehouseStocks/A__P',{productKey:'P',warehouseId:'A',onHand:4,reserved:0,transferFreeInTransit:0});
- put('inventory/Q',{productKey:'Q',onHand:6,reserved:0,transferFreeInTransit:0});
+ put('inventory/Q',{productKey:'Q',onHand:2,reserved:0,transferFreeInTransit:0});
  put('warehouseStocks/B__Q',{productKey:'Q',warehouseId:'B',onHand:2,reserved:0,transferFreeInTransit:0});
  const request={orderId:'O',syncAttemptId:'sync_1234567890'};
  const snapshot=()=>JSON.stringify([...docs].sort(([a],[b])=>a.localeCompare(b)));
@@ -70,6 +79,81 @@ test('one backend transaction reserves all warehouse items and reconciles all su
  assert.equal(demand('I3').requestedQty,1);
  assert.equal(demand('I4').requestedQty,2);
  assert.equal(f.docs.get('reservationOperationReceipts/order-sync-O__sync_1234567890').actorUid,'actor');
+});
+test('initial whole-order backend chooses an alternate single stocked warehouse without false procurement',async()=>{
+ const f=fixture(),order=f.docs.get('orders/O');
+ f.put('orders/O',{...order,items:[order.items[0]]});
+ f.put('inventory/P',{productKey:'P',onHand:3,reserved:0});
+ f.put('warehouseStocks/A__P',{productKey:'P',warehouseId:'A',onHand:0,reserved:0});
+ f.put('warehouseStocks/B__P',{productKey:'P',warehouseId:'B',onHand:3,reserved:0});
+ const result=await f.run();
+ assert.deepEqual([result.reservedQty,result.shortageQty],[3,0]);
+ const saved=f.docs.get('orders/O');
+ assert.deepEqual([saved.items[0].warehouseId,saved.items[0].reservedQty],['B',3]);
+ assert.equal(saved.inventoryReservationStatus,'completed');
+ assert.equal(f.docs.get('inventoryReservations/O__I1').warehouseId,'B');
+ assert.equal(f.docs.get('warehouseStocks/B__P').reserved,3);
+ assert.equal(f.docs.get('warehouseStocks/A__P').reserved,0);
+ assert.equal(f.docs.has('procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I1')),false);
+ const before=f.snapshot();assert.equal((await f.run()).status,'already-applied');
+ assert.equal(f.snapshot(),before);
+});
+test('one alternate location can partially reserve and create only its genuine shortage',async()=>{
+ const f=fixture(),order=f.docs.get('orders/O');
+ f.put('orders/O',{...order,items:[order.items[0]]});
+ f.put('inventory/P',{productKey:'P',onHand:2,reserved:0});
+ f.put('warehouseStocks/A__P',{productKey:'P',warehouseId:'A',onHand:0,reserved:0});
+ f.put('warehouseStocks/B__P',{productKey:'P',warehouseId:'B',onHand:2,reserved:0});
+ const result=await f.run();
+ assert.deepEqual([result.reservedQty,result.shortageQty],[2,1]);
+ assert.deepEqual([f.docs.get('orders/O').items[0].warehouseId,
+  f.docs.get('orders/O').items[0].shortageQty],['B',1]);
+ assert.equal(f.docs.get('procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I1')).requestedQty,1);
+});
+test('single-location ledger rejects a required multi-warehouse split without any writes',async()=>{
+ const f=fixture(),order=f.docs.get('orders/O');
+ f.put('orders/O',{...order,items:[order.items[0]]});
+ f.put('inventory/P',{productKey:'P',onHand:4,reserved:0});
+ f.put('warehouseStocks/A__P',{productKey:'P',warehouseId:'A',onHand:2,reserved:0});
+ f.put('warehouseStocks/B__P',{productKey:'P',warehouseId:'B',onHand:2,reserved:0});
+ const before=f.snapshot();
+ await assert.rejects(f.run(),/需要多倉分配/);
+ assert.equal(f.snapshot(),before);
+});
+test('company stock above enabled location totals or inactive candidates fails closed',async()=>{
+ for(const inject of [
+  f=>f.put('inventory/P',{productKey:'P',onHand:5,reserved:0}),
+  f=>{f.put('inventory/P',{productKey:'P',onHand:3,reserved:0});
+   f.put('warehouseStocks/A__P',{productKey:'P',warehouseId:'A',onHand:0,reserved:0});
+   f.put('warehouses/B',{active:false});
+   f.put('warehouseStocks/B__P',{productKey:'P',warehouseId:'B',onHand:3,reserved:0});},
+  f=>{f.put('inventory/P',{productKey:'P',onHand:3,reserved:0});
+   f.put('warehouseStocks/A__P',{productKey:'P',warehouseId:'A',onHand:0,reserved:0});
+   f.put('warehouses/B',{active:true,warehouseType:'CUSTODY'});
+   f.put('warehouseStocks/B__P',{productKey:'P',warehouseId:'B',onHand:3,reserved:0});},
+  f=>f.put('warehouseStocks/incorrect',{productKey:'P',warehouseId:'B',onHand:3,reserved:0})
+ ]){
+  const f=fixture(),order=f.docs.get('orders/O');
+  f.put('orders/O',{...order,items:[order.items[0]]});
+  inject(f);const before=f.snapshot();
+  await assert.rejects(f.run(),/公司可用庫存|分倉庫存識別/);
+  assert.equal(f.snapshot(),before);
+ }
+});
+test('repeated same-product order items choose single warehouses against remaining transactional stock',async()=>{
+ const f=fixture(),order=f.docs.get('orders/O');
+ f.put('orders/O',{...order,items:order.items.slice(0,2)});
+ f.put('inventory/P',{productKey:'P',onHand:6,reserved:0});
+ f.put('warehouseStocks/A__P',{productKey:'P',warehouseId:'A',onHand:3,reserved:0});
+ f.put('warehouseStocks/B__P',{productKey:'P',warehouseId:'B',onHand:3,reserved:0});
+ const result=await f.run();
+ assert.deepEqual([result.reservedQty,result.shortageQty],[6,0]);
+ assert.deepEqual(f.docs.get('orders/O').items.map(i=>[i.warehouseId,i.reservedQty]),
+  [['A',3],['B',3]]);
+ assert.equal(f.docs.get('inventory/P').reserved,6);
+ assert.equal(f.docs.get('warehouseStocks/A__P').reserved,3);
+ assert.equal(f.docs.get('warehouseStocks/B__P').reserved,3);
+ assert.equal([...f.docs.keys()].filter(k=>k.startsWith('inventoryMovements/')).length,2);
 });
 test('repeated response after a commit is idempotent and does not double-charge stock',async()=>{
  const f=fixture();await f.run();const before=f.snapshot();
@@ -137,7 +221,7 @@ test('source productKey cannot be forged and manual product codes use the canoni
  manual.items=[{itemId:'M1',itemCode:' a 100 ',inventoryProductKey:'code:A100',
   warehouseId:'A',qty:3,reservedQty:0}];
  f.put('orders/O',manual);
- f.put('inventory/'+encodeURIComponent('code:A100'),{productKey:'code:A100',onHand:8,reserved:0});
+ f.put('inventory/'+encodeURIComponent('code:A100'),{productKey:'code:A100',onHand:6,reserved:0});
  f.put('warehouseStocks/'+encodeURIComponent('A')+'__'+encodeURIComponent('code:A100'),{
   productKey:'code:A100',warehouseId:'A',onHand:6,reserved:0});
  assert.equal((await f.run()).reservedQty,3);
