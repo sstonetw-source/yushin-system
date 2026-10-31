@@ -4,6 +4,7 @@
 // performs no mutation and must be re-run INSIDE the eventual commit transaction.
 // Quantity formulas use the exact browser Procurement Demand Core.
 const demandCore=require('./shared/procurement-demand-core.js');
+const {hasCommercialOwnerIdentity}=require('./commercial-owner-identity');
 function reject(code,message){const error=new Error(message);error.code=code;throw error;}
 function identifier(value,label,max=160){
  if(typeof value!=='string'||!value||value.trim()!==value||value.length>max||value.includes('/'))
@@ -53,7 +54,7 @@ async function validateV2FormalPurchaseTx(tx,db,uid,intent,{allowExistingPo=fals
   const order=await tx.get(ref('orders',intent.orderId));
   if(!order.exists)reject('not-found','來源訂單不存在');
   const source=order.data();
-  if(!source.ownerUid||!source.salesCode)
+  if(!await hasCommercialOwnerIdentity(tx,db,uid,user.data(),source))
    reject('failed-precondition','來源訂單缺少業務歸屬資料，請先核對負責人與業務代碼');
   if(source.status==='cancelled'||source.orderStatus==='cancelled'
     ||source.status==='voided'||source.orderStatus==='voided'
