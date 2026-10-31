@@ -92,6 +92,7 @@ jobs:
         run: |
           node tests/service-progress-browser-smoke.js
           node tests/workflow-audit-browser-smoke.js
+          node tests/order-retry-billing-browser-smoke.js
           node tests/free-stock-recovery-browser-smoke.js
           node tests/pr-reconciliation-browser-smoke.js
           node tests/dispatch-preparation-browser-smoke.js

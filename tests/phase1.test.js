@@ -604,7 +604,7 @@ test('billing status is optimistic and ignores a rapid duplicate tap', async () 
     const order = { id: 'o1', transactionType:'借', isOrdered: true, isArrived: true, isBilled: false, statusHistory: [] };
     let updatePayload;
     const context = {
-        YushinOrderEntry:require('../modules/order-entry-core'),window: {}, BUSINESS_STATUS: { ACTIVE: 'active', COMPLETED: 'completed', CANCELLED: 'cancelled', VOIDED: 'voided' }, ordersCache: [order], pendingOrderStatusKeys: new Set(), activeOrderWorkFilter: 'all',
+        YushinOrderEntry:require('../modules/order-entry-core'),window: {}, BUSINESS_STATUS: { ACTIVE: 'active', COMPLETED: 'completed', CANCELLED: 'cancelled', VOIDED: 'voided' }, ordersCache: [order], pendingOrderStatusKeys: new Set(), pendingOrderReservationIds: new Set(), activeOrderWorkFilter: 'all',
         canManageOrderLifecycleCapability: () => true, canEditPage: () => true, normalizedOrderStatus: () => 'normal',
         deliveryProgressInfo: () => ({ delivered: 0 }), orderBillingDate: () => '', localDateString: () => '2026-09-17',
         prompt: () => { throw new Error('billing must not depend on window.prompt'); }, alert: message => { throw new Error(message); },
@@ -642,7 +642,7 @@ test('failed billing write restores the previous state and unlocks the button', 
     const order = { id: 'o2', transactionType:'借', isOrdered: true, isArrived: true, isBilled: false, billingDate: '', statusHistory: [] };
     let alertMessage = '';
     const context = {
-        YushinOrderEntry:require('../modules/order-entry-core'),window: {}, BUSINESS_STATUS: { ACTIVE: 'active', COMPLETED: 'completed', CANCELLED: 'cancelled', VOIDED: 'voided' }, ordersCache: [order], pendingOrderStatusKeys: new Set(), activeOrderWorkFilter: 'billing',
+        YushinOrderEntry:require('../modules/order-entry-core'),window: {}, BUSINESS_STATUS: { ACTIVE: 'active', COMPLETED: 'completed', CANCELLED: 'cancelled', VOIDED: 'voided' }, ordersCache: [order], pendingOrderStatusKeys: new Set(), pendingOrderReservationIds: new Set(), activeOrderWorkFilter: 'billing',
         canManageOrderLifecycleCapability: () => true, canEditPage: () => true, normalizedOrderStatus: () => 'normal',
         deliveryProgressInfo: () => ({ delivered: 0 }), orderBillingDate: () => '', localDateString: () => '2026-09-17',
         prompt: () => '2026-09-17', alert: message => { alertMessage = message; },

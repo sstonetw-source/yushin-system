@@ -1256,6 +1256,7 @@ window.renderOrdersList = function() {
         const useBatchDelivery = orderDeliveryRequiresItemForm(allOrderItems, deliveryProgress, fulfillmentProgress);
         const deliveryPending = pendingDeliveryOrderIds.has(o.id);
         const billingPending = pendingOrderStatusKeys.has(o.id + ':isBilled');
+        const inventorySyncPending = pendingOrderReservationIds.has(o.id);
         if (lifecycle.status !== 'normal') {
             tr.classList.add('order-row-closed');
         }
@@ -1309,7 +1310,7 @@ window.renderOrdersList = function() {
                         ? `<button type="button" class="btn-small" onclick="openV3CustodyReturn(${inlineJsValue(o.id)})">保管退貨實收／核對</button>`:''}
                     
                     ${canConfirmOrderDelivery && lifecycle.status === 'normal' && deliveryProgress.state !== 'complete' && (fulfillmentProgress.shippable>0 || deliveryPending) ? `<button type="button" class="btn-small" onclick="${useBatchDelivery ? 'openPartialDeliveryForOrder' : 'quickCompleteDelivery'}(${inlineJsValue(o.id)})" ${orderInventorySyncIncomplete(o) || lifecycle.status !== 'normal' || deliveryPending || deliveryProgress.state === 'complete' || fulfillmentProgress.shippable<=0 ? 'disabled' : ''}>${deliveryPending ? '處理中…' : useBatchDelivery ? '確認分批送達' : '確認送達'}</button>` : ''}
-                    ${canBusinessSelfOrder(o) ? `<button type="button" class="btn-small order-billing-action ${o.isBilled ? 'btn-secondary' : ''}" onclick="toggleOrderStatus('${o.id}', 'isBilled', ${!o.isBilled})" ${lifecycle.status !== 'normal' || billingPending ? 'disabled' : ''}>${billingPending ? '儲存中…' : o.isBilled ? '已核銷' : '核銷'}</button>` : ''}
+                    ${canBusinessSelfOrder(o) ? `<button type="button" class="btn-small order-billing-action ${o.isBilled ? 'btn-secondary' : ''}" onclick="toggleOrderStatus('${o.id}', 'isBilled', ${!o.isBilled})" ${lifecycle.status !== 'normal' || billingPending || inventorySyncPending ? 'disabled' : ''}>${billingPending ? '儲存中…' : o.isBilled ? '已核銷' : '核銷'}</button>` : ''}
                     <details class="order-more-menu">
                         <summary title="更多操作">⋯</summary>
                         <div class="order-more-menu-popover">
@@ -1473,7 +1474,7 @@ function orderInventorySyncStatusHtml(order) {
     const running=pendingOrderReservationIds.has(order.id);
     const label=running?'訂單同步中…':!orderInventorySyncIncomplete(order)?'來源文件同步未完成':order.inventoryReservationStatus==='failed'?'庫存同步未完成':'庫存同步待確認';
     const canRetry=orderInventorySyncIncomplete(order)?canRetryOrderInventorySync(order):canRetrySourceDocumentSync(order);
-    return `<div class="inline-status" role="status">${label}${!running&&canRetry?` <button type="button" class="btn-small" onclick="retryOrderInventoryReservation(${inlineJsValue(order.id)})">重試同步</button>`:''}</div>`;
+    return `<div class="inline-status" role="status">${label}${running||canRetry?` <button type="button" class="btn-small" ${running?'disabled aria-busy="true"':''} onclick="retryOrderInventoryReservation(${inlineJsValue(order.id)})">重試同步</button>`:''}</div>`;
 }
 window.addEventListener('beforeunload',event=>{
     if(pendingOrderReservationIds.size){event.preventDefault();event.returnValue='';}

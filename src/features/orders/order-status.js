@@ -46,6 +46,9 @@ window.toggleOrderStatus = function(orderId, field, newValue) {
     }
     const o = ordersCache.find(x => x.id === orderId);
     if (!o || !canEditPage('orders.list')) return;
+    // A retry re-renders its row; ignore a stale or rapid tap on billing until
+    // that same order finishes synchronization. Other orders remain usable.
+    if (pendingOrderReservationIds.has(orderId)) return;
     if((o.items||[]).some(item=>String(item?.productType||'').trim().toUpperCase()==='SERVICE')) {
         return toggleServiceOrderBilling(o,newValue);
     }
