@@ -7,12 +7,18 @@ function populateOrderOwnerSelect() {
     const wrap = document.getElementById('orderOwnerWrap');
     const select = document.getElementById('orderOwnerUid');
     if (!wrap || !select) return;
-    wrap.style.display = currentUserRole === 'purchaser' ? '' : 'none';
-    if (currentUserRole !== 'purchaser') return;
+    const canDelegate = currentUserRole === 'purchaser' || currentUserRole === 'admin';
+    wrap.style.display = canDelegate ? '' : 'none';
+    if (!canDelegate) return;
     const salespeople = salesList.filter(isSelectableCommercialOwner);
+    if (currentUserRole === 'admin' && currentUser?.uid && currentUserName && currentUserCode
+        && !salespeople.some(person => person.uid === currentUser.uid)) {
+        salespeople.push({uid:currentUser.uid,name:currentUserName,code:currentUserCode,role:'admin'});
+    }
     select.replaceChildren(new Option('請選擇負責業務', ''));
     salespeople.forEach(person => select.add(new Option(`${person.name}（${person.code}・${ROLE_LABELS[person.role]}）`, person.uid)));
-    select.value = salespeople.some(person => person.uid === requestedOrderOwnerUid) ? requestedOrderOwnerUid : '';
+    const defaultUid = requestedOrderOwnerUid || (currentUserRole === 'admin' ? currentUser?.uid : '');
+    select.value = salespeople.some(person => person.uid === defaultUid) ? defaultUid : '';
 }
 
 function orderDraftStorageKey() {
@@ -423,7 +429,7 @@ window.openOrderModal = function(source = null) {
 
         populateOrderOwnerSelect();
         window.initializeOrderDeliveryDefaults?.(source?.shippingInstructions);
-        if (currentUserRole === 'purchaser') {
+        if (currentUserRole === 'purchaser' || currentUserRole === 'admin') {
             ensureSalesListLoaded()
                 .then(() => {
                     if (openingGeneration === orderModalOpenGeneration) {populateOrderOwnerSelect();window.initializeOrderDeliveryDefaults?.(source?.shippingInstructions);}
@@ -655,11 +661,18 @@ window.saveNewOrder = function() {
         return;
     }
     if(items.some(item=>item.fulfillmentType==='WAREHOUSE'&&String(item.productType||'').trim().toUpperCase()!=='SERVICE'&&warehouseMasterCache.length&&!item.warehouseId)){alert('請為每個倉庫出貨品項選擇倉庫。');return;}
-    const assistedOwner = currentUserRole === 'purchaser'
-        ? salesList.find(person => person.uid === document.getElementById('orderOwnerUid')?.value
-            && isSelectableCommercialOwner(person))
+    const delegated = currentUserRole === 'purchaser' || currentUserRole === 'admin';
+    const selectedOwnerUid = document.getElementById('orderOwnerUid')?.value || '';
+    const assistedOwner = delegated
+        ? (salesList.find(person => person.uid === selectedOwnerUid && isSelectableCommercialOwner(person))
+            || (currentUserRole === 'admin' && selectedOwnerUid === currentUser?.uid && currentUserName && currentUserCode
+                ? {uid:currentUser.uid,name:currentUserName,code:currentUserCode,role:'admin'} : null))
         : null;
-    if (currentUserRole === 'purchaser' && !assistedOwner) { alert('請先選擇有效的負責業務。'); return; }
+    if (delegated && !assistedOwner) { alert('請先選擇具有有效姓名、業務代碼的負責業務。'); return; }
+    const sourceOwnerUid = window._orderModalQuoteContext?.ownerUid || window._orderModalForecastContext?.ownerUid || '';
+    if (delegated && sourceOwnerUid && assistedOwner.uid !== sourceOwnerUid) {
+        alert('來源估價單或 Forecast 的負責人與新訂單不一致，請重新選擇。'); return;
+    }
     if(currentUserRole==='purchaser'&&items.some(item=>item.procurementType==='SALES_SELF_ORDER'&&item.selfOrderConfirmed===true)){alert('採購可代建自行訂貨訂單；已向供應商下訂由負責業務確認。');return;}
     if(!document.getElementById('orderCustomer').value.trim()){alert('請填寫客戶名稱。');document.getElementById('orderCustomer')?.focus();return;}
     for(let index=0;index<items.length;index++) {
@@ -875,7 +888,7 @@ window.exportOrdersByDate = async function() {
             const rows = [];
             records.forEach(o => {
                 if((o.orderDate||'')<start||(o.orderDate||'')>end)return;
-                if (!canViewAllData('orders') && !belongsToCurrentUser(o.salesName, o.ownerUid)) {
+                if (!canViewAllData('orders') && !belongsToCurrentUser(o.salesName, o.ownerUid, o.salesCode)) {
                     return;
                 }
                 rows.push({

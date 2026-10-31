@@ -24,11 +24,12 @@ function canManageEquipmentCapability(role = currentUserRole) {
     return role === 'admin' || role === 'engineer';
 }
 
-// 採購代辦沿用負責業務的單據歸屬；工程師也是商業單據負責業務。
+// 具有效姓名及業務代碼的管理員保留商務負責人資格，不新增複合角色。
 function isSelectableCommercialOwner(person) {
-    return !!person && ['sales', 'engineer'].includes(person.role)
+    return !!person && ['sales', 'engineer', 'admin'].includes(person.role)
         && person.active !== false && person.disabled !== true
-        && !!person.uid && !!person.code;
+        && !!String(person.uid || '').trim() && !!String(person.code || '').trim()
+        && !!String(person.name || '').trim();
 }
 
 function commercialCreatorFields() {
@@ -85,16 +86,14 @@ function syncCustomerMaster(customerName, extra = {}) {
 
 function canUseQuote(record = {}) {
     return canViewAllData('quotes')
-        || belongsToCurrentUser(record.salesName, record.ownerUid, record.salesCode)
-        || (currentUserRole === 'engineer' && record.createdByUid === currentUser?.uid
-            && record.createdByRole === 'engineer');
+        || belongsToCurrentUser(record.salesName, record.ownerUid, record.salesCode);
 }
 
 function belongsToCurrentUser(salesName, ownerUid, salesCode = '') {
-    if (salesCode && currentUserCode) return String(salesCode) === String(currentUserCode);
     if (ownerUid && currentUser?.uid) return ownerUid === currentUser.uid;
-    if (!currentUserName) return false;
-    return stripPhoneSuffix(salesName || '') === stripPhoneSuffix(currentUserName);
+    if (salesCode && currentUserCode) return String(salesCode) === String(currentUserCode);
+    // Never infer document authority from a display name (duplicate names are possible).
+    return false;
 }
 
 function getActivePermissionPage() {
@@ -152,6 +151,8 @@ function updateReadonlyNotice() {
         notice.innerText = '倉管模式：可收貨、出貨、調撥點收及盤點；採購、成本維護與打單由採購／管理員處理。';
     } else if (pageKey === 'products' && currentUserRole === 'purchaser') {
         notice.innerText = '產品主檔權限：採購可新增、編輯與停用產品主檔；永久刪除僅限管理員。';
+    } else if (pageKey === 'products' && currentUserRole === 'sales') {
+        notice.innerText = '可新增正式產品主檔；既有產品的編輯、停用、刪除及成本、庫存維護仍限授權人員。';
     } else if (pageKey === 'products' && hasBusinessCapability()) {
         notice.innerText = '產品主檔僅可查看；您可以把產品加入估價單或建立訂單，但不能修改、停用或刪除產品主檔。';
     } else {

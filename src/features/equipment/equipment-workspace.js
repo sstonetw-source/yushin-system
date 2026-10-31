@@ -305,11 +305,8 @@ function escapeHtml(str) {
 // 這是必要的設計：一般業務只看得到自己的儀器清單，如果編號單純依序累加，
 // 不同業務各自算出來的「下一個編號」會撞在一起（例如兩人都算出 EQ00001）；
 // 用代號當前綴後，就算彼此看不到對方的資料，編號也不會重複。
-function getNextAssetId(salesName) {
-    const match = salesList.find(s => s.name === salesName);
-    const code = (salesName === currentUserName && currentUserCode)
-        ? currentUserCode
-        : ((match && match.code) ? match.code : 'NA');
+function getNextAssetId(salesName, selectedCode = '') {
+    const code = selectedCode || (salesName === currentUserName ? currentUserCode : '') || 'NA';
     const prefix = `EQ-${code}-`;
 
     let maxSeq = 0;
@@ -442,14 +439,18 @@ window.saveEquipmentFromModal = async function() {
     if (equipmentActionsPending.has('save')) return;
     const editId = document.getElementById('eqModalOverlay').dataset.editId;
     if (editId && equipmentActionsPending.has(editId)) return;
+    const ownerOption = document.getElementById('eqSales').selectedOptions?.[0];
+    const ownerUid = ownerOption?.dataset.ownerUid || '';
+    const ownerCode = ownerOption?.dataset.salesCode || '';
+    const savedEquipment = editId ? equipmentList.find(item => item.id === editId) : null;
     const data = {
         customerName: document.getElementById('eqCustomer').value.trim(),
         customerId: customerIdForName(document.getElementById('eqCustomer').value.trim()),
         brand: getBrandFieldValue('eqBrand', 'eqBrandOther'),
         model: document.getElementById('eqModel').value.trim(),
         serialNo: document.getElementById('eqSerial').value.trim(),
-        salesName: document.getElementById('eqSales').value.trim(),
-        salesCode: salesCodeForName(document.getElementById('eqSales').value.trim()),
+        salesName: ownerCode ? document.getElementById('eqSales').value.trim() : (savedEquipment?.salesName || ''),
+        salesCode: ownerCode || savedEquipment?.salesCode || '',
         location: document.getElementById('eqLocation').value.trim(),
         installDate: document.getElementById('eqInstallDate').value,
         cycleMonths: parseInt(document.getElementById('eqCycle').value) || 12,
@@ -476,7 +477,7 @@ window.saveEquipmentFromModal = async function() {
         await db.runTransaction(async tx => {
             const snapshot = await tx.get(ref);
             if (snapshot.exists) tx.update(ref, data);
-            else tx.set(ref, { ...data, assetId: getNextAssetId(data.salesName), logs: [] });
+            else tx.set(ref, { ...data, ...(ownerUid ? {ownerUid} : {}), assetId: getNextAssetId(data.salesName, data.salesCode), logs: [] });
         });
         const stillEditing = overlay.dataset.editId === editId && (editId || overlay.dataset.pendingCreateId === ref.id);
         if (stillEditing) { overlay.dataset.editId = ref.id; currentEquipmentId = ref.id; }

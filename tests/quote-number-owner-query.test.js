@@ -34,14 +34,13 @@ test('sales number uses the maximum of UID ownership and legacy code ownership, 
     for(const filters of db.calls)assert.ok(filters.some(([f,op])=>['salesCode','ownerUid'].includes(f)&&op==='=='));
 });
 
-test('engineer-assisted numbering includes only their own assisted quotes and keeps the selected salesperson prefix',async()=>{
+test('engineer numbering stays owner-scoped despite historically assisting another salesperson',async()=>{
     const db=database([
-        {quoteNo:'YS-20261031-S02-05',ownerUid:'sales2',salesCode:'S02',createdByUid:'eng1',createdByRole:'engineer'},
-        {quoteNo:'YS-20261031-S02-98',ownerUid:'sales2',salesCode:'S02',createdByUid:'eng2',createdByRole:'engineer'},
-        {quoteNo:'YS-20261031-S02-99',ownerUid:'sales2',salesCode:'S02',createdByUid:'eng1',createdByRole:'sales'}
+        {quoteNo:'YS-20261031-E01-05',ownerUid:'eng1',salesCode:'E01',createdByUid:'eng1',createdByRole:'engineer'},
+        {quoteNo:'YS-20261031-E01-98',ownerUid:'sales2',salesCode:'S02',createdByUid:'eng1',createdByRole:'engineer'}
     ]);
-    assert.equal(await quoteNumberGenerator(db,{role:'engineer',uid:'eng1',code:'E01',selectedCode:'S02'}).generate(),'YS-20261031-S02-06');
-    assert.equal(db.calls.length,3);
+    assert.equal(await quoteNumberGenerator(db,{role:'engineer',uid:'eng1',code:'E01',selectedCode:'E01'}).generate(),'YS-20261031-E01-06');
+    assert.equal(db.calls.length,2);
 });
 
 test('purchaser and administrator keep a single bounded company lookup',async()=>{

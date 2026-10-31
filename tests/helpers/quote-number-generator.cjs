@@ -12,8 +12,10 @@ exports.quoteNumberGenerator = function(database, {role='sales', uid='sales1', c
         window:{}, db:database, editingQuoteNo:'', restoringQuoteDraft:false,
         companyData:{YS:{prefix:'YS'}}, currentCompany:'YS',
         currentUser:uid ? {uid} : null, currentUserRole:role, currentUserCode:code,
-        currentUserName:'Owner', salesList:[{name:'Selected', code:selectedCode}],
-        document:{getElementById:id => id==='quoteNo' ? input : id==='salesName' ? {value:'Selected'} : null},
+        currentUserName:'Owner', salesList:[{uid, name:'Selected', code:selectedCode}],
+        isSelectableCommercialOwner:()=>true,
+        document:{getElementById:id => id==='quoteNo' ? input : id==='salesName'
+          ? {value:'Selected', selectedOptions:[{dataset:{ownerUid:uid}}]} : null},
         getFormattedDateCode:()=>'20261031', canViewAllData:()=>['admin','purchaser'].includes(role),
         firestoreReadWithTimeout:promise=>promise, saveQuoteDraft:()=>{},
         setQuoteOutputStatus:message=>errors.push(message), console:{error:()=>{}}

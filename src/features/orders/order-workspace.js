@@ -1117,7 +1117,7 @@ function orderBrandFilterValue(value, selectableBrands) {
 let orderFilterOptionsSignature = '';
 
 function workflowSalesFilterNames() {
-    return [...new Set(salesList.map(person => stripPhoneSuffix(person.name)).filter(Boolean))]
+    return [...new Set(salesList.filter(isSelectableCommercialOwner).map(person => stripPhoneSuffix(person.name)).filter(Boolean))]
         .sort((a, b) => a.localeCompare(b, 'zh-Hant'));
 }
 

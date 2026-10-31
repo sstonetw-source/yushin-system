@@ -65,11 +65,8 @@ function forecastSalesCodeForName(name) {
     const normalizedName = stripPhoneSuffix(name || '').trim();
     if (!normalizedName) return '';
     if (normalizedName === forecastOwnSalesName() && currentUserCode) return String(currentUserCode);
-    const match = salesList.find(person =>
-        String(person.role || 'sales').toLowerCase() === 'sales'
-        && stripPhoneSuffix(person.name || '') === normalizedName
-        && person.active !== false
-    );
+    const match = salesList.find(person => isSelectableCommercialOwner(person)
+        && stripPhoneSuffix(person.name || '') === normalizedName);
     return String(match?.code || '');
 }
 
@@ -96,7 +93,7 @@ function populateForecastSalesFilter() {
     const names = new Set();
 
     salesList
-        .filter(person => String(person.role || 'sales').toLowerCase() === 'sales' && person.active !== false)
+        .filter(isSelectableCommercialOwner)
         .forEach(person => {
             const name = stripPhoneSuffix(person.name || '');
             if (name) names.add(name);
