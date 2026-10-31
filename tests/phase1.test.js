@@ -230,17 +230,16 @@ test('preview host selects isolated Firebase project and exposes a visible envir
     assert.match(indexSource, /PREVIEW／測試環境｜資料與正式系統分離/);
 });
 
-test('quote owner selector lets engineer assist sales while keeping sales self-only', () => {
+test('quote owner selector allows engineer only self and eligible admin commercial identities', () => {
     assert.match(appSource, /function populateSalesDropdown\(\)/);
     const start = appSource.indexOf('function populateSalesDropdown()');
     const end = appSource.indexOf('\n}\n', start) + 2;
     const selector = appSource.slice(start, end);
-    assert.match(selector, /if \(currentUserRole === 'sales'\) return s\.uid === currentUser\?\.uid/);
-    assert.match(selector, /if \(currentUserRole === 'engineer'\) return s\.uid === currentUser\?\.uid \|\| role === 'sales'/);
-    assert.match(selector, /return role === 'sales' \|\| role === 'engineer'/);
+    assert.match(selector, /isSelectableCommercialOwner\(s\)/);
+    assert.match(selector, /!\['sales','engineer'\]\.includes\(currentUserRole\) \|\| s\.uid === currentUser\?\.uid/);
     assert.match(selector, /\? currentUserName : ''/);
-    assert.match(rulesSource, /function engineerAssistedSalesQuote/);
-    assert.match(rulesSource, /match \/quotes\/\{id\}[\s\S]*?engineerAssistedSalesQuote\(request\.resource\.data\)/);
+    assert.doesNotMatch(rulesSource, /function engineerAssistedSalesQuote/);
+    assert.match(rulesSource, /match \/quotes\/\{id\}[\s\S]*?validOwnedCommercialCreate\(request\.resource\.data\)/);
 });
 
 test('Brand Master drives the main brand list while statistics grouping remains independent', () => {
@@ -349,7 +348,7 @@ test('purchaser order form assigns a salesperson while preserving creator identi
     const start = appSource.indexOf('window.saveNewOrder = function()');
     const end = appSource.indexOf('\n};', start) + 3;
     const saveOrder = appSource.slice(start, end);
-    assert.match(saveOrder, /currentUserRole === 'purchaser' && !assistedOwner/);
+    assert.match(saveOrder, /delegated && !assistedOwner/);
     assert.match(saveOrder, /ownerUid: assistedOwner\?\.uid \|\| window\._orderModalQuoteContext\?\.ownerUid \|\| window\._orderModalForecastContext\?\.ownerUid \|\| currentUser\?\.uid/);
     assert.match(saveOrder, /\.\.\.commercialCreatorFields\(\)/);
 });
@@ -1245,6 +1244,7 @@ test('order brand filter uses selectable brands and groups alternate spelling an
             { salesName: '王先生', brand: '自行輸入品牌' }
         ],
         salesList: [{ name: '王先生' }],
+        isSelectableCommercialOwner:()=>true,
         OTHER_BRAND_OPTION_KEY: '其他廠牌',
         normalizeBrandLookupKey: normalize,
         resolveBrandName: value => normalize(value) === 'biorad' ? 'Bio-Rad' : value,
@@ -2688,7 +2688,7 @@ test('own-scope equipment page avoids full staff preload', () => {
     const assetStart=appSource.indexOf('function getNextAssetId');
     const assetEnd=appSource.indexOf('// 型號輸入時',assetStart);
     const assetSource=appSource.slice(assetStart,assetEnd);
-    assert.match(assetSource,/salesName === currentUserName && currentUserCode/);
+    assert.match(assetSource,/selectedCode \|\| \(salesName === currentUserName \? currentUserCode : ''\)/);
 
     const initStart=appSource.indexOf("if (mainKey === 'equipment') {");
     const initEnd=appSource.indexOf("if (mainKey === 'admin')",initStart);
@@ -2766,7 +2766,7 @@ test('quote form loads staff only for roles that need owner selection', () => {
     const selectorStart=appSource.indexOf('function populateSalesDropdown()');
     const selectorEnd=appSource.indexOf('\n// 依目前輸入的業務姓名',selectorStart);
     const selectorSource=appSource.slice(selectorStart,selectorEnd);
-    assert.match(selectorSource,/currentUserRole === 'engineer'[\s\S]*?s\.uid === currentUser\?\.uid \|\| role === 'sales'/);
+    assert.match(selectorSource,/!\['sales','engineer'\]\.includes\(currentUserRole\) \|\| s\.uid === currentUser\?\.uid/);
 
     const phoneStart=appSource.indexOf('function updateSalesPhoneDisplay');
     const phoneEnd=appSource.indexOf('\nfunction populateEquipmentSalesDropdown',phoneStart);

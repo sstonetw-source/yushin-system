@@ -28,7 +28,6 @@ service cloud.firestore {
 
     function admin() { return role() == 'admin'; }
     function sales() { return role() == 'sales'; }
-    function engineer() { return role() == 'engineer'; }
     function purchaser() { return role() == 'purchaser'; }
     function warehouse() { return role() == 'warehouse'; }
     // Customer arrival is a commercial fact, not a warehouse receipt.
@@ -78,7 +77,7 @@ service cloud.firestore {
       let ownerSalesCode = data.get('salesCode', '');
       return signedIn() && profileEnabled(profile) && (
         (ownerUid != '' && ownerUid == request.auth.uid) ||
-        (code != null && ownerSalesCode != '' && ownerSalesCode == code)
+        (ownerUid == '' && code != null && ownerSalesCode != '' && ownerSalesCode == code)
       );
     }
 
@@ -95,35 +94,25 @@ service cloud.firestore {
         && (profile.get('role', '') == 'admin' || !data.keys().hasAny(['unitCost','cost']));
     }
 
-    function validSalesOwner(data) {
-      return validQuoteOwner(data)
-        && get(/databases/$(database)/documents/users/$(data.ownerUid)).data.role == 'sales';
-    }
-
-    // Both quotes and customer orders may belong to an active salesperson or engineer.
-    // Purchaser assistance preserves the owner; creator fields retain the actual operator.
+    // Quotes and orders belong to an enabled salesperson, engineer or an admin
+    // with an actual commercial identity (name and business code).
     function validQuoteOwner(data) {
       return data.get('ownerUid', '') is string && data.get('ownerUid', '').size() > 0
         && data.get('salesCode', '') is string && data.get('salesCode', '').size() > 0
         && exists(/databases/$(database)/documents/users/$(data.ownerUid))
         && profileEnabled(get(/databases/$(database)/documents/users/$(data.ownerUid)).data)
-        && get(/databases/$(database)/documents/users/$(data.ownerUid)).data.role in ['sales', 'engineer']
+        && get(/databases/$(database)/documents/users/$(data.ownerUid)).data.role in ['sales', 'engineer', 'admin']
+        && (get(/databases/$(database)/documents/users/$(data.ownerUid)).data.role != 'admin'
+          || (get(/databases/$(database)/documents/users/$(data.ownerUid)).data.get('name', '') is string
+            && get(/databases/$(database)/documents/users/$(data.ownerUid)).data.get('name', '').size() > 0))
         && get(/databases/$(database)/documents/users/$(data.ownerUid)).data.get(
           'salesCode',
           get(/databases/$(database)/documents/users/$(data.ownerUid)).data.get('code', null)
         ) == data.salesCode;
     }
 
-    // Engineer may assist a salesperson with a quote, but only quotes the engineer created.
-    // Ownership remains with the salesperson; orders are intentionally not covered here.
-    function engineerAssistedSalesQuote(data) {
-      return engineer()
-        && data.get('createdByUid', '') == request.auth.uid
-        && data.get('createdByRole', '') == 'engineer';
-    }
-
     function validOwnedCommercialCreate(data) {
-      return admin() ||
+      return (admin() && validQuoteOwner(data)) ||
         (commercialDocumentOwner() &&
           data.ownerUid == request.auth.uid &&
           data.salesCode != null &&
@@ -464,6 +453,51 @@ service cloud.firestore {
           'listPrice', 'status', 'active', 'source', 'createdAt',
           'createdBy', 'updatedAt', 'updatedBy'
         ]);
+    }
+
+    // Sales may create a permanent, searchable master without acquiring edit,
+    // deactivate, cost or inventory privileges. Create is intrinsically no-overwrite.
+    function salesPermanentProductCreate(id, data) {
+      return sales()
+        && data.keys().hasAll([
+          'productId', 'brandId', 'brandName', 'manufacturerPartNo',
+          'normalizedPartNo', 'productName', 'nameEn', 'specification',
+          'productLine', 'productLineId', 'productType', 'category',
+          'serviceKind', 'listPrice', 'inventoryTracked', 'lotTracked',
+          'expiryTracked', 'status', 'active', 'source', 'createdAt',
+          'createdBy', 'updatedAt', 'updatedBy'
+        ])
+        && data.keys().hasOnly([
+          'productId', 'brandId', 'brandName', 'manufacturerPartNo',
+          'normalizedPartNo', 'productName', 'nameEn', 'specification',
+          'productLine', 'productLineId', 'productType', 'category',
+          'serviceKind', 'listPrice', 'inventoryTracked', 'lotTracked',
+          'expiryTracked', 'status', 'active', 'source', 'createdAt',
+          'createdBy', 'updatedAt', 'updatedBy'
+        ])
+        && data.productId == id && data.createdBy == request.auth.uid
+        && data.updatedBy == request.auth.uid
+        && data.source == 'MANUAL' && data.status == 'ACTIVE' && data.active == true
+        && data.brandId is string && data.brandId.size() > 0 && data.brandId.size() <= 200
+        && data.brandName is string && data.brandName.size() > 0 && data.brandName.size() <= 200
+        && data.manufacturerPartNo is string && data.manufacturerPartNo.size() > 0 && data.manufacturerPartNo.size() <= 200
+        && data.normalizedPartNo is string && data.normalizedPartNo.size() > 0 && data.normalizedPartNo.size() <= 200
+        && data.productName is string && data.productName.size() > 0 && data.productName.size() <= 500
+        && data.nameEn is string && data.nameEn.size() <= 500
+        && data.specification is string && data.specification.size() <= 2000
+        && data.productLine is string && data.productLine.size() <= 200
+        && data.productLineId is string && data.productLineId.size() <= 200
+        && data.productType is string && data.productType.size() <= 100
+        && data.category == data.productType
+        && data.serviceKind is string && data.serviceKind.size() <= 100
+        && (data.productType == 'Service'
+          ? (data.serviceKind in ['BIOPLEX_LAB','PIPETTE_CALIBRATION','TISSUE_SLICING','ONSITE_REPAIR']
+            && data.inventoryTracked == false && data.lotTracked == false && data.expiryTracked == false)
+          : data.serviceKind == '')
+        && data.listPrice is number && data.listPrice >= 0 && data.listPrice <= 1000000000
+        && data.inventoryTracked is bool && data.lotTracked is bool && data.expiryTracked is bool
+        && data.createdAt is string && data.createdAt.size() > 0 && data.createdAt.size() <= 40
+        && data.updatedAt is string && data.updatedAt.size() > 0 && data.updatedAt.size() <= 40;
     }
 
 
@@ -1244,7 +1278,8 @@ service cloud.firestore {
     // Searchable product master. Cost is intentionally stored separately.
     match /products/{id} {
       allow read: if active();
-      allow create: if canPurchase() || businessTemporaryProduct(id, request.resource.data);
+      allow create: if canPurchase() || businessTemporaryProduct(id, request.resource.data)
+        || salesPermanentProductCreate(id, request.resource.data);
       allow update: if canPurchase();
       allow delete: if admin();
     }
@@ -1262,19 +1297,11 @@ service cloud.firestore {
     }
 
     match /quotes/{id} {
-      allow get: if canPurchase() || (commercialDocumentOwner() && resource == null) || owns(resource.data)
-        || engineerAssistedSalesQuote(resource.data);
-      allow list: if canPurchase() || owns(resource.data)
-        || engineerAssistedSalesQuote(resource.data);
-      allow create: if canCreateCommercialDoc() && (
-        validOwnedCommercialCreate(request.resource.data)
-        || (engineerAssistedSalesQuote(request.resource.data) && validSalesOwner(request.resource.data))
-        || (purchaser() && validQuoteOwner(request.resource.data)
-          && request.resource.data.ownerUid != request.auth.uid)
-      );
+      allow get: if canPurchase() || (commercialDocumentOwner() && resource == null) || owns(resource.data);
+      allow list: if canPurchase() || owns(resource.data);
+      allow create: if canCreateCommercialDoc() && validOwnedCommercialCreate(request.resource.data);
       allow update: if admin()
         || (commercialDocumentOwner() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner() && preservesCreator())
-        || (engineerAssistedSalesQuote(resource.data) && sameCommercialOwner() && preservesCreator())
         || (purchaser() && sameCommercialOwner() && preservesCreator()
           && (resource.data.get('dealClosed', false) != true
             || request.resource.data.get('dealClosed', false) == true));

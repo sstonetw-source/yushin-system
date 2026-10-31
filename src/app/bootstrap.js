@@ -110,7 +110,7 @@ function writeCachedUserProfile(uid, data={}) {
     if(!uid)return;
     try {
         localStorage.setItem(userProfileCacheKey(uid),JSON.stringify({
-            role:data.role||'sales',name:data.name||'',phone:data.phone||'',code:data.code||'',mustChangePassword:!!data.mustChangePassword
+            role:data.role||'sales',name:data.name||'',phone:data.phone||'',code:data.salesCode||data.code||'',mustChangePassword:!!data.mustChangePassword
         }));
     } catch (_) {}
 }
@@ -119,7 +119,7 @@ function applyUserProfile(data={}) {
     trueUserRole=currentUserRole;
     currentUserName=data.name||'';
     currentUserPhone=data.phone||'';
-    currentUserCode=data.code||'';
+    currentUserCode=data.salesCode||data.code||'';
     mustChangePassword=!!data.mustChangePassword;
 }
 const DEFAULT_LIST_LIMIT = 50;

@@ -36,12 +36,12 @@ test('blank quote salesperson keeps self ownership only for sales and engineers'
   assert.equal(vm.runInNewContext(expression,{salesName:'Someone',currentUserRole:role}),false);
  }
 });
-test('engineer quote access includes own assisted quotes and excludes another engineer assistance',()=>{
+test('engineer quote access requires ownership even for quotes they previously created for others',()=>{
  const start=src.indexOf('function canUseQuote('),end=src.indexOf('function belongsToCurrentUser(',start);
  const context=vm.createContext({currentUserRole:'engineer',currentUser:{uid:'eng1'},canViewAllData:()=>false,belongsToCurrentUser:(_name,uid)=>uid==='eng1'});
  vm.runInContext(src.slice(start,end),context);
  assert.equal(context.canUseQuote({ownerUid:'eng1'}),true);
- assert.equal(context.canUseQuote({ownerUid:'sales1',createdByUid:'eng1',createdByRole:'engineer'}),true);
+ assert.equal(context.canUseQuote({ownerUid:'sales1',createdByUid:'eng1',createdByRole:'engineer'}),false);
  assert.equal(context.canUseQuote({ownerUid:'sales1',createdByUid:'eng2',createdByRole:'engineer'}),false);
  context.currentUserRole='sales';
  assert.equal(context.canUseQuote({ownerUid:'sales1',createdByUid:'eng1',createdByRole:'engineer'}),false);

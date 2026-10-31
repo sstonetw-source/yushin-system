@@ -142,16 +142,18 @@ function db(uid) {
   return env.authenticatedContext(uid).firestore();
 }
 
-test('shipped quote number generator respects real Rules for sales and assisted engineers',async()=>{
+test('shipped quote number generator remains owner-scoped for sales and engineers',async()=>{
  const {quoteNumberGenerator}=require('./helpers/quote-number-generator.cjs');
  await seed('quotes/number-code',{quoteNo:'YS-20261031-S01-05',salesCode:'S01'});
  await seed('quotes/number-owner',{quoteNo:'YS-20261031-S01-07',ownerUid:'sales1'});
  await seed('quotes/number-other',{quoteNo:'YS-20261031-S01-99',ownerUid:'sales2',salesCode:'S02'});
  await seed('quotes/number-assisted',{quoteNo:'YS-20261031-S02-04',ownerUid:'sales2',salesCode:'S02',createdByUid:'eng1',createdByRole:'engineer'});
  await seed('quotes/number-other-engineer',{quoteNo:'YS-20261031-S02-09',ownerUid:'sales2',salesCode:'S02',createdByUid:'eng2',createdByRole:'engineer'});
+ await seed('quotes/number-engineer-own',{quoteNo:'YS-20261031-E01-03',ownerUid:'eng1',salesCode:'E01',createdByUid:'eng1',createdByRole:'engineer'});
  await assertFails(db('sales1').collection('quotes').where('quoteNo','>=','YS-20261031-S01-').where('quoteNo','<=','YS-20261031-S01-\uf8ff').orderBy('quoteNo','desc').limit(1).get());
  assert.equal(await quoteNumberGenerator(db('sales1')).generate(),'YS-20261031-S01-08');
- assert.equal(await quoteNumberGenerator(db('eng1'),{role:'engineer',uid:'eng1',code:'E01',selectedCode:'S02'}).generate(),'YS-20261031-S02-05');
+ assert.equal(await quoteNumberGenerator(db('eng1'),{role:'engineer',uid:'eng1',code:'E01',selectedCode:'E01'}).generate(),'YS-20261031-E01-04');
+ await assertFails(getDoc(doc(db('eng1'),'quotes/number-assisted')));
  for(const [uid,role] of [['admin','admin'],['buyer1','purchaser']])
   assert.equal(await quoteNumberGenerator(db(uid),{uid,role}).generate(),'YS-20261031-S01-100');
  for(const [uid,role] of [['wh1','warehouse'],['off1','sales']])
@@ -193,14 +195,17 @@ test('engineer owns and can edit own quote and order, but cannot access Forecast
   await assertSucceeds(getDoc(doc(db('admin'), 'forecasts/f1')));
 });
 
-test('engineer may assist salesperson quotes but not salesperson orders; purchaser assistance still requires matching owner code', async () => {
+test('engineer cannot assist salesperson quotes or orders, including historical creator records', async () => {
   const assistedQuote = {
     ownerUid:'sales1', salesCode:'S01', quoteDate:'2026-09-20',
     createdByUid:'eng1', createdByName:'Engineer', createdByRole:'engineer'
   };
-  await assertSucceeds(setDoc(doc(db('eng1'), 'quotes/assisted-sales'), assistedQuote));
-  await assertSucceeds(getDoc(doc(db('eng1'), 'quotes/assisted-sales')));
-  await assertSucceeds(updateDoc(doc(db('eng1'), 'quotes/assisted-sales'), { quoteDate:'2026-09-21' }));
+  await assertFails(setDoc(doc(db('eng1'), 'quotes/assisted-sales'), assistedQuote));
+  await seed('quotes/assisted-sales', assistedQuote);
+  await assertFails(getDoc(doc(db('eng1'), 'quotes/assisted-sales')));
+  await assertFails(updateDoc(doc(db('eng1'), 'quotes/assisted-sales'), { quoteDate:'2026-09-21' }));
+  await assertSucceeds(getDoc(doc(db('sales1'), 'quotes/assisted-sales')));
+  await assertSucceeds(updateDoc(doc(db('sales1'), 'quotes/assisted-sales'), { quoteDate:'2026-09-21' }));
   await assertFails(setDoc(doc(db('eng1'), 'quotes/wrong-sales-code'), { ...assistedQuote, salesCode:'S02' }));
   await assertFails(setDoc(doc(db('eng1'), 'orders/assisted-sales'), { ...validOrderProduct,
     ownerUid:'sales1', salesCode:'S01', orderDate:'2026-09-20',
@@ -432,6 +437,53 @@ test('sales may create a temporary product but cannot create or modify Product M
   await assertFails(setDoc(doc(db('sales1'), 'productCosts/p3'), cost));
   await assertSucceeds(setDoc(doc(db('buyer1'), 'productCosts/p3'), cost));
   await assertFails(setDoc(doc(db('sales1'), 'priceHistory/p3'), { productId:'p3', unitCost:1 }));
+});
+
+test('sales creates a permanent, searchable master without inventory, maintenance or cost escalation',async()=>{
+  const id='prd:roche:a123';
+  const master={productId:id,brandId:'roche',brandName:'Roche',manufacturerPartNo:'A-123',normalizedPartNo:'a123',
+    productName:'正式驗收試劑',nameEn:'Acceptance reagent',specification:'100 tests',productLine:'PCR',productLineId:'PCR',
+    productType:'Reagent',category:'Reagent',serviceKind:'',listPrice:2500,inventoryTracked:true,lotTracked:false,
+    expiryTracked:false,status:'ACTIVE',active:true,source:'MANUAL',createdAt:'2026-10-31T00:00:00.000Z',
+    createdBy:'sales1',updatedAt:'2026-10-31T00:00:00.000Z',updatedBy:'sales1'};
+  await assertSucceeds(setDoc(doc(db('sales1'),'products/'+id),master));
+  const match=await assertSucceeds(getDocs(query(collection(db('sales1'),'products'),where('normalizedPartNo','==','a123'))));
+  assert.equal(match.docs.filter(row=>row.id===id).length,1);
+  await assertFails(setDoc(doc(db('sales1'),'products/'+id),master));
+  await assertFails(updateDoc(doc(db('sales1'),'products/'+id),{productName:'覆寫'}));
+  await assertFails(updateDoc(doc(db('sales1'),'products/'+id),{active:false}));
+  await assertFails(deleteDoc(doc(db('sales1'),'products/'+id)));
+  for(const [key,change] of Object.entries({createdBy:'sales2',updatedBy:'sales2',source:'PRICE_LIST',status:'TEMPORARY',active:false,listPrice:-1,standardCost:100,reserved:1,manufacturerPartNo:'x'.repeat(1000)})){
+    await assertFails(setDoc(doc(db('sales1'),'products/invalid-'+key),{...master,productId:'invalid-'+key,[key]:change}));
+  }
+  for(const uid of ['eng1','wh1'])await assertFails(setDoc(doc(db(uid),'products/engineer-'+uid),{...master,productId:'engineer-'+uid,createdBy:uid,updatedBy:uid}));
+  await assertFails(setDoc(doc(db('sales1'),'productCosts/'+id),{standardCost:1}));
+  await assertFails(setDoc(doc(db('sales1'),'inventory/'+id),{onHand:1,reserved:0}));
+});
+
+test('permanent master concurrent same-document creation accepts at most one writer',async()=>{
+  const id='prd:roche:race';
+  const master={productId:id,brandId:'roche',brandName:'Roche',manufacturerPartNo:'RACE',normalizedPartNo:'race',
+    productName:'Concurrency probe',nameEn:'',specification:'',productLine:'',productLineId:'',productType:'Reagent',
+    category:'Reagent',serviceKind:'',listPrice:0,inventoryTracked:false,lotTracked:false,expiryTracked:false,
+    status:'ACTIVE',active:true,source:'MANUAL',createdAt:'2026-10-31',createdBy:'sales1',updatedAt:'2026-10-31',updatedBy:'sales1'};
+  const outcomes=await Promise.allSettled([setDoc(doc(db('sales1'),'products/'+id),master),setDoc(doc(db('sales1'),'products/'+id),master)]);
+  assert.equal(outcomes.filter(row=>row.status==='fulfilled').length,1);
+  assert.equal((await getDoc(doc(db('sales1'),'products/'+id))).data().productName,'Concurrency probe');
+});
+
+test('enabled administrator with business identity can own and delegate quotes and orders',async()=>{
+  const adminOwned={ownerUid:'admin',salesCode:'ADM',salesName:'admin',createdByUid:'admin',createdByRole:'admin'};
+  await assertSucceeds(setDoc(doc(db('admin'),'quotes/admin-self'),adminOwned));
+  await assertSucceeds(setDoc(doc(db('admin'),'orders/admin-self'),{...validOrderProduct,...adminOwned}));
+  await assertSucceeds(setDoc(doc(db('buyer1'),'quotes/admin-assisted'),{...adminOwned,createdByUid:'buyer1',createdByRole:'purchaser'}));
+  await assertSucceeds(setDoc(doc(db('buyer1'),'orders/admin-assisted'),{...validOrderProduct,...adminOwned,createdByUid:'buyer1',createdByRole:'purchaser'}));
+  await assertSucceeds(setDoc(doc(db('admin'),'quotes/admin-delegate'),{ownerUid:'sales1',salesCode:'S01',createdByUid:'admin',createdByRole:'admin'}));
+  await assertFails(getDoc(doc(db('sales1'),'quotes/admin-assisted')));
+  await assertFails(updateDoc(doc(db('buyer1'),'orders/admin-assisted'),{ownerUid:'buyer1',salesCode:'P01'}));
+  await seed('users/admin',{role:'admin',active:true,name:'admin'});
+  await assertFails(setDoc(doc(db('buyer1'),'quotes/pure-admin'),{...adminOwned,createdByUid:'buyer1'}));
+  await assertFails(setDoc(doc(db('buyer1'),'orders/pure-admin'),{...validOrderProduct,...adminOwned,createdByUid:'buyer1'}));
 });
 
 test('only admin can permanently delete Product Master and its standard cost', async () => {
@@ -834,15 +886,17 @@ test('business owner may create own reservation movement but cannot forge anothe
 });
 
 
-test('engineer assisted quote remains creator-scoped', async () => {
+test('engineer historical assisted quote is owner-only even if engineer is original creator', async () => {
   await seed('users/eng2', { role:'engineer', active:true, salesCode:'E02' });
   await seed('quotes/engineer-assisted-scope', {
     ownerUid:'sales1', salesCode:'S01', quoteDate:'2026-09-20',
     createdByUid:'eng1', createdByName:'Engineer 1', createdByRole:'engineer'
   });
-  await assertSucceeds(getDoc(doc(db('eng1'), 'quotes/engineer-assisted-scope')));
+  await assertFails(getDoc(doc(db('eng1'), 'quotes/engineer-assisted-scope')));
   await assertFails(getDoc(doc(db('eng2'), 'quotes/engineer-assisted-scope')));
+  await assertFails(updateDoc(doc(db('eng1'), 'quotes/engineer-assisted-scope'), { quoteDate:'2026-09-22' }));
   await assertFails(updateDoc(doc(db('eng2'), 'quotes/engineer-assisted-scope'), { quoteDate:'2026-09-22' }));
+  await assertSucceeds(getDoc(doc(db('sales1'), 'quotes/engineer-assisted-scope')));
 });
 
 
@@ -1981,13 +2035,14 @@ test('warehouse receives a sanitized supply view and cannot read company purchas
   assert.equal(privateSource.data().unitCost,120);
 });
 
-test('engineer list and history search include only its own assisted quotes',async()=>{
+test('engineer creator-index scans cannot list other owners historical assisted quotes',async()=>{
   await seed('quotes/assisted-list',{ownerUid:'sales1',salesCode:'S01',createdByUid:'eng1',createdByRole:'engineer',quoteDate:'2026-10-06',searchTokens:['product']});
   await seed('quotes/other-assistant',{ownerUid:'sales1',salesCode:'S01',createdByUid:'sales1',createdByRole:'sales',quoteDate:'2026-10-06',searchTokens:['product']});
   const list=query(collection(db('eng1'),'quotes'),where('createdByUid','==','eng1'),where('createdByRole','==','engineer'),orderBy('quoteDate','desc'),limit(50));
-  await assertSucceeds(getDocs(list));
-  await assertSucceeds(getDocs(query(collection(db('eng1'),'quotes'),where('createdByUid','==','eng1'),where('createdByRole','==','engineer'),where('searchTokens','array-contains','product'),limit(50))));
+  await assertFails(getDocs(list));
+  await assertFails(getDocs(query(collection(db('eng1'),'quotes'),where('createdByUid','==','eng1'),where('createdByRole','==','engineer'),where('searchTokens','array-contains','product'),limit(50))));
   await assertFails(getDoc(doc(db('eng1'),'quotes/other-assistant')));
+  await assertSucceeds(getDoc(doc(db('sales1'),'quotes/assisted-list')));
 });
 
 test('operational line validation supports fifteen lines without losing commercial protection',async()=>{
