@@ -1321,6 +1321,31 @@ service cloud.firestore {
         && (items.size() <= 13 || validNewItemCost(items[13], data.get('procurementType', 'PURCHASING_PO')))
         && (items.size() <= 14 || validNewItemCost(items[14], data.get('procurementType', 'PURCHASING_PO')));
     }
+    // The backend, not a new browser order payload, computes reservation and
+    // shortage projections. Validate each of the existing 15 supported lines.
+    function newOrderItemUnreserved(item) {
+      return item.get('reservedQty', 0) == 0 && item.get('shortageQty', 0) == 0
+        && !(item.get('reservationStatus', '') in ['completed', 'active', 'reserved']);
+    }
+    function newOrderItemsUnreserved(data) {
+      let items = data.get('items', []);
+      return items is list && items.size() <= 15
+        && (items.size() <= 0 || newOrderItemUnreserved(items[0]))
+        && (items.size() <= 1 || newOrderItemUnreserved(items[1]))
+        && (items.size() <= 2 || newOrderItemUnreserved(items[2]))
+        && (items.size() <= 3 || newOrderItemUnreserved(items[3]))
+        && (items.size() <= 4 || newOrderItemUnreserved(items[4]))
+        && (items.size() <= 5 || newOrderItemUnreserved(items[5]))
+        && (items.size() <= 6 || newOrderItemUnreserved(items[6]))
+        && (items.size() <= 7 || newOrderItemUnreserved(items[7]))
+        && (items.size() <= 8 || newOrderItemUnreserved(items[8]))
+        && (items.size() <= 9 || newOrderItemUnreserved(items[9]))
+        && (items.size() <= 10 || newOrderItemUnreserved(items[10]))
+        && (items.size() <= 11 || newOrderItemUnreserved(items[11]))
+        && (items.size() <= 12 || newOrderItemUnreserved(items[12]))
+        && (items.size() <= 13 || newOrderItemUnreserved(items[13]))
+        && (items.size() <= 14 || newOrderItemUnreserved(items[14]));
+    }
     // Ordinary operational changes use the existing cheap path. Only changes to
     // cost or identity enter the additional Service binding validation.
     function commercialItemIdentityAndCostProtected(before, after, method) {
@@ -1968,7 +1993,8 @@ service cloud.firestore {
         && validNewOrderSourceSync(id)
         && validOwnedCommercialCreate(request.resource.data)
         && validNewOrderProductMaster(request.resource.data)
-        && validOrderEmbeddedCost(request.resource.data);
+        && validOrderEmbeddedCost(request.resource.data)
+        && newOrderItemsUnreserved(request.resource.data);
       // Commercial owner edits commercial data; purchaser/warehouse must use scoped
       // workflow collections below instead of broad order mutation.
       // Transaction type validation is inside the scoped update paths, evaluated once.

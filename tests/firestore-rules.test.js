@@ -1414,6 +1414,10 @@ test('no client role may create or transition an order into server-only reservat
   await assertSucceeds(setDoc(doc(client,'orders/'+id),data));
   await assertFails(updateDoc(doc(client,'orders/'+id),{inventoryReservationStatus:'completed'}));
   await assertFails(setDoc(doc(client,'orders/'+id+'-forged'),{...data,inventoryReservationStatus:'completed'}));
+  const item={itemId:'A',productId:'p-order',qty:5,orderedQty:5};
+  await assertSucceeds(setDoc(doc(client,'orders/'+id+'-clean-line'),{...data,items:[item]}));
+  for(const patch of [{reservedQty:3},{shortageQty:2},{reservationStatus:'completed'}])
+   await assertFails(setDoc(doc(client,'orders/'+id+'-forged-line-'+Object.keys(patch)[0]),{...data,items:[{...item,...patch}]}));
   assert.equal((await getDoc(doc(db('admin'),'orders/'+id))).data().inventoryReservationStatus,'pending');
  }
 });
