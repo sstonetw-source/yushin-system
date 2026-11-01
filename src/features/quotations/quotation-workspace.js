@@ -81,7 +81,10 @@ function getFormattedDateCode() {
     return `${yyyy}${mm}${dd}`;
 }
 
+let quoteNoGeneration = 0;
 window.generateQuoteNo = async function() {
+    const generation = ++quoteNoGeneration;
+    const session = sessionDataGeneration;
     const quoteNoInput = document.getElementById('quoteNo');
     if (editingQuoteNo && !restoringQuoteDraft) {
         if (quoteNoInput) quoteNoInput.value = editingQuoteNo;
@@ -92,7 +95,12 @@ window.generateQuoteNo = async function() {
     const dateStr = getFormattedDateCode();
 
     const owner = quoteOwnerFromSelection();
-    const salesCode = owner.salesCode || '01';
+    if (!owner.ownerUid || typeof owner.salesCode !== 'string' || !owner.salesCode.trim()) {
+        if (quoteNoInput) quoteNoInput.value = '';
+        return '';
+    }
+    const salesCode = owner.salesCode;
+    if (quoteNoInput) quoteNoInput.value = '';
 
     const prefix = `${info.prefix}-${dateStr}-${salesCode}-`;
 
@@ -114,6 +122,7 @@ window.generateQuoteNo = async function() {
             if (!queries.length) throw new Error('目前帳號缺少可用的資料歸屬資訊');
         }
         const snapshots = await Promise.all(queries.map(query => firestoreReadWithTimeout(query.get(), '估價單號')));
+        if (generation !== quoteNoGeneration || session !== sessionDataGeneration || (editingQuoteNo && !restoringQuoteDraft)) return quoteNoInput?.value || '';
 
         // 用「目前已存在的最大流水號 + 1」而非「筆數 + 1」：
         // 因為 Firestore 是拿 quoteNo 當文件 ID，如果中間有一張估價單被刪除，
@@ -133,6 +142,7 @@ window.generateQuoteNo = async function() {
             setQuoteOutputStatus('');
         }
     } catch (e) {
+        if (generation !== quoteNoGeneration || session !== sessionDataGeneration || (editingQuoteNo && !restoringQuoteDraft)) return quoteNoInput?.value || '';
         console.error('取得估價單號失敗：', e);
         if (quoteNoInput) quoteNoInput.value = '';
         setQuoteOutputStatus('無法取得安全的估價單號，請確認網路後再試一次。', true);
@@ -196,7 +206,7 @@ function setQuoteOwnerSelection(record = {}, historical = false) {
     select.value = match?.value || '';
     select.disabled = historical;
 }
-function populateSalesDropdown() {
+function populateSalesDropdown(regenerateNumber = true) {
     const select = document.getElementById('salesName');
     if (!select) return;
     const selected = quoteOwnerFromSelection();
@@ -219,7 +229,7 @@ function populateSalesDropdown() {
     let desired = pending || (selected.ownerUid ? selected : {ownerUid:currentUser?.uid || '',salesCode:currentUserCode || '',salesName:currentUserName || ''});
     if (!pending && !selected.ownerUid && !ownOnly && currentUserRole !== 'admin') desired = {};
     setQuoteOwnerSelection(historical ? loadedQuoteOwnerIdentity : desired, historical);
-    if (!restoringQuoteDraft && !editingQuoteNo) generateQuoteNo();
+    if (regenerateNumber && !restoringQuoteDraft && !editingQuoteNo) generateQuoteNo();
     updateSalesPhoneDisplay();
 }
 function updateSalesPhoneDisplay() {

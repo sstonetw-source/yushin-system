@@ -1,12 +1,16 @@
-window.startNextQuote = function() {
+window.startNextQuote = async function() {
     if (!confirm('確定要開始製作下一張估價單嗎？目前畫面上的內容將會被清空（如果還沒匯出 PDF，請先確認已經處理好）。')) return;
+    ++quoteNoGeneration;
     setQuoteEditingContext('');
     setQuoteOutputStatus('');
-    resetQuoteFormForNextOne();
+    await resetQuoteFormForNextOne();
     saveQuoteDraft();
 };
 
-function resetQuoteFormForNextOne() {
+async function resetQuoteFormForNextOne() {
+    const quoteNoInput = document.getElementById('quoteNo');
+    const previousNo = quoteNoInput.value || '';
+    const selected = quoteOwnerFromSelection();
     document.getElementById('clientName').value = '';
     document.getElementById('ordererName').value = '';
     document.getElementById('discountRateInput').value = 0;
@@ -17,17 +21,32 @@ function resetQuoteFormForNextOne() {
     addQuoteRow();
     calculateTotals();
 
-    // 單號直接把目前這組號碼的流水號 +1，不重新查一次雲端——
-    // 因為上一張單的雲端存檔是背景進行、不保證這時候已經真的寫進 Firestore，
-    // 這時如果重新查詢「目前最大流水號」，很可能還查到上一張存檔前的舊資料，算出來的下一號反而會撞號
-    const quoteNoInput = document.getElementById('quoteNo');
-    const parts = (quoteNoInput.value || '').split('-');
-    const lastPart = parts[parts.length - 1];
-    const lastSeq = parseInt(lastPart, 10);
-    if (parts.length >= 2 && !isNaN(lastSeq)) {
-        parts[parts.length - 1] = String(lastSeq + 1).padStart(lastPart.length, '0');
-        quoteNoInput.value = parts.join('-');
+    initDate();
+    populateSalesDropdown(false);
+    const eligible = salesList.filter(isSelectableCommercialOwner);
+    let owner = ['sales','engineer'].includes(currentUserRole)
+        ? {uid:currentUser?.uid,code:currentUserCode,name:currentUserName}
+        : eligible.find(person => person.uid === selected.ownerUid);
+    if (!owner && !selected.ownerUid && selected.salesCode) {
+        const matches = eligible.filter(person => person.code === selected.salesCode);
+        if (matches.length === 1) owner = matches[0];
     }
+    if (!owner && currentUserRole === 'admin') owner = eligible.find(person => person.uid === currentUser?.uid);
+    setQuoteOwnerSelection(owner ? {ownerUid:owner.uid,salesCode:owner.code,salesName:owner.name} : {});
+    updateSalesPhoneDisplay();
+
+    // Same-group local increments cannot race a preceding background save.
+    // A new day, company or responsible person must use that group's safe lookup.
+    const nextOwner = quoteOwnerFromSelection();
+    if (!nextOwner.ownerUid || !nextOwner.salesCode) { quoteNoInput.value = ''; return; }
+    const prefix = `${companyData[currentCompany].prefix}-${getFormattedDateCode()}-${nextOwner.salesCode}-`;
+    const sequence = previousNo.startsWith(prefix) ? previousNo.slice(prefix.length) : '';
+    if (/^\d+$/.test(sequence) && Number.isSafeInteger(Number(sequence) + 1)) {
+        quoteNoInput.value = prefix + String(Number(sequence) + 1).padStart(Math.max(2,sequence.length), '0');
+    } else {
+        await generateQuoteNo();
+    }
+
 }
 
 // 新增：處理狀態切換的函數

@@ -2391,8 +2391,8 @@ function ensureProductMasterEditor() {
           </div>
         </div>
         <div id="pmEditMeta" style="margin-top:10px;font-size:12px;color:#666;"></div>
-        <div style="margin-top:14px;display:flex;justify-content:flex-end;gap:8px;">
-          <button type="button" id="saveProductMasterEditorBtn" onclick="saveProductMasterEditor()">儲存主檔</button>
+        <div class="modal-actions">
+          <button type="button" class="btn-primary" id="saveProductMasterEditorBtn" onclick="saveProductMasterEditor()">儲存主檔</button>
           <button type="button" class="btn-secondary" onclick="closeProductMasterEditor()">取消</button>
         </div>
       </div>`;
@@ -2754,7 +2754,9 @@ window.saveProductMasterEditor = async function() {
     const normalizedPartNo = normalizeItemCodeLoose(code);
     const duplicate = await findDuplicateProductMaster(brand,code,originalId);
     if (duplicate) {
-        alert('這個廠牌與貨號已經存在於產品主檔，請直接編輯既有產品。');
+        alert(canManagePendingProductMaster()
+            ? '這個廠牌與貨號已經存在於產品主檔，請直接編輯既有產品。'
+            : '這個廠牌與貨號已存在，請搜尋並使用既有產品；需要修改時請洽採購或管理員。');
         return;
     }
 
@@ -4711,7 +4713,10 @@ function getFormattedDateCode() {
     return `${yyyy}${mm}${dd}`;
 }
 
+let quoteNoGeneration = 0;
 window.generateQuoteNo = async function() {
+    const generation = ++quoteNoGeneration;
+    const session = sessionDataGeneration;
     const quoteNoInput = document.getElementById('quoteNo');
     if (editingQuoteNo && !restoringQuoteDraft) {
         if (quoteNoInput) quoteNoInput.value = editingQuoteNo;
@@ -4722,7 +4727,12 @@ window.generateQuoteNo = async function() {
     const dateStr = getFormattedDateCode();
 
     const owner = quoteOwnerFromSelection();
-    const salesCode = owner.salesCode || '01';
+    if (!owner.ownerUid || typeof owner.salesCode !== 'string' || !owner.salesCode.trim()) {
+        if (quoteNoInput) quoteNoInput.value = '';
+        return '';
+    }
+    const salesCode = owner.salesCode;
+    if (quoteNoInput) quoteNoInput.value = '';
 
     const prefix = `${info.prefix}-${dateStr}-${salesCode}-`;
 
@@ -4744,6 +4754,7 @@ window.generateQuoteNo = async function() {
             if (!queries.length) throw new Error('目前帳號缺少可用的資料歸屬資訊');
         }
         const snapshots = await Promise.all(queries.map(query => firestoreReadWithTimeout(query.get(), '估價單號')));
+        if (generation !== quoteNoGeneration || session !== sessionDataGeneration || (editingQuoteNo && !restoringQuoteDraft)) return quoteNoInput?.value || '';
 
         // 用「目前已存在的最大流水號 + 1」而非「筆數 + 1」：
         // 因為 Firestore 是拿 quoteNo 當文件 ID，如果中間有一張估價單被刪除，
@@ -4763,6 +4774,7 @@ window.generateQuoteNo = async function() {
             setQuoteOutputStatus('');
         }
     } catch (e) {
+        if (generation !== quoteNoGeneration || session !== sessionDataGeneration || (editingQuoteNo && !restoringQuoteDraft)) return quoteNoInput?.value || '';
         console.error('取得估價單號失敗：', e);
         if (quoteNoInput) quoteNoInput.value = '';
         setQuoteOutputStatus('無法取得安全的估價單號，請確認網路後再試一次。', true);
@@ -4826,7 +4838,7 @@ function setQuoteOwnerSelection(record = {}, historical = false) {
     select.value = match?.value || '';
     select.disabled = historical;
 }
-function populateSalesDropdown() {
+function populateSalesDropdown(regenerateNumber = true) {
     const select = document.getElementById('salesName');
     if (!select) return;
     const selected = quoteOwnerFromSelection();
@@ -4849,7 +4861,7 @@ function populateSalesDropdown() {
     let desired = pending || (selected.ownerUid ? selected : {ownerUid:currentUser?.uid || '',salesCode:currentUserCode || '',salesName:currentUserName || ''});
     if (!pending && !selected.ownerUid && !ownOnly && currentUserRole !== 'admin') desired = {};
     setQuoteOwnerSelection(historical ? loadedQuoteOwnerIdentity : desired, historical);
-    if (!restoringQuoteDraft && !editingQuoteNo) generateQuoteNo();
+    if (regenerateNumber && !restoringQuoteDraft && !editingQuoteNo) generateQuoteNo();
     updateSalesPhoneDisplay();
 }
 function updateSalesPhoneDisplay() {
@@ -19013,15 +19025,19 @@ window.confirmSavedPurchaseOrder = async function(poId) {
         if(currentUser?.uid===uid && currentUserRole===role)showActionFeedback(error.message,'warning');
     }
 };
-window.startNextQuote = function() {
+window.startNextQuote = async function() {
     if (!confirm('確定要開始製作下一張估價單嗎？目前畫面上的內容將會被清空（如果還沒匯出 PDF，請先確認已經處理好）。')) return;
+    ++quoteNoGeneration;
     setQuoteEditingContext('');
     setQuoteOutputStatus('');
-    resetQuoteFormForNextOne();
+    await resetQuoteFormForNextOne();
     saveQuoteDraft();
 };
 
-function resetQuoteFormForNextOne() {
+async function resetQuoteFormForNextOne() {
+    const quoteNoInput = document.getElementById('quoteNo');
+    const previousNo = quoteNoInput.value || '';
+    const selected = quoteOwnerFromSelection();
     document.getElementById('clientName').value = '';
     document.getElementById('ordererName').value = '';
     document.getElementById('discountRateInput').value = 0;
@@ -19032,17 +19048,32 @@ function resetQuoteFormForNextOne() {
     addQuoteRow();
     calculateTotals();
 
-    // 單號直接把目前這組號碼的流水號 +1，不重新查一次雲端——
-    // 因為上一張單的雲端存檔是背景進行、不保證這時候已經真的寫進 Firestore，
-    // 這時如果重新查詢「目前最大流水號」，很可能還查到上一張存檔前的舊資料，算出來的下一號反而會撞號
-    const quoteNoInput = document.getElementById('quoteNo');
-    const parts = (quoteNoInput.value || '').split('-');
-    const lastPart = parts[parts.length - 1];
-    const lastSeq = parseInt(lastPart, 10);
-    if (parts.length >= 2 && !isNaN(lastSeq)) {
-        parts[parts.length - 1] = String(lastSeq + 1).padStart(lastPart.length, '0');
-        quoteNoInput.value = parts.join('-');
+    initDate();
+    populateSalesDropdown(false);
+    const eligible = salesList.filter(isSelectableCommercialOwner);
+    let owner = ['sales','engineer'].includes(currentUserRole)
+        ? {uid:currentUser?.uid,code:currentUserCode,name:currentUserName}
+        : eligible.find(person => person.uid === selected.ownerUid);
+    if (!owner && !selected.ownerUid && selected.salesCode) {
+        const matches = eligible.filter(person => person.code === selected.salesCode);
+        if (matches.length === 1) owner = matches[0];
     }
+    if (!owner && currentUserRole === 'admin') owner = eligible.find(person => person.uid === currentUser?.uid);
+    setQuoteOwnerSelection(owner ? {ownerUid:owner.uid,salesCode:owner.code,salesName:owner.name} : {});
+    updateSalesPhoneDisplay();
+
+    // Same-group local increments cannot race a preceding background save.
+    // A new day, company or responsible person must use that group's safe lookup.
+    const nextOwner = quoteOwnerFromSelection();
+    if (!nextOwner.ownerUid || !nextOwner.salesCode) { quoteNoInput.value = ''; return; }
+    const prefix = `${companyData[currentCompany].prefix}-${getFormattedDateCode()}-${nextOwner.salesCode}-`;
+    const sequence = previousNo.startsWith(prefix) ? previousNo.slice(prefix.length) : '';
+    if (/^\d+$/.test(sequence) && Number.isSafeInteger(Number(sequence) + 1)) {
+        quoteNoInput.value = prefix + String(Number(sequence) + 1).padStart(Math.max(2,sequence.length), '0');
+    } else {
+        await generateQuoteNo();
+    }
+
 }
 
 // 新增：處理狀態切換的函數
