@@ -22,9 +22,9 @@
         }
     };
     function businessDefault(){
-        const uid=currentUserRole==='purchaser'?$('orderOwnerUid')?.value:currentUser?.uid;
+        const uid=['admin','purchaser'].includes(currentUserRole)?$('orderOwnerUid')?.value:currentUser?.uid;
         const person=salesList.find(x=>x.uid===uid);
-        if(!person&&currentUserRole==='purchaser')return {};
+        if(!person&&['admin','purchaser'].includes(currentUserRole))return {};
         return root.YushinDeliverySettings.salespersonPlan(person,defaultWarehouse()?.id||'');
     }
     root.onOrderDeliveryChoiceChange=function(){

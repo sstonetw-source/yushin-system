@@ -6,6 +6,8 @@ test('purchaser owner picker accepts active sales and engineers and preserves en
  const people=[
   {uid:'s',name:'業務',code:'S',role:'sales'},
   {uid:'e',name:'工程師',code:'E',role:'engineer'},
+  {uid:'boss',name:'主管',code:'B',role:'admin'},
+  {uid:'system',name:'純管理',code:'',role:'admin'},
   {uid:'p',name:'採購',code:'P',role:'purchaser'},
   {uid:'w',name:'倉管',code:'W',role:'warehouse'},
   {uid:'off',name:'停用',code:'O',role:'engineer',active:false},
@@ -14,11 +16,12 @@ test('purchaser owner picker accepts active sales and engineers and preserves en
  ];
  const select={value:'',options:[],replaceChildren(...options){this.options=options;},add(option){this.options.push(option);}};
  const wrap={style:{}};
- const context=vm.createContext({currentUserRole:'purchaser',requestedOrderOwnerUid:'e',salesList:people,ROLE_LABELS:{sales:'業務',engineer:'工程師'},Option:class{constructor(text,value){Object.assign(this,{text,value});}},document:{getElementById:id=>id==='orderOwnerUid'?select:wrap}});
+ const context=vm.createContext({window:{},currentUser:{uid:'boss'},currentUserRole:'purchaser',requestedOrderOwnerUid:'e',salesList:people,ROLE_LABELS:{sales:'業務',engineer:'工程師'},Option:class{constructor(text,value){Object.assign(this,{text,value});}},document:{getElementById:id=>id==='orderOwnerUid'?select:wrap}});
  vm.runInContext(fn('isSelectableCommercialOwner')+fn('populateOrderOwnerSelect'),context);
  context.populateOrderOwnerSelect();
- assert.deepEqual(select.options.map(x=>x.value),['','s','e']);
+ assert.deepEqual(select.options.map(x=>x.value),['','s','e','boss']);
  assert.equal(select.value,'e');assert.match(select.options[2].text,/工程師/);
+ context.currentUserRole='admin';context.requestedOrderOwnerUid='';context.populateOrderOwnerSelect();assert.equal(select.value,'boss');
  context.requestedOrderOwnerUid='disabled';context.populateOrderOwnerSelect();assert.equal(select.value,'');
  for(const role of ['sales','engineer','warehouse']){context.currentUserRole=role;context.populateOrderOwnerSelect();assert.equal(wrap.style.display,'none');}
 });
@@ -50,4 +53,11 @@ test('purchaser cannot cancel linked customer orders through quote cancellation'
  const start=src.indexOf('window.unmarkQuoteAsDeal ='),end=src.indexOf('\n};',start)+3;
  const context=vm.createContext({window:{},canManageOrderLifecycleCapability:()=>false,canEditPage:()=>true,actionButtonFromEventOrSelector:()=>{throw Error('must reject before cancellation controls or reads');}});
  vm.runInContext(src.slice(start,end),context);await context.window.unmarkQuoteAsDeal('Q1');
+});
+
+test('administrator view-as records the actual creator role while keeping the selected owner separate',()=>{
+ const context=vm.createContext({currentUser:{uid:'admin-uid'},currentUserName:'管理員',currentUserRole:'purchaser',trueUserRole:'admin'});
+ vm.runInContext(fn('commercialCreatorFields'),context);const fields=context.commercialCreatorFields();
+ assert.equal(fields.createdByUid,'admin-uid');assert.equal(fields.createdByRole,'admin');
+ assert.equal(Object.hasOwn(fields,'ownerUid'),false);
 });

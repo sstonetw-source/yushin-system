@@ -8,11 +8,13 @@ exports.quoteNumberGenerator = function(database, {role='sales', uid='sales1', c
     const start = source.indexOf('window.generateQuoteNo = async function()');
     const end = source.indexOf('\nwindow.onSalesChange', start);
     const input = {value:''}, errors = [];
+    const owner = {ownerUid:uid,salesCode:code,salesName:'Owner'};
     const context = {
         window:{}, db:database, editingQuoteNo:'', restoringQuoteDraft:false,
         companyData:{YS:{prefix:'YS'}}, currentCompany:'YS',
         currentUser:uid ? {uid} : null, currentUserRole:role, currentUserCode:code,
-        currentUserName:'Owner', salesList:[{name:'Selected', code:selectedCode}],
+        currentUserName:'Owner', salesList:[{uid,name:'Owner',code,role}],
+        quoteOwnerFromSelection:()=>owner,
         document:{getElementById:id => id==='quoteNo' ? input : id==='salesName' ? {value:'Selected'} : null},
         getFormattedDateCode:()=>'20261031', canViewAllData:()=>['admin','purchaser'].includes(role),
         firestoreReadWithTimeout:promise=>promise, saveQuoteDraft:()=>{},

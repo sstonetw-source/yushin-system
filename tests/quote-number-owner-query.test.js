@@ -34,14 +34,14 @@ test('sales number uses the maximum of UID ownership and legacy code ownership, 
     for(const filters of db.calls)assert.ok(filters.some(([f,op])=>['salesCode','ownerUid'].includes(f)&&op==='=='));
 });
 
-test('engineer-assisted numbering includes only their own assisted quotes and keeps the selected salesperson prefix',async()=>{
+test('engineer numbering ignores formerly assisted quotes and remains bounded to own identity',async()=>{
     const db=database([
-        {quoteNo:'YS-20261031-S02-05',ownerUid:'sales2',salesCode:'S02',createdByUid:'eng1',createdByRole:'engineer'},
-        {quoteNo:'YS-20261031-S02-98',ownerUid:'sales2',salesCode:'S02',createdByUid:'eng2',createdByRole:'engineer'},
-        {quoteNo:'YS-20261031-S02-99',ownerUid:'sales2',salesCode:'S02',createdByUid:'eng1',createdByRole:'sales'}
+        {quoteNo:'YS-20261031-E01-03',ownerUid:'eng1',salesCode:'E01'},
+        {quoteNo:'YS-20261031-S02-99',ownerUid:'sales2',salesCode:'S02',createdByUid:'eng1',createdByRole:'engineer'}
     ]);
-    assert.equal(await quoteNumberGenerator(db,{role:'engineer',uid:'eng1',code:'E01',selectedCode:'S02'}).generate(),'YS-20261031-S02-06');
-    assert.equal(db.calls.length,3);
+    assert.equal(await quoteNumberGenerator(db,{role:'engineer',uid:'eng1',code:'E01'}).generate(),'YS-20261031-E01-04');
+    assert.equal(db.calls.length,2);
+    assert.ok(db.calls.every(filters=>filters.every(([field])=>field!=='createdByUid')));
 });
 
 test('purchaser and administrator keep a single bounded company lookup',async()=>{
@@ -71,7 +71,7 @@ test('missing ownership stops before reading and editing an existing quote keeps
 });
 
 test('every bounded ownership query has a deployable composite index',()=>{
-    for(const fields of [['salesCode'],['ownerUid'],['createdByUid','createdByRole']]) {
+    for(const fields of [['salesCode'],['ownerUid']]) {
         assert.ok(indexes.some(index=>index.collectionGroup==='quotes'&&index.queryScope==='COLLECTION'
             &&JSON.stringify(index.fields)===JSON.stringify([
                 ...fields.map(fieldPath=>({fieldPath,order:'ASCENDING'})),{fieldPath:'quoteNo',order:'DESCENDING'}

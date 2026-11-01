@@ -66,7 +66,7 @@ function forecastSalesCodeForName(name) {
     if (!normalizedName) return '';
     if (normalizedName === forecastOwnSalesName() && currentUserCode) return String(currentUserCode);
     const match = salesList.find(person =>
-        String(person.role || 'sales').toLowerCase() === 'sales'
+        ['admin','sales'].includes(person.role || 'sales') && isSelectableCommercialOwner(person)
         && stripPhoneSuffix(person.name || '') === normalizedName
         && person.active !== false
     );
@@ -96,7 +96,7 @@ function populateForecastSalesFilter() {
     const names = new Set();
 
     salesList
-        .filter(person => String(person.role || 'sales').toLowerCase() === 'sales' && person.active !== false)
+        .filter(person => ['admin','sales'].includes(person.role || 'sales') && isSelectableCommercialOwner(person))
         .forEach(person => {
             const name = stripPhoneSuffix(person.name || '');
             if (name) names.add(name);
@@ -495,6 +495,10 @@ window.saveForecast = async function() {
 
     const id = document.getElementById('forecastId').value;
     const existing = id ? forecastCache.find(item => item.id === id) : null;
+    if (!existing && currentUserRole === 'admin' && (!currentUserName.trim() || !currentUserCode)) {
+        alert('這個管理帳號沒有完整的業務身分，請由具姓名及業務代碼的負責人建立 Forecast。');
+        return;
+    }
 
     const customerName = document.getElementById('forecastCustomer').value.trim();
     const brand = normalizeForecastBrand(getBrandFieldValue('forecastBrand', 'forecastBrandOther'));

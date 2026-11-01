@@ -49,7 +49,7 @@ let salesListLoadPromise = null;
 let quickProductTarget = null;
 let quoteFormInitialized = false;
 let draftSaveTimer = null;
-const APP_CACHE_VERSION = 1;
+const APP_CACHE_VERSION = 2;
 const APP_ASSET_VERSION = (() => {
     try {
         const script = [...document.scripts].find(node => /\/app\.js(?:\?|$)/.test(node.src || ''));
@@ -110,7 +110,7 @@ function writeCachedUserProfile(uid, data={}) {
     if(!uid)return;
     try {
         localStorage.setItem(userProfileCacheKey(uid),JSON.stringify({
-            role:data.role||'sales',name:data.name||'',phone:data.phone||'',code:data.code||'',mustChangePassword:!!data.mustChangePassword
+            role:data.role||'sales',name:data.name||'',phone:data.phone||'',code:data.salesCode||data.code||'',mustChangePassword:!!data.mustChangePassword
         }));
     } catch (_) {}
 }
@@ -119,7 +119,7 @@ function applyUserProfile(data={}) {
     trueUserRole=currentUserRole;
     currentUserName=data.name||'';
     currentUserPhone=data.phone||'';
-    currentUserCode=data.code||'';
+    currentUserCode=data.salesCode||data.code||'';
     mustChangePassword=!!data.mustChangePassword;
 }
 const DEFAULT_LIST_LIMIT = 50;

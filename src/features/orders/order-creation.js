@@ -7,12 +7,15 @@ function populateOrderOwnerSelect() {
     const wrap = document.getElementById('orderOwnerWrap');
     const select = document.getElementById('orderOwnerUid');
     if (!wrap || !select) return;
-    wrap.style.display = currentUserRole === 'purchaser' ? '' : 'none';
-    if (currentUserRole !== 'purchaser') return;
+    wrap.style.display = ['admin','purchaser'].includes(currentUserRole) ? '' : 'none';
+    if (!['admin','purchaser'].includes(currentUserRole)) return;
     const salespeople = salesList.filter(isSelectableCommercialOwner);
     select.replaceChildren(new Option('請選擇負責業務', ''));
     salespeople.forEach(person => select.add(new Option(`${person.name}（${person.code}・${ROLE_LABELS[person.role]}）`, person.uid)));
-    select.value = salespeople.some(person => person.uid === requestedOrderOwnerUid) ? requestedOrderOwnerUid : '';
+    const preferred = requestedOrderOwnerUid || window._orderModalQuoteContext?.ownerUid
+        || window._orderModalForecastContext?.ownerUid || (currentUserRole === 'admin' ? currentUser?.uid : '');
+    select.value = salespeople.some(person => person.uid === preferred) ? preferred : '';
+    select.disabled = !!(window._orderModalQuoteContext?.ownerUid || window._orderModalForecastContext?.ownerUid);
 }
 
 function orderDraftStorageKey() {
@@ -423,7 +426,7 @@ window.openOrderModal = function(source = null) {
 
         populateOrderOwnerSelect();
         window.initializeOrderDeliveryDefaults?.(source?.shippingInstructions);
-        if (currentUserRole === 'purchaser') {
+        if (['admin','purchaser'].includes(currentUserRole)) {
             ensureSalesListLoaded()
                 .then(() => {
                     if (openingGeneration === orderModalOpenGeneration) {populateOrderOwnerSelect();window.initializeOrderDeliveryDefaults?.(source?.shippingInstructions);}
@@ -583,7 +586,7 @@ window.copyOrderAsNew = function(orderId) {
         return;
     }
     openOrderModal();
-    if (currentUserRole === 'purchaser') {
+    if (['admin','purchaser'].includes(currentUserRole)) {
         requestedOrderOwnerUid = source.ownerUid || '';
         populateOrderOwnerSelect();
     }
@@ -655,11 +658,13 @@ window.saveNewOrder = function() {
         return;
     }
     if(items.some(item=>item.fulfillmentType==='WAREHOUSE'&&String(item.productType||'').trim().toUpperCase()!=='SERVICE'&&warehouseMasterCache.length&&!item.warehouseId)){alert('請為每個倉庫出貨品項選擇倉庫。');return;}
-    const assistedOwner = currentUserRole === 'purchaser'
+    const assistedOwner = ['admin','purchaser'].includes(currentUserRole)
         ? salesList.find(person => person.uid === document.getElementById('orderOwnerUid')?.value
             && isSelectableCommercialOwner(person))
         : null;
-    if (currentUserRole === 'purchaser' && !assistedOwner) { alert('請先選擇有效的負責業務。'); return; }
+    if (['admin','purchaser'].includes(currentUserRole) && !assistedOwner) { alert('請先選擇有效的負責業務。'); return; }
+    const sourceOwner = window._orderModalQuoteContext?.ownerUid || window._orderModalForecastContext?.ownerUid;
+    if (sourceOwner && assistedOwner && assistedOwner.uid !== sourceOwner) { alert('來源單據負責人不一致，請重新載入原單據。'); return; }
     if(currentUserRole==='purchaser'&&items.some(item=>item.procurementType==='SALES_SELF_ORDER'&&item.selfOrderConfirmed===true)){alert('採購可代建自行訂貨訂單；已向供應商下訂由負責業務確認。');return;}
     if(!document.getElementById('orderCustomer').value.trim()){alert('請填寫客戶名稱。');document.getElementById('orderCustomer')?.focus();return;}
     for(let index=0;index<items.length;index++) {

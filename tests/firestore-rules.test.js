@@ -142,16 +142,17 @@ function db(uid) {
   return env.authenticatedContext(uid).firestore();
 }
 
-test('shipped quote number generator respects real Rules for sales and assisted engineers',async()=>{
+test('shipped quote number generator respects real Rules for sales and own-only engineers',async()=>{
  const {quoteNumberGenerator}=require('./helpers/quote-number-generator.cjs');
  await seed('quotes/number-code',{quoteNo:'YS-20261031-S01-05',salesCode:'S01'});
  await seed('quotes/number-owner',{quoteNo:'YS-20261031-S01-07',ownerUid:'sales1'});
  await seed('quotes/number-other',{quoteNo:'YS-20261031-S01-99',ownerUid:'sales2',salesCode:'S02'});
  await seed('quotes/number-assisted',{quoteNo:'YS-20261031-S02-04',ownerUid:'sales2',salesCode:'S02',createdByUid:'eng1',createdByRole:'engineer'});
  await seed('quotes/number-other-engineer',{quoteNo:'YS-20261031-S02-09',ownerUid:'sales2',salesCode:'S02',createdByUid:'eng2',createdByRole:'engineer'});
+ await seed('quotes/number-engineer-own',{quoteNo:'YS-20261031-E01-03',ownerUid:'eng1',salesCode:'E01',createdByUid:'eng1',createdByRole:'engineer'});
  await assertFails(db('sales1').collection('quotes').where('quoteNo','>=','YS-20261031-S01-').where('quoteNo','<=','YS-20261031-S01-\uf8ff').orderBy('quoteNo','desc').limit(1).get());
  assert.equal(await quoteNumberGenerator(db('sales1')).generate(),'YS-20261031-S01-08');
- assert.equal(await quoteNumberGenerator(db('eng1'),{role:'engineer',uid:'eng1',code:'E01',selectedCode:'S02'}).generate(),'YS-20261031-S02-05');
+ assert.equal(await quoteNumberGenerator(db('eng1'),{role:'engineer',uid:'eng1',code:'E01'}).generate(),'YS-20261031-E01-04');
  for(const [uid,role] of [['admin','admin'],['buyer1','purchaser']])
   assert.equal(await quoteNumberGenerator(db(uid),{uid,role}).generate(),'YS-20261031-S01-100');
  for(const [uid,role] of [['wh1','warehouse'],['off1','sales']])
@@ -193,14 +194,17 @@ test('engineer owns and can edit own quote and order, but cannot access Forecast
   await assertSucceeds(getDoc(doc(db('admin'), 'forecasts/f1')));
 });
 
-test('engineer may assist salesperson quotes but not salesperson orders; purchaser assistance still requires matching owner code', async () => {
+test('engineer cannot assist salesperson quotes or orders; purchaser still requires matching owner code', async () => {
   const assistedQuote = {
     ownerUid:'sales1', salesCode:'S01', quoteDate:'2026-09-20',
     createdByUid:'eng1', createdByName:'Engineer', createdByRole:'engineer'
   };
-  await assertSucceeds(setDoc(doc(db('eng1'), 'quotes/assisted-sales'), assistedQuote));
-  await assertSucceeds(getDoc(doc(db('eng1'), 'quotes/assisted-sales')));
-  await assertSucceeds(updateDoc(doc(db('eng1'), 'quotes/assisted-sales'), { quoteDate:'2026-09-21' }));
+  await assertFails(setDoc(doc(db('eng1'), 'quotes/assisted-sales'), assistedQuote));
+  await seed('quotes/assisted-sales', assistedQuote);
+  await assertFails(getDoc(doc(db('eng1'), 'quotes/assisted-sales')));
+  await assertFails(updateDoc(doc(db('eng1'), 'quotes/assisted-sales'), { quoteDate:'2026-09-21' }));
+  await assertSucceeds(getDoc(doc(db('sales1'), 'quotes/assisted-sales')));
+  await assertSucceeds(updateDoc(doc(db('buyer1'), 'quotes/assisted-sales'), { quoteDate:'2026-10-31' }));
   await assertFails(setDoc(doc(db('eng1'), 'quotes/wrong-sales-code'), { ...assistedQuote, salesCode:'S02' }));
   await assertFails(setDoc(doc(db('eng1'), 'orders/assisted-sales'), { ...validOrderProduct,
     ownerUid:'sales1', salesCode:'S01', orderDate:'2026-09-20',
@@ -254,6 +258,40 @@ test('purchaser may assist sales and engineer quotes and orders without changing
   await seed('users/eng1',{role:'engineer',active:true,disabled:true,salesCode:'E01'});
   await assertFails(setDoc(doc(db('buyer1'), 'orders/disabled-engineer'), {...validOrderProduct,ownerUid:'eng1',salesCode:'E01',...createdBy}));
   await assertFails(setDoc(doc(db('buyer1'), 'quotes/disabled-engineer'), {ownerUid:'eng1',salesCode:'E01',...createdBy}));
+});
+
+test('promoted administrator keeps business ownership and purchaser delegation without account or historical migration',async()=>{
+ const owner={ownerUid:'manager',salesCode:'M01',salesName:'主管'};
+ const buyer={createdByUid:'buyer1',createdByRole:'purchaser',createdByName:'Buyer'};
+ await seed('users/manager',{role:'sales',active:true,name:'主管',salesCode:'M01'});
+ await seed('quotes/manager-history',{...owner,createdByUid:'manager',createdByRole:'sales',quoteNo:'Q-old'});
+ await seed('users/manager',{role:'admin',active:true,name:'主管',salesCode:'M01'});
+ await assertSucceeds(getDoc(doc(db('manager'),'quotes/manager-history')));
+ await assertSucceeds(setDoc(doc(db('buyer1'),'quotes/manager-new'),{...owner,...buyer}));
+ await assertSucceeds(setDoc(doc(db('buyer1'),'orders/manager-new'),{...validOrderProduct,...owner,...buyer}));
+ const saved=await getDoc(doc(db('buyer1'),'quotes/manager-new'));
+ assert.equal(saved.data().ownerUid,'manager');assert.equal(saved.data().createdByUid,'buyer1');
+ await assertFails(updateDoc(doc(db('buyer1'),'quotes/manager-new'),{ownerUid:'buyer1',salesCode:'P01'}));
+ await assertFails(updateDoc(doc(db('buyer1'),'quotes/manager-new'),{createdByUid:'manager'}));
+ await assertSucceeds(setDoc(doc(db('manager'),'quotes/admin-delegated'),{ownerUid:'sales1',salesCode:'S01',createdByUid:'manager',createdByRole:'admin'}));
+ for(const profile of [
+  {role:'admin',active:true,name:'主管'},
+  {role:'admin',active:true,salesCode:'M01'},
+  {role:'admin',active:false,name:'主管',salesCode:'M01'},
+  {role:'admin',disabled:true,name:'主管',salesCode:'M01'}
+ ]){
+  await seed('users/manager',profile);
+  await assertFails(setDoc(doc(db('buyer1'),'quotes/invalid-manager'),{...owner,...buyer}));
+  await assertFails(setDoc(doc(db('buyer1'),'orders/invalid-manager'),{...validOrderProduct,...owner,...buyer}));
+ }
+});
+
+test('delegated quote creation cannot forge an explicit creator UID or role',async()=>{
+ const owner={ownerUid:'sales1',salesCode:'S01'};
+ await assertFails(setDoc(doc(db('buyer1'),'quotes/forged-creator'),{...owner,createdByUid:'admin',createdByRole:'purchaser'}));
+ await assertFails(setDoc(doc(db('buyer1'),'quotes/forged-role'),{...owner,createdByUid:'buyer1',createdByRole:'admin'}));
+ await assertFails(setDoc(doc(db('sales2'),'quotes/other-owned'),{...owner,createdByUid:'sales2',createdByRole:'sales'}));
+ await assertFails(setDoc(doc(db('wh1'),'quotes/not-a-business-owner'),{...owner,createdByUid:'wh1',createdByRole:'warehouse'}));
 });
 
 test('commercial creator audit fields cannot be rewritten by normal owner edits', async () => {
@@ -432,6 +470,62 @@ test('sales may create a temporary product but cannot create or modify Product M
   await assertFails(setDoc(doc(db('sales1'), 'productCosts/p3'), cost));
   await assertSucceeds(setDoc(doc(db('buyer1'), 'productCosts/p3'), cost));
   await assertFails(setDoc(doc(db('sales1'), 'priceHistory/p3'), { productId:'p3', unitCost:1 }));
+});
+
+test('sales creates a permanent, searchable master without inventory, maintenance or cost escalation',async()=>{
+  const id='prd:roche:a123';
+  const master={productId:id,brandId:'roche',brandName:'Roche',manufacturerPartNo:'A-123',normalizedPartNo:'a123',
+    productName:'正式驗收試劑',nameEn:'Acceptance reagent',specification:'100 tests',productLine:'PCR',productLineId:'PCR',
+    productType:'Reagent',category:'Reagent',serviceKind:'',listPrice:2500,inventoryTracked:true,lotTracked:false,
+    expiryTracked:false,status:'ACTIVE',active:true,source:'MANUAL',createdAt:'2026-10-31T00:00:00.000Z',
+    createdBy:'sales1',updatedAt:'2026-10-31T00:00:00.000Z',updatedBy:'sales1'};
+  await assertSucceeds(setDoc(doc(db('sales1'),'products/'+id),master));
+  const match=await assertSucceeds(getDocs(query(collection(db('sales1'),'products'),where('normalizedPartNo','==','a123'))));
+  assert.equal(match.docs.filter(row=>row.id===id).length,1);
+  await assertFails(setDoc(doc(db('sales1'),'products/'+id),master));
+  await assertFails(updateDoc(doc(db('sales1'),'products/'+id),{productName:'覆寫'}));
+  await assertFails(updateDoc(doc(db('sales1'),'products/'+id),{active:false}));
+  await assertFails(deleteDoc(doc(db('sales1'),'products/'+id)));
+  for(const [key,change] of Object.entries({createdBy:'sales2',updatedBy:'sales2',source:'PRICE_LIST',status:'TEMPORARY',active:false,listPrice:-1,standardCost:100,reserved:1,manufacturerPartNo:'x'.repeat(1000)})){
+    await assertFails(setDoc(doc(db('sales1'),'products/invalid-'+key),{...master,productId:'invalid-'+key,[key]:change}));
+  }
+  for(const uid of ['eng1','wh1'])await assertFails(setDoc(doc(db(uid),'products/engineer-'+uid),{...master,productId:'engineer-'+uid,createdBy:uid,updatedBy:uid}));
+  await assertFails(setDoc(doc(db('sales1'),'productCosts/'+id),{standardCost:1}));
+  await assertFails(setDoc(doc(db('sales1'),'inventory/'+id),{onHand:1,reserved:0}));
+});
+
+test('permanent master concurrent same-document creation accepts at most one writer',async()=>{
+  const id='prd:roche:race';
+  const master={productId:id,brandId:'roche',brandName:'Roche',manufacturerPartNo:'RACE',normalizedPartNo:'race',
+    productName:'Concurrency probe',nameEn:'',specification:'',productLine:'',productLineId:'',productType:'Reagent',
+    category:'Reagent',serviceKind:'',listPrice:0,inventoryTracked:false,lotTracked:false,expiryTracked:false,
+    status:'ACTIVE',active:true,source:'MANUAL',createdAt:'2026-10-31',createdBy:'sales1',updatedAt:'2026-10-31',updatedBy:'sales1'};
+  const outcomes=await Promise.allSettled([setDoc(doc(db('sales1'),'products/'+id),master),setDoc(doc(db('sales1'),'products/'+id),master)]);
+  assert.equal(outcomes.filter(row=>row.status==='fulfilled').length,1);
+  assert.equal((await getDoc(doc(db('sales1'),'products/'+id))).data().productName,'Concurrency probe');
+});
+
+test('enabled administrator with business identity can own and delegate quotes and orders',async()=>{
+  const adminOwned={ownerUid:'admin',salesCode:'ADM',salesName:'admin',createdByUid:'admin',createdByRole:'admin'};
+  await assertSucceeds(setDoc(doc(db('admin'),'quotes/admin-self'),adminOwned));
+  await assertSucceeds(setDoc(doc(db('admin'),'orders/admin-self'),{...validOrderProduct,...adminOwned}));
+  await assertSucceeds(setDoc(doc(db('buyer1'),'quotes/admin-assisted'),{...adminOwned,createdByUid:'buyer1',createdByRole:'purchaser'}));
+  await assertSucceeds(setDoc(doc(db('buyer1'),'orders/admin-assisted'),{...validOrderProduct,...adminOwned,createdByUid:'buyer1',createdByRole:'purchaser'}));
+  await assertSucceeds(setDoc(doc(db('admin'),'quotes/admin-delegate'),{ownerUid:'sales1',salesCode:'S01',createdByUid:'admin',createdByRole:'admin'}));
+  await assertFails(getDoc(doc(db('sales1'),'quotes/admin-assisted')));
+  await assertFails(updateDoc(doc(db('buyer1'),'orders/admin-assisted'),{ownerUid:'buyer1',salesCode:'P01'}));
+  await seed('users/admin',{role:'admin',active:true,name:'admin'});
+  await assertFails(setDoc(doc(db('buyer1'),'quotes/pure-admin'),{...adminOwned,createdByUid:'buyer1'}));
+  await assertFails(setDoc(doc(db('buyer1'),'orders/pure-admin'),{...validOrderProduct,...adminOwned,createdByUid:'buyer1'}));
+  // Some established users have a business code in `code` while salesCode is blank.
+  // Browser selection and Rules must agree, without editing their real profile.
+  await seed('users/admin',{role:'admin',active:true,name:'主管',salesCode:'',code:'A01'});
+  await assertSucceeds(setDoc(doc(db('buyer1'),'quotes/admin-code-alias'),{
+    ...adminOwned,salesCode:'A01',createdByUid:'buyer1',createdByRole:'purchaser'}));
+  await assertSucceeds(setDoc(doc(db('admin'),'orders/admin-code-alias'),{
+    ...validOrderProduct,...adminOwned,salesCode:'A01'}));
+  await assertFails(setDoc(doc(db('buyer1'),'quotes/admin-wrong-code'),{
+    ...adminOwned,salesCode:'ADM',createdByUid:'buyer1'}));
 });
 
 test('only admin can permanently delete Product Master and its standard cost', async () => {
@@ -834,15 +928,18 @@ test('business owner may create own reservation movement but cannot forge anothe
 });
 
 
-test('engineer assisted quote remains creator-scoped', async () => {
+test('historical engineer-created quotes remain with their original owner, not their creator', async () => {
   await seed('users/eng2', { role:'engineer', active:true, salesCode:'E02' });
   await seed('quotes/engineer-assisted-scope', {
     ownerUid:'sales1', salesCode:'S01', quoteDate:'2026-09-20',
     createdByUid:'eng1', createdByName:'Engineer 1', createdByRole:'engineer'
   });
-  await assertSucceeds(getDoc(doc(db('eng1'), 'quotes/engineer-assisted-scope')));
+  await assertFails(getDoc(doc(db('eng1'), 'quotes/engineer-assisted-scope')));
+  await assertSucceeds(getDoc(doc(db('sales1'), 'quotes/engineer-assisted-scope')));
   await assertFails(getDoc(doc(db('eng2'), 'quotes/engineer-assisted-scope')));
+  await assertFails(updateDoc(doc(db('eng1'), 'quotes/engineer-assisted-scope'), { quoteDate:'2026-09-22' }));
   await assertFails(updateDoc(doc(db('eng2'), 'quotes/engineer-assisted-scope'), { quoteDate:'2026-09-22' }));
+  await assertSucceeds(getDoc(doc(db('sales1'), 'quotes/engineer-assisted-scope')));
 });
 
 
@@ -1981,13 +2078,14 @@ test('warehouse receives a sanitized supply view and cannot read company purchas
   assert.equal(privateSource.data().unitCost,120);
 });
 
-test('engineer list and history search include only its own assisted quotes',async()=>{
+test('engineer creator-scoped list and history queries are rejected',async()=>{
   await seed('quotes/assisted-list',{ownerUid:'sales1',salesCode:'S01',createdByUid:'eng1',createdByRole:'engineer',quoteDate:'2026-10-06',searchTokens:['product']});
   await seed('quotes/other-assistant',{ownerUid:'sales1',salesCode:'S01',createdByUid:'sales1',createdByRole:'sales',quoteDate:'2026-10-06',searchTokens:['product']});
   const list=query(collection(db('eng1'),'quotes'),where('createdByUid','==','eng1'),where('createdByRole','==','engineer'),orderBy('quoteDate','desc'),limit(50));
-  await assertSucceeds(getDocs(list));
-  await assertSucceeds(getDocs(query(collection(db('eng1'),'quotes'),where('createdByUid','==','eng1'),where('createdByRole','==','engineer'),where('searchTokens','array-contains','product'),limit(50))));
+  await assertFails(getDocs(list));
+  await assertFails(getDocs(query(collection(db('eng1'),'quotes'),where('createdByUid','==','eng1'),where('createdByRole','==','engineer'),where('searchTokens','array-contains','product'),limit(50))));
   await assertFails(getDoc(doc(db('eng1'),'quotes/other-assistant')));
+  await assertSucceeds(getDoc(doc(db('sales1'),'quotes/assisted-list')));
 });
 
 test('operational line validation supports fifteen lines without losing commercial protection',async()=>{
@@ -3615,4 +3713,26 @@ test('retired external notice and pending-inventory collections stay denied for 
    await assertFails(setDoc(doc(db(uid),name+'/new'),{ownerUid:uid,status:'NEW'}));
   }
  }
+});
+
+test('UID-only historical quotes remain editable without backfilling owner or creator fields',async()=>{
+ for(const uid of ['sales1','eng1']){
+  const id='uid-only-'+uid;
+  await seed('quotes/'+id,{ownerUid:uid,salesName:'原負責人',quoteDate:'2026-09-05'});
+  const ref=doc(db(uid),'quotes/'+id);
+  await assertSucceeds(getDoc(ref));await assertSucceeds(updateDoc(ref,{quoteDate:'2026-11-01'}));
+  await assertFails(updateDoc(ref,{salesCode:uid==='sales1'?'S01':'E01'}));
+  await assertFails(updateDoc(ref,{ownerUid:'sales2'}));
+  await assertFails(updateDoc(ref,{createdByUid:uid}));
+  await assertSucceeds(updateDoc(doc(db('buyer1'),'quotes/'+id),{quoteDate:'2026-11-02'}));
+  await assertFails(updateDoc(doc(db('buyer1'),'quotes/'+id),{ownerUid:'sales2'}));
+  const saved=(await getDoc(ref)).data();assert.equal(Object.hasOwn(saved,'salesCode'),false);assert.equal(Object.hasOwn(saved,'createdByUid'),false);
+ }
+});
+
+test('warehouse role does not inherit quote access from an earlier business identity',async()=>{
+ await seed('quotes/former-business',{ownerUid:'wh1',salesCode:'W01',quoteDate:'2026-09-05'});
+ await assertFails(getDoc(doc(db('wh1'),'quotes/former-business')));
+ await assertFails(getDocs(query(collection(db('wh1'),'quotes'),where('ownerUid','==','wh1'))));
+ await assertSucceeds(getDoc(doc(db('buyer1'),'quotes/former-business')));
 });

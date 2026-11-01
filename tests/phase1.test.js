@@ -230,17 +230,15 @@ test('preview host selects isolated Firebase project and exposes a visible envir
     assert.match(indexSource, /PREVIEW／測試環境｜資料與正式系統分離/);
 });
 
-test('quote owner selector lets engineer assist sales while keeping sales self-only', () => {
-    assert.match(appSource, /function populateSalesDropdown\(\)/);
+test('quote owner selector uses UID, limits engineers to self and includes eligible administrators', () => {
     const start = appSource.indexOf('function populateSalesDropdown()');
-    const end = appSource.indexOf('\n}\n', start) + 2;
-    const selector = appSource.slice(start, end);
-    assert.match(selector, /if \(currentUserRole === 'sales'\) return s\.uid === currentUser\?\.uid/);
-    assert.match(selector, /if \(currentUserRole === 'engineer'\) return s\.uid === currentUser\?\.uid \|\| role === 'sales'/);
-    assert.match(selector, /return role === 'sales' \|\| role === 'engineer'/);
-    assert.match(selector, /\? currentUserName : ''/);
-    assert.match(rulesSource, /function engineerAssistedSalesQuote/);
-    assert.match(rulesSource, /match \/quotes\/\{id\}[\s\S]*?engineerAssistedSalesQuote\(request\.resource\.data\)/);
+    const end = appSource.indexOf('function updateSalesPhoneDisplay',start);
+    const selector = appSource.slice(start,end);
+    assert.match(selector,/isSelectableCommercialOwner\(person\)/);
+    assert.match(selector,/\['sales','engineer'\]\.includes\(currentUserRole\)/);
+    assert.match(selector,/person\.uid === currentUser\?\.uid/);
+    assert.match(selector,/new Option\(`[^`]+`, person\.uid\)/);
+    assert.doesNotMatch(rulesSource,/engineerAssistedSalesQuote/);
 });
 
 test('Brand Master drives the main brand list while statistics grouping remains independent', () => {
@@ -349,7 +347,7 @@ test('purchaser order form assigns a salesperson while preserving creator identi
     const start = appSource.indexOf('window.saveNewOrder = function()');
     const end = appSource.indexOf('\n};', start) + 3;
     const saveOrder = appSource.slice(start, end);
-    assert.match(saveOrder, /currentUserRole === 'purchaser' && !assistedOwner/);
+    assert.match(saveOrder, /\['admin','purchaser'\]\.includes\(currentUserRole\) && !assistedOwner/);
     assert.match(saveOrder, /ownerUid: assistedOwner\?\.uid \|\| window\._orderModalQuoteContext\?\.ownerUid \|\| window\._orderModalForecastContext\?\.ownerUid \|\| currentUser\?\.uid/);
     assert.match(saveOrder, /\.\.\.commercialCreatorFields\(\)/);
 });
@@ -1245,6 +1243,7 @@ test('order brand filter uses selectable brands and groups alternate spelling an
             { salesName: '王先生', brand: '自行輸入品牌' }
         ],
         salesList: [{ name: '王先生' }],
+        isSelectableCommercialOwner:()=>true,
         OTHER_BRAND_OPTION_KEY: '其他廠牌',
         normalizeBrandLookupKey: normalize,
         resolveBrandName: value => normalize(value) === 'biorad' ? 'Bio-Rad' : value,
@@ -2688,7 +2687,8 @@ test('own-scope equipment page avoids full staff preload', () => {
     const assetStart=appSource.indexOf('function getNextAssetId');
     const assetEnd=appSource.indexOf('// 型號輸入時',assetStart);
     const assetSource=appSource.slice(assetStart,assetEnd);
-    assert.match(assetSource,/salesName === currentUserName && currentUserCode/);
+    assert.match(assetSource,/function getNextAssetId\(salesCode\)/);
+    assert.doesNotMatch(assetSource,/find\(.*name/);
 
     const initStart=appSource.indexOf("if (mainKey === 'equipment') {");
     const initEnd=appSource.indexOf("if (mainKey === 'admin')",initStart);
@@ -2759,19 +2759,19 @@ test('quote form loads staff only for roles that need owner selection', () => {
     const start=appSource.indexOf('function ensureQuoteFormInitialized');
     const end=appSource.indexOf('\n\nwindow.openChangePasswordModal',start);
     const source=appSource.slice(start,end);
-    assert.match(source,/currentUserRole === 'admin' \|\| currentUserRole === 'purchaser' \|\| currentUserRole === 'engineer'/);
+    assert.match(source,/currentUserRole === 'admin' \|\| currentUserRole === 'purchaser'/);
     assert.match(source,/ensureSalesListLoaded\(\)/);
     assert.match(source,/else \{[\s\S]*?populateSalesDropdown\(\)/);
 
     const selectorStart=appSource.indexOf('function populateSalesDropdown()');
-    const selectorEnd=appSource.indexOf('\n// 依目前輸入的業務姓名',selectorStart);
+    const selectorEnd=appSource.indexOf('function updateSalesPhoneDisplay',selectorStart);
     const selectorSource=appSource.slice(selectorStart,selectorEnd);
-    assert.match(selectorSource,/currentUserRole === 'engineer'[\s\S]*?s\.uid === currentUser\?\.uid \|\| role === 'sales'/);
+    assert.match(selectorSource,/\['sales','engineer'\]\.includes\(currentUserRole\)[\s\S]*?person\.uid === currentUser\?\.uid/);
 
     const phoneStart=appSource.indexOf('function updateSalesPhoneDisplay');
     const phoneEnd=appSource.indexOf('\nfunction populateEquipmentSalesDropdown',phoneStart);
     const phoneSource=appSource.slice(phoneStart,phoneEnd);
-    assert.match(phoneSource,/selectedName === currentUserName/);
+    assert.match(phoneSource,/identity\.ownerUid === currentUser\?\.uid/);
     assert.match(phoneSource,/currentUserPhone/);
 });
 
@@ -2954,9 +2954,8 @@ test('existing quote output preserves audit and background metadata', () => {
     const source=appSource.slice(start,end);
     assert.match(source,/if \(snapshot\.exists && updatingExisting\)/);
     assert.match(source,/quoteData\.createdAt = existing\.createdAt \|\| quoteData\.createdAt/);
-    assert.match(source,/quoteData\.createdByUid = existing\.createdByUid/);
-    assert.match(source,/quoteData\.createdByName = existing\.createdByName/);
-    assert.match(source,/quoteData\.createdByRole = existing\.createdByRole/);
+    assert.match(source,/\['ownerUid','salesCode','salesName','createdByUid','createdByName','createdByRole'\]/);
+    assert.match(source,/if \(key in existing\) quoteData\[key\] = existing\[key\]; else delete quoteData\[key\]/);
     assert.match(source,/transaction\.set\(quoteRef, quoteData, \{ merge: true \}\)/);
 });
 
@@ -5442,7 +5441,7 @@ test('quote and decision-analysis output have no mandatory user-entered fields',
     assert.match(appSource, /populateBrandSelect\(quoteBrandSelect, '廠牌（選填）'/);
     assert.match(appSource, /function quoteOutputCanSync\(quoteData = \{\}\)/);
     assert.match(appSource, /syncResult = 'skipped'/);
-    assert.match(appSource, /selfOwnedBlankSales/);
+    assert.match(appSource, /function quoteOwnerFromSelection/);
 });
 
 

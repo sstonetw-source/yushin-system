@@ -26,7 +26,8 @@ function canManageEquipmentCapability(role = currentUserRole) {
 
 // 採購代辦沿用負責業務的單據歸屬；工程師也是商業單據負責業務。
 function isSelectableCommercialOwner(person) {
-    return !!person && ['sales', 'engineer'].includes(person.role)
+    return !!person && ['admin', 'sales', 'engineer'].includes(person.role)
+        && typeof person.name === 'string' && !!person.name.trim()
         && person.active !== false && person.disabled !== true
         && !!person.uid && !!person.code;
 }
@@ -35,7 +36,7 @@ function commercialCreatorFields() {
     return {
         createdByUid: currentUser?.uid || '',
         createdByName: currentUserName || '',
-        createdByRole: currentUserRole || ''
+        createdByRole: (typeof trueUserRole === 'string' && trueUserRole ? trueUserRole : currentUserRole) || ''
     };
 }
 
@@ -52,8 +53,8 @@ function salesCodeForName(salesName) {
     const normalizedName = stripPhoneSuffix(salesName || '');
     if (!normalizedName) return '';
     if (normalizedName === stripPhoneSuffix(currentUserName || '') && currentUserCode) return currentUserCode;
-    const match = salesList.find(person => stripPhoneSuffix(person.name || '') === normalizedName);
-    return String(match?.code || '').trim();
+    const matches = salesList.filter(person => stripPhoneSuffix(person.name || '') === normalizedName);
+    return matches.length === 1 ? String(matches[0].code || '').trim() : '';
 }
 
 function normalizeCustomerKey(value) {
@@ -84,17 +85,15 @@ function syncCustomerMaster(customerName, extra = {}) {
 }
 
 function canUseQuote(record = {}) {
-    return canViewAllData('quotes')
-        || belongsToCurrentUser(record.salesName, record.ownerUid, record.salesCode)
-        || (currentUserRole === 'engineer' && record.createdByUid === currentUser?.uid
-            && record.createdByRole === 'engineer');
+    return ['admin','purchaser','sales','engineer'].includes(currentUserRole)
+        && (canViewAllData('quotes') || belongsToCurrentUser(record.salesName, record.ownerUid, record.salesCode));
 }
 
 function belongsToCurrentUser(salesName, ownerUid, salesCode = '') {
+    // Existing code handovers remain authoritative; display names grant no access.
     if (salesCode && currentUserCode) return String(salesCode) === String(currentUserCode);
     if (ownerUid && currentUser?.uid) return ownerUid === currentUser.uid;
-    if (!currentUserName) return false;
-    return stripPhoneSuffix(salesName || '') === stripPhoneSuffix(currentUserName);
+    return false;
 }
 
 function getActivePermissionPage() {
@@ -152,6 +151,8 @@ function updateReadonlyNotice() {
         notice.innerText = '倉管模式：可收貨、出貨、調撥點收及盤點；採購、成本維護與打單由採購／管理員處理。';
     } else if (pageKey === 'products' && currentUserRole === 'purchaser') {
         notice.innerText = '產品主檔權限：採購可新增、編輯與停用產品主檔；永久刪除僅限管理員。';
+    } else if (pageKey === 'products' && currentUserRole === 'sales') {
+        notice.innerText = '可新增正式產品主檔；既有產品的編輯、停用、刪除及成本、庫存維護仍限授權人員。';
     } else if (pageKey === 'products' && hasBusinessCapability()) {
         notice.innerText = '產品主檔僅可查看；您可以把產品加入估價單或建立訂單，但不能修改、停用或刪除產品主檔。';
     } else {
@@ -457,7 +458,7 @@ function ensureQuoteFormInitialized() {
         if (!document.getElementById('quoteItems').rows.length) addQuoteRow();
         switchCompany('yushin');
     }
-    if (currentUserRole === 'admin' || currentUserRole === 'purchaser' || currentUserRole === 'engineer') {
+    if (currentUserRole === 'admin' || currentUserRole === 'purchaser') {
         ensureSalesListLoaded().then(() => {
             populateSalesDropdown();
             if (draft) restoreQuoteDraft(draft);

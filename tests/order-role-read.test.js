@@ -30,19 +30,27 @@ test('role switch invalidates pending order reads and clears failed loading stat
 });
 
 test('blank quote salesperson keeps self ownership only for sales and engineers', () => {
- const expression=src.match(/const selfOwnedBlankSales = ([^;]+);/)[1];
+ const start=src.indexOf('function quoteOwnerFromSelection('),end=src.indexOf('\n}',start)+2;
  for(const role of ['sales','engineer','purchaser','warehouse','admin']){
-  assert.equal(vm.runInNewContext(expression,{salesName:'',currentUserRole:role}),['sales','engineer'].includes(role));
-  assert.equal(vm.runInNewContext(expression,{salesName:'Someone',currentUserRole:role}),false);
+  const context=vm.createContext({editingQuoteNo:'',loadedQuoteOwnerIdentity:null,currentUserRole:role,currentUser:{uid:'U'},currentUserCode:'CODE',document:{getElementById:()=>({selectedOptions:[]})}});
+  vm.runInContext(src.slice(start,end),context);
+  assert.equal(context.quoteOwnerFromSelection().ownerUid,['sales','engineer'].includes(role)?'U':'');
  }
+
 });
-test('engineer quote access includes own assisted quotes and excludes another engineer assistance',()=>{
+test('engineer quote access excludes all other-owned quotes even when they created them',()=>{
  const start=src.indexOf('function canUseQuote('),end=src.indexOf('function belongsToCurrentUser(',start);
  const context=vm.createContext({currentUserRole:'engineer',currentUser:{uid:'eng1'},canViewAllData:()=>false,belongsToCurrentUser:(_name,uid)=>uid==='eng1'});
  vm.runInContext(src.slice(start,end),context);
  assert.equal(context.canUseQuote({ownerUid:'eng1'}),true);
- assert.equal(context.canUseQuote({ownerUid:'sales1',createdByUid:'eng1',createdByRole:'engineer'}),true);
+ assert.equal(context.canUseQuote({ownerUid:'sales1',createdByUid:'eng1',createdByRole:'engineer'}),false);
  assert.equal(context.canUseQuote({ownerUid:'sales1',createdByUid:'eng2',createdByRole:'engineer'}),false);
  context.currentUserRole='sales';
  assert.equal(context.canUseQuote({ownerUid:'sales1',createdByUid:'eng1',createdByRole:'engineer'}),false);
+});
+
+test('warehouse UI cannot reuse its former business quote cache even when the UID matches',()=>{
+ const start=src.indexOf('function canUseQuote('),end=src.indexOf('function belongsToCurrentUser(',start);
+ const context=vm.createContext({currentUserRole:'warehouse',canViewAllData:()=>false,belongsToCurrentUser:()=>true});
+ vm.runInContext(src.slice(start,end),context);assert.equal(context.canUseQuote({ownerUid:'wh1'}),false);
 });

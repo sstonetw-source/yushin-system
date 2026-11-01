@@ -4,8 +4,8 @@
 // 業務名單來源改為 users 集合（與登入帳號綁定，name/code/phone/role 皆存在同一份文件）
 function applySalesRows(rows) {
     const list = (rows || [])
-        .filter(d => d.name && d.code && d.active !== false && d.disabled !== true)
-        .map(d => ({ uid:d.id || d.uid || '', code:d.code, name:d.name, phone:d.phone || '', role:d.role || 'sales', deliveryDefaults:d.deliveryDefaults||{}, active:true }));
+        .filter(d => d.name && (d.salesCode || d.code) && d.active !== false && d.disabled !== true)
+        .map(d => ({ uid:d.id || d.uid || '', code:d.salesCode || d.code, name:d.name, phone:d.phone || '', role:d.role || 'sales', deliveryDefaults:d.deliveryDefaults||{}, active:true }));
     list.sort((a, b) => (a.code || '').localeCompare(b.code || ''));
     salesList = list;
     populateSalesDropdown();
@@ -91,19 +91,8 @@ window.generateQuoteNo = async function() {
     const info = companyData[currentCompany];
     const dateStr = getFormattedDateCode();
 
-    const salesInput = document.getElementById('salesName');
-    let salesCode = "01";
-
-    if (salesInput && salesInput.value) {
-        const typedName = salesInput.value.trim();
-        if (typedName === currentUserName && currentUserCode) {
-            // 輸入的就是自己，直接用登入時已經取得的代號，不依賴 salesList 是否有正確收錄自己
-            salesCode = currentUserCode;
-        } else {
-            const match = salesList.find(s => s.name === typedName);
-            if (match && match.code) salesCode = match.code;
-        }
-    }
+    const owner = quoteOwnerFromSelection();
+    const salesCode = owner.salesCode || '01';
 
     const prefix = `${info.prefix}-${dateStr}-${salesCode}-`;
 
@@ -118,13 +107,10 @@ window.generateQuoteNo = async function() {
             queries.push(newestInPrefix());
         } else {
             // Match the same ownership paths as the quote list and Rules.
-            // Each path reads at most one record, including legacy code ownership
-            // and engineer-created assisted quotes. Never issue an unscoped read.
+            // Each path reads at most one record for legacy code or UID ownership.
+            // Never issue an unscoped or creator-based read.
             if (currentUserCode) queries.push(newestInPrefix().where('salesCode', '==', currentUserCode));
             if (currentUser?.uid) queries.push(newestInPrefix().where('ownerUid', '==', currentUser.uid));
-            if (currentUserRole === 'engineer' && currentUser?.uid) {
-                queries.push(newestInPrefix().where('createdByUid', '==', currentUser.uid).where('createdByRole', '==', 'engineer'));
-            }
             if (!queries.length) throw new Error('目前帳號缺少可用的資料歸屬資訊');
         }
         const snapshots = await Promise.all(queries.map(query => firestoreReadWithTimeout(query.get(), '估價單號')));
@@ -160,77 +146,125 @@ window.onSalesChange = function() {
     updateSalesPhoneDisplay();
 };
 
-// 估價單可歸屬業務或工程師：業務只開自己名下；工程師可開自己或協助業務；
- // 採購／管理員可代業務或工程師建立。
+// Select values are UIDs. Display names never decide commercial ownership.
+let loadedQuoteOwnerIdentity = null;
+function quotePersonFromIdentity(identity) {
+    if (identity.ownerUid) {
+        const person = salesList.find(person => person.uid === identity.ownerUid);
+        if (person) return person;
+        if (identity.ownerUid === currentUser?.uid) return {uid:currentUser.uid, name:currentUserName,
+            code:currentUserCode, phone:currentUserPhone || ''};
+        return undefined;
+    }
+    const matches = salesList.filter(person => identity.salesCode && person.code === identity.salesCode);
+    return matches.length === 1 ? matches[0] : null;
+}
+function quoteOwnerFromSelection() {
+    if (editingQuoteNo && loadedQuoteOwnerIdentity) return {...loadedQuoteOwnerIdentity};
+    const option = document.getElementById('salesName')?.selectedOptions?.[0];
+    if (option?.dataset.ownerUid) return {
+        ownerUid:option.dataset.ownerUid, salesCode:option.dataset.salesCode || '',
+        salesName:option.dataset.salesName || ''
+    };
+    // Preserve the existing blank printed-name option for a business owner's own quote.
+    return ['sales','engineer'].includes(currentUserRole)
+        ? {ownerUid:currentUser?.uid || '', salesCode:currentUserCode || '', salesName:''}
+        : {ownerUid:'', salesCode:'', salesName:''};
+}
+function setQuoteOwnerSelection(record = {}, historical = false) {
+    const select = document.getElementById('salesName');
+    if (!select) return;
+    const identity = {ownerUid:record.ownerUid || '', salesCode:record.salesCode || '', salesName:record.salesName || ''};
+    if (historical) loadedQuoteOwnerIdentity = identity;
+    let options = [...select.options].filter(option => option.value);
+    let match = identity.ownerUid ? options.find(option => option.value === identity.ownerUid) : null;
+    if (!historical && !identity.ownerUid && !identity.salesCode && identity.salesName === currentUserName) {
+        match = options.find(option => option.value === currentUser?.uid);
+    }
+    if (!identity.ownerUid && identity.salesCode) {
+        const matches = options.filter(option => option.dataset.salesCode === identity.salesCode);
+        if (matches.length === 1) match = matches[0];
+    }
+    if (historical && (!match || match.dataset.salesName !== identity.salesName || match.dataset.salesCode !== identity.salesCode)) {
+        // An inactive or renamed historical owner remains visible without being re-assigned.
+        const option = document.createElement('option');
+        option.value = 'historical-owner';
+        option.text = identity.salesName || '原單據負責人';
+        Object.assign(option.dataset, identity);
+        select.appendChild(option); match = option;
+    }
+    select.value = match?.value || '';
+    select.disabled = historical;
+}
 function populateSalesDropdown() {
     const select = document.getElementById('salesName');
     if (!select) return;
-
-    const visibleList = salesList.filter(s => {
-        const role = (s.role || 'sales').toLowerCase();
-        if (currentUserRole === 'sales') return s.uid === currentUser?.uid;
-        if (currentUserRole === 'engineer') return s.uid === currentUser?.uid || role === 'sales';
-        return role === 'sales' || role === 'engineer';
-    });
-
-    if ((currentUserRole === 'sales' || currentUserRole === 'engineer') && currentUser?.uid && currentUserName
-        && !visibleList.some(s => s.uid === currentUser.uid)) {
-        visibleList.push({ uid: currentUser.uid, name: currentUserName, code: currentUserCode, role: currentUserRole });
+    const selected = quoteOwnerFromSelection();
+    const ownOnly = ['sales','engineer'].includes(currentUserRole);
+    const people = [...salesList];
+    if (currentUser?.uid && currentUserName && currentUserCode && !people.some(person => person.uid === currentUser.uid)) {
+        people.push({uid:currentUser.uid,name:currentUserName,code:currentUserCode,role:currentUserRole});
     }
-
-    const currentValue = select.value;
-    select.innerHTML = '<option value="">請選擇負責業務</option>';
-    visibleList.forEach(s => {
-        if (s.name) {
-            const option = document.createElement('option');
-            option.value = s.name;
-            option.text = s.name;
-            select.appendChild(option);
-        }
-    });
-
-    // 如果有等待中的草稿業務姓名（頁面載入時從本機草稿還原的），優先套用這個，只套用一次
-    let valueToApply = currentValue;
-    if (window._pendingDraftSalesName !== undefined) {
-        valueToApply = window._pendingDraftSalesName;
-        delete window._pendingDraftSalesName;
+    const visibleList = people.filter(person => isSelectableCommercialOwner(person)
+        && (!ownOnly || person.uid === currentUser?.uid));
+    select.replaceChildren(new Option('請選擇負責業務', ''));
+    for (const person of visibleList) {
+        const option = new Option(`${person.name}（${person.code}）`, person.uid);
+        Object.assign(option.dataset, {ownerUid:person.uid,salesCode:person.code,salesName:person.name});
+        select.add(option);
     }
-    // 保留有效的草稿選擇；本人登入時預設帶入自己，採購／管理員保持未選擇。
-    select.value = visibleList.some(s => s.name === valueToApply) ? valueToApply
-        : ((currentUserRole === 'sales' || currentUserRole === 'engineer') ? currentUserName : '');
-
-    // 還原草稿與編輯既有估價單時都沿用原單號；只有真正的新單才重新取號。
+    const pending = window._pendingQuoteOwnerIdentity;
+    delete window._pendingQuoteOwnerIdentity;
+    const historical = !!editingQuoteNo && !!loadedQuoteOwnerIdentity;
+    let desired = pending || (selected.ownerUid ? selected : {ownerUid:currentUser?.uid || '',salesCode:currentUserCode || '',salesName:currentUserName || ''});
+    if (!pending && !selected.ownerUid && !ownOnly && currentUserRole !== 'admin') desired = {};
+    setQuoteOwnerSelection(historical ? loadedQuoteOwnerIdentity : desired, historical);
     if (!restoringQuoteDraft && !editingQuoteNo) generateQuoteNo();
     updateSalesPhoneDisplay();
 }
-
-// 依目前輸入的業務姓名，更新旁邊顯示的電話號碼
 function updateSalesPhoneDisplay() {
-    const input = document.getElementById('salesName');
     const phoneSpan = document.getElementById('salesPhone');
-    if (!input || !phoneSpan) return;
+    if (!phoneSpan) return;
+    const identity = quoteOwnerFromSelection();
+    const match = quotePersonFromIdentity(identity);
+    phoneSpan.innerText = match?.phone || (identity.ownerUid === currentUser?.uid ? currentUserPhone || '' : '');
+}
 
-    const selectedName = input.value.trim();
-    const match = salesList.find(s => s.name === selectedName);
-    phoneSpan.innerText = match ? (match.phone || '')
-        : (selectedName === currentUserName ? (currentUserPhone || '') : '');
+function equipmentOwnerFromSelection() {
+    const selected = document.getElementById('eqSales')?.selectedOptions?.[0];
+    return { salesName:selected?.dataset.salesName || '', salesCode:selected?.dataset.salesCode || '',
+        ...(selected?.dataset.ownerUid ? {ownerUid:selected.dataset.ownerUid} : {}) };
+}
+
+function setEquipmentOwnerSelection(record) {
+    const select = document.getElementById('eqSales');
+    if (!select) return;
+    [...select.options].filter(option => option.dataset.historical === 'true').forEach(option => option.remove());
+    if (!record) {
+        select.value = canViewAllEquipment() ? '' : (currentUser?.uid || '');
+        return;
+    }
+    const option = new Option(`${record.salesName || '未指定負責業務'}${record.salesCode ? '（' + record.salesCode + '）' : ''}・原歸屬`, 'historical-equipment');
+    Object.assign(option.dataset, {historical:'true',ownerUid:record.ownerUid || '',salesCode:record.salesCode || '',salesName:record.salesName || ''});
+    select.add(option);select.value = option.value;
 }
 
 function populateEquipmentSalesDropdown() {
     const select = document.getElementById('eqSales');
     if (!select) return;
-    select.innerHTML = '<option value="">未指定負責業務</option>';
+    const previous = select.value;
+    const historical = [...select.options].find(option => option.dataset.historical === 'true');
+    select.replaceChildren(new Option('未指定負責業務', ''));
     const visibleList = canViewAllEquipment()
-        ? salesList
-        : (currentUserName ? [{ name:currentUserName, code:currentUserCode, phone:currentUserPhone }] : []);
-    visibleList.forEach(s => {
-        if (s.name) {
-            const option = document.createElement('option');
-            option.value = s.name;
-            option.text = s.name;
-            select.appendChild(option);
-        }
+        ? salesList.filter(isSelectableCommercialOwner)
+        : (currentUserName ? [{uid:currentUser?.uid, name:currentUserName, code:currentUserCode, phone:currentUserPhone}] : []);
+    visibleList.forEach(person => {
+        const option = new Option(`${person.name}（${person.code}）`, person.uid);
+        Object.assign(option.dataset, {ownerUid:person.uid || '',salesCode:person.code || '',salesName:person.name || ''});
+        select.add(option);
     });
+    if (historical) select.add(historical);
+    select.value = [...select.options].some(option => option.value === previous) ? previous : '';
 }
 
 function loadCompanyAgencyBrandSettings() {
@@ -2178,6 +2212,7 @@ function updateQuoteEditingBanner() {
 
 function setQuoteEditingContext(quoteNo = '') {
     editingQuoteNo = String(quoteNo || '').trim();
+    if (!editingQuoteNo) { loadedQuoteOwnerIdentity = null; const select = document.getElementById('salesName'); if (select) select.disabled = false; }
     updateQuoteEditingBanner();
 }
 
@@ -2231,7 +2266,7 @@ function saveQuoteDraft() {
             company: currentCompany,
             clientName: document.getElementById('clientName')?.value || '',
             ordererName: document.getElementById('ordererName')?.value || '',
-            salesName: document.getElementById('salesName')?.value || '',
+            ...quoteOwnerFromSelection(),
             quoteDate: document.getElementById('quoteDate')?.value || '',
             quoteNo: document.getElementById('quoteNo')?.value || '',
             discountRate: document.getElementById('discountRateInput')?.value || '0',
@@ -2281,7 +2316,8 @@ function restoreQuoteDraft(draft) {
     // 這裡先记住待會兒要設定的值
     document.getElementById('quoteNo').value = draft.quoteNo || '';
     setQuoteEditingContext(draft.editingQuoteNo || '');
-    window._pendingDraftSalesName = draft.salesName || '';
+    window._pendingQuoteOwnerIdentity = {ownerUid:draft.ownerUid || '',salesCode:draft.salesCode || '',salesName:draft.salesName || ''};
+    if (draft.editingQuoteNo) loadedQuoteOwnerIdentity = {...window._pendingQuoteOwnerIdentity};
 
     calculateTotals();
     restoringQuoteDraft = false;
@@ -2313,17 +2349,7 @@ function currentQuoteOutputValidation() {
 }
 
 function collectCurrentQuoteRecord() {
-    const salesName = document.getElementById('salesName').value;
-    const selectedSales = salesList.find(s => stripPhoneSuffix(s.name) === stripPhoneSuffix(salesName));
-    // 負責業務可以留白；業務／工程師本人輸出時仍在背景保留自己的 ownerUid / salesCode，
-    // 讓權限與歷史歸屬不因畫面欄位留白而遺失。
-    const selfOwnedBlankSales = !salesName && (currentUserRole === 'sales' || currentUserRole === 'engineer');
-    const resolvedSalesCode = selectedSales?.code
-        || (selfOwnedBlankSales ? currentUserCode : salesCodeForName(salesName));
-    const resolvedOwnerUid = selectedSales?.uid
-        || (selfOwnedBlankSales
-            ? (currentUser?.uid || '')
-            : (belongsToCurrentUser(salesName, '', resolvedSalesCode) ? currentUser?.uid || '' : ''));
+    const {salesName, salesCode:resolvedSalesCode, ownerUid:resolvedOwnerUid} = quoteOwnerFromSelection();
     const record = {
         quoteNo: document.getElementById('quoteNo').value.trim(), company: currentCompany,
         clientName: document.getElementById('clientName').value, ordererName: document.getElementById('ordererName').value.trim(),
@@ -2537,7 +2563,7 @@ window.openSavedThreeQuoteRecord = async function(quoteNo) {
 
         document.getElementById('clientName').value = baseQuote.clientName || '';
         document.getElementById('ordererName').value = baseQuote.ordererName || '';
-        document.getElementById('salesName').value = baseQuote.salesName || '';
+        setQuoteOwnerSelection(baseQuote, true);
         document.getElementById('quoteDate').value = baseQuote.quoteDate || '';
         document.getElementById('quoteNo').value = baseQuote.quoteNo || quoteNo;
         setQuoteEditingContext(baseQuote.quoteNo || quoteNo);
@@ -2715,15 +2741,16 @@ function persistQuoteOutputRecord(quoteData, outputLabel = '輸出') {
             const existing = snapshot.data() || {};
             // 編輯既有估價單時，表單只代表可編輯內容；成交、三估單、文件連結等背景欄位
             // 必須由 merge 保留。建立者與建立時間也屬稽核欄位，不可因重新輸出而改寫。
+            for (const key of ['ownerUid','salesCode','salesName','createdByUid','createdByName','createdByRole']) {
+                if (key in existing) quoteData[key] = existing[key]; else delete quoteData[key];
+            }
             quoteData.createdAt = existing.createdAt || quoteData.createdAt;
-            quoteData.createdByUid = existing.createdByUid || quoteData.createdByUid || '';
-            quoteData.createdByName = existing.createdByName || quoteData.createdByName || '';
-            quoteData.createdByRole = existing.createdByRole || quoteData.createdByRole || '';
         }
         transaction.set(quoteRef, quoteData, { merge: true });
     }).then(() => {
         if (!editingQuoteNo) {
             setQuoteEditingContext(quoteData.quoteNo);
+            setQuoteOwnerSelection(quoteData, true);
             saveQuoteDraft();
         }
         if (quoteData.sourceType === DOCUMENT_TYPES.FORECAST && quoteData.sourceId) {
@@ -2743,9 +2770,9 @@ function persistQuoteOutputRecord(quoteData, outputLabel = '輸出') {
 
 function quoteDataForPdfExport() {
     const quoteData = collectCurrentQuoteRecord();
-    const selectedSales = salesList.find(s => stripPhoneSuffix(s.name) === stripPhoneSuffix(quoteData.salesName));
+    const selectedSales = quotePersonFromIdentity(quoteData);
     quoteData.customerId = syncCustomerMaster(quoteData.ordererName || quoteData.clientName, {
-        salesCode: selectedSales?.code || quoteData.salesCode || salesCodeForName(quoteData.salesName)
+        salesCode: quoteData.salesCode || selectedSales?.code || ''
     });
     quoteData.status = BUSINESS_STATUS.ACTIVE;
     Object.assign(quoteData, grossAmountMetadata(quoteData.grandTotal));
@@ -2793,7 +2820,7 @@ function renderQuotePdfDocument(quoteData = {}) {
     const discountRate = parseFloat(quoteData.discountRate) || 0;
     const validDays = String(quoteData.validDays ?? '').trim();
     const remarks = String(quoteData.remarks || '').trim();
-    const selectedSales = salesList.find(s => stripPhoneSuffix(s.name) === stripPhoneSuffix(quoteData.salesName));
+    const selectedSales = quotePersonFromIdentity(quoteData);
     const salesPhone = selectedSales?.phone || '';
     const items = Array.isArray(quoteData.items) ? quoteData.items : [];
 
@@ -3171,7 +3198,7 @@ async function fetchAndFillQuote(qNo) {
         document.getElementById('quoteNo').value = data.quoteNo || qNo;
         document.getElementById('clientName').value = data.clientName || '';
         document.getElementById('ordererName').value = data.ordererName || '';
-        document.getElementById('salesName').value = data.salesName || '';
+        setQuoteOwnerSelection(data, true);
         updateSalesPhoneDisplay();
         document.getElementById('quoteDate').value = data.quoteDate || '';
         document.getElementById('validDays').value = data.validDays ?? 90;
@@ -3232,7 +3259,7 @@ window.openQuoteFromAdmin = async function(quoteNo) {
 
         document.getElementById('clientName').value = source.clientName || '';
         document.getElementById('ordererName').value = source.ordererName || '';
-        document.getElementById('salesName').value = source.salesName || '';
+        setQuoteOwnerSelection(source, true);
         document.getElementById('quoteDate').value = source.quoteDate || '';
         document.getElementById('quoteNo').value = source.quoteNo || quoteNo;
         setQuoteEditingContext(source.quoteNo || quoteNo);
@@ -3292,11 +3319,10 @@ window.copyQuoteAsNew = async function(quoteNo) {
         document.getElementById('quoteRemarks').value = source.remarks || '';
         initDate();
 
-        const salesSelect = document.getElementById('salesName');
-        const availableSales = [...salesSelect.options].map(option => option.value);
-        if (currentUserName && availableSales.includes(currentUserName)) salesSelect.value = currentUserName;
-        else if (availableSales.includes(source.salesName || '')) salesSelect.value = source.salesName;
-        else salesSelect.value = '';
+        setQuoteEditingContext('');
+        setQuoteOwnerSelection(salesList.some(person => person.uid === currentUser?.uid && isSelectableCommercialOwner(person))
+            ? {ownerUid:currentUser.uid,salesCode:currentUserCode,salesName:currentUserName}
+            : source);
         updateSalesPhoneDisplay();
 
         const itemsBody = document.getElementById('quoteItems');
@@ -3362,16 +3388,12 @@ async function runQuoteHistorySearch() {
     let cursor = null;
     let checked = 0;
     let lastIntermediateRenderAt = 0;
-    let assistedSearch = false;
     updateQuoteHistorySearchUi('正在搜尋全部歷史估價單…');
     renderMyQuotesList();
 
     try {
         while (true) {
-            let query = (assistedSearch
-                ? db.collection('quotes').where('searchTokens', 'array-contains', queryToken)
-                    .where('createdByUid', '==', currentUser.uid).where('createdByRole', '==', 'engineer')
-                : scopedHistorySearchQuery('quotes', queryToken)).limit(DEFAULT_LIST_LIMIT);
+            let query = scopedHistorySearchQuery('quotes', queryToken).limit(DEFAULT_LIST_LIMIT);
             if (cursor) query = query.startAfter(cursor);
             const snapshot = await firestoreReadWithTimeout(query.get(), '估價單索引搜尋');
             if (generation !== quoteHistorySearchGeneration) return;
@@ -3391,9 +3413,6 @@ async function runQuoteHistorySearch() {
             updateQuoteHistorySearchUi(`全歷史搜尋中：已檢查 ${checked} 筆候選資料，找到 ${records.size} 筆…`);
 
             if (snapshot.size < DEFAULT_LIST_LIMIT) {
-                if (!assistedSearch && currentUserRole === 'engineer' && currentUser?.uid) {
-                    assistedSearch = true; cursor = null; continue;
-                }
                 break;
             }
             cursor = snapshot.docs[snapshot.docs.length - 1];
@@ -3469,7 +3488,6 @@ function createMyQuotesPaginationState() {
     } else {
         if (currentUserCode) sources.push({ cursor: null, query: () => db.collection('quotes').where('salesCode', '==', currentUserCode).orderBy('quoteDate', 'desc') });
         if (currentUser?.uid) sources.push({ cursor: null, query: () => db.collection('quotes').where('ownerUid', '==', currentUser.uid).orderBy('quoteDate', 'desc') });
-        if (currentUserRole === 'engineer' && currentUser?.uid) sources.push({ cursor: null, query: () => db.collection('quotes').where('createdByUid', '==', currentUser.uid).where('createdByRole', '==', 'engineer').orderBy('quoteDate', 'desc') });
 
     }
     return { sources, sourceIndex: 0 };
@@ -3626,7 +3644,7 @@ window.renderMyQuotesList = function() {
     let shown = 0;
 
     const isAdminViewingAll = canViewAllData('quotes');
-    const visibleQuoteSource = quoteHistorySearchActive ? quoteHistorySearchResults : myQuotesCache;
+    const visibleQuoteSource = (quoteHistorySearchActive ? quoteHistorySearchResults : myQuotesCache).filter(canUseQuote);
     populateMyQuoteSalesFilter();
     populateMyQuoteBrandFilter(visibleQuoteSource);
     const salesFilter = document.getElementById('myQuoteSalesFilter')?.value || '';
