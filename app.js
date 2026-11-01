@@ -976,6 +976,8 @@ function hydratePageFromLocalCache(mainKey) {
 }
 
 function initializePageData(mainKey, options = {}) {
+    // Role controls must refresh even when search results or page data are reused.
+    if (mainKey === 'products') updatePendingProductMasterButton();
     if(permissionRulesCheckedUid!==currentUser?.uid){
         if(currentUserRole==='warehouse')return ensurePermissionRulesReady().then(()=>initializePageData(mainKey,options));
         ensurePermissionRulesReady();
@@ -1010,7 +1012,6 @@ function initializePageData(mainKey, options = {}) {
     if (mainKey === 'products' && productManagementSourceMode === 'search') { renderProductManagementResults(); }
     else if (mainKey === 'products') {
         clearProductManagementSearch({ preserveInput: true });
-        updatePendingProductMasterButton();
         jobs.push(ensureProductBrandBrowserLoaded());
     }
     if (mainKey === 'orders.list') {

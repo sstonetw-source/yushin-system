@@ -13,6 +13,25 @@ function fn(name){
   return source.slice(start,source.indexOf('\n}',start)+2);
 }
 
+for(const cached of [false,true])test(`product create entry follows the actual role with preserved search and cached=${cached}`,async()=>{
+  const nodes=Object.fromEntries(['productManagementTools','createProductMasterBtn','productManagementInactiveWrap','productBatchMaintenance'].map(id=>[id,{style:{display:'none'}}]));
+  let renders=0;
+  const ctx=vm.createContext({Date,Promise,console,currentUser:{uid:'U'},currentUserRole:'engineer',permissionRulesCheckedUid:'U',
+    loadedMainPages:new Set(cached?['products']:[]),mainPageLoads:new Map(),dirtyMainPages:new Set(),mainPageRefreshAt:new Map([['products',Date.now()]]),MAIN_PAGE_REFRESH_MS:600000,
+    productManagementSourceMode:'search',hydratePageFromLocalCache:()=>{},renderProductManagementResults:()=>renders++,
+    mainPageLoadSucceeded:()=>{},mainPageLoadFailed:()=>assert.fail('Unexpected product load failure'),
+    document:{getElementById:id=>nodes[id]||null}});
+  vm.runInContext(fn('canManagePendingProductMaster')+fn('canCreateProductMaster')+fn('updatePendingProductMasterButton')+fn('initializePageData'),ctx);
+  for(const role of ['engineer','sales','purchaser','warehouse','admin','engineer']){
+    ctx.currentUserRole=role;await ctx.initializePageData('products');
+    assert.equal(nodes.createProductMasterBtn.style.display,['sales','purchaser','admin'].includes(role)?'':'none',role+' create');
+    for(const id of ['productManagementTools','productManagementInactiveWrap','productBatchMaintenance'])
+      assert.equal(nodes[id].style.display,['purchaser','admin'].includes(role)?'':'none',role+' maintenance');
+    assert.equal(ctx.productManagementSourceMode,'search');
+  }
+  assert.equal(renders,cached?0:6);
+});
+
 test('only enabled people with real business identity can be selectable owners',()=>{
   const ctx=vm.createContext({});vm.runInContext(fn('isSelectableCommercialOwner'),ctx);
   const base={uid:'U1',name:'主管',code:'A01',role:'admin',active:true};
