@@ -3714,3 +3714,25 @@ test('retired external notice and pending-inventory collections stay denied for 
   }
  }
 });
+
+test('UID-only historical quotes remain editable without backfilling owner or creator fields',async()=>{
+ for(const uid of ['sales1','eng1']){
+  const id='uid-only-'+uid;
+  await seed('quotes/'+id,{ownerUid:uid,salesName:'原負責人',quoteDate:'2026-09-05'});
+  const ref=doc(db(uid),'quotes/'+id);
+  await assertSucceeds(getDoc(ref));await assertSucceeds(updateDoc(ref,{quoteDate:'2026-11-01'}));
+  await assertFails(updateDoc(ref,{salesCode:uid==='sales1'?'S01':'E01'}));
+  await assertFails(updateDoc(ref,{ownerUid:'sales2'}));
+  await assertFails(updateDoc(ref,{createdByUid:uid}));
+  await assertSucceeds(updateDoc(doc(db('buyer1'),'quotes/'+id),{quoteDate:'2026-11-02'}));
+  await assertFails(updateDoc(doc(db('buyer1'),'quotes/'+id),{ownerUid:'sales2'}));
+  const saved=(await getDoc(ref)).data();assert.equal(Object.hasOwn(saved,'salesCode'),false);assert.equal(Object.hasOwn(saved,'createdByUid'),false);
+ }
+});
+
+test('warehouse role does not inherit quote access from an earlier business identity',async()=>{
+ await seed('quotes/former-business',{ownerUid:'wh1',salesCode:'W01',quoteDate:'2026-09-05'});
+ await assertFails(getDoc(doc(db('wh1'),'quotes/former-business')));
+ await assertFails(getDocs(query(collection(db('wh1'),'quotes'),where('ownerUid','==','wh1'))));
+ await assertSucceeds(getDoc(doc(db('buyer1'),'quotes/former-business')));
+});

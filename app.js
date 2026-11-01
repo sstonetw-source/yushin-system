@@ -727,8 +727,8 @@ function syncCustomerMaster(customerName, extra = {}) {
 }
 
 function canUseQuote(record = {}) {
-    return canViewAllData('quotes')
-        || belongsToCurrentUser(record.salesName, record.ownerUid, record.salesCode);
+    return ['admin','purchaser','sales','engineer'].includes(currentUserRole)
+        && (canViewAllData('quotes') || belongsToCurrentUser(record.salesName, record.ownerUid, record.salesCode));
 }
 
 function belongsToCurrentUser(salesName, ownerUid, salesCode = '') {
@@ -2826,7 +2826,7 @@ window.saveProductMasterEditor = async function() {
             : `已儲存產品主檔：${brand} / ${code}`;
     } catch (err) {
         console.error('儲存產品主檔失敗：', err);
-        alert('儲存產品主檔失敗：' + (err?.message || err));
+        alert(actionFailureMessage('儲存產品主檔', err, `${brand}／${code}`));
     } finally {
         endActionButton(button, state);
     }

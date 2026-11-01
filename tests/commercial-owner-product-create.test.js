@@ -60,7 +60,7 @@ test('engineer creator-only legacy quote access is removed in client and Rules, 
   assert.doesNotMatch(source,/engineerAssistedSalesQuote|where\('createdByRole', '==', 'engineer'\)/);
   const quotes=rules.slice(rules.indexOf('match /quotes/{id}'),rules.indexOf('match /forecasts/{id}'));
   assert.doesNotMatch(quotes,/engineerAssistedSalesQuote|createdByUid == request\.auth\.uid/);
-  assert.match(quotes,/allow list: if canPurchase\(\) \|\| owns\(resource\.data\)/);
+  assert.match(quotes,/allow list: if canPurchase\(\) \|\| \(commercialDocumentOwner\(\) && owns\(resource\.data\)\)/);
   assert.match(quotes,/preservesCreator\(\)/);
 });
 

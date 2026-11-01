@@ -85,8 +85,8 @@ function syncCustomerMaster(customerName, extra = {}) {
 }
 
 function canUseQuote(record = {}) {
-    return canViewAllData('quotes')
-        || belongsToCurrentUser(record.salesName, record.ownerUid, record.salesCode);
+    return ['admin','purchaser','sales','engineer'].includes(currentUserRole)
+        && (canViewAllData('quotes') || belongsToCurrentUser(record.salesName, record.ownerUid, record.salesCode));
 }
 
 function belongsToCurrentUser(salesName, ownerUid, salesCode = '') {

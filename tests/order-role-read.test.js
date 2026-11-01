@@ -48,3 +48,9 @@ test('engineer quote access excludes all other-owned quotes even when they creat
  context.currentUserRole='sales';
  assert.equal(context.canUseQuote({ownerUid:'sales1',createdByUid:'eng1',createdByRole:'engineer'}),false);
 });
+
+test('warehouse UI cannot reuse its former business quote cache even when the UID matches',()=>{
+ const start=src.indexOf('function canUseQuote('),end=src.indexOf('function belongsToCurrentUser(',start);
+ const context=vm.createContext({currentUserRole:'warehouse',canViewAllData:()=>false,belongsToCurrentUser:()=>true});
+ vm.runInContext(src.slice(start,end),context);assert.equal(context.canUseQuote({ownerUid:'wh1'}),false);
+});
