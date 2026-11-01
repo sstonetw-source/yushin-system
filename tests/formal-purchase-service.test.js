@@ -380,14 +380,45 @@ function recoverySetup() {
  Object.assign(x.c,{
   sessionStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},
   document:{getElementById:()=>null},poSaveInProgress:false,poEditingId:null,poIncomingSyncPending:true,
-  poListCache:[],supplyReceivingCache:[],invalidateProcurementDemandQueue:()=>{},
+  poListCache:[],poHistorySearchResults:[],purchaseHistorySupplyCache:new Map(),supplyReceivingCache:[],invalidateProcurementDemandQueue:()=>{},
   syncCommittedPurchaseOrderSources:()=>{},invalidateWarehouseStockCache:()=>{},
   registerPurchaseIncoming:async id=>incoming.add(id),renderPurchasingView:()=>{},
   showActionFeedback:(message,type)=>feedback.push({message,type}),window:{}
  });
+ const workspace=fs.readFileSync(path.join(__dirname,'../src/features/purchasing/purchasing-workspace.js'),'utf8');
+ vm.runInContext(workspace.slice(workspace.indexOf('function cachePurchaseOrderDocument('),workspace.indexOf('function invalidateProcurementDemandQueue(')),x.c);
  vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/features/purchasing/formal-purchase-recovery.js'),'utf8'),x.c);
  return {...x,storage,incoming,feedback};
 }
+test('confirming a searched draft immediately shows the committed document and receiving progress without another purchase',async()=>{
+ const x=recoverySetup();
+ const draft={...structuredClone(x.po),id:'PO1',status:'DRAFT',documentOnly:true};
+ const unrelated={id:'OTHER',poNo:'OTHER',status:'DRAFT',documentOnly:true};
+ x.c.poListCache=[draft];x.c.poHistorySearchResults=[draft,unrelated];
+ Object.assign(x.records.get('purchaseOrders/PO1'),{status:'ORDERED',documentOnly:false,supplyOrderIds:['PO1-0']});
+ const workspace=fs.readFileSync(path.join(__dirname,'../src/features/purchasing/purchasing-workspace.js'),'utf8');
+ vm.runInContext(workspace.slice(workspace.indexOf('function isPurchaseTerminalStatus('),workspace.indexOf('function purchaseTimelineDateLabel(')),x.c);
+ x.c.YushinSupply=require('../modules/supply-core.js');
+ assert.equal(x.c.purchaseOrderDocumentStatusLabel(draft),'文件已儲存／尚未採購');
+ x.c.rememberFormalPurchase(x.po,'buyer','purchaser');await x.c.recoverFormalPurchase();
+ const shown=x.c.poHistorySearchResults.find(po=>po.id==='PO1');
+ assert.equal(x.c.purchaseOrderDocumentStatusLabel(shown),'已下單');
+ assert.equal(shown.documentOnly,false);
+ assert.equal(x.c.purchaseHistoryItemReceiptProgress(shown).remainingQty,1);
+ assert.equal(x.c.poHistorySearchResults.length,2);assert.equal(x.c.poHistorySearchResults[1],unrelated);
+ assert.equal(x.c.poListCache.length,1);assert.equal(x.c.poListCache[0],shown);
+ await x.c.recoverFormalPurchase();
+ assert.equal(x.calls.filter(row=>row.name).length,1);assert.equal(x.incoming.size,1);
+ assert.equal(x.c.poListCache.length,1);assert.equal(x.c.supplyReceivingCache.length,1);
+});
+test('saving a draft updates its visible search result without injecting unrelated documents',()=>{
+ const x=recoverySetup(),old={id:'PO1',poNo:'PO1',vendorName:'Old',status:'DRAFT',documentOnly:true};
+ x.c.poHistorySearchResults=[old];
+ x.c.cachePurchaseOrderDocument({...old,vendorName:'Corrected'});
+ assert.equal(x.c.poHistorySearchResults[0].vendorName,'Corrected');
+ x.c.cachePurchaseOrderDocument({poNo:'OTHER',status:'DRAFT',documentOnly:true});
+ assert.equal(x.c.poHistorySearchResults.length,1);assert.equal(x.c.poListCache.length,2);
+});
 test('formal pending checkpoint freezes original intent across reload and resumes the same Service without another writer',async()=>{
  const x=recoverySetup();x.c.rememberFormalPurchase(x.po,'buyer','purchaser');
  const raw=[...x.storage.values()][0];x.po.items[0].qty=99;

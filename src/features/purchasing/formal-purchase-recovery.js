@@ -44,14 +44,11 @@ function cacheCommittedFormalPurchase({poRecord, committedSourceOrders, committe
     if (committedSupplyOrders.length) {
         const supplyMap = new Map(supplyReceivingCache.map(row => [row.id, row]));
         committedSupplyOrders.forEach(row => supplyMap.set(row.id, row));
+        committedSupplyOrders.forEach(row => purchaseHistorySupplyCache.set(row.id, row));
         supplyReceivingCache = [...supplyMap.values()]
             .sort((a,b) => String(b.orderDate || b.createdAt || '').localeCompare(String(a.orderDate || a.createdAt || '')));
     }
-    const savedPo = {id:poRecord.poNo, ...poRecord};
-    const index = poListCache.findIndex(po => po.id === savedPo.id);
-    if (index >= 0) poListCache[index] = savedPo;
-    else poListCache.unshift(savedPo);
-    return savedPo;
+    return cachePurchaseOrderDocument(poRecord);
 }
 function renderFormalPurchaseRecovery() {
     const panel = document.getElementById('formalPurchaseRecoveryPanel');

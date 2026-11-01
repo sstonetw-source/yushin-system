@@ -32,6 +32,17 @@ let procurementDemandLoaded = false;
 let procurementDemandSourceOrderCache = new Map();
 const selectedPendingPurchaseDemandIds = new Set();
 
+function cachePurchaseOrderDocument(record) {
+    const savedPo = {id:record.poNo, ...record};
+    const index = poListCache.findIndex(po => po.id === savedPo.id);
+    if (index >= 0) poListCache[index] = savedPo;
+    else poListCache.unshift(savedPo);
+    // History search owns separate row objects; update the same document there
+    // without inserting unrelated documents into the current search results.
+    poHistorySearchResults = poHistorySearchResults.map(po => po.id === savedPo.id ? savedPo : po);
+    return savedPo;
+}
+
 function invalidateProcurementDemandQueue(options = {}) {
     purchaseDemandSummaryReady=false;
     if(document.getElementById('purchasing-system')?.classList.contains('active'))loadPurchaseDemandSummary(true);
