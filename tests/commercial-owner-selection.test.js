@@ -84,3 +84,10 @@ test('legacy quote contact lookup uses a unique code and never falls back from a
  assert.equal(f.context.quotePersonFromIdentity({ownerUid:'gone',salesCode:'B2'}),undefined);
  f.people.push({uid:'duplicate',code:'B2',name:'另一人'});assert.equal(f.context.quotePersonFromIdentity({salesCode:'B2'}),null);
 });
+
+test('own quote PDF contact remains available when the restricted role never queries the full staff collection',()=>{
+ const f=fixture('engineer','eng1','E01','工程師');f.people.splice(0);
+ const person=f.context.quotePersonFromIdentity({ownerUid:'eng1',salesCode:'E01'});
+ assert.equal(person.uid,'eng1');assert.equal(person.code,'E01');assert.equal(person.phone,'999');
+ assert.equal(f.context.quotePersonFromIdentity({ownerUid:'boss2'}),undefined);
+});

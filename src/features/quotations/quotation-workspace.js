@@ -149,7 +149,13 @@ window.onSalesChange = function() {
 // Select values are UIDs. Display names never decide commercial ownership.
 let loadedQuoteOwnerIdentity = null;
 function quotePersonFromIdentity(identity) {
-    if (identity.ownerUid) return salesList.find(person => person.uid === identity.ownerUid);
+    if (identity.ownerUid) {
+        const person = salesList.find(person => person.uid === identity.ownerUid);
+        if (person) return person;
+        if (identity.ownerUid === currentUser?.uid) return {uid:currentUser.uid, name:currentUserName,
+            code:currentUserCode, phone:currentUserPhone || ''};
+        return undefined;
+    }
     const matches = salesList.filter(person => identity.salesCode && person.code === identity.salesCode);
     return matches.length === 1 ? matches[0] : null;
 }
