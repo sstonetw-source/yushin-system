@@ -84,3 +84,12 @@ test('admin analytics owner selector includes active commercial admins without l
   assert.match(selects.salesStatsSalesFilter.innerHTML,/歷史業務/);
   assert.match(source,/void ensureSalesListLoaded\(\)\.then/);
 });
+
+test('system-only administrator gets a clear Forecast prerequisite before any data operation',async()=>{
+ const start=source.indexOf('window.saveForecast = async function()'),end=source.indexOf('\n};',start)+3;
+ const alerts=[],ctx=vm.createContext({window:{},forecastSaveInProgress:false,canCreateForecastCapability:()=>true,canEditPage:()=>true,
+  currentUserRole:'admin',currentUserName:'純管理',currentUserCode:'',forecastCache:[],
+  document:{getElementById:id=>{assert.equal(id,'forecastId');return {value:''};}},alert:msg=>alerts.push(msg)});
+ vm.runInContext(source.slice(start,end),ctx);await ctx.window.saveForecast();
+ assert.equal(alerts.length,1);assert.match(alerts[0],/業務身分/);
+});

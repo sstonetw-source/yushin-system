@@ -3871,6 +3871,10 @@ window.saveForecast = async function() {
 
     const id = document.getElementById('forecastId').value;
     const existing = id ? forecastCache.find(item => item.id === id) : null;
+    if (!existing && currentUserRole === 'admin' && (!currentUserName.trim() || !currentUserCode)) {
+        alert('這個管理帳號沒有完整的業務身分，請由具姓名及業務代碼的負責人建立 Forecast。');
+        return;
+    }
 
     const customerName = document.getElementById('forecastCustomer').value.trim();
     const brand = normalizeForecastBrand(getBrandFieldValue('forecastBrand', 'forecastBrandOther'));
