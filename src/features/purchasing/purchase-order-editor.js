@@ -1014,8 +1014,7 @@ window.printPurchaseOrder = async function() {
         const documentRecord=await saveFormalPurchaseDocument(poRecord,{actorUid,actorRole,expectedRevision:originalDraft?.documentRevision|| (originalDraft?1:0)});
         saved=true;
         if(currentUser?.uid!==actorUid || currentUserRole!==actorRole || generation!==poDirectStockOpenGeneration)return;
-        const index=poListCache.findIndex(po=>po.id===documentRecord.id);
-        if(index>=0)poListCache[index]=documentRecord;else poListCache.unshift(documentRecord);
+        cachePurchaseOrderDocument(documentRecord);
         poEditingId=documentRecord.id;poIncomingSyncPending=false;
         document.getElementById('poVendorName').value=documentRecord.vendorName;
         poItems=purchaseItemsFromSavedPo(documentRecord);poAllItems=poItems;renderPoItemsTable();

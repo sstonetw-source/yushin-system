@@ -12898,6 +12898,17 @@ let procurementDemandLoaded = false;
 let procurementDemandSourceOrderCache = new Map();
 const selectedPendingPurchaseDemandIds = new Set();
 
+function cachePurchaseOrderDocument(record) {
+    const savedPo = {id:record.poNo, ...record};
+    const index = poListCache.findIndex(po => po.id === savedPo.id);
+    if (index >= 0) poListCache[index] = savedPo;
+    else poListCache.unshift(savedPo);
+    // History search owns separate row objects; update the same document there
+    // without inserting unrelated documents into the current search results.
+    poHistorySearchResults = poHistorySearchResults.map(po => po.id === savedPo.id ? savedPo : po);
+    return savedPo;
+}
+
 function invalidateProcurementDemandQueue(options = {}) {
     purchaseDemandSummaryReady=false;
     if(document.getElementById('purchasing-system')?.classList.contains('active'))loadPurchaseDemandSummary(true);
@@ -18858,8 +18869,7 @@ window.printPurchaseOrder = async function() {
         const documentRecord=await saveFormalPurchaseDocument(poRecord,{actorUid,actorRole,expectedRevision:originalDraft?.documentRevision|| (originalDraft?1:0)});
         saved=true;
         if(currentUser?.uid!==actorUid || currentUserRole!==actorRole || generation!==poDirectStockOpenGeneration)return;
-        const index=poListCache.findIndex(po=>po.id===documentRecord.id);
-        if(index>=0)poListCache[index]=documentRecord;else poListCache.unshift(documentRecord);
+        cachePurchaseOrderDocument(documentRecord);
         poEditingId=documentRecord.id;poIncomingSyncPending=false;
         document.getElementById('poVendorName').value=documentRecord.vendorName;
         poItems=purchaseItemsFromSavedPo(documentRecord);poAllItems=poItems;renderPoItemsTable();
@@ -18926,14 +18936,11 @@ function cacheCommittedFormalPurchase({poRecord, committedSourceOrders, committe
     if (committedSupplyOrders.length) {
         const supplyMap = new Map(supplyReceivingCache.map(row => [row.id, row]));
         committedSupplyOrders.forEach(row => supplyMap.set(row.id, row));
+        committedSupplyOrders.forEach(row => purchaseHistorySupplyCache.set(row.id, row));
         supplyReceivingCache = [...supplyMap.values()]
             .sort((a,b) => String(b.orderDate || b.createdAt || '').localeCompare(String(a.orderDate || a.createdAt || '')));
     }
-    const savedPo = {id:poRecord.poNo, ...poRecord};
-    const index = poListCache.findIndex(po => po.id === savedPo.id);
-    if (index >= 0) poListCache[index] = savedPo;
-    else poListCache.unshift(savedPo);
-    return savedPo;
+    return cachePurchaseOrderDocument(poRecord);
 }
 function renderFormalPurchaseRecovery() {
     const panel = document.getElementById('formalPurchaseRecoveryPanel');
