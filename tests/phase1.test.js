@@ -1243,6 +1243,7 @@ test('order brand filter uses selectable brands and groups alternate spelling an
             { salesName: '王先生', brand: '自行輸入品牌' }
         ],
         salesList: [{ name: '王先生' }],
+        isSelectableCommercialOwner:()=>true,
         OTHER_BRAND_OPTION_KEY: '其他廠牌',
         normalizeBrandLookupKey: normalize,
         resolveBrandName: value => normalize(value) === 'biorad' ? 'Bio-Rad' : value,

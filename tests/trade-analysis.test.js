@@ -256,6 +256,7 @@ function loaderFixture() {
         tradeAnalysisLoadedKey:'',tradeAnalysisReady:false,tradeAnalysisFiltersPending:false,salesStatisticsLoadPromise:null,
         document:{getElementById:element,querySelectorAll:()=>[]},
         setTradeAnalysisLoading:()=>{},renderSalesStatistics:()=>{},resetSimpleTradeAnalysisDetail:()=>{},
+        ensureSalesListLoaded:()=>Promise.resolve([]),populateSalesStatisticsFilters:()=>{},
         applyTradeAnalysisSnapshot:snapshot=>applied.push(snapshot),
         loadTradeAnalysisSnapshot:(tab,range)=>new Promise((resolve,reject)=>loads.push({tab,range,resolve,reject})),
         readTradeAnalysisFilters:()=>({...filters})});

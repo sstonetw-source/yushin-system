@@ -4,8 +4,8 @@
 // 業務名單來源改為 users 集合（與登入帳號綁定，name/code/phone/role 皆存在同一份文件）
 function applySalesRows(rows) {
     const list = (rows || [])
-        .filter(d => d.name && d.code && d.active !== false && d.disabled !== true)
-        .map(d => ({ uid:d.id || d.uid || '', code:d.code, name:d.name, phone:d.phone || '', role:d.role || 'sales', deliveryDefaults:d.deliveryDefaults||{}, active:true }));
+        .filter(d => d.name && (d.salesCode || d.code) && d.active !== false && d.disabled !== true)
+        .map(d => ({ uid:d.id || d.uid || '', code:d.salesCode || d.code, name:d.name, phone:d.phone || '', role:d.role || 'sales', deliveryDefaults:d.deliveryDefaults||{}, active:true }));
     list.sort((a, b) => (a.code || '').localeCompare(b.code || ''));
     salesList = list;
     populateSalesDropdown();
@@ -2766,7 +2766,7 @@ function quoteDataForPdfExport() {
     const quoteData = collectCurrentQuoteRecord();
     const selectedSales = quotePersonFromIdentity(quoteData);
     quoteData.customerId = syncCustomerMaster(quoteData.ordererName || quoteData.clientName, {
-        salesCode: selectedSales?.code || quoteData.salesCode || salesCodeForName(quoteData.salesName)
+        salesCode: quoteData.salesCode || selectedSales?.code || ''
     });
     quoteData.status = BUSINESS_STATUS.ACTIVE;
     Object.assign(quoteData, grossAmountMetadata(quoteData.grandTotal));

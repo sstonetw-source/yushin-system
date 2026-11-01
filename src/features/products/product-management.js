@@ -29,6 +29,10 @@ function canManagePendingProductMaster() {
     return currentUserRole === 'admin' || currentUserRole === 'purchaser';
 }
 
+function canCreateProductMaster() {
+    return canManagePendingProductMaster() || currentUserRole === 'sales';
+}
+
 function canDeleteProductMaster() {
     // 管理員切成其他角色視角時也不能誤觸永久刪除。
     return trueUserRole === 'admin' && currentUserRole === 'admin';
@@ -41,7 +45,7 @@ function updatePendingProductMasterButton() {
     const inactiveWrap = document.getElementById('productManagementInactiveWrap');
     const batchMaintenance = document.getElementById('productBatchMaintenance');
     if (tools) tools.style.display = allowed ? '' : 'none';
-    if (createButton) createButton.style.display = allowed ? '' : 'none';
+    if (createButton) createButton.style.display = canCreateProductMaster() ? '' : 'none';
     if (inactiveWrap) inactiveWrap.style.display = allowed ? '' : 'none';
     if (batchMaintenance) batchMaintenance.style.display = allowed ? '' : 'none';
 }
@@ -887,6 +891,7 @@ function populateProductMasterEditor(product = {}, options = {}) {
     costInput.dataset.originalValue = costInput.value;
     document.getElementById('pmEditCostField').hidden = !(trueUserRole === 'admin' && currentUserRole === 'admin');
     document.getElementById('pmEditStatus').value = product.status === 'INACTIVE' || product.active === false ? 'INACTIVE' : 'ACTIVE';
+    document.getElementById('pmEditStatus').disabled = !existingIdentity && currentUserRole === 'sales';
     document.getElementById('pmEditInventoryTracked').checked = product.inventoryTracked === true;
     document.getElementById('pmEditLotTracked').checked = product.lotTracked === true;
     document.getElementById('pmEditExpiryTracked').checked = product.expiryTracked === true;
@@ -899,7 +904,7 @@ function populateProductMasterEditor(product = {}, options = {}) {
 }
 
 window.openNewProductMasterEditor = function() {
-    if (!canManagePendingProductMaster()) return;
+    if (!canCreateProductMaster()) return;
     populateProductMasterEditor({}, { source:'MANUAL' });
 };
 
@@ -1116,6 +1121,8 @@ window.closeProductMasterEditor = function() {
     const codeInput = document.getElementById('pmEditCode');
     if (brandInput) brandInput.disabled = false;
     if (codeInput) codeInput.disabled = false;
+    const statusInput = document.getElementById('pmEditStatus');
+    if (statusInput) statusInput.disabled = false;
 };
 
 async function findDuplicateProductMaster(brand, code, excludeId = '') {
@@ -1159,7 +1166,8 @@ function syncSavedProductMaster(productId, record) {
 }
 
 window.saveProductMasterEditor = async function() {
-    if (!canManagePendingProductMaster()) return;
+    const originalId = String(document.getElementById('pmEditProductId')?.value || '').trim();
+    if (originalId ? !canManagePendingProductMaster() : !canCreateProductMaster()) return;
     const button = document.getElementById('saveProductMasterEditorBtn');
     const brand = resolveBrandName(document.getElementById('pmEditBrand').value || '');
     const code = String(document.getElementById('pmEditCode').value || '').trim();
@@ -1193,7 +1201,6 @@ window.saveProductMasterEditor = async function() {
     const state = beginActionButton(button, '檢查中…');
     if (!state) return;
     try {
-    const originalId = String(document.getElementById('pmEditProductId').value || '').trim();
     const normalizedPartNo = normalizeItemCodeLoose(code);
     const duplicate = await findDuplicateProductMaster(brand,code,originalId);
     if (duplicate) {
@@ -1201,9 +1208,12 @@ window.saveProductMasterEditor = async function() {
         return;
     }
 
-    const productId = originalId || stableProductId({ brand, model:code });
+    // 新主檔沿用共用 ID 規則，但貨號先去掉搜尋時忽略的符號；
+    // 同一廠牌的併發建立會碰到同一文件，不會各寫出一筆。
+    const productId = originalId || stableProductId({ brand, model:normalizedPartNo });
     const now = new Date().toISOString();
-    const status = document.getElementById('pmEditStatus').value === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE';
+    const status = currentUserRole === 'sales' ? 'ACTIVE'
+        : (document.getElementById('pmEditStatus').value === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE');
     const brandEntry = brandMasterEntryForName(brand);
     const record = {
         productId,
@@ -1234,9 +1244,13 @@ window.saveProductMasterEditor = async function() {
 
         if (button) button.textContent = '儲存中…';
         await db.runTransaction(async transaction => {
+            const productRef = db.collection('products').doc(productId);
+            const existingProduct = await transaction.get(productRef);
+            if (!originalId && existingProduct.exists) throw new Error('同廠牌與貨號已由其他操作建檔，請搜尋既有產品。');
+            if (originalId && !existingProduct.exists) throw new Error('既有產品已不存在，請重新搜尋。');
             const costRef = db.collection('productCosts').doc(productId);
             const previousCost = costChanged ? await transaction.get(costRef) : null;
-            transaction.set(db.collection('products').doc(productId), record, { merge:true });
+            transaction.set(productRef, record, originalId ? { merge:true } : {});
             if (costChanged) {
                 const standardCost = Number(costText);
                 transaction.set(costRef, { productId, productLineId:productLine, standardCost, salesVisible:false,

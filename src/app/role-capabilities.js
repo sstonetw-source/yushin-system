@@ -36,7 +36,7 @@ function commercialCreatorFields() {
     return {
         createdByUid: currentUser?.uid || '',
         createdByName: currentUserName || '',
-        createdByRole: currentUserRole || ''
+        createdByRole: (typeof trueUserRole === 'string' && trueUserRole ? trueUserRole : currentUserRole) || ''
     };
 }
 
@@ -90,10 +90,10 @@ function canUseQuote(record = {}) {
 }
 
 function belongsToCurrentUser(salesName, ownerUid, salesCode = '') {
+    // Existing code handovers remain authoritative; display names grant no access.
     if (salesCode && currentUserCode) return String(salesCode) === String(currentUserCode);
     if (ownerUid && currentUser?.uid) return ownerUid === currentUser.uid;
-    if (!currentUserName) return false;
-    return stripPhoneSuffix(salesName || '') === stripPhoneSuffix(currentUserName);
+    return false;
 }
 
 function getActivePermissionPage() {
@@ -151,6 +151,8 @@ function updateReadonlyNotice() {
         notice.innerText = '倉管模式：可收貨、出貨、調撥點收及盤點；採購、成本維護與打單由採購／管理員處理。';
     } else if (pageKey === 'products' && currentUserRole === 'purchaser') {
         notice.innerText = '產品主檔權限：採購可新增、編輯與停用產品主檔；永久刪除僅限管理員。';
+    } else if (pageKey === 'products' && currentUserRole === 'sales') {
+        notice.innerText = '可新增正式產品主檔；既有產品的編輯、停用、刪除及成本、庫存維護仍限授權人員。';
     } else if (pageKey === 'products' && hasBusinessCapability()) {
         notice.innerText = '產品主檔僅可查看；您可以把產品加入估價單或建立訂單，但不能修改、停用或刪除產品主檔。';
     } else {

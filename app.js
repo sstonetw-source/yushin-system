@@ -201,7 +201,7 @@ function writeCachedUserProfile(uid, data={}) {
     if(!uid)return;
     try {
         localStorage.setItem(userProfileCacheKey(uid),JSON.stringify({
-            role:data.role||'sales',name:data.name||'',phone:data.phone||'',code:data.code||'',mustChangePassword:!!data.mustChangePassword
+            role:data.role||'sales',name:data.name||'',phone:data.phone||'',code:data.salesCode||data.code||'',mustChangePassword:!!data.mustChangePassword
         }));
     } catch (_) {}
 }
@@ -210,7 +210,7 @@ function applyUserProfile(data={}) {
     trueUserRole=currentUserRole;
     currentUserName=data.name||'';
     currentUserPhone=data.phone||'';
-    currentUserCode=data.code||'';
+    currentUserCode=data.salesCode||data.code||'';
     mustChangePassword=!!data.mustChangePassword;
 }
 const DEFAULT_LIST_LIMIT = 50;
@@ -678,7 +678,7 @@ function commercialCreatorFields() {
     return {
         createdByUid: currentUser?.uid || '',
         createdByName: currentUserName || '',
-        createdByRole: currentUserRole || ''
+        createdByRole: (typeof trueUserRole === 'string' && trueUserRole ? trueUserRole : currentUserRole) || ''
     };
 }
 
@@ -732,10 +732,10 @@ function canUseQuote(record = {}) {
 }
 
 function belongsToCurrentUser(salesName, ownerUid, salesCode = '') {
+    // Existing code handovers remain authoritative; display names grant no access.
     if (salesCode && currentUserCode) return String(salesCode) === String(currentUserCode);
     if (ownerUid && currentUser?.uid) return ownerUid === currentUser.uid;
-    if (!currentUserName) return false;
-    return stripPhoneSuffix(salesName || '') === stripPhoneSuffix(currentUserName);
+    return false;
 }
 
 function getActivePermissionPage() {
@@ -793,6 +793,8 @@ function updateReadonlyNotice() {
         notice.innerText = '倉管模式：可收貨、出貨、調撥點收及盤點；採購、成本維護與打單由採購／管理員處理。';
     } else if (pageKey === 'products' && currentUserRole === 'purchaser') {
         notice.innerText = '產品主檔權限：採購可新增、編輯與停用產品主檔；永久刪除僅限管理員。';
+    } else if (pageKey === 'products' && currentUserRole === 'sales') {
+        notice.innerText = '可新增正式產品主檔；既有產品的編輯、停用、刪除及成本、庫存維護仍限授權人員。';
     } else if (pageKey === 'products' && hasBusinessCapability()) {
         notice.innerText = '產品主檔僅可查看；您可以把產品加入估價單或建立訂單，但不能修改、停用或刪除產品主檔。';
     } else {
@@ -1577,6 +1579,10 @@ function canManagePendingProductMaster() {
     return currentUserRole === 'admin' || currentUserRole === 'purchaser';
 }
 
+function canCreateProductMaster() {
+    return canManagePendingProductMaster() || currentUserRole === 'sales';
+}
+
 function canDeleteProductMaster() {
     // 管理員切成其他角色視角時也不能誤觸永久刪除。
     return trueUserRole === 'admin' && currentUserRole === 'admin';
@@ -1589,7 +1595,7 @@ function updatePendingProductMasterButton() {
     const inactiveWrap = document.getElementById('productManagementInactiveWrap');
     const batchMaintenance = document.getElementById('productBatchMaintenance');
     if (tools) tools.style.display = allowed ? '' : 'none';
-    if (createButton) createButton.style.display = allowed ? '' : 'none';
+    if (createButton) createButton.style.display = canCreateProductMaster() ? '' : 'none';
     if (inactiveWrap) inactiveWrap.style.display = allowed ? '' : 'none';
     if (batchMaintenance) batchMaintenance.style.display = allowed ? '' : 'none';
 }
@@ -2435,6 +2441,7 @@ function populateProductMasterEditor(product = {}, options = {}) {
     costInput.dataset.originalValue = costInput.value;
     document.getElementById('pmEditCostField').hidden = !(trueUserRole === 'admin' && currentUserRole === 'admin');
     document.getElementById('pmEditStatus').value = product.status === 'INACTIVE' || product.active === false ? 'INACTIVE' : 'ACTIVE';
+    document.getElementById('pmEditStatus').disabled = !existingIdentity && currentUserRole === 'sales';
     document.getElementById('pmEditInventoryTracked').checked = product.inventoryTracked === true;
     document.getElementById('pmEditLotTracked').checked = product.lotTracked === true;
     document.getElementById('pmEditExpiryTracked').checked = product.expiryTracked === true;
@@ -2447,7 +2454,7 @@ function populateProductMasterEditor(product = {}, options = {}) {
 }
 
 window.openNewProductMasterEditor = function() {
-    if (!canManagePendingProductMaster()) return;
+    if (!canCreateProductMaster()) return;
     populateProductMasterEditor({}, { source:'MANUAL' });
 };
 
@@ -2664,6 +2671,8 @@ window.closeProductMasterEditor = function() {
     const codeInput = document.getElementById('pmEditCode');
     if (brandInput) brandInput.disabled = false;
     if (codeInput) codeInput.disabled = false;
+    const statusInput = document.getElementById('pmEditStatus');
+    if (statusInput) statusInput.disabled = false;
 };
 
 async function findDuplicateProductMaster(brand, code, excludeId = '') {
@@ -2707,7 +2716,8 @@ function syncSavedProductMaster(productId, record) {
 }
 
 window.saveProductMasterEditor = async function() {
-    if (!canManagePendingProductMaster()) return;
+    const originalId = String(document.getElementById('pmEditProductId')?.value || '').trim();
+    if (originalId ? !canManagePendingProductMaster() : !canCreateProductMaster()) return;
     const button = document.getElementById('saveProductMasterEditorBtn');
     const brand = resolveBrandName(document.getElementById('pmEditBrand').value || '');
     const code = String(document.getElementById('pmEditCode').value || '').trim();
@@ -2741,7 +2751,6 @@ window.saveProductMasterEditor = async function() {
     const state = beginActionButton(button, '檢查中…');
     if (!state) return;
     try {
-    const originalId = String(document.getElementById('pmEditProductId').value || '').trim();
     const normalizedPartNo = normalizeItemCodeLoose(code);
     const duplicate = await findDuplicateProductMaster(brand,code,originalId);
     if (duplicate) {
@@ -2749,9 +2758,12 @@ window.saveProductMasterEditor = async function() {
         return;
     }
 
-    const productId = originalId || stableProductId({ brand, model:code });
+    // 新主檔沿用共用 ID 規則，但貨號先去掉搜尋時忽略的符號；
+    // 同一廠牌的併發建立會碰到同一文件，不會各寫出一筆。
+    const productId = originalId || stableProductId({ brand, model:normalizedPartNo });
     const now = new Date().toISOString();
-    const status = document.getElementById('pmEditStatus').value === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE';
+    const status = currentUserRole === 'sales' ? 'ACTIVE'
+        : (document.getElementById('pmEditStatus').value === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE');
     const brandEntry = brandMasterEntryForName(brand);
     const record = {
         productId,
@@ -2782,9 +2794,13 @@ window.saveProductMasterEditor = async function() {
 
         if (button) button.textContent = '儲存中…';
         await db.runTransaction(async transaction => {
+            const productRef = db.collection('products').doc(productId);
+            const existingProduct = await transaction.get(productRef);
+            if (!originalId && existingProduct.exists) throw new Error('同廠牌與貨號已由其他操作建檔，請搜尋既有產品。');
+            if (originalId && !existingProduct.exists) throw new Error('既有產品已不存在，請重新搜尋。');
             const costRef = db.collection('productCosts').doc(productId);
             const previousCost = costChanged ? await transaction.get(costRef) : null;
-            transaction.set(db.collection('products').doc(productId), record, { merge:true });
+            transaction.set(productRef, record, originalId ? { merge:true } : {});
             if (costChanged) {
                 const standardCost = Number(costText);
                 transaction.set(costRef, { productId, productLineId:productLine, standardCost, salesVisible:false,
@@ -4614,8 +4630,8 @@ window.createOrderFromForecast = async function(id) {
 // 業務名單來源改為 users 集合（與登入帳號綁定，name/code/phone/role 皆存在同一份文件）
 function applySalesRows(rows) {
     const list = (rows || [])
-        .filter(d => d.name && d.code && d.active !== false && d.disabled !== true)
-        .map(d => ({ uid:d.id || d.uid || '', code:d.code, name:d.name, phone:d.phone || '', role:d.role || 'sales', deliveryDefaults:d.deliveryDefaults||{}, active:true }));
+        .filter(d => d.name && (d.salesCode || d.code) && d.active !== false && d.disabled !== true)
+        .map(d => ({ uid:d.id || d.uid || '', code:d.salesCode || d.code, name:d.name, phone:d.phone || '', role:d.role || 'sales', deliveryDefaults:d.deliveryDefaults||{}, active:true }));
     list.sort((a, b) => (a.code || '').localeCompare(b.code || ''));
     salesList = list;
     populateSalesDropdown();
@@ -7376,7 +7392,7 @@ function quoteDataForPdfExport() {
     const quoteData = collectCurrentQuoteRecord();
     const selectedSales = quotePersonFromIdentity(quoteData);
     quoteData.customerId = syncCustomerMaster(quoteData.ordererName || quoteData.clientName, {
-        salesCode: selectedSales?.code || quoteData.salesCode || salesCodeForName(quoteData.salesName)
+        salesCode: quoteData.salesCode || selectedSales?.code || ''
     });
     quoteData.status = BUSINESS_STATUS.ACTIVE;
     Object.assign(quoteData, grossAmountMetadata(quoteData.grandTotal));
@@ -12431,7 +12447,7 @@ function orderBrandFilterValue(value, selectableBrands) {
 let orderFilterOptionsSignature = '';
 
 function workflowSalesFilterNames() {
-    return [...new Set(salesList.map(person => stripPhoneSuffix(person.name)).filter(Boolean))]
+    return [...new Set(salesList.filter(isSelectableCommercialOwner).map(person => stripPhoneSuffix(person.name)).filter(Boolean))]
         .sort((a, b) => a.localeCompare(b, 'zh-Hant'));
 }
 
@@ -25760,6 +25776,9 @@ function applyTradeAnalysisSnapshot(snapshot) {
 }
 window.loadSalesStatistics = function(force = false) {
     if (currentUserRole !== 'admin') return Promise.resolve();
+    void ensureSalesListLoaded().then(() => {
+        if (currentUserRole === 'admin' && tradeAnalysisReady) populateSalesStatisticsFilters();
+    }).catch(err => console.warn('讀取商務負責人名單失敗：', err));
     if(force){tradeAnalysisSnapshots.clear();tradeAnalysisRevision++;}
     if (salesStatisticsLoadPromise) return salesStatisticsLoadPromise;
     const filters=tradeAnalysisAppliedFilters||(tradeAnalysisAppliedFilters=readTradeAnalysisFilters());
@@ -26998,7 +27017,7 @@ function populateSalesStatisticsFilters(rows = buildTradeAnalysisRows()) {
     const brand = document.getElementById('salesStatsBrandFilter')?.value || '';
     const classified = rows.filter(row=>!brand||row.brand===brand);
     const selects = [
-        { id: 'salesStatsSalesFilter', label: '全部負責業務', values: [...salesList.filter(isSelectableCommercialOwner).map(person=>stripPhoneSuffix(person.name)), ...rows.filter(row=>['sales','pending'].includes(row.kind)).map(row=>row.sales)] },
+        { id: 'salesStatsSalesFilter', label: '全部負責業務', values: [...salesList.filter(isSelectableCommercialOwner).map(person=>person.name), ...rows.filter(row=>['sales','pending'].includes(row.kind)).map(row=>row.sales)] },
         { id: 'salesStatsBrandFilter', label: '全部廠牌', values: [...getPrimaryBrandNames(), OTHER_BRAND_OPTION_KEY] },
         { id: 'salesStatsTypeFilter', label: '全部產品類型', values: classified.map(row=>row.type) },
         { id: 'salesStatsLineFilter', label: '全部產品線', values: classified.map(row=>row.line) }

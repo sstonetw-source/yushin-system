@@ -54,3 +54,10 @@ test('purchaser cannot cancel linked customer orders through quote cancellation'
  const context=vm.createContext({window:{},canManageOrderLifecycleCapability:()=>false,canEditPage:()=>true,actionButtonFromEventOrSelector:()=>{throw Error('must reject before cancellation controls or reads');}});
  vm.runInContext(src.slice(start,end),context);await context.window.unmarkQuoteAsDeal('Q1');
 });
+
+test('administrator view-as records the actual creator role while keeping the selected owner separate',()=>{
+ const context=vm.createContext({currentUser:{uid:'admin-uid'},currentUserName:'管理員',currentUserRole:'purchaser',trueUserRole:'admin'});
+ vm.runInContext(fn('commercialCreatorFields'),context);const fields=context.commercialCreatorFields();
+ assert.equal(fields.createdByUid,'admin-uid');assert.equal(fields.createdByRole,'admin');
+ assert.equal(Object.hasOwn(fields,'ownerUid'),false);
+});

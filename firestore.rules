@@ -65,8 +65,14 @@ service cloud.firestore {
       return role() in ['admin','engineer'];
     }
 
+    function businessCode(data) {
+      let assigned = data.get('salesCode', '');
+      return assigned is string && assigned.size() > 0 ? assigned : data.get('code', null);
+    }
+
     function salesCode() {
       let data = userDoc().data;
+      // Keep this hot path inexpensive for 30-line transaction Rules budgets.
       return profileEnabled(data) ? data.get('salesCode', data.get('code', null)) : null;
     }
 
@@ -106,11 +112,11 @@ service cloud.firestore {
         && profileEnabled(owner)
         && owner.get('role', '') in ['admin', 'sales', 'engineer']
         && (owner.get('role', '') != 'admin' || (owner.get('name', '') is string && owner.get('name', '').size() > 0))
-        && owner.get('salesCode', owner.get('code', null)) == ownerCode;
+        && businessCode(owner) == ownerCode;
     }
 
     function validOwnedCommercialCreate(data) {
-      return admin() ||
+      return (admin() && validQuoteOwner(data)) ||
         (commercialDocumentOwner() &&
           data.ownerUid == request.auth.uid &&
           data.salesCode != null &&
@@ -451,6 +457,51 @@ service cloud.firestore {
           'listPrice', 'status', 'active', 'source', 'createdAt',
           'createdBy', 'updatedAt', 'updatedBy'
         ]);
+    }
+
+    // Sales may create a permanent, searchable master without acquiring edit,
+    // deactivate, cost or inventory privileges. Create is intrinsically no-overwrite.
+    function salesPermanentProductCreate(id, data) {
+      return sales()
+        && data.keys().hasAll([
+          'productId', 'brandId', 'brandName', 'manufacturerPartNo',
+          'normalizedPartNo', 'productName', 'nameEn', 'specification',
+          'productLine', 'productLineId', 'productType', 'category',
+          'serviceKind', 'listPrice', 'inventoryTracked', 'lotTracked',
+          'expiryTracked', 'status', 'active', 'source', 'createdAt',
+          'createdBy', 'updatedAt', 'updatedBy'
+        ])
+        && data.keys().hasOnly([
+          'productId', 'brandId', 'brandName', 'manufacturerPartNo',
+          'normalizedPartNo', 'productName', 'nameEn', 'specification',
+          'productLine', 'productLineId', 'productType', 'category',
+          'serviceKind', 'listPrice', 'inventoryTracked', 'lotTracked',
+          'expiryTracked', 'status', 'active', 'source', 'createdAt',
+          'createdBy', 'updatedAt', 'updatedBy'
+        ])
+        && data.productId == id && data.createdBy == request.auth.uid
+        && data.updatedBy == request.auth.uid
+        && data.source == 'MANUAL' && data.status == 'ACTIVE' && data.active == true
+        && data.brandId is string && data.brandId.size() > 0 && data.brandId.size() <= 200
+        && data.brandName is string && data.brandName.size() > 0 && data.brandName.size() <= 200
+        && data.manufacturerPartNo is string && data.manufacturerPartNo.size() > 0 && data.manufacturerPartNo.size() <= 200
+        && data.normalizedPartNo is string && data.normalizedPartNo.size() > 0 && data.normalizedPartNo.size() <= 200
+        && data.productName is string && data.productName.size() > 0 && data.productName.size() <= 500
+        && data.nameEn is string && data.nameEn.size() <= 500
+        && data.specification is string && data.specification.size() <= 2000
+        && data.productLine is string && data.productLine.size() <= 200
+        && data.productLineId is string && data.productLineId.size() <= 200
+        && data.productType is string && data.productType.size() <= 100
+        && data.category == data.productType
+        && data.serviceKind is string && data.serviceKind.size() <= 100
+        && (data.productType == 'Service'
+          ? (data.serviceKind in ['BIOPLEX_LAB','PIPETTE_CALIBRATION','TISSUE_SLICING','ONSITE_REPAIR']
+            && data.inventoryTracked == false && data.lotTracked == false && data.expiryTracked == false)
+          : data.serviceKind == '')
+        && data.listPrice is number && data.listPrice >= 0 && data.listPrice <= 1000000000
+        && data.inventoryTracked is bool && data.lotTracked is bool && data.expiryTracked is bool
+        && data.createdAt is string && data.createdAt.size() > 0 && data.createdAt.size() <= 40
+        && data.updatedAt is string && data.updatedAt.size() > 0 && data.updatedAt.size() <= 40;
     }
 
 
@@ -1231,7 +1282,8 @@ service cloud.firestore {
     // Searchable product master. Cost is intentionally stored separately.
     match /products/{id} {
       allow read: if active();
-      allow create: if canPurchase() || businessTemporaryProduct(id, request.resource.data);
+      allow create: if canPurchase() || businessTemporaryProduct(id, request.resource.data)
+        || salesPermanentProductCreate(id, request.resource.data);
       allow update: if canPurchase();
       allow delete: if admin();
     }
