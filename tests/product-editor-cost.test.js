@@ -46,3 +46,9 @@ test('Switching an edited Service master back to Goods clears the stale workflow
  assert.equal(x.writes[0].data.serviceKind,'');
  assert.equal(x.writes[0].data.inventoryTracked,true);
 });
+
+test('sales duplicate guidance uses an existing product without suggesting forbidden maintenance',async()=>{
+ const x=setup('sales');x.nodes.pmEditProductId.value='';x.c.canManagePendingProductMaster=()=>false;x.c.canCreateProductMaster=()=>true;
+ x.c.findDuplicateProductMaster=async()=>({id:'existing'});await x.c.window.saveProductMasterEditor();
+ assert.equal(x.writes.length,0);assert.match(x.alerts[0],/搜尋並使用既有產品/);assert.doesNotMatch(x.alerts[0],/直接編輯/);
+});

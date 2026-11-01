@@ -841,8 +841,8 @@ function ensureProductMasterEditor() {
           </div>
         </div>
         <div id="pmEditMeta" style="margin-top:10px;font-size:12px;color:#666;"></div>
-        <div style="margin-top:14px;display:flex;justify-content:flex-end;gap:8px;">
-          <button type="button" id="saveProductMasterEditorBtn" onclick="saveProductMasterEditor()">儲存主檔</button>
+        <div class="modal-actions">
+          <button type="button" class="btn-primary" id="saveProductMasterEditorBtn" onclick="saveProductMasterEditor()">儲存主檔</button>
           <button type="button" class="btn-secondary" onclick="closeProductMasterEditor()">取消</button>
         </div>
       </div>`;
@@ -1204,7 +1204,9 @@ window.saveProductMasterEditor = async function() {
     const normalizedPartNo = normalizeItemCodeLoose(code);
     const duplicate = await findDuplicateProductMaster(brand,code,originalId);
     if (duplicate) {
-        alert('這個廠牌與貨號已經存在於產品主檔，請直接編輯既有產品。');
+        alert(canManagePendingProductMaster()
+            ? '這個廠牌與貨號已經存在於產品主檔，請直接編輯既有產品。'
+            : '這個廠牌與貨號已存在，請搜尋並使用既有產品；需要修改時請洽採購或管理員。');
         return;
     }
 

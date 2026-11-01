@@ -10,7 +10,7 @@ exports.quoteNumberGenerator = function(database, {role='sales', uid='sales1', c
     const input = {value:''}, errors = [];
     const owner = {ownerUid:uid,salesCode:code,salesName:'Owner'};
     const context = {
-        window:{}, db:database, editingQuoteNo:'', restoringQuoteDraft:false,
+        window:{}, quoteNoGeneration:0, sessionDataGeneration:0, db:database, editingQuoteNo:'', restoringQuoteDraft:false,
         companyData:{YS:{prefix:'YS'}}, currentCompany:'YS',
         currentUser:uid ? {uid} : null, currentUserRole:role, currentUserCode:code,
         currentUserName:'Owner', salesList:[{uid,name:'Owner',code,role}],

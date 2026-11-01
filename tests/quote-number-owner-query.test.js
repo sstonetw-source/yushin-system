@@ -78,3 +78,32 @@ test('every bounded ownership query has a deployable composite index',()=>{
             ])));
     }
 });
+
+function pendingDatabase(){
+ const pending=[];const builder=()=>({where(){return this;},orderBy(){return this;},limit(){return this;},get(){return new Promise((resolve,reject)=>pending.push({resolve,reject}));}});
+ return {pending,collection:builder};
+}
+function snapshot(number){return {forEach:fn=>fn({data:()=>({quoteNo:number})})};}
+test('a slower previous owner response cannot replace the latest responsible person number',async()=>{
+ const db=pendingDatabase(),g=quoteNumberGenerator(db,{role:'admin'});let owner={ownerUid:'boss',salesCode:'B1'};g.context.quoteOwnerFromSelection=()=>owner;
+ g.input.value='previous-owner-number';
+ const old=g.generate();assert.equal(g.input.value,'');owner={ownerUid:'sales2',salesCode:'S02'};const latest=g.generate();
+ db.pending[1].resolve(snapshot('YS-20261031-S02-04'));await latest;assert.equal(g.input.value,'YS-20261031-S02-05');
+ db.pending[0].resolve(snapshot('YS-20261031-B1-99'));await old;assert.equal(g.input.value,'YS-20261031-S02-05');
+});
+test('a stale lookup failure cannot clear a newer number or display an unrelated failure',async()=>{
+ const db=pendingDatabase(),g=quoteNumberGenerator(db,{role:'admin'});const old=g.generate(),latest=g.generate();
+ db.pending[1].resolve(snapshot('YS-20261031-S01-04'));await latest;db.pending[0].reject(Error('unavailable'));await old;
+ assert.equal(g.input.value,'YS-20261031-S01-05');assert.equal(g.errors.length,0);
+});
+test('opening historical editing or changing sessions fences a pending number lookup',async()=>{
+ for(const change of ['editing','session']){
+  const db=pendingDatabase(),g=quoteNumberGenerator(db,{role:'admin'}),pending=g.generate();
+  g.input.value='preserved';if(change==='editing')g.context.editingQuoteNo='preserved';else g.context.sessionDataGeneration++;
+  db.pending[0].resolve(snapshot('YS-20261031-S01-99'));await pending;assert.equal(g.input.value,'preserved');
+ }
+});
+test('a manager without a selected commercial owner does not invent an 01 business number',async()=>{
+ const db=database([]),g=quoteNumberGenerator(db,{role:'admin',uid:'',code:''});
+ assert.equal(await g.generate(),'');assert.equal(db.calls.length,0);
+});

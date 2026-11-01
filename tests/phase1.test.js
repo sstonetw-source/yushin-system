@@ -231,7 +231,7 @@ test('preview host selects isolated Firebase project and exposes a visible envir
 });
 
 test('quote owner selector uses UID, limits engineers to self and includes eligible administrators', () => {
-    const start = appSource.indexOf('function populateSalesDropdown()');
+    const start = appSource.indexOf('function populateSalesDropdown(');
     const end = appSource.indexOf('function updateSalesPhoneDisplay',start);
     const selector = appSource.slice(start,end);
     assert.match(selector,/isSelectableCommercialOwner\(person\)/);
@@ -2763,7 +2763,7 @@ test('quote form loads staff only for roles that need owner selection', () => {
     assert.match(source,/ensureSalesListLoaded\(\)/);
     assert.match(source,/else \{[\s\S]*?populateSalesDropdown\(\)/);
 
-    const selectorStart=appSource.indexOf('function populateSalesDropdown()');
+    const selectorStart=appSource.indexOf('function populateSalesDropdown(');
     const selectorEnd=appSource.indexOf('function updateSalesPhoneDisplay',selectorStart);
     const selectorSource=appSource.slice(selectorStart,selectorEnd);
     assert.match(selectorSource,/\['sales','engineer'\]\.includes\(currentUserRole\)[\s\S]*?person\.uid === currentUser\?\.uid/);
@@ -3033,9 +3033,9 @@ test('quote numbering fails closed and preserves editing identity', () => {
     const salesEnd=appSource.indexOf('\n};',salesStart)+3;
     assert.match(appSource.slice(salesStart,salesEnd),/if \(!editingQuoteNo\) generateQuoteNo\(\)/);
 
-    const dropdownStart=appSource.indexOf('function populateSalesDropdown()');
+    const dropdownStart=appSource.indexOf('function populateSalesDropdown(');
     const dropdownEnd=appSource.indexOf('\n// 依目前輸入的業務姓名',dropdownStart);
-    assert.match(appSource.slice(dropdownStart,dropdownEnd),/if \(!restoringQuoteDraft && !editingQuoteNo\) generateQuoteNo\(\)/);
+    assert.match(appSource.slice(dropdownStart,dropdownEnd),/if \(regenerateNumber && !restoringQuoteDraft && !editingQuoteNo\) generateQuoteNo\(\)/);
 });
 
 
