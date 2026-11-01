@@ -4,27 +4,54 @@
       "collectionGroup": "products",
       "queryScope": "COLLECTION",
       "fields": [
-        {"fieldPath": "isFrequentlySold", "order": "ASCENDING"},
-        {"fieldPath": "brandName", "order": "ASCENDING"}
+        {
+          "fieldPath": "isFrequentlySold",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "brandName",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "inventoryLots",
       "queryScope": "COLLECTION",
       "fields": [
-        {"fieldPath": "productKey", "order": "ASCENDING"},
-        {"fieldPath": "warehouseId", "order": "ASCENDING"},
-        {"fieldPath": "remainingQty", "order": "ASCENDING"}
+        {
+          "fieldPath": "productKey",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "warehouseId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "remainingQty",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "orders",
       "queryScope": "COLLECTION",
       "fields": [
-        {"fieldPath": "ownerUid", "order": "ASCENDING"},
-        {"fieldPath": "status", "order": "ASCENDING"},
-        {"fieldPath": "workCategories", "arrayConfig": "CONTAINS"},
-        {"fieldPath": "orderDate", "order": "DESCENDING"}
+        {
+          "fieldPath": "ownerUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "workCategories",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "orderDate",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
@@ -789,6 +816,20 @@
         },
         {
           "fieldPath": "quoteNo",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "quotes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "ownerUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "quoteDate",
           "order": "DESCENDING"
         }
       ]
