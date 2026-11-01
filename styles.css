@@ -4935,6 +4935,6 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
 @media (max-width:600px) { .product-master-create-actions button { width:100%; } }
 
 /* Shared modal footer actions use the same touch target and primary palette. */
-.modal-actions > button { min-height:var(--ys-control-height,44px); border-radius:var(--ys-control-radius,8px); }
+:is(#appContainer, .eq-modal-overlay, .modal-overlay, .modal) .modal-actions > button { min-height:var(--ys-control-height,44px) !important; border-radius:var(--ys-control-radius,8px) !important; }
 .modal-actions > .btn-primary { background:var(--ys-primary); color:#fff; border-color:var(--ys-primary); }
 .modal-actions > .btn-secondary { background:var(--ys-surface); color:var(--ys-text); border-color:var(--ys-border); }

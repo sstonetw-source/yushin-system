@@ -66,7 +66,7 @@ const fixture = `<!DOCTYPE html>
   <div id="admin-system" class="content-section active"><div class="sub-nav"><div class="sub-tab active" role="button" id="admin-sub-sales">人員名單</div><div class="sub-tab" role="button">廠牌管理</div></div><div id="admin-statistics"><div class="sub-tabs"><button class="active" id="analyticsTabProbe">銷售分析</button><button>採購分析</button></div></div></div>
   <div id="deliveryModalOverlay"><div class="order-progress-tabs"><button aria-selected="true" id="orderProgressProbe">進行中</button><button aria-selected="false">已完成</button></div></div>
 </div>
-<div id="productMasterEditorOverlay" class="eq-modal-overlay active" style="position:static;display:block;"><div class="eq-modal"><div class="modal-actions"><button class="btn-primary" id="productSaveProbe">儲存主檔</button><button class="btn-secondary" id="productCancelProbe">取消</button></div></div></div>
+<div id="productMasterEditorOverlay" class="eq-modal-overlay active" style="position:static;display:block;"><div class="eq-modal-box"><div class="modal-actions"><button class="btn-primary" id="productSaveProbe">儲存主檔</button><button class="btn-secondary" id="productCancelProbe">取消</button></div></div></div>
 <script>
 const selectors = ${JSON.stringify(controls)};
 const checks = {};
