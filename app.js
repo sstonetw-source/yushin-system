@@ -15594,6 +15594,8 @@ async function commitQuickPurchase(orderId, itemId, purchaseDetails, actorUid=cu
         if(globalThis.YUSHIN_QUICK_PURCHASE_EMULATOR===true
             || globalThis.YUSHIN_PREVIEW_QUICK_PURCHASE===true
             || globalThis.YUSHIN_PRODUCTION_QUICK_PURCHASE===true
+            || (typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='production'
+                && globalThis.YUSHIN_PRODUCTION_QUICK_PURCHASE_LEGACY_BLOCKED===true)
             || pendingBackendAttempt
             || (typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='preview')) {
             if(!quickPurchaseBackendPilotEnabled())

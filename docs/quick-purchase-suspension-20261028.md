@@ -1,3 +1,22 @@
+## 2026-11-02｜正式退役鎖候選，尚未啟用
+
+目前正式手動採購仍走既有入口，`YUSHIN_PRODUCTION_QUICK_PURCHASE` 與新增的
+`YUSHIN_PRODUCTION_QUICK_PURCHASE_LEGACY_BLOCKED` 均為 `false`。
+本次只補候選防護，不部署 Functions／Rules、不切換正式交易。
+
+未來經獨立授權切換時，前端必須同時設 quick=true、legacyBlocked=true，
+並先確認伺服器 `ENABLE_PRODUCTION_QUICK_PURCHASE=true` 與指定 revision。
+一旦退役鎖啟用，應持續保留 true；故障時即使 quick=false，新的分頁／新的品項
+沒有 pending 憑證，也會明確停止，不能重新使用舊 Client Transaction。
+既有未確認憑證仍沿原 ID 核對，不清除或重建。恢復時只恢復同一後端路由。
+
+這個前端鎖無法控制仍快取舊程式的瀏覽器；Rules 舊寫入封鎖仍須另案審查／授權。
+此處的 false 是尚未切換的安全預設，不可誤稱目前已停止正式手動採購舊寫入。
+真 Preview 的可用性與正式管理端 revision 仍須即時確認，原 preview-20135 已有不可用紀錄。
+正式發布範圍與補缺驗收以 Issue #268 最新摘要為準；下方舊版資產版號只供歷史比對。
+
+---
+
 # 手動採購：停用後的未確認操作保護
 
 ## 本批範圍
