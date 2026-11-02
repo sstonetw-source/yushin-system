@@ -19,9 +19,19 @@ function allowPreviewReceiving(env=process.env){
   && !env.FIRESTORE_EMULATOR_HOST
   && !env.FIREBASE_AUTH_EMULATOR_HOST;
 }
+// A separate, default-off deployment decision; neither the Preview flag nor a
+// client rollout flag can open the production Callable on its own.
+function allowProductionReceiving(env=process.env){
+ return env.ENABLE_PRODUCTION_RECEIVING_BACKEND==='true'
+  && projectIdFromEnvironment(env)==='yu-shing-company'
+  && !env.FUNCTIONS_EMULATOR
+  && !env.FIRESTORE_EMULATOR_HOST
+  && !env.FIREBASE_AUTH_EMULATOR_HOST;
+}
 function receiptBackendProject(env=process.env){
  if(allowReceiptEmulator(env))return 'demo-yushin';
  if(allowPreviewReceiving(env))return 'preview-20135';
+ if(allowProductionReceiving(env))return 'yu-shing-company';
  return '';
 }
-module.exports={allowReceiptEmulator,allowPreviewReceiving,receiptBackendProject};
+module.exports={allowReceiptEmulator,allowPreviewReceiving,allowProductionReceiving,receiptBackendProject};

@@ -5,19 +5,38 @@ async function receiveV2SupplyEmulator(supplyId,qty,lotNo,expiryDate,operationId
         &&globalThis.YUSHIN_V2_RECEIVING_EMULATOR===true;
     const preview=typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'
         &&globalThis.YUSHIN_PREVIEW_RECEIVING===true;
+    const production=typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='production'
+        &&globalThis.YUSHIN_PRODUCTION_RECEIVING_BACKEND===true
+        &&globalThis.YUSHIN_PRODUCTION_RECEIVING_LEGACY_BLOCKED===true;
     const host=String(globalThis.location?.hostname||'').toLowerCase();
-    if((!emulator&&!preview)||typeof firebase==='undefined'||!firebase.functions
+    const path=String(globalThis.location?.pathname||'');
+    const approvedProductionSite=host==='sstonetw-source.github.io'
+        &&globalThis.location?.origin==='https://sstonetw-source.github.io'
+        &&(path==='/yushin-system'||path.startsWith('/yushin-system/'));
+    if((!emulator&&!preview&&!production)||typeof firebase==='undefined'||!firebase.auth||!firebase.app
         ||(emulator&&!local(host))
-        ||(preview&&!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(host)))
+        ||(preview&&!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(host))
+        ||(production&&!approvedProductionSite))
         throw Error('收貨後端尚未在目前授權的測試環境啟用，禁止改用舊交易。');
-    const auth=firebase.auth(),functions=firebase.app().functions('asia-east1');
-    const project=emulator?'demo-yushin':'preview-20135';
-    if(auth.app?.options?.projectId!==project||functions.app?.options?.projectId!==project
+    const auth=firebase.auth();
+    const project=emulator?'demo-yushin':preview?'preview-20135':'yu-shing-company';
+    if(auth.app?.options?.projectId!==project
         ||firebase.app().options?.projectId!==project
         ||typeof db==='undefined'||db.app?.options?.projectId!==project
         ||(emulator&&(!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099))
-        ||(preview&&!!auth.emulatorConfig))
+        ||((preview||production)&&!!auth.emulatorConfig))
         throw Error('收貨 Auth、Functions 與資料庫專案不一致，未提交收貨。');
+    // Functions compat is loaded lazily by the live site; never mistake a
+    // missing SDK for permission to execute the legacy Firestore writer.
+    if(!firebase.functions){
+        if(typeof ensureFormalPurchaseFunctionsCompat!=='function')
+            throw Error('Firebase Functions 未載入，禁止改用舊交易。');
+        await ensureFormalPurchaseFunctionsCompat();
+    }
+    if(!firebase.functions)throw Error('Firebase Functions 未載入，禁止改用舊交易。');
+    const functions=firebase.app().functions('asia-east1');
+    if(functions.app?.options?.projectId!==project||db.app?.options?.projectId!==project)
+        throw Error('收貨 Functions 與資料庫專案不一致，未提交收貨。');
     const uid=options.actorUid??currentUser?.uid,role=options.actorRole??currentUserRole;
     const check=()=>{
         if(!uid||auth.currentUser?.uid!==uid||currentUser?.uid!==uid||currentUserRole!==role
