@@ -19652,6 +19652,17 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
         contexts.push({item,itemReservedQty,itemId,index,productKey,directShip,delivered,ordered,warehouseId,invRef,whRef,invSnap,whSnap,reservationRef,reservationSnap,reservationData,demandRef,demandSnap});
     }
 
+    // Until backend initialization succeeds, Rules freeze the original items,
+    // including their initial shortage projection. Cancel only the source state.
+    if(nextStatus==='cancelled'&&['pending','failed'].includes(order.inventoryReservationStatus)){
+        for(const ctx of contexts){
+            if(ctx.reservationSnap.exists||ctx.demandSnap?.exists)
+                throw new Error('未完成預留的訂單已有預留或採購紀錄，請由管理員核對後再取消。');
+            globalThis.YushinReservation.planReservationLifecycle({nextStatus:'cancelled',itemReservedQty:ctx.itemReservedQty});
+        }
+        return {items:order.items,totalReserved:0,totalShortage:0};
+    }
+
     const nextItems = [];
     let totalReserved = 0;
     let totalShortage = 0;
