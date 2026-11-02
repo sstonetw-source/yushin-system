@@ -82,12 +82,23 @@ test('cancelling a failed uncommitted source never invents reservations or stock
  for(const role of ['admin','sales','engineer']){
   const f=fixture({role,held:0,qty:1});
   f.docs.get('orders/O').inventoryReservationStatus='failed';
+  f.docs.get('orders/O').items[0].shortageQty=1;
+  const originalItems=structuredClone(f.docs.get('orders/O').items);
   for(const path of ['inventory/P','warehouseStocks/A__P','inventoryReservations/O__I','procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I')])f.docs.delete(path);
   await f.run('cancelled');
   assert.equal(f.docs.get('orders/O').status,'cancelled');
   assert.equal(f.docs.get('orders/O').items[0].reservedQty,0);
-  assert.equal(f.docs.get('orders/O').items[0].shortageQty,0);
+  assert.deepEqual(f.docs.get('orders/O').items,originalItems);
   assert.equal([...f.docs.keys()].some(k=>/^(inventory|warehouseStocks|inventoryReservations|procurementDemands|inventoryMovements)\//.test(k)),false);
+ }
+});
+test('uncommitted cancellation rejects any existing ledger, demand or positive projected hold',async()=>{
+ for(const kind of ['ledger','demand','projected']){
+  const f=fixture({held:0});f.docs.get('orders/O').inventoryReservationStatus='failed';
+  if(kind!=='ledger')f.docs.delete('inventoryReservations/O__I');
+  if(kind!=='demand')f.docs.delete('procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I'));
+  if(kind==='projected')f.docs.get('orders/O').items[0].reservedQty=1;
+  await assert.rejects(f.run('cancelled'));assert.equal(f.writes.length,0);
  }
 });
 test('cancelling an uncommitted direct-shipped source does not invent a zero ledger',async()=>{

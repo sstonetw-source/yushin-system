@@ -2528,6 +2528,22 @@ function loadActualLifecycle(f){
   tx.update(ref,{status:status==='normal'?'active':'cancelled',orderStatus:status});
  });
 }
+test('actual cancellation of uncommitted pending or failed sources preserves immutable items under real Rules',async()=>{
+ for(const [uid,role] of [['admin','admin'],['sales1','sales'],['eng1','engineer']]){
+  for(const state of ['pending','failed'])for(const direct of [false,true]){
+   const f=await orderInitializationFixture(uid,role,{direct});
+   const ref=doc(db('admin'),'orders/'+f.id),original=(await getDoc(ref)).data();
+   const items=original.items.map(i=>({...i,reservedQty:0,shortageQty:5}));
+   await seed('orders/'+f.id,{...original,inventoryReservationStatus:state,items});
+   const run=loadActualLifecycle(f);await assertSucceeds(run('cancelled'));
+   const after=(await getDoc(ref)).data();assert.equal(after.status,'cancelled');
+   assert.equal(after.inventoryReservationStatus,state);assert.deepEqual(after.items,items);
+   assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).exists(),false);
+   assert.equal((await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).exists(),false);
+   if(!direct){const inv=(await getDoc(doc(db('admin'),'inventory/init-product'))).data();assert.equal(inv.onHand,3);assert.equal(inv.reserved,0);}
+  }
+ }
+});
 test('cancellation changes the demand and held stock atomically for the owner; unrelated writers cannot close demand',async()=>{
  for(const [uid,role] of [['admin','admin'],['sales1','sales'],['eng1','engineer']]){
   const f=await orderInitializationFixture(uid,role);await f.run();
