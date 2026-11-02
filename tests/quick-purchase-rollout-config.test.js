@@ -7,15 +7,16 @@ const vm=require('node:vm');
 const root=path.join(__dirname,'..');
 const rollout=fs.readFileSync(path.join(root,'transaction-rollout-config.js'),'utf8');
 const html=fs.readFileSync(path.join(root,'index.html'),'utf8');
-const version='20261031-order-res-1';
+const version='20261102-qp-guard-1';
 
 test('reviewed production transaction flags are always disabled by default',()=>{
- const context={YUSHIN_PRODUCTION_QUICK_PURCHASE:true,YUSHIN_PREVIEW_QUICK_PURCHASE:true,
+ const context={YUSHIN_PRODUCTION_QUICK_PURCHASE_LEGACY_BLOCKED:true,YUSHIN_PRODUCTION_QUICK_PURCHASE:true,YUSHIN_PREVIEW_QUICK_PURCHASE:true,
   YUSHIN_PRODUCTION_ORDER_RESERVATION_BACKEND:true,
   YUSHIN_PRODUCTION_ORDER_RESERVATION_LEGACY_BLOCKED:true};
  context.globalThis=context;
  vm.runInNewContext(rollout,context,{filename:'transaction-rollout-config.js'});
  assert.equal(context.YUSHIN_PRODUCTION_QUICK_PURCHASE,false);
+ assert.equal(context.YUSHIN_PRODUCTION_QUICK_PURCHASE_LEGACY_BLOCKED,false);
  assert.equal(context.YUSHIN_PRODUCTION_ORDER_RESERVATION_BACKEND,false);
  assert.equal(context.YUSHIN_PRODUCTION_ORDER_RESERVATION_LEGACY_BLOCKED,false);
  assert.equal(context.YUSHIN_PRODUCTION_QUICK_PURCHASE_CONFIG_VERSION,version);
@@ -65,5 +66,5 @@ test('reviewed production environment keeps formal purchasing enabled and other 
  assert.deepEqual(Object.fromEntries(lines.map(line=>line.split('='))),{
   ENABLE_ORDER_RESERVATION_BACKEND:'true',ENABLE_PRODUCTION_ORDER_RESERVATION_BACKEND:'true',ENABLE_PRODUCTION_FORMAL_PURCHASE:'true'
  });
- assert.match(html,/<script src="app\.js\?v=20261102-424"/);
+ assert.match(html,/<script src="app\.js\?v=20261102-425"/);
 });

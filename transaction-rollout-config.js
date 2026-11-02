@@ -4,8 +4,12 @@
 // verified asset versions, and an explicit production authorization.
 (function (scope) {
     'use strict';
-    scope.YUSHIN_PRODUCTION_QUICK_PURCHASE_CONFIG_VERSION = '20261031-order-res-1';
+    scope.YUSHIN_PRODUCTION_QUICK_PURCHASE_CONFIG_VERSION = '20261102-qp-guard-1';
     scope.YUSHIN_PRODUCTION_QUICK_PURCHASE = false;
+    // Default remains false while production still uses the legacy entry.
+    // The separately authorized cutover must set this lock true and retain it
+    // during outages; disabling the backend route must not revive SDK writes.
+    scope.YUSHIN_PRODUCTION_QUICK_PURCHASE_LEGACY_BLOCKED = false;
     const host = String(scope.location?.hostname || '').toLowerCase();
     const path = String(scope.location?.pathname || '');
     scope.YUSHIN_PRODUCTION_FORMAL_PURCHASE = ['yu-shing-company.web.app','yu-shing-company.firebaseapp.com'].includes(host)

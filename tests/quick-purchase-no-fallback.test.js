@@ -33,6 +33,7 @@ test('pilot requested outside isolated emulator fails closed; never falls back t
 test('explicit production backend flag prevents any legacy retry when Callable cannot be reached',async()=>{
  const x=contextFor({environment:'production',pilot:false});
  x.context.YUSHIN_PRODUCTION_QUICK_PURCHASE=true;
+ x.context.YUSHIN_PRODUCTION_QUICK_PURCHASE_LEGACY_BLOCKED=true;
  x.context.location={hostname:'sstonetw-source.github.io',pathname:'/yushin-system/'};
  await assert.rejects(x.context.commitQuickPurchase('O','I',details,'buyer','purchaser'),
   /後端尚未在此授權專案及網站啟用/);
@@ -166,4 +167,16 @@ test('recovery panel keeps pending operation visible during rollout suspension a
  assert.equal(panel.children[0].children[1].textContent,'確認前次採購結果');
  x.context.currentUser={uid:'other'};x.context.renderQuickPurchaseRecovery();
  assert.equal(panel.hidden,true);assert.equal(storage.get(key),raw);
+});
+
+// After an authorized cutover the release-level retirement lock must also
+// fence fresh pages with no per-operation checkpoint when the route is paused.
+test('production retirement lock blocks a fresh purchase after the backend route is disabled',async()=>{
+ for(const storage of [undefined,{getItem:()=>null}]){
+  const x=contextFor({environment:'production',pilot:false});
+  x.context.YUSHIN_PRODUCTION_QUICK_PURCHASE_LEGACY_BLOCKED=true;
+  x.context.sessionStorage=storage;
+  await assert.rejects(x.context.commitQuickPurchase('O','I',details,'buyer','purchaser'),/禁止改用舊交易/);
+  assert.equal(x.legacyCalls(),0);
+ }
 });
