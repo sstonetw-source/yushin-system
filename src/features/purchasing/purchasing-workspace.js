@@ -1064,6 +1064,11 @@ function pendingPurchaseLines(order) {
 
 function syncOrderIntoPurchasingCaches(order, options = {}) {
     if (!order?.id) return;
+    // History search has separate row objects from the recent-order page.
+    // Reconcile an already displayed row whenever confirmed order facts change.
+    if (typeof orderHistorySearchResults !== 'undefined') {
+        orderHistorySearchResults = orderHistorySearchResults.map(row => row.id === order.id ? order : row);
+    }
     const sync = (cache, include) => {
         const index = cache.findIndex(row => row.id === order.id);
         if (include) {

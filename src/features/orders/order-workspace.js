@@ -1480,7 +1480,8 @@ window.addEventListener('beforeunload',event=>{
     if(pendingOrderReservationIds.size){event.preventDefault();event.returnValue='';}
 });
 window.retryOrderInventoryReservation = async function(orderId) {
-    const cachedOrder=ordersCache.find(row=>row.id===orderId);
+    const cachedOrder=ordersCache.find(row=>row.id===orderId)
+        || orderHistorySearchResults.find(row=>row.id===orderId);
     if(!cachedOrder||!canRetryOrderInventorySync(cachedOrder)||(!orderInventorySyncIncomplete(cachedOrder)&&!orderSourceSyncIncomplete(cachedOrder))||pendingOrderReservationIds.has(orderId))return;
     const uid=currentUser?.uid;
     pendingOrderReservationIds.add(orderId);
@@ -1496,7 +1497,8 @@ window.retryOrderInventoryReservation = async function(orderId) {
             await synchronizeOrderInventory(orderId,order,uid);
         }
         if(currentUser?.uid===uid){
-            ordersCache=ordersCache.map(row=>row.id===orderId?order:row);
+            const index=ordersCache.findIndex(row=>row.id===orderId);
+            if(index>=0)ordersCache[index]=order;else ordersCache.unshift(order);
             syncOrderIntoPurchasingCaches(order);
             const sourceError=await syncNewOrderSourceDocuments(orderId,order,uid);
             if(currentUser?.uid===uid)showActionFeedback(sourceError?'庫存已同步；來源文件更新待確認：'+sourceError.message:'訂單庫存同步完成。',sourceError?'warning':'success');
@@ -1504,6 +1506,7 @@ window.retryOrderInventoryReservation = async function(orderId) {
     }catch(err){
         if(order&&normalizedOrderStatus(order)==='normal'&&currentUser?.uid===uid&&canRetryOrderInventorySync(order)){
             Object.assign(cachedOrder,order);
+            syncOrderIntoPurchasingCaches(order);
         }
         if(currentUser?.uid===uid)showActionFeedback('庫存同步未完成，可在同一筆訂單重試：'+(err.message||err),'warning');
     }finally{

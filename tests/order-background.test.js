@@ -41,13 +41,16 @@ test('pending and failed synchronization block purchasing and dispatch calculati
 });
 function retrySetup(liveStatus='pending'){
  let live={createdByUid:'U1',ownerUid:'U1',inventoryReservationStatus:liveStatus};
- const reserve=deferred(),events=[],x=vm.createContext({window:{addEventListener(){}},currentUser:{uid:'U1'},currentUserRole:'sales',ordersCache:[{id:'O1',createdByUid:'U1',ownerUid:'U1',inventoryReservationStatus:'pending'}],
- normalizedOrderStatus:order=>order.status==='cancelled'?'cancelled':'normal',renderOrdersList(){},writeAppDataCache(){},showActionFeedback:(...a)=>events.push(a),syncOrderIntoPurchasingCaches(){},syncNewOrderSourceDocuments:async()=>null,escapeAttr:s=>s,
+ const reserve=deferred(),events=[],x=vm.createContext({window:{addEventListener(){}},currentUser:{uid:'U1'},currentUserRole:'sales',orderHistorySearchResults:[],ordersCache:[{id:'O1',createdByUid:'U1',ownerUid:'U1',inventoryReservationStatus:'pending'}],
+ normalizedOrderStatus:order=>order.status==='cancelled'?'cancelled':'normal',orderSourceSyncIncomplete:()=>false,renderOrdersList(){},writeAppDataCache(){},showActionFeedback:(...a)=>events.push(a),syncOrderIntoPurchasingCaches(){},syncNewOrderSourceDocuments:async()=>null,escapeAttr:s=>s,
  db:{collection:()=>({doc:id=>({id:id||'attempt-1',get:async()=>({exists:true,id,data:()=>({...live})})})})},
  runRoleTransaction:async fn=>fn({get:async()=>({exists:true,data:()=>({...live})}),update:(_ref,updates)=>{live={...live,...updates};events.push(updates);}}),
  orderWorkIndexFields:()=>({}),orderReservationSummary:()=>({reservedQty:0,shortageQty:0}),
  firestoreReadWithTimeout:p=>p,reserveInventoryForNewOrder:async()=>{events.push('reserve');await reserve.promise;},console
  });
+ const purchasing=fs.readFileSync(require('node:path').join(__dirname,'../src/features/purchasing/purchasing-workspace.js'),'utf8');
+ Object.assign(x,{pendingPurchaseCache:[],purchasingDispatchCache:[],pendingProcurementDisplayLines:()=>[],normalizedOrderItems:()=>[],receivingSourceOrderStatusCache:new Map(),receivingSourceOrderCache:new Map(),document:{getElementById:()=>null}});
+ vm.runInContext(purchasing.slice(purchasing.indexOf('function syncOrderIntoPurchasingCaches('),purchasing.indexOf('function syncCommittedPurchaseOrderSources(')),x);
  vm.runInContext(src.slice(src.indexOf('const pendingOrderReservationIds = new Set();'),src.indexOf('// 採購主頁資料')),x);return {x,reserve,events};
 }
 test('retry restores a pending order using current saved document and blocks double clicks',async()=>{
@@ -56,6 +59,33 @@ test('retry restores a pending order using current saved document and blocks dou
 });
 test('retry skips inventory reservation if cloud already completed it',async()=>{
  const a=retrySetup('completed');await a.x.window.retryOrderInventoryReservation('O1');assert.equal(a.events.includes('reserve'),false);assert.equal(a.x.ordersCache[0].inventoryReservationStatus,'completed');
+});
+test('result-unknown retry clears the displayed history status without reserving a second time',async()=>{
+ const a=retrySetup('completed');a.x.orderHistorySearchResults=[structuredClone(a.x.ordersCache[0]),{id:'UNRELATED',inventoryReservationStatus:'failed'}];
+ await a.x.window.retryOrderInventoryReservation('O1');
+ assert.equal(a.events.includes('reserve'),false);assert.equal(a.x.orderHistorySearchResults[0].inventoryReservationStatus,'completed');
+ assert.equal(a.x.orderInventorySyncStatusHtml(a.x.orderHistorySearchResults[0]),'');
+ assert.equal(a.x.orderHistorySearchResults[1].inventoryReservationStatus,'failed');
+});
+test('search-only recovery hydrates the authoritative order and prevents duplicate page rows',async()=>{
+ const a=retrySetup('completed');a.x.orderHistorySearchResults=[a.x.ordersCache[0]];a.x.ordersCache=[];
+ await a.x.window.retryOrderInventoryReservation('O1');await a.x.window.retryOrderInventoryReservation('O1');
+ assert.equal(a.events.includes('reserve'),false);assert.equal(a.x.ordersCache.length,1);
+ assert.equal(a.x.ordersCache[0].inventoryReservationStatus,'completed');assert.equal(a.x.orderHistorySearchResults[0].inventoryReservationStatus,'completed');
+});
+test('search history cannot authorize recovery when the live owner differs',async()=>{
+ const a=retrySetup('completed');a.x.orderHistorySearchResults=[a.x.ordersCache[0]];a.x.ordersCache=[];
+ a.x.db.collection=()=>({doc:id=>({get:async()=>({exists:true,id,data:()=>({ownerUid:'FOREIGN',inventoryReservationStatus:'pending'})})})});
+ await a.x.window.retryOrderInventoryReservation('O1');
+ assert.equal(a.events.includes('reserve'),false);assert.equal(a.x.ordersCache.length,0);
+ assert.ok(a.events.some(e=>Array.isArray(e)&&String(e[0]).includes('身份或權限')));
+});
+test('failed recovery refreshes the displayed search row and keeps it retryable',async()=>{
+ const a=retrySetup();a.x.orderHistorySearchResults=[structuredClone(a.x.ordersCache[0])];
+ const run=a.x.window.retryOrderInventoryReservation('O1');await tick();a.reserve.reject(Error('warehouse allocation rejected'));await run;
+ assert.equal(a.x.orderHistorySearchResults[0].inventoryReservationStatus,'failed');
+ assert.match(a.x.orderHistorySearchResults[0].inventoryReservationError,/warehouse allocation rejected/);
+ assert.equal(a.x.canRetryOrderInventorySync(a.x.orderHistorySearchResults[0]),true);
 });
 
 function productCheckHarness(lookup) {
