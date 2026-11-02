@@ -116,6 +116,56 @@ test('Preview receipt requires matching Auth, Functions, default app and actual 
  const demo=transport();demo.c.db.app={options:{projectId:'preview-20135'}};
  await assert.rejects(demo.receive());assert.equal(demo.calls.length,0);
 });
+function productionTransport(){
+ const x=transport();
+ x.c.APP_ENVIRONMENT='production';
+ x.c.YUSHIN_PRODUCTION_RECEIVING_BACKEND=true;
+ x.c.YUSHIN_PRODUCTION_RECEIVING_LEGACY_BLOCKED=true;
+ x.c.location={origin:'https://sstonetw-source.github.io',hostname:'sstonetw-source.github.io',pathname:'/yushin-system/'};
+ x.auth.app.options.projectId='yu-shing-company';
+ delete x.auth.emulatorConfig;
+ x.c.db.app={options:{projectId:'yu-shing-company'}};
+ return x;
+}
+test('production receipt transport needs both client switches and exact HTTPS site, all SDK projects, and live Auth',async()=>{
+ const good=productionTransport();assert.deepEqual([...await good.receive()],['O']);
+ assert.equal(good.calls.some(call=>call.host),false);
+ for(const change of [
+  x=>x.c.YUSHIN_PRODUCTION_RECEIVING_BACKEND=false,
+  x=>x.c.YUSHIN_PRODUCTION_RECEIVING_LEGACY_BLOCKED=false,
+  x=>x.c.location.origin='http://sstonetw-source.github.io',
+  x=>x.c.location.pathname='/other-project/',
+  x=>x.c.location.hostname='evil.example',
+  x=>x.c.db.app={options:{projectId:'preview-20135'}},
+  x=>x.functions.app={options:{projectId:'preview-20135'}},
+  x=>x.auth.emulatorConfig={host:'127.0.0.1',port:9099},
+  x=>x.auth.currentUser.uid='other'
+ ]){
+  const x=productionTransport();change(x);
+  await assert.rejects(x.receive());assert.equal(x.calls.length,0);
+ }
+ const unknown=productionTransport(),original=JSON.stringify(unknown.jobs);
+ unknown.functions.httpsCallable=()=>async()=>{throw Error('lost reply');};
+ await assert.rejects(unknown.receive(),/lost reply/);
+ assert.equal(JSON.stringify(unknown.jobs),original);
+});
+test('production receipt loads Functions compat only after checking the approved project; SDK failure never falls back',async()=>{
+ const missing=productionTransport();delete missing.c.firebase.functions;
+ await assert.rejects(missing.receive(),/禁止改用舊交易/);
+ assert.equal(missing.calls.length,0);
+ const failed=productionTransport();delete failed.c.firebase.functions;
+ failed.c.ensureFormalPurchaseFunctionsCompat=async()=>{throw Error('script unavailable');};
+ await assert.rejects(failed.receive(),/script unavailable/);
+ assert.equal(failed.calls.length,0);
+ const loaded=productionTransport();delete loaded.c.firebase.functions;
+ let loads=0;
+ loaded.c.ensureFormalPurchaseFunctionsCompat=async()=>{loads++;loaded.c.firebase.functions=()=>loaded.functions;};
+ assert.deepEqual([...await loaded.receive()],['O']);assert.equal(loads,1);
+ const wrong=productionTransport();delete wrong.c.firebase.functions;
+ wrong.c.db.app.options.projectId='demo-yushin';
+ wrong.c.ensureFormalPurchaseFunctionsCompat=async()=>{throw Error('should never load');};
+ await assert.rejects(wrong.receive(),/專案不一致/);assert.equal(wrong.calls.length,0);
+});
 
 test('shared PO receipt witness follows unique supply link and rejects draft, terminal, wrong source and fulfillment',async()=>{
  const create=require('../functions/shared/receiving-runtime');
