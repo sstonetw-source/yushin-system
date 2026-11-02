@@ -110,7 +110,7 @@ test('quick purchase backend enforces role, demand, supplier and stock integrity
   const x=fixture();await assert.rejects(commitV2QuickPurchase(x.db,who,x.data),{code:'permission-denied'});
   assert.equal(x.history.length,0);
  }
- for(const change of [x=>{x.data.qty=8;},x=>{x.records.delete('warehouseStocks/W__P');},
+ for(const change of [x=>{x.data.qty=8;},x=>{x.records.delete('inventory/P');},
   x=>{x.records.get('inventory/P').incoming=-1;},
   x=>{x.records.get('inventory/P').productKey='wrong-product';},
   x=>{x.records.get('warehouseStocks/W__P').productId='wrong-product';},
@@ -118,6 +118,42 @@ test('quick purchase backend enforces role, demand, supplier and stock integrity
   x=>{x.records.get('orders/ORDER-1').items[0].procurementType='SALES_SELF_ORDER';},
   x=>{x.records.get('orders/ORDER-1').procurementType='SALES_SELF_ORDER';},
   x=>{x.records.get('procurementDemands/'+encodeURIComponent(x.demandId)).orderedQty=2;}]){
+  const x=fixture();change(x);
+  await assert.rejects(commitV2QuickPurchase(x.db,'buyer',x.data),{code:'failed-precondition'});
+  assert.equal(x.history.length,0);
+ }
+});
+test('first manual purchase initializes absent company and warehouse balances atomically',async()=>{
+ const x=fixture();
+ x.records.delete('inventory/P');
+ x.records.delete('warehouseStocks/W__P');
+ const result=await commitV2QuickPurchase(x.db,'buyer',{...x.data,unitCost:0,qty:1});
+ assert.equal(result.status,'committed');
+ assert.deepEqual(
+  ['onHand','reserved','incoming','productId','productKey'].map(key=>x.records.get('inventory/P')[key]),
+  [0,0,1,'P','P']
+ );
+ assert.deepEqual(
+  ['onHand','reserved','incoming','productId','productKey','warehouseId']
+   .map(key=>x.records.get('warehouseStocks/W__P')[key]),
+  [0,0,1,'P','P','W']
+ );
+ assert.deepEqual(x.records.get('inventory/P').lots,[]);
+ assert.equal(x.records.get('inventoryMovements/quick-'+x.data.operationId).qty,1);
+ assert.equal(x.records.get('orders/ORDER-1').items[0].supplyOrderedQty,1);
+ const writes=x.history.length;
+ assert.equal((await commitV2QuickPurchase(x.db,'buyer',{...x.data,unitCost:0,qty:1})).status,'already-applied');
+ assert.equal(x.history.length,writes);
+});
+test('partial stock initialization and forged stock identities fail closed',async()=>{
+ const changes=[
+  x=>{x.records.delete('inventory/P');},
+  x=>{x.records.delete('warehouseStocks/W__P');},
+  x=>{x.records.get('inventory/P').productId='forged';},
+  x=>{x.records.get('warehouseStocks/W__P').warehouseId='forged';},
+  x=>{x.records.get('warehouseStocks/W__P').incoming=-1;}
+ ];
+ for(const change of changes){
   const x=fixture();change(x);
   await assert.rejects(commitV2QuickPurchase(x.db,'buyer',x.data),{code:'failed-precondition'});
   assert.equal(x.history.length,0);

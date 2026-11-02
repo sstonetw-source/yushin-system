@@ -157,18 +157,23 @@ async function commitV2QuickPurchase(db,uid,data){
    warehouseRef=ref('warehouseStocks',encodeURIComponent(warehouseId)+'__'+encodeURIComponent(productKey));
    inventory=await tx.get(inventoryRef);
    warehouse=await tx.get(warehouseRef);
-   // Fail closed on absent or mismatched stock. Stock creation is a separate
-   // acceptance case; do not manufacture a second stock identity here.
-   if(!inventory.exists||!warehouse.exists
-     ||inventory.data().productId!==sourceItem.productId
-     ||inventory.data().productKey!==productKey
-     ||warehouse.data().productId!==sourceItem.productId
-     ||warehouse.data().productKey!==productKey
-     ||warehouse.data().warehouseId!==warehouseId)
-    fail('failed-precondition','入庫倉庫或產品庫存尚未完成初始化');
-   for(const snap of [inventory,warehouse]){
-    for(const key of ['onHand','reserved','incoming'])number(snap.data()[key],key);
-    if(snap.data().incoming+intent.qty>1000000000)
+   // The first purchase of a valid product may have no stock documents.
+   // Initialize missing zero balances atomically with incoming. Never infer
+   // a missing company total from an existing warehouse balance.
+   const companyStock=inventory.exists?inventory.data():null;
+   const warehouseStock=warehouse.exists?warehouse.data():null;
+   if((companyStock&&(companyStock.productId!==sourceItem.productId
+       ||companyStock.productKey!==productKey))
+     ||(warehouseStock&&(warehouseStock.productId!==sourceItem.productId
+       ||warehouseStock.productKey!==productKey
+       ||warehouseStock.warehouseId!==warehouseId)))
+    fail('failed-precondition','入庫倉庫或產品庫存識別不一致');
+   if(Boolean(companyStock)!==Boolean(warehouseStock))
+    fail('failed-precondition','公司與分倉庫存初始化狀態不同，請先核對帳目');
+   for(const stock of [companyStock,warehouseStock]){
+    if(!stock)continue;
+    for(const key of ['onHand','reserved','incoming'])number(stock[key],key);
+    if(stock.incoming+intent.qty>1000000000)
      fail('failed-precondition','在途數量超過上限');
    }
   }
@@ -226,8 +231,18 @@ async function commitV2QuickPurchase(db,uid,data){
    const mirror=ref('receivingSupplyOrders',supplyId);
    tx.set(mirror,sanitizeSupply(supply));
   }else{
-   tx.update(inventoryRef,{incoming:inventory.data().incoming+intent.qty,updatedAt:now});
-   tx.update(warehouseRef,{incoming:warehouse.data().incoming+intent.qty,updatedAt:now});
+   if(inventory.exists)tx.update(inventoryRef,{incoming:inventory.data().incoming+intent.qty,updatedAt:now});
+   else tx.create(inventoryRef,{
+    productId:sourceItem.productId,productKey,itemCode:supply.itemCode,itemName:supply.itemName,
+    brand:supply.brand,brandId:supply.brandId,onHand:0,reserved:0,incoming:intent.qty,
+    lots:[],updatedAt:now
+   });
+   if(warehouse.exists)tx.update(warehouseRef,{incoming:warehouse.data().incoming+intent.qty,updatedAt:now});
+   else tx.create(warehouseRef,{
+    productId:sourceItem.productId,productKey,warehouseId,
+    itemCode:supply.itemCode,itemName:supply.itemName,brand:supply.brand,brandId:supply.brandId,
+    onHand:0,reserved:0,incoming:intent.qty,updatedAt:now
+   });
    tx.create(movementRef,{
     type:'purchase_incoming',qty:intent.qty,productKey,productId:sourceItem.productId,
     warehouseId,brand:supply.brand,brandId:supply.brandId,
