@@ -168,8 +168,8 @@ async function commitV2QuickPurchase(db,uid,data){
        ||warehouseStock.productKey!==productKey
        ||warehouseStock.warehouseId!==warehouseId)))
     fail('failed-precondition','入庫倉庫或產品庫存識別不一致');
-   if(!companyStock&&warehouseStock)
-    fail('failed-precondition','公司庫存缺失但分倉庫存已存在，請先核對帳目');
+   if(Boolean(companyStock)!==Boolean(warehouseStock))
+    fail('failed-precondition','公司與分倉庫存初始化狀態不同，請先核對帳目');
    for(const stock of [companyStock,warehouseStock]){
     if(!stock)continue;
     for(const key of ['onHand','reserved','incoming'])number(stock[key],key);
