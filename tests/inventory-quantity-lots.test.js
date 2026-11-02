@@ -41,6 +41,47 @@ test('quantity editor reduces actual batches and keeps receipt identity',async()
  assert.equal(f.docs.get('inventoryMovements/COUNT').lotAllocations[0].qty,5);
  assert.equal(f.readAfterWrite(),false);
 });
+test('count rebuilds company lot summary from operational lots across warehouses',async()=>{
+ const f=fixture({target:5,lots:[{id:'main',remainingQty:10,lotNo:'A'}]});
+ f.docs.get('inventory/P').onHand=14;
+ f.docs.get('inventory/P').lots=[{warehouseId:'MAIN',lotNo:'phantom',expiryDate:'',qty:99}];
+ f.docs.set('inventoryLots/other',{productKey:'P',warehouseId:'EXT',lotNo:'B',remainingQty:4});
+ const other=JSON.stringify(f.docs.get('inventoryLots/other'));
+ await f.run();
+ const rows=f.docs.get('inventory/P').lots;
+ assert.equal(rows.find(x=>x.warehouseId==='MAIN'&&x.lotNo==='A')?.qty,5);
+ assert.equal(rows.find(x=>x.warehouseId==='EXT'&&x.lotNo==='B')?.qty,4);
+ assert.equal(rows.some(x=>x.lotNo==='phantom'),false);
+ assert.equal(rows.reduce((sum,x)=>sum+x.qty,0),f.docs.get('inventory/P').onHand);
+ assert.equal(JSON.stringify(f.docs.get('inventoryLots/other')),other);assert.equal(f.readAfterWrite(),false);
+});
+test('count rollback consumes only the new FEFO test batch and removes its positive summary quantity',async()=>{
+ const f=fixture({onHand:2,reserved:1,target:1,lots:[
+  {id:'original',remainingQty:1,lotNo:'',expiryDate:'',receivedAt:'2026-10-14'},
+  {id:'qa',remainingQty:1,lotNo:'QA311',expiryDate:'2099-12-31',receivedAt:'2026-11-02'}
+ ]});
+ const inv=f.docs.get('inventory/P');inv.onHand=103;inv.reserved=5;
+ inv.lots=[{warehouseId:'MAIN',lotNo:'',expiryDate:'',qty:1},{warehouseId:'MAIN',lotNo:'QA311',expiryDate:'2099-12-31',qty:1},{warehouseId:'EXT',lotNo:'',expiryDate:'',qty:100},{warehouseId:'custody-U',lotNo:'',expiryDate:'',qty:1}];
+ f.docs.set('inventoryLots/external',{productKey:'P',warehouseId:'EXT',remainingQty:100});
+ f.docs.set('inventoryLots/custody',{productKey:'P',warehouseId:'custody-U',remainingQty:1});
+ f.docs.set('inventoryLotCosts/original',{unitCost:1200});
+ const preserved=['inventoryLots/original','inventoryLots/external','inventoryLots/custody','inventoryLotCosts/original'].map(k=>[k,JSON.stringify(f.docs.get(k))]);
+ await f.run();
+ assert.equal(f.docs.get('inventory/P').onHand,102);assert.equal(f.docs.get('inventory/P').reserved,5);
+ assert.equal(f.docs.get('warehouseStocks/MAIN__P').onHand,1);assert.equal(f.docs.get('warehouseStocks/MAIN__P').reserved,1);
+ assert.equal(f.docs.get('inventoryLots/qa').remainingQty,0);
+ assert.equal(f.docs.get('inventory/P').lots.find(x=>x.lotNo==='QA311')?.qty,0);
+ assert.equal(f.docs.get('inventory/P').lots.reduce((s,x)=>s+x.qty,0),102);
+ for(const [k,before]of preserved)assert.equal(JSON.stringify(f.docs.get(k)),before);
+ assert.deepEqual(f.docs.get('inventoryMovements/COUNT').lotAllocations.map(x=>[x.lotId,x.qty]),[['qa',1]]);
+});
+test('count refuses corrupt lot identities in another warehouse before writing company summary',async()=>{
+ for(const patch of [{warehouseId:''},{warehouseId:'bad/id'},{productId:'OTHER'},{remainingQty:-1}]){
+  const f=fixture({lots:[{id:'main',remainingQty:10}]});
+  f.docs.set('inventoryLots/other',{productKey:'P',warehouseId:'EXT',remainingQty:1,...patch});
+  const before=JSON.stringify([...f.docs]);await assert.rejects(f.run());assert.equal(JSON.stringify([...f.docs]),before);assert.equal(f.writesCommitted.length,0);
+ }
+});
 test('quantity editor reservation violation and failed commit leave all records unchanged',async()=>{
  for(const options of [{target:3,reserved:4},{target:15,fail:true}]){
   const f=fixture(options),before=structuredClone([...f.docs]);await f.c.saveInventoryQuantity();

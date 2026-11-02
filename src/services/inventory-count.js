@@ -58,18 +58,26 @@ async function commitInventoryQuantity(input,{actorUid=currentUser?.uid,actorRol
         // Even an unchanged count needs a receipt: an uncertain reply must not let
         // the same operation overwrite a later arrival on its next attempt.
         if(delta===0){tx.set(movementRef,{...audit,lotAllocations:[],lotIds:[]});return;}
-        const lotQuery=await firestoreReadWithTimeout(db.collection('inventoryLots').where('productKey','==',key).where('warehouseId','==',warehouseId).limit(201).get(),'盤點批次');
+        // The company summary spans every location. Read its operational source
+        // inside the same transaction; only the counted warehouse's lots change.
+        const lotQuery=await firestoreReadWithTimeout(db.collection('inventoryLots').where('productKey','==',key).limit(201).get(),'盤點批次');
         assertActor();
         if(lotQuery.size>200)throw new Error('批次超過安全處理上限。');
         const lotSnaps=await Promise.all(lotQuery.docs.map(doc=>tx.get(doc.ref)));
-        const currentLots=lotSnaps.filter(doc=>doc.exists).map(doc=>({...doc.data(),id:doc.id}));
-        for(const lot of currentLots){assertIdentity(lot,warehouseId);number(lot.remainingQty??lot.qty,'批次');}
+        const allLots=lotSnaps.filter(doc=>doc.exists).map(doc=>({...doc.data(),id:doc.id}));
+        for(const lot of allLots){
+            assertIdentity(lot);if(!validId(lot.warehouseId))throw new Error('批次缺少有效的倉庫識別。');
+            number(lot.remainingQty??lot.qty,'批次');
+        }
+        const currentLots=allLots.filter(lot=>lot.warehouseId===warehouseId);
         const balanceSnap=await tx.get(balanceRef),addedSnap=await tx.get(addedRef);assertActor();
         if(balanceSnap.exists||addedSnap.exists)throw new Error('盤點操作識別碼衝突，請先確認原作業。');
         const lotPlan=YushinInventory.quantityAdjustmentLots(currentLots,current,target,effectiveWarehouse.reserved,balanceRef.id,addedRef.id);
         const canonicalBrand=resolveBrandName(old.brand||item.brand||'');
         const metadata={productKey:key,productId:old.productId||item.productId||key,itemCode:old.itemCode||item.itemCode||'',itemName:old.itemName||item.itemName||'',brand:canonicalBrand,brandId:old.brandId||item.brandId||brandIdForName(canonicalBrand)};
-        const nextInventory={...old,...metadata,onHand:n.onHand+delta,reserved:n.reserved,incoming:n.incoming,updatedAt:now};
+        const lots=[...allLots.filter(lot=>lot.warehouseId!==warehouseId),...lotPlan.lots.map(lot=>({...lot,warehouseId}))]
+            .map(lot=>({warehouseId:lot.warehouseId,lotNo:lot.lotNo||'',expiryDate:lot.expiryDate||'',qty:Number(lot.remainingQty??lot.qty??0)}));
+        const nextInventory={...old,...metadata,onHand:n.onHand+delta,reserved:n.reserved,incoming:n.incoming,lots,updatedAt:now};
         nextInventory.searchTokens=buildInventorySearchTokens(nextInventory);
         assertActor();
         for(const lot of lotPlan.lots){
