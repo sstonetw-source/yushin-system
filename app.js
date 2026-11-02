@@ -19669,7 +19669,9 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
             globalThis.YushinReservation.planReservationLifecycle({nextStatus:'cancelled',
                 existingQty:reservationData.quantity,itemReservedQty});
             const shortage = directShip ? 0 : Math.max(0, ordered - delivered);
-            transaction.set(reservationRef, {
+            // A rejected, uncommitted source has no reservation to release.
+            // Preserve backend initialization protection by not inventing a ledger.
+            if(nextStatus!=='cancelled'||reservationSnap.exists)transaction.set(reservationRef, {
                 orderId,itemId,orderNo:order.orderNo||order.quoteNo||orderId,productKey,
                 itemCode:item.itemCode||'',itemName:item.itemName||'',customerName:order.customerName||'',
                 salesCode:order.salesCode||salesCodeForName(order.salesName),salesName:order.salesName||'',
@@ -19697,7 +19699,7 @@ async function adjustInventoryReservationForLifecycle(transaction, orderId, orde
                 whState.reserved = Number(whState.reserved||0) - release;
                 transaction.set(db.collection('inventoryMovements').doc(), inventoryMovementRecord('release',-release,orderId,productKey,actor,{reason:'order_cancelled',warehouseId,itemId}));
             }
-            transaction.set(reservationRef,{
+            if(reservationSnap.exists)transaction.set(reservationRef,{
                 orderId,itemId,orderNo:order.orderNo||order.quoteNo||orderId,productKey,
                 itemCode:item.itemCode||'',itemName:item.itemName||'',customerName:order.customerName||'',
                 salesCode:order.salesCode||salesCodeForName(order.salesName),salesName:order.salesName||'',

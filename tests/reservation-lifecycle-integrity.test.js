@@ -78,6 +78,27 @@ test('actual cancellation preserves other orders held stock and never changes on
   assert.equal(f.reads.length,5);
  }
 });
+test('cancelling a failed uncommitted source never invents reservations or stock documents',async()=>{
+ for(const role of ['admin','sales','engineer']){
+  const f=fixture({role,held:0,qty:1});
+  f.docs.get('orders/O').inventoryReservationStatus='failed';
+  for(const path of ['inventory/P','warehouseStocks/A__P','inventoryReservations/O__I','procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I')])f.docs.delete(path);
+  await f.run('cancelled');
+  assert.equal(f.docs.get('orders/O').status,'cancelled');
+  assert.equal(f.docs.get('orders/O').items[0].reservedQty,0);
+  assert.equal(f.docs.get('orders/O').items[0].shortageQty,0);
+  assert.equal([...f.docs.keys()].some(k=>/^(inventory|warehouseStocks|inventoryReservations|procurementDemands|inventoryMovements)\//.test(k)),false);
+ }
+});
+test('cancelling an uncommitted direct-shipped source does not invent a zero ledger',async()=>{
+ const f=fixture({held:0});f.docs.get('orders/O').inventoryReservationStatus='failed';
+ f.docs.get('orders/O').items[0].fulfillmentType='DIRECT_SHIP';
+ f.docs.delete('inventoryReservations/O__I');f.docs.delete('procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I'));
+ const inv=JSON.stringify(f.docs.get('inventory/P')),wh=JSON.stringify(f.docs.get('warehouseStocks/A__P'));
+ await f.run('cancelled');assert.equal(f.docs.get('orders/O').status,'cancelled');
+ assert.equal(f.docs.has('inventoryReservations/O__I'),false);
+ assert.equal(JSON.stringify(f.docs.get('inventory/P')),inv);assert.equal(JSON.stringify(f.docs.get('warehouseStocks/A__P')),wh);
+});
 test('cancelling an order atomically closes its existing demand without rewriting supplier history',async()=>{
  for(const role of ['admin','sales','engineer']){
   const f=fixture({role});
