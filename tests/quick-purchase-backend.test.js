@@ -145,21 +145,10 @@ test('first manual purchase initializes absent company and warehouse balances at
  assert.equal((await commitV2QuickPurchase(x.db,'buyer',{...x.data,unitCost:0,qty:1})).status,'already-applied');
  assert.equal(x.history.length,writes);
 });
-test('manual purchase can initialize a new warehouse while preserving an existing company balance',async()=>{
- const x=fixture();
- x.records.delete('warehouseStocks/W__P');
- const result=await commitV2QuickPurchase(x.db,'buyer',x.data);
- assert.equal(result.status,'committed');
- assert.equal(x.records.get('inventory/P').onHand,5);
- assert.equal(x.records.get('inventory/P').reserved,2);
- assert.equal(x.records.get('inventory/P').incoming,4);
- assert.equal(x.records.get('warehouseStocks/W__P').onHand,0);
- assert.equal(x.records.get('warehouseStocks/W__P').reserved,0);
- assert.equal(x.records.get('warehouseStocks/W__P').incoming,4);
-});
-test('missing company balance with existing warehouse and forged stock identities fail closed',async()=>{
+test('partial stock initialization and forged stock identities fail closed',async()=>{
  const changes=[
   x=>{x.records.delete('inventory/P');},
+  x=>{x.records.delete('warehouseStocks/W__P');},
   x=>{x.records.get('inventory/P').productId='forged';},
   x=>{x.records.get('warehouseStocks/W__P').warehouseId='forged';},
   x=>{x.records.get('warehouseStocks/W__P').incoming=-1;}
