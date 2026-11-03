@@ -24,12 +24,12 @@ test.before(async()=>{
   const pathname=new URL(request.url,'http://localhost').pathname;
   if(pathname==='/site'){
    const html=read('index.html').replace(/https:\/\/www\.gstatic\.com\/firebasejs\/10\.8\.0\/firebase-app-compat\.js/g,'/sdk.js')
-    .replace(/https:\/\/www\.gstatic\.com\/firebasejs\/10\.8\.0\/firebase-(?:firestore|auth)-compat\.js/g,'/sdk-ready.js')
+    .replace(/https:\/\/www\.gstatic\.com\/firebasejs\/10\.8\.0\/firebase-(?:firestore|auth|functions)-compat\.js/g,'/sdk-ready.js')
     .replace('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js','/vendor/html2canvas.js')
     .replace('https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js','/vendor/jspdf.js');
    response.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});response.end(html);return;
   }
-  if(pathname==='/sdk-ready.js'){response.writeHead(200,{'Content-Type':'application/javascript'});response.end('// Real compat Auth/Firestore already included in sdk.js.');return;}
+  if(pathname==='/sdk-ready.js'){response.writeHead(200,{'Content-Type':'application/javascript'});response.end('// Real compat Auth/Firestore/Functions already included in sdk.js.');return;}
   const vendor={'/vendor/html2canvas.js':'html2canvas/dist/html2canvas.min.js','/vendor/jspdf.js':'jspdf/dist/jspdf.umd.min.js'}[pathname];
   if(vendor){response.writeHead(200,{'Content-Type':'application/javascript'});response.end(fs.readFileSync(require.resolve(vendor)));return;}
   if(request.url==='/sdk.js'){response.writeHead(200,{'Content-Type':'application/javascript'});response.end(sdk);return;}
