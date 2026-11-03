@@ -38,7 +38,7 @@ node functions/scripts/one-time-operational-reset.js --project=yu-shing-company 
 ## 驗收
 
 - 工具輸出 `status: VERIFIED`，待刪根集合從 Firestore 不再出現。
-- 保留根集合仍存在；`inventory` / `warehouseStocks` 每筆 `onHand/reserved/available/incoming/shortage` 為 0，內嵌 `lots` 為空。
+- 保留根集合仍存在；`inventory` / `warehouseStocks` 每筆 `onHand/reserved/available/incoming/shortage/transferReserved/transferInTransit/transferFreeInTransit` 為 0，內嵌 `lots` 為空。
 - 另外以管理端獨立查核 29 個先前存在的根集合及任何巢狀交易集合、交易入口和前端列表。確認不會被舊寫入工作重建後才解除凍結。
 - 目前 29 個正式頂層集合中：14 個刪除、13 個保留、2 個歸零；未出現的潛在交易集合在 policy 內仍須處理。
 
@@ -49,3 +49,12 @@ node functions/scripts/one-time-operational-reset.js --project=yu-shing-company 
 - 不處理 Firebase Authentication 使用者（依授權保留）。
 - 不會自動清除保留主檔內的嵌入交易紀錄；若有此類欄位，必須追加獨立驗證／清理。
 - 不可使用既有前台 `executeTestDataReset()` 替代，因它保留 `quotes`，且遇到調撥紀錄會中止。
+
+
+## 2026-11-03 歸零完整性修正
+
+清除調撥與 Movement 後，調撥預留及在途計數也必須歸零。
+否則舊 `transferFreeInTransit` 可能大於歸零後的 `onHand`，使新建單拒絕預留；
+舊 `transferReserved`／`transferInTransit` 亦會留下無來源的調撥數量。
+工具的盤點、執行與 VERIFIED 驗證均沿用同一 STOCK_FIELDS 清單，現包含上述八欄。
+此修正不執行任何正式重置，也不擴大刪除或保留集合範圍。
