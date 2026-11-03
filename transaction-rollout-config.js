@@ -5,34 +5,34 @@
 // verified asset versions, and an explicit production authorization.
 (function (scope) {
     'use strict';
-    scope.YUSHIN_PRODUCTION_QUICK_PURCHASE_CONFIG_VERSION = '20261103-receiving-guard-1';
-    // Receiving remains closed until separately authorized server, browser, and Rules cutover.
-    // Overwrite stale global values; the caller must never inherit an unintended true gate.
-    scope.YUSHIN_PRODUCTION_RECEIVING_BACKEND = false;
-    scope.YUSHIN_PRODUCTION_RECEIVING_LEGACY_BLOCKED = false;
-    // Prepared only: a separately authorized release must enable both sides.
-    scope.YUSHIN_PRODUCTION_CUSTOMER_RETURN_BACKEND = false;
-    scope.YUSHIN_PRODUCTION_CUSTOMER_RETURN_LEGACY_BLOCKED = false;
-    scope.YUSHIN_PRODUCTION_CUSTOMER_RETURN_REQUEST_BACKEND = false;
-    scope.YUSHIN_PRODUCTION_CUSTOMER_RETURN_REQUEST_LEGACY_BLOCKED = false;
-    scope.YUSHIN_PRODUCTION_DELIVERY_CONFIRMATION_BACKEND = false;
-    scope.YUSHIN_PRODUCTION_DELIVERY_CONFIRMATION_LEGACY_BLOCKED = false;
-    scope.YUSHIN_PRODUCTION_DELIVERY_REVERSAL_BACKEND = false;
-    scope.YUSHIN_PRODUCTION_DELIVERY_REVERSAL_LEGACY_BLOCKED = false;
-    scope.YUSHIN_PRODUCTION_DISPATCH_BACKEND = false;
-    scope.YUSHIN_PRODUCTION_DISPATCH_LEGACY_BLOCKED = false;
-    scope.YUSHIN_PRODUCTION_SHIPMENT_BACKEND = false;
-    scope.YUSHIN_PRODUCTION_SHIPMENT_LEGACY_BLOCKED = false;
-    scope.YUSHIN_PRODUCTION_ORDER_LIFECYCLE_BACKEND = false;
-    scope.YUSHIN_PRODUCTION_ORDER_LIFECYCLE_LEGACY_BLOCKED = false;
     const host = String(scope.location?.hostname || '').toLowerCase();
     const path = String(scope.location?.pathname || '');
+    const orderReservationProductionSite = scope.location?.origin === 'https://sstonetw-source.github.io'
+        && (path === '/yushin-system' || path.startsWith('/yushin-system/'));
+    scope.YUSHIN_PRODUCTION_QUICK_PURCHASE_CONFIG_VERSION = '20261104-transaction-activation-1';
+    // Authorized activation: match the deployed production backend and database retirement gates.
+    // Overwrite stale global values; the caller must never inherit an unintended true gate.
+    scope.YUSHIN_PRODUCTION_RECEIVING_BACKEND = orderReservationProductionSite;
+    scope.YUSHIN_PRODUCTION_RECEIVING_LEGACY_BLOCKED = orderReservationProductionSite;
+    // Backend failure never revives the retired browser writer.
+    scope.YUSHIN_PRODUCTION_CUSTOMER_RETURN_BACKEND = orderReservationProductionSite;
+    scope.YUSHIN_PRODUCTION_CUSTOMER_RETURN_LEGACY_BLOCKED = orderReservationProductionSite;
+    scope.YUSHIN_PRODUCTION_CUSTOMER_RETURN_REQUEST_BACKEND = orderReservationProductionSite;
+    scope.YUSHIN_PRODUCTION_CUSTOMER_RETURN_REQUEST_LEGACY_BLOCKED = orderReservationProductionSite;
+    scope.YUSHIN_PRODUCTION_DELIVERY_CONFIRMATION_BACKEND = orderReservationProductionSite;
+    scope.YUSHIN_PRODUCTION_DELIVERY_CONFIRMATION_LEGACY_BLOCKED = orderReservationProductionSite;
+    scope.YUSHIN_PRODUCTION_DELIVERY_REVERSAL_BACKEND = orderReservationProductionSite;
+    scope.YUSHIN_PRODUCTION_DELIVERY_REVERSAL_LEGACY_BLOCKED = orderReservationProductionSite;
+    scope.YUSHIN_PRODUCTION_DISPATCH_BACKEND = orderReservationProductionSite;
+    scope.YUSHIN_PRODUCTION_DISPATCH_LEGACY_BLOCKED = orderReservationProductionSite;
+    scope.YUSHIN_PRODUCTION_SHIPMENT_BACKEND = orderReservationProductionSite;
+    scope.YUSHIN_PRODUCTION_SHIPMENT_LEGACY_BLOCKED = orderReservationProductionSite;
+    scope.YUSHIN_PRODUCTION_ORDER_LIFECYCLE_BACKEND = orderReservationProductionSite;
+    scope.YUSHIN_PRODUCTION_ORDER_LIFECYCLE_LEGACY_BLOCKED = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_FORMAL_PURCHASE = ['yu-shing-company.web.app','yu-shing-company.firebaseapp.com'].includes(host)
         || (host === 'sstonetw-source.github.io' && (path === '/yushin-system' || path.startsWith('/yushin-system/')));
     // #311 approved cutover: the deployed backend has independent server gates.
     // Only the approved HTTPS GitHub Pages origin and repository path may enable it.
-    const orderReservationProductionSite = scope.location?.origin === 'https://sstonetw-source.github.io'
-        && (path === '/yushin-system' || path.startsWith('/yushin-system/'));
     // #268 activation candidate: the independent server gate is already deployed.
     // Both settings are restricted to the same exact HTTPS production site.
     scope.YUSHIN_PRODUCTION_QUICK_PURCHASE = orderReservationProductionSite;
