@@ -1227,7 +1227,12 @@ service cloud.firestore {
 
     match /settings/{id} {
       allow read: if active();
-      allow create, update: if admin();
+      // After approved receiving cutover, the backend-only receipt gate cannot
+      // be switched off by a cached client or a routine admin settings edit.
+      allow create: if admin();
+      allow update: if admin() && (id != 'receivingCutover'
+        || resource.data.get('backendOnly', false) != true
+        || request.resource.data.get('backendOnly', false) == true);
       allow delete: if false;
     }
 
@@ -2444,18 +2449,28 @@ service cloud.firestore {
       allow delete: if admin();
     }
 
+    // Client receipt writes are permitted only before the separately approved
+    // backend-only cutover. Cloud Functions Admin SDK bypasses Firestore Rules.
+    // The immutable settings/receivingCutover.backendOnly flag makes stale
+    // browser receipt transactions fail atomically after the cutover.
+    function receivingBackendOnly() {
+      let gate = /databases/$(database)/documents/settings/receivingCutover;
+      return exists(gate) && get(gate).data.get('backendOnly', false) == true;
+    }
+
     match /receipts/{id} {
       allow get: if canReceiveInventory()
         || (businessOwner() && (resource == null || owns(resource.data)));
       allow list: if canReceiveInventory()
         || (businessOwner() && owns(resource.data));
-      allow create: if (request.resource.data.get('fulfillmentType', '') == 'DIRECT_SHIP'
+      allow create: if !receivingBackendOnly()
+        && (request.resource.data.get('fulfillmentType', '') == 'DIRECT_SHIP'
         ? validDirectShipReceipt(id, request.resource.data) : canReceiveInventory())
         && !('unitCost' in request.resource.data)
         && !('purchaseNetAmount' in request.resource.data);
       // Receipt facts remain immutable. Receiving roles may only advance the
       // post-receipt shortage-allocation checkpoint used for resumable/idempotent retries.
-      allow update: if canReceiveInventory()
+      allow update: if !receivingBackendOnly() && canReceiveInventory()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'autoAllocatedQty', 'allocationCompleted', 'allocationUpdatedAt'
         ])
