@@ -11,6 +11,7 @@ const {getFirestore:clientFirestore,connectFirestoreEmulator,doc,collection,getD
 const procurementDemandCore=require('../modules/procurement-demand-core');
 const {synchronizeV2OrderFixture}=require('./fixtures/v2-order-initialization.cjs');
 const {orderCreationClient}=require('./fixtures/order-creation-client.cjs');
+const {formalPurchaseDocumentClient}=require('./fixtures/formal-purchase-document-client.cjs');
 const {registerV2PurchaseIncomingFixture}=require('./fixtures/v2-purchase-incoming.cjs');
 const {commitLocationDispatchPreparation}=require('../functions/location-dispatch-service');
 const {commitLocationShipment}=require('../functions/location-shipment-service');
@@ -1767,7 +1768,15 @@ test('canonical client creation and authoritative initial reservation flow throu
    supplyId=(await call(buyer,'commitV2QuickPurchase',{orderId,itemId:'I0',operationId:orderId+'-purchase',qty:3,supplier:'Isolated QA',unitCost:0})).supplyId;
   }else{
    const poNo=orderId+'-PO';
-   supplyId=(await call(buyer,'commitV2FormalPurchase',{poNo,poDate:'2026-11-03',supplier:'Isolated QA',items:[{orderId,itemId:'I0',qty:3,unitCost:0}]})).supplyOrderIds[0];
+   const document={company:'yushin',supplierSnapshot:{supplierId:'',supplierName:'Isolated QA',purchaseHeaderName:'Isolated QA',email:'',leadTimeDays:0},
+    expectedDate:'',expectedDateSource:'',lineScheduleDates:['']};
+   const saved=await formalPurchaseDocumentClient(buyer.app,buyer.uid,'purchaser').save({poNo,poDate:'2026-11-03',vendorName:'Isolated QA',supplierName:'Isolated QA',
+    company:document.company,supplierSnapshot:document.supplierSnapshot,expectedDate:'',expectedDateSource:'',createdAt:new Date().toISOString(),
+    items:[{orderId,itemId:'I0',productId:key,warehouseId:wh,fulfillmentType:'WAREHOUSE',qty:3,unitPrice:0,scheduleDate:''}]});
+   assert.equal(saved.status,'DRAFT');assert.equal(saved.documentOnly,true);
+   assert.equal((await sourceRef.get()).data().items[0].supplyOrderedQty,0);
+   supplyId=(await call(buyer,'commitV2FormalPurchase',{poNo,poDate:'2026-11-03',supplier:'Isolated QA',document,documentRevision:saved.documentRevision,
+    items:[{orderId,itemId:'I0',qty:3,unitCost:0}]})).supplyOrderIds[0];
    await call(buyer,'registerV2FormalPurchaseIncoming',{poNo});
    poRef=db.doc('purchaseOrders/'+poNo);originalPo=(await poRef.get()).data();
   }
