@@ -21179,6 +21179,8 @@ async function commitCustomerReturnReceipt({orderId,requestId,receiptId,qty,qual
 }
 
 async function commitCustomerReturnHoldRelease(id){
+    if(typeof productionTransactionBackendRequired==='function'&&productionTransactionBackendRequired('CUSTOMER_RETURN'))
+        throw Error('退貨實收已切換可信任後端，舊版待檢退貨轉庫存暫不開放。');
     if(!canReceiveInventoryCapability())throw new Error('無收貨權限。');
     await runRoleTransaction(async tx=>{
         const receiptRef=db.collection('customerReturnReceipts').doc(id),snap=await tx.get(receiptRef);

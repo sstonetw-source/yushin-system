@@ -30,6 +30,14 @@ test('hold release shares original return posting, commits receipt and posting t
  assert.equal(f.docs.get('posted/R').qty,2);assert.equal(f.docs.get('customerReturnReceipts/R').disposition,'STOCK');
  assert.equal(f.docs.get('orders/O').returnRecords.length,1);
 });
+test('backend-only return cutover rejects legacy hold release before any stock transaction',async()=>{
+ const f=fixture(),before=structuredClone([...f.docs]);let attempted=false;
+ f.c.productionTransactionBackendRequired=kind=>kind==='CUSTOMER_RETURN';
+ f.c.runRoleTransaction=async()=>{attempted=true;throw Error('legacy writer invoked');};
+ await assert.rejects(f.c.commitCustomerReturnHoldRelease('R'),/可信任後端/);
+ assert.equal(attempted,false);
+ assert.deepEqual([...f.docs],before);
+});
 test('late failure or missing receiving permission leaves the hold and stock posting unchanged',async()=>{
  for(const options of [{fail:true},{allowed:false}]){const f=fixture(options),before=structuredClone([...f.docs]);await assert.rejects(f.c.commitCustomerReturnHoldRelease('R'));assert.deepEqual([...f.docs],before);}
 });
