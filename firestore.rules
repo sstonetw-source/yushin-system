@@ -1838,9 +1838,7 @@ service cloud.firestore {
         && (!changed.hasAny(['status','orderStatus']) || validOrderCancellationTransition())
         && (!changed.hasAny(['inventoryReservationStatus','inventoryReservationError','inventoryReservationUpdatedAt','inventoryReservationAttemptId']) || validOrderInventorySyncTransition(userRole))
         && (!changed.hasAny(['sourceDocumentSyncStatus','sourceDocumentSyncError','sourceDocumentSyncUpdatedAt']) || validOrderSourceSyncTransition(id, userRole))
-        && (userRole == 'admin' ? (changed.hasAny(['inventoryShipmentRecordId'])
-            ? inventoryShipmentOrderUpdate(id)
-            : (changed.hasAny(['items','productId','productType','serviceKind']) ? validClientServiceBillingBinding() : true))
+        && (userRole == 'admin' ? (changed.hasAny(['items','productId','productType','serviceKind','inventoryShipmentRecordId']) ? validClientServiceBillingBinding() : true)
         : userRole in ['sales','engineer'] && changed.hasAny(['isBilled','billingDate'])
           && changed.hasOnly(['isBilled','billingDate','statusHistory','updatedAt',
             'status','workCategories','workCategoryUpdatedAt']) ? owns(resource.data)
@@ -2008,8 +2006,12 @@ service cloud.firestore {
     function validClientServiceBillingBinding() {
       let before = resource.data.get('items', []);
       let after = request.resource.data.get('items', []);
-      return (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['productId','productType','serviceKind'])
-          || !isServiceBillingItem(resource.data) && !isServiceBillingItem(request.resource.data))
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      // Reuse the existing changed-key guard: ordinary item/lot corrections
+      // do not incur another Rules expression or a settings document lookup.
+      return (!changed.hasAny(['productId','productType','serviceKind','inventoryShipmentRecordId'])
+          || ((!changed.hasAny(['inventoryShipmentRecordId']) || !shipmentBackendOnly())
+            && !isServiceBillingItem(resource.data) && !isServiceBillingItem(request.resource.data)))
         && (before == after || (before is list && after is list && before.size() <= 15 && after.size() <= 15
           && (before.size() <= 0 && after.size() <= 0 || serviceBillingBindingAt(before, after, 0))
           && (before.size() <= 1 && after.size() <= 1 || serviceBillingBindingAt(before, after, 1))
