@@ -79,7 +79,7 @@ test('new canonical v2 shortage candidates remain eligible for their lifecycle w
  const fs=require('node:fs'),vm=require('node:vm');
  const source=fs.readFileSync(require('node:path').join(__dirname,'../src/services/receiving.js'),'utf8');
  const start=source.indexOf('function receiptShortageWarehouseEligible(');
- const end=source.indexOf('\nasync function allocateFreeReceiptStockToShortages(',start);
+ const end=source.indexOf('\n    allocationGuard?.();',start);
  assert.ok(start>0&&end>start,'free receipt allocator must define its canonical warehouse selector');
  const eligible=vm.runInNewContext(source.slice(start,end)+'\nreceiptShortageWarehouseEligible');
  const v2={productKey:'P',locationSchemaVersion:2,lifecycleWarehouseIds:['A','B'],
