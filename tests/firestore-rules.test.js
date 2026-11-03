@@ -3995,3 +3995,35 @@ test('return cutover blocks stale requests receipts and held-stock release witho
  await adminDatabase.doc('customerReturnReceipts/'+record.id).update({disposition:'STOCK'});
  assert.equal((await getDoc(doc(administrator,'customerReturnReceipts/'+record.id))).data().disposition,'STOCK');
 });
+
+
+test('purchasing cutover keeps document drafts usable but rejects stale purchase transactions atomically',async()=>{
+ const client=db('admin'),gate=doc(client,'settings/purchasingCutover');
+ const supply={type:'PURCHASING_MANUAL',qty:1,unitCost:0,supplier:'test',orderId:''};
+ const po={status:'DRAFT',documentOnly:true,poNo:'cutover-po',items:[{qty:1,unitPrice:0}]};
+ await assertSucceeds(setDoc(doc(client,'purchaseOrders/cutover-po'),po));
+ await assertSucceeds(setDoc(doc(client,'supplyOrders/cutover-before'),supply));
+ await assertSucceeds(updateDoc(doc(client,'purchaseOrders/cutover-po'),{status:'ORDERED',documentOnly:false}));
+ await assertSucceeds(setDoc(gate,{backendOnly:true}));
+ await assertSucceeds(setDoc(doc(client,'purchaseOrders/cutover-draft'),po));
+ await assertSucceeds(updateDoc(doc(client,'purchaseOrders/cutover-draft'),{items:[{qty:2,unitPrice:1}]}));
+ await assertSucceeds(updateDoc(doc(client,'purchaseOrders/cutover-po'),{lastOutputAt:'now',lastOutputType:'PDF'}));
+ await assertFails(updateDoc(doc(client,'purchaseOrders/cutover-po'),{status:'DRAFT',documentOnly:true}));
+ const batch=writeBatch(client);
+ batch.update(doc(client,'purchaseOrders/cutover-draft'),{status:'ORDERED',documentOnly:false});
+ batch.set(doc(client,'supplyOrders/cutover-after'),supply);
+ await assertFails(batch.commit());
+ assert.equal((await getDoc(doc(client,'purchaseOrders/cutover-draft'))).data().status,'DRAFT');
+ assert.equal((await getDoc(doc(client,'supplyOrders/cutover-after'))).exists(),false);
+ for(const uid of ['admin','buyer1','wh1','sales1','eng1']){
+  const actor=db(uid);
+  await assertFails(setDoc(doc(actor,'supplyOrders/cutover-'+uid),supply));
+  await assertFails(updateDoc(doc(actor,'supplyOrders/cutover-before'),{qty:2}));
+  await assertFails(deleteDoc(doc(actor,'supplyOrders/cutover-before')));
+  await assertFails(deleteDoc(doc(actor,'purchaseOrders/cutover-po')));
+ }
+ for(const patch of [{backendOnly:false},{backendOnly:deleteField()},{backendOnly:'true'}])await assertFails(updateDoc(gate,patch));
+ await assertFails(deleteDoc(gate));
+ await adminDatabase.doc('supplyOrders/trusted-cutover-purchase').set(supply);
+ assert.equal((await getDoc(doc(client,'supplyOrders/trusted-cutover-purchase'))).exists(),true);
+});
