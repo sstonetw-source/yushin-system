@@ -2576,6 +2576,39 @@ function loadActualLifecycle(f){
   tx.update(ref,{status:status==='normal'?'active':'cancelled',orderStatus:status});
  });
 }
+test('lifecycle cutover blocks stale cancellation and restoration atomically while preserving committed evidence',async()=>{
+ const admin=db('admin'),gate=doc(admin,'settings/lifecycleCutover');
+ const f=await legacyOrderLifecycleFixture('sales1','sales');
+ await f.run();
+ await assertSucceeds(setDoc(gate,{backendOnly:false}));
+ const run=loadActualLifecycle(f);
+ await assertSucceeds(run('cancelled'));
+ await assertSucceeds(run('normal'));
+ const paths=['orders/'+f.id,'inventory/init-product','warehouseStocks/W1__init-product',
+  'inventoryReservations/'+f.id+'__I',
+  'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')];
+ const facts=()=>Promise.all(paths.map(async path=>(await getDoc(doc(admin,path))).data()));
+ const before=await facts();
+ await assertSucceeds(updateDoc(gate,{backendOnly:true}));
+ await assert.rejects(run('cancelled'));
+ assert.deepEqual(await facts(),before,'a stale cancellation cannot partially release any stock or demand');
+ await assertFails(updateDoc(doc(admin,'orders/'+f.id),{status:'cancelled',orderStatus:'cancelled'}));
+ await assertFails(updateDoc(gate,{backendOnly:false}));
+ await assertFails(deleteDoc(gate));
+ assert.equal((await getDoc(gate)).data().backendOnly,true);
+ // An old already-cancelled order cannot be restored by a cached browser either.
+ const other=await legacyOrderLifecycleFixture('eng1','engineer');await other.run();
+ const otherRun=loadActualLifecycle(other);
+ await seed('orders/'+other.id,{...(await getDoc(doc(admin,'orders/'+other.id))).data(),
+  status:'cancelled',orderStatus:'cancelled'});
+ const frozen=(await getDoc(doc(admin,'orders/'+other.id))).data();
+ await assert.rejects(otherRun('normal'));
+ assert.deepEqual((await getDoc(doc(admin,'orders/'+other.id))).data(),frozen);
+ // Functions Admin SDK retains the trusted migration path.
+ await adminDatabase.doc('orders/backend-lifecycle-cutover-proof').set({status:'active'});
+ await adminDatabase.doc('orders/backend-lifecycle-cutover-proof').update({status:'cancelled'});
+ assert.equal((await getDoc(doc(admin,'orders/backend-lifecycle-cutover-proof'))).data().status,'cancelled');
+});
 test('actual cancellation of uncommitted pending or failed sources preserves immutable items under real Rules',async()=>{
  for(const [uid,role] of [['admin','admin'],['sales1','sales'],['eng1','engineer']]){
   for(const state of ['pending','failed'])for(const direct of [false,true]){

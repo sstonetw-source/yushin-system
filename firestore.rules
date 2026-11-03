@@ -1239,6 +1239,9 @@ service cloud.firestore {
           || request.resource.data.get('backendOnly', false) == true)
         && (id != 'shipmentCutover'
           || resource.data.get('backendOnly', false) != true
+          || request.resource.data.get('backendOnly', false) == true)
+        && (id != 'lifecycleCutover'
+          || resource.data.get('backendOnly', false) != true
           || request.resource.data.get('backendOnly', false) == true);
       allow delete: if false;
     }
@@ -1538,17 +1541,27 @@ service cloud.firestore {
 
     // Completed delivery must be corrected separately or returned, never cancelled.
     // Check both snapshots so a combined flag/status update cannot bypass this guard.
+    // When the separately approved lifecycle backend cutover is armed, no
+    // cached client can cancel or restore orders. Admin SDK is unaffected.
+    function lifecycleBackendOnly() {
+      let gate = /databases/$(database)/documents/settings/lifecycleCutover;
+      return exists(gate) && get(gate).data.get('backendOnly', false) == true;
+    }
+
     function validOrderCancellationTransition() {
       let before = resource.data;
       let after = request.resource.data;
       let wasCancelled = orderIsCancelled(before);
       let isCancelled = orderIsCancelled(after);
-      return !isCancelled || wasCancelled
+      // Only cross-state transitions read the cutover gate; unrelated status
+      // metadata edits retain the existing Rules expression budget.
+      return (wasCancelled == isCancelled || !lifecycleBackendOnly())
+        && (!isCancelled || wasCancelled
         || (noCustodyForCancellation() && before.get('logisticsTransfersPending', 0) == 0 && after.get('logisticsTransfersPending', 0) == 0
           && before.get('isDelivered', false) != true && after.get('isDelivered', false) != true
           && after.get('deliveryRecords', []) == before.get('deliveryRecords', [])
           && after.get('returnRecords', []) == before.get('returnRecords', [])
-          && after.get('deliveredQty', 0) == before.get('deliveredQty', 0));
+          && after.get('deliveredQty', 0) == before.get('deliveredQty', 0)));
     }
 
     function validInventoryShipmentItem(before, after, record) {
