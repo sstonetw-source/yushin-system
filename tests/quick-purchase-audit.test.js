@@ -65,6 +65,7 @@ test('broken immutable links, missing evidence, duplicate movement and ledger mi
   f=>f.records.get('inventory/P').incoming=2,
   f=>f.records.get('inventory/P').incoming=-1,
   f=>f.records.get('warehouseStocks/W__P').warehouseId='wrong',
+  f=>f.records.set('warehouseStocks/W2__wrong',{productId:'P',productKey:'wrong',warehouseId:'W2',onHand:0,reserved:0,incoming:1}),
   f=>f.records.get('users/buyer').disabled=true
  ];
  for(const corrupt of corruptions){

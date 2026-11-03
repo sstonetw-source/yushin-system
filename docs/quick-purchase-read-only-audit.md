@@ -20,7 +20,7 @@ node functions/scripts/audit-quick-purchase.js --project=yu-shing-company --orde
 
 - Order 唯一來源品項／唯一原採購事件、採購時的 Supply 身分與原意圖 hash、purchaseOperations、Demand 身分及沿既有純核心重算的需求投影。
 - 原 `inventoryMovements/quick-{operationId}` 的數量、來源、倉庫與操作者，並查詢該 Supply 的所有 movement，確認唯一在途紀錄。
-- 公司庫存與該商品**全部分倉**的現有／預留／在途合計，以及指定分倉的採購在途覆蓋。公司總量可包含其他採購，不錯誤要求等於這一筆採購數量。
+- 公司庫存與該商品分倉的現有／預留／在途合計，以及指定分倉的採購在途覆蓋。以 productKey 及 productId 兩個查詢聯集、按文件 ID 去重，也納入單邊識別錯誤的分倉文件；兩個識別都損壞的無關聯舊資料仍需全庫獨立盤點。公司總量可包含其他採購，不錯誤要求等於這一筆採購數量。
 - 目前 actor 仍有採購權限。若已合法離職／停權，此項仍會標記不符，需人工區分歷史交易與目前身分；不能據此推論歷史操作未授權。
 
 判定僅限**單次、尚未收貨的實體倉庫手動採購**：
@@ -31,7 +31,7 @@ node functions/scripts/audit-quick-purchase.js --project=yu-shing-company --orde
 | MISMATCH | 2 | 缺文件或至少一項不符，需唯讀調查；沒有自動修復 |
 | INCONCLUSIVE | 2 | 直送、收貨／取消後續生命週期、追加採購或查詢超過上限，不能沿本工具判定 |
 
-分倉與來源 movement 各最多讀取 101 文件，超過 100 即明列無法判定，絕不以截斷結果宣稱一致。這不是全庫在途重算、正式角色 UI 驗收、成本隔離驗收或回覆遺失演練，不證明其他交易入口安全。
+分倉兩個查詢及來源 movement 查詢各最多讀取 101 文件；分倉聯集或 movement 超過 100 即明列無法判定，絕不以截斷結果宣稱一致。這不是全庫在途重算、正式角色 UI 驗收、成本隔離驗收或回覆遺失演練，不證明其他交易入口安全。
 
 ## 驗證與後續
 

@@ -49,10 +49,14 @@ async function auditQuickPurchase(db,input){
   if(!id(productKey)||!id(supply.warehouseId))return report('MISMATCH','Invalid stock identity');
   const company=await read(ref('inventory',encodeURIComponent(productKey)));
   const warehouses=await tx.get(db.collection('warehouseStocks').where('productKey','==',productKey).limit(QUERY_LIMIT+1));
+  const warehousesByProduct=await tx.get(db.collection('warehouseStocks').where('productId','==',item[0].productId).limit(QUERY_LIMIT+1));
   const movements=await tx.get(db.collection('inventoryMovements').where('sourceId','==',supplyId).limit(QUERY_LIMIT+1));
-  if(warehouses.docs.length>QUERY_LIMIT||movements.docs.length>QUERY_LIMIT)
+  // Include mismatched legacy keys as well, so a bad productKey cannot hide a
+  // warehouse balance from the company reconciliation. Deduplicate overlapping queries.
+  const stockDocs=[...new Map([...warehouses.docs,...warehousesByProduct.docs].map(doc=>[doc.id,doc])).values()];
+  if(stockDocs.length>QUERY_LIMIT||movements.docs.length>QUERY_LIMIT)
    return report('INCONCLUSIVE','Query bound exceeded; incomplete results cannot establish consistency');
-  const stocks=warehouses.docs.map(doc=>({id:doc.id,data:doc.data()}));
+  const stocks=stockDocs.map(doc=>({id:doc.id,data:doc.data()}));
   const warehouse=stocks.find(row=>row.id===encodeURIComponent(supply.warehouseId)+'__'+encodeURIComponent(productKey))?.data;
   const qty=operation.qty;
   check('source-ready-and-owned',id(order.ownerUid)&&id(order.salesCode)
