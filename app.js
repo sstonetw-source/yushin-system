@@ -616,7 +616,7 @@ function productionTransactionBackendRequired(kind){
    ||globalThis['YUSHIN_PRODUCTION_'+kind+'_LEGACY_BLOCKED']===true);
 }
 function productionTransactionBackendEnabled(kind){
- if(!['DISPATCH','SHIPMENT'].includes(kind)||!productionTransactionBackendRequired(kind)
+ if(!['DISPATCH','SHIPMENT','ORDER_LIFECYCLE'].includes(kind)||!productionTransactionBackendRequired(kind)
   ||globalThis['YUSHIN_PRODUCTION_'+kind+'_BACKEND']!==true
   ||globalThis['YUSHIN_PRODUCTION_'+kind+'_LEGACY_BLOCKED']!==true)return false;
  const path=String(globalThis.location?.pathname||'');
@@ -19847,6 +19847,7 @@ function lifecycleProtectedMode(){
  return globalThis.YUSHIN_V3_CUSTODY_LIFECYCLE_EMULATOR===true
   ||globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true
   ||globalThis.YUSHIN_PREVIEW_ORDER_LIFECYCLE===true
+  ||(typeof productionTransactionBackendRequired==='function'&&productionTransactionBackendRequired('ORDER_LIFECYCLE'))
   ||(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview');
 }
 function assertNoPendingV2LifecycleBeforeLegacyWrite(orderId){
@@ -19929,8 +19930,9 @@ async function setV2OrderLifecycleEmulator(orderId,nextStatus,details=null){
  const emulator=globalThis.YUSHIN_V2_LIFECYCLE_EMULATOR===true;
  const preview=typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'
   &&globalThis.YUSHIN_PREVIEW_ORDER_LIFECYCLE===true;
+ const production=typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled('ORDER_LIFECYCLE');
  const host=String(globalThis.location?.hostname||'').toLowerCase();
- if((!emulator&&!preview)||(emulator&&!local(host))
+ if((!emulator&&!preview&&!production)||(emulator&&!local(host))
   ||(preview&&!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(host))
   ||typeof firebase==='undefined'||!firebase.auth||!firebase.functions)
   throw Error('取消／恢復後端尚未在此 Preview／Emulator 獲准啟用，禁止改用舊交易。');
@@ -19939,13 +19941,15 @@ async function setV2OrderLifecycleEmulator(orderId,nextStatus,details=null){
   if(auth.app?.options?.projectId!=='demo-yushin'||functions.app?.options?.projectId!=='demo-yushin'
    ||!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099)
    throw Error('v2 取消／恢復只允許本機 demo-yushin Auth／Functions Emulator。');
- }else if(firebase.app().options?.projectId!=='preview-20135'
-  ||auth.app?.options?.projectId!=='preview-20135'
-  ||functions.app?.options?.projectId!=='preview-20135'
-  ||typeof db==='undefined'||db.app?.options?.projectId!=='preview-20135'
+ }else if(firebase.app().options?.projectId!==(production?'yu-shing-company':'preview-20135')
+  ||auth.app?.options?.projectId!==(production?'yu-shing-company':'preview-20135')
+  ||functions.app?.options?.projectId!==(production?'yu-shing-company':'preview-20135')
+  ||typeof db==='undefined'||db.app?.options?.projectId!==(production?'yu-shing-company':'preview-20135')
   ||!!auth.emulatorConfig)
   throw Error('取消／恢復 Auth、Functions 與資料庫專案不一致，未提交交易。');
  const check=()=>{
+  if(production&&!productionTransactionBackendEnabled('ORDER_LIFECYCLE'))
+   throw Error('取消／恢復後端已停用，請保留原操作識別碼核對。');
   if(!uid||auth.currentUser?.uid!==uid||currentUser?.uid!==uid||currentUserRole!==role
    ||!['admin','sales','engineer'].includes(role)||!canManageOrderLifecycleCapability()||!canEditPage('orders.list'))
    throw Error('登入身分或取消／恢復權限已變更。');

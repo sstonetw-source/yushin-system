@@ -29,6 +29,7 @@ function fixture(){
     functions:()=>({app:{options:{projectId:'demo-yushin'}},useEmulator:(h,p)=>{assert.equal(h,'127.0.0.1');assert.equal(p,5001);},
      httpsCallable:name=>async payload=>{assert.equal(name,'setV2OrderLifecycle');calls.push(structuredClone(payload));return transport(payload,c);}})},
    runRoleTransaction:()=>{throw Error('legacy writer forbidden');}});
+  vm.runInContext(fs.readFileSync('src/infrastructure/production-transaction.js','utf8'),c);
   vm.runInContext(source,c);return c;
  };
  return {open,order,ledgers,storage,calls,reads,applied,setTransport:f=>transport=f,setReadFailure:v=>failRead=v,setSaveFailure:v=>failSave=v,setAfterRead:f=>afterRead=f};
@@ -163,5 +164,35 @@ test('order quick actions, list and form all use the same Preview pending guard'
   const content=fs.readFileSync(path,'utf8');
   assert.match(content,/lifecycleProtectedMode\(\)/,path);
   assert.doesNotMatch(content,/YUSHIN_V2_LIFECYCLE_EMULATOR/,path);
+ }
+});
+
+function productionContext(f){
+ const c=previewContext(f,{project:'yu-shing-company',host:'sstonetw-source.github.io'});
+ c.APP_ENVIRONMENT='production';c.YUSHIN_PREVIEW_ORDER_LIFECYCLE=false;
+ c.location.origin='https://sstonetw-source.github.io';c.location.pathname='/yushin-system/';
+ c.db.app.options.projectId='yu-shing-company';
+ c.YUSHIN_PRODUCTION_ORDER_LIFECYCLE_BACKEND=true;c.YUSHIN_PRODUCTION_ORDER_LIFECYCLE_LEGACY_BLOCKED=true;
+ return c;
+}
+test('production lifecycle retains original single-warehouse intent on lost reply and disabled backend',async()=>{
+ const f=fixture();for(const ledger of f.ledgers.values())ledger.lifecycleWarehouseIds=['A'];
+ f.setTransport(p=>{f.applied(p);throw Error('lost reply');});
+ await assert.rejects(productionContext(f).setOrderLifecycleStatus('O','cancelled'),/lost reply/);
+ const c=productionContext(f);c.YUSHIN_PRODUCTION_ORDER_LIFECYCLE_BACKEND=false;
+ await assert.rejects(c.setOrderLifecycleStatus('O','cancelled'),/尚未/);
+ assert.equal(f.storage.size,1);assert.equal(f.calls.length,1);
+ f.ledgers.clear();f.setTransport(p=>f.applied(p));
+ await productionContext(f).setOrderLifecycleStatus('O','cancelled');
+ assert.deepEqual(f.calls[1],f.calls[0]);assert.equal(f.storage.size,0);
+ assert.equal(f.order.orderLifecycleHistory.length,1);
+});
+test('production lifecycle rejects wrong website project emulator and missing retirement fence before submitting',async()=>{
+ for(const change of [c=>c.location.origin='http://sstonetw-source.github.io',c=>c.location.pathname='/other/',
+  c=>c.db.app.options.projectId='preview-20135',c=>c.YUSHIN_PRODUCTION_ORDER_LIFECYCLE_LEGACY_BLOCKED=false,
+  c=>{const auth=c.firebase.auth();c.firebase.auth=()=>({...auth,emulatorConfig:{host:'localhost',port:9099}});}]){
+  const f=fixture(),c=productionContext(f);change(c);
+  await assert.rejects(c.setOrderLifecycleStatus('O','cancelled'));
+  assert.equal(f.calls.length,0);assert.equal(f.storage.size,0);
  }
 });

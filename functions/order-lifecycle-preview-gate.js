@@ -1,6 +1,7 @@
 'use strict';
 // Cancellation/restoration needs a separate rollout from shipment and delivery.
 const {projectIdFromEnvironment}=require('./grouped-reservation-gate');
+const {allowProductionTransaction}=require('./production-transaction-gate');
 
 function allowOrderLifecycleEmulator(env=process.env){
  const local=value=>typeof value==='string'&&/^(127\.0\.0\.1|localhost):[0-9]+$/.test(value);
@@ -17,6 +18,7 @@ function allowPreviewOrderLifecycle(env=process.env){
 function orderLifecycleBackendProject(env=process.env){
  if(allowOrderLifecycleEmulator(env))return 'demo-yushin';
  if(allowPreviewOrderLifecycle(env))return 'preview-20135';
+ if(allowProductionTransaction('ORDER_LIFECYCLE',env))return 'yu-shing-company';
  return '';
 }
 module.exports={allowOrderLifecycleEmulator,allowPreviewOrderLifecycle,orderLifecycleBackendProject};

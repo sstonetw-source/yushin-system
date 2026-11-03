@@ -11,6 +11,8 @@
     scope.YUSHIN_PRODUCTION_DISPATCH_LEGACY_BLOCKED = false;
     scope.YUSHIN_PRODUCTION_SHIPMENT_BACKEND = false;
     scope.YUSHIN_PRODUCTION_SHIPMENT_LEGACY_BLOCKED = false;
+    scope.YUSHIN_PRODUCTION_ORDER_LIFECYCLE_BACKEND = false;
+    scope.YUSHIN_PRODUCTION_ORDER_LIFECYCLE_LEGACY_BLOCKED = false;
     const host = String(scope.location?.hostname || '').toLowerCase();
     const path = String(scope.location?.pathname || '');
     scope.YUSHIN_PRODUCTION_FORMAL_PURCHASE = ['yu-shing-company.web.app','yu-shing-company.firebaseapp.com'].includes(host)

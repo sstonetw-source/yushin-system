@@ -2,7 +2,8 @@
 const {projectIdFromEnvironment}=require('./grouped-reservation-gate');
 const flags=Object.freeze({
  DISPATCH:'ENABLE_PRODUCTION_DISPATCH_BACKEND',
- SHIPMENT:'ENABLE_PRODUCTION_SHIPMENT_BACKEND'
+ SHIPMENT:'ENABLE_PRODUCTION_SHIPMENT_BACKEND',
+ ORDER_LIFECYCLE:'ENABLE_PRODUCTION_ORDER_LIFECYCLE_BACKEND'
 });
 function allowProductionTransaction(kind,env=process.env){
  const flag=flags[kind];
