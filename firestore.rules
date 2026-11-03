@@ -2118,23 +2118,19 @@ service cloud.firestore {
       allow delete: if admin();
     }
 
-    function purchasingBackendOnly() {
-      let gate = /databases/$(database)/documents/settings/purchasingCutover;
-      return exists(gate) && get(gate).data.get('backendOnly', false) == true;
-    }
+
     function purchaseDocumentDraft(data) {
       return data.get('status', '') == 'DRAFT' && data.get('documentOnly', false) == true;
     }
     // Formal supplier PO. Sales/engineer self-order does NOT grant purchase-order privilege.
     match /purchaseOrders/{id} {
       allow read: if canPurchase();
-      allow create: if canPurchase() && (purchaseDocumentDraft(request.resource.data) || !purchasingBackendOnly());
+      allow create: if canPurchase() && purchaseDocumentDraft(request.resource.data);
       // The PO is an immutable document snapshot for warehouse users. Receiving
       // progress belongs to supplyOrders and receipts, never back on the PO.
-      allow update: if canPurchase() && (!purchasingBackendOnly()
-        || purchaseDocumentDraft(resource.data) && purchaseDocumentDraft(request.resource.data)
+      allow update: if canPurchase() && (purchaseDocumentDraft(resource.data) && purchaseDocumentDraft(request.resource.data)
         || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastOutputAt','lastOutputType']));
-      allow delete: if admin() && (!purchasingBackendOnly() || purchaseDocumentDraft(resource.data));
+      allow delete: if admin() && purchaseDocumentDraft(resource.data);
     }
 
     // ERP-style communication timeline. Browser share/mailto can prove only that
@@ -2217,23 +2213,12 @@ service cloud.firestore {
 
     // Unified source/order evidence: PURCHASING_PO, PURCHASING_MANUAL, SALES_SELF_ORDER, STOCK_REPLENISHMENT.
     match /supplyOrders/{id} {
+      // Historical browser supply mutations are retired; trusted Callables write through Admin SDK.
       allow read: if canPurchase()
         || (businessOwner()
           && resource.data.type == 'SALES_SELF_ORDER'
           && resource.data.ownerUid == request.auth.uid);
-      allow create: if !purchasingBackendOnly() && purchaserSupplySourceReady() && (((canPurchase()) && validQuickPurchaseCost())
-        && validSelfOrderSupplyCreate()
-        || (businessOwner()
-          && request.resource.data.type == 'SALES_SELF_ORDER'
-          && request.resource.data.ownerUid == request.auth.uid
-          && request.resource.data.salesCode == salesCode()
-          && validSelfOrderSupplyCreate()));
-      // Sales owns the commercial intent and may create/read its own self-order,
-      // but supply execution becomes operational evidence after creation. Only purchasing
-      // or receiving roles may mutate quantities/status; this prevents direct API edits
-      // from bypassing procurement and receipt workflows.
-      allow update: if !purchasingBackendOnly() && supplyOperationalUpdateAllowed(id);
-      allow delete: if !purchasingBackendOnly() && admin();
+      allow create, update, delete: if false;
     }
 
     // The authoritative supply record retains cost. This derived receiving view
@@ -2512,58 +2497,24 @@ service cloud.firestore {
     }
 
     match /customerReturnReceipts/{id} {
+      // Return receipt writes are backend-only; existing records remain readable by authorized roles.
       allow read: if canReceiveInventory() || (businessOwner() && owns(resource.data));
-      allow create: if !returnBackendOnly() && canReceiveInventory()
-        && validActiveReturnWarehouse(request.resource.data.warehouseId)
-        && request.resource.data.receivedBy == request.auth.uid
-        && request.resource.data.qty is number && request.resource.data.qty > 0
-        && request.resource.data.quality in ['SALEABLE', 'INSPECTION', 'DAMAGED']
-        && request.resource.data.disposition == (request.resource.data.quality == 'SALEABLE' ? 'STOCK' : 'HOLD')
-        && request.resource.data.record.id == id
-        && request.resource.data.record.qty == request.resource.data.qty
-        && request.resource.data.record.requestId == request.resource.data.requestId
-        && request.resource.data.record.itemId == request.resource.data.itemId
-        && request.resource.data.record.settlement == 'CLOSE'
-        && request.resource.data.record.quality == request.resource.data.quality
-        && request.resource.data.record.warehouseId == request.resource.data.warehouseId
-        && getAfter(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.returnReceiptId == id;
-      allow update: if !returnBackendOnly() && canReceiveInventory() && resource.data.disposition == 'HOLD'
-        && validActiveReturnWarehouse(resource.data.warehouseId)
-        && request.resource.data.disposition == 'STOCK'
-        && request.resource.data.releasedBy == request.auth.uid
-        && request.resource.data.releasedAt != ''
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['disposition', 'releasedAt', 'releasedBy']);
-      allow delete: if !returnBackendOnly() && admin();
+      allow create, update, delete: if false;
     }
 
     // Client receipt writes are permitted only before the separately approved
     // backend-only cutover. Cloud Functions Admin SDK bypasses Firestore Rules.
     // The immutable settings/receivingCutover.backendOnly flag makes stale
     // browser receipt transactions fail atomically after the cutover.
-    function receivingBackendOnly() {
-      let gate = /databases/$(database)/documents/settings/receivingCutover;
-      return exists(gate) && get(gate).data.get('backendOnly', false) == true;
-    }
+
 
     match /receipts/{id} {
+      // Receiving is backend-only. Never revive a cached browser receipt writer.
       allow get: if canReceiveInventory()
         || (businessOwner() && (resource == null || owns(resource.data)));
       allow list: if canReceiveInventory()
         || (businessOwner() && owns(resource.data));
-      allow create: if !receivingBackendOnly()
-        && (request.resource.data.get('fulfillmentType', '') == 'DIRECT_SHIP'
-        ? validDirectShipReceipt(id, request.resource.data) : canReceiveInventory())
-        && !('unitCost' in request.resource.data)
-        && !('purchaseNetAmount' in request.resource.data);
-      // Receipt facts remain immutable. Receiving roles may only advance the
-      // post-receipt shortage-allocation checkpoint used for resumable/idempotent retries.
-      allow update: if !receivingBackendOnly() && canReceiveInventory()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'autoAllocatedQty', 'allocationCompleted', 'allocationUpdatedAt'
-        ])
-        && request.resource.data.get('autoAllocatedQty', 0) >= resource.data.get('autoAllocatedQty', 0)
-        && request.resource.data.get('autoAllocatedQty', 0) <= resource.data.get('autoAllocationQty', 0);
-      allow delete: if admin();
+      allow create, update, delete: if false;
     }
 
 
@@ -2573,32 +2524,24 @@ service cloud.firestore {
 
     // Stale browsers must not create a second dispatch writer after the
     // separately approved backend-only cutover. Backend Admin SDK is unaffected.
-    function dispatchBackendOnly() {
-      let gate = /databases/$(database)/documents/settings/dispatchCutover;
-      return exists(gate) && get(gate).data.get('backendOnly', false) == true;
-    }
+
 
     // Purchaser records completion of the company's existing shipping paperwork.
     // Every legacy dispatch transaction creates this receipt in the same atomic
     // commit as the order update, so rejecting it also rolls back that order.
     match /dispatchRecords/{id} {
+      // Dispatch is backend-only. Cached clients may read, but cannot create or erase receipts.
       allow read: if canReceiveInventory()
         || (businessOwner() && owns(resource.data));
-      allow create: if !dispatchBackendOnly() && canPurchase();
-      allow update: if false;
-      // Cutover also preserves already-committed operation identities:
-      // a cached admin client must not erase a proof and allow its ID to be reused.
-      allow delete: if !dispatchBackendOnly() && admin();
+      allow create, update, delete: if false;
     }
 
     // Physical delivery is recorded by the responsible business owner.
     match /deliveries/{id} {
+      // Delivery is backend-only; client-created delivery evidence is retired.
       allow read: if canReceiveInventory()
         || (businessOwner() && owns(resource.data));
-      allow create: if !deliveryBackendOnly() && (admin()
-        || (businessOwner() && owns(request.resource.data)));
-      allow update: if false;
-      allow delete: if !deliveryBackendOnly() && admin();
+      allow create, update, delete: if false;
     }
 
 
