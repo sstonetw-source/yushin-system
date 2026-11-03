@@ -90,9 +90,9 @@ function multiShipmentDeliveryContext(order,intent,{allowCancelledCloseReturn=fa
   &&(!['active','normal'].includes(order.status)||![undefined,'','normal','active'].includes(order.orderStatus)))
   fault('已取消或結案訂單不可新增送達');
  if(!order.ownerUid||!order.salesCode||!Array.isArray(order.items)||order.items.length<2
-  ||order.items.length>5||order.items.filter(row=>row?.itemId===itemId).length!==1
+  ||order.items.length>(allowCustody?5:15)||order.items.filter(row=>row?.itemId===itemId).length!==1
   ||(order.logisticsTransfersPending??0)!==0)
-  fault('此試點僅支援來源完整的 2–5 品項實體倉訂單');
+  fault('此試點僅支援來源完整的 2–15 品項實體倉訂單（業務保管仍限 5 品項）');
  if(!Array.isArray(order.deliveryRecords)||!Array.isArray(order.returnRecords))
   fault('出貨、送達或退貨紀錄格式不正確');
  if(allowCustody&&order.items.some(row=>String(row.productType||row.type||'')

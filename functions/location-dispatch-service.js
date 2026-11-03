@@ -63,9 +63,9 @@ async function commitLocationDispatchPreparation(db,uid,data,env=process.env){
    fault('庫存尚未同步完成或同步識別碼已變更');
   if(!['active','normal'].includes(order.status)||![undefined,'','normal','active'].includes(order.orderStatus))
    fault('取消或結案訂單不能打單');
-  if(!order.ownerUid||!order.salesCode||!Array.isArray(order.items)||!order.items.length||order.items.length>5
+  if(!order.ownerUid||!order.salesCode||!Array.isArray(order.items)||!order.items.length||order.items.length>15
    ||order.items.filter(row=>row?.itemId===itemId).length!==1)
-   fault('此試點僅支援來源完整且品項唯一的 1–5 品項訂單');
+   fault('此試點僅支援來源完整且品項唯一的 1–15 品項訂單');
   const item=order.items.find(row=>row.itemId===itemId),multi=order.items.length>1;
   if(item.itemId!==itemId||(item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
    ||String(item.productType||item.type||'').toUpperCase()==='SERVICE'

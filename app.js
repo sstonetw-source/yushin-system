@@ -19920,7 +19920,7 @@ function pendingV2OrderLifecycle(orderId){
   const intent=JSON.parse(raw);
   if(!intent||intent.orderId!==orderId||intent.actorUid!==currentUser?.uid||intent.actorRole!==currentUserRole
    ||!['normal','cancelled'].includes(intent.nextStatus)||!/^\w[\w-]{11,95}$/.test(intent.operationId||'')
-   ||!Array.isArray(intent.itemIds)||!intent.itemIds.length||intent.itemIds.length>5
+   ||!Array.isArray(intent.itemIds)||!intent.itemIds.length||intent.itemIds.length>15
    ||!Array.isArray(intent.warehouseIds)||![0,1,2].includes(intent.warehouseIds.length))throw Error('invalid pending lifecycle');
   return intent;
  }catch(_){throw Error('前次取消／恢復結果尚未確認，請使用原帳號與角色核對。');}
@@ -19969,7 +19969,7 @@ async function setV2OrderLifecycleEmulator(orderId,nextStatus,details=null){
   if(!snapshot.exists)throw Error('找不到原始訂單。');
   const order=snapshot.data(),items=order.items;
   if(order.inventoryReservationStatus!=='completed'||!order.inventoryReservationAttemptId||!Array.isArray(items)
-   ||!items.length||items.length>5||items.some(row=>typeof row?.itemId!=='string'||!row.itemId||row.itemId.includes('/'))
+   ||!items.length||items.length>15||items.some(row=>typeof row?.itemId!=='string'||!row.itemId||row.itemId.includes('/'))
    ||new Set(items.map(row=>row.itemId)).size!==items.length)throw Error('訂單尚未具備完整的 v2 取消／恢復來源。');
   if(normalizedOrderStatus(order)===nextStatus)throw Error('訂單已是此狀態；v2 試點不提供單獨更正日期／原因。');
   let warehouseIds;
@@ -20595,7 +20595,7 @@ async function confirmV2ShipmentDeliveryEmulator(orderId,{date,qty,notes='',item
   const order=snapshot.data(),rows=order.items||[];
   const resolvedItemId=itemId||(rows.length===1?rows[0].itemId:'');
   if(order.inventoryReservationStatus!=='completed'||!order.inventoryReservationAttemptId
-    ||rows.length<1||rows.length>5||!resolvedItemId)
+    ||rows.length<1||rows.length>15||!resolvedItemId)
     throw Error('訂單尚未具備完整的 v2 送達來源。');
   const source=(order.warehouseShipmentRecords||[]).find(s=>s.id===shipmentId&&s.itemId===resolvedItemId);
   if(!source)throw Error('請先選擇這個品項的實際出貨紀錄。');

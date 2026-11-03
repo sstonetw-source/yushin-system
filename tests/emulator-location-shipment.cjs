@@ -2258,9 +2258,9 @@ for(const singleWarehouse of [false,true])test('production initial writer '+(sin
 
 // The production initial writer, not a converted reservation fixture, supplies
 // all five distinct products across both candidate warehouses.
-test('native five-product order completes dispatch shipment delivery cancel restore and original-lot return',async()=>{
- const tag='native_five_lifecycle',uid=tag+'_admin',orderId=tag+'_order',syncAttemptId=tag+'_sync';
- const items=Array.from({length:5},(_,i)=>({itemId:'N'+i,productId:tag+'_P'+i,qty:3,
+for(const itemCount of [5,15])test('native '+itemCount+'-product order completes dispatch shipment delivery cancel restore and original-lot return',async()=>{
+ const tag='native_'+itemCount+'_lifecycle',uid=tag+'_admin',orderId=tag+'_order',syncAttemptId=tag+'_sync';
+ const items=Array.from({length:itemCount},(_,i)=>({itemId:'N'+i,productId:tag+'_P'+i,qty:3,
   warehouseId:i%2?B:A,fulfillmentType:'WAREHOUSE',deliveryPlan:plan}));
  const batch=db.batch(),set=(n,k,d)=>batch.set(db.collection(n).doc(k),d);
  set('users',uid,{role:'admin',active:true});
@@ -2278,32 +2278,55 @@ test('native five-product order completes dispatch shipment delivery cancel rest
   }
  }
  await batch.commit();
- await require('../functions/order-reservation-service').commitOrderReservation(db,uid,{orderId,syncAttemptId});
+ const budgets=[];
+ const tracked=label=>({projectId:db.projectId,collection:n=>db.collection(n),runTransaction:fn=>db.runTransaction(async tx=>{
+  const usage={label,reads:0,documents:0,writes:0,writeBytes:0};
+  const measured=new Proxy(tx,{get(target,key){
+   if(key==='get')return async ref=>{usage.reads++;const snap=await target.get(ref);usage.documents+=snap.docs?snap.docs.length:Number(snap.exists);return snap;};
+   if(['set','update','create','delete'].includes(key))return (...args)=>{
+    usage.writes++;usage.writeBytes+=Buffer.byteLength(JSON.stringify(args[1]||{}));return target[key](...args);};
+   const value=target[key];return typeof value==='function'?value.bind(target):value;
+  }});
+  const result=await fn(measured);budgets.push(usage);return result;
+ })});
+ await require('../functions/order-reservation-service').commitOrderReservation(tracked('initialize'),uid,{orderId,syncAttemptId});
  for(const item of items){
   const ledger=(await db.collection('inventoryReservations').doc(orderId+'__'+item.itemId).get()).data();
   assert.equal(ledger.locationSchemaVersion,2);assert.equal(ledger.warehouseId,undefined);
   assert.deepEqual(ledger.lifecycleWarehouseIds,[A,B]);
   const op=tag+'_'+item.itemId;
-  await commitLocationDispatchPreparation(db,uid,{orderId,itemId:item.itemId,quantity:1,
+  await commitLocationDispatchPreparation(tracked('dispatch'),uid,{orderId,itemId:item.itemId,quantity:1,
    operationId:op+'_print',syncAttemptId});
-  await commitLocationShipment(db,uid,{orderId,itemId:item.itemId,quantity:1,warehouseId:item.warehouseId,
+  await commitLocationShipment(tracked('shipment'),uid,{orderId,itemId:item.itemId,quantity:1,warehouseId:item.warehouseId,
    operationId:op+'_ship',syncAttemptId,date:'2026-11-03',expectedPlan:plan});
-  await commitShipmentDelivery(db,uid,{orderId,itemId:item.itemId,shipmentId:op+'_ship',quantity:1,
+  await commitShipmentDelivery(tracked('delivery'),uid,{orderId,itemId:item.itemId,shipmentId:op+'_ship',quantity:1,
    operationId:op+'_deliver',syncAttemptId,date:'2026-11-03'});
  }
  const lifecycle=require('../functions/single-item-location-lifecycle-service').commitOrderLocationLifecycle;
  const cancel={orderId,itemIds:items.map(row=>row.itemId),warehouseIds:[A,B],nextStatus:'cancelled',
   operationId:tag+'_cancel',syncAttemptId,date:'2026-11-03'};
- await lifecycle(db,uid,cancel);
+ await lifecycle(tracked('cancel'),uid,cancel);
  for(const item of items)assert.equal((await db.collection('inventory').doc(item.productId).get()).data().reserved,0);
- await lifecycle(db,uid,{...cancel,nextStatus:'normal',operationId:tag+'_restore'});
+ await lifecycle(tracked('restore'),uid,{...cancel,nextStatus:'normal',operationId:tag+'_restore'});
  for(const item of items)assert.equal((await db.collection('inventory').doc(item.productId).get()).data().reserved,2);
  const first=items[0],ret={orderId,itemId:first.itemId,shipmentId:tag+'_'+first.itemId+'_ship',warehouseId:first.warehouseId,
   operationId:tag+'_return',syncAttemptId,date:'2026-11-03',reason:'結案退貨',condition:'RESTOCKABLE',settlement:'CLOSE',
   selections:[{lotId:first.productId+'_'+first.warehouseId,qty:1}]};
- await commitLocationReturn(db,uid,ret);await commitLocationReturn(db,uid,ret);
+ await commitLocationReturn(tracked('return'),uid,ret);await commitLocationReturn(tracked('return'),uid,ret);
+ for(const usage of budgets){assert.ok(usage.writes<=100,JSON.stringify(usage));assert.ok(usage.documents<=250,JSON.stringify(usage));assert.ok(usage.writeBytes<1000000,JSON.stringify(usage));}
+ console.log('NATIVE_LIFECYCLE_BUDGET',itemCount,JSON.stringify(budgets));
  const saved=(await db.collection('orders').doc(orderId).get()).data();
- assert.equal(saved.returnRecords.length,1);assert.equal(saved.warehouseShipmentRecords.length,5);
+ assert.equal(saved.returnRecords.length,1);assert.equal(saved.warehouseShipmentRecords.length,itemCount);
+ if(itemCount===15){
+  await db.collection('orders').doc(orderId).update({items:[...saved.items,{...saved.items[0],itemId:'OVERFLOW'}]});
+  const before=(await db.collection('orders').doc(orderId).get()).data();
+  await assert.rejects(commitLocationDispatchPreparation(db,uid,{orderId,itemId:first.itemId,quantity:1,
+   operationId:tag+'_overflow_print',syncAttemptId}),/1–15/);
+  await assert.rejects(lifecycle(db,uid,{...cancel,itemIds:before.items.map(row=>row.itemId),operationId:tag+'_overflow_cancel'}),/1–15/);
+  assert.deepEqual((await db.collection('orders').doc(orderId).get()).data(),before);
+  assert.equal((await db.collection('dispatchRecords').doc('v2-'+tag+'_overflow_print').get()).exists,false);
+ }
+
  for(const item of items){
   const stock=(await db.collection('inventory').doc(item.productId).get()).data();
   assert.equal(stock.onHand,item===first?6:5);assert.equal(stock.reserved,2);

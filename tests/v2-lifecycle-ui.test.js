@@ -196,3 +196,12 @@ test('production lifecycle rejects wrong website project emulator and missing re
   assert.equal(f.calls.length,0);assert.equal(f.storage.size,0);
  }
 });
+
+test('fifteen-item native lifecycle preserves all item IDs through lost reply and reload',async()=>{
+ const f=fixture();f.order.items=Array.from({length:15},(_,i)=>({itemId:'I'+i}));f.ledgers.clear();
+ for(const item of f.order.items)f.ledgers.set(item.itemId,{locationSchemaVersion:2,orderId:'O',itemId:item.itemId,lifecycleWarehouseIds:['A']});
+ f.setTransport(p=>{f.applied(p);throw Error('lost reply');});
+ await assert.rejects(f.open().setOrderLifecycleStatus('O','cancelled'),/lost reply/);
+ assert.equal(f.calls[0].itemIds.length,15);f.ledgers.clear();f.setTransport(p=>f.applied(p));
+ await f.open().setOrderLifecycleStatus('O','cancelled');assert.deepEqual(f.calls[1],f.calls[0]);assert.equal(f.storage.size,0);
+});

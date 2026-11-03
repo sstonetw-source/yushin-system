@@ -129,3 +129,8 @@ test('production DELIVERY_CONFIRMATION rejects wrong site project Auth emulator 
   assert.equal(f.calls.length,0);assert.equal(f.legacyWrites(),0);
  }
 });
+
+test('fifteen-item physical source can confirm one shipment without altering sibling quantities',async()=>{
+ const f=fixture();f.order.items=[...f.order.items,...Array.from({length:14},(_,i)=>({itemId:'SIB'+i,qty:1}))];
+ await f.open().saveOrderDeliveryRecord('O',input);assert.equal(f.calls.length,1);assert.equal(f.legacyWrites(),0);
+});
