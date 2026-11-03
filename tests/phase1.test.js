@@ -3416,16 +3416,14 @@ test('order row summaries reuse normalized items without exposing pending-dispat
     assert.match(renderSource,/selfOrderActionHtml\(o, allOrderItems, dispatchStateByItem\)/);
 });
 
-test('receipt allocation progress has narrowly scoped Firestore update permission', () => {
+test('receipt allocation progress is backend-only while role reads remain scoped', () => {
     const start=rulesSource.indexOf('match /receipts/{id}');
-    const end=rulesSource.indexOf('\n    // Purchaser records completion',start);
+    const end=rulesSource.indexOf('\n    match /dispatchRecords/{id}',start);
     const source=rulesSource.slice(start,end);
-    assert.match(source,/allow update: if !receivingBackendOnly\(\) && canReceiveInventory\(\)/);
-    assert.match(source,/affectedKeys\(\)\.hasOnly\(\[[\s\S]*?'autoAllocatedQty'[\s\S]*?'allocationCompleted'[\s\S]*?'allocationUpdatedAt'/);
-    assert.match(source,/autoAllocatedQty', 0\) >= resource\.data\.get\('autoAllocatedQty', 0\)/);
-    assert.match(source,/autoAllocatedQty', 0\) <= resource\.data\.get\('autoAllocationQty', 0\)/);
+    assert.match(source,/allow get: if canReceiveInventory\(\)/);
+    assert.match(source,/allow list: if canReceiveInventory\(\)/);
+    assert.match(source,/allow create, update, delete: if false;/);
 });
-
 
 test('work metrics reuse one dispatch state per item', () => {
     const categoryStart=appSource.indexOf('function orderItemWorkCategory');
@@ -3801,26 +3799,17 @@ test('order cache refresh avoids hidden purchasing renders', () => {
 });
 
 
-test('self-order capability is aligned between frontend and Firestore rules', () => {
+test('self-order capability cannot bypass backend-only supply writes', () => {
     const capabilityStart=appSource.indexOf('function canSelfOrderCapability');
     const capabilityEnd=appSource.indexOf('\nfunction canCreatePurchaseOrderCapability',capabilityStart);
     const capabilitySource=appSource.slice(capabilityStart,capabilityEnd);
     assert.match(capabilitySource,/return hasBusinessCapability\(role\)/);
-
-    const actionStart=appSource.indexOf('function canBusinessSelfOrder');
-    const actionEnd=appSource.indexOf('\nfunction selfOrderActionHtml',actionStart);
-    const actionSource=appSource.slice(actionStart,actionEnd);
-    assert.match(actionSource,/canSelfOrderCapability\(currentUserRole\)/);
-    assert.doesNotMatch(actionSource,/currentUserRole !== 'sales'/);
     const ruleStart=rulesSource.indexOf('match /supplyOrders/{id}');
     const ruleEnd=rulesSource.indexOf('\n    match /inventory/{id}',ruleStart);
     const ruleSource=rulesSource.slice(ruleStart,ruleEnd);
-    assert.match(ruleSource,/allow create: if !purchasingBackendOnly\(\) && purchaserSupplySourceReady\(\) && \(\(\(canPurchase\(\)\) && validQuickPurchaseCost\(\)\)[\s\S]*?businessOwner\(\)[\s\S]*?SALES_SELF_ORDER/);
-    assert.match(ruleSource,/request\.resource\.data\.ownerUid == request\.auth\.uid/);
-    assert.match(ruleSource,/request\.resource\.data\.salesCode == salesCode\(\)/);
-    assert.doesNotMatch(ruleSource,/allow create: if admin\(\) \|\| purchaser\(\)[\s\S]*?\|\| \(sales\(\)/);
+    assert.match(ruleSource,/allow read: if canPurchase\(\)/);
+    assert.match(ruleSource,/allow create, update, delete: if false;/);
 });
-
 
 test('purchasing cache sync performs one unified active render', () => {
     const start=appSource.indexOf('function syncOrderIntoPurchasingCaches');
@@ -4352,48 +4341,15 @@ test('product batch maintenance gives visible progress and blocks duplicate impo
 });
 
 
-test('supply order rules preserve identity and valid operational quantities', () => {
-    const identityStart=rulesSource.indexOf('function sameSupplyIdentity()');
-    const identityEnd=rulesSource.indexOf('\n\n    function validSupplyOperationalState()',identityStart);
-    const identitySource=rulesSource.slice(identityStart,identityEnd);
-    assert.ok(identityStart>=0&&identityEnd>identityStart);
-    assert.match(identitySource,/affectedKeys\(\)\.hasAny\(\[/);
-    ['type','orderId','itemId','ownerUid','salesCode','productId','productKey','fulfillmentType','warehouseId','purchaseDocumentId'].forEach(field => {
-        assert.match(identitySource,new RegExp("'"+field+"'"));
-    });
-
-    const stateStart=rulesSource.indexOf('function validSupplyOperationalState()');
-    const stateEnd=rulesSource.indexOf('\n\n    function purchaserSupplyOperationalUpdate(userRole)',stateStart);
-    const stateSource=rulesSource.slice(stateStart,stateEnd);
-    assert.match(stateSource,/qty >= resource\.data\.get\('qty', 0\)/);
-    assert.match(stateSource,/receivedQty <= qty/);
-    assert.match(stateSource,/incomingQty >= 0/);
-    assert.match(stateSource,/incomingQty <= \(qty - receivedQty\)/);
-    assert.match(stateSource,/fulfillmentType', 'WAREHOUSE'\) != 'DIRECT_SHIP'[\s\S]*?incomingQty == 0/);
-    assert.match(stateSource,/nextStatus == 'ORDERED'/);
-    assert.match(stateSource,/nextStatus == 'PARTIAL_RECEIPT'/);
-    assert.match(stateSource,/nextStatus == 'RECEIVED'/);
-    assert.match(stateSource,/nextStatus == 'CANCELLED'/);
-    assert.match(stateSource,/nextStatus == 'CLOSED'/);
-
-    const warehouseStart=rulesSource.indexOf('function warehouseSupplyOperationalUpdate(userRole)');
-    const warehouseEnd=rulesSource.indexOf('\n\n    // Creator identity',warehouseStart);
-    const warehouseSource=rulesSource.slice(warehouseStart,warehouseEnd);
-    assert.match(warehouseSource,/hasOnly\(\[[\s\S]*?'receivedQty'[\s\S]*?'incomingRegisteredQty'[\s\S]*?'status'[\s\S]*?'updatedAt'/);
-    assert.match(warehouseSource,/status', 'ORDERED'\) != 'CANCELLED'/);
-    assert.match(warehouseSource,/sameSupplyIdentity\(\)/);
-    assert.doesNotMatch(warehouseSource,/'qty'/);
-
-    const supplyStart=rulesSource.indexOf('match /supplyOrders/{id}');
-    const supplyEnd=rulesSource.indexOf('\n\n    match /inventory/{id}',supplyStart);
-    const supplySource=rulesSource.slice(supplyStart,supplyEnd);
-    assert.match(supplySource,/allow update: if !purchasingBackendOnly\(\) && supplyOperationalUpdateAllowed\(id\)/);
-    const dispatch=rulesSource.slice(rulesSource.indexOf('function supplyOperationalUpdateAllowed(id)'),supplyStart);
-    assert.match(dispatch,/let userRole = role\(\)/);
-    assert.match(dispatch,/userRole == 'purchaser' && \(purchaserSupplyOperationalUpdate\(userRole\)/);
-    assert.match(dispatch,/userRole == 'warehouse' && warehouseSupplyOperationalUpdate\(userRole\)/);
-    assert.match(dispatch,/supplierReceiptDispositionAllowed\(\) && validQuickPurchaseUpdate\(\)/);
-    assert.doesNotMatch(supplySource,/allow update: if admin\(\) \|\| purchaser\(\)/);
+test('supply order mutations are server-only without broader client permissions', () => {
+    const start=rulesSource.indexOf('match /supplyOrders/{id}');
+    const end=rulesSource.indexOf('\n    match /inventory/{id}',start);
+    const source=rulesSource.slice(start,end);
+    assert.match(source,/allow read: if canPurchase\(\)/);
+    assert.match(source,/businessOwner\(\)/);
+    assert.match(source,/resource\.data\.ownerUid == request\.auth\.uid/);
+    assert.match(source,/allow create, update, delete: if false;/);
+    assert.doesNotMatch(source,/allow create: if|allow update: if|allow delete: if/);
 });
 
 test('supply rule tightening still covers current quick-order receipt and cancellation writes', () => {
@@ -4431,50 +4387,16 @@ test('supply rule tightening still covers current quick-order receipt and cancel
 });
 
 
-test('direct ship delivery rule is bound to the matching atomic receipt', () => {
+test('direct ship order proof stays scoped and supply writes require backend', () => {
     const directStart=rulesSource.indexOf('function directShipReceiptOrderUpdate(orderId)');
     const directEnd=rulesSource.indexOf('\n    function operationalItemsOnly',directStart);
     const source=rulesSource.slice(directStart,directEnd);
     assert.ok(directStart>=0&&directEnd>directStart);
-    assert.match(source,/afterRecords\.size\(\) == beforeRecords\.size\(\) \+ 1/);
-    assert.match(source,/afterRecords\.hasAll\(beforeRecords\)/);
-    assert.match(source,/!beforeRecords\.hasAny\(\[newRecord\]\)/);
-    assert.match(source,/newRecord\.get\('sourceType', ''\) == 'DIRECT_SHIP_RECEIPT'/);
     assert.match(source,/supplyBefore = get\(supplyPath\)\.data/);
     assert.match(source,/supplyAfter = getAfter\(supplyPath\)\.data/);
-    assert.match(source,/supplyBefore\.get\('orderId', ''\) == orderId/);
-    assert.match(source,/supplyAfter\.get\('receivedQty', 0\) == supplyBefore\.get\('receivedQty', 0\) \+ newRecord\.get\('qty', 0\)/);
-    assert.match(source,/supplyAfter\.get\('receivedQty', 0\) <= supplyBefore\.get\('qty', 0\)/);
-    assert.match(source,/affectedKeys\(\)\.hasOnly\(\[[\s\S]*?'deliveryRecords'[\s\S]*?'deliveredQty'[\s\S]*?'isDelivered'/);
-
-    const purchaserStart=rulesSource.indexOf('function purchaserOrderWorkflowUpdate(');
-    const purchaserEnd=rulesSource.indexOf('\n\n    function warehouseOrderWorkflowUpdate()',purchaserStart);
-    const purchaserSource=rulesSource.slice(purchaserStart,purchaserEnd);
-    assert.doesNotMatch(purchaserSource,/'deliveryRecords'|'deliveredQty'|'isDelivered'/);
-
-    const warehouseStart=rulesSource.indexOf('function warehouseOrderWorkflowUpdate()');
-    const warehouseEnd=rulesSource.indexOf('\n\n    function productPath',warehouseStart);
-    const warehouseSource=rulesSource.slice(warehouseStart,warehouseEnd);
-    assert.doesNotMatch(warehouseSource,/'deliveryRecords'|'deliveredQty'|'isDelivered'/);
-
-    const orderStart=rulesSource.indexOf('match /orders/{id}');
-    const orderEnd=rulesSource.indexOf('\n\n    // Formal supplier PO',orderStart);
-    const orderSource=rulesSource.slice(orderStart,orderEnd);
-    assert.match(orderSource,/orderUpdateAllowed\(id\)/);
-    assert.match(rulesSource.slice(rulesSource.indexOf('function orderUpdateAllowed(id)'),rulesSource.indexOf('match /orders/{id}')),/directShipReceiptOrderUpdate\(id\)/);
-
-    const supplyFastStart=rulesSource.indexOf('function directShipSupplyReceiptUpdate(id, userRole)');
-    const supplyFastEnd=rulesSource.indexOf('\n\n    function purchaserSupplyOperationalUpdate(userRole)',supplyFastStart);
-    const supplyFastSource=rulesSource.slice(supplyFastStart,supplyFastEnd);
-    assert.ok(supplyFastStart>=0&&supplyFastEnd>supplyFastStart);
-    assert.match(supplyFastSource,/affectedKeys\(\)\.hasOnly\(\[[\s\S]*?'receivedQty'[\s\S]*?'status'[\s\S]*?'updatedAt'/);
-    assert.match(supplyFastSource,/resource\.data\.get\('fulfillmentType', 'WAREHOUSE'\) == 'DIRECT_SHIP'/);
-
-    const supplyMatchStart=rulesSource.indexOf('match /supplyOrders/{id}');
-    const supplyMatchEnd=rulesSource.indexOf('\n\n    match /inventory/{id}',supplyMatchStart);
-    const supplyMatchSource=rulesSource.slice(supplyMatchStart,supplyMatchEnd);
-    assert.match(supplyMatchSource,/supplyOperationalUpdateAllowed\(id\)/);
-    assert.match(rulesSource.slice(rulesSource.indexOf('function supplyOperationalUpdateAllowed(id)'),supplyMatchStart),/directShipSupplyReceiptUpdate\(id, userRole\)/);
+    const supplyStart=rulesSource.indexOf('match /supplyOrders/{id}');
+    const supplyEnd=rulesSource.indexOf('\n    match /inventory/{id}',supplyStart);
+    assert.match(rulesSource.slice(supplyStart,supplyEnd),/allow create, update, delete: if false;/);
 });
 
 test('direct ship receipt transaction writes the supply delta required by security rules', () => {
@@ -4494,99 +4416,36 @@ test('direct ship receipt transaction writes the supply delta required by securi
 });
 
 
-test('cancelled or closed supply is terminal and cannot be received again', () => {
+test('cancelled or closed supply is terminal and browser supply updates are retired', () => {
     const receiveStart=appSource.indexOf('async function receiveSupplyOrderRecord');
     const receiveEnd=appSource.indexOf('\nfunction receiptOperationStorageKey',receiveStart);
     const receiveSource=appSource.slice(receiveStart,receiveEnd);
     assert.match(receiveSource,/isPurchaseTerminalStatus\(supply\.status\)/);
     assert.match(receiveSource,/已結案，不能再確認到貨/);
     assert.match(receiveSource,/已取消，不能再確認到貨/);
-
-    const stateStart=rulesSource.indexOf('function validSupplyOperationalState()');
-    const stateEnd=rulesSource.indexOf('\n\n    function purchaserSupplyOperationalUpdate(userRole)',stateStart);
-    const stateSource=rulesSource.slice(stateStart,stateEnd);
-    assert.match(stateSource,/previousStatus != 'CANCELLED'/);
-    assert.match(stateSource,/previousStatus != 'CLOSED'/);
-    assert.match(stateSource,/receivedQty >= resource\.data\.get\('receivedQty', 0\)/);
-    assert.match(stateSource,/cancelledQty <= \(qty - receivedQty\)/);
-    assert.match(stateSource,/closedQty <= \(qty - receivedQty\)/);
-
-    const warehouseStart=rulesSource.indexOf('function warehouseSupplyOperationalUpdate(userRole)');
-    const warehouseEnd=rulesSource.indexOf('\n\n    // Creator identity',warehouseStart);
-    const warehouseSource=rulesSource.slice(warehouseStart,warehouseEnd);
-    assert.match(warehouseSource,/request\.resource\.data\.get\('status', 'ORDERED'\) != 'CANCELLED'/);
-    assert.match(warehouseSource,/request\.resource\.data\.get\('status', 'ORDERED'\) != 'CLOSED'/);
+    const supplyStart=rulesSource.indexOf('match /supplyOrders/{id}');
+    const supplyEnd=rulesSource.indexOf('\n    match /inventory/{id}',supplyStart);
+    assert.match(rulesSource.slice(supplyStart,supplyEnd),/allow create, update, delete: if false;/);
 });
 
-
-test('quick purchase keeps immutable supply snapshot and rules restrict mutable fields', () => {
+test('quick purchase still guards source identity and browser supply writes are retired', () => {
     const quickStart=appSource.indexOf('async function commitQuickPurchase(');
     const quickEnd=appSource.indexOf('// Atomic quick-purchase service end.',quickStart);
     const quickSource=appSource.slice(quickStart,quickEnd);
-    assert.ok(quickStart>=0&&quickEnd>quickStart);
-    assert.match(quickSource,/existingSupply\?\.productKey \|\| currentProductKey/);
-    assert.match(quickSource,/existingSupply\?\.fulfillmentType \|\| currentFulfillmentType/);
-    assert.match(quickSource,/existingSupply\?\.warehouseId \|\| currentWarehouseId/);
     assert.match(quickSource,/產品識別不可在追加採購前變更/);
     assert.match(quickSource,/交付方式不可在追加採購前變更/);
     assert.match(quickSource,/入庫倉庫不可在追加採購前變更/);
-    assert.match(quickSource,/type:'PURCHASING_MANUAL'/);
-    assert.match(quickSource,/method:'PURCHASING_MANUAL'/);
-    assert.match(quickSource,/sourceType:'SALES_ORDER'/);
-    assert.match(quickSource,/sourceId:orderId/);
-    assert.match(quickSource,/sourceItemId:itemId/);
-    assert.match(quickSource,/ownerUid:existingSupply\?\.ownerUid\|\|order\.ownerUid/);
-    assert.match(quickSource,/itemCode:existingSupply\?\.itemCode\|\|item\.itemCode/);
-    assert.match(quickSource,/createdByUid:existingSupply\?\.createdByUid\|\|actorUid/);
-    assert.match(quickSource,/incomingRegisteredQty:targetIncomingQty/);
-    assert.match(quickSource,/inv\.incoming\+incomingDelta/);
-
-    const identityStart=rulesSource.indexOf('function sameSupplyIdentity()');
-    const identityEnd=rulesSource.indexOf('\n\n    function validSupplyOperationalState()',identityStart);
-    const identitySource=rulesSource.slice(identityStart,identityEnd);
-    [
-      'internalNo','purchaseDocumentId','purchaseDocumentNo','orderId','itemId','orderItemIndex',
-      'ownerUid','salesCode','salesName','customerName','company',
-      'productId','productKey','itemCode','itemName','brand','productLine',
-      'fulfillmentType','warehouseId','orderDate',
-      'createdAt','createdByUid','createdBy','createdByRole'
-    ].forEach(field => {
-        assert.match(identitySource,new RegExp("'"+field+"'"));
-    });
-    assert.match(identitySource,/affectedKeys\(\)\.hasAny\(\[/);
-
-    const purchaserStart=rulesSource.indexOf('function purchaserSupplyOperationalUpdate(userRole)');
-    const purchaserEnd=rulesSource.indexOf('\n\n    function warehouseSupplyOperationalUpdate(userRole)',purchaserStart);
-    const purchaserSource=rulesSource.slice(purchaserStart,purchaserEnd);
-    assert.match(purchaserSource,/affectedKeys\(\)\.hasOnly/);
-    assert.match(purchaserSource,/sameSupplyIdentity\(\)/);
-    ['qty','receivedQty','incomingRegisteredQty','incomingRegisteredAt','status','supplier','unitCost','lastOrderedAt','orderEvents','cancelledQty','cancelReason','cancelledAt','cancelledByUid','cancelledBy','closedQty','closeReason','closedAt','closedByUid','closedBy','updatedAt'].forEach(field => {
-        assert.match(purchaserSource,new RegExp("'"+field+"'"));
-    });
-    assert.doesNotMatch(purchaserSource,/'createdByUid'/);
-    assert.doesNotMatch(purchaserSource,/'productKey'/);
-    assert.doesNotMatch(purchaserSource,/'warehouseId'/);
+    const supplyStart=rulesSource.indexOf('match /supplyOrders/{id}');
+    const supplyEnd=rulesSource.indexOf('\n    match /inventory/{id}',supplyStart);
+    assert.match(rulesSource.slice(supplyStart,supplyEnd),/allow create, update, delete: if false;/);
 });
 
-
-test('supply status must match operational quantities', () => {
-    const stateStart=rulesSource.indexOf('function validSupplyOperationalState()');
-    const stateEnd=rulesSource.indexOf('\n\n    function purchaserSupplyOperationalUpdate(userRole)',stateStart);
-    const source=rulesSource.slice(stateStart,stateEnd);
-    assert.ok(stateStart>=0&&stateEnd>stateStart);
-
-    assert.match(source,/nextStatus == 'ORDERED'[\s\S]*?receivedQty == 0[\s\S]*?cancelledQty == 0[\s\S]*?closedQty == 0/);
-    assert.match(source,/nextStatus == 'PARTIAL_RECEIPT'[\s\S]*?receivedQty > 0[\s\S]*?receivedQty < qty/);
-    assert.match(source,/nextStatus == 'RECEIVED'[\s\S]*?receivedQty == qty/);
-    assert.match(source,/nextStatus == 'CANCELLED'[\s\S]*?cancelledQty == qty - receivedQty/);
-    assert.match(source,/nextStatus == 'CLOSED'[\s\S]*?receivedQty > 0[\s\S]*?closedQty == qty - receivedQty/);
-    assert.match(source,/incomingQty == 0/);
-    assert.match(source,/cancelReason', ''\) != ''/);
-    assert.match(source,/cancelledByUid', ''\) == request\.auth\.uid/);
-    assert.match(source,/closeReason', ''\) != ''/);
-    assert.match(source,/closedByUid', ''\) == request\.auth\.uid/);
+test('supply status changes cannot be forged by a browser', () => {
+    const start=rulesSource.indexOf('match /supplyOrders/{id}');
+    const end=rulesSource.indexOf('\n    match /inventory/{id}',start);
+    const source=rulesSource.slice(start,end);
+    assert.match(source,/allow create, update, delete: if false;/);
 });
-
 
 test('receipt retry stays idempotent after outstanding supply is cancelled or closed', () => {
     const start=appSource.indexOf('async function receiveSupplyOrderRecord');
