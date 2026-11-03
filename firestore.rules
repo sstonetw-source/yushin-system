@@ -1227,12 +1227,16 @@ service cloud.firestore {
 
     match /settings/{id} {
       allow read: if active();
-      // After approved receiving cutover, the backend-only receipt gate cannot
-      // be switched off by a cached client or a routine admin settings edit.
+      // Approved cutover gates are one-way: a cached client or routine admin
+      // edit must never reactivate a retired transaction writer.
       allow create: if admin();
-      allow update: if admin() && (id != 'receivingCutover'
-        || resource.data.get('backendOnly', false) != true
-        || request.resource.data.get('backendOnly', false) == true);
+      allow update: if admin()
+        && (id != 'receivingCutover'
+          || resource.data.get('backendOnly', false) != true
+          || request.resource.data.get('backendOnly', false) == true)
+        && (id != 'dispatchCutover'
+          || resource.data.get('backendOnly', false) != true
+          || request.resource.data.get('backendOnly', false) == true);
       allow delete: if false;
     }
 
@@ -2484,13 +2488,24 @@ service cloud.firestore {
     // 只有實際確認通知時建立 NOTIFIED；SHIPPED 需與訂單/庫存交易同時提交。
 
 
+    // Stale browsers must not create a second dispatch writer after the
+    // separately approved backend-only cutover. Backend Admin SDK is unaffected.
+    function dispatchBackendOnly() {
+      let gate = /databases/$(database)/documents/settings/dispatchCutover;
+      return exists(gate) && get(gate).data.get('backendOnly', false) == true;
+    }
+
     // Purchaser records completion of the company's existing shipping paperwork.
+    // Every legacy dispatch transaction creates this receipt in the same atomic
+    // commit as the order update, so rejecting it also rolls back that order.
     match /dispatchRecords/{id} {
       allow read: if canReceiveInventory()
         || (businessOwner() && owns(resource.data));
-      allow create: if canPurchase();
+      allow create: if !dispatchBackendOnly() && canPurchase();
       allow update: if false;
-      allow delete: if admin();
+      // Cutover also preserves already-committed operation identities:
+      // a cached admin client must not erase a proof and allow its ID to be reused.
+      allow delete: if !dispatchBackendOnly() && admin();
     }
 
     // Physical delivery is recorded by the responsible business owner.

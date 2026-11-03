@@ -3140,6 +3140,43 @@ test('actual dispatch UI service permits only admin/purchaser across all five cu
   }else{await assert.rejects(f.run());assert.equal((await f.order()).items[0].dispatchPreparedQty,0);assert.equal((await f.record()).exists(),false);}
  }
 });
+test('dispatch cutover blocks stale client commits atomically and cannot be reversed',async()=>{
+ const administrator=db('admin'),gate=doc(administrator,'settings/dispatchCutover');
+ // With no gate, the existing dispatch writer remains valid.
+ const first=await dispatchPreparationFixture('admin','admin');
+ await first.run();
+ await assertSucceeds(setDoc(gate,{backendOnly:false}));
+ const existing=await dispatchPreparationFixture('buyer1','purchaser');
+ await existing.run();
+ // Add legitimate new stock for a second dispatch, as in the normal retry test.
+ const current=await existing.order();
+ await seed('orders/'+existing.id,{...current,items:current.items.map((item,index)=>
+  index?item:{...item,reservedQty:5})});
+ const before=await existing.order();
+ const second={...existing.intent,operationId:'dispatch-cutover-new-AAAAAAAAAAAA',
+  quantity:2,expectedPreparedQty:3};
+ // Enabling the gate is an explicit maintenance write, never an implicit rollout.
+ await assertSucceeds(updateDoc(gate,{backendOnly:true}));
+ await assert.rejects(existing.run(second));
+ assert.deepEqual(await existing.order(),before,'the failed dispatch must not partially update the order');
+ assert.equal((await getDoc(doc(administrator,'dispatchRecords/'+second.operationId))).exists(),false);
+ await assertFails(setDoc(doc(administrator,'dispatchRecords/forged-after-cutover'),{
+  ownerUid:'sales1',salesCode:'S01',orderId:existing.id,itemId:'I',qty:1
+ }));
+ // Old already-committed evidence can be read and idempotently checked.
+ await existing.run();
+ assert.equal((await existing.record()).data().preparedByUid,'buyer1');
+ await assertFails(deleteDoc(doc(administrator,'dispatchRecords/'+existing.intent.operationId)));
+ // Even an admin using the old browser cannot turn its writer back on.
+ await assertFails(updateDoc(gate,{backendOnly:false}));
+ await assertFails(deleteDoc(gate));
+ assert.equal((await getDoc(gate)).data().backendOnly,true);
+ // The trusted backend is unaffected because Admin SDK bypasses client Rules.
+ await adminDatabase.doc('dispatchRecords/trusted-after-cutover').set({
+  ownerUid:'sales1',salesCode:'S01',orderId:existing.id,itemId:'I',qty:1
+ });
+ assert.equal((await getDoc(doc(administrator,'dispatchRecords/trusted-after-cutover'))).exists(),true);
+});
 test('actual dispatch lost reply/new arrival and concurrent retries reuse one immutable record',async()=>{
  const f=await dispatchPreparationFixture();await f.run();
  const o=await f.order();await seed('orders/'+f.id,{...o,items:o.items.map((i,n)=>n?i:{...i,reservedQty:5})});
