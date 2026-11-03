@@ -34,6 +34,11 @@ test('receipt transport sends no actor, requires saved original intent and verif
  }
  const bad=transport();bad.proof.qty=3;await assert.rejects(bad.receive(),/憑證/);
 });
+test('receipt transport verifies an explicit single-warehouse backend receipt and rejects missing or unknown schema',async()=>{
+ const x=transport();x.proof.reservationLocationSchemaVersion=1;
+ assert.deepEqual([...await x.receive()],['O']);
+ for(const version of [undefined,0,3,'1']){const bad=transport();bad.proof.reservationLocationSchemaVersion=version;await assert.rejects(bad.receive(),/憑證/);}
+});
 test('receipt transport leaves original work on unknown replies and account changes, never runs another writer',async()=>{
  for(const switched of [true,false]){
   const x=transport(),original=JSON.stringify(x.jobs);x.functions.httpsCallable=()=>async()=>{

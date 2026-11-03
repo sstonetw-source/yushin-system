@@ -16858,7 +16858,7 @@ async function receiveV2SupplyEmulator(supplyId,qty,lotNo,expiryDate,operationId
         : proof?.lotNo===lotNo&&proof?.expiryDate===expiryDate;
     if(!proof||proof.supplyOrderId!==supplyId||proof.qty!==qty||!batchMatches
         ||proof.createdByUid!==uid||proof.createdByRole!==role
-        ||(!direct&&proof.reservationLocationSchemaVersion!==2))
+        ||(!direct&&![1,2].includes(proof.reservationLocationSchemaVersion)))
         throw Error('收貨已可能提交，但憑證尚未確認，請使用原資料重試。');
     if(proof.fulfillmentType!=='DIRECT_SHIP')
         options.onStockCommitted?.(proof.productKey,proof.warehouseId);

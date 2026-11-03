@@ -9,6 +9,7 @@ const cores=Object.fromEntries(Object.entries(coreNames).map(([key,name])=>[key,
 const {createHash}=require('node:crypto');
 const demandCore=require('./shared/procurement-demand-core');
 const {receiptBackendProject}=require('./supply-receipt-gate');
+const {validateCanonicalReceiptSource}=require('./canonical-receipt-source');
 // Quick Purchase uses the same Receiving writer as formal PO, but has a
 // different immutable purchase witness. Verify the existing single-writer
 // operation and incoming debit before permitting any receipt-side mutation.
@@ -71,6 +72,9 @@ function fail(code,message){const error=new Error(message);error.code=code;throw
 function normalReceiptOrder(order){
  return order?.status==='active'&&[undefined,'','normal'].includes(order.orderStatus);
 }
+function receiptIntentHash(intent){
+ return createHash('sha256').update(JSON.stringify([intent.supplyId,intent.operationId,intent.qty,intent.lotNo,intent.expiryDate])).digest('hex');
+}
 function receiptIntent(input){
  if(!input||typeof input!=='object'||Array.isArray(input)
   ||Object.keys(input).sort().join(',')!=='expiryDate,lotNo,operationId,qty,supplyId')fail('invalid-argument','收貨欄位不正確');
@@ -105,6 +109,8 @@ async function receiveV2Supply(db,uid,input,env=process.env){
   const orderSnap=await get(db.collection('orders').doc(supply.orderId));
   if(!orderSnap.exists)fail('failed-precondition','找不到來源訂單');
   const order=orderSnap.data();
+  const previous=await get(db.collection('receipts').doc(intent.operationId));
+  let reservationSchema=0;
   if(supply.type==='PURCHASING_MANUAL')
    await verifyQuickPurchaseReceipt(get,db,supply,order,intent.supplyId);
   if(directShip){
@@ -113,16 +119,36 @@ async function receiveV2Supply(db,uid,input,env=process.env){
   }else{
    if(!['admin','purchaser','warehouse'].includes(role))fail('permission-denied','目前沒有實體入庫權限');
    const ledger=await get(db.collection('inventoryReservations').doc(supply.orderId+'__'+supply.itemId));
-   if(!ledger.exists||ledger.data().locationSchemaVersion!==2)fail('failed-precondition','來源未完成 v2 預留');
+   if(!ledger.exists)fail('failed-precondition','來源缺少權威預留');
+   reservationSchema=ledger.data().locationSchemaVersion===2?2:1;
+   if(reservationSchema===1){
+    const receiptOperationRef=db.collection('reservationOperationReceipts')
+     .doc('canonical-receipt-'+createHash('sha256').update(intent.operationId).digest('hex'));
+    const operationSnap=await get(receiptOperationRef),operation=operationSnap.exists?operationSnap.data():null;
+    const hash=receiptIntentHash(intent);
+    if(previous.exists){
+     const proof=previous.data();
+     if(!operation||operation.action!=='CANONICAL_SUPPLY_RECEIPT'||operation.intentHash!==hash
+       ||operation.actorUid!==uid||operation.actorRole!==role||operation.receiptId!==intent.operationId
+       ||operation.supplyId!==intent.supplyId||operation.productKey!==proof.productKey
+       ||operation.warehouseId!==proof.warehouseId||operation.lotId!==proof.lotId)
+      fail('failed-precondition','單倉收貨缺少一致的後端操作憑證，請保留原操作查核');
+    }else if(operation)fail('failed-precondition','單倉收貨操作憑證與收貨結果不一致');
+    await validateCanonicalReceiptSource({get,db,uid,actor:live.data(),order,supply,reservation:ledger.data(),
+     qty:intent.qty,replay:previous.exists});
+    if(!previous.exists&&supply.type==='PURCHASING_PO')
+     await runtime.validateReceiptPurchaseDocument({get},{...supply,id:intent.supplyId},{orderId:supply.orderId,itemId:supply.itemId,
+      productId:supply.productId,warehouseId:supply.warehouseId,fulfillmentType:'WAREHOUSE'});
+   }
   }
-  // Warehouse source: 1–15 items; direct shipping retains its 1–5 pilot.
+  // V2 warehouse sources: 1–15. Canonical per-item single-warehouse sources
+  // have the stricter 1–5 initial-stage guard above; direct shipping stays 1–5.
   // The existing Receiving Service validates every
   // immutable shipment/return proof and current outstanding demand, including
   // sibling reservation and receipts after partial fulfillment. Cancellation stays gated.
   // The existing Service remains authoritative for quantities and all writes.
-  const previous=await get(db.collection('receipts').doc(intent.operationId));
-  if(previous.exists&&!directShip&&previous.data().reservationLocationSchemaVersion!==2)
-   fail('failed-precondition','原收貨憑證不是 v2 格式');
+  if(previous.exists&&!directShip&&previous.data().reservationLocationSchemaVersion!==reservationSchema)
+   fail('failed-precondition','原收貨憑證與預留格式不一致');
   if(!previous.exists&&(!Array.isArray(order.items)||order.items.length<1||order.items.length>(directShip?5:15)||!normalReceiptOrder(order)))
    fail('failed-precondition',`收貨登入試點僅支援正常 1–${directShip?5:15} 品項來源；取消尚未開放`);
   if(!previous.exists&&directShip&&supply.type==='PURCHASING_PO'){
@@ -137,7 +163,18 @@ async function receiveV2Supply(db,uid,input,env=process.env){
    staged.update(reference,data);
    if(reference.path===supplyRef.path)staged.set(db.collection('receivingSupplyOrders').doc(intent.supplyId),stockPermissions.sanitizeSupply({...supply,...data}));
    if(reference.path==='orders/'+supply.orderId)orderPatches.push(data);
-  },set:(...args)=>staged.set(...args)};
+  },set(reference,data,...options){
+   if(reference.path==='receipts/'+intent.operationId&&!directShip&&reservationSchema===1){
+    data={...data,reservationLocationSchemaVersion:1};
+    // The existing callable-only checkpoint collection cannot be forged by a
+    // stale client writer. It commits atomically with the original receipt.
+    staged.set(db.collection('reservationOperationReceipts').doc('canonical-receipt-'+createHash('sha256').update(intent.operationId).digest('hex')),
+     {action:'CANONICAL_SUPPLY_RECEIPT',receiptId:intent.operationId,supplyId:intent.supplyId,
+      actorUid:uid,actorRole:role,intentHash:receiptIntentHash(intent),
+      productKey:data.productKey,warehouseId:data.warehouseId,lotId:data.lotId});
+   }
+   staged.set(reference,data,...options);
+  }};
   const result=await callback(adapter);
   if(orderPatches.length&&order.items?.some(item=>String(item.productType||'').trim().toUpperCase()==='SERVICE')){
    const next=Object.assign({},order,...orderPatches);

@@ -11,6 +11,7 @@ const {getFirestore:clientFirestore,connectFirestoreEmulator,doc,collection,getD
 const procurementDemandCore=require('../modules/procurement-demand-core');
 const {synchronizeV2OrderFixture}=require('./fixtures/v2-order-initialization.cjs');
 const {orderCreationClient}=require('./fixtures/order-creation-client.cjs');
+const {formalPurchaseDocumentClient}=require('./fixtures/formal-purchase-document-client.cjs');
 const {registerV2PurchaseIncomingFixture}=require('./fixtures/v2-purchase-incoming.cjs');
 const {commitLocationDispatchPreparation}=require('../functions/location-dispatch-service');
 const {commitLocationShipment}=require('../functions/location-shipment-service');
@@ -1733,6 +1734,99 @@ test('pure Service cancellation and restoration preserve custody evidence withou
  assert.equal(history.events.length,1);assert.equal(history.custody,'IN_HOUSE');
  for(const name of ['inventoryReservations','inventoryMovements','supplyOrders'])
   assert.equal((await db.collection(name).where(name==='inventoryMovements'?'sourceId':'orderId','==',orderId).get()).size,0);
+});
+
+test('canonical client creation and authoritative initial reservation flow through purchase and the same backend receipt without a v2 fixture',{timeout:240000},async()=>{
+ for(const [method,count]of [['manual',1],['po',5]]){
+  const owner=await identity('canonical-receipt-owner-'+method,'sales'),buyer=await identity('canonical-receipt-buyer-'+method,'purchaser');
+  const warehouse=await identity('canonical-receipt-warehouse-'+method,'warehouse');
+  await db.doc('users/'+owner.uid).update({salesCode:'C'});
+  const orderId='canonical-receipt-'+method,wh=orderId+'-W',syncAttemptId=orderId+'-sync',base=method==='po'?1:0;
+  const setup=db.batch(),rows=[];
+  setup.set(db.doc('warehouses/'+wh),{active:true});
+  for(let i=0;i<count;i++){
+   const key=orderId+'-P'+i;
+   setup.set(db.doc('products/'+key),{productType:'Goods',active:true});
+   setup.set(db.doc('inventory/'+key),{productKey:key,productId:key,onHand:base,reserved:0,incoming:0});
+   setup.set(db.doc('warehouseStocks/'+wh+'__'+key),{productKey:key,productId:key,warehouseId:wh,onHand:base,reserved:0,incoming:0});
+   if(base)setup.set(db.doc('inventoryLots/'+key+'-initial'),{productKey:key,productId:key,warehouseId:wh,remainingQty:base,receivedQty:base,lotNo:'initial'});
+   rows.push({itemId:'I'+i,productId:key,productType:'Goods',qty:base+3,warehouseId:wh,fulfillmentType:'WAREHOUSE',
+    reservedQty:0,shortageQty:0,supplyOrderedQty:0,receivedQty:0,deliveredQty:0,returnedQty:0,dispatchPreparedQty:0,warehouseShippedQty:0});
+  }
+  await setup.commit();
+  const creator=orderCreationClient(owner.app,owner.uid,'sales');
+  await creator.create(orderId,{transactionType:'借',status:'active',ownerUid:owner.uid,salesCode:'C',createdByUid:owner.uid,createdByRole:'sales',
+   customerName:'Canonical receipt isolation',productId:rows[0].productId,productMasterMatched:true,items:rows,
+   inventoryReservationStatus:'pending',inventoryReservationAttemptId:syncAttemptId,deliveryRecords:[],returnRecords:[]});
+  const call=(actor,name,input)=>httpsCallable(actor.functions,name,{timeout:60000})(input).then(r=>r.data);
+  await call(owner,'commitOrderReservationPreview',{orderId,syncAttemptId});
+  const ledgerRef=db.doc('inventoryReservations/'+orderId+'__I0'),sourceRef=db.doc('orders/'+orderId),key=rows[0].productId;
+  const initial=(await ledgerRef.get()).data();
+  assert.equal(initial.locationSchemaVersion,undefined);assert.equal(initial.quantity,base);assert.equal(initial.shortageQty,3);
+  let supplyId,poRef,originalPo;
+  if(method==='manual'){
+   supplyId=(await call(buyer,'commitV2QuickPurchase',{orderId,itemId:'I0',operationId:orderId+'-purchase',qty:3,supplier:'Isolated QA',unitCost:0})).supplyId;
+  }else{
+   const poNo=orderId+'-PO';
+   const document={company:'yushin',supplierSnapshot:{supplierId:'',supplierName:'Isolated QA',purchaseHeaderName:'Isolated QA',email:'',leadTimeDays:0},
+    expectedDate:'',expectedDateSource:'',lineScheduleDates:['']};
+   const saved=await formalPurchaseDocumentClient(buyer.app,buyer.uid,'purchaser').save({poNo,poDate:'2026-11-03',vendorName:'Isolated QA',supplierName:'Isolated QA',
+    company:document.company,supplierSnapshot:document.supplierSnapshot,expectedDate:'',expectedDateSource:'',createdAt:new Date().toISOString(),
+    items:[{orderId,itemId:'I0',productId:key,warehouseId:wh,fulfillmentType:'WAREHOUSE',qty:3,unitPrice:0,scheduleDate:''}]});
+   assert.equal(saved.status,'DRAFT');assert.equal(saved.documentOnly,true);
+   assert.equal((await sourceRef.get()).data().items[0].supplyOrderedQty,0);
+   supplyId=(await call(buyer,'commitV2FormalPurchase',{poNo,poDate:'2026-11-03',supplier:'Isolated QA',document,documentRevision:saved.documentRevision,
+    items:[{orderId,itemId:'I0',qty:3,unitCost:0}]})).supplyOrderIds[0];
+   await call(buyer,'registerV2FormalPurchaseIncoming',{poNo});
+   poRef=db.doc('purchaseOrders/'+poNo);originalPo=(await poRef.get()).data();
+  }
+  const request=(qty,suffix)=>({supplyId,qty,lotNo:'C-'+method,expiryDate:'2028-01-01',operationId:orderId+'-'+suffix});
+  const receive=(input,actor=warehouse)=>call(actor,'receiveV2Supply',input);
+  const snapshot=async()=>{
+   const refs=[sourceRef,ledgerRef,db.doc('inventory/'+key),db.doc('warehouseStocks/'+wh+'__'+key),db.doc('supplyOrders/'+supplyId),
+    db.doc('procurementDemands/'+encodeURIComponent('SALES_ORDER:'+orderId+':I0'))];
+   const docs=await db.getAll(...refs);
+   const receipts=await db.collection('receipts').where('supplyOrderId','==',supplyId).get();
+   const related={};
+   for(const name of ['inventoryLots','inventoryLotCosts','inventoryMovements'])
+    related[name]=(await db.collection(name).where('productKey','==',key).get()).docs.map(s=>[s.id,s.data()]).sort((a,b)=>a[0].localeCompare(b[0]));
+   related.backendReceipts=(await db.collection('reservationOperationReceipts').where('supplyId','==',supplyId).get()).docs
+    .map(s=>[s.id,s.data()]).sort((a,b)=>a[0].localeCompare(b[0]));
+   return {documents:docs.map(s=>s.data()),receipts:receipts.docs.map(s=>[s.id,s.data()]).sort((a,b)=>a[0].localeCompare(b[0])),...related};
+  };
+  const before=await snapshot();
+  // A matching client-visible receipt alone cannot impersonate a committed
+  // backend receipt. The callable-only checkpoint must exist as well.
+  const forgedRef=db.doc('receipts/'+request(1,'first').operationId);
+  await forgedRef.set({supplyOrderId:supplyId,qty:1,lotNo:'C-'+method,expiryDate:'2028-01-01',
+   createdByUid:warehouse.uid,createdByRole:'warehouse',reservationLocationSchemaVersion:1});
+  const forged=await snapshot();await assert.rejects(receive(request(1,'first')));assert.deepEqual(await snapshot(),forged);
+  await forgedRef.delete();
+  await assert.rejects(receive(request(1,'first'),owner),code('permission-denied'));assert.deepEqual(await snapshot(),before);
+  await ledgerRef.update({quantity:base+1});const corrupt=await snapshot();
+  await assert.rejects(receive(request(1,'first')));assert.deepEqual(await snapshot(),corrupt);await ledgerRef.set(initial);
+  if(poRef){await poRef.update({status:'DRAFT'});await assert.rejects(receive(request(1,'first')));assert.deepEqual(await snapshot(),before);await poRef.set(originalPo);}
+  await Promise.all([receive(request(1,'first')),receive(request(1,'first'))]);
+  const partial=await snapshot();assert.equal(partial.receipts.length,1);
+  assert.equal(partial.documents[2].onHand,base+1);assert.equal(partial.documents[2].reserved,base+1);assert.equal(partial.documents[2].incoming,2);
+  await assert.rejects(receive(request(2,'first')));assert.deepEqual(await snapshot(),partial);
+  await receive(request(2,'final'));const complete=await snapshot();
+  assert.equal(complete.receipts.length,2);
+  assert.equal(complete.documents[0].items[0].receivedQty,3);assert.equal(complete.documents[0].items[0].reservedQty,base+3);
+  assert.equal(complete.documents[0].items[0].shortageQty,0);
+  for(const stock of complete.documents.slice(2,4))assert.deepEqual([stock.onHand,stock.reserved,stock.incoming],[base+3,base+3,0]);
+  assert.equal(complete.documents[1].locationSchemaVersion,undefined);assert.equal(complete.documents[1].locations,undefined);
+  assert.equal(complete.documents[4].receivedQty,3);assert.equal(complete.documents[4].incomingRegisteredQty,0);
+  assert.equal(complete.documents[5].receivedQty,3);
+  assert.ok(complete.receipts.every(([,r])=>r.reservationLocationSchemaVersion===1));
+  assert.equal(complete.backendReceipts.length,2);
+  assert.ok(complete.backendReceipts.every(([,op])=>complete.receipts.some(([id,r])=>id===op.receiptId&&r.lotId===op.lotId)));
+  if(poRef)await poRef.update({status:'CANCELLED'});
+  await receive(Object.fromEntries(Object.entries(request(1,'first')).reverse()));assert.deepEqual(await snapshot(),complete);
+  for(let i=1;i<count;i++){
+   const sibling=complete.documents[0].items[i];assert.deepEqual([sibling.reservedQty,sibling.shortageQty,sibling.receivedQty],[base,3,0]);
+  }
+ }
 });
 
 async function directReceiptProofFixture(tag,ownerRole){
