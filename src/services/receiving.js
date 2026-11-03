@@ -2,13 +2,15 @@
 // callers own cache invalidation and presentation. Never notify from a transaction callback.
 // V2 canonical reservations have no top-level warehouseId: use the immutable
 // lifecycle warehouse scope, while preserving legacy single-location matching.
-function receiptShortageWarehouseEligible(reservation, warehouseId) {
-    if(reservation?.locationSchemaVersion===2)
-        return Array.isArray(reservation.lifecycleWarehouseIds)
-            && reservation.lifecycleWarehouseIds.includes(warehouseId);
-    return reservation?.warehouseId===warehouseId;
-}
 async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty,actor,excludeOrderId='',receiptId='',checkpointCollection='receipts',allocationGuard=null,onStockCommitted=null) {
+    // Keep the predicate inside this transaction routine: the isolated
+    // recovery harness invokes it directly, and the server generator shares it.
+    function receiptShortageWarehouseEligible(reservation, warehouseId) {
+        if(reservation?.locationSchemaVersion===2)
+            return Array.isArray(reservation.lifecycleWarehouseIds)
+                && reservation.lifecycleWarehouseIds.includes(warehouseId);
+        return reservation?.warehouseId===warehouseId;
+    }
     allocationGuard?.();
     if(!['receipts','stockTransfers'].includes(checkpointCollection))throw new Error('庫存分配進度來源不正確。');
     let remaining=Math.max(0,Number(maxQty||0)),allocatedQty=0;
