@@ -79,6 +79,8 @@ async function auditQuickPurchase(db,input){
    &&supply.sourceId===target.orderId&&supply.sourceItemId===target.itemId
    &&supply.orderId===target.orderId&&supply.itemId===target.itemId&&supply.demandId===demandId
    &&supply.productId===item[0].productId&&supply.productKey===productKey
+   &&supply.fulfillmentType===(item[0].fulfillmentType||'WAREHOUSE')
+   &&supply.warehouseId===(item[0].warehouseId||order.warehouseId)
    &&supply.ownerUid===order.ownerUid&&supply.salesCode===order.salesCode);
   check('demand-source-identity',demand.demandId===demandId&&demand.sourceType==='SALES_ORDER'
    &&demand.sourceId===target.orderId&&demand.sourceItemId===target.itemId

@@ -14,7 +14,7 @@ function fixture(){
  const records=new Map([
   ['users/buyer',{role:'purchaser',active:true,email:'PRIVATE EMAIL'}],
   ['orders/O',{ownerUid:'seller',salesCode:'B',status:'active',orderStatus:'normal',inventoryReservationStatus:'completed',items:[{
-   itemId:'I',productId:'P',qty:1,shortageQty:1,receivedQty:0,supplyOrderedQty:1,
+   itemId:'I',productId:'P',warehouseId:'W',qty:1,shortageQty:1,receivedQty:0,supplyOrderedQty:1,
    orderEvents:[{id:movementId,type:'PURCHASING_MANUAL',qty:1,documentNo:'MO-1'}]}]}],
   ['supplyOrders/'+supplyId,{...source,orderId:'O',itemId:'I',type:'PURCHASING_MANUAL',
    fulfillmentType:'WAREHOUSE',warehouseId:'W',status:'ORDERED',qty:1,receivedQty:0,
@@ -55,6 +55,7 @@ test('broken immutable links, missing evidence, duplicate movement and ledger mi
   f=>f.records.delete('purchaseOperations/'+f.movementId),
   f=>f.records.get('purchaseOperations/'+f.movementId).hash='wrong',
   f=>f.records.get('supplyOrders/'+f.supplyId).sourceId='wrong',
+  f=>f.records.get('orders/O').items[0].warehouseId='other',
   f=>f.records.get('procurementDemands/SALES_ORDER%3AO%3AI').productKey='wrong',
   f=>f.records.get('procurementDemands/SALES_ORDER%3AO%3AI').remainingToOrderQty=4,
   f=>f.records.get('orders/O').inventoryReservationStatus='failed',
