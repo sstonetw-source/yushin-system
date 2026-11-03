@@ -6,7 +6,7 @@
 
 - 已匯出的 `receiveV2Supply` Callable 經 `functions/supply-receipt-service.js`，以 Admin SDK 取得最新角色，並於同一 Firestore Transaction 再次核對角色、供應來源、PO／手動採購操作憑證、訂單、倉庫、餘量與預留。實際收貨、Movement、Reservation、Demand、公司與分倉庫存仍交給同一份 `src/services/receiving.js`；後端 `functions/shared/receiving-runtime.js` 由其產生，沒有第二套寫入器。
 - 固定 `operationId` 及 `receipts/{operationId}` 憑證用於冪等與重試；畫面保存每一列的原始數量／批號／效期及操作 ID，未知結果不得另建 ID 或執行舊前端交易。已確認的收貨仍需核對真實 receipt 欄位。
-- 目前已驗證上限維持：實體倉庫收貨來源最多 **15 品項**；原廠直送最多 **5 品項**。不延伸其他交易入口的上限。
+- 原v2實體倉庫來源上限 **15 品項**、原廠直送 **5 品項**；後續現行「每品項單倉」來源銜接候選限 **1–5 個實體商品**，且適用條件見下節。不延伸其他交易入口的上限。
 
 ## 正式候選開關（本次全部保持關閉）
 
@@ -20,7 +20,19 @@
 
 ## 真實環境切換前的必要獨立工作
 
-### 2026-11-03 正式來源唯讀前置核對
+### 後續銜接候選：現行單倉來源也走同一收貨後端
+
+程式候選已補上現行權威 `commitOrderReservationPreview` 生成的單倉來源准入，**不用替預留資料補v2標記、也不用遷移新建訂單**。原v2實體1–15／直送1–5路徑保持原驗證；現行單倉來源本批限1–5個實體商品、初始化完成、未打單／出貨／送達／退貨／調撥，且來源、所有同產品兄弟預留、商品／實體倉、公司與分倉預留、Demand與採購在途必須一致。混合服務、直送混單、缺主檔／缺庫存文件、未知位置格式及已進入其他履約階段的單倉來源仍拒絕，不回退前端交易。
+
+這是同一 `receiveV2Supply` Callable 中的**來源驗證**；數量及所有寫入仍由既有 Receiving／Reservation／Supply／Demand Core完成，沒有第二套庫存計算或writer。正式PO另外核驗原PO唯一供應連結；手動採購沿用原operation及唯一incoming movement驗證。
+
+收貨後預留仍是原單倉格式。只有新後端建立的收貨憑證明列 `reservationLocationSchemaVersion=1`，前端依原操作內容／操作者／批號驗證1或2版明確憑證，缺省及未知版仍拒絕；不能將舊前端無版本憑證直接當成此候選的成功結果。
+
+必要串接驗證使用真登入 Client Creation Service＋Rules建單，再呼叫**正式同一預留Callable**、手動採購／正式PO＋在途、唯一收貨Callable；不使用v2初始化coordinator或Admin直接建立預留／需求／採購／收貨事實。測試的產品、倉庫及初始庫存仍為隔離fixture，這不是原畫面全流程或真Preview／正式驗收。
+
+前後端旗標保持原值，本候選未部署。舊快取／舊writer防護、真Preview與正式角色差異驗收仍是發布條件。下方「單倉來源尚無可用後端」為此次候選之前的核對背景，不能用本次程式測試宣稱正式已切換。
+
+### 2026-11-03 歷史來源前置核對（單倉銜接候選之前）
 
 既有 Carol QA 來源 `qbCVc4f0PmsUgBnGm0Im`／`item-1793541854182-tieqp` 的 canonical `status=active`、`inventoryReservationStatus=completed`，但未保存 legacy `orderStatus`；其預留文件存在、quantity=0，**沒有 locationSchemaVersion=2**。這是同一既有 QA 單的唯讀查核，未提交收貨、補欄位或遷移。
 
