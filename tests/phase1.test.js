@@ -1077,8 +1077,9 @@ test('phase 5 inventory uses on-hand reserved available incoming and transaction
 test('phase 5 order creation reserves only available stock and records shortage', () => {
     const backend=fs.readFileSync('functions/order-reservation-service.js','utf8');
     assert.match(backend,/selectSingleWarehouse/);
-    assert.match(backend,/reserve=Math\.min\(orderedQty,aggregate\.available,location\.available\)/);
-    assert.match(backend,/shortage=orderedQty-reserve/);
+    assert.match(backend,/reservationCore\.planLocationReservation/);
+    assert.match(backend,/reserve=locationPlan\.reservation\.quantity/);
+    assert.match(backend,/shortage=locationPlan\.reservation\.shortageQty/);
     assert.match(backend,/inventoryReservationStatus:'completed'/);
     assert.doesNotMatch(appSource,/async function reserveSingleOrderItem/);
     assert.match(appSource,/await synchronizeOrderInventory\(docRef\.id, data, savingUid\)/);

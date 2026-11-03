@@ -143,8 +143,8 @@ async function commitLocationDispatchPreparation(db,uid,data,env=process.env){
    }
    if(locationTotal!==held||ledger.status!==(held?'active':shortage?'shortage':'fulfilled'))
     fault('v2 預留與倉位合計不一致');
-   if(multi&&(!Array.isArray(ledger.lifecycleWarehouseIds)||ledger.lifecycleWarehouseIds.length!==2
-    ||new Set(ledger.lifecycleWarehouseIds).size!==2||ledger.lifecycleWarehouseIds.some(wh=>id(wh,'原候選倉').startsWith('custody-'))
+   if(multi&&(!Array.isArray(ledger.lifecycleWarehouseIds)||(ledger.lifecycleWarehouseIds.length<1||ledger.lifecycleWarehouseIds.length>2)
+    ||new Set(ledger.lifecycleWarehouseIds).size!==ledger.lifecycleWarehouseIds.length||ledger.lifecycleWarehouseIds.some(wh=>id(wh,'原候選倉').startsWith('custody-'))
     ||ledger.locations.some(loc=>!ledger.lifecycleWarehouseIds.includes(loc.warehouseId))
     ||!ledger.lifecycleWarehouseIds.includes(row.warehouseId||order.warehouseId)))
     fault('整單品項預留不在原雙倉來源');

@@ -112,8 +112,8 @@
      if(ownerUid.includes('/')||custodyTransferId.includes('/')||reservation.warehouseId!==undefined
        ||!Array.isArray(reservation.locations)||!Array.isArray(reservation.sourceLocationSnapshot)
        ||reservation.sourceLocationSnapshot.length<1||reservation.sourceLocationSnapshot.length>2
-       ||!Array.isArray(reservation.lifecycleWarehouseIds)||reservation.lifecycleWarehouseIds.length!==2
-       ||new Set(reservation.lifecycleWarehouseIds).size!==2)
+       ||!Array.isArray(reservation.lifecycleWarehouseIds)||(reservation.lifecycleWarehouseIds.length<1||reservation.lifecycleWarehouseIds.length>2)
+       ||new Set(reservation.lifecycleWarehouseIds).size!==reservation.lifecycleWarehouseIds.length)
        throw Error('V3 業務保管預留缺少原實體倉或操作憑證。');
      const original=validateMultiLocationLedger({requestedQty:locationQty(reservation.custodyOriginalQty),
        locations:reservation.sourceLocationSnapshot});
@@ -244,7 +244,7 @@
    }else if(isCustody)throw Error('一般倉庫調撥不得直接寫入業務保管位置。');
    if(source.schemaVersion===2){
      const candidates=reservation.lifecycleWarehouseIds;
-     if(!Array.isArray(candidates)||candidates.length!==2||new Set(candidates).size!==2
+     if(!Array.isArray(candidates)||(candidates.length<1||candidates.length>2)||new Set(candidates).size!==candidates.length
        ||candidates.some(w=>typeof w!=='string'||!w||w!==w.trim()||w.includes('/')||w.startsWith('custody-'))
        ||!candidates.includes(item.warehouseId)
        ||source.sources.some(row=>!candidates.includes(row.warehouseId))

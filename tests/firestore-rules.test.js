@@ -1718,7 +1718,7 @@ test('whole-order backend replay never reopens an already committed zero-stock s
   try{await assertSucceeds(f.run());await assertSucceeds(f.run());}catch(err){throw Error(uid+' remote zero recovery: '+err.message);}
   const d=(await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).data();
   assert.equal(d.requestedQty,5);assert.equal(d.remainingToOrderQty,5);
-  const r=(await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).data();assert.equal(r.quantity,0);assert.equal(r.warehouseId,'W1');
+  const r=(await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).data();assert.equal(r.quantity,0);assert.equal(r.warehouseId,undefined);assert.equal(r.locationSchemaVersion,2);assert.deepEqual(r.locations,[]);
  }
 });
 test('initialization rejects multi-location stock before publishing false purchasing; disabled warehouse is not selected',async()=>{
@@ -2503,8 +2503,24 @@ for(const [uid,role] of [['buyer1','purchaser'],['wh1','warehouse']])test(role+'
  assert.equal((await getDoc(doc(db('admin'),'orders/'+f.id))).data().items[0].reservedQty,3);
  assert.equal((await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).data().remainingToOrderQty,2);
 });
+// These tests retain explicit historical source fixtures while the old client
+// writer is still deployed. They do not represent the new v2 lifecycle route.
+async function legacyOrderLifecycleFixture(...args){
+ const f=await orderInitializationFixture(...args),initialize=f.run;
+ return {...f,run:async()=>{
+  const result=await initialize();
+  const path='inventoryReservations/'+f.id+'__I';
+  const snap=await adminDatabase.doc(path).get(),data=snap.data();
+  if(data?.locationSchemaVersion===2){
+   const {locationSchemaVersion,locations,lifecycleWarehouseIds,...legacy}=data;
+   const order=(await adminDatabase.doc('orders/'+f.id).get()).data();
+   await seed(path,{...legacy,warehouseId:order.items[0].warehouseId});
+  }
+  return result;
+ }};
+}
 for(const [uid,role] of [['sales1','sales'],['eng1','engineer']])test(role+' actual cancellation releases stock and queues recovery without granting recovery control',async()=>{
- const f=await orderInitializationFixture(uid,role);await f.run();
+ const f=await legacyOrderLifecycleFixture(uid,role);await f.run();
  const original=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();await seed('orders/'+f.id,{...original,inventoryReservationStatus:'completed'});
  Object.assign(f.context,{savedDeliveryRecords:o=>o.deliveryRecords||[],savedReturnRecords:o=>o.returnRecords||[]});
  const app=fs.readFileSync('app.js','utf8');f.context.DOCUMENT_TYPES={ORDER:'order'};
@@ -2531,7 +2547,7 @@ function loadActualLifecycle(f){
 test('actual cancellation of uncommitted pending or failed sources preserves immutable items under real Rules',async()=>{
  for(const [uid,role] of [['admin','admin'],['sales1','sales'],['eng1','engineer']]){
   for(const state of ['pending','failed'])for(const direct of [false,true]){
-   const f=await orderInitializationFixture(uid,role,{direct});
+   const f=await legacyOrderLifecycleFixture(uid,role,{direct});
    const ref=doc(db('admin'),'orders/'+f.id),original=(await getDoc(ref)).data();
    const items=original.items.map(i=>({...i,reservedQty:0,shortageQty:5}));
    await seed('orders/'+f.id,{...original,inventoryReservationStatus:state,items});
@@ -2546,7 +2562,7 @@ test('actual cancellation of uncommitted pending or failed sources preserves imm
 });
 test('cancellation changes the demand and held stock atomically for the owner; unrelated writers cannot close demand',async()=>{
  for(const [uid,role] of [['admin','admin'],['sales1','sales'],['eng1','engineer']]){
-  const f=await orderInitializationFixture(uid,role);await f.run();
+  const f=await legacyOrderLifecycleFixture(uid,role);await f.run();
   const current=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
   await seed('orders/'+f.id,{...current,inventoryReservationStatus:'completed'});
   const demandPath='procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I');
@@ -2570,7 +2586,7 @@ test('cancellation changes the demand and held stock atomically for the owner; u
  }
 });
 test('malformed linked demand prevents cancellation from partially releasing reserved inventory',async()=>{
- const f=await orderInitializationFixture('sales1','sales');await f.run();
+ const f=await legacyOrderLifecycleFixture('sales1','sales');await f.run();
  const current=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
  await seed('orders/'+f.id,{...current,inventoryReservationStatus:'completed'});
  const demandPath='procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I');
@@ -2589,7 +2605,7 @@ function loadActualPermanentDelete(f){
 }
 test('admin permanent deletion atomically releases stock and deletes all linked unpurchased demand and reservations',async()=>{
  for(const [status,onHand] of [['active',3],['cancelled',0]]){
-  const f=await orderInitializationFixture('admin','admin',{onHand});await f.run();
+  const f=await legacyOrderLifecycleFixture('admin','admin',{onHand});await f.run();
   const order=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
   await seed('orders/'+f.id,{...order,status,orderStatus:status,inventoryReservationStatus:'completed'});
   const reservation='inventoryReservations/'+f.id+'__I';
@@ -2607,7 +2623,7 @@ test('admin permanent deletion atomically releases stock and deletes all linked 
  }
 });
 test('admin deletion refuses hidden supplier commitments; business cannot delete another role protected order',async()=>{
- const f=await orderInitializationFixture('admin','admin');await f.run();
+ const f=await legacyOrderLifecycleFixture('admin','admin');await f.run();
  const original=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
  await seed('orders/'+f.id,{...original,inventoryReservationStatus:'completed'});
  const demand='procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I');
@@ -2617,7 +2633,7 @@ test('admin deletion refuses hidden supplier commitments; business cannot delete
  assert.equal((await getDoc(doc(db('admin'),'orders/'+f.id))).exists(),true);
  assert.equal((await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).data().quantity,3);
  assert.equal((await getDoc(doc(db('admin'),'warehouseStocks/W1__init-product'))).data().reserved,3);
- const sales=await orderInitializationFixture('sales1','sales');await sales.run();
+ const sales=await legacyOrderLifecycleFixture('sales1','sales');await sales.run();
  const saleOrder=(await getDoc(doc(db('admin'),'orders/'+sales.id))).data();
  await seed('orders/'+sales.id,{...saleOrder,inventoryReservationStatus:'completed'});
  await assertFails(loadActualPermanentDelete(sales)());
@@ -2625,7 +2641,7 @@ test('admin deletion refuses hidden supplier commitments; business cannot delete
 });
 test('actual lifecycle refuses underfunded cancellation for admin and business roles without erasing the original hold',async()=>{
  for(const [uid,role] of [['admin','admin'],['sales1','sales'],['eng1','engineer']]){
-  const f=await orderInitializationFixture(uid,role);await f.run();
+  const f=await legacyOrderLifecycleFixture(uid,role);await f.run();
   const original=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
   await seed('orders/'+f.id,{...original,inventoryReservationStatus:'completed'});
   const run=loadActualLifecycle(f);
@@ -2646,7 +2662,7 @@ test('actual lifecycle refuses underfunded cancellation for admin and business r
 });
 test('atomic order restoration reopens linked purchase demand for sales, engineer and admin',async()=>{
  for(const [uid,role] of [['admin','admin'],['sales1','sales'],['eng1','engineer']]){
-  const f=await orderInitializationFixture(uid,role);await f.run();
+  const f=await legacyOrderLifecycleFixture(uid,role);await f.run();
   const order=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
   await seed('orders/'+f.id,{...order,inventoryReservationStatus:'completed'});
   const run=loadActualLifecycle(f);
@@ -2669,7 +2685,7 @@ test('atomic order restoration reopens linked purchase demand for sales, enginee
 });
 test('restoring without a prior demand creates it in the same reservation transaction',async()=>{
  for(const [uid,role] of [['admin','admin'],['sales1','sales'],['eng1','engineer']]){
-  const f=await orderInitializationFixture(uid,role,{onHand:0});await f.run();
+  const f=await legacyOrderLifecycleFixture(uid,role,{onHand:0});await f.run();
   const order=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
   const d='procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I');
   await seed('orders/'+f.id,{...order,status:'cancelled',orderStatus:'cancelled',inventoryReservationStatus:'completed'});
@@ -2682,7 +2698,7 @@ test('restoring without a prior demand creates it in the same reservation transa
  }
 });
 test('restore detects supplier quantity drift and leaves reservation, demand and order untouched',async()=>{
- const f=await orderInitializationFixture('sales1','sales',{onHand:0});await f.run();
+ const f=await legacyOrderLifecycleFixture('sales1','sales',{onHand:0});await f.run();
  const original=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
  const id='procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I');
  const demand=(await getDoc(doc(db('admin'),id))).data();
@@ -2696,7 +2712,7 @@ test('restore detects supplier quantity drift and leaves reservation, demand and
 });
 test('actual restoration respects zero and partial company availability for admin sales and engineer',async()=>{
  for(const [uid,role] of [['admin','admin'],['sales1','sales'],['eng1','engineer']]){
-  const f=await orderInitializationFixture(uid,role,{onHand:0});await f.run();
+  const f=await legacyOrderLifecycleFixture(uid,role,{onHand:0});await f.run();
   const original=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
   const reservation=(await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).data();
   const run=loadActualLifecycle(f);
@@ -2719,7 +2735,7 @@ test('actual restoration respects zero and partial company availability for admi
 
 test('actual restoration cannot reserve in a disabled or custody-designated warehouse for any commercial role',async()=>{
  for(const [uid,role] of [['admin','admin'],['sales1','sales'],['eng1','engineer']]){
-  const f=await orderInitializationFixture(uid,role,{onHand:0});await f.run();
+  const f=await legacyOrderLifecycleFixture(uid,role,{onHand:0});await f.run();
   const original=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
   const reservation=(await getDoc(doc(db('admin'),'inventoryReservations/'+f.id+'__I'))).data();
   const run=loadActualLifecycle(f);
@@ -2788,7 +2804,7 @@ test('actual initialization selects physical remote stock over free transit for 
   assert.equal((await getDoc(doc(admin,'warehouseStocks/W1__init-product'))).data().reserved,0);
   assert.equal((await getDoc(doc(admin,'warehouseStocks/W2__init-product'))).data().reserved,5);
   assert.equal((await getDoc(doc(admin,'inventory/init-product'))).data().reserved,5);
-  assert.equal((await getDoc(doc(admin,'inventoryReservations/'+f.id+'__I'))).data().warehouseId,'W2');
+  assert.deepEqual((await getDoc(doc(admin,'inventoryReservations/'+f.id+'__I'))).data().locations,[{warehouseId:'W2',reservedQty:5}]);
   assert.equal((await getDoc(doc(admin,'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).exists(),false);
  }
 });
@@ -3036,7 +3052,7 @@ test('actual receiving-location allocation refuses corrupt transit before updati
 for(const status of ['cancelled','normal'])test('actual '+status+' refuses impossible transit balances atomically and permits corrected retries for admin sales and engineer',async()=>{
  for(const [uid,role] of [['admin','admin'],['sales1','sales'],['eng1','engineer']]){
   const checked=async(phase,fn)=>{try{return await fn();}catch(error){throw new Error(uid+' '+status+' '+phase+': '+error.message,{cause:error});}};
-  const f=await orderInitializationFixture(uid,role);await checked('initialize',()=>f.run());
+  const f=await legacyOrderLifecycleFixture(uid,role);await checked('initialize',()=>f.run());
   const order=(await getDoc(doc(db('admin'),'orders/'+f.id))).data();
   await seed('orders/'+f.id,{...order,inventoryReservationStatus:'completed'});
   const run=loadActualLifecycle(f);
@@ -3751,4 +3767,21 @@ test('warehouse role does not inherit quote access from an earlier business iden
  await assertFails(getDoc(doc(db('wh1'),'quotes/former-business')));
  await assertFails(getDocs(query(collection(db('wh1'),'quotes'),where('ownerUid','==','wh1'))));
  await assertSucceeds(getDoc(doc(db('buyer1'),'quotes/former-business')));
+});
+
+
+test('cached legacy lifecycle cannot mutate an authoritative native v2 source for any former writer',async()=>{
+ for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['admin','admin']]){
+  const f=await orderInitializationFixture(uid,role);await f.run();
+  const paths=['orders/'+f.id,'inventory/init-product','warehouseStocks/W1__init-product',
+   'inventoryReservations/'+f.id+'__I','procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')];
+  const facts=()=>Promise.all(paths.map(async path=>(await adminDatabase.doc(path).get()).data()));
+  const before=await facts();
+  await assert.rejects(loadActualLifecycle(f)('cancelled'),e=>e.code==='unsupported-reservation-location');
+  assert.deepEqual(await facts(),before);
+  const ledger=before[3];
+  const {locationSchemaVersion,locations,lifecycleWarehouseIds,...forged}=ledger;
+  await assertFails(setDoc(doc(db(uid),paths[3]),{...forged,warehouseId:'W1'}));
+  assert.deepEqual(await facts(),before);
+ }
 });

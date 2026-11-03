@@ -76,7 +76,7 @@ function pendingV2OrderLifecycle(orderId){
   if(!intent||intent.orderId!==orderId||intent.actorUid!==currentUser?.uid||intent.actorRole!==currentUserRole
    ||!['normal','cancelled'].includes(intent.nextStatus)||!/^\w[\w-]{11,95}$/.test(intent.operationId||'')
    ||!Array.isArray(intent.itemIds)||!intent.itemIds.length||intent.itemIds.length>5
-   ||!Array.isArray(intent.warehouseIds)||![0,2].includes(intent.warehouseIds.length))throw Error('invalid pending lifecycle');
+   ||!Array.isArray(intent.warehouseIds)||![0,1,2].includes(intent.warehouseIds.length))throw Error('invalid pending lifecycle');
   return intent;
  }catch(_){throw Error('前次取消／恢復結果尚未確認，請使用原帳號與角色核對。');}
 }
@@ -130,7 +130,7 @@ async function setV2OrderLifecycleEmulator(orderId,nextStatus,details=null){
    const snap=await db.collection('inventoryReservations').doc(orderId+'__'+item.itemId).get({source:'server'});check();
    const ledger=snap.exists?snap.data():null,candidates=ledger?.lifecycleWarehouseIds;
    if(!ledger||ledger.locationSchemaVersion!==2||ledger.orderId!==orderId||ledger.itemId!==item.itemId
-    ||!Array.isArray(candidates)||candidates.length!==2||new Set(candidates).size!==2
+    ||!Array.isArray(candidates)||(candidates.length<1||candidates.length>2)||new Set(candidates).size!==candidates.length
     ||candidates.some(id=>typeof id!=='string'||!id||id.includes('/')))
     throw Error('缺少原始 v2 雙倉來源，不能以指定倉或目前位置猜測。');
    const sorted=[...candidates].sort();

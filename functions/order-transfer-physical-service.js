@@ -93,8 +93,8 @@ async function commitOrderTransferPhysical(db,uid,data,action,env=process.env){
   if(source.schemaVersion===2){
    if(env.ENABLE_ORDER_TRANSFER_V2_EMULATOR!=='true')fail('v2訂單調撥尚未獨立啟用');
    if(ledger.ownerUid!==order.ownerUid||ledger.salesCode!==order.salesCode
-    ||!Array.isArray(ledger.lifecycleWarehouseIds)||ledger.lifecycleWarehouseIds.length!==2
-    ||new Set(ledger.lifecycleWarehouseIds).size!==2
+    ||!Array.isArray(ledger.lifecycleWarehouseIds)||(ledger.lifecycleWarehouseIds.length<1||ledger.lifecycleWarehouseIds.length>2)
+    ||new Set(ledger.lifecycleWarehouseIds).size!==ledger.lifecycleWarehouseIds.length
     ||!ledger.lifecycleWarehouseIds.includes(from)||(!handoff&&!ledger.lifecycleWarehouseIds.includes(to)))
     fail('調撥來源不在原v2候選倉，或目的實體倉是第三倉');
    if(action==='RECEIVE'&&(t.reservationLocationSchemaVersion!==2

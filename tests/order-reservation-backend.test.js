@@ -91,7 +91,8 @@ test('initial whole-order backend chooses an alternate single stocked warehouse 
  const saved=f.docs.get('orders/O');
  assert.deepEqual([saved.items[0].warehouseId,saved.items[0].reservedQty],['B',3]);
  assert.equal(saved.inventoryReservationStatus,'completed');
- assert.equal(f.docs.get('inventoryReservations/O__I1').warehouseId,'B');
+ assert.equal(f.docs.get('inventoryReservations/O__I1').warehouseId,undefined);
+ assert.deepEqual(f.docs.get('inventoryReservations/O__I1').locations,[{warehouseId:'B',reservedQty:3}]);
  assert.equal(f.docs.get('warehouseStocks/B__P').reserved,3);
  assert.equal(f.docs.get('warehouseStocks/A__P').reserved,0);
  assert.equal(f.docs.has('procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I1')),false);
@@ -168,7 +169,7 @@ test('insufficient or missing stock yields shortage and demand without partially
  const result=await f.run();assert.equal(result.reservedQty,2);
  assert.equal(result.shortageQty,7);
  assert.equal(f.docs.get('inventory/P').reserved,0);
- assert.equal(f.docs.has('warehouseStocks/A__P'),false);
+ assert.equal(f.docs.get('warehouseStocks/A__P').onHand,0);
  assert.equal(f.docs.get('inventoryReservations/O__I1').quantity,0);
  assert.equal(f.docs.get('procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I1')).requestedQty,3);
 });
@@ -181,7 +182,7 @@ test('existing unrelated reservation or supplier commitment fails the whole orde
   f=>f.put('warehouseStocks/B__Q',{productKey:'Q',warehouseId:'B',onHand:2,reserved:3})
  ]){
   const f=fixture();inject(f);const before=f.snapshot();
-  await assert.rejects(f.run(),/舊預留|採購需求|庫存帳目/);
+  await assert.rejects(f.run(),/已有預留帳|採購需求|庫存帳目/);
   assert.equal(f.snapshot(),before);
  }
 });
@@ -309,4 +310,68 @@ test('authorized purchasing can reserve an active administrator-owned order with
   if(profile)bad.put('users/owner-admin',profile);
   const before=bad.snapshot();await assert.rejects(()=>bad.run(),error=>error.code==='failed-precondition');assert.equal(bad.snapshot(),before);
  }
+});
+
+
+test('new orders persist only the fulfillment v2 location contract, including zero holds',async()=>{
+ const f=fixture();await f.run();
+ const core=require('../functions/shared/reservation-core');
+ for(const item of f.docs.get('orders/O').items.filter(i=>i.fulfillmentType!=='DIRECT_SHIP')){
+  const ledger=f.docs.get('inventoryReservations/O__'+item.itemId);
+  assert.equal(ledger.locationSchemaVersion,2);
+  assert.equal(Object.hasOwn(ledger,'warehouseId'),false);
+  assert.deepEqual(ledger.lifecycleWarehouseIds,['A','B']);
+  assert.equal(core.reservationLocations(ledger).reduce((sum,r)=>sum+r.qty,0),item.reservedQty);
+  assert.equal(ledger.shortageQty,item.shortageQty);
+ }
+ const before=f.snapshot();await f.run();assert.equal(f.snapshot(),before);
+ const zero=fixture();zero.put('inventory/P',{productKey:'P',onHand:0,reserved:0});
+ zero.docs.delete('warehouseStocks/A__P');await zero.run();
+ const ledger=zero.docs.get('inventoryReservations/O__I1');
+ assert.equal(ledger.locationSchemaVersion,2);assert.deepEqual(ledger.locations,[]);
+ assert.equal(ledger.quantity,0);assert.equal(ledger.shortageQty,3);
+});
+
+test('new initialization rejects even an empty existing ledger rather than migrating it',async()=>{
+ const f=fixture();f.put('inventoryReservations/O__I1',{
+  orderId:'O',itemId:'I1',productKey:'P',warehouseId:'A',quantity:0
+ });
+ const before=f.snapshot();await assert.rejects(f.run(),/已有預留帳/);
+ assert.equal(f.snapshot(),before);
+});
+
+
+test('different orders may use the same synchronization ID without movement collisions',async()=>{
+ const f=fixture();await f.run();
+ const order=clone(f.docs.get('orders/O'));
+ for(const item of order.items){item.reservedQty=0;item.shortageQty=0;}
+ order.inventoryReservationStatus='pending';
+ f.put('orders/O2',order);
+ f.put('inventory/P',{...f.docs.get('inventory/P'),onHand:8});
+ f.put('warehouseStocks/A__P',{...f.docs.get('warehouseStocks/A__P'),onHand:8});
+ await f.run('actor',{...f.request,orderId:'O2'});
+ const moves=[...f.docs].filter(([path])=>path.startsWith('inventoryMovements/')).map(([,data])=>data);
+ assert.ok(moves.some(row=>row.sourceId==='O'));
+ assert.ok(moves.some(row=>row.sourceId==='O2'));
+ assert.equal(f.docs.get('inventory/P').reserved,8);
+});
+
+
+test('v2 initialization materializes missing zero balances for every shared lifecycle candidate',async()=>{
+ const f=fixture();f.docs.delete('inventory/Q');f.docs.delete('warehouseStocks/B__Q');
+ await f.run();
+ for(const key of ['P','Q'])for(const wh of ['A','B']){
+  const stock=f.docs.get('warehouseStocks/'+wh+'__'+key);
+  assert.equal(stock.productKey,key);assert.equal(stock.warehouseId,wh);
+  assert.equal(Number.isSafeInteger(stock.onHand),true);
+ }
+ assert.equal(f.docs.get('inventory/Q').onHand,0);
+ assert.equal(f.docs.get('inventory/Q').reserved,0);
+ assert.equal(f.docs.get('warehouseStocks/A__Q').onHand,0);
+});
+
+test('three candidate warehouses reject before creating an unusable lifecycle source',async()=>{
+ const f=fixture();f.put('warehouses/C',{active:true});
+ f.put('warehouseStocks/C__P',{productKey:'P',warehouseId:'C',onHand:0,reserved:0});
+ const before=f.snapshot();await assert.rejects(f.run(),/1–2 個候選/);assert.equal(f.snapshot(),before);
 });

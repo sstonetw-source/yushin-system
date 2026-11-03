@@ -46,6 +46,17 @@ function previewContext(f,{host='preview-20135.web.app',project='preview-20135',
  c.db.app={options:{projectId:'preview-20135'}};
  return c;
 }
+test('canonical single-warehouse lifecycle recovers its frozen operation after lost reply and reload',async()=>{
+ const f=fixture();
+ for(const ledger of f.ledgers.values())ledger.lifecycleWarehouseIds=['A'];
+ f.setTransport(p=>{f.applied(p);throw Error('lost reply');});
+ await assert.rejects(f.open().setOrderLifecycleStatus('O','cancelled'),/lost reply/);
+ assert.deepEqual(f.calls[0].warehouseIds,['A']);
+ f.ledgers.clear();f.setTransport(p=>f.applied(p));
+ const saved=await f.open().setOrderLifecycleStatus('O','cancelled');
+ assert.deepEqual(f.calls[1],f.calls[0]);assert.equal(saved.orderStatus,'cancelled');
+ assert.equal(f.order.orderLifecycleHistory.length,1);assert.equal(f.storage.size,0);
+});
 test('lifecycle freezes complete original candidates and retries the identical intent after lost reply and reload',async()=>{
  const f=fixture();f.setTransport(p=>{f.applied(p);throw Error('lost reply');});
  await assert.rejects(f.open().setOrderLifecycleStatus('O','cancelled'),/lost reply/);
