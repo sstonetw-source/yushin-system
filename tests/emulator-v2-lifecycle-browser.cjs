@@ -2291,7 +2291,9 @@ for(const multi of [false,true])for(const width of [1280,390])test('full site '+
    assert.equal(new Set(order.items.map(i=>i.itemId)).size,3);assert.equal(order.items[1].deliveryPlan.mode,'CUSTOMER_SHIP');
    assert.equal(order.items[1].deliveryPlan.address,'台北市手動多品項驗收地址');assert.equal(order.items[2].deliveryPlan.mode,'PICKUP');
    for(const row of order.items){const hold=(await db.collection('inventoryReservations').doc(orderId+'__'+row.itemId).get()).data();
-    assert.equal(hold.quantity,row.qty);assert.equal(hold.productKey,row.productId);assert.equal(hold.warehouseId,row.warehouseId);}
+    assert.equal(hold.quantity,row.qty);assert.equal(hold.productKey,row.productId);assert.equal(hold.warehouseId,undefined);
+    assert.equal(hold.locationSchemaVersion,2);assert.deepEqual(hold.locations,[{warehouseId:row.warehouseId,reservedQty:row.qty}]);
+    assert.deepEqual(hold.lifecycleWarehouseIds,[warehouseId,otherWarehouse].sort());}
    assert.equal(held.otherStock.onHand,1);assert.equal(held.otherStock.reserved,1);assert.equal(held.otherLot.remainingQty,1);
    assert.equal(held.qInventory.onHand,2);assert.equal(held.qInventory.reserved,2);assert.equal(held.qStock.onHand,2);assert.equal(held.qStock.reserved,2);assert.equal(held.qLot.remainingQty,2);
   }
