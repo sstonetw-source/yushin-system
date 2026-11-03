@@ -1561,7 +1561,7 @@ service cloud.firestore {
           && before.get('isDelivered', false) != true && after.get('isDelivered', false) != true
           && after.get('deliveryRecords', []) == before.get('deliveryRecords', [])
           && after.get('returnRecords', []) == before.get('returnRecords', [])
-          && after.get('deliveredQty', 0) == before.get('deliveredQty', 0));
+          && after.get('deliveredQty', 0) == before.get('deliveredQty', 0)));
     }
 
     function validInventoryShipmentItem(before, after, record) {
