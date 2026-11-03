@@ -2275,7 +2275,8 @@ for(const multi of [false,true])for(const width of [1280,390])test('full site '+
   assert.equal(item.unitPrice,100);assert.equal(order.totalPrice,multi?600:200);assert.equal(item.warehouseId,warehouseId);
   assert.equal(item.reservedQty,2);assert.equal(item.shortageQty,0);assert.equal(order.inventoryReservationStatus,'completed');
   const ledger=(await db.collection('inventoryReservations').doc(orderId+'__'+item.itemId).get()).data();
-  assert.equal(ledger.quantity,2);assert.equal(ledger.warehouseId,warehouseId);assert.equal(ledger.productKey,key);
+  assert.equal(ledger.quantity,2);assert.equal(ledger.warehouseId,undefined);assert.equal(ledger.productKey,key);
+  assert.equal(ledger.locationSchemaVersion,2);assert.deepEqual(ledger.locations,[{warehouseId,reservedQty:2}]);
   const physical=async()=>({inventory:(await db.collection('inventory').doc(key).get()).data(),
    stock:(await db.collection('warehouseStocks').doc(warehouseId+'__'+key).get()).data(),
    lot:(await db.collection('inventoryLots').doc(tag+'-lot').get()).data(),
