@@ -2255,3 +2255,57 @@ for(const singleWarehouse of [false,true])test('production initial writer '+(sin
  const last=await snapshot(x);await commitLocationReturn(db,x.uid,request);
  assert.deepEqual(await snapshot(x),last);
 });
+
+// The production initial writer, not a converted reservation fixture, supplies
+// all five distinct products across both candidate warehouses.
+test('native five-product order completes dispatch shipment delivery cancel restore and original-lot return',async()=>{
+ const tag='native_five_lifecycle',uid=tag+'_admin',orderId=tag+'_order',syncAttemptId=tag+'_sync';
+ const items=Array.from({length:5},(_,i)=>({itemId:'N'+i,productId:tag+'_P'+i,qty:3,
+  warehouseId:i%2?B:A,fulfillmentType:'WAREHOUSE',deliveryPlan:plan}));
+ const batch=db.batch(),set=(n,k,d)=>batch.set(db.collection(n).doc(k),d);
+ set('users',uid,{role:'admin',active:true});
+ set('orders',orderId,{ownerUid:uid,salesCode:'NATIVE',status:'active',orderStatus:'normal',
+  inventoryReservationStatus:'pending',inventoryReservationAttemptId:syncAttemptId,
+  items,deliveryRecords:[],returnRecords:[],warehouseShipmentRecords:[]});
+ for(const wh of [A,B])set('warehouses',wh,{active:true});
+ for(const item of items){
+  const key=item.productId;set('products',key,{productType:'Goods',active:true});
+  set('inventory',key,{productKey:key,onHand:6,reserved:0,incoming:0});
+  for(const wh of [A,B]){
+   set('warehouseStocks',wh+'__'+key,{productKey:key,warehouseId:wh,onHand:3,reserved:0,incoming:0});
+   set('inventoryLots',key+'_'+wh,{productKey:key,warehouseId:wh,remainingQty:3,receivedQty:3,
+    lotNo:key+'_'+wh,receivedAt:'2026-11-03T00:00:00Z',unitCost:0});
+  }
+ }
+ await batch.commit();
+ await require('../functions/order-reservation-service').commitOrderReservation(db,uid,{orderId,syncAttemptId});
+ for(const item of items){
+  const ledger=(await db.collection('inventoryReservations').doc(orderId+'__'+item.itemId).get()).data();
+  assert.equal(ledger.locationSchemaVersion,2);assert.equal(ledger.warehouseId,undefined);
+  assert.deepEqual(ledger.lifecycleWarehouseIds,[A,B]);
+  const op=tag+'_'+item.itemId;
+  await commitLocationDispatchPreparation(db,uid,{orderId,itemId:item.itemId,quantity:1,
+   operationId:op+'_print',syncAttemptId});
+  await commitLocationShipment(db,uid,{orderId,itemId:item.itemId,quantity:1,warehouseId:item.warehouseId,
+   operationId:op+'_ship',syncAttemptId,date:'2026-11-03',expectedPlan:plan});
+  await commitShipmentDelivery(db,uid,{orderId,itemId:item.itemId,shipmentId:op+'_ship',quantity:1,
+   operationId:op+'_deliver',syncAttemptId,date:'2026-11-03'});
+ }
+ const lifecycle=require('../functions/single-item-location-lifecycle-service').commitOrderLocationLifecycle;
+ const cancel={orderId,itemIds:items.map(row=>row.itemId),warehouseIds:[A,B],nextStatus:'cancelled',
+  operationId:tag+'_cancel',syncAttemptId,date:'2026-11-03'};
+ await lifecycle(db,uid,cancel);
+ for(const item of items)assert.equal((await db.collection('inventory').doc(item.productId).get()).data().reserved,0);
+ await lifecycle(db,uid,{...cancel,nextStatus:'normal',operationId:tag+'_restore'});
+ for(const item of items)assert.equal((await db.collection('inventory').doc(item.productId).get()).data().reserved,2);
+ const first=items[0],ret={orderId,itemId:first.itemId,shipmentId:tag+'_'+first.itemId+'_ship',warehouseId:first.warehouseId,
+  operationId:tag+'_return',syncAttemptId,date:'2026-11-03',reason:'結案退貨',condition:'RESTOCKABLE',settlement:'CLOSE',
+  selections:[{lotId:first.productId+'_'+first.warehouseId,qty:1}]};
+ await commitLocationReturn(db,uid,ret);await commitLocationReturn(db,uid,ret);
+ const saved=(await db.collection('orders').doc(orderId).get()).data();
+ assert.equal(saved.returnRecords.length,1);assert.equal(saved.warehouseShipmentRecords.length,5);
+ for(const item of items){
+  const stock=(await db.collection('inventory').doc(item.productId).get()).data();
+  assert.equal(stock.onHand,item===first?6:5);assert.equal(stock.reserved,2);
+ }
+});

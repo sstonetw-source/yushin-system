@@ -27,7 +27,7 @@ function fixture(){
    sessionStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},
    canManageOrderLifecycleCapability:()=>true,canEditPage:()=>true,lifecycleRecordId:()=> 'withdraw_123456789'});
   // The callable's after-hook always uses the latest recreated VM.
-  current=c;vm.runInContext(service,c);vm.runInContext(fs.readFileSync('src/services/customer-return.js','utf8'),c);return c;
+  current=c;vm.runInContext(fs.readFileSync('src/infrastructure/production-transaction.js','utf8'),c);vm.runInContext(service,c);vm.runInContext(fs.readFileSync('src/services/customer-return.js','utf8'),c);return c;
  };
  let current;const c=new Proxy({}, {get:(_,key)=>current[key],set:(_,key,value)=>{current[key]=value;return true;}});
  const input={orderId:'O',itemId:'I',operationId:'request_123456789',qty:2,date:'2026-10-29',reason:'訂錯貨'};
@@ -76,4 +76,33 @@ test('Preview flag off with no pending operation rejects the original entry inst
  await assert.rejects(c.commitCustomerReturnRequest(f.input),/旗標/);
  await assert.rejects(c.commitCustomerReturnWithdrawal({orderId:'O',requestId:'Q'}),/旗標/);
  assert.equal(f.calls.length,0);assert.equal(f.storage.size,0);
+});
+
+function productionContext(f){
+ const c=f.open(),functions=c.firebase.app().functions('asia-east1'),auth=c.firebase.auth();
+ c.APP_ENVIRONMENT='production';c.YUSHIN_PREVIEW_CUSTOMER_RETURN_REQUEST=false;
+ Object.assign(c.location,{hostname:'sstonetw-source.github.io',origin:'https://sstonetw-source.github.io',pathname:'/yushin-system/'});
+ functions.app.options.projectId='yu-shing-company';auth.app.options.projectId='yu-shing-company';
+ c.firebase.app=()=>({options:{projectId:'yu-shing-company'},functions:()=>functions});c.db.app.options.projectId='yu-shing-company';
+ c.YUSHIN_PRODUCTION_CUSTOMER_RETURN_REQUEST_BACKEND=true;c.YUSHIN_PRODUCTION_CUSTOMER_RETURN_REQUEST_LEGACY_BLOCKED=true;
+ return c;
+}
+test('production request retains frozen operation across lost reply and blocked legacy takeover',async()=>{
+ const f=fixture();f.setLose(true);await assert.rejects(productionContext(f).commitCustomerReturnRequest(f.input),/reply lost/);
+ const c=productionContext(f);c.YUSHIN_PRODUCTION_CUSTOMER_RETURN_REQUEST_BACKEND=false;
+ await assert.rejects(c.commitCustomerReturnRequest(f.input));assert.equal(f.storage.size,1);assert.equal(f.calls.length,1);
+ await productionContext(f).commitCustomerReturnRequestBackend('O');
+ assert.deepEqual(f.calls[0],f.calls[1]);assert.equal(f.storage.size,0);
+});
+test('production request rejects foreign site project emulator and missing retirement fence',async()=>{
+ for(const change of [c=>c.location.origin='http://sstonetw-source.github.io',c=>c.location.pathname='/other/',
+  c=>c.db.app.options.projectId='preview-20135',c=>c.firebase.auth().emulatorConfig={host:'localhost',port:9099},
+  c=>c.YUSHIN_PRODUCTION_CUSTOMER_RETURN_REQUEST_LEGACY_BLOCKED=false]){
+  const f=fixture(),c=productionContext(f);change(c);await assert.rejects(c.commitCustomerReturnRequest(f.input));
+  assert.equal(f.calls.length,0);assert.equal(f.storage.size,0);
+ }
+});
+test('retired production return receipt cannot be sent through the legacy writer',async()=>{
+ const f=fixture(),c=f.open();c.APP_ENVIRONMENT='production';c.YUSHIN_PRODUCTION_CUSTOMER_RETURN_LEGACY_BLOCKED=true;
+ await assert.rejects(c.commitCustomerReturnReceipt({orderId:'O'}),/禁止改用一般退貨交易/);
 });

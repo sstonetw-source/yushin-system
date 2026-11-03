@@ -1,5 +1,6 @@
 'use strict';
 // A customer acknowledgement is distinct from physical shipment and stock.
+const {allowProductionTransaction}=require('./production-transaction-gate');
 const {projectIdFromEnvironment}=require('./grouped-reservation-gate');
 
 function allowDeliveryConfirmationEmulator(env=process.env){
@@ -17,6 +18,7 @@ function allowPreviewDeliveryConfirmation(env=process.env){
 function deliveryConfirmationBackendProject(env=process.env){
  if(allowDeliveryConfirmationEmulator(env))return 'demo-yushin';
  if(allowPreviewDeliveryConfirmation(env))return 'preview-20135';
+ if(allowProductionTransaction('DELIVERY_CONFIRMATION',env))return 'yu-shing-company';
  return '';
 }
 module.exports={allowDeliveryConfirmationEmulator,allowPreviewDeliveryConfirmation,deliveryConfirmationBackendProject};

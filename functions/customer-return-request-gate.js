@@ -1,6 +1,8 @@
 'use strict';
+const {allowProductionTransaction}=require('./production-transaction-gate');
 const {projectIdFromEnvironment}=require('./grouped-reservation-gate');
 function customerReturnRequestBackendProject(env=process.env){
+ if(allowProductionTransaction('CUSTOMER_RETURN_REQUEST',env))return 'yu-shing-company';
  const project=projectIdFromEnvironment(env);
  const local=value=>typeof value==='string'&&/^(localhost|127\.0\.0\.1):[0-9]+$/.test(value);
  if(project==='demo-yushin'&&env.ENABLE_V2_RETURN_REQUEST_AUTH_EMULATOR==='true'

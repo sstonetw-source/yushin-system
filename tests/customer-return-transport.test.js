@@ -2,8 +2,8 @@
 const test=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
 const core=require('../modules/fulfillment-core');
 const source=fs.readFileSync('src/services/customer-return-transport.js','utf8');
-function fixture({preview=false}={}){
- const project=preview?'preview-20135':'demo-yushin';
+function fixture({preview=false,production=false}={}){
+ const project=production?'yu-shing-company':preview?'preview-20135':'demo-yushin';
  const intent={orderId:'O',itemId:'I',shipmentId:'S',syncAttemptId:'sync',selections:[{lotId:'L',qty:1}],operationId:'return_receipt_001',warehouseId:'A',date:'2026-10-21',reason:'訂錯貨',condition:'RESTOCKABLE',settlement:'CLOSE',requestId:'Q'};
  const order={inventoryReservationStatus:'completed',inventoryReservationAttemptId:'sync',warehouseShipmentRecords:[{id:'S',itemId:'I',warehouseId:'A'}],returnRequests:[{id:'Q',itemId:'I',qty:1,receivedQty:0,status:'PENDING'}],returnRecords:[]};
  const storage=new Map(),calls=[];let proof,failSave=false,afterRead=()=>{},transport;
@@ -15,10 +15,13 @@ function fixture({preview=false}={}){
  };transport=applied;
  const open=()=>{
   const functions={app:{options:{projectId:project}},useEmulator:(h,p)=>{assert.equal(preview,false);assert.equal(h,'127.0.0.1');assert.equal(p,5001);},httpsCallable:name=>async p=>{assert.equal(name,'receiveV2CustomerReturn');calls.push(structuredClone(p));return transport(p,c);}};
-  const c=vm.createContext({YushinFulfillment:core,APP_ENVIRONMENT:preview?'preview':'development',YUSHIN_PREVIEW_CUSTOMER_RETURN:preview,YUSHIN_V2_RETURN_RECEIPT_EMULATOR:!preview,location:{hostname:preview?'preview-20135.web.app':'localhost'},currentUser:{uid:'U'},currentUserRole:'warehouse',canReceiveInventoryCapability:()=>true,
-   firebase:{functions:()=>{throw Error('global API forbidden');},app:()=>({options:{projectId:project},functions:region=>{assert.equal(region,'asia-east1');return functions;}}),auth:()=>({app:{options:{projectId:project}},currentUser:{uid:'U'},emulatorConfig:preview?null:{host:'localhost',port:9099}})},
+  const c=vm.createContext({YushinFulfillment:core,APP_ENVIRONMENT:production?'production':preview?'preview':'development',YUSHIN_PREVIEW_CUSTOMER_RETURN:preview,YUSHIN_V2_RETURN_RECEIPT_EMULATOR:!preview&&!production,location:{hostname:preview?'preview-20135.web.app':'localhost'},currentUser:{uid:'U'},currentUserRole:'warehouse',canReceiveInventoryCapability:()=>true,
+   firebase:{functions:()=>{throw Error('global API forbidden');},app:()=>({options:{projectId:project},functions:region=>{assert.equal(region,'asia-east1');return functions;}}),auth:()=>({app:{options:{projectId:project}},currentUser:{uid:'U'},emulatorConfig:preview||production?null:{host:'localhost',port:9099}})},
    sessionStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>{if(failSave)throw Error('storage failed');storage.set(k,v);},removeItem:k=>storage.delete(k)},
    db:{app:{options:{projectId:project}},collection:n=>({doc:id=>({get:async options=>{assert.equal(options.source,'server');afterRead(c,n);const value=n==='orders'?order:proof;return {exists:!!value,data:()=>structuredClone(value)};}})})}});
+  if(production){Object.assign(c.location,{hostname:'sstonetw-source.github.io',origin:'https://sstonetw-source.github.io',pathname:'/yushin-system/'});
+   c.YUSHIN_PRODUCTION_CUSTOMER_RETURN_BACKEND=true;c.YUSHIN_PRODUCTION_CUSTOMER_RETURN_LEGACY_BLOCKED=true;}
+  vm.runInContext(fs.readFileSync('src/infrastructure/production-transaction.js','utf8'),c);
   vm.runInContext(source,c);return c;
  };
  return {intent,order,storage,calls,open,applied,getProof:()=>proof,setTransport:f=>transport=f,setSaveFailure:v=>failSave=v,setAfterRead:f=>afterRead=f};
@@ -121,4 +124,21 @@ test('Preview flag disabled after commit retains original proof until the same o
  f.setTransport(p=>({data:{...f.applied(p).data,status:'already-applied'}}));
  await f.open().receiveV2CustomerReturnEmulator('O');
  assert.deepEqual(f.calls[0],f.calls[1]);assert.equal(f.order.returnRecords.length,1);assert.equal(f.storage.size,0);
+});
+
+test('production return receipt reuses original batch intent after lost reply and refuses disabled route',async()=>{
+ const f=fixture({production:true});f.setTransport(p=>{f.applied(p);throw Error('lost reply');});
+ await assert.rejects(f.open().receiveV2CustomerReturnEmulator('O',f.intent),/lost reply/);
+ const c=f.open();c.YUSHIN_PRODUCTION_CUSTOMER_RETURN_BACKEND=false;
+ await assert.rejects(c.receiveV2CustomerReturnEmulator('O'));assert.equal(f.calls.length,1);assert.equal(f.storage.size,1);
+ f.setTransport(p=>f.applied(p));await f.open().receiveV2CustomerReturnEmulator('O');
+ assert.deepEqual(f.calls[0],f.calls[1]);assert.equal(f.order.returnRecords.length,1);assert.equal(f.storage.size,0);
+});
+test('production return receipt rejects foreign site project emulator and missing fence',async()=>{
+ for(const change of [c=>c.location.origin='http://sstonetw-source.github.io',c=>c.location.pathname='/other/',
+  c=>c.db.app.options.projectId='preview-20135',c=>c.YUSHIN_PRODUCTION_CUSTOMER_RETURN_LEGACY_BLOCKED=false,
+  c=>{const auth=c.firebase.auth();c.firebase.auth=()=>({...auth,emulatorConfig:{host:'localhost',port:9099}});}]){
+  const f=fixture({production:true}),c=f.open();change(c);await assert.rejects(c.receiveV2CustomerReturnEmulator('O',f.intent));
+  assert.equal(f.calls.length,0);assert.equal(f.storage.size,0);
+ }
 });

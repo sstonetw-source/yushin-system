@@ -29,6 +29,7 @@ function setup({host='localhost',authUid='buyer',lost=true}={}){
   db:{app,collection:()=>({doc:()=>({get:async()=>({exists:true,data:()=>order})})})},
   firebase:{app:()=>({options:app.options,functions:()=>functions}),auth:()=>auth,functions:()=>functions},
   runRoleTransaction:()=>{throw Error('legacy write prohibited');}});
+ vm.runInContext(fs.readFileSync('src/infrastructure/production-transaction.js','utf8'),c);
  vm.runInContext(source,c);
  return {c,storage,sent,app,auth,order,applied:()=>applied};
 }
@@ -105,4 +106,30 @@ test('pending v2 shipment stays visible when current shippable stock reaches zer
  const rows=workspace.shippingRows(orders,warehouse,'A',helpers);
  assert.equal(rows.length,1);assert.equal(rows[0].warehouseId,'B');assert.equal(rows[0].qty,2);
  assert.equal(workspace.shippingRows(orders,warehouse,'A',{...helpers,pending:undefined}).length,0);
+});
+
+
+function productionShipmentFixture(options={}){
+ const f=setup(options);f.c.APP_ENVIRONMENT='production';f.c.YUSHIN_V2_SHIPMENT_EMULATOR=false;
+ Object.assign(f.c.location,{hostname:'sstonetw-source.github.io',origin:'https://sstonetw-source.github.io',pathname:'/yushin-system/'});
+ f.c.YUSHIN_PRODUCTION_SHIPMENT_BACKEND=true;f.c.YUSHIN_PRODUCTION_SHIPMENT_LEGACY_BLOCKED=true;
+ f.app.options.projectId='yu-shing-company';delete f.auth.emulatorConfig;return f;
+}
+test('production shipment retries its frozen ID and a disabled backend cannot revive the old writer',async()=>{
+ const f=productionShipmentFixture();await assert.rejects(f.c.commitInventoryShipment(base),/response lost/);
+ const original=f.c.pendingV2WarehouseShipment('O','I');assert.equal(original.operationId,base.operationId);
+ f.c.YUSHIN_PRODUCTION_SHIPMENT_BACKEND=false;
+ await assert.rejects(f.c.commitInventoryShipment(base),/不得改走一般交易/);
+ assert.equal(f.applied(),1);assert.equal(f.sent.length,1);
+ f.c.YUSHIN_PRODUCTION_SHIPMENT_BACKEND=true;await f.c.commitInventoryShipment(base);
+ assert.equal(f.applied(),1);assert.equal(f.storage.size,0);
+ assert.deepEqual(f.sent.map(row=>row.operationId),[base.operationId,base.operationId]);
+});
+test('production shipment rejects wrong site project Auth emulator and missing retirement lock before any write',async()=>{
+ for(const mutate of [f=>f.c.location.origin='http://sstonetw-source.github.io',
+  f=>f.c.location.pathname='/other/',f=>f.app.options.projectId='preview-20135',
+  f=>f.auth.emulatorConfig={host:'localhost',port:9099},f=>f.c.YUSHIN_PRODUCTION_SHIPMENT_LEGACY_BLOCKED=false]){
+  const f=productionShipmentFixture({lost:false});mutate(f);
+  await assert.rejects(f.c.commitInventoryShipment(base));assert.equal(f.applied(),0);assert.equal(f.sent.length,0);
+ }
 });

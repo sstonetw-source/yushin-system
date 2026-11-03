@@ -39,8 +39,10 @@ test('Preview physical receipt only accepts linked CLOSE returns and never broad
   selections:[{lotId:'L',qty:1}],operationId:'return_123456',warehouseId:'A',date:'2026-10-29',reason:'客戶退回',
   condition:'RESTOCKABLE',settlement:'CLOSE',requestId:'Q'};
  const unlinked={...intent};delete unlinked.requestId;
+ for(const [projectId,env] of [['preview-20135',preview()],['yu-shing-company',{
+  GCLOUD_PROJECT:'yu-shing-company',ENABLE_PRODUCTION_CUSTOMER_RETURN_BACKEND:'true'}]])
  for(const data of [unlinked,{...unlinked,settlement:'REPLACE'}])
-  await assert.rejects(commitLocationReturn({projectId:'preview-20135'},'U',data,preview()),
+  await assert.rejects(commitLocationReturn({projectId},'U',data,env),
    e=>e.code==='failed-precondition'&&/原申請/.test(e.message));
 });
 test('canonical Functions exports and Auth harness share the existing return writer',()=>{

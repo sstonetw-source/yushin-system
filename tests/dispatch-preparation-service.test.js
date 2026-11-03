@@ -23,6 +23,7 @@ function fixture(role='purchaser'){
    };
    const next=queue.then(run);queue=next.catch(()=>{});return next;
   }});
+ vm.runInContext(fs.readFileSync('src/infrastructure/production-transaction.js','utf8'),c);
  vm.runInContext(source,c);
  const intent=(patch={})=>({operationId:'dispatch-ui-AAAAAAAAAAAAAAA',orderId:'O',itemId:'I',actorUid:'buyer',actorRole:role,quantity:3,expectedPreparedQty:0,...patch});
  return {c,docs,intent,run:a=>c.prepareOrderDispatch('O','I',a||intent()),
@@ -145,5 +146,24 @@ test('original UI blocks corrupt pending dispatch credentials and disabled Previ
   assert.equal(legacy,0);assert.equal(storage.size,raw===undefined?0:1);
   if(raw!==undefined)assert.equal(storage.get(key),raw);
   assert.match(alerts[0],raw===undefined?/尚未啟用/:/憑證/);
+ }
+});
+
+
+function productionDispatchFixture(){
+ const f=emulatorFixture();f.c.APP_ENVIRONMENT='production';f.c.YUSHIN_V2_DISPATCH_EMULATOR=false;
+ Object.assign(f.c.location,{hostname:'sstonetw-source.github.io',origin:'https://sstonetw-source.github.io',pathname:'/yushin-system/'});
+ f.c.YUSHIN_PRODUCTION_DISPATCH_BACKEND=true;f.c.YUSHIN_PRODUCTION_DISPATCH_LEGACY_BLOCKED=true;
+ f.auth.app.options.projectId='yu-shing-company';delete f.auth.emulatorConfig;return f;
+}
+test('production dispatch uses its original intent and disabling the route preserves the retirement fence',async()=>{
+ const f=productionDispatchFixture();await f.run();assert.equal(f.calls.length,1);
+ assert.equal(f.calls[0].data.syncAttemptId,'original-sync');assert.equal(f.records().length,0);
+ f.c.YUSHIN_PRODUCTION_DISPATCH_BACKEND=false;
+ await assert.rejects(f.run(),/不可改用一般交易/);assert.equal(f.calls.length,1);
+ for(const mutate of [g=>g.c.location.pathname='/other/',g=>g.c.location.origin='http://sstonetw-source.github.io',
+  g=>g.c.YUSHIN_PRODUCTION_DISPATCH_LEGACY_BLOCKED=false,g=>g.auth.app.options.projectId='preview-20135',
+  g=>g.auth.emulatorConfig={host:'localhost',port:9099}]){
+  const g=productionDispatchFixture();mutate(g);await assert.rejects(g.run());assert.equal(g.calls.length,0);
  }
 });

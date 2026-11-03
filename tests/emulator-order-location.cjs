@@ -129,18 +129,31 @@ test('partial item lists stale sync duplicate source IDs and existing logistics 
  await db.collection('orders').doc(f.orderId).update({items:order.items,warehouseShipmentRecords:[{id:'existing'}]});
  await assert.rejects(f.run(),/物流/);
 });
-test('same-product source reads are bounded and stock/order documents are written only once',async()=>{
- const f=await seed('read-budget',{five:true}),reads=[],writes=[];
- const counted={projectId:db.projectId,collection:n=>db.collection(n),runTransaction:fn=>db.runTransaction(tx=>fn({
-  get:ref=>{reads.push(ref.path);return tx.get(ref);},
-  update:(ref,data)=>{writes.push(ref.path);return tx.update(ref,data);},
-  set:(ref,data)=>{writes.push(ref.path);return tx.set(ref,data);},
-  create:(ref,data)=>{writes.push(ref.path);return tx.create(ref,data);}
- }))};
- await f.run({},f.uid,counted);assert.equal(reads.length,14);assert.equal(new Set(reads).size,reads.length);
- for(const path of ['orders/'+f.orderId,'inventory/'+f.p,'warehouseStocks/MULTI-A__'+f.p,'warehouseStocks/MULTI-B__'+f.p])
-  assert.equal(writes.filter(p=>p===path).length,1,path);
+test('same-product read and write budgets apply to each real transaction attempt, including an aborted retry',async()=>{
+ const f=await seed('read-budget',{five:true}),attempts=[];
+ const counted={projectId:db.projectId,collection:n=>db.collection(n),runTransaction:fn=>db.runTransaction(async tx=>{
+  const reads=[],writes=[];attempts.push({reads,writes});
+  const result=await fn({
+   get:ref=>{reads.push(ref.path);return tx.get(ref);},
+   update:(ref,data)=>{writes.push(ref.path);return tx.update(ref,data);},
+   set:(ref,data)=>{writes.push(ref.path);return tx.set(ref,data);},
+   create:(ref,data)=>{writes.push(ref.path);return tx.create(ref,data);}
+  });
+  // Exercise the actual SDK retry rather than assuming the callback runs once.
+  if(attempts.length===1)throw Object.assign(new Error('forced transaction retry'),{code:10});
+  return result;
+ })};
+ await f.run({},f.uid,counted);assert.ok(attempts.length>=2);
+ for(const {reads,writes} of attempts){
+  assert.equal(reads.length,14);assert.equal(new Set(reads).size,reads.length);
+  for(const path of ['orders/'+f.orderId,'inventory/'+f.p,'warehouseStocks/MULTI-A__'+f.p,'warehouseStocks/MULTI-B__'+f.p])
+   assert.equal(writes.filter(p=>p===path).length,1,path);
+ }
+ const saved=await snapshot(f);assert.equal(saved.receipts.length,1);assert.equal(saved.movements.length,3);
+ assert.equal(saved.movements.reduce((sum,[,move])=>sum+move.qty,0),7);
+ assert.equal((await f.read('inventory',f.p)).reserved,7);
 });
+
 test('joint existing ledger claims cannot conceal duplicate ownership of the original company or warehouse holds',async()=>{
  for(const target of ['company','warehouse']){
   const f=await seed('joint-'+target);await f.run();
