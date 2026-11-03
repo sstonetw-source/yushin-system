@@ -288,6 +288,22 @@ async function commitOrderReservation(db,uid,data){
       if(prior||demandDoc.requestedQty>0)writes.push({type:'set',ref:demandRef,data:demandDoc});
     }
     const lifecycleWarehouseIds=[...lifecycleWarehouses].sort();
+    if(lifecycleWarehouseIds.length>2)
+      fault('failed-precondition','新單生命週期目前僅支援 1–2 個候選實體倉，未提交任何預留');
+    // Every v2 consumer needs an explicit zero balance for each candidate,
+    // including a product that has never been stocked at a sibling's warehouse.
+    // Missing stock was already treated as zero during reservation planning;
+    // make that fact durable in the same transaction, never infer real stock.
+    for(const [productKey,company] of companyStocks){
+      if(!company.exists)writes.push({type:'create',ref:company.ref,data:{
+        productKey,onHand:0,reserved:0,incoming:0,updatedAt:now}});
+      for(const warehouseId of lifecycleWarehouseIds){
+        const key=encodeURIComponent(warehouseId)+'__'+encodeURIComponent(productKey);
+        const stock=await trackedStock('warehouseStocks',key,warehouseStocks,warehouseId,{warehouseId,productKey});
+        if(!stock.exists)writes.push({type:'create',ref:stock.ref,data:{
+          productKey,warehouseId,onHand:0,reserved:0,incoming:0,updatedAt:now}});
+      }
+    }
     for(const write of writes)if(write.ref.path.startsWith('inventoryReservations/'))
       write.data.lifecycleWarehouseIds=lifecycleWarehouseIds;
     // The read phase is complete. Apply all writes only after validating the

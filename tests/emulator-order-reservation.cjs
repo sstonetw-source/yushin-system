@@ -117,3 +117,28 @@ test('code-free administrator demand continues into the existing formal purchasi
  assert.equal(order.ownerUid,f.uid);assert.equal(order.salesCode,'');assert.equal(order.items[2].supplyOrderedQty,1);
  assert.equal(demand.ownerUid,f.uid);assert.equal(demand.salesCode,'');assert.equal(demand.orderedQty,1);
 });
+
+test('new zero-stock source creates explicit balances and can cancel and restore without ledger conversion',async()=>{
+ const f=await seed('zero-lifecycle');
+ await db.doc('orders/'+f.orderId).update({items:[
+  {itemId:'I1',productId:f.productKey,warehouseId:'A',qty:3,reservedQty:0}
+ ]});
+ await db.doc('inventory/'+f.productKey).delete();
+ await db.doc('warehouseStocks/A__'+f.productKey).delete();
+ await db.doc('warehouseStocks/B__'+f.productKey).delete();
+ await f.call();
+ assert.equal((await f.get('inventory/'+f.productKey)).onHand,0);
+ assert.equal((await f.get('warehouseStocks/A__'+f.productKey)).reserved,0);
+ const ledger=await f.get('inventoryReservations/'+f.orderId+'__I1');
+ assert.equal(ledger.locationSchemaVersion,2);assert.deepEqual(ledger.locations,[]);
+ assert.deepEqual(ledger.lifecycleWarehouseIds,['A']);
+ await db.doc('users/'+f.uid).update({role:'admin'});
+ const lifecycle=require('../functions/single-item-location-lifecycle-service').commitOrderLocationLifecycle;
+ const intent={orderId:f.orderId,itemIds:['I1'],warehouseIds:['A'],syncAttemptId:f.intent.syncAttemptId,
+  operationId:'zero_source_cancel_12345',nextStatus:'cancelled',date:'2026-11-03'};
+ await lifecycle(db,f.uid,intent);
+ assert.equal((await f.get('orders/'+f.orderId)).status,'cancelled');
+ await lifecycle(db,f.uid,{...intent,operationId:'zero_source_restore_12345',nextStatus:'normal'});
+ assert.equal((await f.get('orders/'+f.orderId)).items[0].shortageQty,3);
+ assert.equal((await f.get('inventory/'+f.productKey)).onHand,0);
+});

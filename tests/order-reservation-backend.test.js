@@ -169,7 +169,7 @@ test('insufficient or missing stock yields shortage and demand without partially
  const result=await f.run();assert.equal(result.reservedQty,2);
  assert.equal(result.shortageQty,7);
  assert.equal(f.docs.get('inventory/P').reserved,0);
- assert.equal(f.docs.has('warehouseStocks/A__P'),false);
+ assert.equal(f.docs.get('warehouseStocks/A__P').onHand,0);
  assert.equal(f.docs.get('inventoryReservations/O__I1').quantity,0);
  assert.equal(f.docs.get('procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I1')).requestedQty,3);
 });
@@ -354,4 +354,24 @@ test('different orders may use the same synchronization ID without movement coll
  assert.ok(moves.some(row=>row.sourceId==='O'));
  assert.ok(moves.some(row=>row.sourceId==='O2'));
  assert.equal(f.docs.get('inventory/P').reserved,8);
+});
+
+
+test('v2 initialization materializes missing zero balances for every shared lifecycle candidate',async()=>{
+ const f=fixture();f.docs.delete('inventory/Q');f.docs.delete('warehouseStocks/B__Q');
+ await f.run();
+ for(const key of ['P','Q'])for(const wh of ['A','B']){
+  const stock=f.docs.get('warehouseStocks/'+wh+'__'+key);
+  assert.equal(stock.productKey,key);assert.equal(stock.warehouseId,wh);
+  assert.equal(Number.isSafeInteger(stock.onHand),true);
+ }
+ assert.equal(f.docs.get('inventory/Q').onHand,0);
+ assert.equal(f.docs.get('inventory/Q').reserved,0);
+ assert.equal(f.docs.get('warehouseStocks/A__Q').onHand,0);
+});
+
+test('three candidate warehouses reject before creating an unusable lifecycle source',async()=>{
+ const f=fixture();f.put('warehouses/C',{active:true});
+ f.put('warehouseStocks/C__P',{productKey:'P',warehouseId:'C',onHand:0,reserved:0});
+ const before=f.snapshot();await assert.rejects(f.run(),/1–2 個候選/);assert.equal(f.snapshot(),before);
 });
