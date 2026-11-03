@@ -9,6 +9,7 @@ const {initializeApp:clientApp,deleteApp}=require('firebase/app');
 const {getAuth,connectAuthEmulator,signInWithEmailAndPassword}=require('firebase/auth');
 const {getFunctions,connectFunctionsEmulator,httpsCallable}=require('firebase/functions');
 const demandCore=require('../functions/shared/procurement-demand-core');
+const {auditQuickPurchase}=require('../functions/quick-purchase-audit');
 const project='demo-yushin';
 let server,db,users;
 const clients=[];
@@ -80,6 +81,13 @@ test('real purchaser Callable atomically creates supplier, demand, source, both 
  assert.equal((await f.data('warehouseStocks/'+f.warehouseId+'__'+f.productId)).incoming,4);
  assert.equal((await f.data('warehouseStocks/'+f.warehouseId+'__'+f.productId)).reserved,2);
  assert.equal((await f.data('inventoryMovements/quick-'+intent.operationId)).qty,4);
+ // Audit the same committed fixture, without submitting another purchase.
+ const operationRef=db.doc('purchaseOperations/quick-'+intent.operationId);
+ const operationBefore=await operationRef.get();
+ const audit=await auditQuickPurchase(db,{orderId:f.orderId,itemId:f.itemId});
+ assert.equal(audit.status,'CONSISTENT',JSON.stringify(audit));
+ assert.equal(audit.target.operationId,intent.operationId);
+ assert.equal((await operationRef.get()).updateTime.isEqual(operationBefore.updateTime),true);
  const repeat=(await f.call(intent)).data;
  assert.equal(repeat.status,'already-applied');
  assert.equal((await f.data('inventory/'+f.productId)).incoming,4);
