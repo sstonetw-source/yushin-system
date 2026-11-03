@@ -46,6 +46,7 @@ test('stock reset zeroes quantity fields and clears embedded lots without touchi
   const patch = stockResetPatch(sample, 'admin-cli', '2026-10-28T00:00:00.000Z');
   assert.deepEqual(patch, {
     onHand: 0, reserved: 0, available: 0, incoming: 0, shortage: 0,
+    transferReserved: 0, transferInTransit: 0, transferFreeInTransit: 0,
     lots: [], updatedAt: '2026-10-28T00:00:00.000Z', resetBy: 'admin-cli'
   });
   assert.equal(sample.onHand, 4);
@@ -63,4 +64,20 @@ test('stock reset preserves a warehouse stock without lots', () => {
 test('stock reset rejects unknown field types before any write', () => {
   assert.throws(() => stockResetPatch({ onHand: '8' }, 'cli', 'now'), /Unexpected stock field type/);
   assert.throws(() => stockResetPatch({ lots: { stale: true } }, 'cli', 'now'), /Unexpected lots type/);
+});
+
+
+test('reset removes transfer holds and transit counters before stock can be initialized again',()=>{
+ const original={productKey:'P',warehouseId:'W',onHand:9,reserved:4,
+  transferReserved:2,transferInTransit:5,transferFreeInTransit:3};
+ const patch=stockResetPatch(original,'cli','now');
+ const cleaned={...original,...patch};
+ assert.equal(cleaned.transferReserved,0);
+ assert.equal(cleaned.transferInTransit,0);
+ assert.equal(cleaned.transferFreeInTransit,0);
+ assert.equal(cleaned.reserved,0);assert.equal(cleaned.onHand,0);
+ assert.equal(require('../modules/inventory-core').normalizeStock(cleaned).available,0);
+ for(const key of ['transferReserved','transferInTransit','transferFreeInTransit'])
+  assert.throws(()=>stockResetPatch({...original,[key]:'3'},'cli','now'),/Unexpected stock field type/);
+ assert.equal(original.transferReserved,2,'planning never mutates the live snapshot');
 });
