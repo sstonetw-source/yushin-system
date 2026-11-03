@@ -7,7 +7,7 @@ const vm=require('node:vm');
 const root=path.join(__dirname,'..');
 const rollout=fs.readFileSync(path.join(root,'transaction-rollout-config.js'),'utf8');
 const html=fs.readFileSync(path.join(root,'index.html'),'utf8');
-const version='20261102-qp-activation-1';
+const version='20261103-receiving-guard-1';
 
 test('missing production origin leaves all new transaction flags disabled',()=>{
  const context={YUSHIN_PRODUCTION_QUICK_PURCHASE_LEGACY_BLOCKED:true,YUSHIN_PRODUCTION_QUICK_PURCHASE:true,YUSHIN_PREVIEW_QUICK_PURCHASE:true,
@@ -25,6 +25,23 @@ test('missing production origin leaves all new transaction flags disabled',()=>{
  assert.equal(context.YUSHIN_PRODUCTION_QUICK_PURCHASE,false,'reloading the asset must remain fail-closed');
  assert.equal(context.YUSHIN_PRODUCTION_ORDER_RESERVATION_BACKEND,false,'reservation flag must remain fail-closed');
  assert.equal(context.YUSHIN_PRODUCTION_ORDER_RESERVATION_LEGACY_BLOCKED,false,'untrusted origins must not inherit a production flag');
+});
+
+test('receiving backend and retirement lock never inherit stale global gates before approved cutover',()=>{
+ for(const url of ['https://sstonetw-source.github.io/yushin-system/','https://evil.example/yushin-system/']){
+  const context={location:new URL(url),YUSHIN_PRODUCTION_RECEIVING_BACKEND:true,
+   YUSHIN_PRODUCTION_RECEIVING_LEGACY_BLOCKED:true,YUSHIN_PREVIEW_RECEIVING:true};
+  context.globalThis=context;
+  vm.runInNewContext(rollout,context);
+  assert.equal(context.YUSHIN_PRODUCTION_RECEIVING_BACKEND,false,url);
+  assert.equal(context.YUSHIN_PRODUCTION_RECEIVING_LEGACY_BLOCKED,false,url);
+  assert.equal(context.YUSHIN_PREVIEW_RECEIVING,true,'production config must not change Preview gates');
+  context.YUSHIN_PRODUCTION_RECEIVING_BACKEND=true;
+  context.YUSHIN_PRODUCTION_RECEIVING_LEGACY_BLOCKED=true;
+  vm.runInNewContext(rollout,context);
+  assert.equal(context.YUSHIN_PRODUCTION_RECEIVING_BACKEND,false,'reload must remain closed');
+  assert.equal(context.YUSHIN_PRODUCTION_RECEIVING_LEGACY_BLOCKED,false,'reload must not arm retirement');
+ }
 });
 
 test('versioned rollout config loads synchronously before generated app.js',()=>{
