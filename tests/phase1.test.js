@@ -3930,7 +3930,7 @@ test('business reservation rules retain scoped writes and block native cross-war
     assert.match(rulesSource,/function operationalReservationStockEvidence\(id\)[\s\S]*?get\('crossWarehouse', false\) != true/);
     assert.match(rulesSource,/function validOperationalMovementEvidence\(id\)[\s\S]*?get\('crossWarehouse', false\) == false/);
     const updateGuard=rulesSource.slice(rulesSource.indexOf('function reservationUpdateAllowed(id)'),rulesSource.indexOf('function inventoryMovementWriter(id)'));
-    assert.match(updateGuard,/validReservationSource\(id, request.resource.data, userRole\)[\s\S]*?reservationIdentityUnchanged\(\)[\s\S]*?legacyReservationLocationShape\(resource.data\)[\s\S]*?reservationUpdateWriter\(id, userRole\)/);
+    assert.match(updateGuard,/validReservationSource\(id, request.resource.data\)[\s\S]*?reservationIdentityUnchanged\(\)[\s\S]*?legacyReservationLocationShape\(resource.data\)[\s\S]*?reservationUpdateWriter\(id, userRole\)/);
     assert.match(rulesSource,/function reservationUpdateWriter\(id, userRole\)[\s\S]*?businessReservationOperationalUpdate\(\)/);
 });
 
