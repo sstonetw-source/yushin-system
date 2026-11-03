@@ -1076,8 +1076,12 @@ service cloud.firestore {
       let userRole = role();
       return userRole in ['admin','purchaser','warehouse','sales','engineer']
         && (userRole in ['admin','purchaser','warehouse'] || owns(request.resource.data))
+        // Existing validated reservation movements already carry their own
+        // dedicated stock proof; avoid adding reads to their Rules budget.
         && (!('reservationStockEvidence' in request.resource.data)
-          || (userRole in ['admin','purchaser','warehouse'] && validOperationalMovementEvidence(id)));
+          ? (!(request.resource.data.get('type', '') in ['ship', 'ship_reversal'])
+            || !shipmentBackendOnly())
+          : (userRole in ['admin','purchaser','warehouse'] && validOperationalMovementEvidence(id)));
     }
 
     function businessProcurementDemandOperationalUpdate() {
@@ -2535,9 +2539,7 @@ service cloud.firestore {
     match /inventoryMovements/{id} {
       allow read: if canReceiveInventory()
         || (businessOwner() && owns(resource.data));
-      allow create: if (!(request.resource.data.get('type', '') in ['ship', 'ship_reversal'])
-          || !shipmentBackendOnly())
-        && inventoryMovementWriter(id)
+      allow create: if inventoryMovementWriter(id)
         && !('unitCost' in request.resource.data)
         && !('purchaseNetAmount' in request.resource.data)
         && !('cogs' in request.resource.data);
