@@ -163,6 +163,8 @@ async function assertActiveReturnWarehouse(tx,warehouseId){
         throw new Error('收貨倉庫不存在、已停用或屬於業務保管位置，請重新選擇。');
 }
 async function commitCustomerReturnReceipt({orderId,requestId,receiptId,qty,quality,warehouseId}){
+    if(typeof productionTransactionBackendRequired==='function'&&productionTransactionBackendRequired('CUSTOMER_RETURN'))
+        throw Error('退貨實收必須使用原出貨及批次的可信任後端，禁止改用一般退貨交易。');
     if(typeof pendingV2CustomerReturnReceipt==='function'&&pendingV2CustomerReturnReceipt(orderId))
         throw new Error('前次後端退貨尚未確認，請以原操作核對，禁止改用一般退貨入庫。');
     if(!canReceiveInventoryCapability())throw new Error('無收貨權限。');

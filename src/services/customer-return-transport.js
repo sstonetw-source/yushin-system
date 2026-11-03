@@ -2,20 +2,22 @@
 function customerReturnBackendEnabled(){
     return globalThis.YUSHIN_V2_RETURN_RECEIPT_EMULATOR===true
         ||(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'
-            &&globalThis.YUSHIN_PREVIEW_CUSTOMER_RETURN===true);
+            &&globalThis.YUSHIN_PREVIEW_CUSTOMER_RETURN===true)
+        ||(typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled('CUSTOMER_RETURN'));
 }
 function v2CustomerReturnTransport(){
     const local=host=>host==='localhost'||host==='127.0.0.1';
     const emulator=globalThis.YUSHIN_V2_RETURN_RECEIPT_EMULATOR===true;
-    const project=emulator?'demo-yushin':'preview-20135';
+    const production=typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled('CUSTOMER_RETURN');
+    const project=emulator?'demo-yushin':production?'yu-shing-company':'preview-20135';
     const host=String(globalThis.location?.hostname||'').toLowerCase();
     if(!customerReturnBackendEnabled()||typeof firebase==='undefined'||!firebase.auth||!firebase.functions
-        ||(emulator?!local(host):!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(host)))
+        ||(emulator?!local(host):!production&&!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(host)))
         throw Error('退貨後端尚未在此環境獲准啟用，禁止改用舊交易。');
     const auth=firebase.auth(),functions=firebase.app().functions('asia-east1');
     const uid=currentUser?.uid,role=currentUserRole;
     const check=()=>{
-        if(!customerReturnBackendEnabled()||emulator!==(globalThis.YUSHIN_V2_RETURN_RECEIPT_EMULATOR===true)
+        if(!customerReturnBackendEnabled()||(production&&!productionTransactionBackendEnabled('CUSTOMER_RETURN'))||emulator!==(globalThis.YUSHIN_V2_RETURN_RECEIPT_EMULATOR===true)
             ||firebase.app().options?.projectId!==project||auth.app?.options?.projectId!==project
             ||functions.app?.options?.projectId!==project||db.app?.options?.projectId!==project
             ||(emulator?(!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099):!!auth.emulatorConfig))

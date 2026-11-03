@@ -2,13 +2,15 @@
 function customerReturnRequestBackendEnabled(){
  return globalThis.YUSHIN_V2_RETURN_REQUEST_EMULATOR===true
   ||(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'
-   &&globalThis.YUSHIN_PREVIEW_CUSTOMER_RETURN_REQUEST===true);
+   &&globalThis.YUSHIN_PREVIEW_CUSTOMER_RETURN_REQUEST===true)
+  ||(typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled('CUSTOMER_RETURN_REQUEST'));
 }
 function customerReturnRequestPendingKey(orderId){
  return 'v2-return-request:'+encodeURIComponent(currentUser?.uid||'')+':'+encodeURIComponent(orderId);
 }
 function customerReturnRequestBackendRequired(orderId){
  return (typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview')
+  ||(typeof productionTransactionBackendRequired==='function'&&productionTransactionBackendRequired('CUSTOMER_RETURN_REQUEST'))
   ||customerReturnRequestBackendEnabled()||sessionStorage.getItem(customerReturnRequestPendingKey(orderId))!==null;
 }
 function pendingCustomerReturnRequestOperation(orderId){
@@ -19,20 +21,21 @@ function pendingCustomerReturnRequestOperation(orderId){
    ||!['REQUEST','WITHDRAW'].includes(saved.action)||!p||p.orderId!==orderId
    ||typeof p.operationId!=='string'||!/^[a-zA-Z0-9_-]{12,96}$/.test(p.operationId)
    ||typeof p.syncAttemptId!=='string'||!p.syncAttemptId
-   ||!['demo-yushin','preview-20135'].includes(saved.backendProject))throw Error('invalid checkpoint');
+   ||!['demo-yushin','preview-20135','yu-shing-company'].includes(saved.backendProject))throw Error('invalid checkpoint');
   return saved;
  }catch(_){throw Error('前次退貨申請／撤回結果未確認，請保留暫存並使用原帳號與角色核對。');}
 }
 function customerReturnRequestTransport(){
  const emulator=globalThis.YUSHIN_V2_RETURN_REQUEST_EMULATOR===true;
- const project=emulator?'demo-yushin':'preview-20135';
+ const production=typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled('CUSTOMER_RETURN_REQUEST');
+ const project=emulator?'demo-yushin':production?'yu-shing-company':'preview-20135';
  const local=host=>host==='localhost'||host==='127.0.0.1';
  if(typeof firebase==='undefined'||!firebase.auth||!firebase.functions)throw Error('退貨申請後端尚未準備完成，禁止改用舊交易。');
  const auth=firebase.auth(),functions=firebase.app().functions('asia-east1'),uid=currentUser?.uid,role=currentUserRole;
  const check=()=>{
   const host=globalThis.location?.hostname;
-  if(!customerReturnRequestBackendEnabled()||emulator!==(globalThis.YUSHIN_V2_RETURN_REQUEST_EMULATOR===true)
-   ||(emulator?!local(host):!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(host))
+  if(!customerReturnRequestBackendEnabled()||(production&&!productionTransactionBackendEnabled('CUSTOMER_RETURN_REQUEST'))||emulator!==(globalThis.YUSHIN_V2_RETURN_REQUEST_EMULATOR===true)
+   ||(emulator?!local(host):!production&&!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(host))
    ||firebase.app().options?.projectId!==project||auth.app?.options?.projectId!==project
    ||functions.app?.options?.projectId!==project||db.app?.options?.projectId!==project
    ||(emulator?(!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099):!!auth.emulatorConfig))

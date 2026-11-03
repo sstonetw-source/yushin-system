@@ -1,7 +1,9 @@
 'use strict';
+const {allowProductionTransaction}=require('./production-transaction-gate');
 const {projectIdFromEnvironment}=require('./grouped-reservation-gate');
 const local=value=>typeof value==='string'&&/^(localhost|127\.0\.0\.1):[0-9]+$/.test(value);
 function customerReturnBackendProject(env=process.env){
+ if(allowProductionTransaction('CUSTOMER_RETURN',env))return 'yu-shing-company';
  const project=projectIdFromEnvironment(env);
  if(project==='demo-yushin'&&env.ENABLE_V2_RETURN_AUTH_EMULATOR==='true'
   &&env.FUNCTIONS_EMULATOR==='true'&&local(env.FIRESTORE_EMULATOR_HOST)

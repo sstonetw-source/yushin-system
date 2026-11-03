@@ -5,7 +5,7 @@ function productionTransactionBackendRequired(kind){
    ||globalThis['YUSHIN_PRODUCTION_'+kind+'_LEGACY_BLOCKED']===true);
 }
 function productionTransactionBackendEnabled(kind){
- if(!['DISPATCH','SHIPMENT','ORDER_LIFECYCLE','DELIVERY_CONFIRMATION','DELIVERY_REVERSAL'].includes(kind)||!productionTransactionBackendRequired(kind)
+ if(!['DISPATCH','SHIPMENT','ORDER_LIFECYCLE','DELIVERY_CONFIRMATION','DELIVERY_REVERSAL','CUSTOMER_RETURN','CUSTOMER_RETURN_REQUEST'].includes(kind)||!productionTransactionBackendRequired(kind)
   ||globalThis['YUSHIN_PRODUCTION_'+kind+'_BACKEND']!==true
   ||globalThis['YUSHIN_PRODUCTION_'+kind+'_LEGACY_BLOCKED']!==true)return false;
  const path=String(globalThis.location?.pathname||'');
