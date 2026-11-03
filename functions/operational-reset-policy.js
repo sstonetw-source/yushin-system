@@ -2,7 +2,7 @@
 
 // One-time operational reset allowlist. Unknown roots always abort.
 const DELETE_COLLECTIONS = Object.freeze([
-  'orders', 'purchaseOrders', 'procurementDemands', 'supplyOrders',
+  'orders', 'purchaseOrders', 'purchaseOperations', 'procurementDemands', 'supplyOrders',
   'inventoryReservations', 'inventoryLots', 'inventoryLotCosts',
   'receipts', 'customerReturnReceipts', 'dispatchRecords', 'deliveries',
   'inventoryMovements', 'receivingSupplyOrders', 'forecasts',

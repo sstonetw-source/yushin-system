@@ -16,3 +16,21 @@ ENABLE_PRODUCTION_CUSTOMER_RETURN_BACKEND=true；只有一致的 yu-shing-compan
 實收成功依原憑證及訂單回讀核對後才移除暫存。
 
 與其他核心路由、舊瀏覽器保護、資料重置及期初庫存集中審核授權後才可正式發布。
+
+## 舊瀏覽器資料庫退役鎖候選
+
+`settings/returnCutover.backendOnly=true` 同時退役舊退貨申請／撤回、實收、
+更正及待檢轉庫存。未建立設定或 false 時維持原權限；設 true 後 Client SDK
+（包括管理員）不能更動訂單 returnRequests／returnPending／returnRequestMutationIndex／
+returnRecords／returnedQty／returnReceiptId，也不能建立、更新或刪除 customerReturnReceipts。
+新訂單允許空退貨狀態，不能夾帶退貨事實；既有唯讀權限不變。
+
+設定為單向：瀏覽器不能關閉、移除 backendOnly、換成其他型別或刪除 gate。
+可信 Functions Admin SDK 沿原唯一退貨核心與最新角色查核繼續寫入。
+舊實收與待檢轉庫存交易在訂單／憑證遭拒時整筆回滾，不會只入庫或只完成申請。
+本鎖不代表待檢轉庫存已獲新後端支援；未支援功能維持停用，由管理員處理例外。
+
+只在退貨欄位變更、帶退貨事實的新建與退貨憑證寫入時讀 gate，
+不新增 Collection 類型、Query、Index、Listener 或庫存計算核心。
+必須另行授權發布 Rules、部署相容後端、啟用路由及真角色驗收；
+故障保留退役鎖與原操作 ID，不回退舊 writer。

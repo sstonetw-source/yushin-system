@@ -1240,6 +1240,9 @@ service cloud.firestore {
         && (id != 'shipmentCutover'
           || resource.data.get('backendOnly', false) != true
           || request.resource.data.get('backendOnly', false) == true)
+        && (id != 'returnCutover'
+          || resource.data.get('backendOnly', false) != true
+          || request.resource.data.get('backendOnly', false) == true)
         && (id != 'deliveryCutover'
           || resource.data.get('backendOnly', false) != true
           || request.resource.data.get('backendOnly', false) == true)
@@ -1467,7 +1470,10 @@ service cloud.firestore {
     // candidates for a short, fully withdrawn request list.
     function returnPendingInGroup(requests, start) {
       let count = requests.size();
-      return count > start && (requests[start].status == 'PENDING'
+      return count >= start + 5
+        ? [requests[start].status, requests[start + 1].status, requests[start + 2].status,
+          requests[start + 3].status, requests[start + 4].status].hasAny(['PENDING'])
+        : count > start && (requests[start].status == 'PENDING'
         || (count > start + 1 && requests[start + 1].status == 'PENDING')
         || (count > start + 2 && requests[start + 2].status == 'PENDING')
         || (count > start + 3 && requests[start + 3].status == 'PENDING')
@@ -2067,10 +2073,28 @@ service cloud.firestore {
         && request.resource.data.get('deliveredQty', 0) == 0
         && request.resource.data.get('isDelivered', false) == false) || !deliveryBackendOnly();
     }
+    // Return requests, receipt settlement and inspection release retire together.
+    // The trusted return services keep their existing calculation and role checks.
+    function returnBackendOnly() {
+      let gate = /databases/$(database)/documents/settings/returnCutover;
+      return exists(gate) && get(gate).data.get('backendOnly', false) == true;
+    }
+    function clientReturnFactsUnchanged() {
+      return !request.resource.data.diff(resource.data).affectedKeys()
+        .hasAny(['returnRequests', 'returnPending', 'returnRequestMutationIndex',
+          'returnRecords', 'returnedQty', 'returnReceiptId']) || !returnBackendOnly();
+    }
+    function clientReturnFactsEmpty() {
+      return (request.resource.data.get('returnRequests', []) == []
+        && request.resource.data.get('returnPending', false) == false
+        && request.resource.data.get('returnRecords', []) == []
+        && request.resource.data.get('returnedQty', 0) == 0
+        && request.resource.data.get('returnReceiptId', '') == '') || !returnBackendOnly();
+    }
     match /orders/{id} {
       allow get: if (resource == null ? role() in ['admin','purchaser','warehouse','sales','engineer'] : operationalOrOwnedReader(resource.data));
       allow list: if operationalOrOwnedReader(resource.data);
-      allow create: if canCreateCommercialDoc() && clientDeliveryFactsEmpty()
+      allow create: if canCreateCommercialDoc() && clientDeliveryFactsEmpty() && clientReturnFactsEmpty()
         // Client SDK must not forge the terminal server-only checkpoint.
         && request.resource.data.get('inventoryReservationStatus', '') != 'completed'
         && request.resource.data.get('items', []).size() <= 15
@@ -2087,7 +2111,7 @@ service cloud.firestore {
           || request.resource.data.get('items', []) == resource.data.get('items', []))
         && (resource.data.get('inventoryReservationStatus', '') == 'completed'
           || request.resource.data.get('inventoryReservationStatus', '') != 'completed')
-        && orderUpdateAllowed(id);
+        && clientReturnFactsUnchanged() && orderUpdateAllowed(id);
       allow delete: if admin();
     }
 
@@ -2477,7 +2501,7 @@ service cloud.firestore {
 
     match /customerReturnReceipts/{id} {
       allow read: if canReceiveInventory() || (businessOwner() && owns(resource.data));
-      allow create: if canReceiveInventory()
+      allow create: if !returnBackendOnly() && canReceiveInventory()
         && validActiveReturnWarehouse(request.resource.data.warehouseId)
         && request.resource.data.receivedBy == request.auth.uid
         && request.resource.data.qty is number && request.resource.data.qty > 0
@@ -2491,13 +2515,13 @@ service cloud.firestore {
         && request.resource.data.record.quality == request.resource.data.quality
         && request.resource.data.record.warehouseId == request.resource.data.warehouseId
         && getAfter(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.returnReceiptId == id;
-      allow update: if canReceiveInventory() && resource.data.disposition == 'HOLD'
+      allow update: if !returnBackendOnly() && canReceiveInventory() && resource.data.disposition == 'HOLD'
         && validActiveReturnWarehouse(resource.data.warehouseId)
         && request.resource.data.disposition == 'STOCK'
         && request.resource.data.releasedBy == request.auth.uid
         && request.resource.data.releasedAt != ''
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['disposition', 'releasedAt', 'releasedBy']);
-      allow delete: if admin();
+      allow delete: if !returnBackendOnly() && admin();
     }
 
     // Client receipt writes are permitted only before the separately approved
