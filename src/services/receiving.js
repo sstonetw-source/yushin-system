@@ -1,5 +1,13 @@
 // Transaction layer only. Optional synchronous observers report committed locations;
 // callers own cache invalidation and presentation. Never notify from a transaction callback.
+// V2 canonical reservations have no top-level warehouseId: use the immutable
+// lifecycle warehouse scope, while preserving legacy single-location matching.
+function receiptShortageWarehouseEligible(reservation, warehouseId) {
+    if(reservation?.locationSchemaVersion===2)
+        return Array.isArray(reservation.lifecycleWarehouseIds)
+            && reservation.lifecycleWarehouseIds.includes(warehouseId);
+    return reservation?.warehouseId===warehouseId;
+}
 async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty,actor,excludeOrderId='',receiptId='',checkpointCollection='receipts',allocationGuard=null,onStockCommitted=null) {
     allocationGuard?.();
     if(!['receipts','stockTransfers'].includes(checkpointCollection))throw new Error('庫存分配進度來源不正確。');
@@ -24,7 +32,7 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
                 allocationGuard?.();
                 for(const doc of page.docs){
                     const row={...doc.data(),id:doc.id};
-                    if(row.orderId===excludeOrderId||row.warehouseId!==warehouseId||!(Number(row.shortageQty||0)>0)||skippedCandidateIds.has(row.id))continue;
+                    if(row.orderId===excludeOrderId||!receiptShortageWarehouseEligible(row,warehouseId)||!(Number(row.shortageQty||0)>0)||skippedCandidateIds.has(row.id))continue;
                     if(!candidate||compare(row,candidate)<0)candidate=row;
                 }
                 if(page.size<50)break;
@@ -60,7 +68,9 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
             if(!orderSnap.exists||!resSnap.exists||!whSnap.exists||!invSnap.exists){skipCandidate=true;return;}
             if(receiptRef&&!receiptSnap?.exists){completionReason='deferred';stopAllocation=true;return;}
             const reservation=resSnap.data();
-            if(reservation.productKey!==productKey||reservation.warehouseId!==warehouseId){skipCandidate=true;return;}
+            if(reservation.productKey!==productKey||!receiptShortageWarehouseEligible(reservation,warehouseId)){skipCandidate=true;return;}
+            if(reservation.locationSchemaVersion===2)
+                globalThis.YushinReservation.reservationLocations(reservation);
             const liveShortage=Math.max(0,Number(reservation.shortageQty||0));
             const order={id:orderSnap.id,...orderSnap.data()};
             if(normalizedOrderStatus(order)!=='normal'||orderInventorySyncIncomplete(order)||liveShortage<=0){skipCandidate=true;return;}
@@ -68,7 +78,9 @@ async function allocateFreeReceiptStockToShortages(productKey,warehouseId,maxQty
             const receiptTarget=receiptRef?Math.max(0,Number(receipt?.autoAllocationQty||0)):remaining;
             const receiptAllocated=receiptRef?Math.max(0,Number(receipt?.autoAllocatedQty||0)):0;
             const receiptRemaining=receiptRef?Math.max(0,receiptTarget-receiptAllocated):remaining;
-            const items=normalizedOrderItems(order);
+            // Canonical v2 order lines must retain original location and lifecycle fields.
+            const items=reservation.locationSchemaVersion===2
+                ?order.items.map(row=>({...row})):normalizedOrderItems(order);
             const index=items.findIndex(item=>item.itemId===reservation.itemId);
             if(index<0){skipCandidate=true;return;}
             const item=items[index],oldReserved=Number(item.reservedQty||0);
