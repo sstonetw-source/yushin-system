@@ -2503,7 +2503,9 @@ service cloud.firestore {
         || (businessOwner() && owns(resource.data));
       allow create: if !dispatchBackendOnly() && canPurchase();
       allow update: if false;
-      allow delete: if admin();
+      // Cutover also preserves already-committed operation identities:
+      // a cached admin client must not erase a proof and allow its ID to be reused.
+      allow delete: if !dispatchBackendOnly() && admin();
     }
 
     // Physical delivery is recorded by the responsible business owner.
