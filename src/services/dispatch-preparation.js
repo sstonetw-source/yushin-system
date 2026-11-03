@@ -3,27 +3,31 @@
 function dispatchBackendPilotEnabled() {
     return globalThis.YUSHIN_V2_DISPATCH_EMULATOR===true
         || (typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'
-            &&globalThis.YUSHIN_PREVIEW_DISPATCH===true);
+            &&globalThis.YUSHIN_PREVIEW_DISPATCH===true)
+        ||(typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled('DISPATCH'));
 }
 async function prepareV2OrderDispatchBackend(orderId,itemId,intent,assertActor) {
     const local=host=>['localhost','127.0.0.1'].includes(host);
     const emulator=globalThis.YUSHIN_V2_DISPATCH_EMULATOR===true;
     const preview=typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'
         &&globalThis.YUSHIN_PREVIEW_DISPATCH===true;
+    const production=typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled('DISPATCH');
     const host=String(globalThis.location?.hostname||'').toLowerCase();
-    if((!emulator&&!preview)||(emulator&&!local(host))
+    if((!emulator&&!preview&&!production)||(emulator&&!local(host))
         ||(preview&&!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(host))
         ||typeof firebase==='undefined'||!firebase.auth||!firebase.functions)
         throw new Error('出貨準備後端尚未在目前授權的測試環境啟用，禁止改用舊交易。');
     const auth=firebase.auth(),functions=firebase.app().functions('asia-east1');
-    const project=emulator?'demo-yushin':'preview-20135';
+    const project=emulator?'demo-yushin':production?'yu-shing-company':'preview-20135';
     if(firebase.app().options?.projectId!==project
         ||auth.app?.options?.projectId!==project||functions.app?.options?.projectId!==project
         ||typeof db==='undefined'||db.app?.options?.projectId!==project
         ||(emulator&&(!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099))
-        ||(preview&&!!auth.emulatorConfig))
+        ||((preview||production)&&!!auth.emulatorConfig))
         throw new Error('出貨準備 Auth、Functions 與資料庫專案不一致，未提交打單。');
-    const assertSession=()=>{assertActor();if(auth.currentUser?.uid!==intent.actorUid)
+    const assertSession=()=>{assertActor();
+        if(production&&!productionTransactionBackendEnabled('DISPATCH'))throw new Error('打單後端已停用，請保留原識別碼核對。');
+        if(auth.currentUser?.uid!==intent.actorUid)
         throw new Error('實際登入帳號已變更，請以原身分確認打單結果。');};
     assertSession();
     if(typeof intent.syncAttemptId!=='string'||!intent.syncAttemptId||intent.syncAttemptId.length>96)
@@ -63,7 +67,7 @@ async function prepareOrderDispatch(orderId,itemId,attempt) {
     const intent={...attempt};
     if(dispatchBackendPilotEnabled())
         return prepareV2OrderDispatchBackend(orderId,itemId,intent,assertActor);
-    if(intent.syncAttemptId!==undefined||globalThis.YUSHIN_PREVIEW_DISPATCH===true
+    if((typeof productionTransactionBackendRequired==='function'&&productionTransactionBackendRequired('DISPATCH'))||intent.syncAttemptId!==undefined||globalThis.YUSHIN_PREVIEW_DISPATCH===true
         ||(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'))
         throw new Error('原後端打單作業不可改用一般交易重送。');
     let saved;

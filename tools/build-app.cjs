@@ -8,6 +8,7 @@ const parts = [
   "src/infrastructure/firebase.js",
   "src/app/bootstrap.js",
   "src/infrastructure/stock-transaction.js",
+  "src/infrastructure/production-transaction.js",
   "src/infrastructure/inventory-lot-read.js",
   "src/app/role-capabilities.js",
   "src/app/navigation.js",

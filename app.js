@@ -609,6 +609,20 @@ async function runRoleTransaction(callback) {
     return result;
 }
 
+// Default-off production handoff. Server flags remain independently required.
+function productionTransactionBackendRequired(kind){
+ return typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='production'
+  &&(globalThis['YUSHIN_PRODUCTION_'+kind+'_BACKEND']===true
+   ||globalThis['YUSHIN_PRODUCTION_'+kind+'_LEGACY_BLOCKED']===true);
+}
+function productionTransactionBackendEnabled(kind){
+ if(!['DISPATCH','SHIPMENT'].includes(kind)||!productionTransactionBackendRequired(kind)
+  ||globalThis['YUSHIN_PRODUCTION_'+kind+'_BACKEND']!==true
+  ||globalThis['YUSHIN_PRODUCTION_'+kind+'_LEGACY_BLOCKED']!==true)return false;
+ const path=String(globalThis.location?.pathname||'');
+ return globalThis.location?.origin==='https://sstonetw-source.github.io'
+  &&(path==='/yushin-system'||path.startsWith('/yushin-system/'));
+}
 // Read-only bounded adapters. Never project embedded inventory.lots or fetch cost.
 async function readInventoryLotQueryPage(query,{cursor=null,pageSize=100,assertContext=()=>{}}={}) {
     if(!Number.isInteger(pageSize)||pageSize<1||pageSize>100)throw new Error('批次分頁大小不正確。');
@@ -11124,27 +11138,31 @@ window.saveServiceCaseAction=async function(){
 function dispatchBackendPilotEnabled() {
     return globalThis.YUSHIN_V2_DISPATCH_EMULATOR===true
         || (typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'
-            &&globalThis.YUSHIN_PREVIEW_DISPATCH===true);
+            &&globalThis.YUSHIN_PREVIEW_DISPATCH===true)
+        ||(typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled('DISPATCH'));
 }
 async function prepareV2OrderDispatchBackend(orderId,itemId,intent,assertActor) {
     const local=host=>['localhost','127.0.0.1'].includes(host);
     const emulator=globalThis.YUSHIN_V2_DISPATCH_EMULATOR===true;
     const preview=typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'
         &&globalThis.YUSHIN_PREVIEW_DISPATCH===true;
+    const production=typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled('DISPATCH');
     const host=String(globalThis.location?.hostname||'').toLowerCase();
-    if((!emulator&&!preview)||(emulator&&!local(host))
+    if((!emulator&&!preview&&!production)||(emulator&&!local(host))
         ||(preview&&!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(host))
         ||typeof firebase==='undefined'||!firebase.auth||!firebase.functions)
         throw new Error('出貨準備後端尚未在目前授權的測試環境啟用，禁止改用舊交易。');
     const auth=firebase.auth(),functions=firebase.app().functions('asia-east1');
-    const project=emulator?'demo-yushin':'preview-20135';
+    const project=emulator?'demo-yushin':production?'yu-shing-company':'preview-20135';
     if(firebase.app().options?.projectId!==project
         ||auth.app?.options?.projectId!==project||functions.app?.options?.projectId!==project
         ||typeof db==='undefined'||db.app?.options?.projectId!==project
         ||(emulator&&(!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099))
-        ||(preview&&!!auth.emulatorConfig))
+        ||((preview||production)&&!!auth.emulatorConfig))
         throw new Error('出貨準備 Auth、Functions 與資料庫專案不一致，未提交打單。');
-    const assertSession=()=>{assertActor();if(auth.currentUser?.uid!==intent.actorUid)
+    const assertSession=()=>{assertActor();
+        if(production&&!productionTransactionBackendEnabled('DISPATCH'))throw new Error('打單後端已停用，請保留原識別碼核對。');
+        if(auth.currentUser?.uid!==intent.actorUid)
         throw new Error('實際登入帳號已變更，請以原身分確認打單結果。');};
     assertSession();
     if(typeof intent.syncAttemptId!=='string'||!intent.syncAttemptId||intent.syncAttemptId.length>96)
@@ -11184,7 +11202,7 @@ async function prepareOrderDispatch(orderId,itemId,attempt) {
     const intent={...attempt};
     if(dispatchBackendPilotEnabled())
         return prepareV2OrderDispatchBackend(orderId,itemId,intent,assertActor);
-    if(intent.syncAttemptId!==undefined||globalThis.YUSHIN_PREVIEW_DISPATCH===true
+    if((typeof productionTransactionBackendRequired==='function'&&productionTransactionBackendRequired('DISPATCH'))||intent.syncAttemptId!==undefined||globalThis.YUSHIN_PREVIEW_DISPATCH===true
         ||(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'))
         throw new Error('原後端打單作業不可改用一般交易重送。');
     let saved;
@@ -21589,7 +21607,8 @@ window.saveCustomerReturnReceipt=async function(){
 function shipmentBackendPilotEnabled(){
  return globalThis.YUSHIN_V2_SHIPMENT_EMULATOR===true
   ||(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'
-    &&globalThis.YUSHIN_PREVIEW_SHIPMENT===true);
+    &&globalThis.YUSHIN_PREVIEW_SHIPMENT===true)
+        ||(typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled('SHIPMENT'));
 }
 function pendingV2WarehouseShipment(orderId,itemId){
  if(typeof sessionStorage==='undefined')return null;
@@ -21607,20 +21626,22 @@ async function commitV2WarehouseShipmentBackend(input){
  const emulator=globalThis.YUSHIN_V2_SHIPMENT_EMULATOR===true;
  const preview=typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'
   &&globalThis.YUSHIN_PREVIEW_SHIPMENT===true;
+ const production=typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled('SHIPMENT');
  const host=String(globalThis.location?.hostname||'').toLowerCase();
- if((!emulator&&!preview)||(emulator&&!local(host))
+ if((!emulator&&!preview&&!production)||(emulator&&!local(host))
   ||(preview&&!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(host))
   ||typeof firebase==='undefined'||!firebase.auth||!firebase.functions)
   throw Error('v2 實際出貨尚未在目前測試環境獲准啟用，禁止改用舊交易。');
  const auth=firebase.auth(),fn=firebase.app().functions('asia-east1'),uid=currentUser?.uid,role=currentUserRole;
- const project=emulator?'demo-yushin':'preview-20135';
+ const project=emulator?'demo-yushin':production?'yu-shing-company':'preview-20135';
  if(firebase.app().options?.projectId!==project
   ||auth.app?.options?.projectId!==project||fn.app?.options?.projectId!==project
   ||typeof db==='undefined'||db.app?.options?.projectId!==project
   ||(emulator&&(!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099))
-  ||(preview&&!!auth.emulatorConfig))
+  ||((preview||production)&&!!auth.emulatorConfig))
   throw Error('v2 實際出貨 Auth、Functions 與 Firestore 專案不一致。');
  const same=()=>{
+  if(production&&!productionTransactionBackendEnabled('SHIPMENT'))throw Error('出貨後端已停用，請保留原識別碼核對。');
   if(!uid||currentUser?.uid!==uid||currentUserRole!==role||auth.currentUser?.uid!==uid
     ||!canReceiveInventoryCapability()||!canAccessPage('inventory'))throw Error('登入帳號或權限已變更。');
  };
@@ -21671,7 +21692,7 @@ async function commitInventoryShipment({orderId,itemId,qty,date,notes='',operati
   // An unknown backend result may never be retried by the old client writer.
   const prior=pendingV2WarehouseShipment(orderId,itemId);
   if(shipmentBackendPilotEnabled())return commitV2WarehouseShipmentBackend({orderId,itemId,qty,date,notes,operationId,expectedWarehouseId,expectedPlan});
-  if(prior||globalThis.YUSHIN_PREVIEW_SHIPMENT===true
+  if((typeof productionTransactionBackendRequired==='function'&&productionTransactionBackendRequired('SHIPMENT'))||prior||globalThis.YUSHIN_PREVIEW_SHIPMENT===true
     ||(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'))
     throw Error('原 v2 實際出貨不得改走一般交易；請恢復受控環境以原操作識別碼核對。');
   if(!canReceiveInventoryCapability()||!canAccessPage('inventory'))throw new Error('無倉庫出貨權限。');

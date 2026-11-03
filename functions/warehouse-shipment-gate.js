@@ -1,6 +1,7 @@
 'use strict';
 // Customer-shipment accounting must remain disabled until this independent
 // backend and browser handoff have completed Preview acceptance.
+const {allowProductionTransaction}=require('./production-transaction-gate');
 const {projectIdFromEnvironment}=require('./grouped-reservation-gate');
 
 function allowShipmentEmulator(env=process.env){
@@ -17,6 +18,7 @@ function allowPreviewShipment(env=process.env){
 function shipmentBackendProject(env=process.env){
  if(allowShipmentEmulator(env))return 'demo-yushin';
  if(allowPreviewShipment(env))return 'preview-20135';
+ if(allowProductionTransaction('SHIPMENT',env))return 'yu-shing-company';
  return '';
 }
 module.exports={allowShipmentEmulator,allowPreviewShipment,shipmentBackendProject};

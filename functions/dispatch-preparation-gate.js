@@ -1,4 +1,5 @@
 'use strict';
+const {allowProductionTransaction}=require('./production-transaction-gate');
 const {projectIdFromEnvironment}=require('./grouped-reservation-gate');
 
 function allowDispatchEmulator(env=process.env){
@@ -7,7 +8,7 @@ function allowDispatchEmulator(env=process.env){
   &&projectIdFromEnvironment(env)==='demo-yushin'
   &&local(env.FIRESTORE_EMULATOR_HOST)&&local(env.FIREBASE_AUTH_EMULATOR_HOST);
 }
-// Deliberately no production gate: shipment preparation is still a Preview candidate.
+// Production requires its independent default-off deployment flag.
 function allowPreviewDispatch(env=process.env){
  return env.ENABLE_PREVIEW_DISPATCH==='true'&&projectIdFromEnvironment(env)==='preview-20135'
   &&!env.FUNCTIONS_EMULATOR&&!env.FIRESTORE_EMULATOR_HOST&&!env.FIREBASE_AUTH_EMULATOR_HOST;
@@ -15,6 +16,7 @@ function allowPreviewDispatch(env=process.env){
 function dispatchBackendProject(env=process.env){
  if(allowDispatchEmulator(env))return 'demo-yushin';
  if(allowPreviewDispatch(env))return 'preview-20135';
+ if(allowProductionTransaction('DISPATCH',env))return 'yu-shing-company';
  return '';
 }
 module.exports={allowDispatchEmulator,allowPreviewDispatch,dispatchBackendProject};
