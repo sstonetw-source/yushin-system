@@ -638,6 +638,38 @@ test('operational receipt and movement reject embedded cost fields', async () =>
 });
 
 
+test('backend-only receiving cutover atomically denies stale client receipt writes and cannot be reversed',async()=>{
+ const warehouse=db('wh1'),admin=db('admin');
+ // Before an approved cutover, existing receiving transactions retain their Rules path.
+ await assertSucceeds(setDoc(doc(warehouse,'receipts/cutover-before'),{productKey:'p1',qty:1}));
+ await assertSucceeds(setDoc(doc(admin,'settings/receivingCutover'),{backendOnly:false}));
+ await assertSucceeds(setDoc(doc(warehouse,'receipts/cutover-unarmed'),{productKey:'p1',qty:1}));
+ await seed('orders/receipt-cutover',{ownerUid:'sales1',salesCode:'S01',customerName:'A',
+  items:[{itemId:'i1',qty:5,reservedQty:0,shortageQty:5}]});
+ const orderRef=doc(warehouse,'orders/receipt-cutover');
+ const beforeCutover=writeBatch(warehouse);
+ beforeCutover.update(orderRef,{items:[{itemId:'i1',qty:5,reservedQty:1,shortageQty:4}],
+  itemCount:1,orderSchemaVersion:2,updatedAt:'2026-11-03T00:00:00Z'});
+ beforeCutover.set(doc(warehouse,'receipts/cutover-batch-before'),{productKey:'p1',qty:1});
+ await assertSucceeds(beforeCutover.commit());
+ // Cutover is a separate, authorized settings write; backend Admin SDK is unaffected.
+ await assertSucceeds(updateDoc(doc(admin,'settings/receivingCutover'),{backendOnly:true}));
+ await assertFails(setDoc(doc(warehouse,'receipts/cutover-after'),{productKey:'p1',qty:1}));
+ await assertFails(setDoc(doc(admin,'receipts/cutover-admin'),{productKey:'p1',qty:1}));
+ const staleTransaction=writeBatch(warehouse);
+ staleTransaction.update(orderRef,{items:[{itemId:'i1',qty:5,reservedQty:2,shortageQty:3}],
+  itemCount:1,orderSchemaVersion:2,updatedAt:'2026-11-03T00:01:00Z'});
+ staleTransaction.set(doc(warehouse,'receipts/cutover-batch-after'),{productKey:'p1',qty:1});
+ await assertFails(staleTransaction.commit(),'a stale client transaction must have zero partial writes');
+ assert.equal((await getDoc(doc(admin,'orders/receipt-cutover'))).data().items[0].reservedQty,1);
+ await assertFails(updateDoc(doc(warehouse,'receipts/cutover-before'),{autoAllocatedQty:1}));
+ // Once enabled, admins cannot restore the legacy receipt path or delete its gate.
+ await assertFails(updateDoc(doc(admin,'settings/receivingCutover'),{backendOnly:false}));
+ await assertFails(deleteDoc(doc(admin,'settings/receivingCutover')));
+ assert.equal((await getDoc(doc(admin,'settings/receivingCutover'))).data().backendOnly,true);
+ assert.equal((await getDoc(doc(admin,'receipts/cutover-after'))).exists(),false);
+});
+
 test('receiving roles may advance only receipt allocation progress within its target', async () => {
   await seed('receipts/r-progress', {
     receiptId:'r-progress', supplyOrderId:'s1',
