@@ -65,6 +65,12 @@ async function verifyQuickPurchaseReceipt(get,db,supply,order,supplyId){
 cores.YUSHIN_V2_DISPATCH_EMULATOR=true;
 cores.crypto=require('node:crypto').webcrypto;
 function fail(code,message){const error=new Error(message);error.code=code;throw error;}
+// The canonical order writer uses status=active and need not persist the
+// redundant legacy orderStatus. Missing/blank is normal; explicit terminal,
+// unknown or malformed legacy states must still fail closed.
+function normalReceiptOrder(order){
+ return order?.status==='active'&&[undefined,'','normal'].includes(order.orderStatus);
+}
 function receiptIntent(input){
  if(!input||typeof input!=='object'||Array.isArray(input)
   ||Object.keys(input).sort().join(',')!=='expiryDate,lotNo,operationId,qty,supplyId')fail('invalid-argument','收貨欄位不正確');
@@ -117,7 +123,7 @@ async function receiveV2Supply(db,uid,input,env=process.env){
   const previous=await get(db.collection('receipts').doc(intent.operationId));
   if(previous.exists&&!directShip&&previous.data().reservationLocationSchemaVersion!==2)
    fail('failed-precondition','原收貨憑證不是 v2 格式');
-  if(!previous.exists&&(!Array.isArray(order.items)||order.items.length<1||order.items.length>(directShip?5:15)||order.status!=='active'||order.orderStatus!=='normal'))
+  if(!previous.exists&&(!Array.isArray(order.items)||order.items.length<1||order.items.length>(directShip?5:15)||!normalReceiptOrder(order)))
    fail('failed-precondition',`收貨登入試點僅支援正常 1–${directShip?5:15} 品項來源；取消尚未開放`);
   if(!previous.exists&&directShip&&supply.type==='PURCHASING_PO'){
    const selected=order.items.filter(row=>row?.itemId===supply.itemId);
@@ -151,4 +157,4 @@ async function receiveV2Supply(db,uid,input,env=process.env){
  const affectedOrderIds=await runtime.receiveSupplyOrderRecord(intent.supplyId,intent.qty,intent.lotNo,intent.expiryDate,intent.operationId,{actorUid:uid,actorRole:role});
  return {status:'confirmed',supplyId:intent.supplyId,operationId:intent.operationId,affectedOrderIds};
 }
-module.exports={receiveV2Supply,receiptIntent};
+module.exports={receiveV2Supply,receiptIntent,normalReceiptOrder};

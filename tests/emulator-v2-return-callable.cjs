@@ -3,7 +3,7 @@
 // Source documents are Admin fixtures; inventory synchronization now runs the real src workflow.
 const test=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
-const admin=require('firebase-admin'),{getFirestore}=require('firebase-admin/firestore'),{getAuth:adminAuth}=require('firebase-admin/auth');
+const admin=require('firebase-admin'),{getFirestore,FieldValue}=require('firebase-admin/firestore'),{getAuth:adminAuth}=require('firebase-admin/auth');
 const {initializeApp,deleteApp}=require('firebase/app');
 const {getAuth,connectAuthEmulator,signInWithEmailAndPassword}=require('firebase/auth');
 const {getFunctions,connectFunctionsEmulator,httpsCallable}=require('firebase/functions');
@@ -1767,6 +1767,9 @@ async function directReceiptProofFixture(tag,ownerRole){
 test('direct arrival validates actual PO source before every new receipt, preserves original-ID recovery and never touches physical stock',{timeout:240000},async()=>{
  for(const ownerRole of ['sales','engineer']){
   const x=await directReceiptProofFixture(ownerRole,ownerRole),poRef=db.collection('purchaseOrders').doc(x.poNo),po=(await poRef.get()).data();
+  // Current canonical sources may omit the redundant legacy status. Exercise
+  // both valid representations through real Auth + the unchanged receipt writer.
+  await db.doc('orders/'+x.orderId).update({orderStatus:ownerRole==='sales'?FieldValue.delete():''});
   const before=await x.snapshot();
   for(const corrupt of [
    r=>r.status='CANCELLED',r=>r.status='DRAFT',r=>r.documentOnly=true,r=>r.supplyOrderIds=[],r=>r.supplyOrderIds.push(x.supplyId),
@@ -1779,6 +1782,7 @@ test('direct arrival validates actual PO source before every new receipt, preser
   await assert.rejects(x.receive(x.input(1,'first'),x.buyer),code('permission-denied'));assert.deepEqual(await x.snapshot(),before);
   await assert.rejects(x.receive({...x.input(1,'first'),lotNo:'INVALID'}));assert.deepEqual(await x.snapshot(),before);
   await Promise.all([x.receive(x.input(1,'first')),x.receive(x.input(1,'first'))]);const partial=await x.snapshot();
+  assert.equal(partial.order.orderStatus,before.order.orderStatus,'receipt never repairs source fields to pass admission');
   assert.equal(partial.receipts.length,1);assert.equal(partial.order.deliveredQty,1);assert.equal(partial.demand.receivedQty,1);assert.equal(partial.order.items[0].shortageQty,0);assert.equal(partial.order.items[0].reservedQty,0);
   await poRef.update({status:'CANCELLED'});await x.receive(x.input(1,'first'));assert.deepEqual(await x.snapshot(),partial,'existing receipt recovers despite later PO cancellation');
   await assert.rejects(x.receive(x.input(1,'later')));assert.deepEqual(await x.snapshot(),partial);await poRef.set(po);

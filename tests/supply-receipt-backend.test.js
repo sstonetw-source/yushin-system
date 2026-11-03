@@ -1,6 +1,14 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
-const {receiptIntent}=require('../functions/supply-receipt-service');
+const {receiptIntent,normalReceiptOrder}=require('../functions/supply-receipt-service');
+test('receipt admission follows canonical active status without requiring a redundant legacy normal field',()=>{
+ for(const orderStatus of [undefined,'','normal'])assert.equal(normalReceiptOrder({status:'active',orderStatus}),true);
+ for(const orderStatus of ['cancelled','voided','pending','unknown','active',null,0,false,{},[]])
+  assert.equal(normalReceiptOrder({status:'active',orderStatus}),false);
+ for(const status of ['cancelled','voided','pending','normal',undefined,null])
+  assert.equal(normalReceiptOrder({status,orderStatus:'normal'}),false);
+ assert.equal(normalReceiptOrder(null),false);
+});
 test('receipt backend accepts only exact receipt identity and finite integer quantities, dates and batch text',()=>{
  const input={supplyId:'SUP',operationId:'receipt_1',qty:2,lotNo:'LOT',expiryDate:'2028-01-01'};
  assert.deepEqual(receiptIntent(input),input);
