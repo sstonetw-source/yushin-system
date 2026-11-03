@@ -25,6 +25,7 @@ function fixture(){
    firebase:{app:()=>app,auth:()=>auth,functions:()=>functions},
    YushinFulfillment:{projectOrderShipmentReturns:()=>({items:[{itemId:'I',shipments:[{shipmentId:'SHIP',pendingQty:3}]}]})},
    runRoleTransaction:()=>{legacyWrites++;throw Error('legacy stock writer must never run');}});
+  vm.runInContext(fs.readFileSync('src/infrastructure/production-transaction.js','utf8'),c);
   vm.runInContext(source,c);return c;
  };
  return {open,auth,db,app,functions,order,pending,calls,setOutcome:fn=>{outcome=fn;},
@@ -105,4 +106,26 @@ test('Preview UI opens partial confirmation and keeps reversal read-only, not le
  await c.quickCompleteDelivery('O');await c.deleteDeliveryRecord('D');
  assert.deepEqual(calls,['open:O','partial']);
  assert.equal(messages.length,1);assert.match(messages[0],/尚未開放/);
+});
+
+function productionContext(f){
+ const c=f.open();c.APP_ENVIRONMENT='production';c.YUSHIN_PREVIEW_DELIVERY_CONFIRMATION=false;
+ Object.assign(c.location,{hostname:'sstonetw-source.github.io',origin:'https://sstonetw-source.github.io',pathname:'/yushin-system/'});
+ for(const target of [f.auth,f.app,f.functions])target.options?target.options.projectId='yu-shing-company':target.app.options.projectId='yu-shing-company';
+ c.YUSHIN_PRODUCTION_DELIVERY_CONFIRMATION_BACKEND=true;c.YUSHIN_PRODUCTION_DELIVERY_CONFIRMATION_LEGACY_BLOCKED=true;
+ return c;
+}
+test('production DELIVERY_CONFIRMATION uses its fixed operation and refuses fallback after disabling the backend',async()=>{
+ const f=fixture();let c=productionContext(f);await c.saveOrderDeliveryRecord('O',input);
+ assert.equal(f.calls.length,1);assert.equal(f.legacyWrites(),0);assert.equal(f.emulatorCalls(),0);
+ c.YUSHIN_PRODUCTION_DELIVERY_CONFIRMATION_BACKEND=false;
+ await assert.rejects(c.saveOrderDeliveryRecord('O',input));assert.equal(f.calls.length,1);assert.equal(f.legacyWrites(),0);
+});
+test('production DELIVERY_CONFIRMATION rejects wrong site project Auth emulator or missing retirement lock',async()=>{
+ for(const change of [c=>c.location.origin='http://sstonetw-source.github.io',c=>c.location.pathname='/foreign/',
+  c=>c.firebase.auth().app.options.projectId='preview-20135',c=>c.firebase.auth().emulatorConfig={host:'localhost',port:9099},
+  c=>c.YUSHIN_PRODUCTION_DELIVERY_CONFIRMATION_LEGACY_BLOCKED=false]){
+  const f=fixture(),c=productionContext(f);change(c);await assert.rejects(c.saveOrderDeliveryRecord('O',input));
+  assert.equal(f.calls.length,0);assert.equal(f.legacyWrites(),0);
+ }
 });

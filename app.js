@@ -616,7 +616,7 @@ function productionTransactionBackendRequired(kind){
    ||globalThis['YUSHIN_PRODUCTION_'+kind+'_LEGACY_BLOCKED']===true);
 }
 function productionTransactionBackendEnabled(kind){
- if(!['DISPATCH','SHIPMENT','ORDER_LIFECYCLE'].includes(kind)||!productionTransactionBackendRequired(kind)
+ if(!['DISPATCH','SHIPMENT','ORDER_LIFECYCLE','DELIVERY_CONFIRMATION','DELIVERY_REVERSAL'].includes(kind)||!productionTransactionBackendRequired(kind)
   ||globalThis['YUSHIN_PRODUCTION_'+kind+'_BACKEND']!==true
   ||globalThis['YUSHIN_PRODUCTION_'+kind+'_LEGACY_BLOCKED']!==true)return false;
  const path=String(globalThis.location?.pathname||'');
@@ -20502,6 +20502,8 @@ function deliveryConfirmationProtectedMode(){
   ||globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true
   ||globalThis.YUSHIN_PREVIEW_DELIVERY_CONFIRMATION===true
   ||globalThis.YUSHIN_PREVIEW_DELIVERY_REVERSAL===true
+  ||(typeof productionTransactionBackendRequired==='function'
+   &&(productionTransactionBackendRequired('DELIVERY_CONFIRMATION')||productionTransactionBackendRequired('DELIVERY_REVERSAL')))
   ||(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview');
 }
 function assertNoUnresolvedV2DeliveryBeforeLegacyWrite(orderId){
@@ -20546,19 +20548,22 @@ function v2DeliveryConfirmationTransport(custodyV3=false){
   return {...v2DeliveryEmulatorTransport(custodyV3),emulator:true};
  const preview=typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'
   &&globalThis.YUSHIN_PREVIEW_DELIVERY_CONFIRMATION===true;
+ const production=typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled('DELIVERY_CONFIRMATION');
+ const project=production?'yu-shing-company':'preview-20135';
  const host=String(globalThis.location?.hostname||'').toLowerCase();
- if(!preview||!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(host)
+ if((!preview&&!production)||(preview&&!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(host))
   ||typeof firebase==='undefined'||!firebase.auth||!firebase.functions)
   throw Error('送達確認後端尚未在此 Preview 獲准啟用，禁止改用舊交易。');
  const auth=firebase.auth(),functions=firebase.app().functions('asia-east1');
- if(firebase.app().options?.projectId!=='preview-20135'
-  ||auth.app?.options?.projectId!=='preview-20135'
-  ||functions.app?.options?.projectId!=='preview-20135'
-  ||typeof db==='undefined'||db.app?.options?.projectId!=='preview-20135'
+ if(firebase.app().options?.projectId!==project
+  ||auth.app?.options?.projectId!==project
+  ||functions.app?.options?.projectId!==project
+  ||typeof db==='undefined'||db.app?.options?.projectId!==project
   ||!!auth.emulatorConfig)
   throw Error('送達確認 Auth、Functions 與資料庫專案不一致，未提交送達。');
  const uid=currentUser?.uid,role=currentUserRole;
  const check=()=>{
+  if(production&&!productionTransactionBackendEnabled('DELIVERY_CONFIRMATION'))throw Error('送達後端已停用，請保留原操作識別碼核對。');
   if(!uid||auth.currentUser?.uid!==uid||currentUser?.uid!==uid||currentUserRole!==role
    ||!['admin','sales','engineer'].includes(role)
    ||!canManageOrderLifecycleCapability()||!canEditPage('orders.list'))
@@ -20649,19 +20654,22 @@ function v2DeliveryReversalTransport(){
   return {...v2DeliveryEmulatorTransport(),emulator:true};
  const preview=typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'
   &&globalThis.YUSHIN_PREVIEW_DELIVERY_REVERSAL===true;
+ const production=typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled('DELIVERY_REVERSAL');
+ const project=production?'yu-shing-company':'preview-20135';
  const host=String(globalThis.location?.hostname||'').toLowerCase();
- if(!preview||!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(host)
+ if((!preview&&!production)||(preview&&!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(host))
   ||typeof firebase==='undefined'||!firebase.auth||!firebase.functions)
   throw Error('送達撤銷後端尚未在此 Preview 獲准啟用，禁止改用舊交易。');
  const auth=firebase.auth(),functions=firebase.app().functions('asia-east1');
- if(firebase.app().options?.projectId!=='preview-20135'
-  ||auth.app?.options?.projectId!=='preview-20135'
-  ||functions.app?.options?.projectId!=='preview-20135'
-  ||typeof db==='undefined'||db.app?.options?.projectId!=='preview-20135'
+ if(firebase.app().options?.projectId!==project
+  ||auth.app?.options?.projectId!==project
+  ||functions.app?.options?.projectId!==project
+  ||typeof db==='undefined'||db.app?.options?.projectId!==project
   ||!!auth.emulatorConfig)
   throw Error('送達撤銷 Auth、Functions 與資料庫專案不一致，未提交撤銷。');
  const uid=currentUser?.uid,role=currentUserRole;
  const check=()=>{
+  if(production&&!productionTransactionBackendEnabled('DELIVERY_REVERSAL'))throw Error('送達後端已停用，請保留原操作識別碼核對。');
   if(!uid||auth.currentUser?.uid!==uid||currentUser?.uid!==uid||currentUserRole!==role
    ||!['admin','sales','engineer'].includes(role)
    ||!canManageOrderLifecycleCapability()||!canEditPage('orders.list'))
@@ -22885,7 +22893,7 @@ function renderDeliveryModal() {
             <td>${escapeHtml(record.date || '')}</td><td>${escapeHtml(String(record.qty || ''))}</td>
             <td>${record.itemId ? escapeHtml(deliveryItemNameById.get(record.itemId)||record.itemId)+'<br>' : ''}${escapeHtml(record.notes || '')}</td>
             <td>${escapeHtml(record.createdBy || '')}<br><span style="font-size:10px;color:#666;">${escapeHtml(formatOrderStatusTime(record.createdAt))}</span></td>
-            <td>${editable && !v2 ? `<details class="order-record-actions"><summary>操作</summary><button type="button" class="btn-small btn-secondary" onclick="editDeliveryRecord(${inlineJsValue(record.id)})">編輯</button> <button type="button" class="btn-danger" onclick="deleteDeliveryRecord(${inlineJsValue(record.id)})">更正誤登</button></details>` : editableSteps && (globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true || (typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'&&globalThis.YUSHIN_PREVIEW_DELIVERY_REVERSAL===true)) && record.sourceType==='WAREHOUSE_SHIPMENT_CONFIRMATION' && !order.returnRecords?.length && !confirmation && !reversal ? `<button type="button" class="btn-danger" onclick="deleteDeliveryRecord(${inlineJsValue(record.id)})">撤銷送達確認</button>` : '僅可查看'}</td>
+            <td>${editable && !v2 ? `<details class="order-record-actions"><summary>操作</summary><button type="button" class="btn-small btn-secondary" onclick="editDeliveryRecord(${inlineJsValue(record.id)})">編輯</button> <button type="button" class="btn-danger" onclick="deleteDeliveryRecord(${inlineJsValue(record.id)})">更正誤登</button></details>` : editableSteps && (globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true || ((typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'&&globalThis.YUSHIN_PREVIEW_DELIVERY_REVERSAL===true) || (typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled('DELIVERY_REVERSAL')))) && record.sourceType==='WAREHOUSE_SHIPMENT_CONFIRMATION' && !order.returnRecords?.length && !confirmation && !reversal ? `<button type="button" class="btn-danger" onclick="deleteDeliveryRecord(${inlineJsValue(record.id)})">撤銷送達確認</button>` : '僅可查看'}</td>
         </tr>`).join('');
     } else if (progress.isLegacyEstimated) {
         tbody.innerHTML = `<tr><td>${escapeHtml(order.orderDate || '')}<br><span class="delivery-estimated">歷史推估</span></td><td>${progress.total}</td><td>舊版已送貨資料</td><td>－</td><td>${editable ? '<button type="button" class="btn-secondary" onclick="clearLegacyDelivery()">取消此推估</button>' : '僅可查看'}</td></tr>`;
@@ -23015,11 +23023,13 @@ async function reverseV2DeliveryRecord(recordId){
 }
 
 window.deleteDeliveryRecord = async function(recordId) {
-    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true
-        ||(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'&&globalThis.YUSHIN_PREVIEW_DELIVERY_REVERSAL===true))
-        return reverseV2DeliveryRecord(recordId);
-    if(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview')return alert('Preview 送達撤銷尚未開放，禁止改用舊交易。');
     if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) { alert('此操作僅限訂單負責業務或管理員。'); return; }
+    if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true
+        ||((typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'&&globalThis.YUSHIN_PREVIEW_DELIVERY_REVERSAL===true) || (typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled('DELIVERY_REVERSAL'))))
+        return reverseV2DeliveryRecord(recordId);
+    if((typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview')
+        ||(typeof productionTransactionBackendRequired==='function'&&productionTransactionBackendRequired('DELIVERY_REVERSAL')))
+        return alert('送達撤銷尚未開放，禁止改用舊交易。');
     const correctionReason = prompt('僅限更正誤登的送貨紀錄，會同步回補原出貨庫存並保留異動軌跡。實際已送出的貨請申請退貨。\n\n請輸入誤登更正原因：');
     if (!correctionReason || !correctionReason.trim()) return;
     const orderId = currentDeliveryOrderId;

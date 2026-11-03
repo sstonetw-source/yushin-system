@@ -3,11 +3,15 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const {allowProductionTransaction}=require('../functions/production-transaction-gate');
 const {dispatchBackendProject}=require('../functions/dispatch-preparation-gate');
 const {shipmentBackendProject}=require('../functions/warehouse-shipment-gate');
+const {deliveryConfirmationBackendProject}=require('../functions/delivery-confirmation-gate');
+const {deliveryReversalBackendProject}=require('../functions/delivery-reversal-gate');
 const {orderLifecycleBackendProject}=require('../functions/order-lifecycle-preview-gate');
 for(const [kind,flag,project] of [
  ['DISPATCH','ENABLE_PRODUCTION_DISPATCH_BACKEND',dispatchBackendProject],
  ['SHIPMENT','ENABLE_PRODUCTION_SHIPMENT_BACKEND',shipmentBackendProject],
- ['ORDER_LIFECYCLE','ENABLE_PRODUCTION_ORDER_LIFECYCLE_BACKEND',orderLifecycleBackendProject]
+ ['ORDER_LIFECYCLE','ENABLE_PRODUCTION_ORDER_LIFECYCLE_BACKEND',orderLifecycleBackendProject],
+ ['DELIVERY_CONFIRMATION','ENABLE_PRODUCTION_DELIVERY_CONFIRMATION_BACKEND',deliveryConfirmationBackendProject],
+ ['DELIVERY_REVERSAL','ENABLE_PRODUCTION_DELIVERY_REVERSAL_BACKEND',deliveryReversalBackendProject]
 ])test(kind+' production flag stays independent and fails closed on project or emulator mismatch',()=>{
  const env={GCLOUD_PROJECT:'yu-shing-company',[flag]:'true'};
  assert.equal(allowProductionTransaction(kind,env),true);assert.equal(project(env),'yu-shing-company');

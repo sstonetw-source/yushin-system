@@ -1,5 +1,6 @@
 'use strict';
 // Customer acknowledgement reversal is independently enabled from confirmation.
+const {allowProductionTransaction}=require('./production-transaction-gate');
 const {projectIdFromEnvironment}=require('./grouped-reservation-gate');
 
 function allowDeliveryReversalEmulator(env=process.env){
@@ -17,6 +18,7 @@ function allowPreviewDeliveryReversal(env=process.env){
 function deliveryReversalBackendProject(env=process.env){
  if(allowDeliveryReversalEmulator(env))return 'demo-yushin';
  if(allowPreviewDeliveryReversal(env))return 'preview-20135';
+ if(allowProductionTransaction('DELIVERY_REVERSAL',env))return 'yu-shing-company';
  return '';
 }
 module.exports={allowDeliveryReversalEmulator,allowPreviewDeliveryReversal,deliveryReversalBackendProject};

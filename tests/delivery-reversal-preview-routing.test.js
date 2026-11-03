@@ -22,6 +22,7 @@ function fixture(){
    sessionStorage:{getItem:key=>pending.get(key)||null,setItem:(key,value)=>pending.set(key,value),
     removeItem:key=>pending.delete(key)},db,firebase:{app:()=>app,auth:()=>auth,functions:()=>functions},
    runRoleTransaction:()=>{legacyWrites++;throw Error('legacy writer forbidden');}});
+  vm.runInContext(fs.readFileSync('src/infrastructure/production-transaction.js','utf8'),c);
   vm.runInContext(service,c);return c;
  };
  return {open,auth,app,functions,order,pending,calls,setOutcome:fn=>{outcome=fn;},
@@ -96,4 +97,26 @@ test('Preview UI sends approved reversal through the protected route and never t
  c.YUSHIN_PREVIEW_DELIVERY_REVERSAL=false;
  await c.deleteDeliveryRecord('D');
  assert.equal(calls.length,1);assert.match(messages[0],/尚未開放/);
+});
+
+function productionContext(f){
+ const c=f.open();c.APP_ENVIRONMENT='production';c.YUSHIN_PREVIEW_DELIVERY_REVERSAL=false;
+ Object.assign(c.location,{hostname:'sstonetw-source.github.io',origin:'https://sstonetw-source.github.io',pathname:'/yushin-system/'});
+ for(const target of [f.auth,f.app,f.functions])target.options?target.options.projectId='yu-shing-company':target.app.options.projectId='yu-shing-company';
+ c.YUSHIN_PRODUCTION_DELIVERY_REVERSAL_BACKEND=true;c.YUSHIN_PRODUCTION_DELIVERY_REVERSAL_LEGACY_BLOCKED=true;
+ return c;
+}
+test('production DELIVERY_REVERSAL uses its fixed operation and refuses fallback after disabling the backend',async()=>{
+ const f=fixture();let c=productionContext(f);await c.reverseV2ShipmentDeliveryEmulator('O','D',request);
+ assert.equal(f.calls.length,1);assert.equal(f.legacyWrites(),0);assert.equal(f.emulatorCalls(),0);
+ c.YUSHIN_PRODUCTION_DELIVERY_REVERSAL_BACKEND=false;
+ await assert.rejects(c.reverseV2ShipmentDeliveryEmulator('O','D',request));assert.equal(f.calls.length,1);assert.equal(f.legacyWrites(),0);
+});
+test('production DELIVERY_REVERSAL rejects wrong site project Auth emulator or missing retirement lock',async()=>{
+ for(const change of [c=>c.location.origin='http://sstonetw-source.github.io',c=>c.location.pathname='/foreign/',
+  c=>c.firebase.auth().app.options.projectId='preview-20135',c=>c.firebase.auth().emulatorConfig={host:'localhost',port:9099},
+  c=>c.YUSHIN_PRODUCTION_DELIVERY_REVERSAL_LEGACY_BLOCKED=false]){
+  const f=fixture(),c=productionContext(f);change(c);await assert.rejects(c.reverseV2ShipmentDeliveryEmulator('O','D',request));
+  assert.equal(f.calls.length,0);assert.equal(f.legacyWrites(),0);
+ }
 });

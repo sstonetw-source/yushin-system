@@ -5,6 +5,8 @@ function deliveryConfirmationProtectedMode(){
   ||globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true
   ||globalThis.YUSHIN_PREVIEW_DELIVERY_CONFIRMATION===true
   ||globalThis.YUSHIN_PREVIEW_DELIVERY_REVERSAL===true
+  ||(typeof productionTransactionBackendRequired==='function'
+   &&(productionTransactionBackendRequired('DELIVERY_CONFIRMATION')||productionTransactionBackendRequired('DELIVERY_REVERSAL')))
   ||(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview');
 }
 function assertNoUnresolvedV2DeliveryBeforeLegacyWrite(orderId){
@@ -49,19 +51,22 @@ function v2DeliveryConfirmationTransport(custodyV3=false){
   return {...v2DeliveryEmulatorTransport(custodyV3),emulator:true};
  const preview=typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'
   &&globalThis.YUSHIN_PREVIEW_DELIVERY_CONFIRMATION===true;
+ const production=typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled('DELIVERY_CONFIRMATION');
+ const project=production?'yu-shing-company':'preview-20135';
  const host=String(globalThis.location?.hostname||'').toLowerCase();
- if(!preview||!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(host)
+ if((!preview&&!production)||(preview&&!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(host))
   ||typeof firebase==='undefined'||!firebase.auth||!firebase.functions)
   throw Error('送達確認後端尚未在此 Preview 獲准啟用，禁止改用舊交易。');
  const auth=firebase.auth(),functions=firebase.app().functions('asia-east1');
- if(firebase.app().options?.projectId!=='preview-20135'
-  ||auth.app?.options?.projectId!=='preview-20135'
-  ||functions.app?.options?.projectId!=='preview-20135'
-  ||typeof db==='undefined'||db.app?.options?.projectId!=='preview-20135'
+ if(firebase.app().options?.projectId!==project
+  ||auth.app?.options?.projectId!==project
+  ||functions.app?.options?.projectId!==project
+  ||typeof db==='undefined'||db.app?.options?.projectId!==project
   ||!!auth.emulatorConfig)
   throw Error('送達確認 Auth、Functions 與資料庫專案不一致，未提交送達。');
  const uid=currentUser?.uid,role=currentUserRole;
  const check=()=>{
+  if(production&&!productionTransactionBackendEnabled('DELIVERY_CONFIRMATION'))throw Error('送達後端已停用，請保留原操作識別碼核對。');
   if(!uid||auth.currentUser?.uid!==uid||currentUser?.uid!==uid||currentUserRole!==role
    ||!['admin','sales','engineer'].includes(role)
    ||!canManageOrderLifecycleCapability()||!canEditPage('orders.list'))
@@ -152,19 +157,22 @@ function v2DeliveryReversalTransport(){
   return {...v2DeliveryEmulatorTransport(),emulator:true};
  const preview=typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'
   &&globalThis.YUSHIN_PREVIEW_DELIVERY_REVERSAL===true;
+ const production=typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled('DELIVERY_REVERSAL');
+ const project=production?'yu-shing-company':'preview-20135';
  const host=String(globalThis.location?.hostname||'').toLowerCase();
- if(!preview||!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(host)
+ if((!preview&&!production)||(preview&&!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(host))
   ||typeof firebase==='undefined'||!firebase.auth||!firebase.functions)
   throw Error('送達撤銷後端尚未在此 Preview 獲准啟用，禁止改用舊交易。');
  const auth=firebase.auth(),functions=firebase.app().functions('asia-east1');
- if(firebase.app().options?.projectId!=='preview-20135'
-  ||auth.app?.options?.projectId!=='preview-20135'
-  ||functions.app?.options?.projectId!=='preview-20135'
-  ||typeof db==='undefined'||db.app?.options?.projectId!=='preview-20135'
+ if(firebase.app().options?.projectId!==project
+  ||auth.app?.options?.projectId!==project
+  ||functions.app?.options?.projectId!==project
+  ||typeof db==='undefined'||db.app?.options?.projectId!==project
   ||!!auth.emulatorConfig)
   throw Error('送達撤銷 Auth、Functions 與資料庫專案不一致，未提交撤銷。');
  const uid=currentUser?.uid,role=currentUserRole;
  const check=()=>{
+  if(production&&!productionTransactionBackendEnabled('DELIVERY_REVERSAL'))throw Error('送達後端已停用，請保留原操作識別碼核對。');
   if(!uid||auth.currentUser?.uid!==uid||currentUser?.uid!==uid||currentUserRole!==role
    ||!['admin','sales','engineer'].includes(role)
    ||!canManageOrderLifecycleCapability()||!canEditPage('orders.list'))
