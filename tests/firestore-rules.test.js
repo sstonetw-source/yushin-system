@@ -3917,3 +3917,113 @@ test('cached legacy lifecycle cannot mutate an authoritative native v2 source fo
   assert.deepEqual(await facts(),before);
  }
 });
+
+
+test('delivery cutover rejects cached ledger writes and physical reversal atomically without reopening proofs',async()=>{
+ await seedStockWorkflow();
+ await assertSucceeds(stockWorkflow(0,5,'reserve'));
+ await assertSucceeds(stockWorkflow(-2,3,'ship'));
+ const administrator=db('admin'),gate=doc(administrator,'settings/deliveryCutover');
+ await assertSucceeds(setDoc(gate,{backendOnly:false}));
+ const source=doc(db('sales1'),'orders/stock-order');
+ const live=(await getDoc(source)).data();
+ await assertSucceeds(updateDoc(source,{deliveryRecords:live.deliveryRecords.map(r=>({...r,notes:'before'})),businessDeliveryEvidence:{recordIndex:0}}));
+ await assertSucceeds(setDoc(doc(db('sales1'),'deliveries/delivery-cutover-existing'),{ownerUid:'sales1',salesCode:'S01',orderId:'stock-order'}));
+ await assertSucceeds(updateDoc(gate,{backendOnly:true}));
+ const paths=['orders/stock-order','inventory/p1','warehouseStocks/w1-p1','inventoryLots/l1','inventoryReservations/stock-order__item-1'];
+ const read=()=>Promise.all(paths.map(async path=>(await getDoc(doc(administrator,path))).data()));
+ const before=await read();
+ await assertFails(stockWorkflow(2,5,'ship_reversal'));
+ assert.deepEqual(await read(),before);
+ for(const uid of ['admin','sales1','eng1','buyer1','wh1']){
+  const client=db(uid);
+  for(const patch of [{deliveryRecords:[]},{deliveredQty:0},{isDelivered:true},
+   {deliveryRecords:live.deliveryRecords.map(r=>({...r,notes:'after'})),businessDeliveryEvidence:{recordIndex:0}}])
+   await assertFails(updateDoc(doc(client,'orders/stock-order'),patch));
+  await assertFails(setDoc(doc(client,'deliveries/delivery-cutover-'+uid),{ownerUid:uid,orderId:'stock-order'}));
+  await assertFails(deleteDoc(doc(client,'deliveries/delivery-cutover-existing')));
+ }
+ assert.deepEqual(await read(),before);
+ for(const patch of [{backendOnly:false},{backendOnly:deleteField()},{backendOnly:'true'}])await assertFails(updateDoc(gate,patch));
+ await assertFails(deleteDoc(gate));
+ await assertFails(updateDoc(doc(db('sales1'),'settings/deliveryCutover'),{backendOnly:false}));
+ await assertFails(setDoc(doc(administrator,'orders/forged-delivery-create'),{
+  ...validOrderProduct,ownerUid:'sales1',salesCode:'S01',deliveryRecords:[{id:'forged',qty:1}],deliveredQty:1
+ }));
+ await assertSucceeds(setDoc(doc(administrator,'orders/empty-delivery-create'),{
+  ...validOrderProduct,ownerUid:'sales1',salesCode:'S01',deliveryRecords:[],deliveredQty:0,isDelivered:false
+ }));
+ await assertSucceeds(updateDoc(doc(administrator,'orders/stock-order'),{updatedAt:'2026-11-03T00:00:00.000Z'}));
+ await adminDatabase.doc('orders/stock-order').update({deliveryRecords:[],deliveredQty:0});
+ await adminDatabase.doc('deliveries/trusted-delivery').set({orderId:'stock-order'});
+ assert.equal((await getDoc(doc(administrator,'deliveries/trusted-delivery'))).exists(),true);
+ assert.equal((await getDoc(doc(administrator,'orders/stock-order'))).data().deliveredQty,0);
+});
+
+
+test('return cutover blocks stale requests receipts and held-stock release without partial writes',async()=>{
+ const administrator=db('admin'),gate=doc(administrator,'settings/returnCutover');
+ await seed('warehouses/W1',{active:true,warehouseType:'PHYSICAL'});
+ const order={...validOrderProduct,ownerUid:'sales1',salesCode:'S01',deliveredQty:2,returnedQty:0,items:[{itemId:'I1',qty:2}],returnRequests:[],returnRecords:[],returnPending:false};
+ await seed('orders/return-cutover',order);
+ const request={id:'Q1',itemId:'I1',qty:1,receivedQty:0,status:'PENDING',settlement:'CLOSE',createdByUid:'sales1'};
+ const requestPatch={returnRequests:[request],returnPending:true,returnRequestMutationIndex:0};
+ await assertSucceeds(setDoc(gate,{backendOnly:false}));
+ await assertSucceeds(updateDoc(doc(db('sales1'),'orders/return-cutover'),requestPatch));
+ const record={id:'return-cutover-before',requestId:'Q1',itemId:'I1',qty:1,settlement:'CLOSE',quality:'INSPECTION',warehouseId:'W1'};
+ const receipt={orderId:'return-cutover',requestId:'Q1',requestIndex:0,itemId:'I1',qty:1,quality:'INSPECTION',warehouseId:'W1',disposition:'HOLD',record,receivedBy:'wh1',ownerUid:'sales1',salesCode:'S01'};
+ const receiptPatch={returnReceiptId:record.id,returnRequests:[{...request,receivedQty:1,status:'RECEIVED'}],returnPending:false,returnedQty:1,returnRecords:[record]};
+ const receive=(id)=>{const client=db('wh1'),b=writeBatch(client);b.set(doc(client,'customerReturnReceipts/'+id),{...receipt,record:{...record,id}});b.update(doc(client,'orders/return-cutover'),{...receiptPatch,returnReceiptId:id,returnRecords:[{...record,id}]});return b.commit();};
+ await assertSucceeds(receive(record.id));
+ await seed('orders/return-cutover',{...order,...requestPatch});
+ await assertSucceeds(updateDoc(gate,{backendOnly:true}));
+ const before=(await getDoc(doc(administrator,'orders/return-cutover'))).data();
+ await assertFails(receive('return-cutover-after'));
+ assert.deepEqual((await getDoc(doc(administrator,'orders/return-cutover'))).data(),before);
+ assert.equal((await getDoc(doc(administrator,'customerReturnReceipts/return-cutover-after'))).exists(),false);
+ for(const uid of ['admin','sales1','eng1','buyer1','wh1']){
+  const client=db(uid);
+  for(const patch of [{returnRequests:[],returnPending:false,returnRequestMutationIndex:0},receiptPatch])
+   await assertFails(updateDoc(doc(client,'orders/return-cutover'),patch));
+  await assertFails(updateDoc(doc(client,'customerReturnReceipts/'+record.id),{disposition:'STOCK',releasedBy:uid,releasedAt:'now'}));
+  await assertFails(deleteDoc(doc(client,'customerReturnReceipts/'+record.id)));
+ }
+ for(const patch of [{backendOnly:false},{backendOnly:deleteField()},{backendOnly:'true'}])await assertFails(updateDoc(gate,patch));
+ await assertFails(deleteDoc(gate));
+ await assertSucceeds(updateDoc(doc(administrator,'orders/return-cutover'),{updatedAt:'now'}));
+ await adminDatabase.doc('orders/return-cutover').update(receiptPatch);
+ await adminDatabase.doc('customerReturnReceipts/'+record.id).update({disposition:'STOCK'});
+ assert.equal((await getDoc(doc(administrator,'customerReturnReceipts/'+record.id))).data().disposition,'STOCK');
+});
+
+
+test('purchasing cutover keeps document drafts usable but rejects stale purchase transactions atomically',async()=>{
+ const client=db('admin'),gate=doc(client,'settings/purchasingCutover');
+ const supply={type:'PURCHASING_MANUAL',qty:1,unitCost:0,supplier:'test',orderId:''};
+ const po={status:'DRAFT',documentOnly:true,poNo:'cutover-po',items:[{qty:1,unitPrice:0}]};
+ await assertSucceeds(setDoc(doc(client,'purchaseOrders/cutover-po'),po));
+ await assertSucceeds(setDoc(doc(client,'supplyOrders/cutover-before'),supply));
+ await assertSucceeds(updateDoc(doc(client,'purchaseOrders/cutover-po'),{status:'ORDERED',documentOnly:false}));
+ await assertSucceeds(setDoc(gate,{backendOnly:true}));
+ await assertSucceeds(setDoc(doc(client,'purchaseOrders/cutover-draft'),po));
+ await assertSucceeds(updateDoc(doc(client,'purchaseOrders/cutover-draft'),{items:[{qty:2,unitPrice:1}]}));
+ await assertSucceeds(updateDoc(doc(client,'purchaseOrders/cutover-po'),{lastOutputAt:'now',lastOutputType:'PDF'}));
+ await assertFails(updateDoc(doc(client,'purchaseOrders/cutover-po'),{status:'DRAFT',documentOnly:true}));
+ const batch=writeBatch(client);
+ batch.update(doc(client,'purchaseOrders/cutover-draft'),{status:'ORDERED',documentOnly:false});
+ batch.set(doc(client,'supplyOrders/cutover-after'),supply);
+ await assertFails(batch.commit());
+ assert.equal((await getDoc(doc(client,'purchaseOrders/cutover-draft'))).data().status,'DRAFT');
+ assert.equal((await getDoc(doc(client,'supplyOrders/cutover-after'))).exists(),false);
+ for(const uid of ['admin','buyer1','wh1','sales1','eng1']){
+  const actor=db(uid);
+  await assertFails(setDoc(doc(actor,'supplyOrders/cutover-'+uid),supply));
+  await assertFails(updateDoc(doc(actor,'supplyOrders/cutover-before'),{qty:2}));
+  await assertFails(deleteDoc(doc(actor,'supplyOrders/cutover-before')));
+  await assertFails(deleteDoc(doc(actor,'purchaseOrders/cutover-po')));
+ }
+ for(const patch of [{backendOnly:false},{backendOnly:deleteField()},{backendOnly:'true'}])await assertFails(updateDoc(gate,patch));
+ await assertFails(deleteDoc(gate));
+ await adminDatabase.doc('supplyOrders/trusted-cutover-purchase').set(supply);
+ assert.equal((await getDoc(doc(client,'supplyOrders/trusted-cutover-purchase'))).exists(),true);
+});

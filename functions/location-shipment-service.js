@@ -77,8 +77,8 @@ async function commitLocationShipment(db,uid,data,env=process.env){
   if(!['active','normal'].includes(order.status)||![undefined,'','normal','active'].includes(order.orderStatus))
    fault('已取消或結案訂單不可出貨');
   if(!order.ownerUid||!order.salesCode||!Array.isArray(order.items)||!order.items.length
-   ||order.items.length>5||order.items.filter(row=>row?.itemId===itemId).length!==1)
-   fault('此試點僅限完整且品項唯一的 1–5 品項訂單');
+   ||order.items.length>15||order.items.filter(row=>row?.itemId===itemId).length!==1)
+   fault('此試點僅限完整且品項唯一的 1–15 品項訂單');
   const multi=order.items.length>1,item=order.items.find(row=>row.itemId===itemId);
   const itemIndex=order.items.indexOf(item);
   if(item.itemId!==itemId||(item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'

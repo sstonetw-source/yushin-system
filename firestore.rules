@@ -329,7 +329,7 @@ service cloud.firestore {
     function directShipReceiptOrderUpdate(orderId) {
       let beforeRecords = resource.data.get('deliveryRecords', []);
       let afterRecords = request.resource.data.get('deliveryRecords', []);
-      return directShipReceiver()
+      return !deliveryBackendOnly() && directShipReceiver()
         && afterRecords.size() == beforeRecords.size() + 1
         && operationalItemsOnly(['orderedQty', 'reservedQty', 'shortageQty', 'receivedQty', 'deliveredQty', 'directShipDeliveredQty', 'receiptEvents', 'reservationStatus', 'inventoryProductKey'])
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -1240,6 +1240,15 @@ service cloud.firestore {
         && (id != 'shipmentCutover'
           || resource.data.get('backendOnly', false) != true
           || request.resource.data.get('backendOnly', false) == true)
+        && (id != 'purchasingCutover'
+          || resource.data.get('backendOnly', false) != true
+          || request.resource.data.get('backendOnly', false) == true)
+        && (id != 'returnCutover'
+          || resource.data.get('backendOnly', false) != true
+          || request.resource.data.get('backendOnly', false) == true)
+        && (id != 'deliveryCutover'
+          || resource.data.get('backendOnly', false) != true
+          || request.resource.data.get('backendOnly', false) == true)
         && (id != 'lifecycleCutover'
           || resource.data.get('backendOnly', false) != true
           || request.resource.data.get('backendOnly', false) == true);
@@ -1464,7 +1473,10 @@ service cloud.firestore {
     // candidates for a short, fully withdrawn request list.
     function returnPendingInGroup(requests, start) {
       let count = requests.size();
-      return count > start && (requests[start].status == 'PENDING'
+      return count >= start + 5
+        ? [requests[start].status, requests[start + 1].status, requests[start + 2].status,
+          requests[start + 3].status, requests[start + 4].status].hasAny(['PENDING'])
+        : count > start && (requests[start].status == 'PENDING'
         || (count > start + 1 && requests[start + 1].status == 'PENDING')
         || (count > start + 2 && requests[start + 2].status == 'PENDING')
         || (count > start + 3 && requests[start + 3].status == 'PENDING')
@@ -1627,7 +1639,7 @@ service cloud.firestore {
       let beforeRecords = before.get('deliveryRecords', []);
       let afterRecords = after.get('deliveryRecords', []);
       let record = afterRecords[beforeRecords.size()];
-      return !shipmentBackendOnly() && canReceiveInventory()
+      return !shipmentBackendOnly() && !deliveryBackendOnly() && canReceiveInventory()
         && !orderIsCancelled(before)
         && before.get('inventoryReservationStatus', '') != 'pending'
         && beforeRecords.size() + 1 == afterRecords.size()
@@ -1851,7 +1863,7 @@ service cloud.firestore {
         && (!changed.hasAny(['status','orderStatus']) || validOrderCancellationTransition())
         && (!changed.hasAny(['inventoryReservationStatus','inventoryReservationError','inventoryReservationUpdatedAt','inventoryReservationAttemptId']) || validOrderInventorySyncTransition(userRole))
         && (!changed.hasAny(['sourceDocumentSyncStatus','sourceDocumentSyncError','sourceDocumentSyncUpdatedAt']) || validOrderSourceSyncTransition(id, userRole))
-        && (userRole == 'admin' ? (changed.hasAny(['items','productId','productType','serviceKind','inventoryShipmentRecordId']) ? validClientServiceBillingBinding() : true)
+        && (userRole == 'admin' ? clientDeliveryFactsUnchanged() && (changed.hasAny(['items','productId','productType','serviceKind','inventoryShipmentRecordId']) ? validClientServiceBillingBinding() : true)
         : userRole in ['sales','engineer'] && changed.hasAny(['isBilled','billingDate'])
           && changed.hasOnly(['isBilled','billingDate','statusHistory','updatedAt',
             'status','workCategories','workCategoryUpdatedAt']) ? owns(resource.data)
@@ -1911,7 +1923,7 @@ service cloud.firestore {
         && before.get('receivedQty', 0) == after.get('receivedQty', 0)
         && ((prior == next && before.get('deliveredQty', 0) == after.get('deliveredQty', 0)
             && before.get('isDelivered', false) == after.get('isDelivered', false))
-          || (next is list && after.get('deliveredQty', 0) is number && after.deliveredQty >= 0
+          || (!deliveryBackendOnly() && next is list && after.get('deliveredQty', 0) is number && after.deliveredQty >= 0
             && (!after.get('isDelivered', false) || next.size() > 0)
             && (businessDeliveryRecordChange(prior, next, e.get('recordIndex', -1))
               || (before.get('items', []).size() == 1 && next.size() == 0 && after.deliveredQty == 0))
@@ -2048,10 +2060,44 @@ service cloud.firestore {
     function validOrderTransactionType(data) {
       return data.get('transactionType', '') in ['直', '借', '扣'];
     }
+    // Coordinated fulfillment cutover: legacy delivery writers also performed
+    // physical stock changes. Freeze their order witness as well as receipts;
+    // trusted Admin SDK delivery/shipment/receiving services remain unaffected.
+    function deliveryBackendOnly() {
+      let gate = /databases/$(database)/documents/settings/deliveryCutover;
+      return exists(gate) && get(gate).data.get('backendOnly', false) == true;
+    }
+    function clientDeliveryFactsUnchanged() {
+      return !request.resource.data.diff(resource.data).affectedKeys()
+        .hasAny(['deliveryRecords', 'deliveredQty', 'isDelivered']) || !deliveryBackendOnly();
+    }
+    function clientDeliveryFactsEmpty() {
+      return (request.resource.data.get('deliveryRecords', []) == []
+        && request.resource.data.get('deliveredQty', 0) == 0
+        && request.resource.data.get('isDelivered', false) == false) || !deliveryBackendOnly();
+    }
+    // Return requests, receipt settlement and inspection release retire together.
+    // The trusted return services keep their existing calculation and role checks.
+    function returnBackendOnly() {
+      let gate = /databases/$(database)/documents/settings/returnCutover;
+      return exists(gate) && get(gate).data.get('backendOnly', false) == true;
+    }
+    function clientReturnFactsUnchanged() {
+      return !request.resource.data.diff(resource.data).affectedKeys()
+        .hasAny(['returnRequests', 'returnPending', 'returnRequestMutationIndex',
+          'returnRecords', 'returnedQty', 'returnReceiptId']) || !returnBackendOnly();
+    }
+    function clientReturnFactsEmpty() {
+      return (request.resource.data.get('returnRequests', []) == []
+        && request.resource.data.get('returnPending', false) == false
+        && request.resource.data.get('returnRecords', []) == []
+        && request.resource.data.get('returnedQty', 0) == 0
+        && request.resource.data.get('returnReceiptId', '') == '') || !returnBackendOnly();
+    }
     match /orders/{id} {
       allow get: if (resource == null ? role() in ['admin','purchaser','warehouse','sales','engineer'] : operationalOrOwnedReader(resource.data));
       allow list: if operationalOrOwnedReader(resource.data);
-      allow create: if canCreateCommercialDoc()
+      allow create: if canCreateCommercialDoc() && clientDeliveryFactsEmpty() && clientReturnFactsEmpty()
         // Client SDK must not forge the terminal server-only checkpoint.
         && request.resource.data.get('inventoryReservationStatus', '') != 'completed'
         && request.resource.data.get('items', []).size() <= 15
@@ -2068,18 +2114,27 @@ service cloud.firestore {
           || request.resource.data.get('items', []) == resource.data.get('items', []))
         && (resource.data.get('inventoryReservationStatus', '') == 'completed'
           || request.resource.data.get('inventoryReservationStatus', '') != 'completed')
-        && orderUpdateAllowed(id);
+        && clientReturnFactsUnchanged() && orderUpdateAllowed(id);
       allow delete: if admin();
     }
 
+    function purchasingBackendOnly() {
+      let gate = /databases/$(database)/documents/settings/purchasingCutover;
+      return exists(gate) && get(gate).data.get('backendOnly', false) == true;
+    }
+    function purchaseDocumentDraft(data) {
+      return data.get('status', '') == 'DRAFT' && data.get('documentOnly', false) == true;
+    }
     // Formal supplier PO. Sales/engineer self-order does NOT grant purchase-order privilege.
     match /purchaseOrders/{id} {
       allow read: if canPurchase();
-      allow create: if canPurchase();
+      allow create: if canPurchase() && (purchaseDocumentDraft(request.resource.data) || !purchasingBackendOnly());
       // The PO is an immutable document snapshot for warehouse users. Receiving
       // progress belongs to supplyOrders and receipts, never back on the PO.
-      allow update: if canPurchase();
-      allow delete: if admin();
+      allow update: if canPurchase() && (!purchasingBackendOnly()
+        || purchaseDocumentDraft(resource.data) && purchaseDocumentDraft(request.resource.data)
+        || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastOutputAt','lastOutputType']));
+      allow delete: if admin() && (!purchasingBackendOnly() || purchaseDocumentDraft(resource.data));
     }
 
     // ERP-style communication timeline. Browser share/mailto can prove only that
@@ -2166,7 +2221,7 @@ service cloud.firestore {
         || (businessOwner()
           && resource.data.type == 'SALES_SELF_ORDER'
           && resource.data.ownerUid == request.auth.uid);
-      allow create: if purchaserSupplySourceReady() && (((canPurchase()) && validQuickPurchaseCost())
+      allow create: if !purchasingBackendOnly() && purchaserSupplySourceReady() && (((canPurchase()) && validQuickPurchaseCost())
         && validSelfOrderSupplyCreate()
         || (businessOwner()
           && request.resource.data.type == 'SALES_SELF_ORDER'
@@ -2177,8 +2232,8 @@ service cloud.firestore {
       // but supply execution becomes operational evidence after creation. Only purchasing
       // or receiving roles may mutate quantities/status; this prevents direct API edits
       // from bypassing procurement and receipt workflows.
-      allow update: if supplyOperationalUpdateAllowed(id);
-      allow delete: if admin();
+      allow update: if !purchasingBackendOnly() && supplyOperationalUpdateAllowed(id);
+      allow delete: if !purchasingBackendOnly() && admin();
     }
 
     // The authoritative supply record retains cost. This derived receiving view
@@ -2458,7 +2513,7 @@ service cloud.firestore {
 
     match /customerReturnReceipts/{id} {
       allow read: if canReceiveInventory() || (businessOwner() && owns(resource.data));
-      allow create: if canReceiveInventory()
+      allow create: if !returnBackendOnly() && canReceiveInventory()
         && validActiveReturnWarehouse(request.resource.data.warehouseId)
         && request.resource.data.receivedBy == request.auth.uid
         && request.resource.data.qty is number && request.resource.data.qty > 0
@@ -2472,13 +2527,13 @@ service cloud.firestore {
         && request.resource.data.record.quality == request.resource.data.quality
         && request.resource.data.record.warehouseId == request.resource.data.warehouseId
         && getAfter(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.returnReceiptId == id;
-      allow update: if canReceiveInventory() && resource.data.disposition == 'HOLD'
+      allow update: if !returnBackendOnly() && canReceiveInventory() && resource.data.disposition == 'HOLD'
         && validActiveReturnWarehouse(resource.data.warehouseId)
         && request.resource.data.disposition == 'STOCK'
         && request.resource.data.releasedBy == request.auth.uid
         && request.resource.data.releasedAt != ''
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['disposition', 'releasedAt', 'releasedBy']);
-      allow delete: if admin();
+      allow delete: if !returnBackendOnly() && admin();
     }
 
     // Client receipt writes are permitted only before the separately approved
@@ -2540,10 +2595,10 @@ service cloud.firestore {
     match /deliveries/{id} {
       allow read: if canReceiveInventory()
         || (businessOwner() && owns(resource.data));
-      allow create: if admin()
-        || (businessOwner() && owns(request.resource.data));
+      allow create: if !deliveryBackendOnly() && (admin()
+        || (businessOwner() && owns(request.resource.data)));
       allow update: if false;
-      allow delete: if admin();
+      allow delete: if !deliveryBackendOnly() && admin();
     }
 
 

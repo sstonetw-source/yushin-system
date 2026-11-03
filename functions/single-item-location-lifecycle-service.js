@@ -45,8 +45,8 @@ function normalizeLifecycleIntent(data,{allowNoWarehouse=false}={}){
 }
 function normalizeOrderLifecycleIntent(data){
  if(!data||typeof data!=='object'||Array.isArray(data)||'itemId' in data
-  ||!Array.isArray(data.itemIds)||!data.itemIds.length||data.itemIds.length>5)
-  fault('整單取消恢復須提供 1–5 個唯一品項','invalid-argument');
+  ||!Array.isArray(data.itemIds)||!data.itemIds.length||data.itemIds.length>15)
+  fault('整單取消恢復須提供 1–15 個唯一品項','invalid-argument');
  const itemIds=data.itemIds.map(value=>ident(value,'品項 ID')).sort();
  if(new Set(itemIds).size!==itemIds.length)fault('整單品項重複','invalid-argument');
  const {itemIds:ignored,...rest}=data;
@@ -91,7 +91,7 @@ async function runLocationLifecycle(db,uid,data,wholeOrder,env=process.env){
     fault('操作識別碼已用於其他交易','already-exists');
    return {...record.result,status:'already-applied',receiptId:receiptRef.id};
   }
-  if(!order.ownerUid||!order.salesCode||!Array.isArray(order.items)||!order.items.length||order.items.length>5
+  if(!order.ownerUid||!order.salesCode||!Array.isArray(order.items)||!order.items.length||order.items.length>15
    ||(!wholeOrder&&(order.items.length!==1||order.items[0]?.itemId!==intent.itemId))
    ||(wholeOrder&&(order.items.length!==intent.itemIds.length
      ||new Set(order.items.map(row=>row?.itemId)).size!==order.items.length

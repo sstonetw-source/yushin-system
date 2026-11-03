@@ -3815,7 +3815,7 @@ test('self-order capability is aligned between frontend and Firestore rules', ()
     const ruleStart=rulesSource.indexOf('match /supplyOrders/{id}');
     const ruleEnd=rulesSource.indexOf('\n    match /inventory/{id}',ruleStart);
     const ruleSource=rulesSource.slice(ruleStart,ruleEnd);
-    assert.match(ruleSource,/allow create: if purchaserSupplySourceReady\(\) && \(\(\(canPurchase\(\)\) && validQuickPurchaseCost\(\)\)[\s\S]*?businessOwner\(\)[\s\S]*?SALES_SELF_ORDER/);
+    assert.match(ruleSource,/allow create: if !purchasingBackendOnly\(\) && purchaserSupplySourceReady\(\) && \(\(\(canPurchase\(\)\) && validQuickPurchaseCost\(\)\)[\s\S]*?businessOwner\(\)[\s\S]*?SALES_SELF_ORDER/);
     assert.match(ruleSource,/request\.resource\.data\.ownerUid == request\.auth\.uid/);
     assert.match(ruleSource,/request\.resource\.data\.salesCode == salesCode\(\)/);
     assert.doesNotMatch(ruleSource,/allow create: if admin\(\) \|\| purchaser\(\)[\s\S]*?\|\| \(sales\(\)/);
@@ -4387,7 +4387,7 @@ test('supply order rules preserve identity and valid operational quantities', ()
     const supplyStart=rulesSource.indexOf('match /supplyOrders/{id}');
     const supplyEnd=rulesSource.indexOf('\n\n    match /inventory/{id}',supplyStart);
     const supplySource=rulesSource.slice(supplyStart,supplyEnd);
-    assert.match(supplySource,/allow update: if supplyOperationalUpdateAllowed\(id\)/);
+    assert.match(supplySource,/allow update: if !purchasingBackendOnly\(\) && supplyOperationalUpdateAllowed\(id\)/);
     const dispatch=rulesSource.slice(rulesSource.indexOf('function supplyOperationalUpdateAllowed(id)'),supplyStart);
     assert.match(dispatch,/let userRole = role\(\)/);
     assert.match(dispatch,/userRole == 'purchaser' && \(purchaserSupplyOperationalUpdate\(userRole\)/);

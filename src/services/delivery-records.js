@@ -98,7 +98,7 @@ async function confirmV2ShipmentDeliveryEmulator(orderId,{date,qty,notes='',item
   const order=snapshot.data(),rows=order.items||[];
   const resolvedItemId=itemId||(rows.length===1?rows[0].itemId:'');
   if(order.inventoryReservationStatus!=='completed'||!order.inventoryReservationAttemptId
-    ||rows.length<1||rows.length>5||!resolvedItemId)
+    ||rows.length<1||rows.length>15||!resolvedItemId)
     throw Error('訂單尚未具備完整的 v2 送達來源。');
   const source=(order.warehouseShipmentRecords||[]).find(s=>s.id===shipmentId&&s.itemId===resolvedItemId);
   if(!source)throw Error('請先選擇這個品項的實際出貨紀錄。');

@@ -81,3 +81,13 @@ test('reset removes transfer holds and transit counters before stock can be init
   assert.throws(()=>stockResetPatch({...original,[key]:'3'},'cli','now'),/Unexpected stock field type/);
  assert.equal(original.transferReserved,2,'planning never mutates the live snapshot');
 });
+
+
+test('manual purchase idempotency proofs are reset with their source transactions',()=>{
+ const plan=classifyRootCollections(['purchaseOperations','orders','supplyOrders','settings','users']);
+ assert.deepEqual(plan.unknown,[]);
+ assert.ok(plan.deleting.includes('purchaseOperations'));
+ assert.ok(plan.deleting.includes('orders'));
+ assert.ok(plan.deleting.includes('supplyOrders'));
+ assert.deepEqual(plan.preserving,['settings','users']);
+});

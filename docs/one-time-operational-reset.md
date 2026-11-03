@@ -58,3 +58,10 @@ node functions/scripts/one-time-operational-reset.js --project=yu-shing-company 
 舊 `transferReserved`／`transferInTransit` 亦會留下無來源的調撥數量。
 工具的盤點、執行與 VERIFIED 驗證均沿用同一 STOCK_FIELDS 清單，現包含上述八欄。
 此修正不執行任何正式重置，也不擴大刪除或保留集合範圍。
+
+## 2026-11-03 最新唯讀盤點補充
+
+正式 `(default)` 已存在 `purchaseOperations`，它是手動採購固定操作 ID 的後端憑證，
+必須與 orders／supplyOrders／Movement 同批清除，不能保留孤立的舊冪等結果。
+policy 已將它列入交易刪除集合；未知集合仍會中止，未執行正式清理。
+過往 29 根集合的數字是歷史快照，不能作為本次清除筆數或完整清單。

@@ -90,7 +90,7 @@ test('whole-order lifecycle intent covers all ids canonically and refuses mixed 
  assert.equal(first.hash,normalizeOrderLifecycleIntent({...data,itemIds:['I1','I2'],warehouseIds:['A','B'],reason:'取消'}).hash);
  for(const patch of [{itemIds:['I1']},{nextStatus:'normal'},{date:'2026-10-22'},{reason:'不同'}])
   assert.notEqual(first.hash,normalizeOrderLifecycleIntent({...data,...patch}).hash);
- for(const patch of [{itemIds:[]},{itemIds:['I1','I1']},{itemIds:['1','2','3','4','5','6']},{itemId:'I1'},{actorRole:'admin'},{quantity:99}])
+ for(const patch of [{itemIds:[]},{itemIds:['I1','I1']},{itemIds:Array.from({length:16},(_,i)=>'I'+i)},{itemId:'I1'},{actorRole:'admin'},{quantity:99}])
   assert.throws(()=>normalizeOrderLifecycleIntent({...data,...patch}));
  return assert.rejects(commitOrderLocationLifecycle({projectId:'production'},'actor',data),e=>e.code==='failed-precondition');
 });
