@@ -7,7 +7,7 @@ const vm=require('node:vm');
 const root=path.join(__dirname,'..');
 const rollout=fs.readFileSync(path.join(root,'transaction-rollout-config.js'),'utf8');
 const html=fs.readFileSync(path.join(root,'index.html'),'utf8');
-const version='20261103-receiving-guard-1';
+const version='20261103-transaction-cutover-1';
 
 test('missing production origin leaves all new transaction flags disabled',()=>{
  const context={YUSHIN_PRODUCTION_QUICK_PURCHASE_LEGACY_BLOCKED:true,YUSHIN_PRODUCTION_QUICK_PURCHASE:true,YUSHIN_PREVIEW_QUICK_PURCHASE:true,
@@ -27,20 +27,20 @@ test('missing production origin leaves all new transaction flags disabled',()=>{
  assert.equal(context.YUSHIN_PRODUCTION_ORDER_RESERVATION_LEGACY_BLOCKED,false,'untrusted origins must not inherit a production flag');
 });
 
-test('receiving backend and retirement lock never inherit stale global gates before approved cutover',()=>{
+test('receiving cutover and retirement lock follow only the approved production site',()=>{
  for(const url of ['https://sstonetw-source.github.io/yushin-system/','https://evil.example/yushin-system/']){
   const context={location:new URL(url),YUSHIN_PRODUCTION_RECEIVING_BACKEND:true,
    YUSHIN_PRODUCTION_RECEIVING_LEGACY_BLOCKED:true,YUSHIN_PREVIEW_RECEIVING:true};
   context.globalThis=context;
   vm.runInNewContext(rollout,context);
-  assert.equal(context.YUSHIN_PRODUCTION_RECEIVING_BACKEND,false,url);
-  assert.equal(context.YUSHIN_PRODUCTION_RECEIVING_LEGACY_BLOCKED,false,url);
+  assert.equal(context.YUSHIN_PRODUCTION_RECEIVING_BACKEND,url==='https://sstonetw-source.github.io/yushin-system/',url);
+  assert.equal(context.YUSHIN_PRODUCTION_RECEIVING_LEGACY_BLOCKED,url==='https://sstonetw-source.github.io/yushin-system/',url);
   assert.equal(context.YUSHIN_PREVIEW_RECEIVING,true,'production config must not change Preview gates');
   context.YUSHIN_PRODUCTION_RECEIVING_BACKEND=true;
   context.YUSHIN_PRODUCTION_RECEIVING_LEGACY_BLOCKED=true;
   vm.runInNewContext(rollout,context);
-  assert.equal(context.YUSHIN_PRODUCTION_RECEIVING_BACKEND,false,'reload must remain closed');
-  assert.equal(context.YUSHIN_PRODUCTION_RECEIVING_LEGACY_BLOCKED,false,'reload must not arm retirement');
+  assert.equal(context.YUSHIN_PRODUCTION_RECEIVING_BACKEND,url==='https://sstonetw-source.github.io/yushin-system/','reload follows approved site');
+  assert.equal(context.YUSHIN_PRODUCTION_RECEIVING_LEGACY_BLOCKED,url==='https://sstonetw-source.github.io/yushin-system/','reload never revives retired writers on the approved site');
  }
 });
 
@@ -81,10 +81,31 @@ test('approved production transaction activation is restricted to the exact HTTP
  }
 });
 
-test('production environment preserves the independently approved deployed backend gates',()=>{
+test('maintenance environment keeps every deployed transaction flag disabled',()=>{
  const lines=fs.readFileSync(path.join(root,'functions/.env.yu-shing-company'),'utf8').trim().split('\n');
- assert.deepEqual(Object.fromEntries(lines.map(line=>line.split('='))),{
-  ENABLE_ORDER_RESERVATION_BACKEND:'true',ENABLE_PRODUCTION_ORDER_RESERVATION_BACKEND:'true',ENABLE_PRODUCTION_FORMAL_PURCHASE:'true',ENABLE_PRODUCTION_QUICK_PURCHASE:'true'
- });
+ const flags=Object.fromEntries(lines.map(line=>line.split('=')));
+ assert.ok(Object.keys(flags).length>=12);
+ assert.ok(Object.values(flags).every(value=>value==='false'));
+ assert.equal(flags.ENABLE_PRODUCTION_ORDER_RESERVATION_BACKEND,'false');
+ assert.equal(flags.ENABLE_PRODUCTION_FORMAL_PURCHASE,'false');
+ assert.equal(flags.ENABLE_PRODUCTION_QUICK_PURCHASE,'false');
  assert.match(html,/<script src="app\.js\?v=20261103-442"/);
+});
+
+test('maintenance and all new backend retirement routes are restricted to the approved origin',()=>{
+ for(const url of ['https://sstonetw-source.github.io/yushin-system','https://sstonetw-source.github.io/yushin-system/','https://sstonetw-source.github.io/yushin-system/index.html','http://localhost:8080/','https://evil.example/yushin-system/']){
+  const c={location:new URL(url)};c.globalThis=c;vm.runInNewContext(rollout,c);
+  const approved=url.startsWith('https://sstonetw-source.github.io/yushin-system');
+  assert.equal(c.YUSHIN_PRODUCTION_MAINTENANCE,approved);
+  for(const name of ['RECEIVING','DISPATCH','SHIPMENT','ORDER_LIFECYCLE','DELIVERY_CONFIRMATION','DELIVERY_REVERSAL','CUSTOMER_RETURN','CUSTOMER_RETURN_REQUEST']){
+   assert.equal(c['YUSHIN_PRODUCTION_'+name+'_BACKEND'],approved,name);
+   assert.equal(c['YUSHIN_PRODUCTION_'+name+'_LEGACY_BLOCKED'],approved,name);
+  }
+  let destination;const location={href:url,replace:target=>destination=target};
+  vm.runInNewContext(fs.readFileSync(path.join(root,'production-maintenance-redirect.js'),'utf8'),{YUSHIN_PRODUCTION_MAINTENANCE:c.YUSHIN_PRODUCTION_MAINTENANCE,location,URL});
+  assert.equal(destination,approved?'https://sstonetw-source.github.io/yushin-system/maintenance.html':undefined);
+ }
+ assert.ok(html.indexOf('production-maintenance-redirect.js')<html.indexOf('firebase-app-compat.js'));
+ const notice=fs.readFileSync(path.join(root,'maintenance.html'),'utf8');
+ assert.doesNotMatch(notice,/<script|firebasejs|app\.js/);
 });

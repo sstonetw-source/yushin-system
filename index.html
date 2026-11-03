@@ -8,6 +8,8 @@
          有時還會被重新排版空白，看起來像格式跑掉），估價單輸出時才會維持原本的純黑色文字 -->
     <meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
     <title>又鑫管理系統</title>
+    <script src="transaction-rollout-config.js?v=20261103-transaction-cutover-1"></script>
+    <script src="production-maintenance-redirect.js?v=20261103-1"></script>
     <!-- Firebase SDK (Compat 模式，支援 Firestore + Auth) -->
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
@@ -1698,7 +1700,6 @@
         }
     }, 15000);
     </script>
-    <script src="transaction-rollout-config.js?v=20261103-receiving-guard-1"></script>
     <script src="modules/supplier-core.js?v=20261020-1"></script>
 <script src="modules/stock-permissions.js?v=20261025-6"></script>
     <script src="modules/inventory-core.js?v=20261010-1"></script>
