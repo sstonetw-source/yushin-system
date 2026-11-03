@@ -329,7 +329,7 @@ service cloud.firestore {
     function directShipReceiptOrderUpdate(orderId) {
       let beforeRecords = resource.data.get('deliveryRecords', []);
       let afterRecords = request.resource.data.get('deliveryRecords', []);
-      return directShipReceiver()
+      return !deliveryBackendOnly() && directShipReceiver()
         && afterRecords.size() == beforeRecords.size() + 1
         && operationalItemsOnly(['orderedQty', 'reservedQty', 'shortageQty', 'receivedQty', 'deliveredQty', 'directShipDeliveredQty', 'receiptEvents', 'reservationStatus', 'inventoryProductKey'])
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -1630,7 +1630,7 @@ service cloud.firestore {
       let beforeRecords = before.get('deliveryRecords', []);
       let afterRecords = after.get('deliveryRecords', []);
       let record = afterRecords[beforeRecords.size()];
-      return !shipmentBackendOnly() && canReceiveInventory()
+      return !shipmentBackendOnly() && !deliveryBackendOnly() && canReceiveInventory()
         && !orderIsCancelled(before)
         && before.get('inventoryReservationStatus', '') != 'pending'
         && beforeRecords.size() + 1 == afterRecords.size()
@@ -1854,7 +1854,7 @@ service cloud.firestore {
         && (!changed.hasAny(['status','orderStatus']) || validOrderCancellationTransition())
         && (!changed.hasAny(['inventoryReservationStatus','inventoryReservationError','inventoryReservationUpdatedAt','inventoryReservationAttemptId']) || validOrderInventorySyncTransition(userRole))
         && (!changed.hasAny(['sourceDocumentSyncStatus','sourceDocumentSyncError','sourceDocumentSyncUpdatedAt']) || validOrderSourceSyncTransition(id, userRole))
-        && (userRole == 'admin' ? (changed.hasAny(['items','productId','productType','serviceKind','inventoryShipmentRecordId']) ? validClientServiceBillingBinding() : true)
+        && (userRole == 'admin' ? clientDeliveryFactsUnchanged() && (changed.hasAny(['items','productId','productType','serviceKind','inventoryShipmentRecordId']) ? validClientServiceBillingBinding() : true)
         : userRole in ['sales','engineer'] && changed.hasAny(['isBilled','billingDate'])
           && changed.hasOnly(['isBilled','billingDate','statusHistory','updatedAt',
             'status','workCategories','workCategoryUpdatedAt']) ? owns(resource.data)
@@ -1914,7 +1914,7 @@ service cloud.firestore {
         && before.get('receivedQty', 0) == after.get('receivedQty', 0)
         && ((prior == next && before.get('deliveredQty', 0) == after.get('deliveredQty', 0)
             && before.get('isDelivered', false) == after.get('isDelivered', false))
-          || (next is list && after.get('deliveredQty', 0) is number && after.deliveredQty >= 0
+          || (!deliveryBackendOnly() && next is list && after.get('deliveredQty', 0) is number && after.deliveredQty >= 0
             && (!after.get('isDelivered', false) || next.size() > 0)
             && (businessDeliveryRecordChange(prior, next, e.get('recordIndex', -1))
               || (before.get('items', []).size() == 1 && next.size() == 0 && after.deliveredQty == 0))
@@ -2087,7 +2087,7 @@ service cloud.firestore {
           || request.resource.data.get('items', []) == resource.data.get('items', []))
         && (resource.data.get('inventoryReservationStatus', '') == 'completed'
           || request.resource.data.get('inventoryReservationStatus', '') != 'completed')
-        && clientDeliveryFactsUnchanged() && orderUpdateAllowed(id);
+        && orderUpdateAllowed(id);
       allow delete: if admin();
     }
 
