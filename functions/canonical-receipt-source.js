@@ -37,7 +37,6 @@ async function validateCanonicalReceiptSource({get,db,uid,actor,order,supply,res
  for(const row of order.items){
   if(!id(row?.itemId)||seen.has(row.itemId)||!id(row.productId)
     ||(row.fulfillmentType||order.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
-    ||String(row.productType||row.type||'').toUpperCase()==='SERVICE'
     ||row.transferPendingId||row.custodyTransferId)reject();
   seen.add(row.itemId);
   for(const field of ['dispatchPreparedQty','warehouseShippedQty','deliveredQty','returnedQty'])
@@ -46,7 +45,24 @@ async function validateCanonicalReceiptSource({get,db,uid,actor,order,supply,res
   const reserved=number(row.reservedQty,true),shortage=number(row.shortageQty,true);
   const ordered=number(row.supplyOrderedQty,true),received=number(row.receivedQty,true);
   if(!requested||requested>1000000||(row.orderedQty!==undefined&&row.orderedQty!==requested)
-    ||reserved+shortage!==requested||received>ordered||ordered-received>shortage)reject();
+    ||received>ordered||ordered-received>shortage)reject();
+  // The initial-order writer creates no stock reservation or demand for service.
+  // Validate that contract explicitly; a service line must never count as stock.
+  if(String(row.productType||row.type||'').toUpperCase()==='SERVICE'){
+   if(reserved!==0||shortage!==0||ordered!==0||received!==0
+     ||row.inventoryProductKey!==''||row.warehouseId!==''
+     ||row.reservationStatus!=='not_required')reject();
+   const serviceProduct=await get(db.collection('products').doc(row.productId));
+   if(!serviceProduct.exists||serviceProduct.data().active===false
+     ||String(serviceProduct.data().productType||serviceProduct.data().type||'').toUpperCase()!=='SERVICE')reject();
+   const unexpected=await get(db.collection('inventoryReservations').doc(supply.orderId+'__'+row.itemId));
+   if(unexpected.exists)reject();
+   const demandId=demandCore.demandIdForSource({sourceType:'SALES_ORDER',sourceId:supply.orderId,sourceItemId:row.itemId});
+   const demand=await get(db.collection('procurementDemands').doc(encodeURIComponent(demandId)));
+   if(demand.exists)reject();
+   continue;
+  }
+  if(reserved+shortage!==requested)reject();
   const key=row.inventoryProductKey||row.productId,warehouseId=row.warehouseId||order.warehouseId;
   if(!id(key)||key!==row.productId||!id(warehouseId))reject();
   if(!products.has(row.productId)){

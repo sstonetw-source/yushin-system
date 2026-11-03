@@ -65,3 +65,29 @@ test('receipt replay preserves terminal lifecycle semantics but still rejects a 
  f.input.reservation.locations=[];
  await assert.rejects(f.check(),{code:'failed-precondition'});
 });
+
+test('canonical receipt allows a fresh mixed goods/service order without counting service as stock',async()=>{
+ const f=fixture(1),service={itemId:'IS',productId:'PS',productType:'SERVICE',
+  fulfillmentType:'WAREHOUSE',inventoryProductKey:'',warehouseId:'',qty:1,orderedQty:1,
+  reservedQty:0,shortageQty:0,supplyOrderedQty:0,receivedQty:0,reservationStatus:'not_required'};
+ f.input.order.items.push(service);
+ f.records.set('products/PS',{active:true,productType:'SERVICE'});
+ const before=structuredClone(f.records);
+ await f.check();
+ assert.deepEqual(f.records,before);
+ assert.ok(f.reads.length<40);
+ for(const change of [
+  f=>f.input.order.items[1].reservedQty=1,
+  f=>f.input.order.items[1].warehouseId='W',
+  f=>f.input.order.items[1].reservationStatus='active',
+  f=>f.records.get('products/PS').productType='Goods',
+  f=>f.records.set('inventoryReservations/O__IS',{quantity:0}),
+  f=>f.records.set('procurementDemands/SALES_ORDER%3AO%3AIS',{requestedQty:0})
+ ]){
+  const bad=fixture(1);
+  bad.input.order.items.push({...service});
+  bad.records.set('products/PS',{active:true,productType:'SERVICE'});
+  change(bad);
+  await assert.rejects(bad.check(),{code:'failed-precondition'});
+ }
+});
