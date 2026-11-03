@@ -7,7 +7,7 @@ const vm=require('node:vm');
 const root=path.join(__dirname,'..');
 const rollout=fs.readFileSync(path.join(root,'transaction-rollout-config.js'),'utf8');
 const html=fs.readFileSync(path.join(root,'index.html'),'utf8');
-const version='20261103-transaction-cutover-1';
+const version='20261104-transaction-activation-1';
 
 test('missing production origin leaves all new transaction flags disabled',()=>{
  const context={YUSHIN_PRODUCTION_QUICK_PURCHASE_LEGACY_BLOCKED:true,YUSHIN_PRODUCTION_QUICK_PURCHASE:true,YUSHIN_PREVIEW_QUICK_PURCHASE:true,
@@ -81,31 +81,26 @@ test('approved production transaction activation is restricted to the exact HTTP
  }
 });
 
-test('maintenance environment keeps every deployed transaction flag disabled',()=>{
+test('authorized environment enables production transaction gates without enabling Preview or Emulator',()=>{
  const lines=fs.readFileSync(path.join(root,'functions/.env.yu-shing-company'),'utf8').trim().split('\n');
  const flags=Object.fromEntries(lines.map(line=>line.split('=')));
  assert.ok(Object.keys(flags).length>=12);
- assert.ok(Object.values(flags).every(value=>value==='false'));
- assert.equal(flags.ENABLE_PRODUCTION_ORDER_RESERVATION_BACKEND,'false');
- assert.equal(flags.ENABLE_PRODUCTION_FORMAL_PURCHASE,'false');
- assert.equal(flags.ENABLE_PRODUCTION_QUICK_PURCHASE,'false');
- assert.match(html,/<script src="app\.js\?v=20261103-442"/);
+ for(const [key,value] of Object.entries(flags))assert.equal(value,key==='ENABLE_ORDER_RESERVATION_BACKEND'||key.startsWith('ENABLE_PRODUCTION_')?'true':'false',key);
+ assert.equal(flags.ENABLE_PRODUCTION_ORDER_RESERVATION_BACKEND,'true');
+ assert.equal(flags.ENABLE_PRODUCTION_FORMAL_PURCHASE,'true');
+ assert.equal(flags.ENABLE_PRODUCTION_QUICK_PURCHASE,'true');
+ assert.match(html,/<script src="app\.js\?v=20261104-444"/);
 });
 
-test('maintenance and all new backend retirement routes are restricted to the approved origin',()=>{
+test('all new backend retirement routes are restricted to the approved origin without a maintenance lock',()=>{
  for(const url of ['https://sstonetw-source.github.io/yushin-system','https://sstonetw-source.github.io/yushin-system/','https://sstonetw-source.github.io/yushin-system/index.html','http://localhost:8080/','https://evil.example/yushin-system/']){
   const c={location:new URL(url)};c.globalThis=c;vm.runInNewContext(rollout,c);
   const approved=url.startsWith('https://sstonetw-source.github.io/yushin-system');
-  assert.equal(c.YUSHIN_PRODUCTION_MAINTENANCE,approved);
+  assert.equal(c.YUSHIN_PRODUCTION_MAINTENANCE,undefined);
   for(const name of ['RECEIVING','DISPATCH','SHIPMENT','ORDER_LIFECYCLE','DELIVERY_CONFIRMATION','DELIVERY_REVERSAL','CUSTOMER_RETURN','CUSTOMER_RETURN_REQUEST']){
    assert.equal(c['YUSHIN_PRODUCTION_'+name+'_BACKEND'],approved,name);
    assert.equal(c['YUSHIN_PRODUCTION_'+name+'_LEGACY_BLOCKED'],approved,name);
   }
-  let destination;const location={href:url,replace:target=>destination=target};
-  vm.runInNewContext(fs.readFileSync(path.join(root,'production-maintenance-redirect.js'),'utf8'),{YUSHIN_PRODUCTION_MAINTENANCE:c.YUSHIN_PRODUCTION_MAINTENANCE,location,URL});
-  assert.equal(destination,approved?'https://sstonetw-source.github.io/yushin-system/maintenance.html':undefined);
  }
- assert.ok(html.indexOf('production-maintenance-redirect.js')<html.indexOf('firebase-app-compat.js'));
- const notice=fs.readFileSync(path.join(root,'maintenance.html'),'utf8');
- assert.doesNotMatch(notice,/<script|firebasejs|app\.js/);
+ assert.doesNotMatch(html,/production-maintenance-redirect|maintenance\.html/);
 });

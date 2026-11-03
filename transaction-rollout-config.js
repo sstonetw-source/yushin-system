@@ -9,13 +9,12 @@
     const path = String(scope.location?.pathname || '');
     const orderReservationProductionSite = scope.location?.origin === 'https://sstonetw-source.github.io'
         && (path === '/yushin-system' || path.startsWith('/yushin-system/'));
-    scope.YUSHIN_PRODUCTION_MAINTENANCE = orderReservationProductionSite;
-    scope.YUSHIN_PRODUCTION_QUICK_PURCHASE_CONFIG_VERSION = '20261103-transaction-cutover-1';
-    // Authorized client cutover: maintenance keeps the UI closed and server gates stay off.
+    scope.YUSHIN_PRODUCTION_QUICK_PURCHASE_CONFIG_VERSION = '20261104-transaction-activation-1';
+    // Authorized activation: match the deployed production backend and database retirement gates.
     // Overwrite stale global values; the caller must never inherit an unintended true gate.
     scope.YUSHIN_PRODUCTION_RECEIVING_BACKEND = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_RECEIVING_LEGACY_BLOCKED = orderReservationProductionSite;
-    // Old writers stay retired while opening inventory and role acceptance are pending.
+    // Backend failure never revives the retired browser writer.
     scope.YUSHIN_PRODUCTION_CUSTOMER_RETURN_BACKEND = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_CUSTOMER_RETURN_LEGACY_BLOCKED = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_CUSTOMER_RETURN_REQUEST_BACKEND = orderReservationProductionSite;
