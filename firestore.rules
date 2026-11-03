@@ -1240,6 +1240,9 @@ service cloud.firestore {
         && (id != 'shipmentCutover'
           || resource.data.get('backendOnly', false) != true
           || request.resource.data.get('backendOnly', false) == true)
+        && (id != 'deliveryCutover'
+          || resource.data.get('backendOnly', false) != true
+          || request.resource.data.get('backendOnly', false) == true)
         && (id != 'lifecycleCutover'
           || resource.data.get('backendOnly', false) != true
           || request.resource.data.get('backendOnly', false) == true);
@@ -2048,10 +2051,26 @@ service cloud.firestore {
     function validOrderTransactionType(data) {
       return data.get('transactionType', '') in ['直', '借', '扣'];
     }
+    // Coordinated fulfillment cutover: legacy delivery writers also performed
+    // physical stock changes. Freeze their order witness as well as receipts;
+    // trusted Admin SDK delivery/shipment/receiving services remain unaffected.
+    function deliveryBackendOnly() {
+      let gate = /databases/$(database)/documents/settings/deliveryCutover;
+      return exists(gate) && get(gate).data.get('backendOnly', false) == true;
+    }
+    function clientDeliveryFactsUnchanged() {
+      return !request.resource.data.diff(resource.data).affectedKeys()
+        .hasAny(['deliveryRecords', 'deliveredQty', 'isDelivered']) || !deliveryBackendOnly();
+    }
+    function clientDeliveryFactsEmpty() {
+      return (request.resource.data.get('deliveryRecords', []) == []
+        && request.resource.data.get('deliveredQty', 0) == 0
+        && request.resource.data.get('isDelivered', false) == false) || !deliveryBackendOnly();
+    }
     match /orders/{id} {
       allow get: if (resource == null ? role() in ['admin','purchaser','warehouse','sales','engineer'] : operationalOrOwnedReader(resource.data));
       allow list: if operationalOrOwnedReader(resource.data);
-      allow create: if canCreateCommercialDoc()
+      allow create: if canCreateCommercialDoc() && clientDeliveryFactsEmpty()
         // Client SDK must not forge the terminal server-only checkpoint.
         && request.resource.data.get('inventoryReservationStatus', '') != 'completed'
         && request.resource.data.get('items', []).size() <= 15
@@ -2068,7 +2087,7 @@ service cloud.firestore {
           || request.resource.data.get('items', []) == resource.data.get('items', []))
         && (resource.data.get('inventoryReservationStatus', '') == 'completed'
           || request.resource.data.get('inventoryReservationStatus', '') != 'completed')
-        && orderUpdateAllowed(id);
+        && clientDeliveryFactsUnchanged() && orderUpdateAllowed(id);
       allow delete: if admin();
     }
 
@@ -2540,10 +2559,10 @@ service cloud.firestore {
     match /deliveries/{id} {
       allow read: if canReceiveInventory()
         || (businessOwner() && owns(resource.data));
-      allow create: if admin()
-        || (businessOwner() && owns(request.resource.data));
+      allow create: if !deliveryBackendOnly() && (admin()
+        || (businessOwner() && owns(request.resource.data)));
       allow update: if false;
-      allow delete: if admin();
+      allow delete: if !deliveryBackendOnly() && admin();
     }
 
 

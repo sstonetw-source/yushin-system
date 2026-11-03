@@ -3917,3 +3917,45 @@ test('cached legacy lifecycle cannot mutate an authoritative native v2 source fo
   assert.deepEqual(await facts(),before);
  }
 });
+
+
+test('delivery cutover rejects cached ledger writes and physical reversal atomically without reopening proofs',async()=>{
+ await seedStockWorkflow();
+ await assertSucceeds(stockWorkflow(0,5,'reserve'));
+ await assertSucceeds(stockWorkflow(-2,3,'ship'));
+ const administrator=db('admin'),gate=doc(administrator,'settings/deliveryCutover');
+ await assertSucceeds(setDoc(gate,{backendOnly:false}));
+ const source=doc(db('sales1'),'orders/stock-order');
+ const live=(await getDoc(source)).data();
+ await assertSucceeds(updateDoc(source,{deliveryRecords:live.deliveryRecords.map(r=>({...r,notes:'before'})),businessDeliveryEvidence:{recordIndex:0}}));
+ await assertSucceeds(setDoc(doc(db('sales1'),'deliveries/delivery-cutover-existing'),{ownerUid:'sales1',salesCode:'S01',orderId:'stock-order'}));
+ await assertSucceeds(updateDoc(gate,{backendOnly:true}));
+ const paths=['orders/stock-order','inventory/p1','warehouseStocks/w1-p1','inventoryLots/l1','inventoryReservations/stock-order__item-1'];
+ const read=()=>Promise.all(paths.map(async path=>(await getDoc(doc(administrator,path))).data()));
+ const before=await read();
+ await assertFails(stockWorkflow(2,5,'ship_reversal'));
+ assert.deepEqual(await read(),before);
+ for(const uid of ['admin','sales1','eng1','buyer1','wh1']){
+  const client=db(uid);
+  for(const patch of [{deliveryRecords:[]},{deliveredQty:0},{isDelivered:true},
+   {deliveryRecords:live.deliveryRecords.map(r=>({...r,notes:'after'})),businessDeliveryEvidence:{recordIndex:0}}])
+   await assertFails(updateDoc(doc(client,'orders/stock-order'),patch));
+  await assertFails(setDoc(doc(client,'deliveries/delivery-cutover-'+uid),{ownerUid:uid,orderId:'stock-order'}));
+  await assertFails(deleteDoc(doc(client,'deliveries/delivery-cutover-existing')));
+ }
+ assert.deepEqual(await read(),before);
+ for(const patch of [{backendOnly:false},{backendOnly:deleteField()},{backendOnly:'true'}])await assertFails(updateDoc(gate,patch));
+ await assertFails(deleteDoc(gate));
+ await assertFails(updateDoc(doc(db('sales1'),'settings/deliveryCutover'),{backendOnly:false}));
+ await assertFails(setDoc(doc(administrator,'orders/forged-delivery-create'),{
+  ...validOrderProduct,ownerUid:'sales1',salesCode:'S01',deliveryRecords:[{id:'forged',qty:1}],deliveredQty:1
+ }));
+ await assertSucceeds(setDoc(doc(administrator,'orders/empty-delivery-create'),{
+  ...validOrderProduct,ownerUid:'sales1',salesCode:'S01',deliveryRecords:[],deliveredQty:0,isDelivered:false
+ }));
+ await assertSucceeds(updateDoc(doc(administrator,'orders/stock-order'),{updatedAt:'2026-11-03T00:00:00.000Z'}));
+ await adminDatabase.doc('orders/stock-order').update({deliveryRecords:[],deliveredQty:0});
+ await adminDatabase.doc('deliveries/trusted-delivery').set({orderId:'stock-order'});
+ assert.equal((await getDoc(doc(administrator,'deliveries/trusted-delivery'))).exists(),true);
+ assert.equal((await getDoc(doc(administrator,'orders/stock-order'))).data().deliveredQty,0);
+});
