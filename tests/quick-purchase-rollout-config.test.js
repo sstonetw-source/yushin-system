@@ -69,5 +69,5 @@ test('production environment preserves the independently approved deployed backe
  assert.deepEqual(Object.fromEntries(lines.map(line=>line.split('='))),{
   ENABLE_ORDER_RESERVATION_BACKEND:'true',ENABLE_PRODUCTION_ORDER_RESERVATION_BACKEND:'true',ENABLE_PRODUCTION_FORMAL_PURCHASE:'true',ENABLE_PRODUCTION_QUICK_PURCHASE:'true'
  });
- assert.match(html,/<script src="app\.js\?v=20261102-425"/);
+ assert.match(html,/<script src="app\.js\?v=20261103-431"/);
 });

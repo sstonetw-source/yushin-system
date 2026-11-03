@@ -28,6 +28,8 @@
 
 收貨後預留仍是原單倉格式。只有新後端建立的收貨憑證明列 `reservationLocationSchemaVersion=1`，前端依原操作內容／操作者／批號驗證1或2版明確憑證，缺省及未知版仍拒絕；不能將舊前端無版本憑證直接當成此候選的成功結果。
 
+單倉收貨同時在既有、Client Rules禁止讀寫的 `reservationOperationReceipts` 建立原意圖hash／操作者／receipt／lot關聯，與原收貨同一交易提交。重送必須有匹配的後端憑證；不能只靠可讀receipt的版本欄位，讓舊客戶端偽造成功結果。沒有新增集合、放寬Rules或重放舊前端交易。
+
 必要串接驗證使用真登入 Client Creation Service＋Rules建單，再呼叫**正式同一預留Callable**、手動採購／正式PO＋在途、唯一收貨Callable；不使用v2初始化coordinator或Admin直接建立預留／需求／採購／收貨事實。測試的產品、倉庫及初始庫存仍為隔離fixture，這不是原畫面全流程或真Preview／正式驗收。
 
 前後端旗標保持原值，本候選未部署。舊快取／舊writer防護、真Preview與正式角色差異驗收仍是發布條件。下方「單倉來源尚無可用後端」為此次候選之前的核對背景，不能用本次程式測試宣稱正式已切換。

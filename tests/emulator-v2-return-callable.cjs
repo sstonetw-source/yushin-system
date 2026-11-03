@@ -1781,9 +1781,18 @@ test('canonical client creation and authoritative initial reservation flow throu
    const related={};
    for(const name of ['inventoryLots','inventoryLotCosts','inventoryMovements'])
     related[name]=(await db.collection(name).where('productKey','==',key).get()).docs.map(s=>[s.id,s.data()]).sort((a,b)=>a[0].localeCompare(b[0]));
+   related.backendReceipts=(await db.collection('reservationOperationReceipts').where('supplyId','==',supplyId).get()).docs
+    .map(s=>[s.id,s.data()]).sort((a,b)=>a[0].localeCompare(b[0]));
    return {documents:docs.map(s=>s.data()),receipts:receipts.docs.map(s=>[s.id,s.data()]).sort((a,b)=>a[0].localeCompare(b[0])),...related};
   };
   const before=await snapshot();
+  // A matching client-visible receipt alone cannot impersonate a committed
+  // backend receipt. The callable-only checkpoint must exist as well.
+  const forgedRef=db.doc('receipts/'+request(1,'first').operationId);
+  await forgedRef.set({supplyOrderId:supplyId,qty:1,lotNo:'C-'+method,expiryDate:'2028-01-01',
+   createdByUid:warehouse.uid,createdByRole:'warehouse',reservationLocationSchemaVersion:1});
+  const forged=await snapshot();await assert.rejects(receive(request(1,'first')));assert.deepEqual(await snapshot(),forged);
+  await forgedRef.delete();
   await assert.rejects(receive(request(1,'first'),owner),code('permission-denied'));assert.deepEqual(await snapshot(),before);
   await ledgerRef.update({quantity:base+1});const corrupt=await snapshot();
   await assert.rejects(receive(request(1,'first')));assert.deepEqual(await snapshot(),corrupt);await ledgerRef.set(initial);
@@ -1801,8 +1810,10 @@ test('canonical client creation and authoritative initial reservation flow throu
   assert.equal(complete.documents[4].receivedQty,3);assert.equal(complete.documents[4].incomingRegisteredQty,0);
   assert.equal(complete.documents[5].receivedQty,3);
   assert.ok(complete.receipts.every(([,r])=>r.reservationLocationSchemaVersion===1));
+  assert.equal(complete.backendReceipts.length,2);
+  assert.ok(complete.backendReceipts.every(([,op])=>complete.receipts.some(([id,r])=>id===op.receiptId&&r.lotId===op.lotId)));
   if(poRef)await poRef.update({status:'CANCELLED'});
-  await receive(request(1,'first'));assert.deepEqual(await snapshot(),complete);
+  await receive(Object.fromEntries(Object.entries(request(1,'first')).reverse()));assert.deepEqual(await snapshot(),complete);
   for(let i=1;i<count;i++){
    const sibling=complete.documents[0].items[i];assert.deepEqual([sibling.reservedQty,sibling.shortageQty,sibling.receivedQty],[base,3,0]);
   }
