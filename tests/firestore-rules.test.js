@@ -3166,6 +3166,7 @@ test('dispatch cutover blocks stale client commits atomically and cannot be reve
  // Old already-committed evidence can be read and idempotently checked.
  await existing.run();
  assert.equal((await existing.record()).data().preparedByUid,'buyer1');
+ await assertFails(deleteDoc(doc(administrator,'dispatchRecords/'+existing.intent.operationId)));
  // Even an admin using the old browser cannot turn its writer back on.
  await assertFails(updateDoc(gate,{backendOnly:false}));
  await assertFails(deleteDoc(gate));
