@@ -91,8 +91,8 @@ test('new canonical v2 shortage candidates remain eligible for their lifecycle w
  assert.equal(eligible({productKey:'P',warehouseId:'A',quantity:0,shortageQty:5},'A'),true);
  assert.equal(eligible({productKey:'P',warehouseId:'A',quantity:0,shortageQty:5},'B'),false);
  assert.equal(eligible({productKey:'P',locationSchemaVersion:3,warehouseId:undefined},'A'),false);
- assert.match(source,/!receiptShortageWarehouseEligible\\(row,warehouseId\\)/);
- assert.match(source,/!receiptShortageWarehouseEligible\\(reservation,warehouseId\\)/);
+ assert.ok(source.includes('!receiptShortageWarehouseEligible(row,warehouseId)'));
+ assert.ok(source.includes('!receiptShortageWarehouseEligible(reservation,warehouseId)'));
 });
 test('new canonical v2 shortage reserves from received free stock in the selected warehouse without adding onHand',()=>{
  const candidate={productKey:'P',locationSchemaVersion:2,lifecycleWarehouseIds:['A','B'],
