@@ -2904,6 +2904,31 @@ async function actualShipmentFixture(uid,role){
  f.ship=(qty,operationId)=>f.context.commitInventoryShipment({orderId:f.id,itemId:'I',qty,date:'2026-10-17',operationId,expectedWarehouseId:'W1'});
  return f;
 }
+test('shipment cutover rolls back stale physical stock debit and cannot reopen old client writer',async()=>{
+ const administrator=db('admin'),gate=doc(administrator,'settings/shipmentCutover');
+ const f=await actualShipmentFixture('wh1','warehouse');
+ await assertSucceeds(setDoc(gate,{backendOnly:false}));
+ await f.ship(1,'shipment-before-cutover');
+ const paths=['orders/'+f.id,'inventory/init-product','warehouseStocks/W1__init-product',
+  'inventoryReservations/'+f.id+'__I','inventoryLots/issue-wh1'];
+ const snapshot=()=>Promise.all(paths.map(async path=>(await getDoc(doc(administrator,path))).data()));
+ const before=await snapshot();
+ // Turning the lock on is deliberately separate from this deployment.
+ await assertSucceeds(updateDoc(gate,{backendOnly:true}));
+ await assert.rejects(f.ship(1,'shipment-after-cutover'));
+ assert.deepEqual(await snapshot(),before,'failed client shipment must leave no partial stock, lot or order writes');
+ // A read-only replay of an already committed operation may inspect the old proof.
+ await f.ship(1,'shipment-before-cutover');
+ assert.deepEqual(await snapshot(),before);
+ await assertFails(updateDoc(gate,{backendOnly:false}));
+ await assertFails(deleteDoc(gate));
+ assert.equal((await getDoc(gate)).data().backendOnly,true);
+ // Only the trusted Admin SDK bypasses Rules after the cutover.
+ await adminDatabase.doc('inventoryMovements/backend-shipment-cutover').set({
+  type:'ship',qty:1,productKey:'init-product',warehouseId:'W1',sourceId:f.id
+ });
+ assert.equal((await getDoc(doc(administrator,'inventoryMovements/backend-shipment-cutover'))).exists(),true);
+});
 test('actual shared issue planner commits partial warehouse shipment and repeat safely under real Rules',async()=>{
  for(const [uid,role] of [['admin','admin'],['buyer1','purchaser'],['wh1','warehouse']]){
   const f=await actualShipmentFixture(uid,role);
