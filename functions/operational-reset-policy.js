@@ -19,7 +19,8 @@ const PRESERVE_COLLECTIONS = Object.freeze([
 ]);
 
 const ZERO_STOCK_COLLECTIONS = Object.freeze(['inventory', 'warehouseStocks']);
-const STOCK_FIELDS = Object.freeze(['onHand', 'reserved', 'available', 'incoming', 'shortage']);
+const STOCK_FIELDS = Object.freeze(['onHand', 'reserved', 'available', 'incoming', 'shortage',
+  'transferReserved', 'transferInTransit', 'transferFreeInTransit']);
 
 function classifyRootCollections(names) {
   const deleteSet = new Set(DELETE_COLLECTIONS);
