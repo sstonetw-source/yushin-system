@@ -8,6 +8,11 @@ const {deliveryReversalBackendProject}=require('../functions/delivery-reversal-g
 const {customerReturnBackendProject}=require('../functions/customer-return-gate');
 const {customerReturnRequestBackendProject}=require('../functions/customer-return-request-gate');
 const {orderLifecycleBackendProject}=require('../functions/order-lifecycle-preview-gate');
+test('fresh warehouse and sales pages load Functions before any transaction UI executes',()=>{
+ const html=require('node:fs').readFileSync('index.html','utf8');
+ const sdk=html.indexOf('https://www.gstatic.com/firebasejs/10.8.0/firebase-functions-compat.js');
+ assert.ok(sdk>=0);assert.ok(sdk<html.indexOf('<script src="app.js?'));
+});
 for(const [kind,flag,project] of [
  ['DISPATCH','ENABLE_PRODUCTION_DISPATCH_BACKEND',dispatchBackendProject],
  ['SHIPMENT','ENABLE_PRODUCTION_SHIPMENT_BACKEND',shipmentBackendProject],
