@@ -73,3 +73,39 @@ test('legacy holds cannot silently migrate to a different receiving warehouse',(
  const input={...base(),itemReservedQty:2,reservation:{productKey:'P',warehouseId:'A',quantity:2,shortageQty:4}};
  assert.throws(()=>plan(input),/單倉預留位置不一致/);
 });
+
+
+test('new canonical v2 shortage candidates remain eligible for their lifecycle warehouse without a legacy warehouseId',()=>{
+ const fs=require('node:fs'),vm=require('node:vm');
+ const source=fs.readFileSync(require('node:path').join(__dirname,'../src/services/receiving.js'),'utf8');
+ const start=source.indexOf('function receiptShortageWarehouseEligible(');
+ const end=source.indexOf('\nasync function allocateFreeReceiptStockToShortages(',start);
+ assert.ok(start>0&&end>start,'free receipt allocator must define its canonical warehouse selector');
+ const eligible=vm.runInNewContext(source.slice(start,end)+'\nreceiptShortageWarehouseEligible');
+ const v2={productKey:'P',locationSchemaVersion:2,lifecycleWarehouseIds:['A','B'],
+  locations:[],quantity:0,shortageQty:5};
+ assert.equal(eligible(v2,'A'),true);
+ assert.equal(eligible(v2,'B'),true);
+ assert.equal(eligible(v2,'C'),false);
+ assert.equal(eligible({...v2,lifecycleWarehouseIds:undefined},'A'),false);
+ assert.equal(eligible({productKey:'P',warehouseId:'A',quantity:0,shortageQty:5},'A'),true);
+ assert.equal(eligible({productKey:'P',warehouseId:'A',quantity:0,shortageQty:5},'B'),false);
+ assert.equal(eligible({productKey:'P',locationSchemaVersion:3,warehouseId:undefined},'A'),false);
+ assert.match(source,/!receiptShortageWarehouseEligible\\(row,warehouseId\\)/);
+ assert.match(source,/!receiptShortageWarehouseEligible\\(reservation,warehouseId\\)/);
+});
+test('new canonical v2 shortage reserves from received free stock in the selected warehouse without adding onHand',()=>{
+ const candidate={productKey:'P',locationSchemaVersion:2,lifecycleWarehouseIds:['A','B'],
+  locations:[],quantity:0,shortageQty:5};
+ const result=plan({productKey:'P',warehouseId:'B',qty:3,requestedReserveQty:5,
+  addsStock:false,itemReservedQty:0,reservation:candidate,
+  aggregateStock:{productKey:'P',onHand:4,reserved:0},
+  warehouseStock:{productKey:'P',warehouseId:'B',onHand:3,reserved:0}});
+ assert.equal(result.allocatedQty,3);
+ assert.equal(result.aggregateStock.onHand,4);
+ assert.equal(result.warehouseStock.onHand,3);
+ assert.deepEqual(result.reservation.locations,[{warehouseId:'B',reservedQty:3}]);
+ assert.equal(result.reservation.quantity,3);
+ assert.equal(result.reservation.shortageQty,2);
+ assert.deepEqual(result.reservation.lifecycleWarehouseIds,['A','B']);
+});
