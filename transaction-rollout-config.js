@@ -5,7 +5,11 @@
 // verified asset versions, and an explicit production authorization.
 (function (scope) {
     'use strict';
-    scope.YUSHIN_PRODUCTION_QUICK_PURCHASE_CONFIG_VERSION = '20261102-qp-activation-1';
+    scope.YUSHIN_PRODUCTION_QUICK_PURCHASE_CONFIG_VERSION = '20261103-receiving-guard-1';
+    // Receiving remains closed until separately authorized server, browser, and Rules cutover.
+    // Overwrite stale global values; the caller must never inherit an unintended true gate.
+    scope.YUSHIN_PRODUCTION_RECEIVING_BACKEND = false;
+    scope.YUSHIN_PRODUCTION_RECEIVING_LEGACY_BLOCKED = false;
     // Prepared only: a separately authorized release must enable both sides.
     scope.YUSHIN_PRODUCTION_CUSTOMER_RETURN_BACKEND = false;
     scope.YUSHIN_PRODUCTION_CUSTOMER_RETURN_LEGACY_BLOCKED = false;
