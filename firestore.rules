@@ -1076,12 +1076,8 @@ service cloud.firestore {
       let userRole = role();
       return userRole in ['admin','purchaser','warehouse','sales','engineer']
         && (userRole in ['admin','purchaser','warehouse'] || owns(request.resource.data))
-        // Existing validated reservation movements already carry their own
-        // dedicated stock proof; avoid adding reads to their Rules budget.
         && (!('reservationStockEvidence' in request.resource.data)
-          ? (!(request.resource.data.get('type', '') in ['ship', 'ship_reversal'])
-            || !shipmentBackendOnly())
-          : (userRole in ['admin','purchaser','warehouse'] && validOperationalMovementEvidence(id)));
+          || (userRole in ['admin','purchaser','warehouse'] && validOperationalMovementEvidence(id)));
     }
 
     function businessProcurementDemandOperationalUpdate() {
@@ -1604,13 +1600,21 @@ service cloud.firestore {
         && getAfter(inventoryPath).data.get('reserved', -1) == get(inventoryPath).data.reserved - record.qty;
     }
 
+    // The cached client shipment always changes inventoryShipmentRecordId in
+    // the same native transaction as stock, reservation and movement writes.
+    // Do not charge unrelated inventory movements an additional Rules lookup.
+    function shipmentBackendOnly() {
+      let gate = /databases/$(database)/documents/settings/shipmentCutover;
+      return exists(gate) && get(gate).data.get('backendOnly', false) == true;
+    }
+
     function inventoryShipmentOrderUpdate(orderId) {
       let before = resource.data;
       let after = request.resource.data;
       let beforeRecords = before.get('deliveryRecords', []);
       let afterRecords = after.get('deliveryRecords', []);
       let record = afterRecords[beforeRecords.size()];
-      return canReceiveInventory()
+      return !shipmentBackendOnly() && canReceiveInventory()
         && !orderIsCancelled(before)
         && before.get('inventoryReservationStatus', '') != 'pending'
         && beforeRecords.size() + 1 == afterRecords.size()
@@ -1834,7 +1838,9 @@ service cloud.firestore {
         && (!changed.hasAny(['status','orderStatus']) || validOrderCancellationTransition())
         && (!changed.hasAny(['inventoryReservationStatus','inventoryReservationError','inventoryReservationUpdatedAt','inventoryReservationAttemptId']) || validOrderInventorySyncTransition(userRole))
         && (!changed.hasAny(['sourceDocumentSyncStatus','sourceDocumentSyncError','sourceDocumentSyncUpdatedAt']) || validOrderSourceSyncTransition(id, userRole))
-        && (userRole == 'admin' ? (changed.hasAny(['items','productId','productType','serviceKind']) ? validClientServiceBillingBinding() : true)
+        && (userRole == 'admin' ? (changed.hasAny(['inventoryShipmentRecordId'])
+            ? inventoryShipmentOrderUpdate(id)
+            : (changed.hasAny(['items','productId','productType','serviceKind']) ? validClientServiceBillingBinding() : true))
         : userRole in ['sales','engineer'] && changed.hasAny(['isBilled','billingDate'])
           && changed.hasOnly(['isBilled','billingDate','statusHistory','updatedAt',
             'status','workCategories','workCategoryUpdatedAt']) ? owns(resource.data)
@@ -2526,14 +2532,6 @@ service cloud.firestore {
     }
 
 
-
-    // After the separately approved shipment cutover, every legacy physical
-    // debit/reversal must fail in the same batch as its stock and order writes.
-    // A backend Admin SDK commit remains the sole authority for these events.
-    function shipmentBackendOnly() {
-      let gate = /databases/$(database)/documents/settings/shipmentCutover;
-      return exists(gate) && get(gate).data.get('backendOnly', false) == true;
-    }
 
     // Immutable stock ledger.
     match /inventoryMovements/{id} {
