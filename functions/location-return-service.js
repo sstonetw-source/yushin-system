@@ -95,7 +95,7 @@ async function commitLocationReturn(db,uid,data,env=process.env,options={}){
  const intent=normalizeLocationReturnIntent(data),{orderId,itemId,warehouseId,operationId}=intent;
  if(custodyV3&&(intent.requestId!==undefined||intent.settlement!=='CLOSE'))
   fault('V3 保管退貨試點只接受無申請待收、已確認送達的 CLOSE 結案退貨');
- if(db.projectId==='preview-20135'&&(!intent.requestId||intent.settlement!=='CLOSE'))
+ if(['preview-20135','yu-shing-company'].includes(db.projectId)&&(!intent.requestId||intent.settlement!=='CLOSE'))
   fault('Preview 退貨實收必須連結原申請並結案，不自動補送');
  const ref=(n,k)=>db.collection(n).doc(k),movementRef=ref('inventoryMovements','location-return-'+operationId);
  return db.runTransaction(async tx=>{
