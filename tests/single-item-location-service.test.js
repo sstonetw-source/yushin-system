@@ -7,9 +7,10 @@ const core=require('../modules/reservation-core');
 test('single item two-warehouse preview accepts two distinct IDs and rejects caller balances',()=>{
  const data={orderId:'O',itemId:'I1',warehouseIds:['B','A']};
  assert.deepEqual(normalizeSingleItemIntent(data).warehouseIds,['A','B']);
+ assert.deepEqual(normalizeSingleItemIntent({...data,warehouseIds:['A']}).warehouseIds,['A']);
  for(const bad of [
    {...data,warehouseIds:['A','A']},
-   {...data,warehouseIds:['A']},
+   {...data,warehouseIds:[]},
    {...data,warehouseIds:['A','B','C']},
    {...data,actorRole:'admin'},
    {...data,quantity:999},

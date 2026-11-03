@@ -11,8 +11,8 @@ function normalizeSingleItemIntent(data){
  if(!data||typeof data!=='object'||Array.isArray(data)||Object.keys(data).some(x=>!['orderId','itemId','warehouseIds'].includes(x)))
    reject('請求內容不正確','invalid-argument');
  const orderId=ident(data.orderId,'訂單'),itemId=ident(data.itemId,'品項');
- if(!Array.isArray(data.warehouseIds)||data.warehouseIds.length!==2)
-   reject('必須提供兩個候選倉','invalid-argument');
+ if(!Array.isArray(data.warehouseIds)||(data.warehouseIds.length<1||data.warehouseIds.length>2))
+   reject('必須提供 1–2 個候選倉','invalid-argument');
  const warehouseIds=data.warehouseIds.map(w=>ident(w,'倉庫')).sort();
  if(warehouseIds[0]===warehouseIds[1])reject('候選倉庫重複','invalid-argument');
  return {orderId,itemId,warehouseIds};
@@ -416,7 +416,7 @@ async function commitSingleItemFreeStockAllocation(db,uid,input,batchContext=nul
   const locations=core.reservationLocations(ledger);
   if(ledger.lifecycleWarehouseIds!==undefined&&
     (!Array.isArray(ledger.lifecycleWarehouseIds)
-     ||ledger.lifecycleWarehouseIds.length!==2
+     ||(ledger.lifecycleWarehouseIds.length<1||ledger.lifecycleWarehouseIds.length>2)
      ||ledger.lifecycleWarehouseIds.some(w=>typeof w!=='string'||!w)))
    reject('自由庫存候選倉格式不正確');
   // The initial v2 writer only persists positive locations. Restrict this

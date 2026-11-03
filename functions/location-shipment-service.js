@@ -159,8 +159,8 @@ async function commitLocationShipment(db,uid,data,env=process.env){
      ||quantity(source.shortageQty,'預留缺口')!==shortage
      ||held+shortage!==part.outstandingQty
      ||source.status!==(held?'active':shortage?'shortage':'fulfilled')
-     ||!Array.isArray(source.lifecycleWarehouseIds)||source.lifecycleWarehouseIds.length!==2
-     ||new Set(source.lifecycleWarehouseIds).size!==2
+     ||!Array.isArray(source.lifecycleWarehouseIds)||(source.lifecycleWarehouseIds.length<1||source.lifecycleWarehouseIds.length>2)
+     ||new Set(source.lifecycleWarehouseIds).size!==source.lifecycleWarehouseIds.length
      ||!Array.isArray(source.locations)||source.locations.length>20)
      fault('整單品項的 v2 預留來源或剩餘需求不一致');
     const candidates=source.lifecycleWarehouseIds.map(wh=>id(wh,'原候選倉')).sort().join('/');

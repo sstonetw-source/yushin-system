@@ -130,7 +130,7 @@ async function setV2OrderLifecycleEmulator(orderId,nextStatus,details=null){
    const snap=await db.collection('inventoryReservations').doc(orderId+'__'+item.itemId).get({source:'server'});check();
    const ledger=snap.exists?snap.data():null,candidates=ledger?.lifecycleWarehouseIds;
    if(!ledger||ledger.locationSchemaVersion!==2||ledger.orderId!==orderId||ledger.itemId!==item.itemId
-    ||!Array.isArray(candidates)||candidates.length!==2||new Set(candidates).size!==2
+    ||!Array.isArray(candidates)||(candidates.length<1||candidates.length>2)||new Set(candidates).size!==candidates.length
     ||candidates.some(id=>typeof id!=='string'||!id||id.includes('/')))
     throw Error('缺少原始 v2 雙倉來源，不能以指定倉或目前位置猜測。');
    const sorted=[...candidates].sort();

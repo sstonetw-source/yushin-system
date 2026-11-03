@@ -1762,7 +1762,7 @@ test('canonical client creation and authoritative initial reservation flow throu
   await call(owner,'commitOrderReservationPreview',{orderId,syncAttemptId});
   const ledgerRef=db.doc('inventoryReservations/'+orderId+'__I0'),sourceRef=db.doc('orders/'+orderId),key=rows[0].productId;
   const initial=(await ledgerRef.get()).data();
-  assert.equal(initial.locationSchemaVersion,undefined);assert.equal(initial.quantity,base);assert.equal(initial.shortageQty,3);
+  assert.equal(initial.locationSchemaVersion,2);assert.equal(initial.warehouseId,undefined);assert.deepEqual(initial.lifecycleWarehouseIds,[wh]);assert.equal(initial.quantity,base);assert.equal(initial.shortageQty,3);
   let supplyId,poRef,originalPo;
   if(method==='manual'){
    supplyId=(await call(buyer,'commitV2QuickPurchase',{orderId,itemId:'I0',operationId:orderId+'-purchase',qty:3,supplier:'Isolated QA',unitCost:0})).supplyId;
@@ -1815,12 +1815,12 @@ test('canonical client creation and authoritative initial reservation flow throu
   assert.equal(complete.documents[0].items[0].receivedQty,3);assert.equal(complete.documents[0].items[0].reservedQty,base+3);
   assert.equal(complete.documents[0].items[0].shortageQty,0);
   for(const stock of complete.documents.slice(2,4))assert.deepEqual([stock.onHand,stock.reserved,stock.incoming],[base+3,base+3,0]);
-  assert.equal(complete.documents[1].locationSchemaVersion,undefined);assert.equal(complete.documents[1].locations,undefined);
+  assert.equal(complete.documents[1].locationSchemaVersion,2);
+  assert.deepEqual(complete.documents[1].locations,[{warehouseId:wh,reservedQty:base+3}]);
   assert.equal(complete.documents[4].receivedQty,3);assert.equal(complete.documents[4].incomingRegisteredQty,0);
   assert.equal(complete.documents[5].receivedQty,3);
-  assert.ok(complete.receipts.every(([,r])=>r.reservationLocationSchemaVersion===1));
-  assert.equal(complete.backendReceipts.length,2);
-  assert.ok(complete.backendReceipts.every(([,op])=>complete.receipts.some(([id,r])=>id===op.receiptId&&r.lotId===op.lotId)));
+  assert.ok(complete.receipts.every(([,r])=>r.reservationLocationSchemaVersion===2));
+  assert.equal(complete.backendReceipts.length,0,'v2 uses the authoritative receipt directly');
   if(poRef)await poRef.update({status:'CANCELLED'});
   await receive(Object.fromEntries(Object.entries(request(1,'first')).reverse()));assert.deepEqual(await snapshot(),complete);
   for(let i=1;i<count;i++){

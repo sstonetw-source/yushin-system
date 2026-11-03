@@ -29,8 +29,8 @@ function normalizeLifecycleIntent(data,{allowNoWarehouse=false}={}){
  if(!/^[a-zA-Z0-9_-]{12,96}$/.test(operationId)||syncAttemptId.length>96)
   fault('操作或同步識別碼不正確','invalid-argument');
  if(!['cancelled','normal'].includes(data.nextStatus))fault('目標狀態不正確','invalid-argument');
- if(!Array.isArray(data.warehouseIds)||(data.warehouseIds.length!==2&&!(allowNoWarehouse&&data.warehouseIds.length===0)))
-  fault('必須提供原兩個候選實體倉','invalid-argument');
+ if(!Array.isArray(data.warehouseIds)||((data.warehouseIds.length<1||data.warehouseIds.length>2)&&!(allowNoWarehouse&&data.warehouseIds.length===0)))
+  fault('必須提供原 1–2 個候選實體倉','invalid-argument');
  const warehouseIds=data.warehouseIds.map(x=>ident(x,'倉庫 ID')).sort();
  if(warehouseIds.length&&warehouseIds[0]===warehouseIds[1])fault('候選倉重複','invalid-argument');
  if(typeof data.date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(data.date)
@@ -116,7 +116,7 @@ async function runLocationLifecycle(db,uid,data,wholeOrder,env=process.env){
   };
   const serviceItems=order.items.filter(item=>String(item.productType||item.type||'').trim().toUpperCase()==='SERVICE');
   const hasGoods=serviceItems.length!==order.items.length;
-  if(warehouseIds.length!==(hasGoods?2:0))fault('取消恢復的實體倉來源不正確');
+  if(hasGoods?(warehouseIds.length<1||warehouseIds.length>2):warehouseIds.length!==0)fault('取消恢復的實體倉來源不正確');
   if(serviceItems.length&&order.isBilled===true)fault('請先撤銷核銷，再取消服務訂單');
   const serviceProgress=serviceItems.length?await require('./service-case-service').readServiceOrderProgress(db,tx,orderId,order):null;
   if(serviceProgress&&current==='normal'&&serviceProgress.serviceCompleted

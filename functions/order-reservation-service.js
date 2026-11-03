@@ -3,6 +3,7 @@
 // A single, retry-safe initial reservation writer for an entire new order.
 // Unlike the former browser per-item transactions, every stock, reservation,
 // purchase-demand and order-item projection commits together or not at all.
+const {createHash}=require('node:crypto');
 const demandCore=require('./shared/procurement-demand-core.js');
 const fulfillmentCore=require('./shared/fulfillment-core.js');
 const workflowCore=require('./shared/workflow-core.js');
@@ -105,7 +106,7 @@ async function commitOrderReservation(db,uid,data){
     const now=new Date().toISOString();
     const productMasters=new Map(),warehouseMasters=new Map();
     const companyStocks=new Map(),warehouseStocks=new Map(),warehouseCandidates=new Map();
-    const writes=[],nextItems=[],seenItems=new Set();
+    const writes=[],nextItems=[],seenItems=new Set(),lifecycleWarehouses=new Set();
     let reservedQty=0,shortageQty=0;
     async function master(collection,key,cache){
       if(!cache.has(key)){
@@ -131,7 +132,8 @@ async function commitOrderReservation(db,uid,data){
       return cache.get(key);
     }
     async function chooseSingleWarehouse(productKey,preferredId,requested,aggregateAvailable){
-      // A single item's legacy ledger can point to only ONE physical location.
+      // Keep the existing single-location allocation policy; persist its result
+      // through the same v2 location contract used by fulfillment.
       // Read every stocked candidate inside this transaction; source warehouse
       // IDs and client-side stock estimates cannot authorize an allocation.
       if(!warehouseCandidates.has(productKey)){
@@ -165,6 +167,7 @@ async function commitOrderReservation(db,uid,data){
         if(!warehouse||warehouse.active===false||warehouse.systemCustody
           ||warehouse.warehouseType==='CUSTODY'||id.startsWith('custody-'))continue;
         physical.push({...warehouse,id});
+        lifecycleWarehouses.add(id);
         totalAvailable+=stock.available;
         // The shared selector recomputes availability from stock fields, so
         // include reservations planned earlier in this same whole-order pass.
@@ -217,28 +220,36 @@ async function commitOrderReservation(db,uid,data){
         const warehouseKey=encodeURIComponent(warehouseId)+'__'+encodeURIComponent(productKey);
         const location=await trackedStock('warehouseStocks',warehouseKey,warehouseStocks,warehouseId,
           {warehouseId,productKey});
-        reserve=Math.min(orderedQty,aggregate.available,location.available);
-        aggregate.available-=reserve;aggregate.delta+=reserve;
-        location.available-=reserve;location.delta+=reserve;
-        shortage=orderedQty-reserve;
         const reservationRef=ref('inventoryReservations',orderId+'__'+itemId);
         const reservationSnap=await tx.get(reservationRef);
-        if(reservationSnap.exists){
-          const before=reservationSnap.data();
-          if(quantity(before.quantity??0,'既有預留')!==0||before.orderId!==orderId
-            ||before.itemId!==itemId||before.productKey!==productKey
-            ||before.warehouseId!==warehouseId)
-            fault('failed-precondition','已有舊預留帳，請先稽核');
-          if(before.locationSchemaVersion!==undefined||before.locations!==undefined
-            ||before.allocations!==undefined||before.warehouseAllocations!==undefined)
-            fault('failed-precondition','已有多位置預留帳，必須另行稽核');
+        // Replays have already returned the original operation receipt. A new
+        // initialization must never adopt or convert an older reservation.
+        if(reservationSnap.exists)
+          fault('failed-precondition','已有預留帳，請先稽核；新建單不得轉換舊交易');
+        const locationPlan=reservationCore.planLocationReservation({
+          productKey,warehouses:[{id:warehouseId,active:true}],
+          stocks:{[warehouseId]:{productKey,warehouseId,onHand:location.onHand,
+            reserved:location.reserved+location.delta,
+            transferFreeInTransit:location.transferFreeInTransit}},
+          aggregateStock:{productKey,onHand:aggregate.onHand,
+            reserved:aggregate.reserved+aggregate.delta,
+            transferFreeInTransit:aggregate.transferFreeInTransit},
+          requestedQty:orderedQty,currentWarehouseId:warehouseId,itemReservedQty:0
+        });
+        reserve=locationPlan.reservation.quantity;shortage=locationPlan.reservation.shortageQty;
+        aggregate.available-=locationPlan.companyReservedDelta;
+        aggregate.delta+=locationPlan.companyReservedDelta;
+        for(const change of locationPlan.warehouseDeltas){
+          if(change.warehouseId!==warehouseId)
+            fault('failed-precondition','新單預留核心回傳未授權位置');
+          location.available-=change.reservedDelta;location.delta+=change.reservedDelta;
         }
         writes.push({type:'set',ref:reservationRef,data:{
           orderId,itemId,orderItemIndex:index,orderNo:order.orderNo||order.quoteNo||orderId,
-          productKey,warehouseId,itemCode:source.itemCode||'',itemName:source.itemName||'',
+          productKey,itemCode:source.itemCode||'',itemName:source.itemName||'',
           customerName:order.customerName||'',ownerUid:order.ownerUid,salesCode:order.salesCode,
-          salesName:order.salesName||'',orderDate:order.orderDate||'',quantity:reserve,
-          shortageQty:shortage,status:reserve>0?'active':'shortage',updatedAt:now}});
+          salesName:order.salesName||'',orderDate:order.orderDate||'',
+          ...locationPlan.reservation,updatedAt:now}});
       }else if(!service&&!direct){
         // Manual products without a linked master are procurement-only.
         shortage=orderedQty;
@@ -276,6 +287,9 @@ async function commitOrderReservation(db,uid,data){
       const demandDoc=demandCore.demandDocument(projected,{createdAt:prior?.createdAt||order.createdAt||now,updatedAt:now});
       if(prior||demandDoc.requestedQty>0)writes.push({type:'set',ref:demandRef,data:demandDoc});
     }
+    const lifecycleWarehouseIds=[...lifecycleWarehouses].sort();
+    for(const write of writes)if(write.ref.path.startsWith('inventoryReservations/'))
+      write.data.lifecycleWarehouseIds=lifecycleWarehouseIds;
     // The read phase is complete. Apply all writes only after validating the
     // entire order, including all supplier and existing-reservation records.
     for(const stock of companyStocks.values())if(stock.delta>0){
@@ -286,9 +300,11 @@ async function commitOrderReservation(db,uid,data){
       if(!stock.exists)fault('failed-precondition','分倉庫存主檔不足，不可增加預留');
       writes.push({type:'update',ref:stock.ref,data:{reserved:stock.reserved+stock.delta,updatedAt:now}});
     }
+    const movementPrefix='order-sync-'+createHash('sha256')
+      .update(JSON.stringify([orderId,syncAttemptId])).digest('hex');
     let movementIndex=0;
     for(const stock of warehouseStocks.values())if(stock.delta>0){
-      writes.push({type:'create',ref:ref('inventoryMovements','order-sync-'+syncAttemptId+'-'+movementIndex++),
+      writes.push({type:'create',ref:ref('inventoryMovements',movementPrefix+'-'+movementIndex++),
         data:{sourceType:'order',sourceId:orderId,productKey:stock.productKey,
           warehouseId:stock.warehouseId,type:'reserve',qty:stock.delta,
           actorUid:uid,actorRole:role,ownerUid:order.ownerUid,salesCode:order.salesCode,

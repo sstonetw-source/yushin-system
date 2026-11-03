@@ -17068,7 +17068,7 @@ async function validateV2ReceiptSource(transaction, {order,supply,reservation,it
         const seen=new Set(),products=new Map();
         jointHolds={company:0,warehouses:new Map()};
         const candidates=reservation.lifecycleWarehouseIds;
-        if(!Array.isArray(candidates)||candidates.length!==2||new Set(candidates).size!==2)
+        if(!Array.isArray(candidates)||(candidates.length<1||candidates.length>2)||new Set(candidates).size!==candidates.length)
             throw new Error('整單原候選倉資料不正確。');
         candidates.forEach(id);
         for(const row of order.items){
@@ -17089,8 +17089,8 @@ async function validateV2ReceiptSource(transaction, {order,supply,reservation,it
             const ledger=rowId===itemId?reservation:(snap.exists?snap.data():{});
             if(ledger.locationSchemaVersion!==2||ledger.warehouseId!==undefined||ledger.orderId!==orderId||ledger.itemId!==rowId
                 ||ledger.productKey!==key||ledger.ownerUid!==order.ownerUid||ledger.salesCode!==order.salesCode
-                ||!Array.isArray(ledger.lifecycleWarehouseIds)||ledger.lifecycleWarehouseIds.length!==2
-                ||new Set(ledger.lifecycleWarehouseIds).size!==2||ledger.lifecycleWarehouseIds.some(wh=>!candidates.includes(wh))
+                ||!Array.isArray(ledger.lifecycleWarehouseIds)||(ledger.lifecycleWarehouseIds.length<1||ledger.lifecycleWarehouseIds.length>2)
+                ||new Set(ledger.lifecycleWarehouseIds).size!==ledger.lifecycleWarehouseIds.length||ledger.lifecycleWarehouseIds.some(wh=>!candidates.includes(wh))
                 ||integer(ledger.quantity,'品項預留')!==row.reservedQty||integer(ledger.shortageQty,'品項缺口')!==row.shortageQty
                 ||ledger.status!==(cancelled?'released':ledger.quantity>0?'active':ledger.shortageQty>0?'shortage':'fulfilled')
                 ||integer(row.supplyOrderedQty??0,'品項供應量')<integer(row.receivedQty??0,'品項收貨量'))
@@ -17189,8 +17189,8 @@ async function validateV2ReceiptSource(transaction, {order,supply,reservation,it
     const rows=globalThis.YushinReservation.reservationLocations(reservation);
     const candidates=new Set([warehouseId,id(item.warehouseId||order.warehouseId),...rows.map(row=>row.warehouseId)]);
     if(reservation.lifecycleWarehouseIds!==undefined){
-        if(!Array.isArray(reservation.lifecycleWarehouseIds)||reservation.lifecycleWarehouseIds.length!==2
-            ||new Set(reservation.lifecycleWarehouseIds).size!==2)throw new Error('原候選倉資料不正確。');
+        if(!Array.isArray(reservation.lifecycleWarehouseIds)||(reservation.lifecycleWarehouseIds.length<1||reservation.lifecycleWarehouseIds.length>2)
+            ||new Set(reservation.lifecycleWarehouseIds).size!==reservation.lifecycleWarehouseIds.length)throw new Error('原候選倉資料不正確。');
         reservation.lifecycleWarehouseIds.forEach(id);
         if([...candidates].some(w=>!reservation.lifecycleWarehouseIds.includes(w)))throw new Error('收貨倉不在原候選倉。');
         reservation.lifecycleWarehouseIds.forEach(w=>candidates.add(w));
@@ -19956,7 +19956,7 @@ async function setV2OrderLifecycleEmulator(orderId,nextStatus,details=null){
    const snap=await db.collection('inventoryReservations').doc(orderId+'__'+item.itemId).get({source:'server'});check();
    const ledger=snap.exists?snap.data():null,candidates=ledger?.lifecycleWarehouseIds;
    if(!ledger||ledger.locationSchemaVersion!==2||ledger.orderId!==orderId||ledger.itemId!==item.itemId
-    ||!Array.isArray(candidates)||candidates.length!==2||new Set(candidates).size!==2
+    ||!Array.isArray(candidates)||(candidates.length<1||candidates.length>2)||new Set(candidates).size!==candidates.length
     ||candidates.some(id=>typeof id!=='string'||!id||id.includes('/')))
     throw Error('缺少原始 v2 雙倉來源，不能以指定倉或目前位置猜測。');
    const sorted=[...candidates].sort();

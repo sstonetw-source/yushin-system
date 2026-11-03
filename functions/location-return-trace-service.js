@@ -55,8 +55,8 @@ async function readMultiReturnSource(tx,db,order,intent,context,{ledger=null,inv
    ||source.quantity!==item.reservedQty||source.shortageQty!==item.shortageQty
    ||source.quantity+source.shortageQty!==(context.cancelled?0:part.outstandingQty)
    ||source.status!==(context.cancelled?'released':source.quantity?'active':source.shortageQty?'shortage':'fulfilled')
-   ||!Array.isArray(source.lifecycleWarehouseIds)||source.lifecycleWarehouseIds.length!==2
-   ||new Set(source.lifecycleWarehouseIds).size!==2
+   ||!Array.isArray(source.lifecycleWarehouseIds)||(source.lifecycleWarehouseIds.length<1||source.lifecycleWarehouseIds.length>2)
+   ||new Set(source.lifecycleWarehouseIds).size!==source.lifecycleWarehouseIds.length
    ||source.lifecycleWarehouseIds.some(id=>typeof id!=='string'||!id||id!==id.trim()||id.length>160||id.includes('/')||id.startsWith('custody-')))
    fault('整單退貨缺少一致的原 v2 預留來源');
   const ids=[...source.lifecycleWarehouseIds].sort();
