@@ -403,7 +403,7 @@ service cloud.firestore {
         'receiptEvents', 'purchaseEvents', 'reservationStatus', 'reservationError', 'inventoryProductKey',
         'linkedDocuments', 'procurementStatus', 'perOrdered', 'perReceived'];
     }
-    function purchaserOrderWorkflowUpdate(id) {
+    function purchaserOrderWorkflowUpdate() {
       return purchaser()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'items', 'itemCount', 'orderSchemaVersion',
@@ -430,10 +430,10 @@ service cloud.firestore {
     }
 
     // Share the bounded item walk; role-specific document whitelists stay separate.
-    function operationalOrderWorkflowUpdate(id, userRole) {
+    function operationalOrderWorkflowUpdate(userRole) {
       return operationalItemsOnly(userRole == 'purchaser' ? purchasingItemFields()
           : ['orderedQty', 'reservedQty', 'shortageQty', 'receivedQty', 'receiptEvents', 'reservationStatus', 'inventoryProductKey'])
-        && (userRole == 'purchaser' ? purchaserOrderWorkflowUpdate(id) : warehouseOrderWorkflowUpdate());
+        && (userRole == 'purchaser' ? purchaserOrderWorkflowUpdate() : warehouseOrderWorkflowUpdate());
     }
 
     function productPath(id) {
@@ -802,7 +802,7 @@ service cloud.firestore {
       // fulfillment paths still prove exactly one warehouse per reservation.
       return !data.keys().hasAny(['locationSchemaVersion','locations','allocations','warehouseAllocations']);
     }
-    function validReservationSource(id, data, userRole) {
+    function validReservationSource(id, data) {
       let order = getAfter(/databases/$(database)/documents/orders/$(data.orderId)).data;
       let index = data.get('orderItemIndex', -1);
       let item = order.items[index];
@@ -1063,12 +1063,12 @@ service cloud.firestore {
       // after the authoritative whole-order transaction has completed.
       return getAfter(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data
           .get('inventoryReservationStatus', '') == 'completed'
-        && validReservationSource(id, request.resource.data, userRole)
+        && validReservationSource(id, request.resource.data)
         && reservationCreateWriter(id, userRole);
     }
     function reservationUpdateAllowed(id) {
       let userRole = role();
-      return validReservationSource(id, request.resource.data, userRole)
+      return validReservationSource(id, request.resource.data)
         && reservationIdentityUnchanged() && legacyReservationLocationShape(resource.data)
         && reservationUpdateWriter(id, userRole);
     }
@@ -1870,7 +1870,7 @@ service cloud.firestore {
         // Delivery-plan and warehouse-logistics success paths already returned above.
         // Their own changed-key whitelists make the duplicate branches unreachable.
         : userRole in ['purchaser','warehouse'] ? (changed.hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id))
-          || operationalOrderWorkflowUpdate(id, userRole)
+          || operationalOrderWorkflowUpdate(userRole)
           || returnReceiptOrderUpdate(id)
         : userRole in ['sales', 'engineer'] && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId'])
           && (changed.hasOnly(['returnRequests', 'returnPending', 'returnRequestMutationIndex', 'updatedAt'])
