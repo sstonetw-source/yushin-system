@@ -2923,6 +2923,11 @@ test('shipment cutover rolls back stale physical stock debit and cannot reopen o
  await assertFails(updateDoc(gate,{backendOnly:false}));
  await assertFails(deleteDoc(gate));
  assert.equal((await getDoc(gate)).data().backendOnly,true);
+ // Administrator browsers are also former writers; role alone cannot bypass.
+ const adminAttempt=await actualShipmentFixture('admin','admin');
+ const adminBefore=(await getDoc(doc(administrator,'orders/'+adminAttempt.id))).data();
+ await assert.rejects(adminAttempt.ship(1,'admin-shipment-after-cutover'));
+ assert.deepEqual((await getDoc(doc(administrator,'orders/'+adminAttempt.id))).data(),adminBefore);
  // Only the trusted Admin SDK bypasses Rules after the cutover.
  await adminDatabase.doc('inventoryMovements/backend-shipment-cutover').set({
   type:'ship',qty:1,productKey:'init-product',warehouseId:'W1',sourceId:f.id
