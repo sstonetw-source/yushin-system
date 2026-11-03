@@ -20,6 +20,14 @@
 
 ## 真實環境切換前的必要獨立工作
 
+### 2026-11-03 正式來源唯讀前置核對
+
+既有 Carol QA 來源 `qbCVc4f0PmsUgBnGm0Im`／`item-1793541854182-tieqp` 的 canonical `status=active`、`inventoryReservationStatus=completed`，但未保存 legacy `orderStatus`；其預留文件存在、quantity=0，**沒有 locationSchemaVersion=2**。這是同一既有 QA 單的唯讀查核，未提交收貨、補欄位或遷移。
+
+- 正常來源准入接受 canonical active 配合缺省、空字串或 normal 的 legacy orderStatus；明確取消／作廢、未知字串或其他型別仍拒絕。直送原有1–5、實體1–15上限與各自角色限制不變。
+- **此修正不讓舊版實體預留來源取得 v2 收貨資格。** 正式 `order-reservation-service.js`／`grouped-reservation-service.js` 目前仍使用單倉舊格式；不能因新建訂單或部署收貨 Callable，就假設有 v2 預留。需先解決正式建單／預留與收貨的資料契約及實際切換相依性，才能開放該來源。
+- 仍需真實且可存取的隔離 Preview。既有 Emulator fixture 的 v2 初始化 coordinator 不等於目前正式建單入口；不把同一單反覆採購／收貨當作補證方式，也不直接替正式預留補版本旗標。
+
 1. **唯讀核對**現有 Firebase 正式專案、Functions 部署 hash／環境旗標、網站實際來源與快取、現有 Rules、角色、目前未完成的收貨 operation ID。舊 `preview-20135` 曾經刪除，**不可假定現在可用**；需先確認真實 Preview 專案存在且權限、資料隔離、安全性均符合需求，才可規劃驗收。Emulator／Facade 證據不等於真實 Preview。
 2. 取得分開且明確的正式 Functions 部署、後端開關、前端切換及必要 Rules 發布授權。先部署且保持後端關閉，回讀專案／函式版本／所有既有入口旗標，避免影響已運作的 PO、手動採購與訂單入口。
 3. 訂出可實施的寫入維護凍結、舊分頁與手機快取換版、Rules 舊 writer 防火牆方案。只變更新版 JavaScript **不能封鎖已快取的舊客戶端**；未保證兩種版本不會併行寫入前，不可放行切換。
