@@ -1236,6 +1236,9 @@ service cloud.firestore {
           || request.resource.data.get('backendOnly', false) == true)
         && (id != 'dispatchCutover'
           || resource.data.get('backendOnly', false) != true
+          || request.resource.data.get('backendOnly', false) == true)
+        && (id != 'shipmentCutover'
+          || resource.data.get('backendOnly', false) != true
           || request.resource.data.get('backendOnly', false) == true);
       allow delete: if false;
     }
@@ -2520,11 +2523,21 @@ service cloud.firestore {
 
 
 
+    // After the separately approved shipment cutover, every legacy physical
+    // debit/reversal must fail in the same batch as its stock and order writes.
+    // A backend Admin SDK commit remains the sole authority for these events.
+    function shipmentBackendOnly() {
+      let gate = /databases/$(database)/documents/settings/shipmentCutover;
+      return exists(gate) && get(gate).data.get('backendOnly', false) == true;
+    }
+
     // Immutable stock ledger.
     match /inventoryMovements/{id} {
       allow read: if canReceiveInventory()
         || (businessOwner() && owns(resource.data));
-      allow create: if inventoryMovementWriter(id)
+      allow create: if (!(request.resource.data.get('type', '') in ['ship', 'ship_reversal'])
+          || !shipmentBackendOnly())
+        && inventoryMovementWriter(id)
         && !('unitCost' in request.resource.data)
         && !('purchaseNetAmount' in request.resource.data)
         && !('cogs' in request.resource.data);
