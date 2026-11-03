@@ -4,10 +4,11 @@ const section=(a,b)=>source.slice(source.indexOf(a),source.indexOf(b,source.inde
 const inventory=require('../modules/inventory-core'),workflow=require('../modules/workflow-core');
 const demandCore=require('../modules/procurement-demand-core'),fulfillment=require('../modules/fulfillment-core');
 
-function allocationFixture({qty=5,incoming=0,fail=false,received=0}={}){
+function allocationFixture({qty=5,incoming=0,fail=false,received=0,v2=false}={}){
  const docs=new Map([
   ['orders/O',{ownerUid:'sales',salesCode:'S1',status:'active',createdAt:'2026-10-14',items:[{itemId:'I',productId:'P',warehouseId:'W',qty,reservedQty:0,shortageQty:qty,supplyOrderedQty:incoming+received,receivedQty:received}]}],
-  ['inventoryReservations/R',{orderId:'O',itemId:'I',productKey:'P',warehouseId:'W',quantity:0,shortageQty:qty,status:'shortage'}],
+  ['inventoryReservations/R',{orderId:'O',itemId:'I',productKey:'P',quantity:0,shortageQty:qty,status:'shortage',
+    ...(v2?{locationSchemaVersion:2,locations:[],lifecycleWarehouseIds:['W']}:{warehouseId:'W'})}],
   ['inventory/P',{onHand:5,reserved:0}],['warehouseStocks/W__P',{onHand:5,reserved:0}],
   ['procurementDemands/SALES_ORDER%3AO%3AI',demandCore.fromSalesOrder({sourceId:'O',sourceItemId:'I',shortageQty:qty,supplyOrderedQty:incoming+received,receivedQty:received})]
  ]);
@@ -28,6 +29,24 @@ test('receipt allocation atomically clears stale procurement demand and retry ca
  assert.equal(result.allocatedQty,5);assert.equal(f.docs.get('orders/O').items[0].shortageQty,0);
  assert.equal(f.demand().remainingToOrderQty,0);assert.equal(f.demand().requestedQty,0);
  await f.c.allocateFreeReceiptStockToShortages('P','W',5,'Tester');assert.equal(f.docs.get('inventory/P').reserved,5);
+});
+test('canonical v2 shortage without ledger warehouseId receives free stock atomically and keeps its v2 locations',async()=>{
+ const f=allocationFixture({v2:true});
+ const before=f.docs.get('inventoryReservations/R');
+ assert.equal(before.warehouseId,undefined);
+ const result=await f.c.allocateFreeReceiptStockToShortages('P','W',5,'Tester');
+ assert.equal(result.allocatedQty,5);
+ const ledger=f.docs.get('inventoryReservations/R');
+ assert.equal(ledger.locationSchemaVersion,2);
+ assert.equal(ledger.warehouseId,undefined);
+ assert.equal(ledger.quantity,5);
+ assert.deepEqual(ledger.locations,[{warehouseId:'W',reservedQty:5}]);
+ assert.equal(f.docs.get('orders/O').items[0].reservedQty,5);
+ assert.equal(f.docs.get('warehouseStocks/W__P').reserved,5);
+ assert.equal(f.docs.get('inventory/P').onHand,5);
+ assert.equal(f.demand().remainingToOrderQty,0);
+ await f.c.allocateFreeReceiptStockToShortages('P','W',5,'Tester');
+ assert.equal(f.docs.get('inventory/P').reserved,5);
 });
 test('free receipt stock only covers uncovered demand, not quantities already ordered from supplier',async()=>{
  for(const incoming of [2,5]){
