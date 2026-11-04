@@ -7554,7 +7554,9 @@ function createQuotePdfStage(quoteData) {
     const options = arguments[1] || {};
     const stage = document.createElement('div');
     stage.className = 'quote-pdf-stage';
-    const documentNode = renderQuotePdfDocument(quoteData, options);
+    const documentNode = options.includeStamp === false
+        ? renderQuotePdfDocument(quoteData, options)
+        : renderQuotePdfDocument(quoteData);
     stage.appendChild(documentNode);
     document.body.appendChild(stage);
     return { stage, documentNode };
