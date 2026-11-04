@@ -1533,7 +1533,7 @@
                 <p style="font-size:13px;color:#555;line-height:1.7;">
                     Forecast、估價單、訂單與儀器的資料歸屬以「業務代號」為核心。人員離職或交接時，
                     不再逐筆把歷史資料改成新同仁姓名；只把該業務代號的目前負責業務交給新同仁。
-                    系統會先替舊資料補上 salesCode，原 salesName、建立人與修改紀錄均保留。
+                    交接由後端原子更新業務代號主檔及人員設定，保留交接紀錄；原 salesName、建立人與歷史資料不改寫。舊資料缺少 salesCode 時另由受控維護流程處理。
                 </p>
                 <div class="form-grid" style="max-width:760px;margin-top:12px;">
                     <div>
@@ -1703,7 +1703,7 @@
     <script src="modules/order-commercial-details.js?v=20261025-1"></script>
     <script src="modules/order-entry-core.js?v=20261026-296"></script>
 <script src="modules/service-work-core.js?v=20261023-2"></script>
-    <script src="app.js?v=20261104-452"></script>
+    <script src="app.js?v=20261104-453"></script>
     <script src="modules/order-self-order-required.js?v=20261013-1"></script>
     <script src="modules/customer-cancellations.js?v=20261021-3"></script>
     <script src="modules/free-stock-recovery.js?v=20261014-9"></script>
