@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 
 const source = fs.readFileSync(require('node:path').join(__dirname, '..', 'app.js'), 'utf8');
-const start = source.indexOf('let pendingDatabaseBackup = null;');
+const start = source.indexOf('const RESTORABLE_BACKUP_COLLECTIONS = new Set([');
 const end = source.indexOf('/* ---------- 估價單／訂單全歷史搜尋索引補建 ---------- */', start);
 const context = vm.createContext({
   window: {}, firebaseConfig: { projectId: 'production' },
@@ -33,11 +33,13 @@ test('backup upload validates project, count, duplicate paths, and collection bo
   }], 'procurementDemands')).length, 1);
 });
 
-test('restore checks each live document in a transaction and excludes permissions', () => {
-  const restore = source.slice(source.indexOf('window.restoreMissingDatabaseBackupDocuments ='),
-    source.indexOf('/* ---------- 估價單／訂單全歷史搜尋索引補建 ---------- */'));
-  assert.match(restore, /(?:db\.runTransaction|runRoleTransaction)\(async transaction/);
-  assert.match(restore, /if \(existing\.exists\) return false;/);
-  assert.match(restore, /transaction\.set\(ref, row\.data\)/);
-  assert.match(source, /collection !== 'users' && collection !== 'settings'/);
+test('browser inspection never restores transaction or permissions documents', () => {
+  const inspection = source.slice(start, end);
+  const html = fs.readFileSync(require('node:path').join(__dirname, '..', 'index.html'), 'utf8');
+  const productMaintenance = fs.readFileSync(require('node:path').join(__dirname, '..', 'src/features/products/product-master-import.js'), 'utf8');
+  assert.doesNotMatch(inspection, /window\.restoreMissingDatabaseBackupDocuments\s*=/);
+  assert.doesNotMatch(inspection, /transaction\.set\(ref, row\.data\)/);
+  assert.doesNotMatch(html, /id="databaseBackupRestoreBtn"|id="testDataResetExecuteBtn"|id="testDataResetPreviewBtn"/);
+  assert.doesNotMatch(productMaintenance, /window\.executeTestDataReset\s*=|window\.previewTestDataReset\s*=/);
+  assert.match(html, /不是完整資料庫備份/);
 });

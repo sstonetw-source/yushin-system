@@ -2689,15 +2689,11 @@ test('admin maintenance reads are bounded', () => {
 });
 
 
-test('test data reset reads are bounded', () => {
-    const start=appSource.indexOf('async function countCollectionDocuments');
-    const end=appSource.indexOf('\nwindow.previewTestDataReset',start);
-    const source=appSource.slice(start,end);
-    assert.match(source,/firestoreReadWithTimeout\(query\.get\(\), `\$\{name\} 文件數量`\)/);
-    assert.match(source,/firestoreReadWithTimeout\([\s\S]*?limit\(300\)\.get\(\)[\s\S]*?`\$\{name\} 清除批次`/);
-    assert.match(source,/firestoreReadWithTimeout\(query\.get\(\), `\$\{name\} 庫存歸零批次`\)/);
+test('production browser has no direct collection delete or stock-zeroing reset', () => {
+    assert.doesNotMatch(appSource,/window\.executeTestDataReset\s*=/);
+    assert.doesNotMatch(appSource,/async function deleteCollectionInBatches\(/);
+    assert.doesNotMatch(appSource,/async function resetStockCollection\(/);
 });
-
 
 test('own-scope equipment page avoids full staff preload', () => {
     const dropdownStart=appSource.indexOf('function populateEquipmentSalesDropdown');

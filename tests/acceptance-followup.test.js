@@ -19,14 +19,13 @@ test('order item limit rejects before order writes and accepts exactly thirty',(
   assert.match(src.slice(start,src.indexOf('assertOrderItemCount(',start)+100),/assertOrderItemCount/);
  }
 });
-test('reset refuses protected evidence before any delete is executed',async()=>{
- const reads=[],c=vm.createContext({TEST_DATA_RESET_PROTECTED_COLLECTIONS:['stockTransfers','stockTransferRequests','stockOperations'],
-  firestoreReadWithTimeout:p=>p,db:{collection:name=>({limit:n=>({get:async()=>{reads.push([name,n]);return {empty:name!=='stockOperations'};}})})}});
- vm.runInContext('async '+functionSource('assertClientTestResetSafe'),c);
- await assert.rejects(c.assertClientTestResetSafe(),/前台初始化/);
- assert.equal(reads.length,3);
- const execute=src.slice(src.indexOf('window.executeTestDataReset ='),src.indexOf('let systemDataAuditIssues'));
- assert.ok(execute.indexOf('await assertClientTestResetSafe()')<execute.indexOf('await deleteCollectionInBatches'));
+test('browser reset writer has been retired; backend reset remains isolated',()=>{
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8');
+ const resetScript=fs.readFileSync(path.join(__dirname,'../functions/scripts/one-time-operational-reset.js'),'utf8');
+ assert.doesNotMatch(src,/window\.executeTestDataReset\s*=|window\.previewTestDataReset\s*=/);
+ assert.doesNotMatch(html,/id="testDataResetExecuteBtn"|id="testDataResetPreviewBtn"/);
+ assert.match(resetScript,/recursiveDelete\(/);
+ assert.match(resetScript,/--writes-frozen/);
 });
 test('pending and delivery lot reads exclude completed work and depleted lots at query level',()=>{
  assert.match(functionSource('pendingOrderWorkQuery'),/workCategories.*array-contains-any/);
