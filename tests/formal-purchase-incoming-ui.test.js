@@ -43,6 +43,13 @@ test('PO incoming refuses foreign host/project, role mutation and invalid receip
  }
 });
 
+test('production disabled PO backend fails closed even if old browser writer remains loaded',async()=>{
+ const x=fixture({production:true});x.c.YUSHIN_V2_PO_INCOMING_EMULATOR=false;
+ x.c.YUSHIN_PRODUCTION_FORMAL_PURCHASE=false;
+ await assert.rejects(x.c.registerPurchaseIncoming('PO1',x.po,{actorUid:'BUY',actorRole:'purchaser'}),/禁止回退舊寫入/);
+ assert.deepEqual(x.calls,[]);
+});
+
 test('production PO incoming uses the deployed purchase endpoint without a client stock transaction',async()=>{
  const x=fixture({production:true});x.c.YUSHIN_V2_PO_INCOMING_EMULATOR=false;
  await x.c.registerPurchaseIncoming('PO1',x.po,{actorUid:'BUY',actorRole:'purchaser'});
