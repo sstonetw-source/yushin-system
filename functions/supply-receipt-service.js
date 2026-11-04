@@ -63,6 +63,56 @@ async function verifyQuickPurchaseReceipt(get,db,supply,order,supplyId){
   ||(directShip?Number(supply.incomingRegisteredQty||0)!==0:
    Number(supply.incomingRegisteredQty)!==supply.qty-Number(supply.receivedQty||0)))reject();
 }
+// Direct-stock PO is an independently authorised procurement source, not a
+// fabricated sales order. Verify the original confirmed PO, its immutable
+// incoming receipt, supply and demand before the shared receipt writer runs.
+async function verifyDirectStockReceipt(get,db,supply,supplyId){
+ const reject=()=>fail('failed-precondition','直接採購缺少一致的正式採購、在途或需求憑證');
+ const poNo=supply.purchaseDocumentId;
+ if(typeof poNo!=='string'||!poNo||poNo.includes('/')||!Number.isSafeInteger(supply.qty)||supply.qty<=0
+  ||!Number.isSafeInteger(supply.receivedQty)||supply.receivedQty<0||supply.receivedQty>supply.qty
+  ||!Number.isSafeInteger(supply.incomingRegisteredQty)||supply.incomingRegisteredQty!==supply.qty-supply.receivedQty)
+  reject();
+ const poSnap=await get(db.collection('purchaseOrders').doc(poNo)),po=poSnap.exists?poSnap.data():null;
+ const links=po?.supplyOrderIds,index=Array.isArray(links)?links.indexOf(supplyId):-1;
+ const line=Array.isArray(po?.items)?po.items[index]:null;
+ const sourceId='MANUAL_PO:'+poNo+':'+index;
+ const demandId=demandCore.demandIdForSource({sourceType:'STOCK_REPLENISHMENT',sourceId});
+ if(!po||po.poNo!==poNo||po.purchaseType!=='stock'||po.status!=='ORDERED'||po.documentOnly!==false
+  ||!po.serverCommitHash||!Array.isArray(links)||links.length<1||links.length>5
+  ||index<0||links.filter(id=>id===supplyId).length!==1
+  ||supplyId!=='po-'+encodeURIComponent(poNo)+'-'+index||!line
+  ||line.sourceType!=='STOCK_REPLENISHMENT'||line.orderId||line.itemId
+  ||line.productId!==supply.productId||line.warehouseId!==supply.warehouseId
+  ||(line.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
+  ||line.qty!==supply.qty||line.unitPrice!==supply.unitCost
+  ||supply.type!=='PURCHASING_PO'||supply.sourceType!=='STOCK_REPLENISHMENT'
+  ||supply.method!=='PURCHASING_PO'||supply.sourceId!==sourceId||supply.sourceItemId!==''
+  ||supply.demandId!==demandId||supply.productKey!==supply.productId
+  ||supply.orderId||supply.itemId||supply.fulfillmentType!=='WAREHOUSE')reject();
+ const [demandSnap,incomingSnap,movementSnap,productSnap,warehouseSnap]=await Promise.all([
+  get(db.collection('procurementDemands').doc(encodeURIComponent(demandId))),
+  get(db.collection('reservationOperationReceipts').doc('po-incoming-'+encodeURIComponent(poNo))),
+  get(db.collection('inventoryMovements').doc('po-incoming-'+encodeURIComponent(poNo)+'-'+encodeURIComponent(supplyId))),
+  get(db.collection('products').doc(supply.productId)),get(db.collection('warehouses').doc(supply.warehouseId))
+ ]);
+ const demand=demandSnap.exists?demandSnap.data():null,
+  incoming=incomingSnap.exists?incomingSnap.data():null,
+  movement=movementSnap.exists?movementSnap.data():null;
+ if(!demand||demand.demandId!==demandId||demand.sourceType!=='STOCK_REPLENISHMENT'
+  ||demand.sourceId!==sourceId||demand.sourceItemId!==''||demand.productId!==supply.productId
+  ||demand.productKey!==supply.productKey||demand.warehouseId!==supply.warehouseId
+  ||demand.orderedQty!==supply.qty||demand.receivedQty!==supply.receivedQty
+  ||!incoming||incoming.action!=='FORMAL_PO_INCOMING'||incoming.poNo!==poNo
+  ||!Array.isArray(incoming.result?.supplyOrderIds)||!incoming.result.supplyOrderIds.includes(supplyId)
+  ||!movement||movement.type!=='purchase_incoming'||movement.qty!==supply.qty
+  ||movement.sourceType!=='SUPPLY_ORDER'||movement.sourceId!==supplyId
+  ||movement.productKey!==supply.productKey||movement.warehouseId!==supply.warehouseId
+  ||movement.purchaseDocumentId!==poNo||!productSnap.exists||productSnap.data().active===false
+  ||String(productSnap.data().productType||productSnap.data().type||'').toUpperCase()==='SERVICE'
+  ||!warehouseSnap.exists||warehouseSnap.data().active===false||warehouseSnap.data().systemCustody===true)
+  reject();
+}
 cores.YUSHIN_V2_DISPATCH_EMULATOR=true;
 cores.crypto=require('node:crypto').webcrypto;
 function fail(code,message){const error=new Error(message);error.code=code;throw error;}
@@ -102,21 +152,28 @@ async function receiveV2Supply(db,uid,input,env=process.env){
   if(!supplySnap.exists)fail('not-found','找不到供應紀錄');
   const supply=supplySnap.data();
   const directShip=supply.fulfillmentType==='DIRECT_SHIP';
+  const directStock=supply.type==='PURCHASING_PO'&&supply.sourceType==='STOCK_REPLENISHMENT'
+   &&!supply.orderId&&!supply.itemId&&supply.fulfillmentType==='WAREHOUSE';
   if(!['PURCHASING_PO','PURCHASING_MANUAL'].includes(supply.type)||!['WAREHOUSE','DIRECT_SHIP'].includes(supply.fulfillmentType)
-    ||!supply.orderId||!supply.itemId)fail('failed-precondition','試點只支援客戶訂單的實體採購／原廠直送');
+    ||(!directStock&&(!supply.orderId||!supply.itemId)))
+   fail('failed-precondition','只支援來源完整的客戶訂單或直接備庫採購');
   if(directShip&&(intent.lotNo||intent.expiryDate||Number(supply.incomingRegisteredQty||0)!==0))
    fail('failed-precondition','原廠直送不得登記倉庫在途、批號或效期');
-  const orderSnap=await get(db.collection('orders').doc(supply.orderId));
-  if(!orderSnap.exists)fail('failed-precondition','找不到來源訂單');
-  const order=orderSnap.data();
+  const orderSnap=directStock?null:await get(db.collection('orders').doc(supply.orderId));
+  if(!directStock&&!orderSnap.exists)fail('failed-precondition','找不到來源訂單');
+  const order=orderSnap?.exists?orderSnap.data():null;
   const previous=await get(db.collection('receipts').doc(intent.operationId));
   let reservationSchema=0;
+  if(directStock){
+   if(!['admin','purchaser','warehouse'].includes(role))fail('permission-denied','目前沒有直接採購入庫權限');
+   await verifyDirectStockReceipt(get,db,supply,intent.supplyId);
+  }
   if(supply.type==='PURCHASING_MANUAL')
    await verifyQuickPurchaseReceipt(get,db,supply,order,intent.supplyId);
   if(directShip){
    if(role!=='admin'&&(!['sales','engineer'].includes(role)||order.ownerUid!==uid
       ||supply.ownerUid!==uid))fail('permission-denied','僅原負責業務可確認直送到貨');
-  }else{
+  }else if(!directStock){
    if(!['admin','purchaser','warehouse'].includes(role))fail('permission-denied','目前沒有實體入庫權限');
    const ledger=await get(db.collection('inventoryReservations').doc(supply.orderId+'__'+supply.itemId));
    if(!ledger.exists)fail('failed-precondition','來源缺少權威預留');
@@ -147,9 +204,9 @@ async function receiveV2Supply(db,uid,input,env=process.env){
   // immutable shipment/return proof and current outstanding demand, including
   // sibling reservation and receipts after partial fulfillment. Cancellation stays gated.
   // The existing Service remains authoritative for quantities and all writes.
-  if(previous.exists&&!directShip&&previous.data().reservationLocationSchemaVersion!==reservationSchema)
+  if(previous.exists&&!directShip&&!directStock&&previous.data().reservationLocationSchemaVersion!==reservationSchema)
    fail('failed-precondition','原收貨憑證與預留格式不一致');
-  if(!previous.exists&&(!Array.isArray(order.items)||order.items.length<1||order.items.length>(directShip?5:15)||!normalReceiptOrder(order)))
+  if(!previous.exists&&!directStock&&(!Array.isArray(order.items)||order.items.length<1||order.items.length>(directShip?5:15)||!normalReceiptOrder(order)))
    fail('failed-precondition',`收貨登入試點僅支援正常 1–${directShip?5:15} 品項來源；取消尚未開放`);
   if(!previous.exists&&directShip&&supply.type==='PURCHASING_PO'){
    const selected=order.items.filter(row=>row?.itemId===supply.itemId);
@@ -176,7 +233,7 @@ async function receiveV2Supply(db,uid,input,env=process.env){
    staged.set(reference,data,...options);
   }};
   const result=await callback(adapter);
-  if(orderPatches.length&&order.items?.some(item=>String(item.productType||'').trim().toUpperCase()==='SERVICE')){
+  if(orderPatches.length&&order?.items?.some(item=>String(item.productType||'').trim().toUpperCase()==='SERVICE')){
    const next=Object.assign({},order,...orderPatches);
    const index=await require('./service-order-fulfillment').mixedWorkIndex(db,{get},supply.orderId,next,{proofOrder:order});
    staged.update(db.collection('orders').doc(supply.orderId),index);

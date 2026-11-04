@@ -184,6 +184,17 @@ test('direct-stock PO without any sales order reaches incoming and warehouse rec
  assert.equal((await warehouse.receive(receiptInput)).status,'confirmed');
  assert.deepEqual(await Promise.all(['supplyOrders/'+supplyId,'procurementDemands/'+encodeURIComponent(demandId),'inventory/'+encodeURIComponent(productId)]
   .map(async path=>(await db.doc(path).get()).data())),snapshot);
+ const supplyRef=db.doc('supplyOrders/'+supplyId),incomingRef=db.doc('reservationOperationReceipts/po-incoming-'+encodeURIComponent(poNo));
+ const badReceipt={...receiptInput,operationId:tag+'-forged',qty:1};
+ await supplyRef.update({sourceId:'OTHER'});
+ await assert.rejects(warehouse.receive(badReceipt),e=>e.code==='functions/failed-precondition');
+ await supplyRef.update({sourceId});
+ const proof=(await incomingRef.get()).data();
+ await incomingRef.delete();
+ await assert.rejects(warehouse.receive(badReceipt),e=>e.code==='functions/failed-precondition');
+ await incomingRef.set(proof);
+ assert.equal((await db.doc('supplyOrders/'+supplyId).get()).data().receivedQty,2);
+ assert.equal((await db.doc('inventory/'+encodeURIComponent(productId)).get()).data().onHand,2);
 });
 
 // Source creation uses real Client Rules; only masters/opening balances are Admin fixtures.
