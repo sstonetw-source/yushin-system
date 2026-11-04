@@ -16937,7 +16937,7 @@ async function receiveV2SupplyEmulator(supplyId,qty,lotNo,expiryDate,operationId
         &&proof.purchaseDocumentId!==''&&!proof.purchaseDocumentId.includes('/')
         &&typeof proof.sourceId==='string'
         ? proof.sourceId.match(/^MANUAL_PO:(.+):([0-4])$/):null;
-    const directStock=!direct&&proof?.fulfillmentType==='WAREHOUSE'
+    const directStock=!!stockSource&&!direct&&proof?.fulfillmentType==='WAREHOUSE'
         &&proof.method==='PURCHASING_PO'&&proof.demandSourceType==='STOCK_REPLENISHMENT'
         &&proof.documentSourceType==='SUPPLY_ORDER'
         &&stockSource?.[1]===proof.purchaseDocumentId

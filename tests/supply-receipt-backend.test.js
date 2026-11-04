@@ -222,7 +222,7 @@ test('direct-stock transport confirms the existing backend receipt without a sal
 });
 test('direct-stock proof rejects altered source, document, batch, actor and malformed missing-schema lookalikes',async()=>{
  const patches=[{method:'PURCHASING_MANUAL'},{demandSourceType:'SALES_ORDER'},{documentSourceType:'OTHER'},
-  {purchaseDocumentId:'OTHER'},{purchaseDocumentId:''},{sourceId:'MANUAL_PO:PO-YS-20261105-01-02:5'},
+  {purchaseDocumentId:'OTHER'},{purchaseDocumentId:''},{purchaseDocumentId:undefined},{sourceId:undefined},{sourceId:'MANUAL_PO:PO-YS-20261105-01-02:5'},
   {sourceId:'SALES_ORDER:O:I'},{demandId:'OTHER'},{orderId:'O'},{itemId:'I'},{sourceItemId:'I'},
   {supplyOrderId:'OTHER'},{receiptId:'OTHER'},{operationId:'OTHER'},{productKey:''},{productId:'OTHER'},
   {warehouseId:''},{warehouseId:'custody-sales'},{lotId:''},{qty:3},{lotNo:'OTHER'},{expiryDate:''},
