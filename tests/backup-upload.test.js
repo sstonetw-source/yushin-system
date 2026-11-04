@@ -37,9 +37,9 @@ test('browser inspection never restores transaction or permissions documents', (
   const inspection = source.slice(start, end);
   const html = fs.readFileSync(require('node:path').join(__dirname, '..', 'index.html'), 'utf8');
   const productMaintenance = fs.readFileSync(require('node:path').join(__dirname, '..', 'src/features/products/product-master-import.js'), 'utf8');
-  assert.doesNotMatch(inspection, /window\\.restoreMissingDatabaseBackupDocuments\\s*=/);
-  assert.doesNotMatch(inspection, /transaction\\.set\\(ref, row\\.data\\)/);
+  assert.doesNotMatch(inspection, /window\.restoreMissingDatabaseBackupDocuments\s*=/);
+  assert.doesNotMatch(inspection, /transaction\.set\(ref, row\.data\)/);
   assert.doesNotMatch(html, /id="databaseBackupRestoreBtn"|id="testDataResetExecuteBtn"|id="testDataResetPreviewBtn"/);
-  assert.doesNotMatch(productMaintenance, /window\\.executeTestDataReset\\s*=|window\\.previewTestDataReset\\s*=/);
+  assert.doesNotMatch(productMaintenance, /window\.executeTestDataReset\s*=|window\.previewTestDataReset\s*=/);
   assert.match(html, /不是完整資料庫備份/);
 });
