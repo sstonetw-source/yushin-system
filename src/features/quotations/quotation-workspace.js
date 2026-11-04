@@ -2819,7 +2819,8 @@ function quotePdfExtraRows(item = {}) {
     ].filter(([label, value]) => String(label || '').trim() && String(value || '').trim());
 }
 
-function renderQuotePdfDocument(quoteData = {}, { includeStamp = true } = {}) {
+function renderQuotePdfDocument(quoteData = {}) {
+    const includeStamp = arguments[1]?.includeStamp !== false;
     const companyKey = quoteData.company || currentCompany;
     const info = comparisonCompanyData[companyKey] || companyData[companyKey] || companyData.yushin;
     const logo = comparisonCompanyData[companyKey]?.logo || '';
@@ -2902,7 +2903,8 @@ function renderQuotePdfDocument(quoteData = {}, { includeStamp = true } = {}) {
     return root;
 }
 
-function createQuotePdfStage(quoteData, options = {}) {
+function createQuotePdfStage(quoteData) {
+    const options = arguments[1] || {};
     const stage = document.createElement('div');
     stage.className = 'quote-pdf-stage';
     const documentNode = renderQuotePdfDocument(quoteData, options);
@@ -3051,7 +3053,8 @@ function quoteOutputCanSync(quoteData = {}) {
 }
 
 let quotePdfExportInProgress = false;
-window.exportCurrentQuotePdf = async function({ includeStamp = true } = {}) {
+window.exportCurrentQuotePdf = async function() {
+    const includeStamp = arguments[0]?.includeStamp !== false;
     if (quotePdfExportInProgress) return;
     const validationMessage = currentQuoteOutputValidation();
     if (validationMessage) {
@@ -3128,7 +3131,9 @@ window.exportCurrentQuotePdf = async function({ includeStamp = true } = {}) {
                 });
         }
 
-        const exportDom = createQuotePdfStage(quoteData, { includeStamp });
+        const exportDom = includeStamp
+            ? createQuotePdfStage(quoteData)
+            : createQuotePdfStage(quoteData, { includeStamp: false });
         stage = exportDom.stage;
         await waitForPdfImages(exportDom.documentNode);
 
@@ -3156,10 +3161,10 @@ window.exportCurrentQuotePdf = async function({ includeStamp = true } = {}) {
             }
         });
         if (button) button.innerText = '正在下載 PDF…';
-        const fileName = includeStamp
-            ? quotePdfFileName(quoteData)
-            : quotePdfFileName(quoteData).replace(/\.pdf$/i, '-無印章.pdf');
-        if (await window.DocumentDownloads.savePdf('quote', pdf, fileName) === false) {
+        const saved = includeStamp
+            ? await window.DocumentDownloads.savePdf('quote', pdf, quotePdfFileName(quoteData))
+            : await window.DocumentDownloads.savePdf('quote', pdf, quotePdfFileName(quoteData).replace(/\.pdf$/i, '-無印章.pdf'));
+        if (saved === false) {
             setQuoteOutputStatus('PDF 已產生；已取消匯出');
             return;
         }

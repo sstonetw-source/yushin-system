@@ -31,7 +31,7 @@ test('quote more actions offers an unstamped PDF through the shared export path'
     assert.match(markup, /id="quoteNoStampPdfBtn"[^>]*onclick="exportCurrentQuotePdfWithoutStamp\(\)"/);
     assert.match(source, /window\.exportCurrentQuotePdfWithoutStamp = function\(\)/);
     assert.match(source, /window\.exportCurrentQuotePdf\(\{ includeStamp: false \}\)/);
-    assert.match(source, /createQuotePdfStage\(quoteData, \{ includeStamp \}\)/);
+    assert.match(source, /createQuotePdfStage\(quoteData, \{ includeStamp: false \}\)/);
     assert.match(source, /'-無印章\.pdf'/);
 });
 
