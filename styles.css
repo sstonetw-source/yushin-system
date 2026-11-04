@@ -4946,4 +4946,24 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
     #appContainer #ordersTable #ordersBody > tr > td:not([data-th="操作"]) :is(strong,b,.workflow-customer-link,.workflow-order-total) {
         font-weight:400;
     }
+    #appContainer #ordersTable #ordersBody > tr > td[data-th="進度"] strong.order-item-status-heading {
+        font-weight:700;
+        color:var(--ys-text);
+    }
+}
+
+/* Mobile order card: keep the customer heading and link on one compact row. */
+@media screen and (max-width:768px) {
+    #appContainer #ordersTable #ordersBody > tr > td.order-customer-cell {
+        display:flex;
+        align-items:center;
+        flex-wrap:wrap;
+        gap:4px 12px;
+        padding:4px 0 6px;
+    }
+    #appContainer #ordersTable #ordersBody > tr > td.order-customer-cell::before {
+        display:inline;
+        flex:0 0 auto;
+        margin:0;
+    }
 }
