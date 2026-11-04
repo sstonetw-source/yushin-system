@@ -161,6 +161,7 @@ test('direct-stock PO without any sales order reaches incoming and warehouse rec
   items:[{sourceType:'STOCK_REPLENISHMENT',productId,warehouseId,qty:3,unitCost:18}]};
  const committed=await buyer.formalPurchase(intent);
  assert.equal(committed.status,'committed');assert.deepEqual(committed.supplyOrderIds,[supplyId]);
+ assert.deepEqual((await db.doc('purchaseOrders/'+poNo).get()).data().orderIds,[]);
  assert.equal((await db.doc('supplyOrders/'+supplyId).get()).data().orderId,'');
  const {registerFormalPurchaseIncoming}=require('../functions/formal-purchase-incoming-service');
  const incomingEnv={GCLOUD_PROJECT:'demo-yushin',FUNCTIONS_EMULATOR:'true',
