@@ -4938,3 +4938,11 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
 :is(#appContainer, .eq-modal-overlay, .modal-overlay, .modal) .modal-actions > button { min-height:var(--ys-control-height,44px) !important; border-radius:var(--ys-control-radius,8px) !important; }
 .modal-actions > .btn-primary { background:var(--ys-primary); color:#fff; border-color:var(--ys-primary); }
 .modal-actions > .btn-secondary { background:var(--ys-surface); color:var(--ys-text); border-color:var(--ys-border); }
+
+/* Order history: only field headings are bold; customer, product, amount and progress values are regular. */
+@media screen {
+    #appContainer #ordersTable #ordersBody > tr > td:not([data-th="操作"]),
+    #appContainer #ordersTable #ordersBody > tr > td:not([data-th="操作"]) :is(strong,b,.workflow-customer-link,.workflow-order-total) {
+        font-weight:400;
+    }
+}
