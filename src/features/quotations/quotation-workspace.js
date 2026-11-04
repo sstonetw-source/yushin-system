@@ -2819,7 +2819,7 @@ function quotePdfExtraRows(item = {}) {
     ].filter(([label, value]) => String(label || '').trim() && String(value || '').trim());
 }
 
-function renderQuotePdfDocument(quoteData = {}) {
+function renderQuotePdfDocument(quoteData = {}, { includeStamp = true } = {}) {
     const companyKey = quoteData.company || currentCompany;
     const info = comparisonCompanyData[companyKey] || companyData[companyKey] || companyData.yushin;
     const logo = comparisonCompanyData[companyKey]?.logo || '';
@@ -2887,7 +2887,7 @@ function renderQuotePdfDocument(quoteData = {}) {
             <div class="quote-pdf-bottom">
                 <div class="quote-pdf-footer-left">
                     ${remarks ? `<div class="quote-pdf-remarks"><b>備註：</b><span>${escapeHtml(remarks)}</span></div>` : ''}
-                    <div class="stamp-section">${stamp ? `<img src="${escapeAttr(stamp)}" alt="${escapeAttr(info?.title || '')} 估價單章">` : ''}</div>
+                    ${includeStamp && stamp ? `<div class="stamp-section"><img src="${escapeAttr(stamp)}" alt="${escapeAttr(info?.title || '')} 估價單章"></div>` : ''}
                 </div>
                 <div class="total-section">
                     <p>銷售額合計：NT$ <span>${subtotal.toLocaleString()}</span></p>
@@ -2902,10 +2902,10 @@ function renderQuotePdfDocument(quoteData = {}) {
     return root;
 }
 
-function createQuotePdfStage(quoteData) {
+function createQuotePdfStage(quoteData, options = {}) {
     const stage = document.createElement('div');
     stage.className = 'quote-pdf-stage';
-    const documentNode = renderQuotePdfDocument(quoteData);
+    const documentNode = renderQuotePdfDocument(quoteData, options);
     stage.appendChild(documentNode);
     document.body.appendChild(stage);
     return { stage, documentNode };
@@ -3050,20 +3050,25 @@ function quoteOutputCanSync(quoteData = {}) {
     return !!String(quoteData.ownerUid || '').trim() && !!String(quoteData.salesCode || '').trim();
 }
 
-window.exportCurrentQuotePdf = async function() {
+let quotePdfExportInProgress = false;
+window.exportCurrentQuotePdf = async function({ includeStamp = true } = {}) {
+    if (quotePdfExportInProgress) return;
     const validationMessage = currentQuoteOutputValidation();
     if (validationMessage) {
         alert(validationMessage);
         return;
     }
 
-    const button = document.getElementById('printBtn');
+    const button = document.getElementById(includeStamp ? 'printBtn' : 'quoteNoStampPdfBtn');
+    const otherButton = document.getElementById(includeStamp ? 'quoteNoStampPdfBtn' : 'printBtn');
     const originalLabel = button?.innerText || '📄 匯出 PDF（自動同步雲端）';
     if (button) {
         button.disabled = true;
         button.innerText = '正在產生 PDF…';
     }
 
+    quotePdfExportInProgress = true;
+    if (otherButton) otherButton.disabled = true;
     let stage = null;
     let pdfDownloaded = false, syncResult = null, exportFailed = false;
     const updateOutput = () => {
@@ -3123,7 +3128,7 @@ window.exportCurrentQuotePdf = async function() {
                 });
         }
 
-        const exportDom = createQuotePdfStage(quoteData);
+        const exportDom = createQuotePdfStage(quoteData, { includeStamp });
         stage = exportDom.stage;
         await waitForPdfImages(exportDom.documentNode);
 
@@ -3151,7 +3156,10 @@ window.exportCurrentQuotePdf = async function() {
             }
         });
         if (button) button.innerText = '正在下載 PDF…';
-        if (await window.DocumentDownloads.savePdf('quote', pdf, quotePdfFileName(quoteData)) === false) {
+        const fileName = includeStamp
+            ? quotePdfFileName(quoteData)
+            : quotePdfFileName(quoteData).replace(/\.pdf$/i, '-無印章.pdf');
+        if (await window.DocumentDownloads.savePdf('quote', pdf, fileName) === false) {
             setQuoteOutputStatus('PDF 已產生；已取消匯出');
             return;
         }
@@ -3168,7 +3176,13 @@ window.exportCurrentQuotePdf = async function() {
             button.disabled = false;
             button.innerText = originalLabel;
         }
+        if (otherButton) otherButton.disabled = false;
+        quotePdfExportInProgress = false;
     }
+};
+
+window.exportCurrentQuotePdfWithoutStamp = function() {
+    return window.exportCurrentQuotePdf({ includeStamp: false });
 };
 
 window.loadQuoteFromCloud = function() {
