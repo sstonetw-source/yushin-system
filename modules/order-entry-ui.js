@@ -2,6 +2,12 @@
 (function(root){
     if(!root.document)return;
     const $=id=>document.getElementById(id);
+    root.syncOrderInvoiceTitleRequirement=function(){
+        const required=$('orderTransactionType')?.value==='直';
+        const invoice=$('orderInvoiceTitle');
+        if(invoice){invoice.disabled=!required;invoice.required=required;invoice.setAttribute('aria-required',String(required));}
+        const marker=$('orderInvoiceTitleRequired');if(marker)marker.hidden=!required;
+    };
     root.refreshOrderEntrySummary=function(){
         const summary=$('orderEntryProductSummary');
         if(summary)summary.textContent=[$('orderItemName')?.value||$('orderItemNameEn')?.value,$('orderSpec')?.value].filter(Boolean).join('｜');
@@ -78,5 +84,6 @@
     root.selectOrderCustomerAddress=function(...args){const result=previousAddressSelect.apply(this,args);root.refreshOrderEntrySummary();return result;};
     $('orderShippingFields')?.addEventListener('input',root.refreshOrderEntrySummary);
     $('orderShippingFields')?.addEventListener('change',root.refreshOrderEntrySummary);
+    root.syncOrderInvoiceTitleRequirement();
     root.refreshOrderEntrySummary();
 })(typeof globalThis!=='undefined'?globalThis:this);

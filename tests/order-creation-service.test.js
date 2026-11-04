@@ -176,6 +176,20 @@ test('creation rejects empty and invalid trade types without writes but resumes 
  assert.equal(result.data.transactionType,'');assert.equal(f.writes.length,0);
 });
 
+test('every new order writer rejects direct invoices without a title before any write',async()=>{
+ for(const invoiceTitle of ['', '  ', undefined]){
+  for(const linkForecast of [false,true]){
+   const f=fixture();
+   const data={...(linkForecast?f.forecast:f.data),transactionType:'直',invoiceTitle};
+   await assert.rejects(f.c.commitOrderCreation('O',data,{linkForecast,expectedForecastUpdatedAt:'V'}),/發票抬頭/);
+   assert.equal(f.writes.length,0);
+  }
+ }
+ const f=fixture();
+ await f.c.commitOrderCreation('O',{...f.data,transactionType:'直',invoiceTitle:'臺大醫院'});
+ assert.equal(f.docs.get('orders/O').invoiceTitle,'臺大醫院');
+});
+
 test('single and multi-item Forecasts open the required order form without writing and preserve owner/version context',async()=>{
  for(const count of [1,3]){
   const forecast={id:'F',ownerUid:'OWNER',salesName:'Owner',salesCode:'S01',updatedAt:'VERSION'};

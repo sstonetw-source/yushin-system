@@ -1126,8 +1126,8 @@
             <div class="table-wrap" id="newOrderItemsWrap" style="display:none;"><table><thead><tr><th>貨號</th><th>品名</th><th>廠牌</th><th>數量</th><th>單價</th><th>產品狀態</th><th>訂貨／交付</th><th>操作</th></tr></thead><tbody id="newOrderItemsBody"></tbody></table></div>
             <section class="order-entry-section"><h4>其他資訊</h4>
             <details class="order-entry-details" id="orderTradeDetails" open><summary>交易與發票資訊</summary><div class="form-grid">
-                <div><label for="orderTransactionType">交易方式 <span aria-hidden="true">*</span></label><select id="orderTransactionType" required aria-required="true" onchange="document.getElementById('orderInvoiceTitle').disabled = this.value !== '直'"><option value="">請選擇交易方式</option><option value="直">直（開發票）</option><option value="借">借（不開發票）</option><option value="扣">扣（扣寄款）</option></select></div>
-                <div><label>發票抬頭</label><input type="text" id="orderInvoiceTitle" disabled></div>
+                <div><label for="orderTransactionType">交易方式 <span aria-hidden="true">*</span></label><select id="orderTransactionType" required aria-required="true" onchange="syncOrderInvoiceTitleRequirement()"><option value="">請選擇交易方式</option><option value="直">直（開發票）</option><option value="借">借（不開發票）</option><option value="扣">扣（扣寄款）</option></select></div>
+                <div><label for="orderInvoiceTitle">發票抬頭 <span id="orderInvoiceTitleRequired" aria-hidden="true" hidden>*</span></label><input type="text" id="orderInvoiceTitle" disabled></div>
             </div></details>
             <details class="order-entry-details"><summary>備註</summary><div class="form-grid">
                 <input type="hidden" id="orderDateInput">
@@ -1702,16 +1702,16 @@
     <script src="modules/trade-analysis-core.js?v=20261004-1"></script>
     <script src="modules/document-downloads.js?v=20261104-1"></script>
     <script src="modules/order-commercial-details.js?v=20261025-1"></script>
-    <script src="modules/order-entry-core.js?v=20261026-296"></script>
+    <script src="modules/order-entry-core.js?v=20261104-459"></script>
 <script src="modules/service-work-core.js?v=20261023-2"></script>
-    <script src="app.js?v=20261104-457"></script>
+    <script src="app.js?v=20261104-459"></script>
     <script src="modules/order-self-order-required.js?v=20261013-1"></script>
     <script src="modules/customer-cancellations.js?v=20261021-3"></script>
     <script src="modules/free-stock-recovery.js?v=20261014-9"></script>
     <script src="modules/inventory-workspace.js?v=20261027-300"></script>
     <script src="modules/warehouse-logistics.js?v=20261029-372"></script>
     <script src="modules/delivery-settings.js?v=20261031-416"></script>
-    <script src="modules/order-entry-ui.js?v=20261031-416"></script>
+    <script src="modules/order-entry-ui.js?v=20261104-459"></script>
     <script src="modules/quote-decision-analysis.js?v=20261005-5"></script>
 
 

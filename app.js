@@ -3370,7 +3370,7 @@ async function commitOrderCreation(orderId,data,{actorUid=currentUser?.uid,actor
             savedData=live;return;
         }
         if((snapshot.items || []).length>15)throw new Error('每張訂單最多 15 個品項；請分成多張訂單後再儲存。');
-        const tradeValidation=globalThis.YushinOrderEntry.validateTrade(snapshot,{requireInvoiceTitle:false});
+        const tradeValidation=globalThis.YushinOrderEntry.validateTrade(snapshot);
         if(!tradeValidation.valid)throw new Error(tradeValidation.message);
         let forecastRef=null;
         if(reorder){
@@ -23551,7 +23551,7 @@ function restoreSavedOrderDraft(){
         setOrderModalItem(draft);
         window.setOrderShippingInstructions?.(draft.shippingInstructions||{});
         document.getElementById('orderTransactionType').value=draft.transactionType||'';
-        const invoice=document.getElementById('orderInvoiceTitle');invoice.value=draft.invoiceTitle||'';invoice.disabled=draft.transactionType!=='直';
+        const invoice=document.getElementById('orderInvoiceTitle');invoice.value=draft.invoiceTitle||'';window.syncOrderInvoiceTitleRequirement?.();
         newOrderDraftItems=Array.isArray(draft.items)?draft.items.map(normalizeNewOrderItem):[];
         renderNewOrderDraftItems();
         checkNewOrderDraftProducts();
@@ -23793,7 +23793,7 @@ window.openOrderModal = function(source = null) {
     document.getElementById('orderWarehouse').value = source?.warehouseId || '';
     onOrderFulfillmentChange();
     document.getElementById('orderTransactionType').value = '';
-    document.getElementById('orderInvoiceTitle').disabled = true;
+    window.syncOrderInvoiceTitleRequirement?.();
     window._orderModalSourceLink = source?.sourceType && source?.sourceId
         ? { sourceType: source.sourceType, sourceId: source.sourceId }
         : null;
@@ -23981,7 +23981,7 @@ window.reorderAfterReturn = function(orderId) {
     document.getElementById('orderCustomer').value=source.customerName||'';
     document.getElementById('orderTransactionType').value=source.transactionType||'';
     const invoice=document.getElementById('orderInvoiceTitle');
-    invoice.value=source.invoiceTitle||'';invoice.disabled=source.transactionType!=='直';
+    invoice.value=source.invoiceTitle||'';window.syncOrderInvoiceTitleRequirement?.();
     document.getElementById('orderRemarks').value=`退貨後重新下單，原訂單：${source.orderNo||orderId}。請重新確認商品、數量與價格。`;
     saveOrderDraft();
 };
@@ -24010,7 +24010,7 @@ window.copyOrderAsNew = function(orderId) {
     document.getElementById('orderTransactionType').value = transactionType;
     const invoiceInput = document.getElementById('orderInvoiceTitle');
     invoiceInput.value = source.invoiceTitle || '';
-    invoiceInput.disabled = transactionType !== '直';
+    window.syncOrderInvoiceTitleRequirement?.();
 };
 
 window.closeOrderModal = function(options = {}) {
@@ -24078,8 +24078,8 @@ window.saveNewOrder = function() {
         const validation=globalThis.YushinOrderEntry.validateItem(items[index]);
         if(!validation.valid){alert(`第 ${index+1} 項：${validation.message}`);if(index<newOrderDraftItems.length)editNewOrderDraftItem(index);document.getElementById(validation.field)?.focus();return;}
     }
-    const tradeValidation=globalThis.YushinOrderEntry.validateTrade({transactionType:document.getElementById('orderTransactionType')?.value},{requireInvoiceTitle:false});
-    if(!tradeValidation.valid){alert(tradeValidation.message);const details=document.getElementById('orderTradeDetails');if(details)details.open=true;document.getElementById('orderTransactionType')?.focus();return;}
+    const tradeValidation=globalThis.YushinOrderEntry.validateTrade({transactionType:document.getElementById('orderTransactionType')?.value,invoiceTitle:document.getElementById('orderInvoiceTitle')?.value});
+    if(!tradeValidation.valid){alert(tradeValidation.message);const details=document.getElementById('orderTradeDetails');if(details)details.open=true;document.getElementById(tradeValidation.field||'orderTransactionType')?.focus();return;}
     let shippingInstructions;
     try {
         const fallback=window.orderShippingInstructions?.()||{};
