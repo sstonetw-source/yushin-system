@@ -5423,7 +5423,7 @@ test('quote and decision-analysis output have no mandatory user-entered fields',
     assert.ok(start >= 0 && end > start);
     assert.doesNotMatch(source, /請先填寫估價單號|請先從下拉選單選擇負責業務|請至少填寫一個品項|missingOtherBrand|含稅總金額必須大於 0/);
     assert.match(source, /hasRestrictedBrand/);
-    assert.match(appSource, /populateBrandSelect\(quoteBrandSelect, '廠牌（選填）'/);
+    assert.match(appSource, /populateBrandSelect\(quoteBrandSelect, '廠牌'/);
     assert.match(appSource, /function quoteOutputCanSync\(quoteData = \{\}\)/);
     assert.match(appSource, /syncResult = 'skipped'/);
     assert.match(appSource, /function quoteOwnerFromSelection/);

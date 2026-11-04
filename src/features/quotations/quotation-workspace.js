@@ -1606,7 +1606,7 @@ function populateQuoteBrandDropdowns() {
     document.querySelectorAll('#quoteItems .item-brand').forEach(select => {
         const row = select.closest('tr');
         const currentValue = quoteRowBrandValue(row);
-        populateBrandSelect(select, '廠牌（選填）', true, getPrimaryBrandNames());
+        populateBrandSelect(select, '廠牌', true, getPrimaryBrandNames());
         if (currentValue) selectBrandInDropdown(select, currentValue);
         onQuoteBrandSelectChange(select);
     });
@@ -2049,7 +2049,7 @@ window.addQuoteRow = function(itemData = {}) {
     if (itemData.model) tr.querySelector('.item-model').dataset.matchedProductCode = normalizeItemCodeLoose(itemData.model);
     refreshQuoteWarehouseStock(tr);
     const quoteBrandSelect = tr.querySelector('.item-brand');
-    populateBrandSelect(quoteBrandSelect, '廠牌（選填）', true, getPrimaryBrandNames());
+    populateBrandSelect(quoteBrandSelect, '廠牌', true, getPrimaryBrandNames());
     if (itemData.brand) selectBrandInDropdown(quoteBrandSelect, itemData.brand);
     if (itemData.productId) tr.querySelector('.item-model').dataset.autofillBrand = normalizeBrandLookupKey(resolveBrandName(itemData.brand || ''));
     onQuoteBrandSelectChange(quoteBrandSelect);
