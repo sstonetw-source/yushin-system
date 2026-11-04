@@ -6,6 +6,7 @@ const path = require('node:path');
 const read = (name) => fs.readFileSync(path.join(__dirname, '..', name), 'utf8');
 const css = read('styles.css');
 const html = read('index.html');
+const orderWorkspace = read('src/features/orders/order-workspace.js');
 
 test('secondary text meets AA on shared navigation page card and selected backgrounds',()=>{
     const token=name=>css.match(new RegExp(`--ys-${name}: (#[0-9A-Fa-f]{6});`))[1];
@@ -78,7 +79,7 @@ test('mobile record lists use one white card layer without a blue outer well or 
     assert.match(css, /#ordersTable tbody > tr \{ background:var\(--ys-record\)!important;/);
     assert.match(css, /#appContainer \.inventory-mobile-summary > div \{ background: var\(--ys-neutral-soft\);/);
     assert.match(css, /#appContainer #printableQuote \{\s*background:var\(--ys-surface\);/);
-    assert.match(html, /styles\.css\?v=20261104-460/);
+    assert.match(html, /styles\.css\?v=20261104-463/);
 });
 
 
@@ -97,5 +98,17 @@ test('purchasing queues use laptop-width cards while preserving their action and
 test('order list keeps only field headings bold and summary values at regular weight', () => {
     assert.match(css, /#appContainer #ordersTable #ordersBody > tr > td:not\(\[data-th="操作"\]\),\s*#appContainer #ordersTable #ordersBody > tr > td:not\(\[data-th="操作"\]\) :is\(strong,b,\.workflow-customer-link,\.workflow-order-total\) \{\s*font-weight:400;/);
     assert.match(css, /#appContainer :is\(#ordersTable,\.workflow-list-table,\.inventory-work-table table\) td\[data-th\]::before \{ font-size:16px; font-weight:700;/);
+});
+
+test('order cards keep commercial details in the drawer and a compact mobile customer row', () => {
+    const progressLine = orderWorkspace.split('\n').find(line => line.includes('<td data-th="進度" class="order-progress-cell">'));
+    assert.ok(progressLine);
+    assert.doesNotMatch(progressLine, /workflowCommercialSummary\(o\)/);
+    assert.match(progressLine, /<strong class="order-item-status-heading">訂單狀態<\/strong>/);
+    assert.match(orderWorkspace, /<h4>交易與備註<\/h4>/);
+    assert.match(orderWorkspace, /<dt>交易方式<\/dt>/);
+    assert.match(orderWorkspace, /<dt>發票抬頭<\/dt>/);
+    assert.match(css, /td\.order-customer-cell \{\s*display:flex;\s*align-items:center;/);
+    assert.match(css, /strong\.order-item-status-heading \{\s*font-weight:700;/);
 });
 
