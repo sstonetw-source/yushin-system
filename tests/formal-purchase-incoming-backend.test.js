@@ -1,6 +1,7 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
 const {registerFormalPurchaseIncoming,formalIncomingGate}=require('../functions/formal-purchase-incoming-service');
+const {commitV2FormalPurchase}=require('../functions/formal-purchase-commit-service');
 const env={GCLOUD_PROJECT:'demo-yushin',FUNCTIONS_EMULATOR:'true',
  ENABLE_V2_PO_INCOMING_EMULATOR:'true',FIRESTORE_EMULATOR_HOST:'127.0.0.1:8080',
  FIREBASE_AUTH_EMULATOR_HOST:'127.0.0.1:9099'};
@@ -81,6 +82,57 @@ test('replay remains tied to original actor and immutable PO, forbids changed so
  x.put('users','other',{role:'admin',active:true});
  await assert.rejects(registerFormalPurchaseIncoming(x.db,'other',{poNo:'PO-1'},env),/憑證/);
  await assert.rejects(registerFormalPurchaseIncoming(x.db,'buyer',{poNo:'PO-1',newOperationId:'different'},env));
+});
+
+async function confirmedDirectStock(){
+ const x=fixture(),poNo='PO-STOCK',supplier='Stock Vendor',poDate='2026-11-04';
+ const snapshot={supplierId:'SUP',supplierName:supplier,purchaseHeaderName:supplier,email:'stock@example.test',leadTimeDays:5};
+ const document={company:'yushin',supplierSnapshot:snapshot,expectedDate:'2026-11-09',
+  expectedDateSource:'manual',lineScheduleDates:['2026-11-09']};
+ const item={sourceType:'STOCK_REPLENISHMENT',orderId:'',itemId:'',productId:'P',warehouseId:'A',
+  fulfillmentType:'WAREHOUSE',itemCode:'P',itemName:'Product',brand:'Test',qty:2,unitPrice:12,
+  scheduleDate:'2026-11-09'};
+ x.put('purchaseOrders',poNo,{poNo,poDate,purchaseType:'stock',supplierName:supplier,vendorName:supplier,
+  company:'yushin',supplierSnapshot:snapshot,expectedDate:document.expectedDate,
+  expectedDateSource:'manual',status:'DRAFT',documentOnly:true,documentRevision:1,
+  createdByUid:'buyer',createdByRole:'purchaser',items:[item]});
+ const input={poNo,poDate,supplier,document,documentRevision:1,
+  items:[{sourceType:'STOCK_REPLENISHMENT',productId:'P',warehouseId:'A',qty:2,unitCost:12}]};
+ const committed=await commitV2FormalPurchase(x.db,'buyer',input);
+ assert.equal(committed.status,'committed');
+ return {...x,poNo,input};
+}
+test('direct-stock PO has no source order yet confirms, books incoming and remains idempotent end-to-end',async()=>{
+ const x=await confirmedDirectStock();
+ const sourceId='MANUAL_PO:PO-STOCK:0',demandId='STOCK_REPLENISHMENT:'+sourceId;
+ const supply=x.docs.get('supplyOrders/po-PO-STOCK-0');
+ assert.equal(supply.orderId,'');assert.equal(supply.sourceType,'STOCK_REPLENISHMENT');
+ assert.equal(supply.sourceId,sourceId);assert.equal(supply.demandId,demandId);
+ assert.equal(x.docs.get('procurementDemands/'+encodeURIComponent(demandId)).orderedQty,2);
+ const incoming=await registerFormalPurchaseIncoming(x.db,'buyer',{poNo:x.poNo},env);
+ assert.equal(incoming.status,'applied');
+ assert.equal(x.docs.get('inventory/P').incoming,2);
+ assert.equal(x.docs.get('warehouseStocks/A__P').incoming,2);
+ assert.equal(x.docs.get('supplyOrders/po-PO-STOCK-0').incomingRegisteredQty,2);
+ assert.equal(x.docs.get('receivingSupplyOrders/po-PO-STOCK-0').unitCost,undefined);
+ const after=structuredClone([...x.docs]);
+ assert.equal((await commitV2FormalPurchase(x.db,'buyer',x.input)).status,'already-applied');
+ assert.equal((await registerFormalPurchaseIncoming(x.db,'buyer',{poNo:x.poNo},env)).status,'already-applied');
+ assert.deepEqual([...x.docs],after);
+});
+test('direct-stock incoming refuses missing or tampered demand and stale supply without any partial write',async()=>{
+ for(const mode of ['missing-demand','changed-demand','changed-supply','changed-warehouse','role']){
+  const x=await confirmedDirectStock(),demandId='STOCK_REPLENISHMENT:MANUAL_PO:PO-STOCK:0';
+  const key='procurementDemands/'+encodeURIComponent(demandId);
+  if(mode==='missing-demand')x.docs.delete(key);
+  if(mode==='changed-demand')x.docs.get(key).orderedQty=1;
+  if(mode==='changed-supply')x.docs.get('supplyOrders/po-PO-STOCK-0').sourceId='OTHER';
+  if(mode==='changed-warehouse')x.docs.get('warehouses/A').systemCustody=true;
+  if(mode==='role')x.docs.get('users/buyer').role='sales';
+  const before=structuredClone([...x.docs]);
+  await assert.rejects(registerFormalPurchaseIncoming(x.db,'buyer',{poNo:x.poNo},env));
+  assert.deepEqual([...x.docs],before,mode);
+ }
 });
 
 const production={GCLOUD_PROJECT:'yu-shing-company',ENABLE_PRODUCTION_FORMAL_PURCHASE:'true'};

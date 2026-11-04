@@ -35,7 +35,8 @@ function createPreviewFormalPurchaseCallable({onCall,HttpsError,getDatabase,env=
    throw new HttpsError('failed-precondition','採購資料庫與授權的 Preview 專案不一致');
   try{
    // A separate immutable-PO checkpoint through the existing deployed endpoint.
-   // Never combine purchase confirmation with incoming or accept client stock facts.
+   // Incoming remains a separate checkpoint; stock items must match saved draft
+   // and live product/warehouse masters inside the same authoritative transaction.
    if(request.data?.action==='register-incoming'){
     if(!allowProductionFormalPurchase(env)
       ||Object.keys(request.data).sort().join(',')!=='action,poNo')

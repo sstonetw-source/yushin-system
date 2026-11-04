@@ -440,6 +440,73 @@ test('server confirmation rejects stale document revision even when quantities a
  assert.equal((await commitV2FormalPurchase(x.db,'buyer',data)).status,'committed');
 });
 
+function directStockFixture(twoLines=false){
+ const x=writeFixture(),document=documentIntent();
+ const lines=[{sourceType:'STOCK_REPLENISHMENT',productId:'P',warehouseId:'W',qty:4,unitCost:19.99}];
+ if(twoLines){
+  x.records.set('products/P2',{active:true,productType:'Goods'});
+  x.records.set('warehouses/W2',{active:true});
+  lines.push({sourceType:'STOCK_REPLENISHMENT',productId:'P2',warehouseId:'W2',qty:3,unitCost:4.5});
+  document.lineScheduleDates.push('2026-10-28');
+ }
+ const data={poNo:'PO-STOCK-1',poDate:'2026-10-20',supplier:'權威供應商',items:lines,document};
+ const draft={poNo:data.poNo,poDate:data.poDate,supplierName:data.supplier,vendorName:document.supplierSnapshot.purchaseHeaderName,
+  company:document.company,supplierSnapshot:document.supplierSnapshot,
+  expectedDate:document.expectedDate,expectedDateSource:document.expectedDateSource,
+  purchaseType:'stock',status:'DRAFT',documentOnly:true,documentRevision:1,
+  createdByUid:'buyer',createdByRole:'purchaser',items:lines.map((line,index)=>({
+   ...line,orderId:'',itemId:'',itemName:'直接採購商品',itemCode:'T'+index,brand:'Test',
+   fulfillmentType:'WAREHOUSE',unitPrice:line.unitCost,scheduleDate:document.lineScheduleDates[index]
+  }))};
+ data.documentRevision=1;
+ x.records.set('purchaseOrders/'+data.poNo,draft);
+ return {...x,data,draft};
+}
+test('direct-stock PO without source orders confirms to authoritative supplies and demand, then replays once',async()=>{
+ const x=directStockFixture(true),existingOrder=structuredClone(x.records.get('orders/ORDER-1'));
+ const result=await commitV2FormalPurchase(x.db,'buyer',x.data);
+ assert.equal(result.status,'committed');
+ const po=x.records.get('purchaseOrders/PO-STOCK-1');
+ assert.equal(po.purchaseType,'stock');assert.equal(po.status,'ORDERED');assert.equal(po.documentOnly,false);
+ assert.deepEqual(po.orderIds,[]);
+ assert.equal(po.sourceType,'');assert.equal(po.sourceId,'');assert.deepEqual(po.linkedDocuments,[]);
+ assert.equal(x.history.filter(row=>row.path.startsWith('orders/')).length,0);
+ assert.deepEqual(x.records.get('orders/ORDER-1'),existingOrder);
+ for(let i=0;i<x.data.items.length;i++){
+  const line=x.data.items[i],sourceId='MANUAL_PO:PO-STOCK-1:'+i;
+  const supply=x.records.get('supplyOrders/po-PO-STOCK-1-'+i);
+  const demandId='STOCK_REPLENISHMENT:'+sourceId;
+  const demand=x.records.get('procurementDemands/'+encodeURIComponent(demandId));
+  assert.equal(supply.sourceType,'STOCK_REPLENISHMENT');assert.equal(supply.sourceId,sourceId);
+  assert.equal(supply.orderId,'');assert.equal(supply.itemId,'');
+  assert.equal(supply.status,'ORDERED');assert.equal(supply.incomingRegisteredQty,0);
+  assert.equal(supply.demandId,demandId);assert.equal(supply.productId,line.productId);
+  assert.equal(demand.sourceId,sourceId);assert.equal(demand.productId,line.productId);
+  assert.equal(demand.requestedQty,line.qty);assert.equal(demand.orderedQty,line.qty);
+  assert.equal(demand.receivedQty,0);assert.equal(demand.remainingToReceiveQty,line.qty);
+ }
+ const after=structuredClone([...x.records]),writes=x.history.length;
+ assert.equal((await commitV2FormalPurchase(x.db,'buyer',x.data)).status,'already-applied');
+ assert.equal(x.history.length,writes);assert.deepEqual([...x.records],after);
+});
+test('direct-stock PO rejects wrong product, warehouse, draft, role and line with zero writes',async()=>{
+ for(const mode of ['product','warehouse','custody','draft','qty','price','actor','duplicate','foreign-demand','mixed']){
+  const x=directStockFixture(true);
+  if(mode==='product')x.records.get('products/P2').active=false;
+  if(mode==='warehouse')x.records.get('warehouses/W2').active=false;
+  if(mode==='custody')x.records.get('warehouses/W2').systemCustody=true;
+  if(mode==='draft')x.draft.items[1].productId='OTHER';
+  if(mode==='qty')x.data.items[1].qty=4;
+  if(mode==='price')x.data.items[1].unitCost=10;
+  if(mode==='duplicate')x.data.items[1].productId='P';
+  if(mode==='foreign-demand')x.records.set('procurementDemands/'+encodeURIComponent('STOCK_REPLENISHMENT:MANUAL_PO:PO-STOCK-1:1'),{other:true});
+  if(mode==='mixed')x.data.items[1]={orderId:'ORDER-1',itemId:'S',qty:4,unitCost:19.99};
+  const before=structuredClone([...x.records]);
+  await assert.rejects(commitV2FormalPurchase(x.db,mode==='actor'?'seller':'buyer',x.data));
+  assert.equal(x.history.length,0,mode);assert.deepEqual([...x.records],before,mode);
+ }
+});
+
 
 // Direct shipment commits a supplier obligation and customer demand, never stock.
 function directSourceFixture(){

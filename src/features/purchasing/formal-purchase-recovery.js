@@ -21,11 +21,14 @@ function pendingFormalPurchase() {
 function rememberFormalPurchase(poRecord, actorUid, actorRole) {
     if (actorUid !== currentUser?.uid || actorRole !== currentUserRole)
         throw Error('登入身分已變更，無法儲存採購作業。');
+    const directStock=poRecord?.purchaseType==='stock';
     if (!Array.isArray(poRecord?.items) || !poRecord.items.length
-        || (formalPurchaseBackendPilotEnabled() && (poRecord.items.length > 5 || poRecord.items.some(item => !item.orderId || !item.itemId
-            || (item.sourceType && item.sourceType !== 'SALES_ORDER')
-            || !['WAREHOUSE','DIRECT_SHIP'].includes(item.fulfillmentType || 'WAREHOUSE')))))
-        throw Error('採購後端試點目前只支援 1–5 個客戶訂單實體入庫或直送品項。');
+        || (formalPurchaseBackendPilotEnabled() && (poRecord.items.length > 5 || poRecord.items.some(item => directStock
+            ? !!item.orderId||!!item.itemId||item.sourceType!=='STOCK_REPLENISHMENT'
+                ||!item.productId||!item.warehouseId||(item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
+            : !item.orderId||!item.itemId||(item.sourceType&&item.sourceType!=='SALES_ORDER')
+                ||!['WAREHOUSE','DIRECT_SHIP'].includes(item.fulfillmentType||'WAREHOUSE')))))
+        throw Error('採購後端只支援 1–5 個有效客戶訂單或直接備庫採購品項。');
     if (pendingFormalPurchase()) throw Error('請先確認前次採購結果，勿另建採購單。');
     const pending = {version:1, actorUid, actorRole, poRecord};
     // A failed storage write stops the operation BEFORE the server is called.
