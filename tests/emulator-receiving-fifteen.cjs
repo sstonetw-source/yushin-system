@@ -161,7 +161,8 @@ for(const mode of ['manual','formal'])test('fifteen Auth-created lines flow thro
   deliveryRecords:[],returnRecords:[],deliveryHistory:[],deliveredQty:0,isDelivered:false,items};
  const creator=orderCreationClient(sales.app,sales.uid,'sales');
  await creator.create(orderId,source);
- assert.deepEqual((await db.doc('orders/'+orderId).get()).data(),source);
+ assert.deepEqual((await db.doc('orders/'+orderId).get()).data(),
+  {...source,warehouseShipmentRecords:[],returnedQty:0});
  await synchronizeV2OrderFixture(db,buyer.uid,{orderId,warehouseIds:warehouses});
  const initialized=(await db.doc('orders/'+orderId).get()).data();
  assert.equal(initialized.inventoryReservationStatus,'completed');
