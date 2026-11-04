@@ -26,7 +26,7 @@
     }
     function validateTrade(order={}, {requireInvoiceTitle=true}={}) {
         if(!['直','借','扣'].includes(order.transactionType))return {valid:false,message:'請選擇交易方式（直、借或扣）。'};
-        if(requireInvoiceTitle&&order.transactionType==='直'&&!text(order.invoiceTitle))return {valid:false,message:'開發票的訂單請先填寫發票抬頭，再打單。'};
+        if(requireInvoiceTitle&&order.transactionType==='直'&&!text(order.invoiceTitle))return {valid:false,field:'orderInvoiceTitle',message:'選擇「直（開發票）」時，請填寫發票抬頭。'};
         return {valid:true};
     }
     function copyItem(item={},fallback={}) {

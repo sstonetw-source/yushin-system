@@ -50,7 +50,7 @@ async function commitOrderCreation(orderId,data,{actorUid=currentUser?.uid,actor
             savedData=live;return;
         }
         if((snapshot.items || []).length>15)throw new Error('每張訂單最多 15 個品項；請分成多張訂單後再儲存。');
-        const tradeValidation=globalThis.YushinOrderEntry.validateTrade(snapshot,{requireInvoiceTitle:false});
+        const tradeValidation=globalThis.YushinOrderEntry.validateTrade(snapshot);
         if(!tradeValidation.valid)throw new Error(tradeValidation.message);
         let forecastRef=null;
         if(reorder){

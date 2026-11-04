@@ -25,7 +25,7 @@ test('copying an order retains customer-facing product settings but creates a ne
 });
 const source=fs.readFileSync('app.js','utf8');
 function validationFixture(current=item,drafts=[]) {
- const nodes={orderOwnerUid:{value:'sales'},orderCustomer:{value:'台大',focus(){}},orderItemCode:{focus(){},scrollIntoView(){}},orderRecipientDetails:{open:false},orderTradeDetails:{open:false},orderTransactionType:{value:'借',focus(){}}};
+ const nodes={orderOwnerUid:{value:'sales'},orderCustomer:{value:'台大',focus(){}},orderItemCode:{focus(){},scrollIntoView(){}},orderRecipientDetails:{open:false},orderTradeDetails:{open:false},orderTransactionType:{value:'借',focus(){}},orderInvoiceTitle:{value:'',focus(){nodes.focused='orderInvoiceTitle';}}};
  const alerts=[];
  const c=vm.createContext({window:{orderShippingInstructions:()=>({mode:'PICKUP'})},document:{getElementById:id=>nodes[id]},newOrderSaveInProgress:false,
   currentOrderModalItem:()=>({...current}),MAX_ORDER_ITEMS:15,newOrderDraftItems:drafts,YushinOrderEntry:core,YushinWarehouseLogistics:logistics,
@@ -110,9 +110,9 @@ test('purchaser can assist with pending entry but cannot confirm a salesperson s
  f.c.currentUserRole='purchaser';assert.equal(f.c.window.saveNewOrder(),undefined);assert.match(f.alerts[0],/負責業務確認/);
 });
 
-test('trade type is required at creation while invoice title remains required before printing',()=>{
+test('direct invoice title is required at order creation and printing',()=>{
  assert.equal(core.validateTrade({}).valid,false);
- assert.equal(core.validateTrade({transactionType:'直'}).valid,false);
+ for(const invoiceTitle of [undefined,'','   '])assert.equal(core.validateTrade({transactionType:'直',invoiceTitle}).field,'orderInvoiceTitle');
  assert.equal(core.validateTrade({transactionType:'直',invoiceTitle:'台大'}).valid,true);
  for(const transactionType of ['借','扣'])assert.equal(core.validateTrade({transactionType}).valid,true);
 });
@@ -123,11 +123,18 @@ test('new order form refuses missing or invalid transaction type and opens the r
   assert.equal(f.c.window.saveNewOrder(),undefined);assert.equal(f.nodes.orderTradeDetails.open,true);
   assert.match(f.alerts[0],/交易方式/);
  }
- for(const transactionType of ['直','借','扣']){
+ for(const transactionType of ['借','扣']){
   const f=validationFixture();f.nodes.orderTransactionType.value=transactionType;
   assert.ok(f.c.window.saveNewOrder());
-  assert.equal(core.validateTrade({transactionType},{requireInvoiceTitle:false}).valid,true);
+  assert.equal(core.validateTrade({transactionType}).valid,true);
  }
+ const direct=validationFixture();direct.nodes.orderTransactionType.value='直';
+ assert.equal(direct.c.window.saveNewOrder(),undefined);
+ assert.match(direct.alerts[0],/發票抬頭/);
+ assert.equal(direct.nodes.focused,'orderInvoiceTitle');
+ direct.nodes.orderInvoiceTitle.value='  台大醫院  ';
+ assert.ok(direct.c.window.saveNewOrder());
+ assert.equal(core.validateTrade({transactionType:'直',invoiceTitle:direct.nodes.orderInvoiceTitle.value}).valid,true);
 });
 test('printing validates current transaction information before writing a dispatch record',async()=>{
  for(const trade of [{},{transactionType:'直'},{transactionType:'直',invoiceTitle:'台大'},{transactionType:'借'}]){

@@ -44,7 +44,17 @@ const save=slice('window.saveNewOrder = function()','    items.forEach(item=>{de
    assert.equal(await page.locator('#orderUnitPrice').inputValue(),'100');assert.equal(await page.locator('#orderProductDetails').getAttribute('open'),null);
    assert.match(await page.locator('#orderEntryProductSummary').textContent(),/試劑/);
    await page.locator('#saveNewOrderBtn').click();assert.match(await page.evaluate(()=>alerts.at(-1)),/交易方式/);
+   await page.locator('#orderTransactionType').selectOption('直');
+   assert.equal(await page.locator('#orderInvoiceTitle').isEnabled(),true);
+   assert.equal(await page.locator('#orderInvoiceTitle').getAttribute('required'),'');
+   assert.equal(await page.locator('#orderInvoiceTitleRequired').isVisible(),true);
+   await page.locator('#saveNewOrderBtn').click();assert.match(await page.evaluate(()=>alerts.at(-1)),/發票抬頭/);
+   await page.locator('#orderInvoiceTitle').fill('臺大醫院');
+   await page.locator('#saveNewOrderBtn').click();assert.equal(await page.evaluate(()=>validated.shippingInstructions.mode),'PICKUP');
    await page.locator('#orderTransactionType').selectOption('借');
+   assert.equal(await page.locator('#orderInvoiceTitle').isDisabled(),true);
+   assert.equal(await page.locator('#orderInvoiceTitle').getAttribute('required'),null);
+   assert.equal(await page.locator('#orderInvoiceTitleRequired').isVisible(),false);
    await page.locator('#saveNewOrderBtn').click();assert.equal(await page.evaluate(()=>validated.shippingInstructions.mode),'PICKUP');
    await page.evaluate(()=>{document.getElementById('orderModalOverlay').scrollTop=0;});
    await page.screenshot({path:path.join(process.env.ORDER_ENTRY_SCREENSHOT_DIR||'/tmp',`order-entry-default-${width}.png`),fullPage:true});
