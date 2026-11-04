@@ -27993,7 +27993,7 @@ window.downloadDatabaseBackup = async function() {
         alert('只有管理員可以下載資料庫備份。');
         return;
     }
-    if (!confirm('下載備份會讀取目前資料庫的全部資料，可能增加 Firebase 本日讀取量。建議每月或重大修改前執行，確定繼續嗎？')) return;
+    if (!confirm('此操作只匯出指定集合，並非完整資料庫備份；會讀取大量資料，可能增加 Firebase 讀取量。確定繼續嗎？')) return;
 
     const button = document.getElementById('databaseBackupBtn');
     const status = document.getElementById('databaseBackupStatus');
@@ -28005,7 +28005,7 @@ window.downloadDatabaseBackup = async function() {
         'inventoryMovements', 'receipts', 'customerReturnReceipts', 'supplyOrders', 'dispatchRecords', 'deliveries', 'auditLogs', 'purchaseOrderCommunications'
     ];
     button.disabled = true;
-    button.innerText = '正在整理備份…';
+    button.innerText = '正在整理部分資料匯出…';
     status.innerText = '讀取雲端資料中，請不要關閉頁面。';
     try {
         const data = {};
@@ -28041,6 +28041,8 @@ window.downloadDatabaseBackup = async function() {
         const backup = {
             format: 'yu-shing-firestore-backup',
             version: 1,
+            scope: 'partial-selected-collections',
+            completeDatabaseBackup: false,
             projectId: firebaseConfig.projectId,
             createdAt: createdAt.toISOString(),
             createdBy: currentUser?.email || currentUserName || '',
@@ -28052,25 +28054,23 @@ window.downloadDatabaseBackup = async function() {
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = `database-backup-${localStamp}.json`;
+        link.download = `partial-data-export-${localStamp}.json`;
         document.body.appendChild(link);
         link.click();
         link.remove();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
-        status.innerText = `備份已下載，共 ${documentCount} 筆文件，檔案大小約 ${formatBytes(blob.size)}。`;
+        status.innerText = `部分資料匯出完成：共 ${documentCount} 筆文件，檔案大小約 ${formatBytes(blob.size)}。此檔案不是完整資料庫備份。`;
     } catch (err) {
         console.error('下載資料庫備份失敗：', err);
         status.innerText = '備份失敗：' + err.message;
         alert('無法完成備份，請確認 Firestore 權限與網路連線。');
     } finally {
         button.disabled = false;
-        button.innerText = '⬇️ 下載資料庫備份';
+        button.innerText = '⬇️ 下載部分資料匯出';
     }
 };
 
-// A restore never overwrites live documents. Identity and permission settings require
-// separate administrator review, so the browser cannot recreate them from an old file.
-let pendingDatabaseBackup = null;
+// 僅供離線檔案檢查：正式交易文件不得由瀏覽器逐筆補回。
 const RESTORABLE_BACKUP_COLLECTIONS = new Set([
     'quotes','forecasts','orders','purchaseOrders','procurementDemands','equipment','brands','productLines',
     'products','productCosts','priceHistory','customers','salesCodes','suppliers',
@@ -28120,50 +28120,19 @@ function validateBackupDocuments(backup) {
 }
 window.previewDatabaseBackupUpload = async function(input) {
     const status = document.getElementById('databaseBackupUploadStatus');
-    const restore = document.getElementById('databaseBackupRestoreBtn');
-    pendingDatabaseBackup = null;
-    if (restore) restore.style.display = 'none';
     const file = input?.files?.[0];
     if (!file) return;
     if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
     try {
-        if (file.size > 50 * 1024 * 1024) throw new Error('檔案超過 50 MB，請改用受控的伺服器端還原。');
-        status.textContent = '正在檢查備份檔案…';
+        if (file.size > 50 * 1024 * 1024) throw new Error('檔案超過 50 MB，請使用受控的伺服器端檢查。');
+        status.textContent = '正在檢查匯出檔案…';
         const backup = JSON.parse(await file.text());
         const documents = validateBackupDocuments(backup);
-        pendingDatabaseBackup = documents;
-        status.textContent = `備份時間：${backup.createdAt || '未記錄'}；共 ${backup.documentCount} 筆，其中 ${documents.length} 筆可補回。上傳檢查不會改動雲端資料。補回時只建立目前不存在的文件；帳號及系統設定不會由檔案還原。`;
-        if (restore && documents.length) restore.style.display = '';
-    } catch (err) { status.textContent = `備份檢查失敗：${err.message}`; }
+        const scope = backup.scope === 'partial-selected-collections' || backup.completeDatabaseBackup === false
+            ? '部分資料匯出' : '舊版匯出檔案（完整性未知）';
+        status.textContent = `${scope}；匯出時間：${backup.createdAt || '未記錄'}；檔案共 ${backup.documentCount} 筆，其中 ${documents.length} 筆為非帳號／設定文件。格式檢查完成，沒有讀寫雲端資料。正式還原須由具備交易完整性檢查的受控後端流程執行。`;
+    } catch (err) { status.textContent = `檔案檢查失敗：${err.message}`; }
     finally { input.value = ''; }
-};
-window.restoreMissingDatabaseBackupDocuments = async function() {
-    const docs = pendingDatabaseBackup;
-    if (trueUserRole !== 'admin' || currentUserRole !== 'admin' || !docs?.length) return;
-    if (!confirm(`將逐筆檢查 ${docs.length} 筆備份文件，只補回目前不存在的文件；現有文件不會覆蓋，帳號與系統設定不會還原。過程可能耗時並增加讀寫量。確定執行嗎？`)) return;
-    const button = document.getElementById('databaseBackupRestoreBtn');
-    const status = document.getElementById('databaseBackupUploadStatus');
-    button.disabled = true;
-    let created = 0, skipped = 0;
-    try {
-        for (const row of docs) {
-            const ref = db.doc(row.path);
-            // A transaction makes repeat clicks and retries safe even if another user writes concurrently.
-            const inserted = await runRoleTransaction(async transaction => {
-                const existing = await transaction.get(ref);
-                if (existing.exists) return false;
-                transaction.set(ref, row.data);
-                return true;
-            });
-            if (inserted) created++; else skipped++;
-            if ((created + skipped) % 20 === 0) status.textContent = `補回中：已檢查 ${created + skipped}/${docs.length}，新增 ${created}，略過既有 ${skipped}。`;
-        }
-        status.textContent = `補回完成：新增 ${created}，略過既有 ${skipped}。帳號與系統設定未還原。`;
-        pendingDatabaseBackup = null;
-        button.style.display = 'none';
-    } catch (err) {
-        status.textContent = `補回中斷：新增 ${created}，略過既有 ${skipped}。${err.message} 可重新上傳同一備份繼續，既有文件不會覆蓋。`;
-    } finally { button.disabled = false; }
 };
 
 /* ---------- 估價單／訂單全歷史搜尋索引補建 ---------- */
@@ -28378,149 +28347,7 @@ function systemAuditProductKey(record = {}) {
     return String(record.productKey || record.productId || '').trim();
 }
 
-const TEST_DATA_RESET_DELETE_COLLECTIONS = [
-    'orders','purchaseOrders','procurementDemands','supplyOrders','inventoryReservations','inventoryLots','inventoryLotCosts',
-    'receipts','customerReturnReceipts','dispatchRecords','deliveries','inventoryMovements','auditLogs','receivingSupplyOrders'
-];
-// Immutable operational evidence cannot be partially deleted by the client.
-const TEST_DATA_RESET_PROTECTED_COLLECTIONS = ['stockTransfers','stockTransferRequests','stockOperations'];
-async function assertClientTestResetSafe() {
-    for (const name of TEST_DATA_RESET_PROTECTED_COLLECTIONS) {
-        const snap = await firestoreReadWithTimeout(db.collection(name).limit(1).get(), `${name} 初始化安全檢查`);
-        if (!snap.empty) throw new Error('系統已有調撥或庫存交易憑證，不能使用前台初始化。請使用後端完整初始化流程，避免留下部分清除資料。');
-    }
-}
-let testDataResetPreviewState = null;
-
-async function countCollectionDocuments(name) {
-    let count = 0, cursor = null;
-    while (true) {
-        let query = db.collection(name).orderBy(firebase.firestore.FieldPath.documentId()).limit(500);
-        if (cursor) query = query.startAfter(cursor);
-        const snap = await firestoreReadWithTimeout(query.get(), `${name} 文件數量`);
-        count += snap.size;
-        if (snap.size < 500) break;
-        cursor = snap.docs[snap.docs.length - 1];
-    }
-    return count;
-}
-
-async function deleteCollectionInBatches(name, onProgress) {
-    let deleted = 0;
-    while (true) {
-        const snap = await firestoreReadWithTimeout(
-            db.collection(name).orderBy(firebase.firestore.FieldPath.documentId()).limit(300).get(),
-            `${name} 清除批次`
-        );
-        if (snap.empty) break;
-        const batch = db.batch();
-        snap.docs.forEach(doc => batch.delete(doc.ref));
-        await batch.commit();
-        deleted += snap.size;
-        if (onProgress) onProgress(deleted);
-        if (snap.size < 300) break;
-    }
-    return deleted;
-}
-
-async function resetStockCollection(name, status) {
-    let cursor = null, updated = 0;
-    while (true) {
-        let query = db.collection(name).orderBy(firebase.firestore.FieldPath.documentId()).limit(300);
-        if (cursor) query = query.startAfter(cursor);
-        const snap = await firestoreReadWithTimeout(query.get(), `${name} 庫存歸零批次`);
-        if (snap.empty) break;
-        const batch = db.batch();
-        snap.docs.forEach(doc => batch.set(doc.ref, {
-            onHand:0, reserved:0, available:0, incoming:0, shortage:0,
-            updatedAt:new Date().toISOString(), resetBy:currentUser.uid
-        }, {merge:true}));
-        await batch.commit();
-        updated += snap.size;
-        if (status) status.textContent = `庫存歸零中：${name} ${updated} 筆…`;
-        if (snap.size < 300) break;
-        cursor = snap.docs[snap.docs.length - 1];
-    }
-    return updated;
-}
-
-window.previewTestDataReset = async function() {
-    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return alert('只有真正的管理員可以執行系統初始化。');
-    const button=document.getElementById('testDataResetPreviewBtn');
-    const preview=document.getElementById('testDataResetPreview');
-    const wrap=document.getElementById('testDataResetConfirmWrap');
-    const status=document.getElementById('testDataResetStatus');
-    if(!button||button.disabled)return;
-    button.disabled=true;if(wrap)wrap.style.display='none';if(status)status.textContent='';
-    try{
-        testDataResetPreviewState=null;
-        await assertClientTestResetSafe();
-        const counts={};
-        for(const name of ['quotes',...TEST_DATA_RESET_DELETE_COLLECTIONS,'forecasts','inventory','warehouseStocks']){
-            if(preview)preview.textContent=`正在檢查 ${name}…`;
-            counts[name]=await countCollectionDocuments(name);
-        }
-        const forecasts=await readCollectionInBatches('forecasts');
-        let progressCount=0;
-        for(const forecast of forecasts){
-            progressCount += await countCollectionDocuments(`forecasts/${forecast.id}/progress`);
-        }
-        counts.forecastProgress=progressCount;
-        testDataResetPreviewState={counts,checkedAt:new Date().toISOString()};
-        const deleteTotal=TEST_DATA_RESET_DELETE_COLLECTIONS.reduce((sum,name)=>sum+(counts[name]||0),0)+(counts.forecasts||0)+progressCount;
-        if(preview)preview.textContent=
-            `待永久刪除：${deleteTotal} 筆營運文件\n`+
-            `Forecast ${counts.forecasts||0}（進度 ${progressCount}）、訂單 ${counts.orders||0}、採購單 ${counts.purchaseOrders||0}、供應／自購 ${counts.supplyOrders||0}\n`+
-            `庫存交易相關 ${deleteTotal-(counts.forecasts||0)-progressCount-(counts.orders||0)-(counts.purchaseOrders||0)-(counts.supplyOrders||0)} 筆\n`+
-            `另將 inventory ${counts.inventory||0} 筆、warehouseStocks ${counts.warehouseStocks||0} 筆數量歸零。\nMaster Data、帳號、角色、倉庫與系統設定保留。\n`+
-            `保留估價單 ${counts.quotes||0} 筆，內容與成交狀態維持原樣；其中指向已清除 Forecast／訂單的連結將無法開啟。`;
-        if(wrap)wrap.style.display='';
-    }catch(err){
-        console.error('檢查測試資料失敗：',err);
-        if(preview)preview.textContent='檢查失敗：'+(err.message||err);
-        testDataResetPreviewState=null;
-    }finally{button.disabled=false;}
-};
-
-window.executeTestDataReset = async function() {
-    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return alert('只有真正的管理員可以執行系統初始化。');
-    const input=document.getElementById('testDataResetConfirmInput');
-    const button=document.getElementById('testDataResetExecuteBtn');
-    const status=document.getElementById('testDataResetStatus');
-    if(!testDataResetPreviewState)return alert('請先執行「檢查待清除資料」。');
-    if((input?.value||'').trim()!=='保留估價單清除測試資料')return alert('確認文字不正確。');
-    if(!confirm(`最後確認：保留 ${testDataResetPreviewState.counts.quotes||0} 筆估價單，永久清除其他測試營運資料並將庫存歸零？此操作無法復原。`))return;
-    button.disabled=true;
-    try{
-        await assertClientTestResetSafe();
-        const forecasts=await readCollectionInBatches('forecasts');
-        for(let i=0;i<forecasts.length;i++){
-            const forecast=forecasts[i];
-            if(status)status.textContent=`清除 Forecast 進度 ${i+1}/${forecasts.length}…`;
-            await deleteCollectionInBatches(`forecasts/${forecast.id}/progress`);
-        }
-        for(const name of TEST_DATA_RESET_DELETE_COLLECTIONS){
-            if(status)status.textContent=`清除 ${name}…`;
-            await deleteCollectionInBatches(name,n=>{if(status)status.textContent=`清除 ${name}：已刪除 ${n} 筆…`;});
-        }
-        await deleteCollectionInBatches('forecasts');
-        await resetStockCollection('inventory',status);
-        await resetStockCollection('warehouseStocks',status);
-
-        forecastCache=[]; forecastHistorySearchResults=[];
-        ordersCache=[]; orderHistorySearchResults=[]; pendingPurchaseCache=[]; purchasingDispatchCache=[];
-        poListCache=[]; supplyReceivingCache=[]; receivingSourceOrderStatusCache=new Map(); inventoryCache=[];
-        orderPaginationState=null; loadedMainPages.clear();
-        testDataResetPreviewState=null;
-        if(input)input.value='';
-        document.getElementById('testDataResetConfirmWrap').style.display='none';
-        document.getElementById('testDataResetPreview').textContent='';
-        if(status)status.textContent='初始化完成：估價單已保留，其他測試營運資料已清除，庫存與分倉數量已歸零。請重新整理以更新畫面。';
-    }catch(err){
-        console.error('系統初始化失敗：',err);
-        if(status)status.textContent='初始化中斷：'+(err.message||err)+'\n請不要繼續建立新資料，先重新檢查剩餘資料後再執行一次。';
-    }finally{button.disabled=false;}
-};
+// 正式環境的營運重置僅由受控後端維護工具執行；瀏覽器不提供直接刪除或庫存歸零入口。
 
 let systemDataAuditIssues = [];
 

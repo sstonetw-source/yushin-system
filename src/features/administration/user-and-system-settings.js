@@ -410,7 +410,7 @@ window.downloadDatabaseBackup = async function() {
         alert('只有管理員可以下載資料庫備份。');
         return;
     }
-    if (!confirm('下載備份會讀取目前資料庫的全部資料，可能增加 Firebase 本日讀取量。建議每月或重大修改前執行，確定繼續嗎？')) return;
+    if (!confirm('此操作只匯出指定集合，並非完整資料庫備份；會讀取大量資料，可能增加 Firebase 讀取量。確定繼續嗎？')) return;
 
     const button = document.getElementById('databaseBackupBtn');
     const status = document.getElementById('databaseBackupStatus');
@@ -422,7 +422,7 @@ window.downloadDatabaseBackup = async function() {
         'inventoryMovements', 'receipts', 'customerReturnReceipts', 'supplyOrders', 'dispatchRecords', 'deliveries', 'auditLogs', 'purchaseOrderCommunications'
     ];
     button.disabled = true;
-    button.innerText = '正在整理備份…';
+    button.innerText = '正在整理部分資料匯出…';
     status.innerText = '讀取雲端資料中，請不要關閉頁面。';
     try {
         const data = {};
@@ -458,6 +458,8 @@ window.downloadDatabaseBackup = async function() {
         const backup = {
             format: 'yu-shing-firestore-backup',
             version: 1,
+            scope: 'partial-selected-collections',
+            completeDatabaseBackup: false,
             projectId: firebaseConfig.projectId,
             createdAt: createdAt.toISOString(),
             createdBy: currentUser?.email || currentUserName || '',
@@ -469,25 +471,23 @@ window.downloadDatabaseBackup = async function() {
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = `database-backup-${localStamp}.json`;
+        link.download = `partial-data-export-${localStamp}.json`;
         document.body.appendChild(link);
         link.click();
         link.remove();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
-        status.innerText = `備份已下載，共 ${documentCount} 筆文件，檔案大小約 ${formatBytes(blob.size)}。`;
+        status.innerText = `部分資料匯出完成：共 ${documentCount} 筆文件，檔案大小約 ${formatBytes(blob.size)}。此檔案不是完整資料庫備份。`;
     } catch (err) {
         console.error('下載資料庫備份失敗：', err);
         status.innerText = '備份失敗：' + err.message;
         alert('無法完成備份，請確認 Firestore 權限與網路連線。');
     } finally {
         button.disabled = false;
-        button.innerText = '⬇️ 下載資料庫備份';
+        button.innerText = '⬇️ 下載部分資料匯出';
     }
 };
 
-// A restore never overwrites live documents. Identity and permission settings require
-// separate administrator review, so the browser cannot recreate them from an old file.
-let pendingDatabaseBackup = null;
+// 僅供離線檔案檢查：正式交易文件不得由瀏覽器逐筆補回。
 const RESTORABLE_BACKUP_COLLECTIONS = new Set([
     'quotes','forecasts','orders','purchaseOrders','procurementDemands','equipment','brands','productLines',
     'products','productCosts','priceHistory','customers','salesCodes','suppliers',
@@ -537,50 +537,19 @@ function validateBackupDocuments(backup) {
 }
 window.previewDatabaseBackupUpload = async function(input) {
     const status = document.getElementById('databaseBackupUploadStatus');
-    const restore = document.getElementById('databaseBackupRestoreBtn');
-    pendingDatabaseBackup = null;
-    if (restore) restore.style.display = 'none';
     const file = input?.files?.[0];
     if (!file) return;
     if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
     try {
-        if (file.size > 50 * 1024 * 1024) throw new Error('檔案超過 50 MB，請改用受控的伺服器端還原。');
-        status.textContent = '正在檢查備份檔案…';
+        if (file.size > 50 * 1024 * 1024) throw new Error('檔案超過 50 MB，請使用受控的伺服器端檢查。');
+        status.textContent = '正在檢查匯出檔案…';
         const backup = JSON.parse(await file.text());
         const documents = validateBackupDocuments(backup);
-        pendingDatabaseBackup = documents;
-        status.textContent = `備份時間：${backup.createdAt || '未記錄'}；共 ${backup.documentCount} 筆，其中 ${documents.length} 筆可補回。上傳檢查不會改動雲端資料。補回時只建立目前不存在的文件；帳號及系統設定不會由檔案還原。`;
-        if (restore && documents.length) restore.style.display = '';
-    } catch (err) { status.textContent = `備份檢查失敗：${err.message}`; }
+        const scope = backup.scope === 'partial-selected-collections' || backup.completeDatabaseBackup === false
+            ? '部分資料匯出' : '舊版匯出檔案（完整性未知）';
+        status.textContent = `${scope}；匯出時間：${backup.createdAt || '未記錄'}；檔案共 ${backup.documentCount} 筆，其中 ${documents.length} 筆為非帳號／設定文件。格式檢查完成，沒有讀寫雲端資料。正式還原須由具備交易完整性檢查的受控後端流程執行。`;
+    } catch (err) { status.textContent = `檔案檢查失敗：${err.message}`; }
     finally { input.value = ''; }
-};
-window.restoreMissingDatabaseBackupDocuments = async function() {
-    const docs = pendingDatabaseBackup;
-    if (trueUserRole !== 'admin' || currentUserRole !== 'admin' || !docs?.length) return;
-    if (!confirm(`將逐筆檢查 ${docs.length} 筆備份文件，只補回目前不存在的文件；現有文件不會覆蓋，帳號與系統設定不會還原。過程可能耗時並增加讀寫量。確定執行嗎？`)) return;
-    const button = document.getElementById('databaseBackupRestoreBtn');
-    const status = document.getElementById('databaseBackupUploadStatus');
-    button.disabled = true;
-    let created = 0, skipped = 0;
-    try {
-        for (const row of docs) {
-            const ref = db.doc(row.path);
-            // A transaction makes repeat clicks and retries safe even if another user writes concurrently.
-            const inserted = await runRoleTransaction(async transaction => {
-                const existing = await transaction.get(ref);
-                if (existing.exists) return false;
-                transaction.set(ref, row.data);
-                return true;
-            });
-            if (inserted) created++; else skipped++;
-            if ((created + skipped) % 20 === 0) status.textContent = `補回中：已檢查 ${created + skipped}/${docs.length}，新增 ${created}，略過既有 ${skipped}。`;
-        }
-        status.textContent = `補回完成：新增 ${created}，略過既有 ${skipped}。帳號與系統設定未還原。`;
-        pendingDatabaseBackup = null;
-        button.style.display = 'none';
-    } catch (err) {
-        status.textContent = `補回中斷：新增 ${created}，略過既有 ${skipped}。${err.message} 可重新上傳同一備份繼續，既有文件不會覆蓋。`;
-    } finally { button.disabled = false; }
 };
 
 /* ---------- 估價單／訂單全歷史搜尋索引補建 ---------- */
