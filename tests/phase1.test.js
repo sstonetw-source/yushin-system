@@ -1467,7 +1467,8 @@ test('all major product-entry screens put item code before downstream product fi
     const orderCode = indexSource.indexOf('id="orderItemCode"');
     const orderName = indexSource.indexOf('id="orderItemName"');
     const orderBrand = indexSource.indexOf('id="orderBrand"');
-    assert.ok(orderCode >= 0 && orderName > orderCode && orderBrand > orderName);
+    const orderDetails = indexSource.indexOf('id="orderProductDetails"');
+    assert.ok(orderCode >= 0 && orderBrand > orderCode && orderDetails > orderBrand && orderName > orderDetails);
 
     const quoteRowStart = appSource.indexOf('window.addQuoteRow');
     const quoteRowEnd = appSource.indexOf('window.deleteQuoteRow', quoteRowStart);
