@@ -5,9 +5,13 @@ function poIncomingKey(item) {
 async function registerPurchaseIncoming(poId, poRecord, {actorUid=currentUser?.uid,actorRole=currentUserRole,onStockCommitted=null}={}) {
     // Production and isolated incoming use the same authoritative Service. An unknown result keeps
     // the original formal-po-pending checkpoint and cannot fall back to SDK.
-    if(globalThis.YUSHIN_V2_PO_INCOMING_EMULATOR===true
-        || (typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='production'
-            && globalThis.YUSHIN_PRODUCTION_FORMAL_PURCHASE===true))
+    const production=typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='production';
+    if(production){
+        if(globalThis.YUSHIN_PRODUCTION_FORMAL_PURCHASE!==true)
+            throw Error('正式 PO 在途後端未啟用，禁止回退舊寫入。');
+        return registerFormalPurchaseIncomingBackend(poId,poRecord,{actorUid,actorRole,onStockCommitted});
+    }
+    if(globalThis.YUSHIN_V2_PO_INCOMING_EMULATOR===true)
         return registerFormalPurchaseIncomingBackend(poId,poRecord,{actorUid,actorRole,onStockCommitted});
     if (poRecord?.status==='DRAFT' || poRecord?.documentOnly===true) throw Error('採購文件尚未確認已採購，不能登記在途。');
     if (isPurchaseTerminalStatus(poRecord?.status)) return;
