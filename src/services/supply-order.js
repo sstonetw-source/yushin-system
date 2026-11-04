@@ -3,9 +3,11 @@ function poIncomingKey(item) {
     return String(item.productId || (item.itemCode ? `code:${normalizeHistoryItemCode(item.itemCode)}` : '')).trim();
 }
 async function registerPurchaseIncoming(poId, poRecord, {actorUid=currentUser?.uid,actorRole=currentUserRole,onStockCommitted=null}={}) {
-    // Explicit Emulator-only backend pilot. An unknown Callable result keeps
+    // Production and isolated incoming use the same authoritative Service. An unknown result keeps
     // the original formal-po-pending checkpoint and cannot fall back to SDK.
-    if(globalThis.YUSHIN_V2_PO_INCOMING_EMULATOR===true)
+    if(globalThis.YUSHIN_V2_PO_INCOMING_EMULATOR===true
+        || (typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='production'
+            && globalThis.YUSHIN_PRODUCTION_FORMAL_PURCHASE===true))
         return registerFormalPurchaseIncomingBackend(poId,poRecord,{actorUid,actorRole,onStockCommitted});
     if (poRecord?.status==='DRAFT' || poRecord?.documentOnly===true) throw Error('採購文件尚未確認已採購，不能登記在途。');
     if (isPurchaseTerminalStatus(poRecord?.status)) return;
@@ -115,18 +117,27 @@ async function registerPurchaseIncoming(poId, poRecord, {actorUid=currentUser?.u
 async function registerFormalPurchaseIncomingBackend(poId,poRecord,{actorUid,actorRole,onStockCommitted}){
     const local=host=>['localhost','127.0.0.1'].includes(host);
     const hostname=String(globalThis.location?.hostname||'').toLowerCase();
-    if(globalThis.YUSHIN_V2_PO_INCOMING_EMULATOR!==true||!local(hostname)
-        ||typeof APP_ENVIRONMENT==='undefined'||APP_ENVIRONMENT!=='emulator'
+    const production=typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='production'
+        && globalThis.YUSHIN_PRODUCTION_FORMAL_PURCHASE===true;
+    const pathname=String(globalThis.location?.pathname||'');
+    const productionSite=globalThis.location?.origin==='https://sstonetw-source.github.io'
+        && (pathname==='/yushin-system'||pathname.startsWith('/yushin-system/'))
+        || ['https://yu-shing-company.web.app','https://yu-shing-company.firebaseapp.com'].includes(globalThis.location?.origin);
+    const emulator=typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='emulator'
+        && globalThis.YUSHIN_V2_PO_INCOMING_EMULATOR===true && local(hostname);
+    if((!production&&!emulator)||(production&&!productionSite)
         ||typeof firebase==='undefined'||!firebase.auth||!firebase.app
         ||!formalPurchaseBackendPilotEnabled())
-        throw Error('正式 PO 在途後端僅開放隔離 Emulator，禁止回退舊寫入。');
+        throw Error('正式 PO 在途後端僅限授權網站及環境，禁止回退舊寫入。');
+    const project=production?'yu-shing-company':'demo-yushin';
     const auth=firebase.auth(),app=firebase.app();
-    if(app.options?.projectId!=='demo-yushin'||auth.app?.options?.projectId!=='demo-yushin'
-        ||db?.app?.options?.projectId!=='demo-yushin'
-        ||!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099)
-        throw Error('正式 PO 在途 Auth／Firestore 專案或 Emulator 不一致。');
+    const projectMatches=()=>app.options?.projectId===project && auth.app?.options?.projectId===project
+        && db?.app?.options?.projectId===project
+        && (production?!auth.emulatorConfig:local(auth.emulatorConfig?.host)&&auth.emulatorConfig?.port===9099);
+    if(!projectMatches())throw Error('正式 PO 在途 Auth／Firestore 專案或 Emulator 不一致。');
     const check=()=>{
-        if(!actorUid||currentUser?.uid!==actorUid||auth.currentUser?.uid!==actorUid
+        if(!projectMatches()||!formalPurchaseBackendPilotEnabled()
+            ||!actorUid||currentUser?.uid!==actorUid||auth.currentUser?.uid!==actorUid
             ||currentUserRole!==actorRole||!['admin','purchaser'].includes(actorRole)
             ||!canCreatePurchaseOrderCapability()||!canAccessPage('orders.po'))
             throw Error('採購在途的登入身分或權限已變更。');
@@ -139,9 +150,11 @@ async function registerFormalPurchaseIncomingBackend(poId,poRecord,{actorUid,act
         throw Error('正式 PO 尚未具有完整後端採購與供應來源。');
     await ensureFormalPurchaseFunctionsCompat();check();
     const functions=app.functions('asia-east1');
-    if(functions.app?.options?.projectId!=='demo-yushin')throw Error('正式 PO 在途 Functions 專案不正確。');
-    functions.useEmulator('127.0.0.1',5001);
-    const result=(await functions.httpsCallable('registerV2FormalPurchaseIncoming')({poNo:poId}))?.data;
+    if(functions.app?.options?.projectId!==project)throw Error('正式 PO 在途 Functions 專案不正確。');
+    if(emulator)functions.useEmulator('127.0.0.1',5001);
+    const endpoint=production?'commitV2FormalPurchase':'registerV2FormalPurchaseIncoming';
+    const input=production?{action:'register-incoming',poNo:poId}:{poNo:poId};
+    const result=(await functions.httpsCallable(endpoint)(input))?.data;
     check();
     if(!['applied','already-applied'].includes(result?.status)||result.poNo!==poId
         ||result.receiptId!=='po-incoming-'+encodeURIComponent(poId)

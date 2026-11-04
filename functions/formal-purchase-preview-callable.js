@@ -4,6 +4,7 @@
 // Production activation is a distinct rollout/deployment decision.
 const {projectIdFromEnvironment}=require('./grouped-reservation-gate');
 const {commitV2FormalPurchase}=require('./formal-purchase-commit-service');
+const {registerFormalPurchaseIncoming}=require('./formal-purchase-incoming-service');
 
 function allowPreviewFormalPurchase(env=process.env){
  if(env.ENABLE_PREVIEW_FORMAL_PURCHASE!=='true')return false;
@@ -32,7 +33,17 @@ function createPreviewFormalPurchaseCallable({onCall,HttpsError,getDatabase,env=
   const database=getDatabase(),project=projectIdFromEnvironment(env);
   if(database.projectId!==project)
    throw new HttpsError('failed-precondition','採購資料庫與授權的 Preview 專案不一致');
-  try{return await commitV2FormalPurchase(database,request.auth.uid,request.data);}
+  try{
+   // A separate immutable-PO checkpoint through the existing deployed endpoint.
+   // Never combine purchase confirmation with incoming or accept client stock facts.
+   if(request.data?.action==='register-incoming'){
+    if(!allowProductionFormalPurchase(env)
+      ||Object.keys(request.data).sort().join(',')!=='action,poNo')
+     throw new HttpsError('invalid-argument','在途操作僅接受原採購單號');
+    return await registerFormalPurchaseIncoming(database,request.auth.uid,{poNo:request.data.poNo},env);
+   }
+   return await commitV2FormalPurchase(database,request.auth.uid,request.data);
+  }
   catch(error){
    if(['invalid-argument','permission-denied','failed-precondition','not-found','already-exists'].includes(error.code))
     throw new HttpsError(error.code,error.message);
