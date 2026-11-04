@@ -10,6 +10,20 @@ exports.sendPurchaseOrderEmail=onCall({region:'asia-east1'},()=>{
 const {getApps,initializeApp}=require('firebase-admin/app');
 if(!getApps().length)initializeApp();
 const {getFirestore}=require('firebase-admin/firestore');
+
+// Admin-only atomic salesCode handover. No historical commercial records are rewritten.
+const {commitSalesCodeTransfer}=require('./sales-code-transfer-service');
+exports.transferSalesCodeOwner=onCall({region:'asia-east1'},async request=>{
+  if(!request.auth?.uid)throw new HttpsError('unauthenticated','請先登入');
+  try{return await commitSalesCodeTransfer(getFirestore(),request.auth.uid,request.data);}
+  catch(error){
+    if(['invalid-argument','permission-denied','failed-precondition','already-exists','not-found'].includes(error.code))
+      throw new HttpsError(error.code,error.message);
+    console.error('Sales code handover failed',error);
+    throw new HttpsError('internal','人員交接未完成，請先核對後再重試');
+  }
+});
+
 const {createPreviewFormalPurchaseCallable}=require('./formal-purchase-preview-callable');
 // Production is disabled by default; only an independent explicit backend
 // rollout flag may enable the already-validated strict transactional writer.

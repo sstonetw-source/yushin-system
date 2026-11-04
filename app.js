@@ -27664,19 +27664,7 @@ window.sendPasswordResetToUser = function(email) {
     });
 };
 
-async function syncSalesCodeMasterFromUsers() {
-    if (trueUserRole !== 'admin') return;
-    const now = new Date().toISOString();
-    for (const person of salesList.filter(item => item.code)) {
-        await db.collection('salesCodes').doc(String(person.code)).set({
-            code: String(person.code),
-            currentUserUid: person.uid || '',
-            currentUserName: person.name || '',
-            active: true,
-            updatedAt: now
-        }, { merge: true });
-    }
-}
+// 業務代號主檔在管理頁載入時僅唯讀，避免覆蓋已完成的交接。
 
 async function loadSalesCodeMaster() {
     const generation = sessionDataGeneration;
@@ -27712,7 +27700,6 @@ window.reloadSalesFromUsers = function() {
         applySalesRows(rows);
         salesListLoadPromise = Promise.resolve(salesList);
         if (document.getElementById('admin-statistics')?.style.display === 'block') populateSalesStatisticsFilters();
-        if (trueUserRole === 'admin') await syncSalesCodeMasterFromUsers().catch(err => console.warn('同步業務代號主檔失敗：', err));
         if (generation !== sessionDataGeneration) return;
         await loadSalesCodeMaster().catch(err => { console.warn('讀取業務代號主檔失敗：', err); salesCodeMasterCache = []; });
         if (generation !== sessionDataGeneration) return;
@@ -27741,13 +27728,15 @@ function populateTransferDropdowns() {
     codeSelect.innerHTML = '<option value="">請選擇業務代號</option>' +
         codeRows.map(s => `<option value="${escapeAttr(s.code || s.id)}">${escapeHtml(s.code || s.id)}｜${escapeHtml(s.currentUserName || '未指派')}</option>`).join('');
     userSelect.innerHTML = '<option value="">請選擇接手同仁</option>' +
-        allUsersCache.filter(u => u.name).map(u => `<option value="${escapeAttr(u.uid)}">${escapeHtml(u.name)}｜${escapeHtml(u.email || u.uid)}</option>`).join('');
+        allUsersCache.filter(u => u.name && u.active !== false && !u.disabled).map(u => `<option value="${escapeAttr(u.uid)}">${escapeHtml(u.name)}｜${escapeHtml(u.email || u.uid)}</option>`).join('');
     if ([...codeSelect.options].some(o => o.value === codeValue)) codeSelect.value = codeValue;
     if ([...userSelect.options].some(o => o.value === userValue)) userSelect.value = userValue;
     resetTransferPreview();
 }
 
+let pendingSalesTransfer = null;
 window.resetTransferPreview = function() {
+    pendingSalesTransfer = null;
     const btn = document.getElementById('transferExecuteBtn');
     const result = document.getElementById('transferResult');
     if (btn) btn.style.display = 'none';
@@ -27765,168 +27754,66 @@ function getTransferSelection() {
     return { salesCode, targetUid, currentHolder, target, master };
 }
 
-async function legacySalesDocsInPages(collectionName, salesName, onPage, pageSize = 200) {
-    let cursor = null;
-    while (true) {
-        let query = db.collection(collectionName)
-            .where('salesName', '==', salesName)
-            .orderBy(firebase.firestore.FieldPath.documentId())
-            .limit(pageSize);
-        if (cursor) query = query.startAfter(cursor);
-        const snap = await firestoreReadWithTimeout(
-            query.get(),
-            collectionName + ' 舊業務資料'
-        );
-        if (snap.empty) break;
-        await onPage(snap.docs);
-        cursor = snap.docs[snap.docs.length - 1];
-        if (snap.size < pageSize) break;
-    }
-}
-
-async function countLegacyRecordsForSalesCode(person) {
-    if (!person?.name) return { quotes:0, orders:0, forecasts:0, equipment:0, total:0 };
-    const configs = [
-        ['quotes','quotes'], ['orders','orders'], ['forecasts','forecasts'], ['equipment','equipment']
-    ];
-    const counts = {};
-    await Promise.all(configs.map(async ([key, collection]) => {
-        let count = 0;
-        await legacySalesDocsInPages(collection, person.name, docs => {
-            count += docs.filter(doc => !doc.data().salesCode).length;
-        });
-        counts[key] = count;
-    }));
-    counts.total = Object.values(counts).reduce((sum, value) => sum + Number(value || 0), 0);
-    return counts;
-}
-
-window.previewSalesTransfer = async function() {
+window.previewSalesTransfer = function() {
     const { salesCode, target, currentHolder } = getTransferSelection();
     const resultEl = document.getElementById('transferResult');
     const executeBtn = document.getElementById('transferExecuteBtn');
-    executeBtn.style.display = 'none';
-
-    if (!salesCode || !target) {
-        resultEl.innerText = '請先選擇要交接的業務代號與接手同仁。';
+    pendingSalesTransfer = null;
+    if (executeBtn) executeBtn.style.display = 'none';
+    if (!salesCode || !target || !currentHolder?.uid) {
+        resultEl.innerText = '請選擇已有原負責人的業務代號及接手同仁。';
         return;
     }
-    if (currentHolder?.uid === target.uid) {
+    if (currentHolder.uid === target.uid) {
         resultEl.innerText = '這位同仁目前已經是此業務代號的負責業務。';
         return;
     }
-    if (target.code && String(target.code) !== String(salesCode)) {
-        resultEl.innerText = `接手同仁目前已有業務代號 ${target.code}。請先完成該代號的交接或解除後，再接手 ${salesCode}，避免同一帳號同時擁有兩個代號。`;
+    if (target.active === false || target.disabled || (target.code && String(target.code) !== String(salesCode))) {
+        resultEl.innerText = '接手同仁已停用或持有其他業務代號，請先確認人員設定。';
         return;
     }
-
-    resultEl.innerText = '檢查舊資料中…';
-    try {
-        const counts = await countLegacyRecordsForSalesCode(currentHolder);
-        resultEl.innerText =
-            `業務代號：${salesCode}\n目前負責業務：${currentHolder?.name || '未指定'}\n接手同仁：${target.name}\n\n` +
-            `舊資料需要補上 salesCode：${counts.total} 筆\n` +
-            `・估價單 ${counts.quotes || 0}\n・訂單 ${counts.orders || 0}\n・Forecast ${counts.forecasts || 0}\n・儀器 ${counts.equipment || 0}\n\n` +
-            '交接後歷史 salesName/createdBy 不會被改寫；資料歸屬只改由此業務代號的現任負責業務接手。';
-        executeBtn.style.display = '';
-    } catch (err) {
-        resultEl.innerText = '檢查失敗：' + err.message;
-    }
+    // Retain one operation ID across network retries; changing the selection invalidates it.
+    const operationId = window.crypto?.randomUUID?.() ||
+        ('transfer-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2));
+    pendingSalesTransfer = { operationId, salesCode:String(salesCode),
+        expectedFromUid:currentHolder.uid, targetUid:target.uid };
+    resultEl.innerText =
+        '業務代號：' + salesCode + '\n原負責人：' + (currentHolder.name || currentHolder.uid) +
+        '\n接手同仁：' + target.name + '\n\n' +
+        '交接將由後端在同一筆交易中修改業務代號主檔與兩位同仁設定，保留不可重複的操作紀錄。\n' +
+        '歷史 salesName／建立者不改寫；缺少 salesCode 的舊資料不會在交接時自動補寫，需另行受控整理。';
+    if (executeBtn) executeBtn.style.display = '';
 };
-
-async function backfillSalesCodeForLegacyRecords(person, salesCode) {
-    if (!person?.name || !salesCode) return 0;
-    const collections = ['quotes','orders','forecasts','equipment'];
-    let total = 0;
-    const migratedAt = new Date().toISOString();
-    for (const collection of collections) {
-        await legacySalesDocsInPages(collection, person.name, async docs => {
-            const refs = docs.filter(doc => !doc.data().salesCode).map(doc => doc.ref);
-            if (!refs.length) return;
-            await runFirestoreBatchUpdates(refs, { salesCode, ownershipMigratedAt: migratedAt });
-            total += refs.length;
-        });
-    }
-    return total;
-}
 
 window.executeSalesTransfer = async function() {
     const { salesCode, target, currentHolder } = getTransferSelection();
     const resultEl = document.getElementById('transferResult');
     const button = document.getElementById('transferExecuteBtn');
-    if (!salesCode || !target || !button) return;
-
-    if (!confirm(`確定把業務代號「${salesCode}」交接給「${target.name}」嗎？\n歷史交易內容與原建立人不會改寫；此代號的新舊資料會改由接手同仁查看與管理。`)) return;
-
+    const intent = pendingSalesTransfer;
+    if (!button || !intent || intent.salesCode !== String(salesCode) ||
+        intent.targetUid !== target?.uid || intent.expectedFromUid !== currentHolder?.uid) {
+        resultEl.innerText = '交接內容已變更，請重新檢查。';
+        return;
+    }
+    if (!confirm('確定將業務代號「' + salesCode + '」由「' + currentHolder.name + '」交接給「' + target.name + '」嗎？')) return;
     button.disabled = true;
-    resultEl.innerText = '交接中…';
+    resultEl.innerText = '正在由後端驗證並交接…';
     try {
-        const migrated = await backfillSalesCodeForLegacyRecords(currentHolder, salesCode);
-        const now = new Date().toISOString();
-        const codeRef = db.collection('salesCodes').doc(String(salesCode));
-        const codeSnap = await firestoreReadWithTimeout(
-            codeRef.get(),
-            '業務代號交接紀錄'
-        );
-        const history = Array.isArray(codeSnap.data()?.handoffHistory) ? codeSnap.data().handoffHistory : [];
-        const entry = {
-            fromUid: currentHolder?.uid || '',
-            fromName: currentHolder?.name || '',
-            toUid: target.uid,
-            toName: target.name || '',
-            at: now,
-            byUid: currentUser?.uid || '',
-            byName: currentUserName || ''
-        };
-
-        const batch = db.batch();
-        batch.set(codeRef, {
-            code: String(salesCode),
-            currentUserUid: target.uid,
-            currentUserName: target.name || '',
-            active: true,
-            handoffHistory: [...history, entry],
-            updatedAt: now
-        }, { merge: true });
-        batch.set(db.collection('users').doc(target.uid), { code: String(salesCode), codeAssignedAt: now }, { merge: true });
-        if (currentHolder?.uid && currentHolder.uid !== target.uid) {
-            batch.set(db.collection('users').doc(currentHolder.uid), {
-                code: '',
-                previousSalesCode: String(salesCode),
-                codeHandedOffAt: now
-            }, { merge: true });
-        }
-        await batch.commit();
-
-        resultEl.innerText = `交接完成。業務代號 ${salesCode} 現由 ${target.name} 負責；另補上 ${migrated} 筆舊資料的 salesCode。歷史姓名與操作紀錄均保留。`;
+        const callable = firebase.app().functions('asia-east1').httpsCallable('transferSalesCodeOwner');
+        const response = await callable(intent);
+        if (!['completed','already-applied'].includes(response?.data?.status))
+            throw new Error('後端未確認交接完成');
+        pendingSalesTransfer = null;
         button.style.display = 'none';
-        button.disabled = false;
         salesListLoadPromise = null;
         await reloadSalesFromUsers();
+        resultEl.innerText = '交接完成：' + salesCode + ' 現由 ' + target.name + ' 負責。原始業務姓名與歷史文件未改動。';
     } catch (err) {
-        console.error(err);
-        resultEl.innerText = '交接失敗：' + err.message;
-        button.disabled = false;
-    }
+        console.error('業務交接後端失敗：',err);
+        resultEl.innerText = '交接未確認完成：' + (err.message || err) +
+            '\n請先重新檢查目前負責人；若為網路中斷，可保留相同操作 ID 重試，不會重複交接。';
+    } finally { button.disabled = false; }
 };
-
-// 依 Firestore batch 500 筆上限，自動切批次執行文件更新
-function runFirestoreBatchUpdates(refs, updateData) {
-    const CHUNK = 450;
-    const chunks = [];
-    for (let i = 0; i < refs.length; i += CHUNK) {
-        chunks.push(refs.slice(i, i + CHUNK));
-    }
-    let chain = Promise.resolve();
-    chunks.forEach(chunk => {
-        chain = chain.then(() => {
-            const batch = db.batch();
-            chunk.forEach(ref => batch.update(ref, updateData));
-            return batch.commit();
-        });
-    });
-    return chain;
-}
 
 /* ---------- 資料庫用量估算 ---------- */
 function formatBytes(bytes) {
