@@ -1379,21 +1379,23 @@ test('Forecast brand entry shares primary brands plus an explicit Other input', 
     assert.match(appSource, /getBrandFieldValue\('forecastBrand', 'forecastBrandOther'\)/);
 });
 
-test('new business records persist stable salesCode while keeping legacy owner fields', () => {
+test('new business records retain stable salesCode ownership without rewriting creator fields', () => {
     assert.match(appSource, /salesCode:\s*currentUserCode/);
     assert.match(appSource, /function salesCodeForName/);
     assert.match(appSource, /function belongsToCurrentUser\(salesName, ownerUid, salesCode/);
-    assert.match(appSource, /collection\('salesCodes'\)/);
+    assert.match(appSource, /readCollectionInBatches\('salesCodes'\)/);
 });
 
-test('sales handoff changes the sales-code holder instead of rewriting historical sales names', () => {
-    const start = appSource.indexOf('window.executeSalesTransfer =');
-    const end = appSource.indexOf('// 依 Firestore batch 500 筆上限', start);
+test('sales handoff uses one trusted backend instead of historical bulk updates', () => {
+    const start = appSource.indexOf('window.executeSalesTransfer = async function');
+    const end = appSource.indexOf('/* ---------- 資料庫用量估算 ---------- */', start);
     const s = appSource.slice(start, end);
-    assert.match(s, /salesCodes/);
-    assert.match(s, /handoffHistory/);
-    assert.match(s, /backfillSalesCodeForLegacyRecords/);
-    assert.doesNotMatch(s, /\{\s*salesName:\s*toName\s*\}/);
+    const backend = fs.readFileSync(path.join(__dirname,'../functions/sales-code-transfer-service.js'),'utf8');
+    assert.match(s,/httpsCallable\('transferSalesCodeOwner'\)/);
+    assert.doesNotMatch(s,/backfillSalesCodeForLegacyRecords|db\.batch\(\)/);
+    assert.match(backend,/handoffHistory/);
+    assert.match(backend,/salesCodeTransferOperations/);
+    assert.match(backend,/db\.runTransaction/);
 });
 
 test('inventory reservation is traceable to occupying orders without order-level quantity mirrors', () => {
@@ -2652,16 +2654,13 @@ test('own-scope forecast does not preload full staff directory', () => {
 });
 
 
-test('admin maintenance reads are bounded', () => {
-    const transferStart=appSource.indexOf('async function legacySalesDocsInPages');
-    const transferEnd=appSource.indexOf('async function countLegacyRecordsForSalesCode',transferStart);
+test('admin maintenance keeps bounded index and migration reads; staff transfer is server-only', () => {
+    assert.doesNotMatch(appSource,/async function legacySalesDocsInPages/);
+    const transferStart=appSource.indexOf('window.executeSalesTransfer = async function');
+    const transferEnd=appSource.indexOf('/* ---------- 資料庫用量估算 ---------- */',transferStart);
     const transferSource=appSource.slice(transferStart,transferEnd);
-    assert.match(transferSource,/firestoreReadWithTimeout\([\s\S]*?collectionName \+ ' 舊業務資料'/);
-
-    const executeStart=appSource.indexOf('window.executeSalesTransfer = async function');
-    const executeEnd=appSource.indexOf('// 依 Firestore batch 500 筆上限',executeStart);
-    const executeSource=appSource.slice(executeStart,executeEnd);
-    assert.match(executeSource,/firestoreReadWithTimeout\([\s\S]*?'業務代號交接紀錄'/);
+    assert.match(transferSource,/httpsCallable\('transferSalesCodeOwner'\)/);
+    assert.doesNotMatch(transferSource,/firestoreReadWithTimeout|runFirestoreBatchUpdates/);
 
     const indexStart=appSource.indexOf('window.backfillOrderSearchIndex = async function');
     const indexEnd=appSource.indexOf('/* ---------- Product Master',indexStart);
