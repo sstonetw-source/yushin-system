@@ -4441,7 +4441,7 @@ test('supply rule tightening still covers current quick-order receipt and cancel
 
 
 test('direct ship delivery rule is bound to the matching atomic receipt', () => {
-    const source=ruleFunctionSource('directShipReceiptOrderUpdate');
+    const source=ruleFunctionSource('directShipReceiptOrderUpdate') + '\n' + ruleFunctionSource('directShipReceiptOrderEvidence');
     assert.match(source,/afterRecords\.size\(\) == beforeRecords\.size\(\) \+ 1/);
     assert.match(source,/afterRecords\.hasAll\(beforeRecords\)/);
     assert.match(source,/!beforeRecords\.hasAny\(\[newRecord\]\)/);
