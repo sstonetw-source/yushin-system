@@ -294,7 +294,9 @@ async function commitOrderReservation(db,uid,data){
     // including a product that has never been stocked at a sibling's warehouse.
     // Missing stock was already treated as zero during reservation planning;
     // make that fact durable in the same transaction, never infer real stock.
-    for(const [productKey,company] of companyStocks){
+    for(const [companyDocumentId,company] of companyStocks){
+      // Cache keys are encoded document IDs; stock fields retain the raw product identity.
+      const productKey=decodeURIComponent(companyDocumentId);
       if(!company.exists)writes.push({type:'create',ref:company.ref,data:{
         productKey,onHand:0,reserved:0,incoming:0,updatedAt:now}});
       for(const warehouseId of lifecycleWarehouseIds){
