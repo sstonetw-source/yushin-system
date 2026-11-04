@@ -15,7 +15,7 @@ const DELETE_COLLECTIONS = Object.freeze([
 const PRESERVE_COLLECTIONS = Object.freeze([
   'brandSupplierMappings', 'brands', 'customers', 'equipment',
   'priceHistory', 'productCosts', 'products', 'productLines', 'quotes',
-  'salesCodes', 'settings', 'suppliers', 'users', 'warehouses'
+  'salesCodes', 'salesCodeTransferOperations', 'settings', 'suppliers', 'users', 'warehouses'
 ]);
 
 const ZERO_STOCK_COLLECTIONS = Object.freeze(['inventory', 'warehouseStocks']);
