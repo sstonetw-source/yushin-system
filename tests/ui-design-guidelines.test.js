@@ -78,7 +78,7 @@ test('mobile record lists use one white card layer without a blue outer well or 
     assert.match(css, /#ordersTable tbody > tr \{ background:var\(--ys-record\)!important;/);
     assert.match(css, /#appContainer \.inventory-mobile-summary > div \{ background: var\(--ys-neutral-soft\);/);
     assert.match(css, /#appContainer #printableQuote \{\s*background:var\(--ys-surface\);/);
-    assert.match(html, /styles\.css\?v=20261102-424/);
+    assert.match(html, /styles\.css\?v=20261104-458/);
 });
 
 
@@ -92,5 +92,10 @@ test('purchasing queues use laptop-width cards while preserving their action and
     assert.match(css, /grid-area:actions; min-width:0;/);
     assert.match(css, /:has\(\.order-detail-panel\) > td\[data-th="交易／開票資料"\] \{ display:none; \}/);
     assert.match(css, /:not\(:has\(\.order-detail-panel\)\) > td\[data-th="交易／開票資料"\] \{ grid-column:1\/-1; \}/);
+});
+
+test('order list keeps only field headings bold and summary values at regular weight', () => {
+    assert.match(css, /#appContainer #ordersTable #ordersBody > tr > td:not\(\[data-th="操作"\]\),\s*#appContainer #ordersTable #ordersBody > tr > td:not\(\[data-th="操作"\]\) :is\(strong,b,\.workflow-customer-link,\.workflow-order-total\) \{\s*font-weight:400;/);
+    assert.match(css, /#appContainer :is\(#ordersTable,\.workflow-list-table,\.inventory-work-table table\) td\[data-th\]::before \{ font-size:16px; font-weight:700;/);
 });
 
