@@ -3329,6 +3329,19 @@ async function commitOrderCreation(orderId,data,{actorUid=currentUser?.uid,actor
     if(typeof orderId!=='string'||!orderId.trim()||orderId.includes('/'))throw new Error('缺少有效的建單識別碼。');
     if(!data||data.createdByUid!==actorUid||data.status!==BUSINESS_STATUS.ACTIVE)throw new Error('建單身分或初始狀態不正確。');
     const snapshot=JSON.parse(JSON.stringify(data));
+    // Both the dispatch and shipment backends require authoritative fulfillment
+    // ledgers to exist even before the first shipment, delivery, or return.
+    // Initialize them for every new-order writer (manual and Forecast) here.
+    for(const field of ['warehouseShipmentRecords','deliveryRecords','returnRecords']){
+        if(snapshot[field]!==undefined&&(!Array.isArray(snapshot[field])||snapshot[field].length))
+            throw new Error('新訂單不得包含既有出貨、送達或退貨紀錄。');
+        snapshot[field]=[];
+    }
+    for(const field of ['deliveredQty','returnedQty']){
+        if(snapshot[field]!==undefined&&snapshot[field]!==0)
+            throw new Error('新訂單的初始履約數量必須為 0。');
+        snapshot[field]=0;
+    }
     const reorder=snapshot.returnReorderSource;
     if(reorder!==undefined&&(!reorder||typeof reorder!=='object'||Array.isArray(reorder)
         ||Object.keys(reorder).length!==1||typeof reorder.orderId!=='string'||!reorder.orderId

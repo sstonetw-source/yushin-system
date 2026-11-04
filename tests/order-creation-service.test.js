@@ -46,6 +46,32 @@ test('manual creation resumes authoritative order without overwriting changed fo
  const result=await f.c.commitOrderCreation('O',{...f.data,customerName:'changed'});
  assert.equal(result.data.inventoryReservationStatus,'completed');assert.equal(result.data.customerName,undefined);assert.equal(f.writes.length,1);
 });
+test('all new order creation paths initialize empty fulfillment ledgers before backend dispatch',async()=>{
+ for(const kind of ['manual','forecast']){
+  const f=fixture();const result=kind==='manual'
+   ?await f.c.commitOrderCreation('O',f.data)
+   :await f.run();
+  const order=result.data;
+  for(const field of ['warehouseShipmentRecords','deliveryRecords','returnRecords'])
+   assert.deepEqual(plain(order[field]),[],`${kind}: ${field} must be an empty array`);
+  assert.equal(order.deliveredQty,0);assert.equal(order.returnedQty,0);
+  assert.deepEqual(f.docs.get('orders/O').deliveryRecords,[]);
+  assert.deepEqual(f.docs.get('orders/O').returnRecords,[]);
+  const resumed=kind==='manual'?await f.c.commitOrderCreation('O',f.data):await f.run();
+  assert.deepEqual(plain(resumed.data),plain(order));
+  assert.equal(f.writes.filter(([action,path])=>action==='set'&&path==='orders/O').length,1);
+ }
+});
+test('a new order cannot import stale shipment records or nonzero fulfillment quantities',async()=>{
+ for(const patch of [
+  {deliveryRecords:[{id:'D'}]},{returnRecords:[{id:'R'}]},
+  {warehouseShipmentRecords:[{id:'S'}]},{deliveryRecords:null},
+  {deliveredQty:1},{returnedQty:1}
+ ]){
+  const f=fixture();await assert.rejects(f.c.commitOrderCreation('O',{...f.data,...patch}),/新訂單/);
+  assert.equal(f.writes.length,0);assert.equal(f.docs.has('orders/O'),false);
+ }
+});
 test('Forecast order and backlink commit once after callback replay and lost reply',async()=>{
  const f=fixture();f.state.replay=true;f.state.lost=true;
  await assert.rejects(f.run(),/lost reply/);assert.equal(f.writes.length,2);

@@ -695,7 +695,10 @@ async function multiReceiptSiteFixture(width,prefix='multi-receipt'){
    .then(()=>null,error=>error.code);
   assert.equal(rejected,'permission-denied');assert.equal((await db.collection('orders').doc(orderId+'-cost').get()).exists,false);
   await creator.create(orderId,source);
-  assert.deepEqual((await db.collection('orders').doc(orderId).get()).data(),source);
+  // The new authoritative creation writer initializes empty shipment/return
+  // ledgers and counters before any physical fulfillment takes place.
+  assert.deepEqual((await db.collection('orders').doc(orderId).get()).data(),
+   {...source,warehouseShipmentRecords:[],returnedQty:0});
   for(const key of keys)assert.equal((await db.collection('inventory').doc(key).get()).data().reserved,0,'creation alone does not reserve');
   await synchronizeV2OrderFixture(db,accounts.purchaser.uid,{orderId,warehouseIds:warehouses});
   const initialized=(await db.collection('orders').doc(orderId).get()).data();
