@@ -16450,8 +16450,8 @@ async function saveFormalPurchaseDocument(record, {actorUid=currentUser?.uid,act
     check();return {id:saved.poNo,...saved};
 }
 // Authoritative PO, supply commitments and source-order linkage. Incoming remains a separate checkpoint.
-// Backend routing is opt-in per environment. Production remains on the legacy
-// writer until separately switched on after acceptance. No Callable failure falls back.
+// Backend routing is opt-in per environment. Production is backend-only;
+// disabling the gate must never revive the retired client purchase writer.
 function formalPurchaseBackendPilotEnabled() {
     return (typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='emulator'
         && globalThis.YUSHIN_FORMAL_PURCHASE_EMULATOR===true)
@@ -16567,6 +16567,9 @@ async function commitFormalPurchaseOrder(poRecord, {actorUid=currentUser?.uid,ac
         if(typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='preview'
             && !formalPurchaseBackendPilotEnabled())
             throw new Error('Preview 採購後端尚未啟用，禁止改由舊交易提交。');
+        if(typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='production'
+            && !formalPurchaseBackendPilotEnabled())
+            throw new Error('正式採購後端尚未啟用，禁止改由舊交易提交。');
         if(formalPurchaseBackendPilotEnabled())
             return commitFormalPurchaseBackend(poRecord,actorUid,assertActor);
         const actorName=currentUserName||currentUser?.email||'', now=poRecord.createdAt||new Date().toISOString();
