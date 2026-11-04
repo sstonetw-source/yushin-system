@@ -375,3 +375,26 @@ test('three candidate warehouses reject before creating an unusable lifecycle so
  f.put('warehouseStocks/C__P',{productKey:'P',warehouseId:'C',onHand:0,reserved:0});
  const before=f.snapshot();await assert.rejects(f.run(),/1–2 個候選/);assert.equal(f.snapshot(),before);
 });
+
+test('encoded product identities create canonical zero company and warehouse ledgers without a second encoding',async()=>{
+ const f=fixture();
+ const keys=['prd:%E9%9B%9C%E9%A0%85:golive20261104p01','prd:Beckman Coulter:TEST'];
+ for(const path of [...f.docs.keys()])if(path.startsWith('inventory/')||path.startsWith('warehouseStocks/'))f.docs.delete(path);
+ for(const key of keys)f.put('products/'+key,{productType:'Consumable',active:true});
+ f.put('orders/O',{...f.docs.get('orders/O'),items:keys.map((key,i)=>({
+  itemId:'I'+i,productId:key,warehouseId:i?'B':'A',qty:1,reservedQty:0}))});
+ const result=await f.run();assert.deepEqual([result.reservedQty,result.shortageQty],[0,2]);
+ for(const key of keys){
+  const company=f.docs.get('inventory/'+encodeURIComponent(key));
+  assert.equal(company.productKey,key);
+  assert.deepEqual([company.onHand,company.reserved,company.incoming],[0,0,0]);
+  for(const wh of ['A','B']){
+   const stock=f.docs.get('warehouseStocks/'+wh+'__'+encodeURIComponent(key));
+   assert.ok(stock,'candidate ledger exists for raw identity');
+   assert.equal(stock.productKey,key);assert.equal(stock.warehouseId,wh);
+   assert.deepEqual([stock.onHand,stock.reserved,stock.incoming],[0,0,0]);
+   assert.equal(f.docs.has('warehouseStocks/'+wh+'__'+encodeURIComponent(encodeURIComponent(key))),false);
+  }
+ }
+ const before=f.snapshot();assert.equal((await f.run()).status,'already-applied');assert.equal(f.snapshot(),before);
+});

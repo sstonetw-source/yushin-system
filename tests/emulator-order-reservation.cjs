@@ -142,3 +142,37 @@ test('new zero-stock source creates explicit balances and can cancel and restore
  assert.equal((await f.get('orders/'+f.orderId)).items[0].shortageQty,3);
  assert.equal((await f.get('inventory/'+f.productKey)).onHand,0);
 });
+
+test('new encoded-identity products with no stock complete native initialization cancellation and restoration',async()=>{
+ const uid='encoded_zero_admin',orderId='encoded_zero_order',syncAttemptId='encoded_zero_sync';
+ const productKeys=['prd:%E9%9B%9C%E9%A0%85:encoded-zero','prd:Beckman Coulter:encoded-zero'];
+ const items=productKeys.map((productId,i)=>({itemId:'E'+i,productId,warehouseId:i?'B':'A',qty:1,
+  productType:'Consumable',fulfillmentType:'WAREHOUSE',reservedQty:0}));
+ const batch=db.batch(),set=(name,id,data)=>batch.set(db.collection(name).doc(id),data);
+ set('users',uid,{active:true,role:'admin'});
+ for(const warehouse of ['A','B'])set('warehouses',warehouse,{active:true});
+ for(const key of productKeys)set('products',key,{active:true,productType:'Consumable'});
+ set('orders',orderId,{ownerUid:uid,salesCode:'ENCODED_ZERO',status:'active',orderStatus:'normal',
+  inventoryReservationStatus:'pending',inventoryReservationAttemptId:syncAttemptId,items,
+  deliveryRecords:[],returnRecords:[],warehouseShipmentRecords:[]});
+ await batch.commit();
+ const initial=await commitOrderReservation(db,uid,{orderId,syncAttemptId});
+ assert.deepEqual([initial.reservedQty,initial.shortageQty],[0,2]);
+ const lifecycle=require('../functions/single-item-location-lifecycle-service').commitOrderLocationLifecycle;
+ const cancel={orderId,itemIds:items.map(row=>row.itemId),warehouseIds:['A','B'],nextStatus:'cancelled',
+  operationId:'encoded_zero_cancel',syncAttemptId,date:'2026-11-04'};
+ await lifecycle(db,uid,cancel);
+ assert.equal((await db.collection('orders').doc(orderId).get()).data().orderStatus,'cancelled');
+ await lifecycle(db,uid,{...cancel,nextStatus:'normal',operationId:'encoded_zero_restore'});
+ const saved=(await db.collection('orders').doc(orderId).get()).data();
+ assert.equal(saved.orderStatus,'normal');assert.deepEqual(saved.items.map(item=>item.shortageQty),[1,1]);
+ for(const key of productKeys){
+  const company=(await db.collection('inventory').doc(encodeURIComponent(key)).get()).data();
+  assert.equal(company.productKey,key);assert.deepEqual([company.onHand,company.reserved,company.incoming],[0,0,0]);
+  for(const warehouse of ['A','B']){
+   const stock=(await db.collection('warehouseStocks').doc(warehouse+'__'+encodeURIComponent(key)).get()).data();
+   assert.equal(stock.productKey,key);assert.deepEqual([stock.onHand,stock.reserved,stock.incoming],[0,0,0]);
+   assert.equal((await db.collection('warehouseStocks').doc(warehouse+'__'+encodeURIComponent(encodeURIComponent(key))).get()).exists,false);
+  }
+ }
+});
