@@ -2254,19 +2254,17 @@ for(const multi of [false,true])for(const width of [1280,390])test('full site '+
    await page.waitForFunction(()=>newOrderDraftItems.length===1);
    await page.locator('#orderItemCode').fill(code);await page.locator('#orderItemCode').blur();
    await page.waitForFunction(()=>document.getElementById('orderItemCode').dataset.productCheckStatus==='matched');
-   await page.locator('#orderQty').fill('1');await page.locator('#orderUnitPrice').fill('100');
-   // Distinct actual destinations keep the same product as separate lines;
-   // identical destination/price entries intentionally merge in the original UI.
+   await page.locator('#orderQty').fill('1');await page.locator('#orderUnitPrice').fill('101');
+   // 相同商品但不同售價維持兩列，交付資訊統一在品項全部加入後設定。
+   await page.locator('button[onclick="addCurrentOrderItemToDraft()"]').click();await page.waitForFunction(()=>newOrderDraftItems.length===2);
+   await page.locator('#orderItemCode').fill(code+'Q');await page.locator('#orderItemCode').blur();
+   await page.waitForFunction(()=>document.getElementById('orderItemCode').dataset.productCheckStatus==='matched');
+   await page.locator('#orderQty').fill('2');await page.locator('#orderUnitPrice').fill('150');
    await page.locator('#orderDeliveryChoice').selectOption('CUSTOMER');
    const details=page.locator('#orderRecipientDetails');if(!await details.evaluate(node=>node.open))await details.locator('summary').click();
    await page.waitForFunction(()=>document.getElementById('orderAddressStatus')?.textContent!=='讀取常用地址…');
    await page.locator('#orderShippingContact').fill('原表單收件人');await page.locator('#orderShippingPhone').fill('02-12345678');
    await page.locator('#orderShippingAddress').fill('台北市手動多品項驗收地址');
-   await page.locator('button[onclick="addCurrentOrderItemToDraft()"]').click();await page.waitForFunction(()=>newOrderDraftItems.length===2);
-   await page.locator('#orderItemCode').fill(code+'Q');await page.locator('#orderItemCode').blur();
-   await page.waitForFunction(()=>document.getElementById('orderItemCode').dataset.productCheckStatus==='matched');
-   await page.locator('#orderQty').fill('2');await page.locator('#orderUnitPrice').fill('150');
-   await page.locator('#orderDeliveryChoice').selectOption('BUSINESS');
   }
   await page.locator('#orderTransactionType').selectOption('借');
   await page.locator('#saveNewOrderBtn').click();await page.locator('#orderModalOverlay.active').waitFor({state:'hidden'});
@@ -2275,7 +2273,7 @@ for(const multi of [false,true])for(const width of [1280,390])test('full site '+
   const orderId=snapshot.docs[0].id,order=snapshot.docs[0].data(),item=order.items[0];
   assert.equal(order.ownerUid,uid);assert.equal(order.salesCode,'B');assert.equal(order.customerName,tag+'客戶');
   assert.equal(order.itemCount,multi?3:1);assert.equal(order.items.length,multi?3:1);assert.equal(item.productId,key);assert.equal(item.qty,2);
-  assert.equal(item.unitPrice,100);assert.equal(order.totalPrice,multi?600:200);assert.equal(item.warehouseId,warehouseId);
+  assert.equal(item.unitPrice,100);assert.equal(order.totalPrice,multi?601:200);assert.equal(item.warehouseId,warehouseId);
   assert.equal(item.reservedQty,2);assert.equal(item.shortageQty,0);assert.equal(order.inventoryReservationStatus,'completed');
   const ledger=(await db.collection('inventoryReservations').doc(orderId+'__'+item.itemId).get()).data();
   assert.equal(ledger.quantity,2);assert.equal(ledger.warehouseId,undefined);assert.equal(ledger.productKey,key);
@@ -2291,8 +2289,9 @@ for(const multi of [false,true])for(const width of [1280,390])test('full site '+
   assert.equal(held.stock.onHand,multi?2:3);assert.equal(held.stock.reserved,2);assert.deepEqual(held.lot,lot);
   if(multi){
    assert.deepEqual(order.items.map(i=>[i.productId,i.qty,i.reservedQty,i.shortageQty,i.warehouseId]),[[key,2,2,0,warehouseId],[key,1,1,0,otherWarehouse],[key+'-Q',2,2,0,warehouseId]]);
-   assert.equal(new Set(order.items.map(i=>i.itemId)).size,3);assert.equal(order.items[1].deliveryPlan.mode,'CUSTOMER_SHIP');
-   assert.equal(order.items[1].deliveryPlan.address,'台北市手動多品項驗收地址');assert.equal(order.items[2].deliveryPlan.mode,'PICKUP');
+   assert.equal(new Set(order.items.map(i=>i.itemId)).size,3);
+   assert.equal(order.items[1].unitPrice,101);
+   for(const row of order.items){assert.equal(row.deliveryPlan.mode,'CUSTOMER_SHIP');assert.equal(row.deliveryPlan.address,'台北市手動多品項驗收地址');}
    for(const row of order.items){const hold=(await db.collection('inventoryReservations').doc(orderId+'__'+row.itemId).get()).data();
     assert.equal(hold.quantity,row.qty);assert.equal(hold.productKey,row.productId);assert.equal(hold.warehouseId,undefined);
     assert.equal(hold.locationSchemaVersion,2);assert.deepEqual(hold.locations,[{warehouseId:row.warehouseId,reservedQty:row.qty}]);

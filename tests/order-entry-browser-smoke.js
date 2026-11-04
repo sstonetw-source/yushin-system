@@ -40,6 +40,15 @@ const save=slice('window.saveNewOrder = function()','    items.forEach(item=>{de
     slice('function normalizeNewOrderItem(', 'let orderDraftProductCheckGeneration'),save,
     fs.readFileSync('modules/order-self-order-required.js','utf8'),fs.readFileSync('modules/delivery-settings.js','utf8'),fs.readFileSync('modules/order-entry-ui.js','utf8')])await page.addScriptTag({content});
    await page.evaluate(()=>{document.getElementById('orderModalOverlay').classList.add('active');document.getElementById('orderBrand').innerHTML='<option></option><option>Roche</option>';initializeOrderDeliveryDefaults();document.getElementById('orderWarehouse').value='MAIN';document.getElementById('orderDateInput').value='2026-10-13';});
+   assert.equal(await page.evaluate(()=>{
+    const procurement=document.getElementById('orderProcurementType'),add=document.querySelector('.order-entry-add'),delivery=document.getElementById('orderDeliveryChoice');
+    return Boolean(procurement.compareDocumentPosition(add)&Node.DOCUMENT_POSITION_FOLLOWING)
+      && Boolean(add.compareDocumentPosition(delivery)&Node.DOCUMENT_POSITION_FOLLOWING)
+      && document.getElementById('orderSharedDeliverySection').querySelector('h4')?.textContent==='交付方式';
+   }),true);
+   assert.equal(await page.locator('label[for="orderItemCode"]').textContent(),'貨號');
+   assert.equal(await page.locator('#orderBrand').isVisible(),true);
+   assert.equal(await page.locator('#orderProductDetails').getAttribute('open'),null);
    await page.locator('#orderCustomer').fill('台大');await page.locator('#orderItemCode').fill('A1');await page.waitForFunction(()=>document.getElementById('orderItemCode').dataset.productCheckStatus==='matched');
    assert.equal(await page.locator('#orderUnitPrice').inputValue(),'100');assert.equal(await page.locator('#orderProductDetails').getAttribute('open'),null);
    assert.match(await page.locator('#orderEntryProductSummary').textContent(),/試劑/);
@@ -75,6 +84,11 @@ const save=slice('window.saveNewOrder = function()','    items.forEach(item=>{de
    assert.equal(await page.locator('#orderRecipientDetails').isVisible(),true);
    await page.locator('#orderShippingContact').fill('客戶');await page.locator('#orderShippingPhone').fill('123');await page.locator('#orderShippingAddress').fill('台北市測試地址');await page.locator('#saveNewOrderBtn').click();
    assert.equal(await page.evaluate(()=>validated.items[0].fulfillmentType),'DIRECT_SHIP');assert.equal(await page.evaluate(()=>validated.items[0].deliveryPlan.contact),'客戶');
+   await page.evaluate(()=>{newOrderDraftItems=[{...currentOrderModalItem(),itemId:'OLDER',deliveryPlan:{mode:'PICKUP'},fulfillmentType:'WAREHOUSE'}];renderNewOrderDraftItems();});
+   await page.locator('#saveNewOrderBtn').click();
+   assert.deepEqual(await page.evaluate(()=>validated.items.map(item=>[item.fulfillmentType,item.deliveryPlan.mode,item.deliveryPlan.address])),[
+    ['DIRECT_SHIP','CUSTOMER_SHIP','台北市測試地址'],['DIRECT_SHIP','CUSTOMER_SHIP','台北市測試地址']
+   ]);
    await page.evaluate(()=>{newOrderDraftItems=[currentOrderModalItem(),{...currentOrderModalItem(),itemId:'OTHER'}];renderNewOrderDraftItems();});
    const dimensions=await page.evaluate(()=>{const box=document.querySelector('#orderModalOverlay .eq-modal-box');return {box:box.clientWidth,scroll:box.scrollWidth,button:document.getElementById('saveNewOrderBtn').getBoundingClientRect().height};});assert.ok(dimensions.scroll<=dimensions.box+1,JSON.stringify(dimensions));assert.ok(dimensions.button>=44);
    await page.evaluate(()=>{document.getElementById('orderModalOverlay').scrollTop=0;});

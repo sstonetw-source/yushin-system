@@ -4376,6 +4376,7 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
 #orderModalOverlay .eq-modal-box { max-width:780px; }
 #orderModalOverlay .order-entry-section { margin:0; padding:20px 0; border:0; border-bottom:1px solid var(--ys-border); border-radius:0; background:var(--ys-surface); }
 #orderModalOverlay .order-entry-section h4 { margin:0 0 14px; font-size:17px; color:var(--ys-text); }
+#orderModalOverlay #orderSharedDeliverySection .order-shipping-details { padding:0; border:0; border-radius:0; }
 #orderModalOverlay h5 { margin:18px 0 10px; font-size:14px; }
 #orderModalOverlay .form-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px 16px; margin-bottom:0; }
 .order-entry-wide { grid-column:1/-1; }

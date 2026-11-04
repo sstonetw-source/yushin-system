@@ -21,8 +21,8 @@
     }
     function sameDraftItem(a,b) {
         return a.productId===b.productId && a.unitPrice===b.unitPrice && a.procurementType===b.procurementType
-            && a.fulfillmentType===b.fulfillmentType && a.supplier===b.supplier && a.costPrice===b.costPrice
-            && a.selfOrderConfirmed===b.selfOrderConfirmed && JSON.stringify(a.deliveryPlan||{})===JSON.stringify(b.deliveryPlan||{});
+            && a.supplier===b.supplier && a.costPrice===b.costPrice
+            && a.selfOrderConfirmed===b.selfOrderConfirmed;
     }
     function validateTrade(order={}, {requireInvoiceTitle=true}={}) {
         if(!['直','借','扣'].includes(order.transactionType))return {valid:false,message:'請選擇交易方式（直、借或扣）。'};
