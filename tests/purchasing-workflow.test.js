@@ -781,7 +781,7 @@ test('ordered action is a direct snapshot-based state change without a data-entr
     const saveEnd=app.indexOf('\nwindow.openOrderPurchaseDraft',saveStart);
     const saveSource=app.slice(saveStart,saveEnd);
     assert.ok(actionStart>=0 && actionEnd>actionStart && saveStart>=0 && saveEnd>saveStart);
-    assert.match(actionSource, /markPurchaseItemOrdered[\s\S]*?>確認已下訂<\/button>/);
+    assert.match(actionSource, /markPurchaseItemOrdered[\s\S]*?>確認已採購<\/button>/);
     assert.doesNotMatch(saveSource, /switchPurchasingView\(/);
     assert.doesNotMatch(saveSource, /loadPendingPurchaseOrders\(true\)/);
     assert.match(saveSource, /syncCommittedQuickPurchaseDemand\(savedDemand, savedOrder\)/);

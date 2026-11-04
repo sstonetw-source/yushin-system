@@ -2075,7 +2075,7 @@ test('ordered action belongs to purchasing while the order list only shows progr
     assert.doesNotMatch(actions, /openOrderPurchaseDraft/);
     const purchasingStart = appSource.indexOf('function renderPendingPurchaseOrders');
     const purchasingEnd = appSource.indexOf('window.loadPendingPurchaseOrders =', purchasingStart);
-    assert.match(appSource.slice(purchasingStart, purchasingEnd), /markPurchaseItemOrdered[\s\S]*?確認已下訂/);
+    assert.match(appSource.slice(purchasingStart, purchasingEnd), /markPurchaseItemOrdered[\s\S]*?確認已採購/);
     assert.match(appSource.slice(purchasingStart, purchasingEnd), /openOrderPurchaseDraft[\s\S]*?建立採購單/);
     const saveStart = appSource.indexOf('window.printPurchaseOrder = async function()');
     const saveEnd = appSource.indexOf("window.addEventListener('afterprint'", saveStart);
