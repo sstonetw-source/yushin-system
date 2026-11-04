@@ -89,7 +89,7 @@ test('authorized environment enables production transaction gates without enabli
  assert.equal(flags.ENABLE_PRODUCTION_ORDER_RESERVATION_BACKEND,'true');
  assert.equal(flags.ENABLE_PRODUCTION_FORMAL_PURCHASE,'true');
  assert.equal(flags.ENABLE_PRODUCTION_QUICK_PURCHASE,'true');
- assert.match(html,/<script src="app\.js\?v=20261104-450"/);
+ assert.match(html,/<script src="app\.js\?v=20261104-451"/);
 });
 
 test('all new backend retirement routes are restricted to the approved origin without a maintenance lock',()=>{

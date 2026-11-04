@@ -156,6 +156,14 @@ test('Preview without backend opt-in fails closed instead of using legacy purcha
   assert.equal(x.calls.some(call=>call.name==='commitV2FormalPurchase'),false);
  }
 });
+test('production without backend opt-in fails closed before any legacy purchase write',async()=>{
+ for(const flag of [false,undefined]){
+  const x=productionSetup();x.c.YUSHIN_PRODUCTION_FORMAL_PURCHASE=flag;
+  await assert.rejects(x.c.commitFormalPurchaseOrder(x.po),/正式採購後端尚未啟用/);
+  assert.equal(x.writes.length,0);
+  assert.equal(x.calls.some(call=>call.name==='commitV2FormalPurchase'),false);
+ }
+});
 test('preview original confirm action uses the same backend, re-reads records and never uses legacy writer',async()=>{
  const x=previewSetup(),result=await x.c.commitFormalPurchaseOrder(x.po);
  assert.equal(result.poRecord.buyerName,'Server Buyer');
