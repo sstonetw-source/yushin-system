@@ -4463,12 +4463,9 @@ test('direct ship delivery rule is bound to the matching atomic receipt', () => 
     const orderEnd=rulesSource.indexOf('\n\n    // Formal supplier PO',orderStart);
     const orderSource=rulesSource.slice(orderStart,orderEnd);
     assert.match(orderSource,/orderUpdateAllowed\(id\)/);
-    assert.match(rulesSource.slice(rulesSource.indexOf('function orderUpdateAllowed(id)'),rulesSource.indexOf('match /orders/{id}')),/directShipReceiptOrderUpdate\(id\)/);
+    assert.match(ruleFunctionSource('orderUpdateAllowed'),/directShipReceiptOrderUpdate\(id\)/);
 
-    const supplyFastStart=rulesSource.indexOf('function directShipSupplyReceiptUpdate(id, userRole)');
-    const supplyFastEnd=rulesSource.indexOf('\n\n    function purchaserSupplyOperationalUpdate(userRole)',supplyFastStart);
-    const supplyFastSource=rulesSource.slice(supplyFastStart,supplyFastEnd);
-    assert.ok(supplyFastStart>=0&&supplyFastEnd>supplyFastStart);
+    const supplyFastSource=ruleFunctionSource('directShipSupplyReceiptUpdate');
     assert.match(supplyFastSource,/affectedKeys\(\)\.hasOnly\(\[[\s\S]*?'receivedQty'[\s\S]*?'status'[\s\S]*?'updatedAt'/);
     assert.match(supplyFastSource,/resource\.data\.get\('fulfillmentType', 'WAREHOUSE'\) == 'DIRECT_SHIP'/);
 
@@ -4476,7 +4473,7 @@ test('direct ship delivery rule is bound to the matching atomic receipt', () => 
     const supplyMatchEnd=rulesSource.indexOf('\n\n    match /inventory/{id}',supplyMatchStart);
     const supplyMatchSource=rulesSource.slice(supplyMatchStart,supplyMatchEnd);
     assert.match(supplyMatchSource,/supplyOperationalUpdateAllowed\(id\)/);
-    assert.match(rulesSource.slice(rulesSource.indexOf('function supplyOperationalUpdateAllowed(id)'),supplyMatchStart),/directShipSupplyReceiptUpdate\(id, userRole\)/);
+    assert.match(ruleFunctionSource('supplyOperationalUpdateAllowed'),/directShipSupplyReceiptUpdate\(id, userRole\)/);
 });
 
 test('direct ship receipt transaction writes the supply delta required by security rules', () => {
