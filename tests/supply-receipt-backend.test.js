@@ -198,3 +198,38 @@ test('shared PO receipt witness follows unique supply link and rejects draft, te
  record=structuredClone(original);
  await assert.rejects(runtime.validateReceiptPurchaseDocument(tx,{...supply,productId:'OTHER'},expected),/採購單憑證/);
 });
+
+function directStockTransport(){
+ const x=transport(),poNo='PO-YS-20261105-01-02',sourceId='MANUAL_PO:'+poNo+':0';
+ x.input.supplyId='po-'+poNo+'-0';x.jobs[0].supplyId=x.input.supplyId;
+ Object.assign(x.proof,{supplyOrderId:x.input.supplyId,fulfillmentType:'WAREHOUSE',
+  method:'PURCHASING_PO',demandSourceType:'STOCK_REPLENISHMENT',documentSourceType:'SUPPLY_ORDER',
+  purchaseDocumentId:poNo,sourceId,demandId:'STOCK_REPLENISHMENT:'+sourceId,
+  orderId:sourceId,itemId:'',sourceItemId:'',receiptId:x.input.operationId,operationId:x.input.operationId,
+  productId:'P',lotId:'stock-lot'});
+ delete x.proof.reservationLocationSchemaVersion;
+ return x;
+}
+test('direct-stock transport confirms the existing backend receipt without a sales-order reservation and refreshes stock',async()=>{
+ const x=directStockTransport(),notifications=[];
+ const receive=()=>x.c.receiveV2SupplyEmulator(x.input.supplyId,x.input.qty,x.input.lotNo,x.input.expiryDate,x.input.operationId,
+  {actorUid:'buyer',actorRole:'purchaser',onStockCommitted:(...args)=>notifications.push(args)});
+ assert.deepEqual([...await receive()],['O']);
+ assert.deepEqual([...await receive()],['O']);
+ assert.deepEqual(notifications,[['P','W'],['P','W']]);
+ assert.equal(x.calls.filter(call=>call.name).length,2);
+ for(const call of x.calls.filter(call=>call.name))assert.deepEqual(JSON.parse(JSON.stringify(call.data)),x.input);
+});
+test('direct-stock proof rejects altered source, document, batch, actor and malformed missing-schema lookalikes',async()=>{
+ const patches=[{method:'PURCHASING_MANUAL'},{demandSourceType:'SALES_ORDER'},{documentSourceType:'OTHER'},
+  {purchaseDocumentId:'OTHER'},{purchaseDocumentId:''},{sourceId:'MANUAL_PO:PO-YS-20261105-01-02:5'},
+  {sourceId:'SALES_ORDER:O:I'},{demandId:'OTHER'},{orderId:'O'},{itemId:'I'},{sourceItemId:'I'},
+  {supplyOrderId:'OTHER'},{receiptId:'OTHER'},{operationId:'OTHER'},{productKey:''},{productId:'OTHER'},
+  {warehouseId:''},{warehouseId:'custody-sales'},{lotId:''},{qty:3},{lotNo:'OTHER'},{expiryDate:''},
+  {createdByUid:'other'},{createdByRole:'admin'},{fulfillmentType:'DIRECT_SHIP'},
+  {reservationLocationSchemaVersion:0},{reservationLocationSchemaVersion:3}];
+ for(const patch of patches){
+  const x=directStockTransport(),saved=JSON.stringify(x.jobs);Object.assign(x.proof,patch);
+  await assert.rejects(x.receive(),/憑證/,JSON.stringify(patch));assert.equal(JSON.stringify(x.jobs),saved);
+ }
+});

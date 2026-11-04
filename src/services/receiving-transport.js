@@ -61,12 +61,32 @@ async function receiveV2SupplyEmulator(supplyId,qty,lotNo,expiryDate,operationId
     // schema without weakening exact batch checks for physical warehouse receipts.
     const direct=proof?.fulfillmentType==='DIRECT_SHIP';
     const empty=value=>value===undefined||value==='';
+    // Direct-stock receipts have no sales-order reservation schema. Accept only
+    // their exact existing backend source identity, never a generic missing schema.
+    const stockSource=typeof proof?.purchaseDocumentId==='string'
+        &&proof.purchaseDocumentId!==''&&!proof.purchaseDocumentId.includes('/')
+        &&typeof proof.sourceId==='string'
+        ? proof.sourceId.match(/^MANUAL_PO:(.+):([0-4])$/):null;
+    const directStock=!direct&&proof?.fulfillmentType==='WAREHOUSE'
+        &&proof.method==='PURCHASING_PO'&&proof.demandSourceType==='STOCK_REPLENISHMENT'
+        &&proof.documentSourceType==='SUPPLY_ORDER'
+        &&stockSource?.[1]===proof.purchaseDocumentId
+        &&proof.supplyOrderId===`po-${encodeURIComponent(proof.purchaseDocumentId)}-${stockSource?.[2]}`
+        &&proof.demandId==='STOCK_REPLENISHMENT:'+proof.sourceId
+        &&proof.orderId===proof.sourceId&&proof.itemId===''&&proof.sourceItemId===''
+        &&proof.receiptId===operationId&&proof.operationId===operationId
+        &&typeof proof.productKey==='string'&&proof.productKey!==''
+        &&proof.productId===proof.productKey
+        &&typeof proof.warehouseId==='string'&&proof.warehouseId!==''
+        &&!proof.warehouseId.startsWith('custody-')
+        &&typeof proof.lotId==='string'&&proof.lotId!==''
+        &&proof.reservationLocationSchemaVersion===undefined;
     const batchMatches=direct
         ? lotNo===''&&expiryDate===''&&empty(proof.lotNo)&&empty(proof.expiryDate)&&proof.warehouseId===''
         : proof?.lotNo===lotNo&&proof?.expiryDate===expiryDate;
     if(!proof||proof.supplyOrderId!==supplyId||proof.qty!==qty||!batchMatches
         ||proof.createdByUid!==uid||proof.createdByRole!==role
-        ||(!direct&&![1,2].includes(proof.reservationLocationSchemaVersion)))
+        ||(!direct&&!directStock&&![1,2].includes(proof.reservationLocationSchemaVersion)))
         throw Error('收貨已可能提交，但憑證尚未確認，請使用原資料重試。');
     if(proof.fulfillmentType!=='DIRECT_SHIP')
         options.onStockCommitted?.(proof.productKey,proof.warehouseId);
