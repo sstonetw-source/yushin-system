@@ -23525,10 +23525,7 @@ function setOrderModalItem(item={}) {
     const confirmed=document.getElementById('orderSelfOrderConfirmed');if(confirmed)confirmed.value=normalized.selfOrderConfirmed===true?'confirmed':'pending';
     onOrderProcurementTypeChange();
     if(normalized.procurementType==='SALES_SELF_ORDER')document.getElementById('orderCostPrice').value=normalized.costPrice??'';
-    document.getElementById('orderFulfillmentType').value=normalized.fulfillmentType||'WAREHOUSE';
-    populateOrderWarehouseOptions(normalized.warehouseId||'');
-    onOrderFulfillmentChange();
-    if(normalized.deliveryPlan)window.setOrderShippingInstructions?.(normalized.deliveryPlan);
+    // 品項編輯不重設整張訂單的交付選擇；交付方式在品項清單下方統一設定。
     window.syncOrderEntrySelfStatus?.();
     window._orderModalProductId=normalized.productId||'';
     onOrderItemCodeChange(codeInput);
@@ -23549,6 +23546,9 @@ function restoreSavedOrderDraft(){
         document.getElementById('orderCustomer').value=draft.customerName||'';
         const remarks=document.getElementById('orderRemarks');if(remarks)remarks.value=draft.remarks||'';
         setOrderModalItem(draft);
+        document.getElementById('orderFulfillmentType').value=draft.fulfillmentType||'WAREHOUSE';
+        populateOrderWarehouseOptions(draft.warehouseId||'');
+        onOrderFulfillmentChange();
         window.setOrderShippingInstructions?.(draft.shippingInstructions||{});
         document.getElementById('orderTransactionType').value=draft.transactionType||'';
         const invoice=document.getElementById('orderInvoiceTitle');invoice.value=draft.invoiceTitle||'';window.syncOrderInvoiceTitleRequirement?.();
@@ -23678,7 +23678,7 @@ function renderNewOrderDraftItems(){
         const status=orderItemProductStatus(item);
         const action=status==='missing'?`<button type="button" class="btn-small btn-secondary" onclick="quickCreateNewOrderDraftItem(${index})">快速建立</button>`
             : ['ambiguous','error'].includes(status)?`<button type="button" class="btn-small btn-secondary" onclick="editNewOrderDraftItem(${index})">${status==='error'?'重試':'選擇產品'}</button>`:'';
-        return `<tr><td data-th="貨號">${escapeHtml(item.itemCode||'')}</td><td data-th="品名">${escapeHtml(item.itemName||'')}</td><td data-th="廠牌">${escapeHtml(item.brand||'')}</td><td data-th="數量">${item.qty}</td><td data-th="單價">${item.unitPrice===null?'待確認':Number(item.unitPrice).toLocaleString()}</td><td data-th="產品狀態" class="order-product-status" data-status="${status}">${orderItemProductStatusLabel(item)}</td><td data-th="訂貨／交付">${item.procurementType==='SALES_SELF_ORDER'?(item.selfOrderConfirmed?'自行訂貨・已下訂':'自行訂貨・尚未下訂'):'交由採購'}／${globalThis.YushinOrderEntry.deliveryLabel(item)}</td><td data-th="操作">${action}<button type="button" class="btn-small btn-secondary" onclick="editNewOrderDraftItem(${index})">編輯</button> <button type="button" class="btn-danger btn-small" onclick="removeNewOrderDraftItem(${index})">移除</button></td></tr>`;
+        return `<tr><td data-th="貨號">${escapeHtml(item.itemCode||'')}</td><td data-th="品名">${escapeHtml(item.itemName||'')}</td><td data-th="廠牌">${escapeHtml(item.brand||'')}</td><td data-th="數量">${item.qty}</td><td data-th="單價">${item.unitPrice===null?'待確認':Number(item.unitPrice).toLocaleString()}</td><td data-th="產品狀態" class="order-product-status" data-status="${status}">${orderItemProductStatusLabel(item)}</td><td data-th="訂貨方式">${item.procurementType==='SALES_SELF_ORDER'?(item.selfOrderConfirmed?'自行訂貨・已下訂':'自行訂貨・尚未下訂'):'交由採購'}</td><td data-th="操作">${action}<button type="button" class="btn-small btn-secondary" onclick="editNewOrderDraftItem(${index})">編輯</button> <button type="button" class="btn-danger btn-small" onclick="removeNewOrderDraftItem(${index})">移除</button></td></tr>`;
     }).join('');
 }
 let orderDraftProductCheckGeneration=0;
@@ -23726,12 +23726,7 @@ window.addCurrentOrderItemToDraft=function(){
     const item=currentOrderModalItem();
     const validation=globalThis.YushinOrderEntry.validateItem(item);
     if(!validation.valid){alert(validation.message);document.getElementById(validation.field)?.focus();return;}
-    if(String(item.productType||'').trim().toUpperCase()==='SERVICE'){
-        if(item.fulfillmentType!=='WAREHOUSE'){alert('服務型品項尚不支援原廠直送或實貨履約入口。');return;}
-        item.deliveryPlan={};item.warehouseId='';
-    }else{
-        try { globalThis.YushinWarehouseLogistics.validatePlan(item.deliveryPlan,true); } catch(err) { alert(err.message); const details=document.getElementById('orderRecipientDetails');if(details)details.open=true;return; }
-    }
+    // 收件資訊只在建立整張訂單時檢查，不阻擋先加入多個品項。
     if(!item.itemName||item.qty<=0){alert('請先完成目前品項的品名與數量。');return;}
     if(item.productMasterMatched!==true||!item.productId||orderItemProductStatus(item)!=='matched'){alert('正式訂單品項必須先對應產品主檔。請輸入既有貨號，或使用「快速新增產品」完成基本產品資料。');return;}
     const duplicateIndex=newOrderDraftItems.findIndex(existing=>globalThis.YushinOrderEntry.sameDraftItem(existing,item));
@@ -24011,6 +24006,10 @@ window.copyOrderAsNew = function(orderId) {
     const invoiceInput = document.getElementById('orderInvoiceTitle');
     invoiceInput.value = source.invoiceTitle || '';
     window.syncOrderInvoiceTitleRequirement?.();
+    document.getElementById('orderFulfillmentType').value=source.fulfillmentType||'WAREHOUSE';
+    populateOrderWarehouseOptions(source.warehouseId||'');
+    onOrderFulfillmentChange();
+    window.setOrderShippingInstructions?.(source.shippingInstructions||first.deliveryPlan||{});
 };
 
 window.closeOrderModal = function(options = {}) {
@@ -24051,8 +24050,14 @@ function showActionFeedback(message, type = 'success') {
 
 window.saveNewOrder = function() {
     if (newOrderSaveInProgress) return;
+    const fulfillmentType=document.getElementById('orderFulfillmentType')?.value||'WAREHOUSE';
+    const warehouseId=fulfillmentType==='DIRECT_SHIP'?'':document.getElementById('orderWarehouse')?.value||'';
+    const sharedPlan=window.orderShippingInstructions?.()||{};
+    const customerName=document.getElementById('orderCustomer')?.value.trim()||'';
     const currentItem=currentOrderModalItem();
-    const items=[...newOrderDraftItems,...(currentItem.itemName?[currentItem]:[])].map(item=>({...item}));
+    const items=[...newOrderDraftItems,...(currentItem.itemName?[currentItem]:[])].map(item=>({
+        ...item,fulfillmentType,warehouseId,deliveryPlan:{...sharedPlan},deliveryCustomerName:customerName
+    }));
     if(!items.length){alert('請至少輸入一個訂單品項。');return;}
     try { assertOrderItemCount(items); } catch (err) { alert(err.message); return; }
     if(items.some(item=>!item.itemName||Number(item.qty||0)<=0)){alert('每個品項都必須有品名及大於 0 的數量。');return;}
@@ -24082,19 +24087,18 @@ window.saveNewOrder = function() {
     if(!tradeValidation.valid){alert(tradeValidation.message);const details=document.getElementById('orderTradeDetails');if(details)details.open=true;document.getElementById(tradeValidation.field||'orderTransactionType')?.focus();return;}
     let shippingInstructions;
     try {
-        const fallback=window.orderShippingInstructions?.()||{};
+        let validatedPlan;
         for(const item of items) {
             if(String(item.productType||'').trim().toUpperCase()==='SERVICE'){
                 if(item.fulfillmentType==='DIRECT_SHIP')throw new Error('服務型品項不屬於原廠直送實貨，請選擇一般服務處理。');
                 item.deliveryPlan={};item.warehouseId='';
                 continue;
             }
-            const plan=item.deliveryPlan||fallback;
-            if(plan.mode==='CUSTOMER_SHIP'&&item.deliveryCustomerName&&item.deliveryCustomerName!==document.getElementById('orderCustomer').value.trim())throw new Error('客戶已更換，請編輯各品項並重新確認收件資訊。');
-            if(item.fulfillmentType==='DIRECT_SHIP'&&plan.mode!=='CUSTOMER_SHIP')throw new Error('原廠直送請設定客戶收件資訊。');
-            item.deliveryPlan=globalThis.YushinWarehouseLogistics.validatePlan(plan,true);
+            if(fulfillmentType==='DIRECT_SHIP'&&sharedPlan.mode!=='CUSTOMER_SHIP')throw new Error('原廠直送請設定客戶收件資訊。');
+            if(!validatedPlan)validatedPlan=globalThis.YushinWarehouseLogistics.validatePlan(sharedPlan,true);
+            item.deliveryPlan={...validatedPlan};
         }
-        shippingInstructions=items.find(item=>String(item.productType||'').trim().toUpperCase()!=='SERVICE')?.deliveryPlan||{};
+        shippingInstructions=validatedPlan||{};
     } catch(err) {alert(err.message);const details=document.getElementById('orderRecipientDetails');if(details)details.open=true;return;}
     items.forEach(item=>{delete item.productCheckStatus;});
     const firstItem=items[0];

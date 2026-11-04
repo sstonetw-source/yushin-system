@@ -14,9 +14,10 @@ test('pending self-order can be saved without cost or supplier but confirmation 
  assert.equal(core.validateItem({...pending,selfOrderConfirmed:true,supplier:'Vendor',costPrice:0}).valid,true);
  assert.equal(core.validateItem({...pending,costPrice:-1}).valid,false);
 });
-test('same product with different recipient, price, procurement mode or cost stays on separate lines',()=>{
+test('same product uses shared delivery while price, procurement mode or cost keeps lines separate',()=>{
  assert.equal(core.sameDraftItem(item,{...item}),true);
- for(const patch of [{unitPrice:0},{procurementType:'SALES_SELF_ORDER'},{fulfillmentType:'DIRECT_SHIP'},{costPrice:10},{selfOrderConfirmed:true},{deliveryPlan:{mode:'CUSTOMER_SHIP',address:'other'}}])assert.equal(core.sameDraftItem(item,{...item,...patch}),false);
+ for(const patch of [{unitPrice:0},{procurementType:'SALES_SELF_ORDER'},{costPrice:10},{selfOrderConfirmed:true}])assert.equal(core.sameDraftItem(item,{...item,...patch}),false);
+ for(const patch of [{fulfillmentType:'DIRECT_SHIP'},{deliveryPlan:{mode:'CUSTOMER_SHIP',address:'other'}}])assert.equal(core.sameDraftItem(item,{...item,...patch}),true);
 });
 test('copying an order retains customer-facing product settings but creates a new uncommitted item',()=>{
  const copied=core.copyItem({...item,selfOrderConfirmed:true,supplyOrderedQty:2,reservedQty:2,deliveredQty:2,dispatchPreparedQty:2,orderEvents:[{id:'old'}],transferPendingId:'T',warehouseShippedQty:2},{});
@@ -25,9 +26,9 @@ test('copying an order retains customer-facing product settings but creates a ne
 });
 const source=fs.readFileSync('app.js','utf8');
 function validationFixture(current=item,drafts=[]) {
- const nodes={orderOwnerUid:{value:'sales'},orderCustomer:{value:'台大',focus(){}},orderItemCode:{focus(){},scrollIntoView(){}},orderRecipientDetails:{open:false},orderTradeDetails:{open:false},orderTransactionType:{value:'借',focus(){}},orderInvoiceTitle:{value:'',focus(){nodes.focused='orderInvoiceTitle';}}};
+ const nodes={orderOwnerUid:{value:'sales'},orderCustomer:{value:'台大',focus(){}},orderItemCode:{focus(){},scrollIntoView(){}},orderRecipientDetails:{open:false},orderTradeDetails:{open:false},orderTransactionType:{value:'借',focus(){}},orderInvoiceTitle:{value:'',focus(){nodes.focused='orderInvoiceTitle';}},orderFulfillmentType:{value:current.fulfillmentType||'WAREHOUSE'},orderWarehouse:{value:'MAIN'}};
  const alerts=[];
- const c=vm.createContext({window:{orderShippingInstructions:()=>({mode:'PICKUP'})},document:{getElementById:id=>nodes[id]},newOrderSaveInProgress:false,
+ const c=vm.createContext({window:{orderShippingInstructions:()=>current.deliveryPlan||{mode:'PICKUP'}},document:{getElementById:id=>nodes[id]},newOrderSaveInProgress:false,
   currentOrderModalItem:()=>({...current}),MAX_ORDER_ITEMS:15,newOrderDraftItems:drafts,YushinOrderEntry:core,YushinWarehouseLogistics:logistics,
   currentUserRole:'sales',salesList:[{uid:'sales',name:'Sales'}],isSelectableCommercialOwner:()=>true,warehouseMasterCache:[{id:'MAIN'}],orderItemProductStatus:()=> 'matched',assertOrderItemCount(){},
   alert:s=>alerts.push(s),editNewOrderDraftItem:i=>nodes.edited=i});
@@ -47,11 +48,13 @@ test('direct shipment requires the actual customer recipient and never accepts s
  const f=validationFixture({...item,fulfillmentType:'DIRECT_SHIP',warehouseId:'',deliveryPlan:{mode:'CUSTOMER_SHIP',contact:'客戶',phone:'123',address:'台北'}});
  assert.equal(f.c.window.saveNewOrder().shippingInstructions.contact,'客戶');
 });
-test('mixed order retains delivery instructions for every line and blocks a missing recipient on any line',()=>{
+test('multiple goods lines share one delivery choice even if draft items had different shipping plans',()=>{
  const customer={...item,itemId:'J',deliveryPlan:{mode:'CUSTOMER_SHIP',contact:'客戶',phone:'123',address:'台北'}};
  let f=validationFixture(item,[customer]);const result=f.c.window.saveNewOrder();
- assert.equal(result.items[0].deliveryPlan.address,'台北');assert.equal(result.items[1].deliveryPlan.mode,'PICKUP');
- f=validationFixture(item,[{...customer,deliveryPlan:{mode:'CUSTOMER_SHIP',contact:'客戶'}}]);assert.equal(f.c.window.saveNewOrder(),undefined);
+ assert.equal(result.items[0].deliveryPlan.mode,'PICKUP');assert.equal(result.items[1].deliveryPlan.mode,'PICKUP');
+ assert.equal(result.items[0].warehouseId,'MAIN');assert.equal(result.items[1].warehouseId,'MAIN');
+ f=validationFixture({...item,deliveryPlan:{mode:'CUSTOMER_SHIP',contact:'客戶'}},[customer]);assert.equal(f.c.window.saveNewOrder(),undefined);
+ assert.match(f.alerts[0],/收件/);
 });
 test('Service-only orders do not demand a warehouse or fake physical delivery instructions',()=>{
  const service={...item,productType:'Service',productId:'BIOPLEX',
@@ -79,7 +82,7 @@ test('Goods plus Service validates only real shipment; rejects direct-ship Servi
  assert.match(f.alerts[0],/服務型/);
 });
 
-test('adding a Service draft skips physical delivery fields; Goods and direct-ship safeguards remain',()=>{
+test('adding items does not require a delivery plan before the shared delivery section',()=>{
  const start=source.indexOf('window.addCurrentOrderItemToDraft=function()'),end=source.indexOf('window.openOrderModal',start);
  for(const productType of ['Service','Goods'])for(const fulfillmentType of ['WAREHOUSE','DIRECT_SHIP']){
   const row={...item,productType,fulfillmentType,deliveryPlan:{mode:'CUSTOMER_SHIP'},warehouseId:'STALE'};
@@ -89,9 +92,8 @@ test('adding a Service draft skips physical delivery fields; Goods and direct-sh
    orderItemProductStatus:()=> 'matched',alert:message=>alerts.push(message),renderNewOrderDraftItems(){},
    clearQuickProductButton(){},clearProductMatchChoices(){}});
   vm.runInContext(source.slice(start,end),c);c.window.addCurrentOrderItemToDraft();
-  if(productType==='Service'&&fulfillmentType==='WAREHOUSE'){
-   assert.equal(drafts.length,1);assert.equal(drafts[0].warehouseId,'');assert.equal(Object.keys(drafts[0].deliveryPlan).length,0);assert.deepEqual(alerts,[]);
-  }else{assert.equal(drafts.length,0);assert.equal(alerts.length,1);}
+  assert.equal(drafts.length,1);assert.deepEqual(alerts,[]);
+  assert.equal(drafts[0].productType,productType);
  }
 });
 
@@ -101,9 +103,26 @@ test('normalized order fields retain missing price as null before save validatio
  assert.equal(c.normalizeNewOrderItem({...item,unitPrice:''}).unitPrice,null);assert.equal(c.normalizeNewOrderItem({...item,unitPrice:0}).unitPrice,0);
 });
 
-test('changing the customer cannot reuse a previous customer recipient snapshot',()=>{
+test('shared delivery replaces stale per-item customer snapshots when saving',()=>{
  const f=validationFixture({...item,deliveryCustomerName:'另一客戶',deliveryPlan:{mode:'CUSTOMER_SHIP',contact:'客戶',phone:'123',address:'台北'}});
- assert.equal(f.c.window.saveNewOrder(),undefined);assert.match(f.alerts[0],/客戶已更換/);
+ const result=f.c.window.saveNewOrder();
+ assert.equal(result.items[0].deliveryCustomerName,'台大');
+ assert.equal(result.items[0].deliveryPlan.address,'台北');
+});
+test('editing a draft item does not replace the order-wide delivery selection',()=>{
+ const nodes=new Map(),element=id=>{
+  if(!nodes.has(id))nodes.set(id,{value:'',dataset:{}});
+  return nodes.get(id);
+ };
+ element('orderFulfillmentType').value='DIRECT_SHIP';
+ element('orderDeliveryChoice').value='DIRECT';
+ const c=vm.createContext({window:{syncOrderEntrySelfStatus(){}},document:{getElementById:element},
+  normalizeNewOrderItem:row=>row,normalizeItemCodeLoose:x=>x,normalizeBrandLookupKey:x=>x,resolveBrandName:x=>x,
+  selectBrandInDropdown:(node,value)=>{node.value=value;},onOrderBrandSelectChange(){},onOrderProcurementTypeChange(){},onOrderItemCodeChange(){},refreshOrderWarehouseStock(){}});
+ vm.runInContext(source.slice(source.indexOf('function setOrderModalItem('),source.indexOf('function restoreSavedOrderDraft(')),c);
+ c.setOrderModalItem({...item,itemCode:'SKU',fulfillmentType:'WAREHOUSE',deliveryPlan:{mode:'PICKUP'}});
+ assert.equal(element('orderFulfillmentType').value,'DIRECT_SHIP');
+ assert.equal(element('orderDeliveryChoice').value,'DIRECT');
 });
 test('purchaser can assist with pending entry but cannot confirm a salesperson self-order',()=>{
  const f=validationFixture({...item,procurementType:'SALES_SELF_ORDER',selfOrderConfirmed:true,supplier:'Vendor',costPrice:0});
