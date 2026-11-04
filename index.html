@@ -1574,14 +1574,13 @@
 
         <!-- 資料庫管理：備份、估算雲端資料量與清理舊資料 -->
         <div id="admin-storage" class="admin-panel" style="display:none;">
-            <h4 style="margin-top:0;">資料庫備份</h4>
+            <h4 style="margin-top:0;">部分資料匯出與檔案檢查</h4>
             <div class="toolbar no-print" style="display:block;">
-                <button id="databaseBackupBtn" onclick="downloadDatabaseBackup()" class="btn-secondary">⬇️ 下載資料庫備份</button>
-                <button type="button" id="databaseBackupUploadBtn" class="btn-secondary" onclick="document.getElementById('databaseBackupFile').click()">⬆️ 上傳備份檢查</button>
+                <button id="databaseBackupBtn" onclick="downloadDatabaseBackup()" class="btn-secondary">⬇️ 下載部分資料匯出</button>
+                <button type="button" id="databaseBackupUploadBtn" class="btn-secondary" onclick="document.getElementById('databaseBackupFile').click()">⬆️ 檢查匯出檔案</button>
                 <input id="databaseBackupFile" type="file" accept=".json,application/json" style="display:none" onchange="previewDatabaseBackupUpload(this)">
-                <button type="button" id="databaseBackupRestoreBtn" class="btn-secondary" onclick="restoreMissingDatabaseBackupDocuments()" style="display:none">補回缺少的文件</button>
                 <span style="font-size:12px;color:#666;">
-                    備份會將訂單、估價單、採購單、儀器、使用者與系統設定整理成一個 JSON 檔下載到電腦。不會預留 Firebase 儲存空間，但每次會讀取全部資料。
+                    只匯出指定且目前帳號有權讀取的集合，以及 Forecast 進度；不包含所有新版交易集合、其他子集合或完整憑證，不是完整資料庫備份。下載會產生大量 Firestore 讀取，僅在需要時執行。上傳檔案只檢查格式，不會寫入或還原正式資料。
                 </span>
                 <div id="databaseBackupStatus" style="margin-top:8px;font-size:13px;"></div>
                 <div id="databaseBackupUploadStatus" style="margin-top:8px;font-size:13px;"></div>
@@ -1598,19 +1597,9 @@
             </div>
 </div>
 
-            <h4 style="margin-top:28px;color:#b42318;">保留估價單／清除其他測試營運資料</h4>
-            <div class="toolbar no-print" style="display:block;border:1px solid #f0b4ae;padding:12px;border-radius:8px;">
-                <button id="testDataResetPreviewBtn" type="button" onclick="previewTestDataReset()">檢查待清除資料</button>
-                <div id="testDataResetPreview" style="margin-top:8px;font-size:13px;white-space:pre-line;"></div>
-                <div id="testDataResetConfirmWrap" style="display:none;margin-top:12px;">
-                    <label for="testDataResetConfirmInput">確認執行時請輸入 <strong>保留估價單清除測試資料</strong></label>
-                    <input id="testDataResetConfirmInput" type="text" autocomplete="off" placeholder="保留估價單清除測試資料" style="margin:6px 8px 6px 0;">
-                    <button id="testDataResetExecuteBtn" type="button" class="btn-danger" onclick="executeTestDataReset()">永久清除並初始化</button>
-                </div>
-                <div id="testDataResetStatus" style="margin-top:8px;font-size:13px;white-space:pre-line;"></div>
-                <span style="display:block;margin-top:8px;font-size:12px;color:#666;">
-                    僅真正管理員可執行。保留估價單；清除 Forecast、訂單、採購、庫存交易／預留／批次／收貨／送貨與測試操作紀錄；庫存與分倉數量歸零。保留使用者、角色、產品、供應商、廠牌與客戶主檔、倉庫與系統設定。估價單中指向已清除資料的連結將無法開啟，原成交狀態不變。
-                </span>
+            <div class="panel" style="margin-top:20px;">
+                <h4>正式資料重置</h4>
+                <p style="font-size:13px;color:#666;">為避免部分資料遭刪除，正式環境已停用瀏覽器初始化。資料清理及期初庫存歸零須於核准維護時段由受控後端工具執行，並完成範圍核對與結果驗證。</p>
             </div>
 
             <div class="admin-maintenance-tool" style="display:none;" aria-hidden="true">
