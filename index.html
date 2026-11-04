@@ -681,6 +681,7 @@
             <details class="quote-more-actions">
                 <summary>更多功能</summary>
                 <div class="quote-create-more-menu">
+                    <button type="button" id="quoteNoStampPdfBtn" class="btn-secondary" onclick="exportCurrentQuotePdfWithoutStamp()">匯出無印章 PDF</button>
                     <button type="button" class="btn-secondary" onclick="refreshAllItemPricesFromPriceList()">🔄 依最新價目表更新所有品項單價</button>
                     <button type="button" id="saveLoadedQuoteAsNewBtn" class="btn-secondary" style="display:none;" onclick="saveLoadedQuoteAsNew()">另存為新估價單</button>
                     <button type="button" id="decisionPriceAnalysisBtn" class="btn-secondary" onclick="exportDecisionPriceAnalysisPdf()">建立決標單價分析表</button>
@@ -1703,7 +1704,7 @@
     <script src="modules/order-commercial-details.js?v=20261025-1"></script>
     <script src="modules/order-entry-core.js?v=20261026-296"></script>
 <script src="modules/service-work-core.js?v=20261023-2"></script>
-    <script src="app.js?v=20261104-453"></script>
+    <script src="app.js?v=20261104-454"></script>
     <script src="modules/order-self-order-required.js?v=20261013-1"></script>
     <script src="modules/customer-cancellations.js?v=20261021-3"></script>
     <script src="modules/free-stock-recovery.js?v=20261014-9"></script>
