@@ -22,7 +22,7 @@
 在 repository 根目錄安裝 Functions 依賴（`npm --prefix functions install --no-package-lock`（目前沒有 Functions lockfile）），再執行：
 
 ```bash
-node functions/scripts/one-time-operational-reset.js --project=yu-shing-company
+node functions/scripts/one-time-operational-reset.js --project=yu-shing-company --database='(default)'
 ```
 
 這只會輸出 root classification、各待刪根集合的**頂層文件數**及庫存非零／批次數目，不會寫入。子集合文件沒有包含在計數中。
@@ -30,10 +30,12 @@ node functions/scripts/one-time-operational-reset.js --project=yu-shing-company
 通過 Emulator 驗收、人工核對所有根集合、完成寫入凍結後，才能執行：
 
 ```bash
-node functions/scripts/one-time-operational-reset.js --project=yu-shing-company --execute --skip-backup --writes-frozen --confirm=DELETE-OLD-OPERATIONS:yu-shing-company
+node functions/scripts/one-time-operational-reset.js --project=yu-shing-company --database='(default)' --journal=/absolute/path/yu-shing-company-reset.json --execute --skip-backup --writes-frozen --confirm=DELETE-OLD-OPERATIONS:yu-shing-company
 ```
 
-這個命令**無法回復**：`recursiveDelete` 會實際刪除文件及子集合；所有集合與庫存寫入並非同一全域原子交易。中途失敗應保持所有寫入凍結、檢查錯誤並可重跑，不能恢復正常營運直到驗證全部通過。
+這個命令**無法回復**：`recursiveDelete` 會實際刪除文件及子集合；所有集合與庫存寫入並非同一全域原子交易。請將 `--journal` 換成操作機器上已建立且只有維護者可寫的絕對路徑（檔名須包含專案 ID）；此檔會以原子檔案替換保存初始計數、逐集合刪除、庫存歸零批次與最終驗證狀態。失敗時保持寫入凍結，**先執行 dry-run 並核對 journal，再用同一路徑重試**；不會回退已刪資料。
+
+執行中會建立同路徑 `.lock` 檔阻止重複執行；正常退出時移除。若作業意外中止而留下 `.lock`，必須先檢查是否仍有維護程序執行及 journal 內容，不能自行盲目刪鎖。已標記 `VERIFIED` 的 journal 不允許再執行同一輪重置。
 
 ## 驗收
 
@@ -48,7 +50,7 @@ node functions/scripts/one-time-operational-reset.js --project=yu-shing-company 
 - 預檢根文件數不含子集合；Firestore 管理權限、配額、費用與長時間刪除仍可能阻擋執行。
 - 不處理 Firebase Authentication 使用者（依授權保留）。
 - 不會自動清除保留主檔內的嵌入交易紀錄；若有此類欄位，必須追加獨立驗證／清理。
-- 不可使用既有前台 `executeTestDataReset()` 替代，因它保留 `quotes`，且遇到調撥紀錄會中止。
+- 瀏覽器直接刪除與補回正式交易文件的舊入口已列入退役 PR；正式重置只能使用經過核准的後端工具。
 
 
 ## 2026-11-03 歸零完整性修正

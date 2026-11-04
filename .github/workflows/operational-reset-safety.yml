@@ -6,6 +6,7 @@ on:
       - 'functions/operational-reset-policy.js'
       - 'functions/scripts/one-time-operational-reset.js'
       - 'tests/operational-reset-policy.test.js'
+      - 'tests/operational-reset-journal.test.js'
       - 'docs/one-time-operational-reset.md'
       - '.github/workflows/operational-reset-safety.yml'
   workflow_dispatch:
@@ -24,4 +25,4 @@ jobs:
       - name: Check operational reset script syntax
         run: node --check functions/scripts/one-time-operational-reset.js
       - name: Verify allowlists and stock reset policy
-        run: node --test tests/operational-reset-policy.test.js
+        run: node --test tests/operational-reset-policy.test.js tests/operational-reset-journal.test.js
