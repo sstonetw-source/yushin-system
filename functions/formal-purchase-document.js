@@ -39,7 +39,7 @@ function normalizePurchaseDocument(input,lineCount,supplier){
 function purchaseDocumentFields(intent,items,buyerName){
  if(!intent.document)return {};
  const header=intent.document,snapshot=header.supplierSnapshot;
- const orderIds=[...new Set(items.map(item=>item.orderId))];
+ const orderIds=[...new Set(items.map(item=>item.orderId).filter(Boolean))];
  const fields={company:header.company,vendorName:snapshot.purchaseHeaderName,
   supplierName:snapshot.supplierName,supplierId:snapshot.supplierId,supplierEmail:snapshot.email,
   supplierSnapshot:snapshot,expectedDate:header.expectedDate,

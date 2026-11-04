@@ -125,6 +125,79 @@ test('Preview-gated handler completes the fifteen-line shared writer on an expli
  await assert.rejects(handler()({...request,data:x.input(13,1,'later')}),{code:'permission-denied'});assert.deepEqual(await x.snapshot(),after);
 });
 
+test('direct-stock PO without any sales order reaches incoming and warehouse receipt through the same authoritative core',{timeout:180000},async()=>{
+ const tag='receipt15-direct-stock',poNo=tag+'-PO',productId=tag+'-P',warehouseId=tag+'-W';
+ const buyer=await actor(tag+'-buyer','purchaser'),warehouse=await actor(tag+'-warehouse','warehouse');
+ const sourceId='MANUAL_PO:'+poNo+':0',demandId='STOCK_REPLENISHMENT:'+sourceId;
+ const supplyId='po-'+encodeURIComponent(poNo)+'-0';
+ const collections=['purchaseOrders','supplyOrders','receivingSupplyOrders','procurementDemands',
+  'products','warehouses','inventory','warehouseStocks','reservationOperationReceipts',
+  'inventoryMovements','receipts','inventoryLots','inventoryLotCosts'];
+ fixtures.push({cleanup:async()=>{
+  const paths=[];
+  for(const name of collections){
+   const docs=(await db.collection(name).get()).docs;
+   for(const doc of docs)if(doc.id.includes(tag)||String(doc.data()?.sourceId||'').includes(tag))paths.push(name+'/'+doc.id);
+  }
+  for(let index=0;index<paths.length;index+=400){const batch=db.batch();paths.slice(index,index+400).forEach(path=>batch.delete(db.doc(path)));await batch.commit();}
+ }});
+ const document={company:'yushin',supplierSnapshot:{supplierId:'',supplierName:'Vendor',purchaseHeaderName:'Vendor',
+  email:'vendor@example.test',leadTimeDays:5},expectedDate:'2026-11-24',expectedDateSource:'manual',lineScheduleDates:['2026-11-24']};
+ const draftItem={sourceType:'STOCK_REPLENISHMENT',orderId:'',itemId:'',productId,warehouseId,
+  fulfillmentType:'WAREHOUSE',itemCode:productId,itemName:'Direct-stock product',brand:'Roche',qty:3,unitPrice:18,
+  scheduleDate:'2026-11-24'};
+ const seed=db.batch();
+ seed.set(db.doc('products/'+productId),{productId,active:true,productType:'Goods',itemCode:productId,brand:'Roche'});
+ seed.set(db.doc('warehouses/'+warehouseId),{active:true,systemCustody:false});
+ seed.set(db.doc('inventory/'+encodeURIComponent(productId)),{productId,productKey:productId,onHand:0,reserved:0,incoming:0});
+ seed.set(db.doc('warehouseStocks/'+encodeURIComponent(warehouseId)+'__'+encodeURIComponent(productId)),{
+  productId,productKey:productId,warehouseId,onHand:0,reserved:0,incoming:0});
+ seed.set(db.doc('purchaseOrders/'+poNo),{poNo,poDate:'2026-11-04',purchaseType:'stock',
+  supplierName:'Vendor',vendorName:'Vendor',supplierSnapshot:document.supplierSnapshot,company:'yushin',
+  expectedDate:document.expectedDate,expectedDateSource:'manual',status:'DRAFT',documentOnly:true,
+  documentRevision:1,createdByUid:buyer.uid,createdByRole:'purchaser',items:[draftItem]});
+ await seed.commit();
+ const intent={poNo,poDate:'2026-11-04',supplier:'Vendor',document,documentRevision:1,
+  items:[{sourceType:'STOCK_REPLENISHMENT',productId,warehouseId,qty:3,unitCost:18}]};
+ const committed=await buyer.formalPurchase(intent);
+ assert.equal(committed.status,'committed');assert.deepEqual(committed.supplyOrderIds,[supplyId]);
+ assert.deepEqual((await db.doc('purchaseOrders/'+poNo).get()).data().orderIds,[]);
+ assert.equal((await db.doc('supplyOrders/'+supplyId).get()).data().orderId,'');
+ const {registerFormalPurchaseIncoming}=require('../functions/formal-purchase-incoming-service');
+ const incomingEnv={GCLOUD_PROJECT:'demo-yushin',FUNCTIONS_EMULATOR:'true',
+  ENABLE_V2_PO_INCOMING_EMULATOR:'true',FIRESTORE_EMULATOR_HOST:process.env.FIRESTORE_EMULATOR_HOST,
+  FIREBASE_AUTH_EMULATOR_HOST:process.env.FIREBASE_AUTH_EMULATOR_HOST};
+ assert.equal((await registerFormalPurchaseIncoming(db,buyer.uid,{poNo},incomingEnv)).status,'applied');
+ assert.equal((await db.doc('inventory/'+encodeURIComponent(productId)).get()).data().incoming,3);
+ assert.equal((await db.doc('warehouseStocks/'+encodeURIComponent(warehouseId)+'__'+encodeURIComponent(productId)).get()).data().incoming,3);
+ const receiptInput={supplyId,operationId:tag+'-receipt',qty:2,lotNo:'STOCK-LOT',expiryDate:'2028-01-01'};
+ assert.equal((await warehouse.receive(receiptInput)).status,'confirmed');
+ const supply=(await db.doc('supplyOrders/'+supplyId).get()).data(),demand=(await db.doc('procurementDemands/'+encodeURIComponent(demandId)).get()).data();
+ assert.equal(supply.receivedQty,2);assert.equal(supply.incomingRegisteredQty,1);
+ assert.equal(demand.orderedQty,3);assert.equal(demand.receivedQty,2);
+ assert.equal((await db.doc('inventory/'+encodeURIComponent(productId)).get()).data().onHand,2);
+ assert.equal((await db.doc('inventory/'+encodeURIComponent(productId)).get()).data().reserved,0);
+ assert.equal((await db.doc('inventory/'+encodeURIComponent(productId)).get()).data().incoming,1);
+ const snapshot=await Promise.all(['supplyOrders/'+supplyId,'procurementDemands/'+encodeURIComponent(demandId),'inventory/'+encodeURIComponent(productId)]
+  .map(async path=>(await db.doc(path).get()).data()));
+ assert.equal((await buyer.formalPurchase(intent)).status,'already-applied');
+ assert.equal((await registerFormalPurchaseIncoming(db,buyer.uid,{poNo},incomingEnv)).status,'already-applied');
+ assert.equal((await warehouse.receive(receiptInput)).status,'confirmed');
+ assert.deepEqual(await Promise.all(['supplyOrders/'+supplyId,'procurementDemands/'+encodeURIComponent(demandId),'inventory/'+encodeURIComponent(productId)]
+  .map(async path=>(await db.doc(path).get()).data())),snapshot);
+ const supplyRef=db.doc('supplyOrders/'+supplyId),incomingRef=db.doc('reservationOperationReceipts/po-incoming-'+encodeURIComponent(poNo));
+ const badReceipt={...receiptInput,operationId:tag+'-forged',qty:1};
+ await supplyRef.update({sourceId:'OTHER'});
+ await assert.rejects(warehouse.receive(badReceipt),e=>e.code==='functions/failed-precondition');
+ await supplyRef.update({sourceId});
+ const proof=(await incomingRef.get()).data();
+ await incomingRef.delete();
+ await assert.rejects(warehouse.receive(badReceipt),e=>e.code==='functions/failed-precondition');
+ await incomingRef.set(proof);
+ assert.equal((await db.doc('supplyOrders/'+supplyId).get()).data().receivedQty,2);
+ assert.equal((await db.doc('inventory/'+encodeURIComponent(productId)).get()).data().onHand,2);
+});
+
 // Source creation uses real Client Rules; only masters/opening balances are Admin fixtures.
 // Initialization retains the existing explicitly enforced Service-adapter boundary.
 for(const mode of ['manual','formal'])test('fifteen Auth-created lines flow through initialization, '+(mode==='manual'?'manual purchasing/incoming':'formal PO and incoming-Service')+' and canonical receiving',{timeout:180000},async()=>{

@@ -90,6 +90,22 @@ test('production PO backend opt-in uses Callable and verified records, not legac
  assert.equal(x.calls.filter(call=>call.name==='commitV2FormalPurchase').length,1);
  assert.equal(x.calls.filter(call=>call.emulator).length,0);
 });
+test('production direct-stock PO sends canonical stock lines without a source order and never falls back to client writer',async()=>{
+ const x=productionSetup();
+ x.po.purchaseType='stock';
+ x.po.items=[{sourceType:'STOCK_REPLENISHMENT',orderId:'',itemId:'',productId:'p',warehouseId:'W',
+  fulfillmentType:'WAREHOUSE',qty:1,unitPrice:0,itemName:'Item',itemCode:'P',brand:'Brand'}];
+ x.records.set('purchaseOrders/PO1',{...x.po,status:'ORDERED',supplyOrderIds:['PO1-0']});
+ x.records.delete('orders/o');
+ const result=await x.c.commitFormalPurchaseOrder(x.po);
+ assert.equal(result.committedSourceOrders.length,0);
+ assert.equal(result.committedSupplyOrders.length,1);
+ const call=x.calls.find(row=>row.name==='commitV2FormalPurchase');
+ assert.deepEqual(JSON.parse(JSON.stringify(call.request.items)),[{
+  sourceType:'STOCK_REPLENISHMENT',productId:'p',warehouseId:'W',qty:1,unitCost:0
+ }]);
+ assert.equal(x.writes.length,0);
+});
 test('GitHub Pages repository path uses guarded production Callable without client writes',async()=>{
  for(const pathname of ['/yushin-system','/yushin-system/','/yushin-system/index.html']){
   const x=productionSetup();Object.assign(x.c.location,{hostname:'sstonetw-source.github.io',pathname});

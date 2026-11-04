@@ -60,16 +60,25 @@ async function registerFormalPurchaseIncoming(db,uid,data,env=process.env){
    const supplyRef=ref('supplyOrders',supplyId),snap=await tx.get(supplyRef);
    const mirrorRef=ref('receivingSupplyOrders',supplyId),mirrorSnap=await tx.get(mirrorRef);
    const supply=snap.exists?snap.data():null;
-   const orderId=string(source.orderId,'訂單'),itemId=string(source.itemId,'訂單品項');
+   const stock=source.sourceType==='STOCK_REPLENISHMENT';
+   if(stock&&(po.purchaseType!=='stock'||source.orderId||source.itemId
+    ||(source.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'))
+    fail('failed-precondition','直接採購不得連結客戶訂單或使用原廠直送');
+   if(!stock&&po.purchaseType==='stock')fail('failed-precondition','採購單來源類型不一致');
+   const orderId=stock?'':string(source.orderId,'訂單');
+   const itemId=stock?'':string(source.itemId,'訂單品項');
+   const sourceId=stock?'MANUAL_PO:'+poNo+':'+i:orderId;
+   const demandId=stock?'STOCK_REPLENISHMENT:'+sourceId:'';
    const productId=string(source.productId,'商品'),productKey=string(source.productKey||productId,'庫存商品');
    const planned=quantity(source.qty,'採購列'),warehouseId=String(source.warehouseId||'');
    const direct=(source.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP';
    if(!supply||supply.type!=='PURCHASING_PO'||supply.status!=='ORDERED'
-    ||supply.purchaseDocumentId!==poNo||supply.sourceType!=='SALES_ORDER'
-    ||supply.sourceId!==orderId||supply.sourceItemId!==itemId
+    ||supply.purchaseDocumentId!==poNo||supply.sourceType!==(stock?'STOCK_REPLENISHMENT':'SALES_ORDER')
+    ||supply.sourceId!==sourceId||supply.sourceItemId!==itemId
     ||supply.orderId!==orderId||supply.itemId!==itemId||supply.productId!==productId
     ||supply.productKey!==productKey||supply.qty!==planned||supply.receivedQty!==0
     ||supply.incomingRegisteredQty!==0||supply.warehouseId!==warehouseId
+    ||(stock&&(supply.demandId!==demandId||productKey!==productId))
     ||(supply.fulfillmentType||'WAREHOUSE')!==(source.fulfillmentType||'WAREHOUSE'))
     fail('failed-precondition','正式採購與供應／到貨／已登記在途的來源不一致');
    const mirror=mirrorSnap.exists?mirrorSnap.data():null;
@@ -81,11 +90,22 @@ async function registerFormalPurchaseIncoming(db,uid,data,env=process.env){
     ||mirror.qty!==planned||mirror.receivedQty!==0||mirror.incomingRegisteredQty!==0
     ||Object.hasOwn(mirror,'unitCost')||Object.hasOwn(mirror,'cost')||Object.hasOwn(mirror,'costPrice')))
     fail('failed-precondition','倉管去成本供應檢視與正式供應來源不一致');
-   if(!orderCache.has(orderId))orderCache.set(orderId,await tx.get(ref('orders',orderId)));
-   const orderSnap=orderCache.get(orderId),order=orderSnap.exists?orderSnap.data():null;
-   const item=order?.items?.find(row=>row.itemId===itemId);
-   if(!item||item.productId!==productId||quantity(item.supplyOrderedQty??0,'來源供應量')<planned)
-    fail('failed-precondition','原客戶訂單供應承諾或產品不一致');
+   if(stock){
+    const demandSnap=await tx.get(ref('procurementDemands',encodeURIComponent(demandId)));
+    const demand=demandSnap.exists?demandSnap.data():null;
+    if(!demand||demand.demandId!==demandId||demand.sourceType!=='STOCK_REPLENISHMENT'
+     ||demand.sourceId!==sourceId||demand.sourceItemId!==''
+     ||demand.productId!==productId||demand.productKey!==productKey
+     ||demand.warehouseId!==warehouseId||demand.requestedQty!==planned
+     ||demand.orderedQty!==planned||demand.receivedQty!==0)
+     fail('failed-precondition','直接採購的權威需求與供應承諾不一致');
+   }else{
+    if(!orderCache.has(orderId))orderCache.set(orderId,await tx.get(ref('orders',orderId)));
+    const orderSnap=orderCache.get(orderId),order=orderSnap.exists?orderSnap.data():null;
+    const item=order?.items?.find(row=>row.itemId===itemId);
+    if(!item||item.productId!==productId||quantity(item.supplyOrderedQty??0,'來源供應量')<planned)
+     fail('failed-precondition','原客戶訂單供應承諾或產品不一致');
+   }
    if(!productCache.has(productId))productCache.set(productId,await tx.get(ref('products',productId)));
    const product=productCache.get(productId);
    if(!product.exists||product.data().active===false

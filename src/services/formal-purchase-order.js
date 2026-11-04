@@ -98,14 +98,20 @@ async function commitFormalPurchaseBackend(poRecord,actorUid,assertActor) {
         if(db.app?.options?.projectId!==project)throw new Error('採購回讀 Firestore 專案已變更，請保留原單號核對結果。');
     };
     check();
-    if(poRecord.items.length>5||poRecord.items.some(item=>!item.orderId||!item.itemId
-        ||(item.sourceType&&item.sourceType!=='SALES_ORDER')
-        ||!['WAREHOUSE','DIRECT_SHIP'].includes(item.fulfillmentType||'WAREHOUSE')))
-        throw new Error('採購後端試點目前只支援 1–5 個客戶訂單實體入庫或直送品項。');
+    const directStock=poRecord.purchaseType==='stock';
+    if(poRecord.items.length>5||poRecord.items.some(item=>directStock
+        ? !!item.orderId||!!item.itemId||item.sourceType!=='STOCK_REPLENISHMENT'
+            ||!item.productId||!item.warehouseId||(item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
+        : !item.orderId||!item.itemId||(item.sourceType&&item.sourceType!=='SALES_ORDER')
+            ||!['WAREHOUSE','DIRECT_SHIP'].includes(item.fulfillmentType||'WAREHOUSE')))
+        throw new Error('採購後端只支援 1–5 個有效客戶訂單或直接備庫採購品項。');
     const request={poNo:poRecord.poNo,poDate:poRecord.poDate,
         supplier:poRecord.supplierName||poRecord.vendorName,
-        items:poRecord.items.map(item=>({orderId:item.orderId,itemId:item.itemId,
-            qty:Number(item.qty),unitCost:Number(item.unitPrice)})),
+        items:poRecord.items.map(item=>directStock
+            ?{sourceType:'STOCK_REPLENISHMENT',productId:item.productId,warehouseId:item.warehouseId,
+                qty:Number(item.qty),unitCost:Number(item.unitPrice)}
+            :{orderId:item.orderId,itemId:item.itemId,
+                qty:Number(item.qty),unitCost:Number(item.unitPrice)}),
         document:{company:poRecord.company,supplierSnapshot:poRecord.supplierSnapshot,
             expectedDate:poRecord.expectedDate||'',expectedDateSource:poRecord.expectedDateSource||'',
             lineScheduleDates:poRecord.items.map(item=>item.scheduleDate||'')}};
@@ -123,7 +129,7 @@ async function commitFormalPurchaseBackend(poRecord,actorUid,assertActor) {
         return {id,...snapshot.data()};
     };
     const saved=await read('purchaseOrders',request.poNo);
-    const committedSourceOrders=[];for(const id of [...new Set(request.items.map(item=>item.orderId))])committedSourceOrders.push(await read('orders',id));
+    const committedSourceOrders=[];for(const id of [...new Set(request.items.map(item=>item.orderId).filter(Boolean))])committedSourceOrders.push(await read('orders',id));
     const committedSupplyOrders=[];for(const id of ids)committedSupplyOrders.push(await read('supplyOrders',id));
     check();return {poRecord:saved,committedSourceOrders,committedSupplyOrders};
 }
