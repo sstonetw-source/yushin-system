@@ -82,3 +82,38 @@ test('replay remains tied to original actor and immutable PO, forbids changed so
  await assert.rejects(registerFormalPurchaseIncoming(x.db,'other',{poNo:'PO-1'},env),/憑證/);
  await assert.rejects(registerFormalPurchaseIncoming(x.db,'buyer',{poNo:'PO-1',newOperationId:'different'},env));
 });
+
+const production={GCLOUD_PROJECT:'yu-shing-company',ENABLE_PRODUCTION_FORMAL_PURCHASE:'true'};
+const {createPreviewFormalPurchaseCallable}=require('../functions/formal-purchase-preview-callable');
+class HttpsError extends Error{constructor(code,message){super(message);this.code=code;}}
+function productionHandler(x,environment=production){
+ return createPreviewFormalPurchaseCallable({onCall:(_options,handler)=>handler,HttpsError,
+  getDatabase:()=>x.db,env:environment});
+}
+test('production incoming checkpoint atomically credits the same company/two-warehouse ledger and replays once',async()=>{
+ const x=fixture();x.db.projectId='yu-shing-company';
+ const handler=productionHandler(x),request={auth:{uid:'buyer'},data:{action:'register-incoming',poNo:'PO-1'}};
+ const first=await handler(request);
+ assert.equal(first.status,'applied');
+ assert.deepEqual([x.docs.get('inventory/P').incoming,x.docs.get('warehouseStocks/A__P').incoming,
+  x.docs.get('warehouseStocks/B__P').incoming],[7,3,4]);
+ const before=structuredClone([...x.docs.entries()]);
+ assert.equal((await handler(request)).status,'already-applied');
+ assert.deepEqual([...x.docs.entries()],before);
+});
+test('production incoming refuses wrong environment, actor, extra client facts and invalid last source with zero writes',async()=>{
+ for(const mode of ['disabled','emulator','foreign','unsigned','role','extra','source']){
+  const x=fixture();x.db.projectId='yu-shing-company';
+  const environment={...production},request={auth:{uid:'buyer'},data:{action:'register-incoming',poNo:'PO-1'}};
+  if(mode==='disabled')environment.ENABLE_PRODUCTION_FORMAL_PURCHASE='false';
+  if(mode==='emulator')environment.FIRESTORE_EMULATOR_HOST='127.0.0.1:8080';
+  if(mode==='foreign')x.db.projectId='preview-20135';
+  if(mode==='unsigned')delete request.auth;
+  if(mode==='role')x.docs.get('users/buyer').role='warehouse';
+  if(mode==='extra')request.data.qty=7;
+  if(mode==='source')x.docs.delete('supplyOrders/po-PO-1-2');
+  const before=structuredClone([...x.docs.entries()]);
+  await assert.rejects(productionHandler(x,environment)(request));
+  assert.deepEqual([...x.docs.entries()],before,mode);
+ }
+});

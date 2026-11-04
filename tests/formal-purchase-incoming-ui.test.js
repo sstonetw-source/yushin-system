@@ -1,21 +1,21 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
 const source=fs.readFileSync('src/services/supply-order.js','utf8');
-function fixture(){
- const calls=[],stocks=[],options={projectId:'demo-yushin'};
+function fixture({production=false}={}){
+ const calls=[],stocks=[],options={projectId:production?'yu-shing-company':'demo-yushin'};
  const po={poNo:'PO1',status:'ORDERED',documentOnly:false,items:[{orderId:'O',itemId:'I'}],
   supplyOrderIds:['S1']};
  let transport=()=>({data:{status:'applied',poNo:'PO1',receiptId:'po-incoming-PO1',supplyOrderIds:['S1']}});
  const functions={app:{options},useEmulator:(host,port)=>{assert.equal(host,'127.0.0.1');assert.equal(port,5001);},
-  httpsCallable:name=>async req=>{assert.equal(name,'registerV2FormalPurchaseIncoming');calls.push(structuredClone(req));return transport(req);}};
+  httpsCallable:name=>async req=>{assert.equal(name,production?'commitV2FormalPurchase':'registerV2FormalPurchaseIncoming');calls.push(structuredClone(req));return transport(req);}};
  const c=vm.createContext({YUSHIN_V2_PO_INCOMING_EMULATOR:true,YUSHIN_FORMAL_PURCHASE_EMULATOR:true,
-  APP_ENVIRONMENT:'emulator',location:{hostname:'localhost'},currentUser:{uid:'BUY'},currentUserRole:'purchaser',
+  YUSHIN_PRODUCTION_FORMAL_PURCHASE:production,APP_ENVIRONMENT:production?'production':'emulator',location:production?{hostname:'sstonetw-source.github.io',origin:'https://sstonetw-source.github.io',pathname:'/yushin-system/'}:{hostname:'localhost'},currentUser:{uid:'BUY'},currentUserRole:'purchaser',
   canCreatePurchaseOrderCapability:()=>true,canAccessPage:()=>true,
   formalPurchaseBackendPilotEnabled:()=>true,ensureFormalPurchaseFunctionsCompat:async()=>{},
-  firebase:{app:()=>({options,functions:()=>functions}),auth:()=>({app:{options},currentUser:{uid:'BUY'},emulatorConfig:{host:'localhost',port:9099}})},
+  firebase:{app:()=>({options,functions:()=>functions}),auth:()=>({app:{options},currentUser:{uid:'BUY'},emulatorConfig:production?null:{host:'localhost',port:9099}})},
   db:{app:{options},collection:name=>({doc:id=>({get:async()=>({exists:true,data:()=>({purchaseDocumentId:'PO1',
    productKey:'P',warehouseId:'A',qty:3,receivedQty:0,incomingRegisteredQty:3,fulfillmentType:'WAREHOUSE'})})})})},
-  runRoleTransaction:()=>{throw Error('legacy writer must not run');}});
+  isPurchaseTerminalStatus:()=>false,currentUserName:'Buyer',runRoleTransaction:()=>{throw Error('legacy writer must not run');}});
  vm.runInContext(source,c);
  return {c,po,calls,stocks,setTransport:fn=>transport=fn};
 }
@@ -40,5 +40,30 @@ test('PO incoming refuses foreign host/project, role mutation and invalid receip
   if(mode==='reply')x.setTransport(()=>({data:{status:'applied',poNo:'PO1',receiptId:'forged',supplyOrderIds:['S1']}}));
   await assert.rejects(x.c.registerPurchaseIncoming('PO1',x.po,{actorUid:'BUY',actorRole:'purchaser'}));
   if(mode!=='reply')assert.equal(x.calls.length,0);
+ }
+});
+
+test('production PO incoming uses the deployed purchase endpoint without a client stock transaction',async()=>{
+ const x=fixture({production:true});x.c.YUSHIN_V2_PO_INCOMING_EMULATOR=false;
+ await x.c.registerPurchaseIncoming('PO1',x.po,{actorUid:'BUY',actorRole:'purchaser'});
+ assert.deepEqual(x.calls,[{action:'register-incoming',poNo:'PO1'}]);
+});
+
+test('production lost reply retains the same PO checkpoint and never falls back to client writes',async()=>{
+ const x=fixture({production:true});x.c.YUSHIN_V2_PO_INCOMING_EMULATOR=false;
+ x.setTransport(()=>{throw Error('lost response');});
+ await assert.rejects(x.c.registerPurchaseIncoming('PO1',x.po),/lost response/);
+ x.setTransport(()=>({data:{status:'already-applied',poNo:'PO1',receiptId:'po-incoming-PO1',supplyOrderIds:['S1']}}));
+ await x.c.registerPurchaseIncoming('PO1',x.po);
+ assert.deepEqual(x.calls,[{action:'register-incoming',poNo:'PO1'},{action:'register-incoming',poNo:'PO1'}]);
+});
+test('production incoming rejects foreign origin, mixed database and role changes before transport',async()=>{
+ for(const mode of ['origin','project','role']){
+  const x=fixture({production:true});x.c.YUSHIN_V2_PO_INCOMING_EMULATOR=false;
+  if(mode==='origin')x.c.location.origin='http://sstonetw-source.github.io';
+  if(mode==='project')x.c.db.app.options.projectId='other';
+  if(mode==='role')x.c.currentUserRole='warehouse';
+  await assert.rejects(x.c.registerPurchaseIncoming('PO1',x.po,{actorUid:'BUY',actorRole:'purchaser'}));
+  assert.equal(x.calls.length,0);
  }
 });

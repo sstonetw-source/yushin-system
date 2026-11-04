@@ -16,6 +16,10 @@ function quantity(value,label){
  return value;
 }
 function formalIncomingGate(env=process.env){
+ if(projectIdFromEnvironment(env)==='yu-shing-company'
+  &&env.ENABLE_PRODUCTION_FORMAL_PURCHASE==='true'
+  &&!env.FUNCTIONS_EMULATOR&&!env.FIREBASE_AUTH_EMULATOR_HOST&&!env.FIRESTORE_EMULATOR_HOST)
+  return 'yu-shing-company';
  const local=value=>typeof value==='string'&&/^(localhost|127\.0\.0\.1):[0-9]+$/.test(value);
  return projectIdFromEnvironment(env)==='demo-yushin'
   &&env.ENABLE_V2_PO_INCOMING_EMULATOR==='true'&&env.FUNCTIONS_EMULATOR==='true'
@@ -153,7 +157,7 @@ async function registerFormalPurchaseIncoming(db,uid,data,env=process.env){
 }
 function createFormalPurchaseIncomingCallable({onCall,HttpsError,getDatabase,env=process.env}){
  return onCall({region:'asia-east1'},async request=>{
-  if(!formalIncomingGate(env))throw new HttpsError('failed-precondition','正式採購在途尚未切換');
+  if(formalIncomingGate(env)!=='demo-yushin')throw new HttpsError('failed-precondition','正式採購在途尚未切換');
   if(!request.auth?.uid)throw new HttpsError('unauthenticated','請先登入');
   try{return await registerFormalPurchaseIncoming(getDatabase(),request.auth.uid,request.data,env);}
   catch(error){
