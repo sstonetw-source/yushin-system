@@ -12,6 +12,26 @@ const indexSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'u
 const rulesSource = fs.readFileSync(path.join(__dirname, '..', 'firestore.rules'), 'utf8');
 const firestoreIndexes = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'firestore.indexes.json'), 'utf8'));
 
+// Extract a balanced helper body regardless of whether it lives at root or inside match.
+function ruleFunctionSource(name) {
+    const re = new RegExp('\\bfunction\\s+' + name + '\\s*\\(');
+    const match = re.exec(rulesSource);
+    assert.ok(match, 'Missing Firestore Rules helper: ' + name);
+    const start = match.index;
+    const open = rulesSource.indexOf('{', start);
+    assert.ok(open >= 0, 'Unclosed Firestore Rules helper: ' + name);
+    let depth = 0;
+    for (let i = open; i < rulesSource.length; i++) {
+        if (rulesSource[i] === '{') depth++;
+        else if (rulesSource[i] === '}') {
+            depth--;
+            if (depth === 0) return rulesSource.slice(start, i + 1);
+        }
+    }
+    assert.fail('Unclosed Firestore Rules helper: ' + name);
+}
+
+
 function loadPurchaseMapper() {
     const start = appSource.indexOf('function purchaseItemsFromOrder(order)');
     const end = appSource.indexOf('\n}\n\nfunction bestPurchaseOrderCompany', start) + 2;
@@ -3904,9 +3924,7 @@ test('warehouse receiving UI matches Firestore receive capability', () => {
 
 
 test('business reservation rules retain scoped writes and block native cross-warehouse proofs', () => {
-    const helperStart=rulesSource.indexOf('function businessReservationOperationalUpdate()');
-    const helperEnd=rulesSource.indexOf('\n\n    function businessInventoryLotOperationalUpdate',helperStart);
-    const helper=rulesSource.slice(helperStart,helperEnd);
+    const helper=ruleFunctionSource('businessReservationOperationalUpdate');
     assert.match(helper,/owns\(resource\.data\)/);
     assert.match(helper,/owns\(request\.resource\.data\)/);
     ['ownerUid','salesCode','orderId','itemId','productKey','warehouseId'].forEach(field => {
@@ -3916,9 +3934,7 @@ test('business reservation rules retain scoped writes and block native cross-war
     assert.match(helper,/get\('quantity', 0\) >= 0/);
     assert.match(helper,/get\('shortageQty', 0\) >= 0/);
 
-    const inventoryStart=rulesSource.indexOf('function businessInventoryOperationalUpdate(id)');
-    const inventoryEnd=rulesSource.indexOf('\n\n    function businessReservationOperationalUpdate',inventoryStart);
-    const inventoryHelper=rulesSource.slice(inventoryStart,inventoryEnd);
+    const inventoryHelper=ruleFunctionSource('businessInventoryOperationalUpdate');
     assert.match(inventoryHelper,/affectedKeys\(\)\.hasOnly\(\[[\s\S]*?'onHand'[\s\S]*?'reserved'[\s\S]*?'updatedAt'/);
     assert.doesNotMatch(inventoryHelper,/'lots'/);
     assert.doesNotMatch(inventoryHelper,/'safetyStock'/);
@@ -3929,7 +3945,7 @@ test('business reservation rules retain scoped writes and block native cross-war
     assert.match(reservationRule,/allow update: if reservationUpdateAllowed\(id\)/);
     assert.match(rulesSource,/function operationalReservationStockEvidence\(id\)[\s\S]*?get\('crossWarehouse', false\) != true/);
     assert.match(rulesSource,/function validOperationalMovementEvidence\(id\)[\s\S]*?get\('crossWarehouse', false\) == false/);
-    const updateGuard=rulesSource.slice(rulesSource.indexOf('function reservationUpdateAllowed(id)'),rulesSource.indexOf('function inventoryMovementWriter(id)'));
+    const updateGuard=ruleFunctionSource('reservationUpdateAllowed');
     assert.match(updateGuard,/validReservationSource\(id, request.resource.data\)[\s\S]*?reservationIdentityUnchanged\(\)[\s\S]*?legacyReservationLocationShape\(resource.data\)[\s\S]*?reservationUpdateWriter\(id, userRole\)/);
     assert.match(rulesSource,/function reservationUpdateWriter\(id, userRole\)[\s\S]*?businessReservationOperationalUpdate\(\)/);
 });
@@ -4156,7 +4172,7 @@ test('critical role matrix stays aligned between UI capabilities and Firestore r
     assert.match(helperSource,/return role\(\) in \['sales', 'engineer'\]/);
     assert.match(helperSource,/function canPurchase\(\)[\s\S]*?role\(\) in \['admin','purchaser'\]/);
     assert.match(helperSource,/function canReceiveInventory\(\)[\s\S]*?role\(\) in \['admin', 'purchaser', 'warehouse'\]/);
-    assert.match(helperSource,/function canManageEquipment\(\)[\s\S]*?role\(\) in \['admin','engineer'\]/);
+    assert.match(ruleFunctionSource('canManageEquipment'),/role\(\) in \['admin','engineer'\]/);
 
     const purchaseRuleStart=rulesSource.indexOf('match /purchaseOrders/{id}');
     const purchaseRuleEnd=rulesSource.indexOf('\n\n    // Unified source/order evidence',purchaseRuleStart);
@@ -4353,18 +4369,13 @@ test('product batch maintenance gives visible progress and blocks duplicate impo
 
 
 test('supply order rules preserve identity and valid operational quantities', () => {
-    const identityStart=rulesSource.indexOf('function sameSupplyIdentity()');
-    const identityEnd=rulesSource.indexOf('\n\n    function validSupplyOperationalState()',identityStart);
-    const identitySource=rulesSource.slice(identityStart,identityEnd);
-    assert.ok(identityStart>=0&&identityEnd>identityStart);
+    const identitySource=ruleFunctionSource('sameSupplyIdentity');
     assert.match(identitySource,/affectedKeys\(\)\.hasAny\(\[/);
     ['type','orderId','itemId','ownerUid','salesCode','productId','productKey','fulfillmentType','warehouseId','purchaseDocumentId'].forEach(field => {
         assert.match(identitySource,new RegExp("'"+field+"'"));
     });
 
-    const stateStart=rulesSource.indexOf('function validSupplyOperationalState()');
-    const stateEnd=rulesSource.indexOf('\n\n    function purchaserSupplyOperationalUpdate(userRole)',stateStart);
-    const stateSource=rulesSource.slice(stateStart,stateEnd);
+    const stateSource=ruleFunctionSource('validSupplyOperationalState');
     assert.match(stateSource,/qty >= resource\.data\.get\('qty', 0\)/);
     assert.match(stateSource,/receivedQty <= qty/);
     assert.match(stateSource,/incomingQty >= 0/);
@@ -4376,9 +4387,7 @@ test('supply order rules preserve identity and valid operational quantities', ()
     assert.match(stateSource,/nextStatus == 'CANCELLED'/);
     assert.match(stateSource,/nextStatus == 'CLOSED'/);
 
-    const warehouseStart=rulesSource.indexOf('function warehouseSupplyOperationalUpdate(userRole)');
-    const warehouseEnd=rulesSource.indexOf('\n\n    // Creator identity',warehouseStart);
-    const warehouseSource=rulesSource.slice(warehouseStart,warehouseEnd);
+    const warehouseSource=ruleFunctionSource('warehouseSupplyOperationalUpdate');
     assert.match(warehouseSource,/hasOnly\(\[[\s\S]*?'receivedQty'[\s\S]*?'incomingRegisteredQty'[\s\S]*?'status'[\s\S]*?'updatedAt'/);
     assert.match(warehouseSource,/status', 'ORDERED'\) != 'CANCELLED'/);
     assert.match(warehouseSource,/sameSupplyIdentity\(\)/);
@@ -4388,7 +4397,7 @@ test('supply order rules preserve identity and valid operational quantities', ()
     const supplyEnd=rulesSource.indexOf('\n\n    match /inventory/{id}',supplyStart);
     const supplySource=rulesSource.slice(supplyStart,supplyEnd);
     assert.match(supplySource,/allow update: if !purchasingBackendOnly\(\) && supplyOperationalUpdateAllowed\(id\)/);
-    const dispatch=rulesSource.slice(rulesSource.indexOf('function supplyOperationalUpdateAllowed(id)'),supplyStart);
+    const dispatch=ruleFunctionSource('supplyOperationalUpdateAllowed');
     assert.match(dispatch,/let userRole = role\(\)/);
     assert.match(dispatch,/userRole == 'purchaser' && \(purchaserSupplyOperationalUpdate\(userRole\)/);
     assert.match(dispatch,/userRole == 'warehouse' && warehouseSupplyOperationalUpdate\(userRole\)/);
@@ -4432,10 +4441,7 @@ test('supply rule tightening still covers current quick-order receipt and cancel
 
 
 test('direct ship delivery rule is bound to the matching atomic receipt', () => {
-    const directStart=rulesSource.indexOf('function directShipReceiptOrderUpdate(orderId)');
-    const directEnd=rulesSource.indexOf('\n    function operationalItemsOnly',directStart);
-    const source=rulesSource.slice(directStart,directEnd);
-    assert.ok(directStart>=0&&directEnd>directStart);
+    const source=ruleFunctionSource('directShipReceiptOrderUpdate');
     assert.match(source,/afterRecords\.size\(\) == beforeRecords\.size\(\) \+ 1/);
     assert.match(source,/afterRecords\.hasAll\(beforeRecords\)/);
     assert.match(source,/!beforeRecords\.hasAny\(\[newRecord\]\)/);
@@ -4447,14 +4453,10 @@ test('direct ship delivery rule is bound to the matching atomic receipt', () => 
     assert.match(source,/supplyAfter\.get\('receivedQty', 0\) <= supplyBefore\.get\('qty', 0\)/);
     assert.match(source,/affectedKeys\(\)\.hasOnly\(\[[\s\S]*?'deliveryRecords'[\s\S]*?'deliveredQty'[\s\S]*?'isDelivered'/);
 
-    const purchaserStart=rulesSource.indexOf('function purchaserOrderWorkflowUpdate(');
-    const purchaserEnd=rulesSource.indexOf('\n\n    function warehouseOrderWorkflowUpdate()',purchaserStart);
-    const purchaserSource=rulesSource.slice(purchaserStart,purchaserEnd);
+    const purchaserSource=ruleFunctionSource('purchaserOrderWorkflowUpdate');
     assert.doesNotMatch(purchaserSource,/'deliveryRecords'|'deliveredQty'|'isDelivered'/);
 
-    const warehouseStart=rulesSource.indexOf('function warehouseOrderWorkflowUpdate()');
-    const warehouseEnd=rulesSource.indexOf('\n\n    function productPath',warehouseStart);
-    const warehouseSource=rulesSource.slice(warehouseStart,warehouseEnd);
+    const warehouseSource=ruleFunctionSource('warehouseOrderWorkflowUpdate');
     assert.doesNotMatch(warehouseSource,/'deliveryRecords'|'deliveredQty'|'isDelivered'/);
 
     const orderStart=rulesSource.indexOf('match /orders/{id}');
@@ -4502,18 +4504,14 @@ test('cancelled or closed supply is terminal and cannot be received again', () =
     assert.match(receiveSource,/已結案，不能再確認到貨/);
     assert.match(receiveSource,/已取消，不能再確認到貨/);
 
-    const stateStart=rulesSource.indexOf('function validSupplyOperationalState()');
-    const stateEnd=rulesSource.indexOf('\n\n    function purchaserSupplyOperationalUpdate(userRole)',stateStart);
-    const stateSource=rulesSource.slice(stateStart,stateEnd);
+    const stateSource=ruleFunctionSource('validSupplyOperationalState');
     assert.match(stateSource,/previousStatus != 'CANCELLED'/);
     assert.match(stateSource,/previousStatus != 'CLOSED'/);
     assert.match(stateSource,/receivedQty >= resource\.data\.get\('receivedQty', 0\)/);
     assert.match(stateSource,/cancelledQty <= \(qty - receivedQty\)/);
     assert.match(stateSource,/closedQty <= \(qty - receivedQty\)/);
 
-    const warehouseStart=rulesSource.indexOf('function warehouseSupplyOperationalUpdate(userRole)');
-    const warehouseEnd=rulesSource.indexOf('\n\n    // Creator identity',warehouseStart);
-    const warehouseSource=rulesSource.slice(warehouseStart,warehouseEnd);
+    const warehouseSource=ruleFunctionSource('warehouseSupplyOperationalUpdate');
     assert.match(warehouseSource,/request\.resource\.data\.get\('status', 'ORDERED'\) != 'CANCELLED'/);
     assert.match(warehouseSource,/request\.resource\.data\.get\('status', 'ORDERED'\) != 'CLOSED'/);
 });
@@ -4541,9 +4539,7 @@ test('quick purchase keeps immutable supply snapshot and rules restrict mutable 
     assert.match(quickSource,/incomingRegisteredQty:targetIncomingQty/);
     assert.match(quickSource,/inv\.incoming\+incomingDelta/);
 
-    const identityStart=rulesSource.indexOf('function sameSupplyIdentity()');
-    const identityEnd=rulesSource.indexOf('\n\n    function validSupplyOperationalState()',identityStart);
-    const identitySource=rulesSource.slice(identityStart,identityEnd);
+    const identitySource=ruleFunctionSource('sameSupplyIdentity');
     [
       'internalNo','purchaseDocumentId','purchaseDocumentNo','orderId','itemId','orderItemIndex',
       'ownerUid','salesCode','salesName','customerName','company',
@@ -4555,9 +4551,7 @@ test('quick purchase keeps immutable supply snapshot and rules restrict mutable 
     });
     assert.match(identitySource,/affectedKeys\(\)\.hasAny\(\[/);
 
-    const purchaserStart=rulesSource.indexOf('function purchaserSupplyOperationalUpdate(userRole)');
-    const purchaserEnd=rulesSource.indexOf('\n\n    function warehouseSupplyOperationalUpdate(userRole)',purchaserStart);
-    const purchaserSource=rulesSource.slice(purchaserStart,purchaserEnd);
+    const purchaserSource=ruleFunctionSource('purchaserSupplyOperationalUpdate');
     assert.match(purchaserSource,/affectedKeys\(\)\.hasOnly/);
     assert.match(purchaserSource,/sameSupplyIdentity\(\)/);
     ['qty','receivedQty','incomingRegisteredQty','incomingRegisteredAt','status','supplier','unitCost','lastOrderedAt','orderEvents','cancelledQty','cancelReason','cancelledAt','cancelledByUid','cancelledBy','closedQty','closeReason','closedAt','closedByUid','closedBy','updatedAt'].forEach(field => {
@@ -4570,10 +4564,7 @@ test('quick purchase keeps immutable supply snapshot and rules restrict mutable 
 
 
 test('supply status must match operational quantities', () => {
-    const stateStart=rulesSource.indexOf('function validSupplyOperationalState()');
-    const stateEnd=rulesSource.indexOf('\n\n    function purchaserSupplyOperationalUpdate(userRole)',stateStart);
-    const source=rulesSource.slice(stateStart,stateEnd);
-    assert.ok(stateStart>=0&&stateEnd>stateStart);
+    const source=ruleFunctionSource('validSupplyOperationalState');
 
     assert.match(source,/nextStatus == 'ORDERED'[\s\S]*?receivedQty == 0[\s\S]*?cancelledQty == 0[\s\S]*?closedQty == 0/);
     assert.match(source,/nextStatus == 'PARTIAL_RECEIPT'[\s\S]*?receivedQty > 0[\s\S]*?receivedQty < qty/);
