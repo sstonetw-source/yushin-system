@@ -547,7 +547,8 @@ service cloud.firestore {
       function validNewOrderProductMaster(data) {
         let productId = data.get('productId', '');
         return data.get('productMasterMatched', false) == true
-          && data.get('items', []) is list && data.get('items', []).size() <= 15
+          // validOrderEmbeddedCost checks list type and the 15-item cap in
+          // this same create rule; do not spend the Rules budget twice.
           && productId != ''
           && exists(productPath(productId));
       }
@@ -1013,7 +1014,8 @@ service cloud.firestore {
         let deliveryLedgerOnly = changed.hasOnly(['deliveredQty', 'deliveryRecords', 'businessDeliveryEvidence', 'updatedAt']);
         // Billing-only changes cannot affect commercial items, stock or ownership.
         // Avoid evaluating unrelated 30-item stock/cost validators after the guard.
-        return (userRole in ['purchaser','warehouse'] && changed.hasAny(['warehouseLogisticsId','warehouseLogisticsEventId']))
+        return !changed.hasAny(['serviceFulfillment'])
+          && ((userRole in ['purchaser','warehouse'] && changed.hasAny(['warehouseLogisticsId','warehouseLogisticsEventId']))
           ? warehouseLogisticsOrderUpdate(id)
           : changed.hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId'])
           && changed.hasOnly(['items','logisticsPlanItemIndex','logisticsPlanActorUid','logisticsPlanEventId','logisticsHistory','updatedAt'])
@@ -1036,16 +1038,16 @@ service cloud.firestore {
           : userRole in ['purchaser','warehouse'] ? (changed.hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id))
             || operationalOrderWorkflowUpdate(userRole)
             || returnReceiptOrderUpdate(id)
-          : userRole in ['sales', 'engineer'] && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['inventoryShipmentRecordId'])
+          : userRole in ['sales', 'engineer'] && !changed.hasAny(['inventoryShipmentRecordId'])
             && (changed.hasOnly(['returnRequests', 'returnPending', 'returnRequestMutationIndex', 'updatedAt'])
               && (changed.size() == 0 || changed.hasAny(['returnRequests', 'returnPending']))
-              ? commercialReturnRequestOnlyUpdate() : ((request.resource.data.diff(resource.data).affectedKeys().hasAny(['deliveryRecords']) && directShipReceiptOrderUpdate(id)) || (owns(resource.data) && (changed.hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) ? false : (sameCommercialOwner() && preservesCreator()
+              ? commercialReturnRequestOnlyUpdate() : ((changed.hasAny(['deliveryRecords']) && directShipReceiptOrderUpdate(id)) || (owns(resource.data) && (changed.hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) ? false : (sameCommercialOwner() && preservesCreator()
                 // Pure delivery ledger updates cannot change item identity or cost.
                 // Keep all delivery, ownership, stock witness and custody proofs below.
                 && (deliveryLedgerOnly || validCommercialOrderCostUpdate())
                 && businessOrderFactsProtected(id, changed) && commercialReturnProtection()
                 // Delivery ledger updates leave custody location, pending count and history unchanged.
-                && (deliveryLedgerOnly || resource.data.get('warehouseLogisticsId', '') == '' || commercialKeepsPendingTransfer())))))));
+                && (deliveryLedgerOnly || resource.data.get('warehouseLogisticsId', '') == '' || commercialKeepsPendingTransfer()))))))));
       }
 
       function businessDeliveryRecordChange(before, after, index) {
@@ -1266,7 +1268,6 @@ service cloud.firestore {
         // Client SDK must not forge the terminal server-only checkpoint.
         && request.resource.data.get('inventoryReservationStatus', '') != 'completed'
         && !request.resource.data.keys().hasAny(['serviceFulfillment'])
-        && request.resource.data.get('items', []).size() <= 15
         && validOrderTransactionType(request.resource.data)
         && validClientBillingCreate(request.resource.data)
         && validNewOrderSourceSync(id)
@@ -1280,8 +1281,7 @@ service cloud.firestore {
           || request.resource.data.get('items', []) == resource.data.get('items', []))
         && (resource.data.get('inventoryReservationStatus', '') == 'completed'
           || request.resource.data.get('inventoryReservationStatus', '') != 'completed')
-        // Service action receipts are only written with the server transaction.
-        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['serviceFulfillment'])
+        // The shared orderUpdateAllowed changed-key guard rejects service receipts.
         && clientReturnFactsUnchanged() && orderUpdateAllowed(id);
       allow delete: if admin();
     }
