@@ -122,7 +122,7 @@ test('concurrent different warehouses preserve ledger and company totals under c
 });
 test('dispatch shortage and another warehouses hold cannot be borrowed even with available stock',async()=>{
  const prepared=await seed('prepared',{prepared:1});const before=await snapshot(prepared);
- await assert.rejects(prepared.call(),/打單可出貨/);assert.deepEqual(await snapshot(prepared),before);
+ await assert.rejects(prepared.call(),/可出貨數量不足|已超額交付/);assert.deepEqual(await snapshot(prepared),before);
  const x=await seed('wrong-hold');const state=await snapshot(x);
  await assert.rejects(x.call(x.request(A,5)),/指定倉庫.*不足/);assert.deepEqual(await snapshot(x),state);
 });
@@ -609,7 +609,7 @@ test('v2 dispatch preparation is a separate idempotent event and allows a later 
  const x=await seed('prepare-more',{prepared:4});
  const first=await x.call(x.request(A,4,'shipment_prepare_A'));
  assert.equal(first.grossShippedQty,4);
- await assert.rejects(x.call(x.request(B,1,'shipment_prepare_unprinted')),/打單可出貨/);
+ await assert.rejects(x.call(x.request(B,1,'shipment_prepare_unprinted')),/可出貨數量不足|已超額交付/);
  const physicalBefore=await Promise.all([
   x.read('inventory',x.key),x.read('warehouseStocks',A+'__'+x.key),x.read('warehouseStocks',B+'__'+x.key),
   x.read('inventoryReservations',x.orderId+'__I'),
@@ -1094,7 +1094,7 @@ test('CLOSE lifecycle still rejects replacement mixed returns in-flight goods an
  before=await snapshot(mixed);await assert.rejects(mixed.lifecycle('cancelled'),/退貨或補送/);
  assert.deepEqual(await snapshot(mixed),before);
  for(const [name,options,pattern] of [['inflight',{confirmedQty:2},/途中貨物/],
-   ['prepared',{prepared:5},/已打單未出貨/]]){
+   ['prepared',{prepared:5},/尚有待出貨數量/]]){
   const x=await closedLifecycleFixture(name,options),baseline=await closedLifecycleSnapshot(x);
   await assert.rejects(x.lifecycle('cancelled'),pattern);
   assert.deepEqual(await closedLifecycleSnapshot(x),baseline);
@@ -1556,7 +1556,7 @@ test('five-line same-product shipment cannot borrow a sibling paper amount or an
  const x=await multiShipmentFixture('five',{five:true});
  await x.prepare('I1',3,'multi_ship_five_prepare_one');
  const before=await multiShipmentSnapshot(x);
- await assert.rejects(x.ship('I2',B,1,'multi_ship_five_wrong'),/打單可出貨/);
+ await assert.rejects(x.ship('I2',B,1,'multi_ship_five_wrong'),/可出貨數量不足|已超額交付/);
  assert.deepEqual(await multiShipmentSnapshot(x),before);
  await x.ship('I1',A,3,'multi_ship_five_allowed');
  const order=await x.read('orders',x.orderId);
@@ -1588,7 +1588,7 @@ test('multi-line shipment replay, over-shipment and concurrent sibling issues pr
  const both=await Promise.all([x.ship('I1',A,1,'multi_ship_race_diff'),x.ship('I2',B,2,'multi_ship_race_sibling')]);
  assert.equal(both.length,2);
  const baseline=await multiShipmentSnapshot(x);
- await assert.rejects(x.ship('I2',B,1,'multi_ship_race_extra'),/打單可出貨|已超額/);
+ await assert.rejects(x.ship('I2',B,1,'multi_ship_race_extra'),/可出貨數量不足|已超額/);
  assert.deepEqual(await multiShipmentSnapshot(x),baseline);
  assert.equal((await x.read('inventory',x.key)).onHand,2);
 });

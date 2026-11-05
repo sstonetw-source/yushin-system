@@ -149,6 +149,11 @@ function renderOrderStatusHistory(order) {
     }
     normalizedOrderItems(order).forEach(item=>{
         const itemLabel=[item.itemCode||'',item.itemName||''].filter(Boolean).join(' ');
+        const serviceActions=order.serviceFulfillment?.[item.itemId];
+        for(const [key,action] of Object.entries({EXECUTE:'服務已執行',PREPARE:'服務打單',DELIVER:'服務已送達'})){
+            const receipt=serviceActions?.[key];
+            if(receipt)entries.push({at:receipt.at,action,by:receipt.by,detail:`${itemLabel}｜數量 ${receipt.quantity}`});
+        }
         const orderEvents=Array.isArray(item.orderEvents)?item.orderEvents:[];
         orderEvents.forEach(event=>{
             const action=event.type==='SALES_SELF_ORDER'?'業務自行訂貨':'已採購';

@@ -48,12 +48,12 @@ function productKeyOf(item,productId){
 function initialOrderWorkIndex(order,items,now){
   // Reuse the same item/dispatch core as the order screen. The status change
   // must not strand a newly reserved line outside its work queue.
-  const hasService=items.some(item=>String(item.productType||'').toUpperCase()==='SERVICE');
-  if(hasService&&Array.isArray(order.workCategories)
-    &&(order.workCategoryUpdatedAt||order.workCategories.some(c=>c==='billing'||c==='complete')))
-    return {};
+  if([order.status,order.orderStatus].some(status=>['cancelled','voided'].includes(status)))
+    return {workCategories:['closed'],workCategoryUpdatedAt:now};
   const categories=[...new Set(items.flatMap((source,index)=>{
     const item=fulfillmentCore.normalizeItem(source,index);
+    if(workflowCore.isServiceItem(item)&&order.serviceFulfillment)
+      return [workflowCore.serviceItemWorkCategory(order,item)];
     const dispatch=fulfillmentCore.dispatchState(item);
     const category=workflowCore.itemWorkCategory({lifecycleStatus:'normal',
       returnedQty:dispatch.returned,effectiveDeliveredQty:dispatch.delivered,
@@ -196,14 +196,14 @@ async function commitOrderReservation(db,uid,data){
         'dispatchPreparedQty','warehouseShippedQty'].some(field=>quantity(source[field]??0,field)!==0)
         ||source.transferPendingId||source.custodyTransferId)
         fault('failed-precondition','僅支援尚未預留或履約的新訂單');
-      const type=String(source.productType||'').toUpperCase();
+      const type=String(source.productType||'').trim().toUpperCase();
       const fulfillmentType=source.fulfillmentType||order.fulfillmentType||'WAREHOUSE';
       if(!['WAREHOUSE','DIRECT_SHIP'].includes(fulfillmentType))
         fault('failed-precondition','品項履約方式不支援');
       const productId=source.productId?ident(source.productId,'產品主檔 ID',1500):'';
       const productKey=productKeyOf(source,productId);
       const product=productId?await master('products',productId,productMasters):null;
-      const actualType=String(product?.productType||product?.type||'').toUpperCase();
+      const actualType=String(product?.productType||product?.type||'').trim().toUpperCase();
       if(type==='SERVICE'&&(!product||product.active===false||actualType!=='SERVICE'))
         fault('failed-precondition','服務型品項與產品主檔不一致');
       if(type!=='SERVICE'&&actualType==='SERVICE')
@@ -274,6 +274,10 @@ async function commitOrderReservation(db,uid,data){
           ||quantity(prior.receivedQty??0,'已收貨量')!==0)
           fault('failed-precondition','既有採購需求已有承諾或來源不一致');
       }
+      if(service){
+        if(prior)fault('failed-precondition','服務品項不可綁定實體採購需求');
+        continue;
+      }
       const projected=demandCore.fromSalesOrder({
         sourceId:orderId,sourceItemId:itemId,sourceItemIndex:index,
         productId,productKey,itemCode:source.itemCode||'',itemName:source.itemName||'',
@@ -337,12 +341,16 @@ async function commitOrderReservation(db,uid,data){
     }
     // The receipt, stock, demand and source completion are one authoritative
     // result. A lost response must never leave a committed ledger marked pending.
-    tx.update(orderRef,{items:nextItems,itemCount:nextItems.length,
+    const serviceEnabled=db.projectId!=='yu-shing-company'
+      ||require('./service-case-gate').serviceCaseBackendProject()===db.projectId;
+    const serviceFields=serviceEnabled&&nextItems.some(workflowCore.isServiceItem)?{serviceFulfillment:{}}:{};
+    const indexedOrder={...order,...serviceFields};
+    tx.update(orderRef,{...serviceFields,items:nextItems,itemCount:nextItems.length,
       inventoryReservationStatus:'completed',inventoryReservationError:'',
-      inventoryReservationUpdatedAt:now,...initialOrderWorkIndex(order,nextItems,now),updatedAt:now});
+      inventoryReservationUpdatedAt:now,...initialOrderWorkIndex(indexedOrder,nextItems,now),updatedAt:now});
     tx.create(receiptRef,{action:'order_initial_reservation',orderId,syncAttemptId,
       actorUid:uid,actorRole:role,reservedQty,shortageQty,createdAt:now,status:'applied'});
     return {status:'applied',receiptId:receiptRef.id,reservedQty,shortageQty};
   });
 }
-module.exports={commitOrderReservation,normalizeOrderReservationIntent};
+module.exports={commitOrderReservation,normalizeOrderReservationIntent,initialOrderWorkIndex};

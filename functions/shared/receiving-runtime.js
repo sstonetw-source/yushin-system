@@ -95,9 +95,13 @@ function orderDeliveryProjection(order, normalizedItems = null) {
 function deliveryProgressInfo(order, normalizedItems = null) {
     const total = orderQuantity(order, normalizedItems);
     const {grossDelivered,returned,effectiveDelivered} = orderDeliveryProjection(order, normalizedItems);
-    const delivered = Math.min(effectiveDelivered, total || effectiveDelivered);
+    const serviceDelivered=order?.serviceFulfillment
+        ? (normalizedItems||normalizedOrderItems(order)).filter(YushinWorkflow.isServiceItem)
+            .reduce((sum,item)=>sum+(order.serviceFulfillment[item.itemId]?.DELIVER?.quantity||0),0)
+        : 0;
+    const delivered = Math.min(effectiveDelivered+serviceDelivered, total || effectiveDelivered);
     const remaining = Math.max(0, total - delivered);
-    const isLegacyEstimated = !!order?.isDelivered && savedDeliveryRecords(order).length === 0;
+    const isLegacyEstimated = !order?.serviceFulfillment && !!order?.isDelivered && savedDeliveryRecords(order).length === 0;
     const state = total > 0 && delivered >= total ? 'complete' : delivered > 0 ? 'partial' : 'none';
     const label = state === 'complete' ? `已送 ${delivered}/${total}` : state === 'partial' ? `部分 ${delivered}/${total}` : `未送 0/${total || 0}`;
     return { total, delivered, grossDelivered, returned, remaining, state, label, isLegacyEstimated };
@@ -159,6 +163,8 @@ function itemDispatchState(order, item) {
 }
 function orderItemWorkCategory(order, item, lifecycleOverride = null, dispatchOverride = null) {
     const lifecycle=lifecycleOverride || orderLifecycleInfo(order);
+    if(order.serviceFulfillment&&YushinWorkflow.isServiceItem(item))
+        return lifecycle.status==='normal'?YushinWorkflow.serviceItemWorkCategory(order,item):'closed';
     const dispatch=dispatchOverride || itemDispatchState(order,item);
     const input={
         lifecycleStatus:lifecycle.status,

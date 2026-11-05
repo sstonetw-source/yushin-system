@@ -1,6 +1,6 @@
 // Service billing keeps the original order visible until the server confirms.
 window.serviceBillingDateEnabled=function(order){
-    return serviceCaseEntryEnabled()
+    return !!serviceCaseClientProject()
         &&canManageOrderLifecycleCapability()&&canEditPage('orders.list')&&canBusinessSelfOrder(order)
         &&Array.isArray(order.items)&&order.items.length>0
         &&order.items.some(i=>String(i?.productType||'').trim().toUpperCase()==='SERVICE');
@@ -24,6 +24,7 @@ async function toggleServiceOrderBilling(order,newValue,dateValue){
         confirmed=true;
         const latest=ordersCache.find(o=>o.id===order.id);
         if(latest)Object.assign(latest,committed.order);
+        if(newValue&&committed.order.serviceFulfillment&&activeOrderWorkFilter==='billing'&&committed.order.isBilled)activeOrderWorkFilter='complete';
         pendingSet.delete(key);
         writeAppDataCache('orders',ordersCache);renderOrdersList();
         if(currentDeliveryOrderId===order.id){renderDeliveryModal();renderOrderLifecycleModal();}

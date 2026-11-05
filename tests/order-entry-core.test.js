@@ -29,7 +29,7 @@ function validationFixture(current=item,drafts=[]) {
  const nodes={orderOwnerUid:{value:'sales'},orderCustomer:{value:'台大',focus(){}},orderItemCode:{focus(){},scrollIntoView(){}},orderRecipientDetails:{open:false},orderTradeDetails:{open:false},orderTransactionType:{value:'借',focus(){}},orderInvoiceTitle:{value:'',focus(){nodes.focused='orderInvoiceTitle';}},orderFulfillmentType:{value:current.fulfillmentType||'WAREHOUSE'},orderWarehouse:{value:'MAIN'}};
  const alerts=[];
  const c=vm.createContext({window:{orderShippingInstructions:()=>current.deliveryPlan||{mode:'PICKUP'}},document:{getElementById:id=>nodes[id]},newOrderSaveInProgress:false,
-  currentOrderModalItem:()=>({...current}),MAX_ORDER_ITEMS:15,newOrderDraftItems:drafts,YushinOrderEntry:core,YushinWarehouseLogistics:logistics,
+  currentOrderModalItem:()=>({...current}),MAX_ORDER_ITEMS:15,newOrderDraftItems:drafts,YushinWorkflow:require('../modules/workflow-core'),YushinOrderEntry:core,YushinWarehouseLogistics:logistics,
   currentUserRole:'sales',salesList:[{uid:'sales',name:'Sales'}],isSelectableCommercialOwner:()=>true,warehouseMasterCache:[{id:'MAIN'}],orderItemProductStatus:()=> 'matched',assertOrderItemCount(){},
   alert:s=>alerts.push(s),editNewOrderDraftItem:i=>nodes.edited=i});
  const start=source.indexOf('window.saveNewOrder = function()');const end=source.indexOf('    items.forEach(item=>{delete item.productCheckStatus;});',start);
@@ -67,7 +67,7 @@ test('Service-only orders do not demand a warehouse or fake physical delivery in
  assert.equal(Object.keys(result.shippingInstructions).length,0);
 });
 
-test('Goods plus Service validates only real shipment; rejects direct-ship Service',()=>{
+test('Goods plus Service validates shipping instructions only for goods',()=>{
  const service={...item,itemId:'SERVICE',productId:'BIOPLEX',
    productType:'Service',warehouseId:'',deliveryPlan:{mode:'CUSTOMER_SHIP'}};
  let f=validationFixture({...item,itemId:'GOODS',warehouseId:'MAIN',deliveryPlan:{mode:'PICKUP'}},[service]);
@@ -77,9 +77,13 @@ test('Goods plus Service validates only real shipment; rejects direct-ship Servi
  assert.equal(result.items[0].warehouseId,'');
  assert.equal(result.items[1].warehouseId,'MAIN');
  assert.equal(result.shippingInstructions.mode,'PICKUP');
- f=validationFixture({...service,fulfillmentType:'DIRECT_SHIP'});
- assert.equal(f.c.window.saveNewOrder(),undefined);
- assert.match(f.alerts[0],/服務型/);
+ f=validationFixture({...item,fulfillmentType:'DIRECT_SHIP',
+  deliveryPlan:{mode:'CUSTOMER_SHIP',contact:'客戶',phone:'123',address:'台北'}},[service]);
+ const direct=f.c.window.saveNewOrder();
+ assert.equal(direct.items[0].fulfillmentType,'WAREHOUSE');
+ assert.equal(direct.items[0].warehouseId,'');
+ assert.equal(direct.items[1].fulfillmentType,'DIRECT_SHIP');
+ assert.equal(f.alerts.length,0);
 });
 
 test('adding items does not require a delivery plan before the shared delivery section',()=>{
@@ -88,7 +92,7 @@ test('adding items does not require a delivery plan before the shared delivery s
   const row={...item,productType,fulfillmentType,deliveryPlan:{mode:'CUSTOMER_SHIP'},warehouseId:'STALE'};
   const nodes={},drafts=[],alerts=[];
   const c=vm.createContext({window:{},document:{getElementById:id=>nodes[id]||(nodes[id]={dataset:{},value:''})},
-   currentOrderModalItem:()=>({...row}),MAX_ORDER_ITEMS:15,newOrderDraftItems:drafts,YushinOrderEntry:core,YushinWarehouseLogistics:logistics,
+   currentOrderModalItem:()=>({...row}),MAX_ORDER_ITEMS:15,newOrderDraftItems:drafts,YushinWorkflow:require('../modules/workflow-core'),YushinOrderEntry:core,YushinWarehouseLogistics:logistics,
    orderItemProductStatus:()=> 'matched',alert:message=>alerts.push(message),renderNewOrderDraftItems(){},
    clearQuickProductButton(){},clearProductMatchChoices(){}});
   vm.runInContext(source.slice(start,end),c);c.window.addCurrentOrderItemToDraft();

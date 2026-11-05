@@ -53,14 +53,15 @@ const {createOrderReservationCallable}=require('./order-reservation-callable');
 exports.commitOrderReservationPreview=createOrderReservationCallable({onCall,HttpsError,getDatabase:getFirestore});
 
  
-// All four service operations share one environment and database boundary.
+// Service actions and billing share the environment and database boundary.
 const {commitServiceCaseEvent,getServiceCaseStatus,getServiceOrderProgress}=require('./service-case-service');
 const {commitServiceOrderBilling}=require('./service-billing-service');
 const {serviceCaseBackendProject}=require('./service-case-gate');
-function serviceCaseCallable(operation, failureMessage){
+function serviceCaseCallable(operation, failureMessage,{legacy=false}={}){
   return onCall({region:'asia-east1'},async request=>{
     const project=serviceCaseBackendProject();
-    if(!project)throw new HttpsError('failed-precondition','服務案件後端尚未在此專案獲准啟用');
+    if(!project||(legacy&&project!=='demo-yushin'))
+      throw new HttpsError('failed-precondition','服務後端尚未在此專案獲准啟用');
     if(!request.auth?.uid)throw new HttpsError('unauthenticated','請先登入');
     const db=getFirestore();
     if(db.projectId!==project||db.databaseId!=='(default)')
@@ -74,10 +75,12 @@ function serviceCaseCallable(operation, failureMessage){
     }
   });
 }
-exports.commitServiceCaseEvent=serviceCaseCallable(commitServiceCaseEvent,'服務案件交易失敗');
-exports.getServiceCaseStatus=serviceCaseCallable(getServiceCaseStatus,'服務案件查詢失敗');
-exports.getServiceOrderProgress=serviceCaseCallable(getServiceOrderProgress,'服務整單進度查核失敗');
+exports.commitServiceCaseEvent=serviceCaseCallable(commitServiceCaseEvent,'服務案件交易失敗',{legacy:true});
+exports.getServiceCaseStatus=serviceCaseCallable(getServiceCaseStatus,'服務案件查詢失敗',{legacy:true});
+exports.getServiceOrderProgress=serviceCaseCallable(getServiceOrderProgress,'服務整單進度查核失敗',{legacy:true});
 exports.commitServiceOrderBilling=serviceCaseCallable(commitServiceOrderBilling,'服務核銷交易失敗');
+const {commitOrderServiceAction}=require('./order-service-action');
+exports.commitOrderServiceAction=serviceCaseCallable(commitOrderServiceAction,'服務品項交易失敗');
 
 // Manual purchasing has independent, default-closed Emulator/Preview/production gates.
 const {createQuickPurchaseCallable}=require('./quick-purchase-callable');

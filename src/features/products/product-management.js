@@ -829,7 +829,7 @@ function ensureProductMasterEditor() {
           </div>
           <div id="pmEditServiceKindField" hidden>
             <label>服務類型 *</label>
-            <select id="pmEditServiceKind"><option value="">請選擇服務類型</option>${serviceKindOptions}</select>
+            <select id="pmEditServiceKind"><option value="">未分類</option>${serviceKindOptions}</select>
             <small>建單時選用此產品主檔，服務品項不走商品庫存、批號或一般出貨。</small>
           </div>
           <div><label>建議售價（含稅）</label><input id="pmEditListPrice" type="number" min="0" step="0.01"></div>
@@ -1185,8 +1185,8 @@ window.saveProductMasterEditor = async function() {
     const productType = readProductMasterEditorType();
     const isService = String(productType).toUpperCase() === 'SERVICE';
     const serviceKind = String(document.getElementById('pmEditServiceKind')?.value || '').trim();
-    if (isService && !Object.prototype.hasOwnProperty.call(globalThis.YushinServiceWork?.STEPS || {}, serviceKind)) {
-        alert('服務型產品請選擇有效的服務類型，才能建立服務案件。');
+    if (isService && serviceKind && !Object.prototype.hasOwnProperty.call(globalThis.YushinServiceWork?.STEPS || {}, serviceKind)) {
+        alert('請選擇有效的服務類型。');
         document.getElementById('pmEditServiceKind')?.focus();
         return;
     }

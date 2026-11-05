@@ -84,7 +84,7 @@ async function commitLocationDispatchPreparation(db,uid,data,env=process.env){
   await readLocationReturnProofs(tx,db,order,intent,productKey,{closedOnly:true});
   const shipped=qty(item.warehouseShippedQty??0,'出貨投影');
   const delivered=qty(item.deliveredQty??0,'送達投影');
-  const prepared=qty(item.dispatchPreparedQty??0,'已打單量');
+  const prepared=qty(item.dispatchPreparedQty??0,'打單量');
   if(intent.expectedPreparedQty!==undefined&&prepared!==intent.expectedPreparedQty){
    const error=new Error('待打單資料已變更，請更新訂單後重新確認數量');
    error.code='failed-precondition';error.reason='dispatch-stale';throw error;

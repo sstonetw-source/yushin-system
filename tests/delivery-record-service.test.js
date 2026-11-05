@@ -152,7 +152,7 @@ test('quick and partial delivery both reject stale or exhausted print quantities
   const patch={items:[{itemId:'I',qty:10,reservedQty:10,dispatchPreparedQty:0}]};
   for(const action of ['quick','partial']){
     const f=fixture({patch});
-    await assert.rejects(action==='quick'?f.c.completeOrderDelivery('O','2026-10-16'):f.c.saveOrderDeliveryRecord('O',request()),/已打單可出貨數量只有 0/);
+    await assert.rejects(action==='quick'?f.c.completeOrderDelivery('O','2026-10-16'):f.c.saveOrderDeliveryRecord('O',request()),/可出貨數量只有 0/);
     assert.equal(f.writes(),0);assert.deepEqual(f.stock(),[]);
   }
 });

@@ -86,7 +86,7 @@ test('printing stays purchaser/admin only, and reuses the existing transactional
     assert.match(service,/await runRoleTransaction\(async tx=>/);
     assert.match(service,/tx\.set\(dispatchRef,/);
     assert.match(service,/tx\.update\(ref,\{items,\.\.\.orderWorkIndexFields\(nextOrder\),updatedAt:now\}\)/);
-    assert.match(app,/\['shipping', '已打單'\]/);
+    assert.match(app,/\['shipping', '待送貨'\]/);
 });
 
 test('business shipping action requires item-level form for multi-item and partial-print orders',()=>{
@@ -156,7 +156,7 @@ test('delivery changes the correct printed line and cannot ship the unprinted li
     const invalid=deliveryTestHarness('I1');
     await invalid.context.window.saveDeliveryRecord();
     assert.equal(invalid.updates.length,0);
-    assert.match(invalid.alerts[0],/已打單可出貨數量只有 0/);
+    assert.match(invalid.alerts[0],/可出貨數量只有 0/);
 });
 test('legacy single-line selection ignores a stale hidden selector; stale edited item fails',async()=>{
     const single=deliveryTestHarness('stale-dropdown',null,true);

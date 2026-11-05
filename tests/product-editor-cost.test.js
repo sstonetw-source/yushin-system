@@ -16,11 +16,11 @@ test('unchanged cost and purchaser edits do not write cost',async()=>{for(const 
 test('invalid costs do not write, zero is accepted',async()=>{for(const value of ['-1','NaN','']){const x=setup('admin',value);await x.c.window.saveProductMasterEditor();assert.equal(x.writes.length,0);assert.equal(x.alerts.length,1);}const x=setup('admin','0');await x.c.window.saveProductMasterEditor();assert.equal(x.writes[1].data.standardCost,0);});
 test('failed transaction cannot change cache or publish partial writes',async()=>{const x=setup('admin','50','20',true);await x.c.window.saveProductMasterEditor();assert.equal(x.writes.length,0);assert.equal(x.invalidated(),0);assert.equal(x.c.purchaseCostCache.size,0);assert.equal(x.alerts.length,1);assert.match(x.alerts[0],/Brand／001/);assert.match(x.alerts[0],/網路|重試/);assert.doesNotMatch(x.alerts[0],/internal network detail/);});
 
-test('Service product master requires one authoritative subtype before any transaction',async()=>{
+test('Service subtype is optional and an invalid classification is rejected',async()=>{
  const invalid=setup('purchaser');invalid.nodes.pmEditProductType.value='Service';
  await invalid.c.window.saveProductMasterEditor();
- assert.equal(invalid.writes.length,0);
- assert.match(invalid.alerts[0],/服務類型/);
+ assert.equal(invalid.writes[0].data.serviceKind,'');
+ assert.equal(invalid.alerts.length,0);
  const wrong=setup('purchaser');wrong.nodes.pmEditProductType.value='Service';
  wrong.nodes.pmEditServiceKind.value='INVALID';
  await wrong.c.window.saveProductMasterEditor();

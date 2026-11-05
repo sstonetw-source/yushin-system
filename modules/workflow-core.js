@@ -35,10 +35,21 @@
 
   // ERP-style projection: one authoritative calculation for order demand,
   // reservation, procurement, receipt and fulfillment state.
+  function isServiceItem(item){
+    return String(item?.productType||item?.type||'').trim().toUpperCase()==='SERVICE';
+  }
+
+  function serviceItemWorkCategory(order,item){
+    const actions=Object.hasOwn(order.serviceFulfillment||{},item.itemId)?order.serviceFulfillment[item.itemId]:null;
+    if(actions?.DELIVER)return order.isBilled?'complete':'billing';
+    if(actions?.PREPARE)return 'delivery';
+    return actions?.EXECUTE?'dispatch':'ordering';
+  }
+
   function projectItem(input={},serviceCases){
     const orderedQty=n(input.orderedQty??input.qty);
     const fulfillmentType=input.fulfillmentType||'WAREHOUSE';
-    const serviceItem=String(input.productType||'').trim().toUpperCase()==='SERVICE';
+    const serviceItem=isServiceItem(input);
     let serviceProgress=null;
     // Only an adapter that has read the complete registered case index may
     // supply this second argument. Never adopt a quantity/cache from input.
@@ -202,7 +213,7 @@
 
   return {
     RELEASE_MODES,ADVANCE_STATUSES,ITEM_WORK_CATEGORIES,
-    projectItem,procurementQuantities,itemWorkCategory,
+    projectItem,procurementQuantities,itemWorkCategory,isServiceItem,serviceItemWorkCategory,
     normalizeCommercialRelease,validateAdvanceRequest,canDeliver,canBill
   };
 });

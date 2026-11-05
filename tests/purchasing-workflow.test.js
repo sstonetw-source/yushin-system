@@ -320,7 +320,7 @@ test('order work cards and filters use item-level work states', () => {
     assert.match(app, /function pendingProcurementDisplayLines\(order, normalizedItems = null, dispatchStateByItem = null, lifecycleOverride = null\)/);
     assert.match(app, /orderItemWorkCategory\(order, item, lifecycle, dispatch\) !== 'ordering'/);
     assert.match(app, /\['dispatch', '待打單'\]/);
-    assert.match(app, /\['shipping', '已打單'\]/);
+    assert.match(app, /\['shipping', '待送貨'\]/);
     assert.match(app, /return YushinWorkflow\.itemWorkCategory\(input\);/);
 });
 
@@ -563,7 +563,7 @@ test('new order reservation persists derived work category index after item rese
     assert.match(app,/workCategories:categories/);
     const backend=require('node:fs').readFileSync('functions/order-reservation-service.js','utf8');
     assert.match(backend,/function initialOrderWorkIndex\(order,items,now\)/);
-    assert.match(backend,/\.\.\.initialOrderWorkIndex\(order,nextItems,now\)/);
+    assert.match(backend,/\.\.\.initialOrderWorkIndex\(indexedOrder,nextItems,now\)/);
     assert.match(backend,/inventoryReservationStatus:'completed'/);
 });
 

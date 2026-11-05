@@ -35,7 +35,7 @@ const save=slice('window.saveNewOrder = function()','    items.forEach(item=>{de
    const page=await browser.newPage({viewport:{width,height:1000}});page.on('pageerror',e=>errors.push(e.message));
    await page.setContent('<html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><body><div id="appContainer">'+modal+'</div></body></html>');
    await page.addStyleTag({content:fs.readFileSync('styles.css','utf8')+fontStyle});
-   for(const content of [logistics,fs.readFileSync('modules/order-entry-core.js','utf8'),bootstrap,
+   for(const content of [logistics,fs.readFileSync('modules/workflow-core.js','utf8'),fs.readFileSync('modules/order-entry-core.js','utf8'),bootstrap,
     slice('function clearOrderProductIdentityKeepBrand(', 'window.onOrderBrandSelectChange'),slice('function clearOrderProductMatch(', '// 客戶名稱自動完成'),
     slice('function normalizeNewOrderItem(', 'let orderDraftProductCheckGeneration'),save,
     fs.readFileSync('modules/order-self-order-required.js','utf8'),fs.readFileSync('modules/delivery-settings.js','utf8'),fs.readFileSync('modules/order-entry-ui.js','utf8')])await page.addScriptTag({content});

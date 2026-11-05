@@ -146,7 +146,7 @@
   }
   function csvDocument(groups){
     const cell=value=>{let text=String(value??'');if(/^[\s\uFEFF]*[=+@-]/.test(text))text="'"+text;return '"'+text.replace(/"/g,'""')+'"';};
-    const header=['出貨倉庫','交付方式','收件人','電話','地址','配送備註','訂單單號','業務','客戶','貨號','品名','本次數量','已打單可出數量'];
+    const header=['出貨倉庫','交付方式','收件人','電話','地址','配送備註','訂單單號','業務','客戶','貨號','品名','本次數量','可出數量'];
     const data=groups.flatMap(g=>aggregateRows(g.rows).map(a=>{const r=a.rows[0];return [g.warehouseName||g.warehouseId,modes[g.plan.mode],g.plan.contact,g.plan.phone,g.plan.address,g.plan.notes,a.rows.map(x=>(x.order.orderNo||x.order.quoteNo||x.order.id||'')+' × '+x.qty).join('；'),[...new Set(a.rows.map(x=>x.order.salesName))].join('、'),[...new Set(a.rows.map(x=>x.order.customerName))].join('、'),r.item.itemCode,r.item.itemName,a.qty,a.rows.reduce((n,x)=>n+Number(x.readyQty??x.qty),0)];}));
     return '\uFEFF'+[header,...data].map(row=>row.map(cell).join(',')).join('\r\n');
   }
@@ -336,7 +336,7 @@
           const key=job.row.order.id+'__'+job.row.item.itemId;
           const qty=(totals.get(key)||0)+job.qty;totals.set(key,qty);
           if(!job.priorShipment&&qty>itemDispatchState(job.row.order,job.row.item).shippable)
-            throw Error('同一品項各倉的本批出貨合計超過已打單可出數量，請調整數量。');
+            throw Error('同一品項各倉的本批出貨合計超過可出數量，請調整數量。');
         }
         batch.started=true;document.querySelectorAll('[data-batch-qty],#warehouseShippingBatchDate,#warehouseShippingBatchNotes').forEach(input=>input.disabled=true);
       }
