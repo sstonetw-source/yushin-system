@@ -815,29 +815,30 @@ function ensureProductMasterEditor() {
         <div class="form-grid" style="margin-top:14px;">
           <div><label>廠牌 *</label><input id="pmEditBrand" type="text" list="pmBrandList" autocomplete="off"><datalist id="pmBrandList"></datalist></div>
           <div><label>原廠貨號 *</label><input id="pmEditCode" type="text" autocomplete="off"></div>
-          <div><label>中文品名 *</label><input id="pmEditNameCn" type="text" autocomplete="off"></div>
-          <div><label>英文品名</label><input id="pmEditNameEn" type="text" autocomplete="off"></div>
+          <div><label for="pmEditNameCn">中文品名 *</label><input id="pmEditNameCn" type="text" autocomplete="off" required></div>
+          <div><label for="pmEditNameEn">英文品名<span id="pmEditNameEnRequired"> *</span></label><input id="pmEditNameEn" type="text" autocomplete="off" required></div>
           <div style="grid-column:1/-1;"><label>規格／包裝</label><input id="pmEditSpec" type="text" autocomplete="off"></div>
           <div><label>產品線</label><input id="pmEditProductLine" type="text" placeholder="選填，例如：Flow Cytometry"></div>
-          <div><label>產品類型</label><input id="pmEditProductType" type="text" list="pmProductTypeList" placeholder="例如：Reagent" oninput="updateProductMasterServiceFields()"></div>
-          <datalist id="pmProductTypeList">
-            <option value="Instrument"></option><option value="Reagent"></option><option value="Consumable"></option>
-            <option value="Accessory"></option><option value="Service"></option>
-          </datalist>
+          <div><label for="pmEditProductType">產品類型</label>
+            <select id="pmEditProductType" onchange="updateProductMasterServiceFields()">
+              <option value=""></option><option value="Instrument">儀器</option><option value="Reagent">試劑</option>
+              <option value="Consumable">耗材</option><option value="Accessory">配件</option><option value="Service">服務</option>
+              <option value="__custom__">其他</option>
+            </select>
+            <input id="pmEditCustomProductType" type="text" aria-label="其他產品類型" hidden oninput="updateProductMasterServiceFields()">
+          </div>
           <div id="pmEditServiceKindField" hidden>
             <label>服務類型 *</label>
             <select id="pmEditServiceKind"><option value="">請選擇服務類型</option>${serviceKindOptions}</select>
-            <small>服務不會建立商品庫存、批號或一般出貨；完成證據依服務類型處理。</small>
+            <small>建單時選用此產品主檔，服務品項不走商品庫存、批號或一般出貨。</small>
           </div>
           <div><label>建議售價（含稅）</label><input id="pmEditListPrice" type="number" min="0" step="0.01"></div>
           <div id="pmEditCostField" hidden><label>標準成本</label><input id="pmEditCost" type="number" min="0" step="0.01"><small>選填；只帶入新採購單，既有單據保留原價。</small></div>
           <div><label>狀態</label>
             <select id="pmEditStatus"><option value="ACTIVE">啟用</option><option value="INACTIVE">停用</option></select>
           </div>
-          <div style="grid-column:1/-1;display:flex;gap:16px;flex-wrap:wrap;">
-            <label><input id="pmEditInventoryTracked" type="checkbox"> 庫存管理</label>
-            <label><input id="pmEditLotTracked" type="checkbox"> 批號管理</label>
-            <label><input id="pmEditExpiryTracked" type="checkbox"> 效期管理</label>
+          <div id="pmEditFrequentlySoldField" style="grid-column:1/-1;">
+            <label><input id="pmEditFrequentlySold" type="checkbox"> 是否為常賣品項</label>
           </div>
         </div>
         <div id="pmEditMeta" style="margin-top:10px;font-size:12px;color:#666;"></div>
@@ -851,16 +852,16 @@ function ensureProductMasterEditor() {
     return overlay;
 }
 
+function readProductMasterEditorType() {
+    const selected = document.getElementById('pmEditProductType').value;
+    return normalizeProductTypeValue(selected === '__custom__'
+        ? document.getElementById('pmEditCustomProductType').value : selected);
+}
+
 function updateProductMasterServiceFields() {
-    const isService = String(document.getElementById('pmEditProductType')?.value || '').trim().toUpperCase() === 'SERVICE';
-    const kindField = document.getElementById('pmEditServiceKindField');
-    if (kindField) kindField.hidden = !isService;
-    for (const id of ['pmEditInventoryTracked','pmEditLotTracked','pmEditExpiryTracked']) {
-        const input = document.getElementById(id);
-        if (!input) continue;
-        if (isService) input.checked = false;
-        input.disabled = isService;
-    }
+    const custom = document.getElementById('pmEditCustomProductType');
+    custom.hidden = document.getElementById('pmEditProductType').value !== '__custom__';
+    document.getElementById('pmEditServiceKindField').hidden = readProductMasterEditorType() !== 'Service';
 }
 
 function populateProductMasterEditor(product = {}, options = {}) {
@@ -880,10 +881,17 @@ function populateProductMasterEditor(product = {}, options = {}) {
     brandInput.disabled = existingIdentity;
     codeInput.disabled = existingIdentity;
     document.getElementById('pmEditNameCn').value = product.productName || product.nameCn || options.itemName || '';
-    document.getElementById('pmEditNameEn').value = product.nameEn || '';
+    const nameEnInput = document.getElementById('pmEditNameEn');
+    nameEnInput.value = product.nameEn || '';
+    nameEnInput.required = !existingIdentity;
+    document.getElementById('pmEditNameEnRequired').hidden = existingIdentity;
     document.getElementById('pmEditSpec').value = product.specification || product.spec || '';
     document.getElementById('pmEditProductLine').value = product.productLine || '';
-    document.getElementById('pmEditProductType').value = product.productType || product.category || '';
+    const typeInput = document.getElementById('pmEditProductType');
+    const productType = normalizeProductTypeValue(product.productType || product.category || '');
+    const standardType = [...typeInput.options].some(option => option.value === productType && option.value !== '__custom__');
+    typeInput.value = standardType ? productType : '__custom__';
+    document.getElementById('pmEditCustomProductType').value = standardType ? '' : productType;
     document.getElementById('pmEditServiceKind').value = product.serviceKind || '';
     document.getElementById('pmEditListPrice').value = product.listPrice ?? product.price ?? '';
     const costInput = document.getElementById('pmEditCost');
@@ -892,9 +900,10 @@ function populateProductMasterEditor(product = {}, options = {}) {
     document.getElementById('pmEditCostField').hidden = !(trueUserRole === 'admin' && currentUserRole === 'admin');
     document.getElementById('pmEditStatus').value = product.status === 'INACTIVE' || product.active === false ? 'INACTIVE' : 'ACTIVE';
     document.getElementById('pmEditStatus').disabled = !existingIdentity && currentUserRole === 'sales';
-    document.getElementById('pmEditInventoryTracked').checked = product.inventoryTracked === true;
-    document.getElementById('pmEditLotTracked').checked = product.lotTracked === true;
-    document.getElementById('pmEditExpiryTracked').checked = product.expiryTracked === true;
+    const frequentInput = document.getElementById('pmEditFrequentlySold');
+    frequentInput.checked = product.isFrequentlySold === true;
+    frequentInput.dataset.originalValue = String(frequentInput.checked);
+    document.getElementById('pmEditFrequentlySoldField').hidden = !canManagePendingProductMaster();
     updateProductMasterServiceFields();
     document.getElementById('productMasterEditorTitle').textContent = product.productId || product.id ? '編輯產品主檔' : '建立產品主檔';
     document.getElementById('pmEditMeta').textContent =
@@ -1173,7 +1182,7 @@ window.saveProductMasterEditor = async function() {
     const code = String(document.getElementById('pmEditCode').value || '').trim();
     const productName = String(document.getElementById('pmEditNameCn').value || '').trim();
     const productLine = String(document.getElementById('pmEditProductLine').value || '').trim();
-    const productType = normalizeProductTypeValue(document.getElementById('pmEditProductType').value || '');
+    const productType = readProductMasterEditorType();
     const isService = String(productType).toUpperCase() === 'SERVICE';
     const serviceKind = String(document.getElementById('pmEditServiceKind')?.value || '').trim();
     if (isService && !Object.prototype.hasOwnProperty.call(globalThis.YushinServiceWork?.STEPS || {}, serviceKind)) {
@@ -1181,8 +1190,9 @@ window.saveProductMasterEditor = async function() {
         document.getElementById('pmEditServiceKind')?.focus();
         return;
     }
-    if (!brand || !code || !productName) {
-        alert('請至少完成廠牌、原廠貨號與中文品名。');
+    const nameEn = String(document.getElementById('pmEditNameEn').value || '').trim();
+    if (!brand || !code || !productName || (!originalId && !nameEn)) {
+        alert(originalId ? '請填寫廠牌、原廠貨號與中文品名。' : '請填寫廠牌、原廠貨號、中文品名與英文品名。');
         return;
     }
     if (!brandMasterEntryForName(brand)) {
@@ -1217,6 +1227,7 @@ window.saveProductMasterEditor = async function() {
     const status = currentUserRole === 'sales' ? 'ACTIVE'
         : (document.getElementById('pmEditStatus').value === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE');
     const brandEntry = brandMasterEntryForName(brand);
+    const frequentInput = document.getElementById('pmEditFrequentlySold');
     const record = {
         productId,
         brandId: brandEntry?.id || '',
@@ -1224,7 +1235,7 @@ window.saveProductMasterEditor = async function() {
         manufacturerPartNo: code,
         normalizedPartNo,
         productName,
-        nameEn: String(document.getElementById('pmEditNameEn').value || '').trim(),
+        nameEn,
         specification: String(document.getElementById('pmEditSpec').value || '').trim(),
         productLine,
         productLineId: productLine,
@@ -1232,9 +1243,9 @@ window.saveProductMasterEditor = async function() {
         category: productType,
         serviceKind: isService ? serviceKind : '',
         listPrice: Number(document.getElementById('pmEditListPrice').value || 0),
-        inventoryTracked: !isService && document.getElementById('pmEditInventoryTracked').checked,
-        lotTracked: !isService && document.getElementById('pmEditLotTracked').checked,
-        expiryTracked: !isService && document.getElementById('pmEditExpiryTracked').checked,
+        ...(!originalId || isService ? { inventoryTracked:false, lotTracked:false, expiryTracked:false } : {}),
+        ...(canManagePendingProductMaster() && String(frequentInput.checked) !== frequentInput.dataset.originalValue
+            ? { isFrequentlySold:frequentInput.checked } : {}),
         status,
         active: status === 'ACTIVE',
         source: String(document.getElementById('pmEditSource').value || 'MANUAL').toUpperCase(),
@@ -1245,7 +1256,7 @@ window.saveProductMasterEditor = async function() {
     };
 
         if (button) button.textContent = '儲存中…';
-        await db.runTransaction(async transaction => {
+        const savedRecord = await db.runTransaction(async transaction => {
             const productRef = db.collection('products').doc(productId);
             const existingProduct = await transaction.get(productRef);
             if (!originalId && existingProduct.exists) throw new Error('同廠牌與貨號已由其他操作建檔，請搜尋既有產品。');
@@ -1261,15 +1272,16 @@ window.saveProductMasterEditor = async function() {
                     previousCost:previousCost.exists ? previousCost.data().standardCost ?? null : null,
                     standardCost, source:'PRODUCT_EDITOR', updatedAt:now, updatedBy:currentUser?.uid || '' });
             }
+            return { ...existingProduct.data(), ...record };
         });
         if (costChanged) {
             invalidateVisibleProductCosts();
             purchaseCostCache.set(productId, Number(costText));
         }
-        syncSavedProductMaster(productId,record);
+        syncSavedProductMaster(productId,savedRecord);
         const overviewIndex = productManagementOverviewRows.findIndex(item => (item.id || item.productId) === productId);
-        if (overviewIndex >= 0) productManagementOverviewRows[overviewIndex] = { ...productManagementOverviewRows[overviewIndex], ...record, id:productId };
-        else if (!originalId) productManagementOverviewRows.unshift({ ...record, id:productId });
+        if (overviewIndex >= 0) productManagementOverviewRows[overviewIndex] = { ...productManagementOverviewRows[overviewIndex], ...savedRecord, id:productId };
+        else if (!originalId) productManagementOverviewRows.unshift({ ...savedRecord, id:productId });
         if (document.getElementById('productOverviewScope')) renderProductManagementOverview();
         closeProductMasterEditor();
         const statusEl = document.getElementById('productManagementSearchStatus');

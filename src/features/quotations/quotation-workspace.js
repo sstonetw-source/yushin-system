@@ -1606,7 +1606,7 @@ function populateQuoteBrandDropdowns() {
     document.querySelectorAll('#quoteItems .item-brand').forEach(select => {
         const row = select.closest('tr');
         const currentValue = quoteRowBrandValue(row);
-        populateBrandSelect(select, '請選擇廠牌', true, getPrimaryBrandNames());
+        populateBrandSelect(select, '', true, getPrimaryBrandNames());
         if (currentValue) selectBrandInDropdown(select, currentValue);
         onQuoteBrandSelectChange(select);
     });
@@ -2012,7 +2012,7 @@ window.addQuoteRow = function(itemData = {}) {
                 <div class="item-row-pair">
                     <div class="item-brand-field">
                         <label>廠牌：</label>
-                        <select class="item-brand" onchange="onQuoteBrandSelectChange(this, true)" aria-label="估價單廠牌"><option value="">請選擇廠牌</option></select>
+                        <select class="item-brand" onchange="onQuoteBrandSelectChange(this, true)" aria-label="估價單廠牌"><option value=""></option></select>
                         <input type="text" class="item-brand-other" placeholder="輸入實際廠牌名稱" autocomplete="off" oninput="onQuoteBrandOtherInput(this)" style="display:none;">
                         <small class="quote-brand-restriction"></small>
                         <input type="hidden" class="item-product-line" value="${escapeAttr(itemData.productLine || '')}">
@@ -2049,7 +2049,7 @@ window.addQuoteRow = function(itemData = {}) {
     if (itemData.model) tr.querySelector('.item-model').dataset.matchedProductCode = normalizeItemCodeLoose(itemData.model);
     refreshQuoteWarehouseStock(tr);
     const quoteBrandSelect = tr.querySelector('.item-brand');
-    populateBrandSelect(quoteBrandSelect, '請選擇廠牌', true, getPrimaryBrandNames());
+    populateBrandSelect(quoteBrandSelect, '', true, getPrimaryBrandNames());
     if (itemData.brand) selectBrandInDropdown(quoteBrandSelect, itemData.brand);
     if (itemData.productId) tr.querySelector('.item-model').dataset.autofillBrand = normalizeBrandLookupKey(resolveBrandName(itemData.brand || ''));
     onQuoteBrandSelectChange(quoteBrandSelect);

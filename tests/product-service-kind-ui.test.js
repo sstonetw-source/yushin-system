@@ -16,24 +16,23 @@ test('Service subtype editor derives its choices from the one authorized Service
  vm.runInContext(editor+'\nensureProductMasterEditor()',ctx);
  for(const kind of Object.keys(core.STEPS))
    assert.match(overlay.innerHTML,new RegExp('<option value="'+kind+'">'));
+ assert.match(overlay.innerHTML,/<option value="Service">服務<\/option>/);
  assert.match(overlay.innerHTML,/id="pmEditServiceKind"/);
+ assert.match(overlay.innerHTML,/id="pmEditFrequentlySold"/);
+ assert.doesNotMatch(overlay.innerHTML,/pmEdit(?:Inventory|Lot|Expiry)Tracked/);
  assert.match(overlay.innerHTML,/updateProductMasterServiceFields\(\)/);
  assert.ok(html.indexOf('modules/service-work-core.js')<html.indexOf('app.js?v'));
 });
-test('Service product type disables all physical inventory flags; Goods restore flag editability',()=>{
+test('choosing Service reveals the existing subtype control and Other retains custom product types',()=>{
  const nodes=new Map([['pmEditProductType',{value:'Service'}],
-   ['pmEditServiceKindField',{hidden:true}],
-   ...['pmEditInventoryTracked','pmEditLotTracked','pmEditExpiryTracked']
-     .map(id=>[id,{checked:true,disabled:false}])]);
- const ctx=vm.createContext({document:{getElementById:id=>nodes.get(id)||null}});
+   ['pmEditServiceKindField',{hidden:true}],['pmEditCustomProductType',{value:'Custom',hidden:true}]]);
+ const ctx=vm.createContext({document:{getElementById:id=>nodes.get(id)},normalizeProductTypeValue:value=>value});
  vm.runInContext(editor+'\nupdateProductMasterServiceFields()',ctx);
  assert.equal(nodes.get('pmEditServiceKindField').hidden,false);
- for(const id of ['pmEditInventoryTracked','pmEditLotTracked','pmEditExpiryTracked']){
-   assert.equal(nodes.get(id).checked,false);assert.equal(nodes.get(id).disabled,true);
- }
- nodes.get('pmEditProductType').value='Reagent';
+ assert.equal(nodes.get('pmEditCustomProductType').hidden,true);
+ nodes.get('pmEditProductType').value='__custom__';
  vm.runInContext('updateProductMasterServiceFields()',ctx);
  assert.equal(nodes.get('pmEditServiceKindField').hidden,true);
- for(const id of ['pmEditInventoryTracked','pmEditLotTracked','pmEditExpiryTracked'])
-   assert.equal(nodes.get(id).disabled,false);
+ assert.equal(nodes.get('pmEditCustomProductType').hidden,false);
+ assert.equal(vm.runInContext('readProductMasterEditorType()',ctx),'Custom');
 });

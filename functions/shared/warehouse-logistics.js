@@ -249,7 +249,7 @@
   root.openWarehouseDeliveryPlan=async function(orderId,itemId){
     if(shippingBatch?.busy)return;const order=ordersCache.find(o=>o.id===orderId)||orderWorkQueueCache.find(o=>o.id===orderId);if(!order||!canSetPlan(order))return;const item=normalizedOrderItems(order).find(i=>i.itemId===itemId);if(!item||item.transferPendingId||(String(item.warehouseId||'').startsWith('custody-')&&!allowed()))return showActionFeedback('品項已交付或調撥中，請由倉管確認後續處理。','warning');const row={order,item,qty:itemDispatchState(order,item).shippable,warehouseId:item.warehouseId||order.warehouseId||defaultWarehouse()?.id||''};
     editor={row,id:lifecycleRecordId(),busy:false,uid:currentUser.uid,role:currentUserRole};
-    modal(`<h3>交付設定</h3><p>${escapeHtml(row.order.salesName||'未指定負責業務')}｜${escapeHtml(row.order.customerName||'')}<br>${escapeHtml(row.item.itemCode)} ${escapeHtml(row.item.itemName)}｜${escapeHtml(warehouseName(row.warehouseId))}｜待出 ${row.qty}</p>${fields(savedRowPlan(row))}<p class="inventory-work-status">存設定與列印不異動庫存。主倉自領不需倉管登記，業務送貨時才扣帳；寄給負責業務後仍由負責業務登記已送貨。</p><div class="toolbar"><button type="button" id="logisticsSave" onclick="saveWarehouseDeliveryPlan(this)">儲存設定</button><button type="button" class="btn-secondary" onclick="printWarehouseDeliveryEditor('labels')">列印地址貼紙</button><button type="button" class="btn-secondary" onclick="printWarehouseDeliveryEditor('list')">列印出貨清單</button><button type="button" class="btn-secondary" onclick="closeWarehouseLogistics()">關閉</button></div>`);if(item.fulfillmentType==='DIRECT_SHIP'){const mode=$('logisticsMode');for(const option of mode.options)option.disabled=option.value!=='CUSTOMER_SHIP';mode.value='CUSTOMER_SHIP';}root.warehouseDeliveryModeChanged();
+    modal(`<h3>交付設定</h3><p>${escapeHtml(row.order.salesName||'未指定負責業務')}｜${escapeHtml(row.order.customerName||'')}<br>${escapeHtml(row.item.itemCode)} ${escapeHtml(row.item.itemName)}｜${escapeHtml(warehouseName(row.warehouseId))}｜待出 ${row.qty}</p>${fields(savedRowPlan(row))}<p class="inventory-work-status">存設定與列印不異動庫存。主倉自領不需倉管登記，業務送貨時才扣帳；寄給負責業務後仍由負責業務登記已送貨。</p><div class="toolbar"><button type="button" id="logisticsSave" onclick="saveWarehouseDeliveryPlan(this)">儲存設定</button><button type="button" class="btn-secondary" onclick="printWarehouseDeliveryEditor()">列印地址貼紙</button><button type="button" class="btn-secondary" onclick="closeWarehouseLogistics()">關閉</button></div>`);if(item.fulfillmentType==='DIRECT_SHIP'){const mode=$('logisticsMode');for(const option of mode.options)option.disabled=option.value!=='CUSTOMER_SHIP';mode.value='CUSTOMER_SHIP';}root.warehouseDeliveryModeChanged();
   };
   root.saveWarehouseDeliveryPlan=async function(button){
     if(!editor||editor.busy||!canSetPlan(editor.row.order))return;const entry=editor;let p;
@@ -359,24 +359,23 @@
       else {showActionFeedback(`已完成 ${result.completed}／${result.total} 個品項；未完成項目可在此重試，不會重複扣庫存。`,'warning');}
     }finally{batch.busy=false;endActionButton(button,bs);if(shippingBatch===batch)button.textContent='重試未完成品項';updateSelection();}
   };
-  function printDocument(groups,kind){
-    const pages=[];for(const g of groups){const p=g.plan;
-      if(kind==='labels'){
-        if(p.mode==='PICKUP')throw Error('業務自取不需地址貼紙，請改列印出貨清單。');validatePlan(p,true);
-        pages.push(`<section class="label"><h2>收件人：${escapeHtml(p.contact)}</h2><h2>${escapeHtml(p.phone)}</h2><div class="address">${escapeHtml(p.address)}</div><p>${escapeHtml(p.notes)}</p><p>寄出倉庫：${escapeHtml(warehouseName(g.warehouseId))}</p><small>又鑫生物科技｜02-2100-1008<br>訂單：${escapeHtml([...new Set(g.rows.map(r=>r.order.orderNo||r.order.quoteNo||r.order.id))].join('、'))}</small></section>`);
-      }else pages.push(`<section><h2>出貨清單｜${escapeHtml(warehouseName(g.warehouseId))}</h2><p>${escapeHtml(modes[p.mode])}</p><p>收件人：${escapeHtml(p.contact)}　電話：${escapeHtml(p.phone)}</p><p>地址：${escapeHtml(p.address)}<br>備註：${escapeHtml(p.notes)}</p><table><thead><tr><th>訂單／負責業務／客戶</th><th>貨號／品名</th><th>數量</th></tr></thead><tbody>${aggregateRows(g.rows).map(a=>`<tr><td>${a.rows.map(r=>escapeHtml(r.order.orderNo||r.order.quoteNo||r.order.id)+'｜'+escapeHtml(r.order.salesName)+'｜'+escapeHtml(r.order.customerName)+' × '+r.qty).join('<br>')}</td><td>${escapeHtml(a.item.itemCode)}<br>${escapeHtml(a.item.itemName)}</td><td>${a.qty}</td></tr>`).join('')}</tbody></table><p>請核對實體數量。本清單與地址貼紙不代表已出貨。</p></section>`);
-    }
+  function printAddressLabels(groups){
+    const pages=groups.map(({warehouseId,plan:p})=>{
+      if(p.mode==='PICKUP')throw Error('業務自取不需地址貼紙。');
+      validatePlan(p,true);
+      return `<section class="label"><h2>收件人：${escapeHtml(p.contact)}</h2><h2>${escapeHtml(p.phone)}</h2><div class="address">${escapeHtml(p.address)}</div><p>${escapeHtml(p.notes)}</p><p>寄出倉庫：${escapeHtml(warehouseName(warehouseId))}</p><small>又鑫生物科技｜02-2100-1008</small></section>`;
+    });
     let frame=$('warehousePrintFrame');if(frame)frame.remove();frame=document.createElement('iframe');frame.id='warehousePrintFrame';frame.className='warehouse-print-frame';
     frame.onload=()=>{frame.contentWindow.focus();frame.contentWindow.print();};
-    frame.srcdoc=`<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><title>${kind==='labels'?'收件地址貼紙':'出貨清單'}</title><style>@page{size:${kind==='labels'?'100mm 150mm':'A4'};margin:8mm}body{font:16px sans-serif;color:#111}section{break-after:page}section:last-child{break-after:auto}.label{overflow-wrap:anywhere}.address{font-size:26px;line-height:1.5}h2{font-size:22px}table{width:100%;border-collapse:collapse}td,th{border:1px solid #666;padding:8px;overflow-wrap:anywhere}thead{display:table-header-group}tr{break-inside:avoid}</style></head><body>${pages.join('')}</body></html>`;
+    frame.srcdoc=`<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><title>收件地址貼紙</title><style>@page{size:100mm 150mm;margin:8mm}body{font:16px sans-serif;color:#111}section{break-after:page}section:last-child{break-after:auto}.label{overflow-wrap:anywhere}.address{font-size:26px;line-height:1.5}h2{font-size:22px}</style></head><body>${pages.join('')}</body></html>`;
     document.body.appendChild(frame);
   }
-  root.printWarehouseDeliveryEditor=function(kind){if(!allowed()||!editor)return;try{const p=validatePlan(readFields(),kind==='labels');printDocument([{warehouseId:editor.row.warehouseId,plan:p,rows:[editor.row]}],kind);}catch(err){alert(err.message);}};
-  root.printSelectedWarehouseShipping=async function(kind,button){
+  root.printWarehouseDeliveryEditor=function(){if(!allowed()||!editor)return;try{printAddressLabels([{warehouseId:editor.row.warehouseId,plan:readFields()}]);}catch(err){alert(err.message);}};
+  root.printSelectedWarehouseShipping=async function(button){
     if(!allowed())return;const bs=beginActionButton(button,'核對中…');try{
       await loadOrderWorkQueue(true);const list=rows().filter(r=>selected.has(r.key));if(!list.length)throw Error('請先勾選要併單的品項。');
       const missing=[...selected].filter(key=>!list.some(r=>r.key===key));if(missing.length)throw Error('部分勾選品項已出貨或狀態變更，請重新選擇。');
-      const groups=partition(list.filter(r=>['CUSTOMER_SHIP','SALES_SHIP'].includes(rowPlan(r).mode)),rowPlan);if(!groups.length)throw Error('請選擇寄給客戶或業務的品項。');printDocument(groups,kind);
+      const groups=partition(list.filter(r=>['CUSTOMER_SHIP','SALES_SHIP'].includes(rowPlan(r).mode)),rowPlan);if(!groups.length)throw Error('請選擇寄給客戶或業務的品項。');printAddressLabels(groups);
     }catch(err){alert(err.message);}finally{endActionButton(button,bs);}
   };
   root.renderWarehouseCustody=function(){

@@ -446,7 +446,7 @@
         <div class="inventory-shipping-tabs no-print"><button type="button" id="inventoryShippingMainBtn" class="order-work-card active" aria-pressed="true" onclick="switchInventoryShippingKind('main')">主倉庫出貨</button><button type="button" id="inventoryShippingBranchBtn" class="order-work-card" aria-pressed="false" onclick="switchInventoryShippingKind('branch')">分倉庫出貨</button><select id="inventoryShippingWarehouse" aria-label="分倉庫" style="display:none" onchange="renderInventoryShipping()"><option value="">全部分倉庫</option></select></div>
         <div id="inventoryShippingError" class="inventory-work-error" role="status" hidden></div>
         <div class="toolbar no-print"><select id="inventoryDeliveryModeFilter" aria-label="寄送對象" onchange="renderInventoryShipping()"><option value="">全部寄送對象</option><option value="SALES_SHIP">寄給負責業務</option><option value="CUSTOMER_SHIP">直接寄客戶</option></select></div>
-        <div class="toolbar no-print inventory-shipping-batch-actions"><span id="warehouseShippingSelectionStatus">尚未勾選品項</span><label><input type="checkbox" id="warehouseShippingSelectAll" onchange="selectVisibleWarehouseShipping(this.checked)"> 全選目前清單</label><button type="button" id="warehouseShippingBatchBtn" onclick="openWarehouseShippingBatch()" disabled>登記出貨</button><details class="order-export-tools warehouse-shipping-tools"><summary>列印／匯出</summary><div class="order-export-panel"><button type="button" class="btn-secondary" onclick="printSelectedWarehouseShipping('list',this)">列印出貨清單</button><button type="button" class="btn-secondary" onclick="printSelectedWarehouseShipping('labels',this)">列印地址貼紙</button><button type="button" class="btn-secondary" onclick="exportSelectedWarehouseShipping(this)">匯出出貨清單 CSV</button><button type="button" class="btn-secondary" onclick="selectVisibleWarehouseShipping(false)">取消全部勾選</button></div></details></div>
+        <div class="toolbar no-print inventory-shipping-batch-actions"><span id="warehouseShippingSelectionStatus">尚未勾選品項</span><label><input type="checkbox" id="warehouseShippingSelectAll" onchange="selectVisibleWarehouseShipping(this.checked)"> 全選目前清單</label><button type="button" id="warehouseShippingBatchBtn" onclick="openWarehouseShippingBatch()" disabled>登記出貨</button><details class="order-export-tools warehouse-shipping-tools"><summary>列印／匯出</summary><div class="order-export-panel"><button type="button" class="btn-secondary" onclick="printSelectedWarehouseShipping(this)">列印地址貼紙</button><button type="button" class="btn-secondary" onclick="exportSelectedWarehouseShipping(this)">匯出出貨清單 CSV</button><button type="button" class="btn-secondary" onclick="selectVisibleWarehouseShipping(false)">取消全部勾選</button></div></details></div>
         <p id="inventoryShippingStatus" class="inventory-work-status" role="status"></p>
         <div id="inventoryShippingSummary"></div><div class="table-wrap inventory-work-table"><table><thead><tr><th>選取</th><th>負責業務／客戶</th><th>貨號／品名</th><th>出貨倉庫</th><th>寄送目的地</th><th>待出數量</th><th>設定</th></tr></thead><tbody id="inventoryShippingBody"></tbody></table></div>
 
@@ -1708,12 +1708,12 @@
     <script src="modules/order-commercial-details.js?v=20261025-1"></script>
     <script src="modules/order-entry-core.js?v=20261104-460"></script>
 <script src="modules/service-work-core.js?v=20261023-2"></script>
-    <script src="app.js?v=20261105-2"></script>
+    <script src="app.js?v=20261105-3"></script>
     <script src="modules/order-self-order-required.js?v=20261013-1"></script>
     <script src="modules/customer-cancellations.js?v=20261021-3"></script>
     <script src="modules/free-stock-recovery.js?v=20261014-9"></script>
     <script src="modules/inventory-workspace.js?v=20261027-300"></script>
-    <script src="modules/warehouse-logistics.js?v=20261029-372"></script>
+    <script src="modules/warehouse-logistics.js?v=20261105-3"></script>
     <script src="modules/delivery-settings.js?v=20261031-416"></script>
     <script src="modules/order-entry-ui.js?v=20261104-459"></script>
     <script src="modules/quote-decision-analysis.js?v=20261005-5"></script>
