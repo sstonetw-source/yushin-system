@@ -15,6 +15,7 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
   await page.addScriptTag({content:`
    let currentUser={uid:'U'},currentUserRole='sales',trueUserRole='sales',sessionDataGeneration=1;
    globalThis.YUSHIN_SERVICE_CASE_EMULATOR=true;
+   const serviceCaseClientProject=()=>'demo-yushin';
    const items=[{itemId:'I',itemName:'檢測',unitPrice:100,productType:'SERVICE',qty:2,orderedQty:2},{itemId:'J',itemName:'校正',unitPrice:200,productType:'SERVICE',qty:2,orderedQty:2}];
    let ordersCache=[{id:'O',orderNo:'YS-1',customerName:'驗收客戶',items,totalPrice:400,isBilled:false}],activeOrderWorkFilter='all';
    const orderHistorySearchActive=false,orderHistorySearchResults=[],orderHistorySearchLoading=false,orderWorkQueueReady=true,orderWorkQueueError='';
