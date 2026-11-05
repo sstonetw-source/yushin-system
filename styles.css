@@ -4995,3 +4995,6 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
  #poModalOverlay #poItemsTable th { white-space:nowrap; }
  #poModalOverlay #poItemsTable td:last-child button { min-width:60px; white-space:nowrap; }
 }
+@media screen {
+ #appContainer :is(#ordersTable,.workflow-list-table) .order-progress-cell small { display:block; max-width:100%; box-sizing:border-box; padding-inline-end:4px; white-space:normal; overflow-wrap:anywhere; }
+}

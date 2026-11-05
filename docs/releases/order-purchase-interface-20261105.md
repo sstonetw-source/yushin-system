@@ -30,7 +30,7 @@
 - 靜態：`git diff --check`、JavaScript 語法、`build-app --check`、`build-receiving-runtime --check`；PDF 產生函式及 Functions／Rules／Index 無差異。
 - 一般自動化：更新至 `059dfd40` 後，排除需要獨立 Emulator 的 Rules suite，最終 2,282 項全數通過。
 - Firebase Emulator：隔離 `demo-yushin` 的既有 receiving suite 7/7 通過，涵蓋兩倉庫、一般訂單來源／權限否決、直接備庫→在途→部分收貨→原操作重試與數量不重複。首輪一項 Emulator 請求逾時；完整重跑 7/7 通過。
-- Rules Emulator：另行執行既有 Rules suite；最終結果見 PR。僅載入原 Rules 至隔離 Emulator，未修改或部署 Rules。
+- Rules Emulator：本機分批完成 241 項（215 + 26）全數通過。首輪預設 2GB heap 在 215 項通過後記憶體不足中止；提高至 4GB 後僅補跑剩餘 26 項，並非一次完整 suite 通過的宣稱。僅載入原 Rules 至隔離 Emulator，未修改或部署 Rules。
 - 實際 Chrome、本機資料替身：共用控制項在 1280／390px 各 20 類；採購編輯視窗與直接備庫待到貨在 1440／390px；同貨號選擇、主檔帶入、實體倉庫、無 PDF 草稿／確認、重複點擊、搜尋及空資料。
 - 採購各工作列表：既有 `workspace-display-browser-smoke` 使用實際 renderer 與本機資料，在 1440／1024／390px 驗證待採購、待打單、已完成、待到貨、歷史採購、明細、搜尋及無額外查詢。已通過。
 - 正式環境：未測試、未寫入、未部署。上述本機／Emulator 結果不代表正式帳號、正式資料或完整人工驗收通過。
