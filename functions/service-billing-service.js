@@ -1,5 +1,5 @@
 'use strict';
-// Service and mixed-order billing use registered cases and physical delivery proofs.
+// The existing billing transaction verifies service and physical delivery proofs.
 const {createHash}=require('node:crypto');
 const {caseDocId}=require('./service-case-service');
 const workflow=require('./shared/workflow-core');
@@ -42,9 +42,6 @@ async function commitServiceOrderBilling(db,uid,data){
   if(typeof uid!=='string'||!uid)fail('請先登入。','unauthenticated');
   const intent=billingIntent(data),at=new Date().toISOString();
   const orderRef=db.collection('orders').doc(intent.orderId);
-  // Four segments cannot collide with three-segment cases or item-index keys.
-  const receiptRef=db.collection('serviceCases').doc(
-    ['billing-operation',intent.orderId,intent.operationId,'v1'].map(encodeURIComponent).join('|'));
   return db.runTransaction(async tx=>{
     const [userSnap,orderSnap]=await Promise.all([
       tx.get(db.collection('users').doc(uid)),tx.get(orderRef)
@@ -56,6 +53,11 @@ async function commitServiceOrderBilling(db,uid,data){
     const order=orderSnap.data();
     if(user.role!=='admin'&&order.ownerUid!==uid)
       fail('只能核銷自己負責的服務訂單。','permission-denied');
+    const receiptRef=order.serviceFulfillment
+      ? db.collection('reservationOperationReceipts').doc('service-billing-'+createHash('sha256')
+        .update(JSON.stringify([intent.orderId,intent.operationId])).digest('hex'))
+      : db.collection('serviceCases').doc(
+        ['billing-operation',intent.orderId,intent.operationId,'v1'].map(encodeURIComponent).join('|'));
     const receipt=await tx.get(receiptRef);
     if(receipt.exists){
       const saved=receipt.data();

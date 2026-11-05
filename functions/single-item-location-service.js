@@ -380,7 +380,7 @@ async function commitSingleItemFreeStockAllocation(db,uid,input,batchContext=nul
     ||String(item.productType||item.type||'').toUpperCase()==='SERVICE'
     ||item.transferPendingId||item.custodyTransferId
     ||integer(order.logisticsTransfersPending??0,'調撥途中')>0
-    ||integer(item.dispatchPreparedQty??0,'已打單')>0
+    ||integer(item.dispatchPreparedQty??0,'待送貨')>0
     ||integer(item.warehouseShippedQty??0,'已出貨')>0
     ||integer(item.deliveredQty??0,'已送達')>0
     ||integer(item.returnedQty??0,'已退貨')>0

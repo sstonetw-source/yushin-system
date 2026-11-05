@@ -619,3 +619,54 @@ test('whole-order summary caps total index fanout before case document reads',as
  await assert.rejects(getServiceOrderProgress(f.db,'U',{orderId:'O'}),/查核上限/);
  assert.equal(f.written.length,0);
 });
+
+test('new service action aborts atomically if order or queue update fails',async()=>{
+ const {commitOrderServiceAction}=require('../functions/order-service-action');
+ const f=fixture({role:'purchaser',retry:true,rejectOrderUpdate:true});
+ const order=f.docs.get('orders/O');order.serviceFulfillment={};order.workCategories=['ordering'];
+ await assert.rejects(commitOrderServiceAction(f.db,'U',{orderId:'O',itemId:'I',action:'EXECUTE'}),/simulated/);
+ assert.deepEqual(order.serviceFulfillment,{});
+ assert.deepEqual(order.workCategories,['ordering']);
+ assert.deepEqual(f.orderWrites,[]);
+ assert.deepEqual(f.written,[]);
+});
+
+test('mixed warehouse order keeps goods and service work independent and refuses unproven delivery',async()=>{
+ const {commitOrderServiceAction}=require('../functions/order-service-action');
+ const {readOrderFulfillment}=require('../functions/service-order-fulfillment');
+ const f=fixture({role:'admin'}),order=f.docs.get('orders/O');
+ order.serviceFulfillment={};
+ order.items.push({itemId:'G',productId:'PG',productType:'Goods',qty:4});
+ mixedSource(f);
+ for(const action of ['EXECUTE','PREPARE','DELIVER'])
+  await commitOrderServiceAction(f.db,'U',{orderId:'O',itemId:'I',action});
+ assert.deepEqual(order.workCategories,['billing','ordering']);
+ const inspect=()=>f.db.runTransaction(tx=>readOrderFulfillment(f.db,tx,'O',order));
+ const state=await inspect();
+ assert.equal(state.serviceCompleted,true);
+ assert.equal(state.goodsCompleted,false);
+ order.items[1].deliveredQty=4;
+ await assert.rejects(inspect(),/交付憑證/);
+ assert.equal(order.isBilled,undefined);
+});
+
+test('mixed direct-ship order only completes with matched goods receipt and service delivery',async()=>{
+ const {commitOrderServiceAction}=require('../functions/order-service-action');
+ const {readOrderFulfillment}=require('../functions/service-order-fulfillment');
+ const f=fixture({role:'admin'}),order=f.docs.get('orders/O');
+ Object.assign(order,{serviceFulfillment:{},deliveryRecords:[]});
+ order.items.push({itemId:'G',productId:'PG',productType:'Goods',qty:1,fulfillmentType:'DIRECT_SHIP'});
+ mixedSource(f);
+ for(const action of ['EXECUTE','PREPARE','DELIVER'])
+  await commitOrderServiceAction(f.db,'U',{orderId:'O',itemId:'I',action});
+ const inspect=()=>f.db.runTransaction(tx=>readOrderFulfillment(f.db,tx,'O',order));
+ assert.equal((await inspect()).goodsCompleted,false);
+ order.deliveryRecords.push({id:'direct-R',receiptId:'R',sourceType:'DIRECT_SHIP_RECEIPT',
+  itemId:'G',sourceId:'S',date:'2026-11-05',qty:1});
+ await assert.rejects(inspect(),/憑證/);
+ f.docs.set('receipts/R',{fulfillmentType:'DIRECT_SHIP',orderId:'O',itemId:'G',
+  supplyOrderId:'S',productId:'PG',receiptDate:'2026-11-05',qty:1});
+ const state=await inspect();
+ assert.equal(state.goodsCompleted,true);
+ assert.equal(state.serviceCompleted,true);
+});

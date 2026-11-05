@@ -30,7 +30,7 @@ const parts = [
   "src/services/grouped-reservation.js",
   "src/services/order-reservation.js",
   "src/services/service-cases.js",
-  "src/features/orders/service-cases.js",
+  "src/features/orders/service-order-actions.js",
   "src/services/dispatch-preparation.js",
   "src/services/self-order-supply.js",
   "src/features/orders/order-workspace.js",

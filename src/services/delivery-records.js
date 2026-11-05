@@ -231,7 +231,7 @@ function assertOrderDeliveryIncrease(order,item,qty) {
         .reduce((sum,row)=>sum+Number(row.qty||0),0);
     const state=globalThis.YushinFulfillment.dispatchState({deliveredQty:gross,
         reservedQty:item.reservedQty,dispatchPreparedQty:item.dispatchPreparedQty});
-    if(qty>state.shippable+1e-9)throw new Error(`${item.itemName||'品項'} 目前已打單可出貨數量只有 ${state.shippable}。`);
+    if(qty>state.shippable+1e-9)throw new Error(`${item.itemName||'品項'} 目前可出貨數量只有 ${state.shippable}。`);
     return state;
 }
 

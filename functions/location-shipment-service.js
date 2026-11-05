@@ -118,7 +118,7 @@ async function commitLocationShipment(db,uid,data,env=process.env){
   const state=fulfillmentCore.warehouseShipmentState({warehouseShippedQty:gross,
    dispatchPreparedQty:prepared,reservedQty:held});
   if(gross>ordered||prepared>ordered||intent.quantity>ordered-state.shippedQty
-   ||intent.quantity>state.shippable)fault('已打單可出貨數量不足或已超額交付');
+   ||intent.quantity>state.shippable)fault('可出貨數量不足或已超額交付');
 
   // Multi-line shipment uses the same transaction, receipt reader, physical
   // issue planner and item ledger as single-line shipment. Every sibling is
@@ -139,8 +139,8 @@ async function commitLocationShipment(db,uid,data,env=process.env){
      ||quantity(row.warehouseShippedQty??0,'品項已出貨')!==part.shippedQty
      ||quantity(row.deliveredQty??0,'品項已送達')!==part.confirmedQty
      ||quantity(row.returnedQty??0,'品項已退貨')!==part.returnedQty
-     ||quantity(row.dispatchPreparedQty??0,'品項已打單')<part.shippedQty
-     ||quantity(row.dispatchPreparedQty??0,'品項已打單')>part.orderedQty)
+     ||quantity(row.dispatchPreparedQty??0,'品項打單量')<part.shippedQty
+     ||quantity(row.dispatchPreparedQty??0,'品項打單量')>part.orderedQty)
      fault('整單品項的來源、打單或履約投影不一致');
     if(!products.has(siblingProductId))products.set(siblingProductId,
      await tx.get(ref('products',siblingProductId)));

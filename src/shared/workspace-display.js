@@ -52,7 +52,9 @@ function organizeOrderRowActions(row, stage) {
     if (!area) return;
     const buttons = [...area.querySelectorAll(':scope > button')];
     const preferred = {arrival:'openOrderDirectShipReceipt',ordering:'openSelfOrderModal',shipping:'Delivery',delivery:'Delivery',billing:'toggleOrderStatus'}[stage];
-    const primary = preferred ? buttons.find(button => (button.getAttribute('onclick') || '').includes(preferred)) : null;
+    const serviceAction={dispatch:'PREPARE',shipping:'DELIVER'}[stage];
+    const primary = buttons.find(button=>serviceAction&&button.dataset.serviceAction===serviceAction)
+        || (preferred ? buttons.find(button => (button.getAttribute('onclick') || '').includes(preferred)) : null);
     buttons.forEach(button => {
         button.classList.toggle('btn-secondary', button !== primary);
         button.classList.toggle('order-primary-action', button === primary);
@@ -71,7 +73,7 @@ function workflowAmountSummary(item, quantity, options = {}) {
 }
 
 function workflowWorkCategoryLabel(category) {
-    return {ordering:'待採購',arrival:'待到貨',dispatch:'待打單',shipping:'已打單',delivery:'待送達',billing:'待核銷',complete:'已完成',closed:'已結束'}[category] || category;
+    return {ordering:'待採購',arrival:'待到貨',dispatch:'待打單',shipping:'待送貨',delivery:'待送達',billing:'待核銷',complete:'已完成',closed:'已結束'}[category] || category;
 }
 
 // Read-only commercial context from the authorized source order; never infer missing prices.

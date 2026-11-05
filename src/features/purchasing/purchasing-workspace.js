@@ -450,6 +450,9 @@ function renderPurchasingWorkCards(normalizedItemsByOrder = null, completedRows 
         const date=order?.orderDate||String(demand.createdAt||'').slice(0,10);
         return purchaseLineMatchesFilters(date,demand.salesName||order?.salesName||'',demand.brand||'',filters);
     }) : null;
+    const serviceRows=pendingServicePurchaseRows(filters,itemMap);
+    const serviceAmount=serviceRows.reduce((sum,{item})=>sum
+        +Number(item.unitPrice||item.salesPrice||0)*Number(item.orderedQty??item.qty),0);
     const demandOrderingAmount=demandOrderingRows ? demandOrderingRows.reduce((sum,demand)=>{
         const order=demand.sourceType==='SALES_ORDER'
             ? procurementDemandSourceOrderCache.get(String(demand.sourceId||'')) || null
@@ -462,8 +465,8 @@ function renderPurchasingWorkCards(normalizedItemsByOrder = null, completedRows 
         const count = document.getElementById(countId);
         const amount = document.getElementById(amountId);
         const useDemand=category==='ordering'&&demandOrderingRows;
-        const baseCount=category === 'arrival' ? receiving.count : useDemand?demandOrderingRows.length:metrics[category].count;
-        const baseAmount=category === 'arrival' ? receiving.amount : useDemand?demandOrderingAmount:metrics[category].amount;
+        const baseCount=category === 'arrival' ? receiving.count : useDemand?demandOrderingRows.length+serviceRows.length:metrics[category].count;
+        const baseAmount=category === 'arrival' ? receiving.amount : useDemand?demandOrderingAmount+serviceAmount:metrics[category].amount;
         if (count) count.textContent = category === 'ordering' && !purchaseDemandSummaryReady ? (purchaseDemandSummaryError || '讀取中…') : category==='arrival' && !activeReceivingSupplyReady ? (activeReceivingSupplyError || '讀取中…') : !orderWorkQueueReady && category === 'dispatch' ? (orderWorkQueueError || '讀取中…') : `${baseCount} ${category === 'arrival' ? '筆供應' : '品項'}`;
         if (amount) amount.textContent = category === 'arrival' && !activeReceivingSupplyReady ? (activeReceivingSupplyError || '讀取中…') : category === 'arrival' && !canCreatePurchaseOrderCapability()
             ? '成本不顯示'
@@ -514,7 +517,7 @@ function renderPurchasingCompletedOrders(completedRows = null) {
     if (!body) return;
     const allRows = completedRows || purchasingCompletedRows();
     const rows = allRows.filter(({order,item})=>workflowLineMatchesSearch(order,item,document.getElementById('purchaseWorkSearch')?.value)).slice(0, purchasingCompletedVisibleLimit);
-    body.innerHTML = rows.map(({order, item, state}) => `<tr><td data-th="訂單日期">${workflowRecordSummary(order, order.orderDate)}</td><td data-th="客戶">${escapeHtml(order.customerName || order.customer || '')}</td><td data-th="已完成採購品項">${purchaseProductSummary(item, state.prepared || item.dispatchPreparedQty || item.qty, null)}</td><td data-th="數量">${workflowQuantitySummary(state.prepared || item.dispatchPreparedQty || item.qty,(item.fulfillmentType || order.fulfillmentType) === 'DIRECT_SHIP' ? '已到貨' : '已打單')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="操作" class="no-print"><button type="button" class="btn-small btn-secondary" onclick="openOrderStatusHistory(${inlineJsValue(order.id)})">查看紀錄</button></td></tr>`).join('');
+    body.innerHTML = rows.map(({order, item, state}) => `<tr><td data-th="訂單日期">${workflowRecordSummary(order, order.orderDate)}</td><td data-th="客戶">${escapeHtml(order.customerName || order.customer || '')}</td><td data-th="已完成採購品項">${purchaseProductSummary(item, state.prepared || item.dispatchPreparedQty || item.qty, null)}</td><td data-th="數量">${workflowQuantitySummary(state.prepared || item.dispatchPreparedQty || item.qty,(item.fulfillmentType || order.fulfillmentType) === 'DIRECT_SHIP' ? '已到貨' : '待送貨')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="操作" class="no-print"><button type="button" class="btn-small btn-secondary" onclick="openOrderStatusHistory(${inlineJsValue(order.id)})">查看紀錄</button></td></tr>`).join('');
     [...body.children].forEach((row,index)=>organizePurchasingOrderRow(row,rows[index].order,rows[index].item));
     if (status) status.textContent = rows.length
         ? `已顯示 ${rows.length} 筆採購已完成品項${purchasingDispatchHasMore || allRows.length > rows.length ? '；可載入更多' : ''}`
@@ -1019,14 +1022,17 @@ function renderPurchasingDispatchOrders(normalizedItemsByOrder = null, filterCon
         pending.forEach(({item,state})=>{
             if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand, filters)) return;
             if (!workflowLineMatchesSearch(order,item,document.getElementById('purchaseWorkSearch')?.value)) return;
-            const warehouseId = item.warehouseId || order.warehouseId || defaultWarehouse()?.id || '';
+            const service=!!order.serviceFulfillment&&YushinWorkflow.isServiceItem(item);
+            const quantity=service?(item.orderedQty??item.qty):state.pending;
             const canPrepareDispatch = currentUserRole === 'purchaser' || currentUserRole === 'admin';
             const preparing = pendingDispatchOrderIds.has(order.id+'__'+item.itemId);
-            const action = canPrepareDispatch
+            const action = service
+                ? (canPrepareDispatch&&serviceCaseClientProject()?serviceOrderActionButton(order,item,'PREPARE','確認打單'):'—')
+                : canPrepareDispatch
                 ? `<button type="button" class="btn-small" onclick="markOrderItemDispatchPrepared(${inlineJsValue(order.id)},${inlineJsValue(item.itemId)})" ${preparing?'disabled':''}>${preparing?'處理中…':(pendingDispatchPreparation(order.id,item.itemId)?'確認打單結果':`確認打單 ${state.pending} 件`)}</button>`
                 : '<span class="order-progress-badge">唯讀</span>';
             const tr=document.createElement('tr');
-            tr.innerHTML=`<td data-th="訂單日期">${workflowRecordSummary(order, order.orderDate)}</td><td data-th="客戶">${escapeHtml(order.customerName||order.customer||'')}</td><td data-th="待打單品項">${purchaseProductSummary(item, state.pending, null)}</td><td data-th="數量">${workflowQuantitySummary(state.pending,'待打單')}</td><td data-th="負責業務">${escapeHtml(order.salesName||'')}</td><td data-th="操作"><div class="workflow-inline-actions">${action}</div></td>`;
+            tr.innerHTML=`<td data-th="訂單日期">${workflowRecordSummary(order, order.orderDate)}</td><td data-th="客戶">${escapeHtml(order.customerName||order.customer||'')}</td><td data-th="待打單品項">${purchaseProductSummary(item, quantity, null)}</td><td data-th="數量">${workflowQuantitySummary(quantity,'待打單')}</td><td data-th="負責業務">${escapeHtml(order.salesName||'')}</td><td data-th="操作"><div class="workflow-inline-actions">${action}</div></td>`;
             organizePurchasingOrderRow(tr,order,item);
             fragment.appendChild(tr);
             shown++;
@@ -1125,14 +1131,37 @@ window.togglePendingPurchaseSelection = function(demandId, checked) {
     updatePendingPurchaseBatchButton();
 };
 
-function renderPendingPurchaseOrders() {
+function pendingServicePurchaseRows(filters, itemMap = null){
+    return ordersCache.flatMap(order=>{
+        if(!order.serviceFulfillment||orderInventorySyncIncomplete(order)||normalizedOrderStatus(order)!=='normal')return [];
+        return (itemMap?.get(order.id)||normalizedOrderItems(order)).filter(item=>
+            YushinWorkflow.isServiceItem(item)
+            &&YushinWorkflow.serviceItemWorkCategory(order,item)==='ordering'
+            &&purchaseLineMatchesFilters(order.orderDate,order.salesName,item.brand,filters)
+        ).map(item=>({order,item}));
+    });
+}
+
+function renderPendingPurchaseOrders(itemMap = null, filterContext = null) {
     const body = document.getElementById('purchasePendingBody');
     if (!body) return;
     body.innerHTML = '';
     const fragment = document.createDocumentFragment();
-    const filters = purchaseFilterContext();
+    const filters = filterContext || purchaseFilterContext();
     let shown = 0;
     const visibleSelectableIds=new Set();
+
+    for(const {order,item} of pendingServicePurchaseRows(filters,itemMap)){
+        if(!workflowLineMatchesSearch(order,item,document.getElementById('purchaseWorkSearch')?.value))continue;
+        const qty=item.orderedQty??item.qty;
+        const action=canCreatePurchaseOrderCapability()&&serviceCaseClientProject()
+            ? serviceOrderActionButton(order,item,'EXECUTE','確認已執行') : '—';
+        const row=document.createElement('tr');
+        row.innerHTML=`<td data-th="合併" class="no-print"></td><td data-th="需求日期">${workflowRecordSummary(order,order.orderDate)}</td><td data-th="客戶／用途">${escapeHtml(order.customerName||order.customer||'')}</td><td data-th="待採購品項">${purchaseProductSummary(item,qty,null)}<div class="record-reference">待執行</div></td><td data-th="數量">${workflowQuantitySummary(qty,'待執行')}</td><td data-th="負責業務">${escapeHtml(order.salesName||'')}</td><td data-th="操作"><div class="workflow-inline-actions">${action}</div></td>`;
+        organizePurchasingOrderRow(row,order,item);
+        fragment.appendChild(row);
+        shown++;
+    }
 
     const rows=[...procurementDemandCache]
         .filter(demand=>demand.sourceType==='SALES_ORDER')

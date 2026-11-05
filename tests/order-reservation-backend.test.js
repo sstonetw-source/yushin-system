@@ -245,7 +245,7 @@ test('single-item and mixed service/direct-ship orders have correct projections'
  single.put('orders/O',{...original,items:[original.items[0]]});
  assert.equal((await single.run()).reservedQty,3);
 });
-test('initial reservation never overwrites an existing authoritative Service work queue',async()=>{
+test('new service orders enter the purchase work queue without physical demand',async()=>{
  const f=fixture(),order=f.docs.get('orders/O');
  f.put('products/S',{productId:'S',productType:'SERVICE',active:true});
  f.put('orders/O',{...order,items:[{itemId:'S',productId:'S',productType:'SERVICE',qty:1}],
@@ -253,8 +253,9 @@ test('initial reservation never overwrites an existing authoritative Service wor
  await f.run();
  const saved=f.docs.get('orders/O');
  assert.equal(saved.inventoryReservationStatus,'completed');
- assert.deepEqual(saved.workCategories,['billing']);
- assert.equal(saved.workCategoryUpdatedAt,'2026-10-30T00:00:00.000Z');
+ assert.deepEqual(saved.workCategories,['ordering']);
+ assert.deepEqual(saved.serviceFulfillment,{});
+ assert.equal([...f.docs.keys()].filter(key=>key.startsWith('procurementDemands/')).length,0);
 });
 test('new order backend is independently disabled by default, in production and without dual emulator',()=>{
  for(const env of [

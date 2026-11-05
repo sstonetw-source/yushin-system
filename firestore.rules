@@ -341,7 +341,7 @@ service cloud.firestore {
           && data.category == data.productType
           && data.serviceKind is string && data.serviceKind.size() <= 100
           && (data.productType == 'Service'
-            ? (data.serviceKind in ['BIOPLEX_LAB','PIPETTE_CALIBRATION','TISSUE_SLICING','ONSITE_REPAIR']
+            ? (data.serviceKind in ['', 'BIOPLEX_LAB','PIPETTE_CALIBRATION','TISSUE_SLICING','ONSITE_REPAIR']
               && data.inventoryTracked == false && data.lotTracked == false && data.expiryTracked == false)
             : data.serviceKind == '')
           && data.listPrice is number && data.listPrice >= 0 && data.listPrice <= 1000000000
@@ -593,7 +593,7 @@ service cloud.firestore {
         return before == after || (
           [before.get('deliveryPlan', {}), before.get('receivedQty', 0), before.get('receiptEvents', []), before.get('procurementType', method)]
             == [after.get('deliveryPlan', {}), after.get('receivedQty', 0), after.get('receiptEvents', []), after.get('procurementType', method)]
-          && (!changed.hasAny(['itemId','productId','productType','serviceKind'])
+          && (!changed.hasAny(['itemId','productId','productType','serviceKind','qty','orderedQty'])
             || !isServiceBillingItem(before) && !isServiceBillingItem(after))
           && (!changed.hasAny(['costPrice','costSource','unitCost','cost'])
             || before.get('procurementType', method) == 'SALES_SELF_ORDER'
@@ -1198,7 +1198,7 @@ service cloud.firestore {
       function serviceBillingBindingAt(before, after, index) {
         let old = index < before.size() ? before[index] : {};
         let next = index < after.size() ? after[index] : {};
-        return !next.diff(old).affectedKeys().hasAny(['itemId','productId','productType','serviceKind'])
+        return !next.diff(old).affectedKeys().hasAny(['itemId','productId','productType','serviceKind','qty','orderedQty'])
           || !(isServiceBillingItem(old) || isServiceBillingItem(next));
       }
 
@@ -1265,6 +1265,7 @@ service cloud.firestore {
       allow create: if canCreateCommercialDoc() && clientDeliveryFactsEmpty() && clientReturnFactsEmpty()
         // Client SDK must not forge the terminal server-only checkpoint.
         && request.resource.data.get('inventoryReservationStatus', '') != 'completed'
+        && !request.resource.data.keys().hasAny(['serviceFulfillment'])
         && request.resource.data.get('items', []).size() <= 15
         && validOrderTransactionType(request.resource.data)
         && validClientBillingCreate(request.resource.data)
@@ -1279,6 +1280,8 @@ service cloud.firestore {
           || request.resource.data.get('items', []) == resource.data.get('items', []))
         && (resource.data.get('inventoryReservationStatus', '') == 'completed'
           || request.resource.data.get('inventoryReservationStatus', '') != 'completed')
+        // Service action receipts are only written with the server transaction.
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['serviceFulfillment'])
         && clientReturnFactsUnchanged() && orderUpdateAllowed(id);
       allow delete: if admin();
     }

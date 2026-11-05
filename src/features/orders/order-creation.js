@@ -649,7 +649,9 @@ window.saveNewOrder = function() {
     const customerName=document.getElementById('orderCustomer')?.value.trim()||'';
     const currentItem=currentOrderModalItem();
     const items=[...newOrderDraftItems,...(currentItem.itemName?[currentItem]:[])].map(item=>({
-        ...item,fulfillmentType,warehouseId,deliveryPlan:{...sharedPlan},deliveryCustomerName:customerName
+        ...item,fulfillmentType,warehouseId,deliveryPlan:{...sharedPlan},deliveryCustomerName:customerName,
+        ...(YushinWorkflow.isServiceItem(item)?{fulfillmentType:'WAREHOUSE',warehouseId:'',
+            deliveryPlan:{},procurementType:'PURCHASING_PO',selfOrderConfirmed:false}:{})
     }));
     if(!items.length){alert('請至少輸入一個訂單品項。');return;}
     try { assertOrderItemCount(items); } catch (err) { alert(err.message); return; }
@@ -682,11 +684,7 @@ window.saveNewOrder = function() {
     try {
         let validatedPlan;
         for(const item of items) {
-            if(String(item.productType||'').trim().toUpperCase()==='SERVICE'){
-                if(item.fulfillmentType==='DIRECT_SHIP')throw new Error('服務型品項不屬於原廠直送實貨，請選擇一般服務處理。');
-                item.deliveryPlan={};item.warehouseId='';
-                continue;
-            }
+            if(YushinWorkflow.isServiceItem(item))continue;
             if(fulfillmentType==='DIRECT_SHIP'&&sharedPlan.mode!=='CUSTOMER_SHIP')throw new Error('原廠直送請設定客戶收件資訊。');
             if(!validatedPlan)validatedPlan=globalThis.YushinWarehouseLogistics.validatePlan(sharedPlan,true);
             item.deliveryPlan={...validatedPlan};

@@ -7,7 +7,7 @@ const {getAuth:adminAuth}=require('firebase-admin/auth');
 const {initializeApp,deleteApp}=require('firebase/app');
 const {getAuth,connectAuthEmulator,signInWithEmailAndPassword}=require('firebase/auth');
 const {getFunctions,connectFunctionsEmulator,httpsCallable}=require('firebase/functions');
-const {getFirestore:clientDb,connectFirestoreEmulator,doc,getDoc,setDoc}=require('firebase/firestore');
+const {getFirestore:clientDb,connectFirestoreEmulator,doc,getDoc,setDoc,updateDoc}=require('firebase/firestore');
 const {caseDocId,itemCaseIndexId}=require('../functions/service-case-service');
 const project='demo-yushin',clients=[];let server,db,accounts;
 test.before(()=>{
@@ -34,7 +34,8 @@ async function actor(tag,role){
  connectFunctionsEmulator(functions,'127.0.0.1',5001);
  const firestore=clientDb(app);
  connectFirestoreEmulator(firestore,'127.0.0.1',8080);
- return {uid,app,firestore,call:payload=>httpsCallable(functions,'commitServiceCaseEvent',{timeout:30000})(payload).then(r=>r.data)};
+ const invoke=(name,payload)=>httpsCallable(functions,name,{timeout:30000})(payload).then(r=>r.data);
+ return {uid,app,firestore,invoke,call:payload=>invoke('commitServiceCaseEvent',payload)};
 }
 async function fixture(tag,kind){
  const orderId='service-order-'+tag,itemId='S',productId='service-product-'+tag,caseId='case-'+tag;
@@ -378,4 +379,42 @@ test('real Auth pure-Service billing verifies events, rejects mixed/foreign acto
  await assert.rejects(getDoc(doc(f.sales.firestore,'serviceCases',receiptId)),e=>e.code==='permission-denied');
  await assert.rejects(setDoc(doc(f.sales.firestore,'serviceCases',receiptId),{isBilled:true}),e=>e.code==='permission-denied');
  assert.equal((await db.collection('inventoryMovements').where('sourceId','==',f.orderId).get()).size,0);
+});
+
+test('shared order workflow executes, prepares, delivers and bills once without stock writes',async()=>{
+ const f=await fixture('simple-workflow','ONSITE_REPAIR');
+ const buyer=await actor('simple-workflow','purchaser');
+ await db.doc('users/'+buyer.uid).set({role:'purchaser',active:true});
+ const orderRef=db.doc('orders/'+f.orderId);
+ await orderRef.update({serviceFulfillment:{},workCategories:['ordering'],isBilled:false});
+ const action=(user,step)=>user.invoke('commitOrderServiceAction',{orderId:f.orderId,itemId:f.itemId,action:step});
+ const billing={orderId:f.orderId,operationId:'simple-workflow-billing',isBilled:true,
+  expectedIsBilled:false,billingDate:'2026-11-05'};
+ const read=async()=> (await orderRef.get()).data();
+ await assert.rejects(action(f.sales,'EXECUTE'),e=>e.code==='functions/permission-denied');
+ await assert.rejects(action(buyer,'PREPARE'),e=>e.code==='functions/failed-precondition');
+ assert.deepEqual((await read()).serviceFulfillment,{});
+ await assert.rejects(updateDoc(doc(f.sales.firestore,'orders',f.orderId),
+  {serviceFulfillment:{S:{DELIVER:{quantity:1}}}}),e=>e.code==='permission-denied');
+ const race=await Promise.all([action(buyer,'EXECUTE'),action(buyer,'EXECUTE')]);
+ assert.deepEqual(race.map(r=>r.status).sort(),['already-applied','applied']);
+ assert.deepEqual((await read()).workCategories,['dispatch']);
+ assert.equal((await read()).serviceFulfillment.S.EXECUTE.by,buyer.uid);
+ await action(buyer,'PREPARE');
+ assert.deepEqual((await read()).workCategories,['delivery']);
+ await assert.rejects(action(f.other,'DELIVER'),e=>e.code==='functions/permission-denied');
+ await assert.rejects(f.sales.invoke('commitServiceOrderBilling',billing),e=>e.code==='functions/failed-precondition');
+ await action(f.sales,'DELIVER');
+ assert.deepEqual((await read()).workCategories,['billing']);
+ assert.equal((await f.sales.invoke('commitServiceOrderBilling',billing)).status,'committed');
+ assert.equal((await f.sales.invoke('commitServiceOrderBilling',billing)).status,'already-applied');
+ const final=await read();
+ assert.equal(final.isBilled,true);
+ assert.deepEqual(final.workCategories,['complete']);
+ assert.equal(final.statusHistory.length,1);
+ assert.deepEqual(Object.keys(final.serviceFulfillment.S),['EXECUTE','PREPARE','DELIVER']);
+ for(const collection of ['inventoryMovements','procurementDemands','inventoryReservations','supplyOrders','receipts']){
+  const field=collection==='procurementDemands'?'sourceId':'orderId';
+  assert.equal((await db.collection(collection).where(field,'==',f.orderId).get()).empty,true,collection);
+ }
 });

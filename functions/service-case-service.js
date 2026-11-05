@@ -125,6 +125,7 @@ async function commitServiceCaseEvent(db,actorUid,input){
       fail('目前使用者沒有服務作業權限。','permission-denied');
     if(!orderSnap.exists)fail('來源訂單不存在。','not-found');
     const order=orderSnap.data();
+    if(order.serviceFulfillment)fail('此訂單使用訂單管理的服務流程。');
     const forbiddenStatus=new Set(['cancelled','canceled','void','voided','deleted','closed','已取消','作廢','已結案']);
     if([order.status,order.orderStatus].some(s=>forbiddenStatus.has(String(s||'').trim().toLowerCase()))
       ||order.inventoryReservationStatus!=='completed')

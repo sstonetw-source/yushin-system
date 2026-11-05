@@ -179,8 +179,8 @@ async function runLocationLifecycle(db,uid,data,wholeOrder,env=process.env){
    ||(order.isDelivered??false)!==(wholeFulfillment??fulfillment).isDelivered)
    fault('出貨或送達投影不一致');
   if(fulfillment.pendingDeliveryQty>0)fault('尚有途中貨物，須先完成送達確認');
-  if(number(item.dispatchPreparedQty??0,'已打單量')!==fulfillment.shippedQty)
-   fault('尚有已打單未出貨數量，不在取消試點範圍');
+  if(number(item.dispatchPreparedQty??0,'打單量')!==fulfillment.shippedQty)
+   fault('尚有待出貨數量，不在取消試點範圍');
   const outstanding=fulfillment.outstandingQty;
   if(!outstanding&&!wholeOrder)fault('訂單已無剩餘未交付數量');
   for(const shipment of (order.warehouseShipmentRecords??[]).filter(row=>!wholeOrder||row.itemId===itemId)){

@@ -3,15 +3,50 @@
 // fulfillment/workflow cores and never writes a separate fulfillment ledger.
 const core=require('./shared/fulfillment-core');
 const workflow=require('./shared/workflow-core');
-const service=item=>String(item?.productType||item?.type||'').trim().toUpperCase()==='SERVICE';
+const service=workflow.isServiceItem;
 function fail(message){const e=Error(message);e.code='failed-precondition';throw e;}
+async function directGoodsCompleted(db,tx,orderId,order,goods){
+ const items=new Map(goods.map(item=>[item.itemId,item])),totals=new Map(),seen=new Set();
+ if((order.warehouseShipmentRecords||[]).length||(order.returnRecords||[]).length
+   ||!Array.isArray(order.deliveryRecords)||order.deliveryRecords.length>40)
+  fail('原廠直送商品的交付紀錄不完整。');
+ for(const record of order.deliveryRecords){
+  const item=items.get(record.itemId);
+  if(!item||record.sourceType!=='DIRECT_SHIP_RECEIPT'||typeof record.receiptId!=='string'
+    ||!record.receiptId||record.receiptId.includes('/')||seen.has(record.receiptId)
+    ||record.id!=='direct-'+record.receiptId||!Number.isSafeInteger(record.qty)||record.qty<=0)
+   fail('原廠直送商品缺少有效到貨憑證。');
+  const receipt=(await tx.get(db.collection('receipts').doc(record.receiptId))).data();
+  if(!receipt||receipt.fulfillmentType!=='DIRECT_SHIP'||receipt.orderId!==orderId
+    ||receipt.itemId!==item.itemId||receipt.supplyOrderId!==record.sourceId
+    ||receipt.productId!==item.productId||receipt.qty!==record.qty||receipt.receiptDate!==record.date)
+   fail('原廠直送商品的到貨憑證與來源不一致。');
+  seen.add(record.receiptId);
+  totals.set(item.itemId,(totals.get(item.itemId)||0)+receipt.qty);
+ }
+ return goods.every(item=>(totals.get(item.itemId)||0)===(item.orderedQty??item.qty));
+}
 async function readOrderFulfillmentEvidence(db,tx,orderId,order,options={}){
- const progress=await require('./service-case-service').readServiceOrderProgress(db,tx,orderId,order,options);
+ const progress=order.serviceFulfillment
+  ? {items:order.items.filter(service).map(item=>({
+     itemId:item.itemId,workCategory:workflow.serviceItemWorkCategory(order,item)
+    }))}
+  : await require('./service-case-service').readServiceOrderProgress(db,tx,orderId,order,options);
+ if(order.serviceFulfillment){
+  progress.serviceCompleted=order.items.filter(service).every(item=>{
+   const actions=order.serviceFulfillment[item.itemId];
+   return ['EXECUTE','PREPARE','DELIVER'].every(action=>
+    actions?.[action]?.quantity===(item.orderedQty??item.qty));
+  });
+ }
  const goods=order.items.filter(item=>!service(item));
  if(!goods.length)return {...progress,goodsCompleted:true,workCategories:[...new Set(progress.items.map(i=>i.workCategory))]};
  if(order.inventoryReservationStatus!=='completed'||!order.inventoryReservationAttemptId
    ||!order.ownerUid||!order.salesCode||(order.logisticsTransfersPending??0)!==0)
   fail('混合單尚未完成初始化或物流來源不完整。');
+ if(order.serviceFulfillment&&goods.every(item=>item.fulfillmentType==='DIRECT_SHIP'))
+  return {...progress,goodsCompleted:await directGoodsCompleted(db,tx,orderId,order,goods),
+   workCategories:require('./order-reservation-service').initialOrderWorkIndex(order,order.items,new Date().toISOString()).workCategories};
  const whole=core.projectOrderShipmentReturns({orderId,items:order.items,
   shipments:order.warehouseShipmentRecords??[],deliveries:order.deliveryRecords??[],returns:order.returnRecords??[]});
  if((order.deliveredQty??0)!==whole.confirmedQty||(order.returnedQty??0)!==whole.returnedQty
@@ -50,7 +85,9 @@ async function readOrderFulfillmentEvidence(db,tx,orderId,order,options={}){
     returns:(order.returnRecords??[]).filter(row=>row.itemId===item.itemId)}}).workCategory);
  }
  return {...progress,goodsCompleted:whole.items.every(item=>item.isDelivered),
-  workCategories:[...new Set(order.items.map(item=>categories.get(item.itemId)))]};
+  workCategories:order.serviceFulfillment
+   ? require('./order-reservation-service').initialOrderWorkIndex(order,order.items,new Date().toISOString()).workCategories
+   : [...new Set(order.items.map(item=>categories.get(item.itemId)))]};
 }
 async function readOrderFulfillment(...args){
  try{return await readOrderFulfillmentEvidence(...args);}
@@ -58,6 +95,8 @@ async function readOrderFulfillment(...args){
 }
 async function mixedWorkIndex(db,tx,orderId,order,options={}){
  if(!order.items?.some(service))return {};
+ if(order.serviceFulfillment)
+  return require('./order-reservation-service').initialOrderWorkIndex(order,order.items,new Date().toISOString());
  const progress=await readOrderFulfillment(db,tx,orderId,order,options);
  return {workCategories:progress.workCategories,workCategoryUpdatedAt:new Date().toISOString()};
 }
