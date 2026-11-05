@@ -13,7 +13,7 @@ function fn(name){const a=source.indexOf('function '+name+'('),b=source.indexOf(
   await page.evaluate(html=>{const d=new DOMParser().parseFromString(html,'text/html'),p=d.getElementById('purchasing-system');document.getElementById('appContainer').append(p);p.classList.add('active');p.style.display='block';},html);
   await page.addStyleTag({content:fs.readFileSync('styles.css','utf8')});
   await page.addScriptTag({content:`
-   let currentUserRole='purchaser';const order={id:'O',orderNo:'YS-20261026-1',orderDate:'2026-10-26',customerName:'客戶 <測試>',salesName:'負責業務',transactionType:'直',invoiceTitle:'測試發票抬頭',totalPrice:2400,items:[{itemId:'I',itemName:'RNeasy Mini Kit (50) 長品名與規格測試',brand:'Qiagen',itemCode:'74104',unitPrice:120,qty:20,orderedQty:20,shortageQty:15,supplyOrderedQty:15,receivedQty:5,dispatchPreparedQty:10}]};
+   let currentUserRole='purchaser',currentUser={uid:'buyer'};const order={id:'O',orderNo:'YS-20261026-1',orderDate:'2026-10-26',customerName:'客戶 <測試>',salesName:'負責業務',transactionType:'直',invoiceTitle:'測試發票抬頭',totalPrice:2400,items:[{itemId:'I',itemName:'RNeasy Mini Kit (50) 長品名與規格測試',brand:'Qiagen',itemCode:'74104',unitPrice:120,qty:20,orderedQty:20,shortageQty:15,supplyOrderedQty:15,receivedQty:5,dispatchPreparedQty:10}]};
    let ordersCache=[order],purchasingDispatchCache=[],purchasingDispatchLoading=false,purchasingDispatchError='',purchasingDispatchHasMore=false,purchasingCompletedVisibleLimit=50;
    const pendingDispatchOrderIds=new Set(),selectedPendingPurchaseDemandIds=new Set();
    const procurementDemandCache=[{id:'D',sourceType:'SALES_ORDER',sourceId:'O',sourceItemId:'I',itemCode:'74104',remainingToOrderQty:5}];
@@ -22,7 +22,15 @@ function fn(name){const a=source.indexOf('function '+name+'('),b=source.indexOf(
    const purchasingReceivingReady=true,purchaseCancellationInProgress=new Set(),purchaseHistorySupplyCache=new Map();
    const isPurchaseTerminalStatus=status=>['CANCELLED','CLOSED'].includes(status);
    const escapeHtml=x=>String(x??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;'),escapeAttr=escapeHtml,inlineJsValue=x=>JSON.stringify(x).replaceAll('"','&quot;');
-   const normalizedOrderItems=o=>o.items,orderLifecycleInfo=()=>({status:'normal'}),normalizedOrderStatus=()=> 'normal',orderItemDisplayCategories=()=>['dispatch','arrival'];
+   const normalizedOrderItems=o=>o.items,orderLifecycleInfo=()=>({status:'normal'}),normalizedOrderStatus=()=> 'normal',orderItemDisplayCategories=(o,i)=>o.serviceFulfillment
+     ? [YushinWorkflow.serviceItemWorkCategory(o,i)] : ['dispatch','arrival'];
+   const orderInventorySyncIncomplete=()=>false,serviceCaseClientProject=()=> 'demo-yushin';
+   const serviceCaseTransport=()=>({call:async(name,input)=>{
+     if(name!=='commitOrderServiceAction'||input.action!=='EXECUTE')throw Error('Unexpected service action');
+     ordersCache.find(o=>o.id===input.orderId).serviceFulfillment[input.itemId]={EXECUTE:{quantity:1}};
+     return {...input,status:'applied'};
+   }});
+   const refreshAffectedOrderCaches=async()=>renderPendingPurchaseOrders();
    const itemDispatchState=()=>({pending:10,prepared:10,shippable:10}),pendingDispatchPreparation=()=>null,defaultWarehouse=()=>({id:'W'}),purchaseFilterContext=()=>({});
    const purchaseLineMatchesFilters=()=>true,canBusinessSelfOrder=()=>false,updatePendingPurchaseBatchButton=()=>{},purchasingCompletedRows=()=>[],canCreatePurchaseOrderCapability=()=>['purchaser','admin'].includes(currentUserRole);
    const buildReceivingEvidenceIndex=()=>new Map(),receivingEvidenceForWorkItem=()=>[{id:'S'}],receivingDueInfo=()=>({status:'normal',sortRank:2}),receivingPlanRiskInfo=()=>({status:'normal',sortRank:4});
@@ -30,8 +38,10 @@ function fn(name){const a=source.indexOf('function '+name+'('),b=source.indexOf(
    const db={collection:()=>{throw Error('Unexpected database read');}};
   `});
   await page.addScriptTag({content:fs.readFileSync('modules/supplier-core.js','utf8')});
+  await page.addScriptTag({content:fs.readFileSync('modules/workflow-core.js','utf8')});
+  await page.addScriptTag({content:fs.readFileSync('src/features/orders/service-order-actions.js','utf8')});
   await page.addScriptTag({content:fs.readFileSync('src/shared/workspace-display.js','utf8')});
-  for(const name of ['renderPendingPurchaseOrders','renderPurchasingDispatchOrders','renderPurchasingCompletedOrders','receivingWorkProgress','renderPurchasingReceivingWorkList'])await page.addScriptTag({content:fn(name)});
+  for(const name of ['pendingServicePurchaseRows','renderPendingPurchaseOrders','renderPurchasingDispatchOrders','renderPurchasingCompletedOrders','receivingWorkProgress','renderPurchasingReceivingWorkList'])await page.addScriptTag({content:fn(name)});
   await page.evaluate(()=>{window.renderPurchasingView=()=>{const view=window.fixtureView;if(view==='ordering')renderPendingPurchaseOrders();if(view==='dispatch')renderPurchasingDispatchOrders();if(view==='completed')renderPurchasingCompletedOrders([{order,item:order.items[0],state:{prepared:10}}]);if(view==='receiving')renderPurchasingReceivingWorkList();};});
   for(const view of ['ordering','dispatch','completed','receiving']){
    await page.evaluate(view=>{
@@ -103,6 +113,22 @@ function fn(name){const a=source.indexOf('function '+name+'('),b=source.indexOf(
    await page.evaluate(role=>{currentUserRole=role;renderPurchasingDispatchOrders();},role);
    assert.equal(await page.locator('#purchaseDispatchBody button[onclick^="markOrderItemDispatchPrepared"]').count(),['purchaser','admin'].includes(role)?1:0);
   }
+  await page.evaluate(()=>{
+   currentUserRole='purchaser';
+   ordersCache.push({id:'SERVICE',customerName:'服務客戶',items:[{itemId:'S',productType:'Service',itemName:'Bio-Plex',qty:1,unitPrice:200}],serviceFulfillment:{}});
+   document.getElementById('purchasePendingPanel').style.display='block';
+   document.getElementById('purchaseWorkSearch').value='';
+   renderPendingPurchaseOrders();
+  });
+  const service=page.locator('#purchasePendingBody tr').filter({hasText:'Bio-Plex'});
+  assert.match(await service.innerText(),/待執行/);
+  assert.equal(await service.getByRole('checkbox').count(),0);
+  assert.equal(await service.getByRole('button',{name:'建立採購單'}).count(),0);
+  await service.getByRole('button',{name:'確認已執行'}).click();
+  await service.waitFor({state:'detached'});
+  await page.evaluate(()=>renderPurchasingDispatchOrders());
+  await page.locator('#purchaseDispatchBody tr').filter({hasText:'Bio-Plex'})
+   .getByRole('button',{name:'確認打單'}).waitFor({state:'visible'});
   await page.evaluate(()=>{ordersCache=[];purchasingDispatchCache=[];renderPurchasingDispatchOrders();});assert.equal(await page.locator('#purchaseDispatchBody tr').count(),0);assert.match(await page.locator('#purchaseDispatchStatus').textContent(),/目前沒有/);
   assert.deepEqual(errors,[]);console.log('Unified work lists '+width+'px: four actual queues, escaped references, product quantities, five-role actions, empty state and no database reads.');await page.close();
  }}finally{await browser.close();}
