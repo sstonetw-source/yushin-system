@@ -330,12 +330,13 @@ input[type="number"] {
 .quote-custom-fields { display:flex; flex-direction:column; gap:5px; margin-top:7px; }
 .quote-custom-field-row { display:grid; grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr) auto; gap:6px; align-items:center; }
 .quote-add-custom-field { margin-top:6px; }
-.field-row label { font-weight: bold; white-space: nowrap; min-width: 60px; flex-shrink: 0; }
+.field-row label, .item-brand-field > label { font-weight: bold; white-space: nowrap; }
+.field-row label { min-width: 60px; flex-shrink: 0; }
 .field-row input, .field-row textarea { flex: 1; width: auto; min-width: 0; }
 
 .item-row-pair { display: flex; gap: 10px; width: 100%; align-items: center; margin-bottom: 0; }
 .item-row-pair > div { flex: 1; display: flex; align-items: center; gap: 4px; }
-.item-row-pair label { white-space: nowrap; margin-bottom: 0; min-width: 40px; }
+.item-row-pair label { margin-bottom: 0; min-width: 40px; }
 /* 「其他（自行輸入）」改在廠牌選單下方顯示，避免在同一列被選單擠到只剩一小格。 */
 .item-brand-field { flex-wrap: wrap; }
 .item-brand-field .item-brand { flex: 1; min-width: 0; }
