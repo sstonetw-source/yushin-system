@@ -121,7 +121,8 @@ test('purchase order action distinguishes creation from downloading an existing 
     const start = app.indexOf('function updatePoSaveButton()');
     const end = app.indexOf('function purchaseItemsFromSavedPo', start);
     const source = app.slice(start, end);
-    assert.match(source, /poEditingId && !editingUnconfirmedPurchaseDocument\(\) \? '📄 下載 PDF' : '📄 儲存文件並下載 PDF'/);
+    assert.match(source, /'下載 PDF'/);
+    assert.match(html, /id="savePoDraftBtn"/);
     assert.doesNotMatch(source, /重試同步在途庫存/);
 });
 
@@ -255,7 +256,7 @@ test('repeating an incoming-stock update does not count the same supply twice', 
 
 
 test('saved document reprint never repairs incoming or confirms a purchase', async () => {
- const start=app.indexOf('window.printPurchaseOrder = async function()'),end=app.indexOf('    if (poItems.length === 0)',start);
+ const start=app.indexOf('window.printPurchaseOrder = async function({download=true} = {})'),end=app.indexOf('    if (poItems.length === 0)',start);
  let prints=0;
  const c=vm.createContext({window:{DocumentDownloads:{prepare:async()=>{}}},poEditingId:'PO1',poListCache:[{id:'PO1',poNo:'PO1',vendorName:'Vendor'}],
   currentUser:{uid:'buyer'},currentUserRole:'purchaser',poSaveInProgress:false,poDraftLoading:false,poIncomingSyncPending:true,
@@ -498,7 +499,7 @@ test('purchase-order history search does not scan legacy unindexed history', () 
 });
 
 test('formal PO creates authoritative supplyOrders before saving the document snapshot', () => {
-    const printStart = app.indexOf('window.printPurchaseOrder = async function()');
+    const printStart = app.indexOf('window.printPurchaseOrder = async function({download=true} = {})');
     const printEnd = app.indexOf("window.addEventListener('afterprint'", printStart);
     const printSource = app.slice(printStart, printEnd);
     assert.match(printSource,/saveFormalPurchaseDocument\(poRecord,\{actorUid,actorRole,expectedRevision:/);
@@ -1342,7 +1343,7 @@ test('purchasing pending card and detail share the procurement demand source', (
 });
 
 test('document persistence precedes PDF while business confirmation stays independent', () => {
-    const start=app.indexOf('window.printPurchaseOrder = async function()');
+    const start=app.indexOf('window.printPurchaseOrder = async function({download=true} = {})');
     const end=app.indexOf('// 「製作下一張估價單」',start);
     const source=app.slice(start,end);
     assert.ok(source.indexOf('await saveFormalPurchaseDocument(')<source.indexOf('await printSavedPoDocument(poNo,vendorName)'));
@@ -1413,7 +1414,7 @@ test('purchase cost preload preserves already resolved costs across repeated PO 
 
 test('new PO cannot be saved until its number is ready', () => {
     const buttonSource = app.match(/function updatePoSaveButton\(\) \{[\s\S]*?\n\}/)?.[0];
-    const saveStart = app.indexOf('window.printPurchaseOrder = async function()');
+    const saveStart = app.indexOf('window.printPurchaseOrder = async function({download=true} = {})');
     const saveEnd = app.indexOf('    if (poEditingId && !originalDraft) {', saveStart);
     assert.ok(buttonSource && saveStart >= 0 && saveEnd > saveStart);
     assert.match(buttonSource, /waitingForNumber = !poEditingId && !poNoReady/);
@@ -1477,7 +1478,7 @@ test('purchase identity fields stay editable and save-print keeps the secure tra
     assert.match(render, /onchange="onDirectPoCodeChange\(\$\{idx\},this\.value\)"/);
     assert.match(render, /onchange="updateDirectPoText\(\$\{idx\},'brand'/);
     assert.match(app, /'📄 匯出 PDF（自動同步雲端）'/);
-    const save = app.match(/window\.printPurchaseOrder = async function\(\) \{[\s\S]*?\n\};/)?.[0] || '';
+    const save = app.match(/window\.printPurchaseOrder = async function\(\{download=true\} = \{\}\) \{[\s\S]*?\n\};/)?.[0] || '';
     assert.ok(save.indexOf('await saveFormalPurchaseDocument(') < save.indexOf('await printSavedPoDocument(poNo,vendorName)'));
 });
 

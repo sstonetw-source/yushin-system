@@ -19,7 +19,8 @@ function fn(name){const a=source.indexOf('function '+name+'('),b=source.indexOf(
    const procurementDemandCache=[{id:'D',sourceType:'SALES_ORDER',sourceId:'O',sourceItemId:'I',itemCode:'74104',remainingToOrderQty:5}];
    const procurementDemandSourceOrderCache=new Map([['O',order]]);let pendingPurchaseLoading=false,pendingPurchaseError='',procurementDemandHasMore=false;
    const supplyReceivingCache=[{id:'S',orderId:'O',itemId:'I',itemName:'RNeasy Mini Kit (50)',itemCode:'74104',productKey:'P',qty:15,receivedQty:5}];
-   const purchasingReceivingReady=true,purchaseCancellationInProgress=new Set();
+   const purchasingReceivingReady=true,purchaseCancellationInProgress=new Set(),purchaseHistorySupplyCache=new Map();
+   const isPurchaseTerminalStatus=status=>['CANCELLED','CLOSED'].includes(status);
    const escapeHtml=x=>String(x??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;'),escapeAttr=escapeHtml,inlineJsValue=x=>JSON.stringify(x).replaceAll('"','&quot;');
    const normalizedOrderItems=o=>o.items,orderLifecycleInfo=()=>({status:'normal'}),normalizedOrderStatus=()=> 'normal',orderItemDisplayCategories=()=>['dispatch','arrival'];
    const itemDispatchState=()=>({pending:10,prepared:10,shippable:10}),pendingDispatchPreparation=()=>null,defaultWarehouse=()=>({id:'W'}),purchaseFilterContext=()=>({});
@@ -28,6 +29,7 @@ function fn(name){const a=source.indexOf('function '+name+'('),b=source.indexOf(
    const canReceiveInventoryCapability=()=>['purchaser','warehouse','admin'].includes(currentUserRole),canConfirmSupplyReceipt=()=>canReceiveInventoryCapability(),supplyCancelActionHtml=()=>'',receivingWaitHtml=()=>'',receivingDueHtml=()=>'',receivingPlanRiskHtml=()=>'',renderReceiptTasks=()=>{},receivingSupplyMetrics=()=>({count:1,quantity:10});
    const db={collection:()=>{throw Error('Unexpected database read');}};
   `});
+  await page.addScriptTag({content:fs.readFileSync('modules/supplier-core.js','utf8')});
   await page.addScriptTag({content:fs.readFileSync('src/shared/workspace-display.js','utf8')});
   for(const name of ['renderPendingPurchaseOrders','renderPurchasingDispatchOrders','renderPurchasingCompletedOrders','receivingWorkProgress','renderPurchasingReceivingWorkList'])await page.addScriptTag({content:fn(name)});
   await page.evaluate(()=>{window.renderPurchasingView=()=>{const view=window.fixtureView;if(view==='ordering')renderPendingPurchaseOrders();if(view==='dispatch')renderPurchasingDispatchOrders();if(view==='completed')renderPurchasingCompletedOrders([{order,item:order.items[0],state:{prepared:10}}]);if(view==='receiving')renderPurchasingReceivingWorkList();};});
@@ -91,7 +93,7 @@ function fn(name){const a=source.indexOf('function '+name+'('),b=source.indexOf(
   `});
   const listStart=source.indexOf('window.renderPoList = function('),listEnd=source.indexOf('\n};',listStart)+3;await page.addScriptTag({content:source.slice(listStart,listEnd)});
   await page.evaluate(()=>{document.getElementById('poListSearch').value='';document.getElementById('poListPanel').style.display='block';renderPoList();});
-  assert.equal(await page.locator('#poListBody .workflow-product .workflow-quantity').count(),0);assert.match(await page.locator('#poListBody td[data-th="品項金額"]').innerText(),/105 × 3[\s\S]*315/);
+  assert.equal(await page.locator('#poListBody .workflow-product .workflow-quantity').count(),0);assert.match(await page.locator('#poListBody td[data-th="採購成本（含稅）"]').textContent(),/NT\$ 315[\s\S]*比較數量：3/);
   for(const [status,label] of [['DRAFT','尚未採購'],['CANCELLED','未到貨已取消'],['CLOSED','已結案'],['UNKNOWN','已建立']]){
    await page.evaluate(({status,label})=>{globalThis.poReceiptFixture={status,label,remainingQty:0};renderPoList();},{status,label});
    assert.equal(await page.locator('#poListBody td[data-th="等待天數"]').innerText(),label);

@@ -83,6 +83,7 @@ jobs:
           node tests/warm-sand-browser-smoke.js
           node tests/workspace-four-improvements-browser-smoke.js
           node tests/workspace-display-browser-smoke.js
+          node tests/purchase-interface-browser-smoke.js
           node tests/order-entry-browser-smoke.js
           node tests/frequent-products-browser-smoke.js
           node tests/inventory-lot-browser-smoke.js

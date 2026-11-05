@@ -17,7 +17,7 @@ function workflowLineMatchesSearch(record, item, query) {
     if (!keyword) return true;
     return [record?.orderNo, record?.poNo, record?.customerName, record?.customer,
         record?.salesName, item?.itemName, item?.name, item?.itemCode,
-        item?.brand, item?.brandName].filter(Boolean).join(' ').toLocaleLowerCase().includes(keyword);
+        item?.brand, item?.brandName, item?.purchaseDocumentNo, item?.supplier, item?.supplierName].filter(Boolean).join(' ').toLocaleLowerCase().includes(keyword);
 }
 
 
@@ -67,7 +67,7 @@ function workflowAmountSummary(item, quantity, options = {}) {
     const qty=Number(quantity||0),unit=Number(options.unit ?? item.unitPrice ?? 0);
     const total=options.total ?? Math.round((unit*qty+Number.EPSILON)*100)/100;
     const money=value=>escapeHtml(Number(value).toLocaleString('zh-TW',{maximumFractionDigits:2}));
-    return `<div class="workflow-amount"><small>${escapeHtml(options.label||'單價')} NT$ ${money(unit)} × ${escapeHtml(qty)}</small><strong>${escapeHtml(options.totalLabel||'品項小計')} NT$ ${money(total)}</strong></div>`;
+    return `<div class="workflow-amount">NT$ ${money(unit)} × ${escapeHtml(qty)}＝<strong>NT$ ${money(total)}</strong></div>`;
 }
 
 function workflowWorkCategoryLabel(category) {
@@ -105,7 +105,7 @@ function organizePurchasingOrderRow(row, order, item) {
     const quantity=find('數量'),progress=find('到貨進度');
     if (progress) { progress.dataset.th='進度'; quantity?.remove(); }
     else if (quantity) quantity.dataset.th='進度';
-    const money=document.createElement('td');money.dataset.th='銷售金額';money.className='order-money-cell';money.innerHTML=workflowSalesAmount(order,item);
+    const money=document.createElement('td');money.dataset.th='銷售金額';money.className='order-money-cell';money.innerHTML=workflowSalesAmount(order,item)+purchasingFinancialSummary(order,item);
     const commercial=document.createElement('td');commercial.dataset.th='交易／開票資料';commercial.innerHTML=workflowCommercialSummary(order);
     const actions=find('操作');
     const area=actions?.querySelector('.workflow-inline-actions')||actions;
@@ -135,3 +135,26 @@ window.organizeInventoryList=function(body,chosenWarehouse){
   row.replaceChildren(product,warehouse,cells[4],cells[5],cells[6],cells[9],actions);row.classList.add('inventory-compact-row');
  }
 };
+
+// Financial context uses only authorized, already loaded supply records.
+function purchasingFinancialSummary(order,item,supplies=null){
+    if(!['purchaser','admin'].includes(currentUserRole))return '';
+    const rows=supplies||[...new Map([...purchaseHistorySupplyCache.values(),...supplyReceivingCache].map(row=>[row.id,row])).values()]
+        .filter(row=>row.orderId===order?.id&&row.itemId===item.itemId&&!isPurchaseTerminalStatus(row.status));
+    const valid=value=>value!==null&&value!==undefined&&String(value).trim()!==''&&Number.isFinite(Number(value))&&Number(value)>=0;
+    const qty=rows.reduce((sum,row)=>sum+Number(row.qty||0),0);
+    const complete=rows.length>0&&qty>0&&rows.every(row=>valid(row.unitCost));
+    const cost=complete?globalThis.YushinSupplier.purchaseAmountMetadata(rows.map(row=>({qty:Number(row.qty),unitPrice:Number(row.unitCost)}))).totalIncTax:null;
+    const stock=!order;
+    const sales=!stock&&valid(item.unitPrice)&&qty>0?Number(item.unitPrice)*qty:null;
+    const money=value=>'NT$ '+escapeHtml(value.toLocaleString('zh-TW',{maximumFractionDigits:2}));
+    const ratio=complete&&sales>0?escapeHtml((cost/sales*100).toLocaleString('zh-TW',{maximumFractionDigits:2}))+'%':'—';
+    return `<details class="purchase-financial-details"><summary>採購成本（含稅）：${complete?money(cost):'待確認'}</summary><small>比較數量：${escapeHtml(qty)}（採購數量）</small><small>銷售金額（含稅）：${sales===null?'—':money(sales)}</small><small>成本率：${stock?'—':ratio}${!stock?'（預估）':''}</small></details>`;
+}
+
+function purchaseHistoryFinancialSummary(po,item,quantity){
+    if(!['purchaser','admin'].includes(currentUserRole))return '';
+    const order=item.orderId?receivingSourceOrderForItem(item):null;
+    const salesItem=order?normalizedOrderItems(order).find(row=>row.itemId===item.itemId):null;
+    return purchasingFinancialSummary(item.orderId?(order||{id:item.orderId}):null,salesItem||{},[{qty:quantity,unitCost:item.unitPrice}]);
+}

@@ -437,7 +437,7 @@ test('purchase document history stops waiting when fully received while arrival 
     assert.match(appSource, /receiptProgress.remainingQty > 0 \? escapeHtml\(poWaitingDays\(po\)\|\|'—'\) : '已到貨'/);
     assert.match(appSource, /function purchaseHistoryItemReceiptProgress/);
     assert.match(appSource, /YushinSupply\.receiptProgress/);
-    assert.match(appSource, /data-th="文件狀態"[\s\S]{0,120}receiptProgress\.label/);
+    assert.match(appSource, /data-th="到貨進度"><span class="order-progress-badge">\$\{escapeHtml\(receiptProgress\.label\)\}/);
 });
 
 test('main navigation exposes focused order and purchasing workspaces', () => {
@@ -2029,7 +2029,7 @@ test('warehouse master save has immediate feedback and duplicate-submit guard', 
 
 
 test('new purchase documents do not persist receipt workflow state', () => {
-    const start=appSource.indexOf('window.printPurchaseOrder = async function()');
+    const start=appSource.indexOf('window.printPurchaseOrder = async function({download=true} = {})');
     const end=appSource.indexOf("window.addEventListener('afterprint'",start);
     const source=appSource.slice(start,end);
     assert.doesNotMatch(source,/receiptStatus:/);
@@ -2077,7 +2077,7 @@ test('ordered action belongs to purchasing while the order list only shows progr
     const purchasingEnd = appSource.indexOf('window.loadPendingPurchaseOrders =', purchasingStart);
     assert.match(appSource.slice(purchasingStart, purchasingEnd), /markPurchaseItemOrdered[\s\S]*?確認已採購/);
     assert.match(appSource.slice(purchasingStart, purchasingEnd), /openOrderPurchaseDraft[\s\S]*?建立採購單/);
-    const saveStart = appSource.indexOf('window.printPurchaseOrder = async function()');
+    const saveStart = appSource.indexOf('window.printPurchaseOrder = async function({download=true} = {})');
     const saveEnd = appSource.indexOf("window.addEventListener('afterprint'", saveStart);
     const save = appSource.slice(saveStart, saveEnd);
     assert.match(save,/await saveFormalPurchaseDocument\(/);
