@@ -1372,10 +1372,15 @@
                         <div class="price-list-admin-actions no-print">
                             <button type="button" class="btn-secondary" onclick="downloadProductMasterTemplate()">下載標準範本</button>
                             <button type="button" onclick="openPriceListUploadForBrand('')">＋ 上傳價目表</button>
+                            <button type="button" class="btn-secondary" onclick="downloadProductPriceUpdateTemplate()">下載價格更新範本</button>
+                            <button type="button" onclick="document.getElementById('productPriceExcelInput').click()">分批更新建議售價</button>
+                            <button type="button" class="btn-secondary" onclick="continueProductPriceImport()">繼續上次價格更新</button>
                             <button type="button" class="btn-secondary" onclick="loadProductManagementOverview(true)">重新整理</button>
                         </div>
                     </div>
                     <input type="file" id="productImportExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handlePriceExcelUpload(this)">
+                    <input type="file" id="productPriceExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handleProductPriceExcelUpload(this)">
+                    <p class="no-print" style="margin:8px 0;color:var(--text-secondary,#667085);font-size:12px;">價格專用匯入只更新既有商品的含稅建議售價，每個美西計費日最多核對 1,000 筆。進度保存在此瀏覽器；隔天可按「繼續上次價格更新」，不必重新上傳 Excel。</p>
 
                     <div id="priceUploadProgress" class="product-import-progress" style="display:none;">
                         <div class="product-import-progress-head"><span id="priceUploadStatus">準備中…</span><span id="priceUploadPercent">0%</span></div>
@@ -1708,7 +1713,7 @@
     <script src="modules/order-commercial-details.js?v=20261025-1"></script>
     <script src="modules/order-entry-core.js?v=20261104-460"></script>
 <script src="modules/service-work-core.js?v=20261023-2"></script>
-    <script src="app.js?v=20261105-4"></script>
+    <script src="app.js?v=20261105-5"></script>
     <script src="modules/order-self-order-required.js?v=20261013-1"></script>
     <script src="modules/customer-cancellations.js?v=20261021-3"></script>
     <script src="modules/free-stock-recovery.js?v=20261014-9"></script>

@@ -29213,6 +29213,229 @@ window.downloadProductCostUpdateTemplate = async function() {
     XLSX.writeFile(wb, '廠牌名稱-成本更新.xlsx');
 };
 
+// 價格更新只存本機進度；不建立雲端排程、額外 Collection 或第二套產品 writer。
+const PRODUCT_PRICE_DAILY_ROW_LIMIT = 1000;
+const PRODUCT_PRICE_LOCAL_DB = 'yushin-product-price-import';
+
+function productPriceImportScope() {
+    const projectId = db?.app?.options?.projectId || '';
+    const uid = currentUser?.uid || '';
+    if (!projectId || !uid) throw new Error('請先確認 Firebase 專案及登入帳號，再使用價格更新。');
+    return `${projectId}:${uid}`;
+}
+
+function productPriceQuotaDay(date = new Date()) {
+    // Firestore 免費額度約在太平洋時間午夜重置；保守限制每個瀏覽器帳號一天處理一批。
+    return new Intl.DateTimeFormat('en-CA', {
+        timeZone:'America/Los_Angeles', year:'numeric', month:'2-digit', day:'2-digit'
+    }).format(date);
+}
+
+function openProductPriceLocalDatabase() {
+    return new Promise((resolve, reject) => {
+        if (typeof indexedDB === 'undefined') return reject(new Error('瀏覽器不支援本機進度保存，尚未讀取或修改雲端。'));
+        const request = indexedDB.open(PRODUCT_PRICE_LOCAL_DB, 1);
+        request.onupgradeneeded = () => request.result.createObjectStore('jobs', { keyPath:'scope' });
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(new Error('無法開啟本機價格更新進度，請確認瀏覽器儲存權限。'));
+        request.onblocked = () => reject(new Error('本機價格更新資料庫正在其他分頁使用，請關閉舊分頁後重試。'));
+    });
+}
+
+async function readProductPriceJob() {
+    const scope = productPriceImportScope();
+    const database = await openProductPriceLocalDatabase();
+    return new Promise((resolve, reject) => {
+        const transaction = database.transaction('jobs', 'readonly');
+        const request = transaction.objectStore('jobs').get(scope);
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => reject(new Error('讀取本機價格更新進度失敗。'));
+        transaction.oncomplete = () => database.close();
+        transaction.onabort = () => { database.close(); reject(new Error('讀取本機價格更新進度中斷。')); };
+    });
+}
+
+async function saveProductPriceJob(job) {
+    if (job.scope !== productPriceImportScope()) throw new Error('登入帳號或專案已切換，禁止儲存其他人的匯入進度。');
+    const database = await openProductPriceLocalDatabase();
+    return new Promise((resolve, reject) => {
+        const transaction = database.transaction('jobs', 'readwrite');
+        transaction.objectStore('jobs').put(job);
+        transaction.oncomplete = () => { database.close(); resolve(); };
+        transaction.onerror = () => { database.close(); reject(new Error('保存本機價格更新進度失敗。')); };
+        transaction.onabort = () => { database.close(); reject(new Error('本機進度保存中斷，請先核對上次批次結果。')); };
+    });
+}
+
+async function readProductPriceDailyQuota(day) {
+    const database = await openProductPriceLocalDatabase();
+    const key = `quota:${productPriceImportScope()}:${day}`;
+    return new Promise((resolve, reject) => {
+        const transaction = database.transaction('jobs', 'readonly');
+        const request = transaction.objectStore('jobs').get(key);
+        request.onsuccess = () => resolve(Number(request.result?.rows || 0));
+        request.onerror = () => reject(new Error('無法核對今日已使用的匯入預算。'));
+        transaction.oncomplete = () => database.close();
+        transaction.onabort = () => { database.close(); reject(new Error('今日匯入預算讀取中斷。')); };
+    });
+}
+
+async function reserveProductPriceDailyQuota(day, rows) {
+    const database = await openProductPriceLocalDatabase();
+    const key = `quota:${productPriceImportScope()}:${day}`;
+    return new Promise((resolve, reject) => {
+        const transaction = database.transaction('jobs', 'readwrite');
+        const store = transaction.objectStore('jobs');
+        const request = store.get(key);
+        request.onsuccess = () => {
+            const total = Number(request.result?.rows || 0) + rows;
+            if (total > PRODUCT_PRICE_DAILY_ROW_LIMIT) {
+                transaction.abort();
+                return;
+            }
+            store.put({ scope:key, rows:total });
+        };
+        transaction.oncomplete = () => { database.close(); resolve(); };
+        transaction.onerror = () => { database.close(); reject(new Error('預留本機匯入額度失敗。')); };
+        transaction.onabort = () => { database.close(); reject(new Error('今天的價格匯入額度已用完，請下個美西計費日繼續。')); };
+    });
+}
+
+async function withProductPriceImportLock(action) {
+    // 不容許兩個分頁同時重送相同批次；無安全鎖支援時拒絕執行雲端操作。
+    if (typeof navigator === 'undefined' || !navigator.locks?.request) {
+        throw new Error('請使用支援安全分頁鎖定的最新版 Chrome 執行價格匯入。');
+    }
+    return navigator.locks.request(`yushin-price-import:${productPriceImportScope()}`, { mode:'exclusive' }, action);
+}
+
+function parseProductPriceUpdateRows(workbook) {
+    const normalizeHeader = value => String(value || '').normalize('NFKC').replace(/\s+/g, '').toLocaleLowerCase();
+    const unique = new Map();
+    workbook.SheetNames.forEach(sheetName => {
+        productImportSheetRows(workbook.Sheets[sheetName]).forEach(row => {
+            const entries = Object.entries(row);
+            const find = names => {
+                const wanted = new Set(names.map(normalizeHeader));
+                const pair = entries.find(([key]) => wanted.has(normalizeHeader(key)));
+                return pair ? pair[1] : '';
+            };
+            const code = String(find(['貨號','型號','Cat No.','Catalog No.'])).trim();
+            const rawPrice = find(['建議售價（含稅）','建議售價','含稅單價','單價','價格']);
+            if (!code && String(rawPrice).trim() === '') return;
+            const price = Number(String(rawPrice).replace(/,/g,'').trim());
+            const key = normalizeItemCodeLoose(code);
+            if (!code || !key || String(rawPrice).trim() === '' || !Number.isFinite(price) || price < 0) {
+                throw new Error(`價格更新檔有無效資料：貨號「${code || '空白'}」、價格「${rawPrice}」。`);
+            }
+            if (unique.has(key) && unique.get(key).price !== price) {
+                throw new Error(`貨號「${code}」在 Excel 中有兩種不同售價；請先修正，尚未讀取或寫入雲端。`);
+            }
+            if (!unique.has(key)) unique.set(key, { code, price });
+        });
+    });
+    if (!unique.size) throw new Error('檔案中沒有可更新的貨號與建議售價。');
+    return [...unique.values()];
+}
+
+async function runProductPriceJobBatch(job) {
+    if (!(currentUserRole === 'admin' || currentUserRole === 'purchaser') || job.scope !== productPriceImportScope()) {
+        throw new Error('登入身分或專案已改變，禁止接續原本的價格更新。');
+    }
+    const today = productPriceQuotaDay();
+    const processedToday = await readProductPriceDailyQuota(today);
+    const availableToday = Math.max(0, PRODUCT_PRICE_DAILY_ROW_LIMIT - processedToday);
+    if (!availableToday) {
+        setPriceUploadProgress(0, `今天已核對 ${PRODUCT_PRICE_DAILY_ROW_LIMIT} 筆。下一個美西計費日再按「繼續上次價格更新」；本次沒有雲端讀寫。`, false);
+        return;
+    }
+    const chunk = job.rows.slice(job.cursor, job.cursor + availableToday);
+    if (!chunk.length) return;
+    // 先在本機預留預算，即使中斷、回覆遺失或切換檔案，當日也不重複使用這份保守額度。
+    await reserveProductPriceDailyQuota(today, chunk.length);
+    setPriceUploadProgress(25, `正在核對 ${job.brand} 第 ${job.cursor + 1}～${job.cursor + chunk.length} 筆…`);
+    const resolved = [];
+    const missing = [];
+    const duplicates = [];
+    for (let i = 0; i < chunk.length; i += 10) {
+        const rows = chunk.slice(i, i + 10);
+        const codes = rows.map(row => normalizeItemCodeLoose(row.code));
+        const snapshot = await firestoreReadWithTimeout(
+            db.collection('products').where('normalizedPartNo', 'in', codes).get({ source:'server' }),
+            '分批建議售價貨號核對'
+        );
+        const docs = snapshot.docs.map(doc => ({ ...doc.data(), id:doc.id }));
+        rows.forEach(row => {
+            const code = normalizeItemCodeLoose(row.code);
+            const matches = docs.filter(doc =>
+                normalizeItemCodeLoose(doc.manufacturerPartNo || doc.sku || '') === code &&
+                normalizeBrandLookupKey(doc.brandName || doc.brand || '') === normalizeBrandLookupKey(job.brand)
+            );
+            if (matches.length === 1) resolved.push({ product:matches[0], price:row.price });
+            else if (matches.length > 1) duplicates.push(row.code);
+            else missing.push(row.code);
+        });
+    }
+    if (missing.length || duplicates.length) {
+        throw new Error(`本批有 ${missing.length} 個不存在、${duplicates.length} 個重複的「${job.brand}」貨號；未寫入本批資料。請先修正產品主檔或重新選擇修正後 Excel。例：${[...missing, ...duplicates].slice(0,8).join('、')}`);
+    }
+    const changed = resolved.filter(({ product, price }) => Number(product.listPrice || 0) !== price);
+    if (!(currentUserRole === 'admin' || currentUserRole === 'purchaser') || job.scope !== productPriceImportScope()) {
+        throw new Error('角色或專案已改變，本批尚未寫入任何價格。');
+    }
+    if (changed.length && !confirm(`分批更新建議售價\n\n廠牌：${job.brand}\n本批核對 ${chunk.length} 筆\n價格異動 ${changed.length} 筆／未變 ${chunk.length - changed.length} 筆\n完成後進度將保存於此瀏覽器。\n\n只更新 products.listPrice，確定執行？`)) {
+        setPriceUploadProgress(0, '已取消本批寫入；進度未前進，重新執行需再次讀取本批。', false);
+        return;
+    }
+    const now = new Date().toISOString();
+    const operations = changed.map(({ product, price }) => batch => {
+        batch.set(db.collection('products').doc(product.id), {
+            listPrice:price, updatedAt:now, updatedBy:currentUser.uid
+        }, { merge:true });
+    });
+    setPriceUploadProgress(65, `正在更新 ${changed.length} 筆異動價格…`);
+    await commitMigrationBatch(operations);
+    changed.forEach(({ product, price }) => {
+        const cached = priceList.find(item => (item.productId || '') === product.id);
+        if (cached) cached.price = price;
+        const result = productManagementResults.find(item => (item.productId || item.id) === product.id);
+        if (result) result.listPrice = price;
+    });
+    job.cursor += chunk.length;
+    job.updated += changed.length;
+    job.unchanged += chunk.length - changed.length;
+    job.lastCompletedAt = now;
+    // 寫入可能已成功但本機進度保存失敗；原批次重跑會先比對雲端，避免重複寫入。
+    await saveProductPriceJob(job);
+    rebuildPriceItemLookup();
+    if (productManagementResults.length) renderProductManagementResults();
+    const done = job.cursor === job.rows.length;
+    setPriceUploadProgress(100, `${done ? '全部完成' : '本日批次完成'}：${job.cursor}/${job.rows.length} 筆；更新 ${job.updated}、未變 ${job.unchanged}。${done ? '原檔未上傳雲端。' : '下個美西計費日可以繼續。'}`);
+}
+
+window.continueProductPriceImport = async function() {
+    if (!(currentUserRole === 'admin' || currentUserRole === 'purchaser')) return alert('只有管理員或採購可以更新建議售價。');
+    if (productBatchMaintenanceInProgress) return;
+    setProductBatchMaintenanceBusy(true);
+    try {
+        await withProductPriceImportLock(async () => {
+            const job = await readProductPriceJob();
+            if (!job || job.cursor >= job.rows.length) {
+                setPriceUploadProgress(0, '目前沒有未完成的價格更新。請選擇新的價格 Excel。', false);
+                return;
+            }
+            await runProductPriceJobBatch(job);
+        });
+    } catch (err) {
+        console.error('接續價格更新失敗：', err);
+        const message = productOperationErrorMessage('分批價格更新', err);
+        setPriceUploadProgress(0, message);
+        alert(message + '；如果已開始寫入，請使用原進度重試，系統會先核對目前售價。');
+    } finally {
+        setProductBatchMaintenanceBusy(false);
+    }
+};
+
 window.handleProductPriceExcelUpload = async function(input) {
     const file = input?.files?.[0];
     if (!file) return;
@@ -29221,112 +29444,39 @@ window.handleProductPriceExcelUpload = async function(input) {
         input.value = '';
         return;
     }
-    if (productBatchMaintenanceInProgress) {
-        input.value = '';
-        return;
-    }
+    if (productBatchMaintenanceInProgress) { input.value = ''; return; }
     setProductBatchMaintenanceBusy(true);
     try {
+        const match = String(file.name || '').match(/^(.+)-價格更新\.(xlsx|xls)$/i);
+        if (!match) throw new Error('請將檔名設為「廠牌名稱-價格更新.xlsx」，且廠牌須與系統主檔一致。');
+        const brand = match[1].normalize('NFKC').trim();
         await ensureXlsxLoaded();
-        setPriceUploadProgress(5, '讀取建議售價更新檔…');
-        const buffer = await file.arrayBuffer();
-        const workbook = XLSX.read(new Uint8Array(buffer), { type:'array' });
-        const brand = String(file.name || '')
-            .replace(/-價格更新.(xlsx|xls)$/i, '')
-            .replace(/.(xlsx|xls)$/i, '')
-            .normalize('NFKC').trim();
-        if (!brand) throw new Error('請將檔名設為「廠牌名稱-價格更新.xlsx」。');
-
-        const normalizeHeader = value => String(value || '').normalize('NFKC').replace(/\s+/g, '').toLocaleLowerCase();
-        const rows = [];
-        workbook.SheetNames.forEach(sheetName => {
-            productImportSheetRows(workbook.Sheets[sheetName]).forEach(row => {
-                const entries = Object.entries(row);
-                const find = names => {
-                    const wanted = new Set(names.map(normalizeHeader));
-                    const pair = entries.find(([key]) => wanted.has(normalizeHeader(key)));
-                    return pair ? pair[1] : '';
-                };
-                const code = String(find(['貨號','型號','Cat No.','Catalog No.'])).trim();
-                const rawPrice = find(['建議售價（含稅）','建議售價','含稅單價','單價','價格']);
-                if (!code && String(rawPrice).trim() === '') return;
-                const price = Number(String(rawPrice).replace(/,/g,'').trim());
-                if (!code || !Number.isFinite(price) || price < 0) {
-                    throw new Error(`價格更新檔有無效資料：貨號「${code || '空白'}」、價格「${rawPrice}」。`);
-                }
-                rows.push({ code, price });
-            });
+        setPriceUploadProgress(5, '正在電腦本機解析 Excel，尚未查詢雲端…');
+        const workbook = XLSX.read(new Uint8Array(await file.arrayBuffer()), { type:'array' });
+        const rows = parseProductPriceUpdateRows(workbook);
+        await withProductPriceImportLock(async () => {
+            const oldJob = await readProductPriceJob();
+            if (oldJob && oldJob.cursor < oldJob.rows.length && !confirm(`此瀏覽器已有 ${oldJob.brand} 未完成的價格更新（${oldJob.cursor}/${oldJob.rows.length}）。\n\n按「確定」會用新 Excel 取代本機進度；原本已更新的雲端價格不會復原。是否取代？`)) {
+                setPriceUploadProgress(0, '保留原本未完成的價格更新，可按「繼續上次價格更新」。', false);
+                return;
+            }
+            const job = {
+                scope:productPriceImportScope(), brand, filename:file.name, rows,
+                cursor:0, updated:0, unchanged:0,
+                createdAt:new Date().toISOString(), lastCompletedAt:''
+            };
+            await saveProductPriceJob(job);
+            setPriceUploadProgress(15, `本機已保存 ${rows.length} 筆；每天最多核對 ${PRODUCT_PRICE_DAILY_ROW_LIMIT} 筆。`);
+            await runProductPriceJobBatch(job);
         });
-        if (!rows.length) throw new Error('檔案中沒有可更新的貨號與建議售價。');
-
-        const deduped = [...new Map(rows.map(row => [normalizeItemCodeLoose(row.code), row])).values()];
-        setPriceUploadProgress(25, `核對 ${deduped.length} 個貨號…`);
-        const resolved = [];
-        const missing = [];
-        for (let i = 0; i < deduped.length; i += 10) {
-            const chunk = deduped.slice(i, i + 10);
-            const codes = chunk.map(row => normalizeItemCodeLoose(row.code));
-            const snap = await firestoreReadWithTimeout(
-                db.collection('products').where('normalizedPartNo', 'in', codes).get(),
-                '批次建議售價貨號核對'
-            );
-            const docs = snap.docs.map(doc => ({ id:doc.id, ...doc.data() }));
-            chunk.forEach(row => {
-                const normalizedCode = normalizeItemCodeLoose(row.code);
-                const matches = docs.filter(doc =>
-                    normalizeItemCodeLoose(doc.manufacturerPartNo || doc.sku || '') === normalizedCode &&
-                    normalizeBrandLookupKey(doc.brandName || doc.brand || '') === normalizeBrandLookupKey(brand)
-                );
-                if (matches.length === 1) resolved.push({ product:matches[0], price:row.price });
-                else missing.push(row.code);
-            });
-        }
-        if (missing.length) {
-            throw new Error(`有 ${missing.length} 個貨號找不到「${brand}」唯一產品主檔：${missing.slice(0,10).join('、')}${missing.length > 10 ? '…' : ''}。未寫入任何資料。`);
-        }
-
-        const changed = resolved.filter(({product, price}) => Number(product.listPrice || 0) !== price);
-        if (!changed.length) {
-            setPriceUploadProgress(100, '檔案中的建議售價都已是最新值。');
-            input.value = '';
-            return;
-        }
-        if (!confirm(`建議售價增量更新\n\n廠牌：${brand}\n檔案共 ${deduped.length} 筆\n實際需要更新 ${changed.length} 筆\n\n只會修改這些產品的 listPrice，不會動品名、規格、分類或其他產品。確定更新嗎？`)) {
-            setPriceUploadProgress(0, '已取消，未修改資料。', false);
-            input.value = '';
-            return;
-        }
-
-        const now = new Date().toISOString();
-        const operations = changed.map(({product, price}) => batch => {
-            batch.set(db.collection('products').doc(product.id || product.productId), {
-                listPrice:price,
-                updatedAt:now,
-                updatedBy:currentUser?.uid || ''
-            }, { merge:true });
-        });
-        setPriceUploadProgress(60, `更新 ${changed.length} 筆建議售價…`);
-        await commitMigrationBatch(operations);
-
-        changed.forEach(({product, price}) => {
-            const id = product.id || product.productId;
-            const cached = priceList.find(item => (item.productId || '') === id);
-            if (cached) cached.price = price;
-            const result = productManagementResults.find(item => (item.productId || item.id) === id);
-            if (result) result.listPrice = price;
-        });
-        rebuildPriceItemLookup();
-        if (productManagementResults.length) renderProductManagementResults();
-        setPriceUploadProgress(100, `完成：已更新 ${changed.length} 筆建議售價；其他產品主檔未變更。`);
-        input.value = '';
     } catch (err) {
-        console.error('建議售價增量更新失敗：', err);
+        console.error('建議售價分批更新失敗：', err);
         const message = productOperationErrorMessage('建議售價更新（' + file.name + '）', err)
-            + (err.totalOperations ? ` 已確認完成 ${err.committedOperations}／${err.totalOperations} 筆；其餘結果待確認。請重新匯入同一檔案，系統會核對後更新。` : '');
+            + (err.totalOperations ? ` 已確認完成 ${err.committedOperations}／${err.totalOperations} 筆寫入；同批重試前會重新核對雲端。` : '');
         setPriceUploadProgress(0, message);
         alert(message);
-        input.value = '';
     } finally {
+        input.value = '';
         setProductBatchMaintenanceBusy(false);
     }
 };

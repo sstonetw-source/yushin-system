@@ -4231,11 +4231,11 @@ test('inventory lookup batches product-key in queries', () => {
     assert.match(productSource,/nameQuery = nameQuery\.startAfter/);
     assert.match(productSource,/where\('productKey','in',keys\)/);
 
-    const priceStart=appSource.indexOf('window.handleProductPriceExcelUpload = async function');
-    const priceEnd=appSource.indexOf('\nwindow.handlePriceExcelUpload',priceStart);
+    const priceStart=appSource.indexOf('async function runProductPriceJobBatch');
+    const priceEnd=appSource.indexOf('\nwindow.continueProductPriceImport',priceStart);
     const priceSource=appSource.slice(priceStart,priceEnd);
-    assert.match(priceSource,/for \(let i = 0; i < deduped\.length; i \+= 10\)/);
-    assert.match(priceSource,/const chunk = deduped\.slice\(i, i \+ 10\)/);
+    assert.match(priceSource,/for \(let i = 0; i < chunk\.length; i \+= 10\)/);
+    assert.match(priceSource,/const rows = chunk\.slice\(i, i \+ 10\)/);
     assert.match(priceSource,/where\('normalizedPartNo', 'in', codes\)/);
 });
 
@@ -4297,9 +4297,9 @@ test('Product Master import cost helper stays removed', () => {
 
 
 
-test('legacy standalone price and cost helpers stay isolated while price-list UI uses unified Product Import', () => {
-    const priceStart=appSource.indexOf('window.handleProductPriceExcelUpload = async function');
-    const priceEnd=appSource.indexOf('\nwindow.handleProductCostExcelUpload',priceStart);
+test('standalone price updater is available while protected cost import remains isolated', () => {
+    const priceStart=appSource.indexOf('async function runProductPriceJobBatch');
+    const priceEnd=appSource.indexOf('\nwindow.continueProductPriceImport',priceStart);
     const priceSource=appSource.slice(priceStart,priceEnd);
     assert.ok(priceStart>=0&&priceEnd>priceStart);
     assert.match(priceSource,/listPrice:price/);
@@ -4327,8 +4327,10 @@ test('legacy standalone price and cost helpers stay isolated while price-list UI
     assert.match(indexSource,/下載標準範本/);
     assert.match(indexSource,/建議售價與標準成本/);
     assert.match(indexSource,/新增／更新／不變／錯誤/);
-    assert.doesNotMatch(indexSource,/handleProductPriceExcelUpload\(this\)/);
+    assert.match(indexSource,/handleProductPriceExcelUpload\(this\)/);
     assert.doesNotMatch(indexSource,/handleProductCostExcelUpload\(this\)/);
+    assert.match(indexSource,/continueProductPriceImport\(\)/);
+    assert.match(indexSource,/下載價格更新範本/);
 });
 
 test('product batch maintenance gives visible progress and blocks duplicate imports', () => {
