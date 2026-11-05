@@ -430,7 +430,22 @@ for(const mixed of [false,true])for(const width of [1280,390])test('shared servi
   await siteOpen(page);await siteLogin(page,accounts.purchaser,'purchaser');await siteNav(page,'purchasing');
   const pending=page.locator('#purchasePendingBody tr').filter({hasText:orderNo});
   await pending.getByRole('button',{name:'確認已執行',exact:true}).click();
-  await pending.waitFor({state:'detached'});
+  try {
+   await page.waitForFunction(id=>!!ordersCache.find(order=>order.id===id)?.serviceFulfillment?.S?.EXECUTE,
+    orderId,{timeout:15000});
+   await pending.waitFor({state:'detached',timeout:5000});
+  } catch(error) {
+   const state=await page.evaluate(id=>({
+    project:serviceCaseClientProject(),role:currentUserRole,
+    authProject:firebase.auth().app?.options?.projectId,
+    emulatorAuth:firebase.auth().emulatorConfig,
+    serviceFlag:globalThis.YUSHIN_SERVICE_CASE_EMULATOR,
+    order:ordersCache.find(order=>order.id===id)?.serviceFulfillment,
+    pending:document.getElementById('purchasePendingBody')?.textContent?.slice(0,500)
+   }),orderId);
+   console.error('Shared service execution UI diagnosis',JSON.stringify({state,dialogs}));
+   throw error;
+  }
   await page.locator('#purchase-card-dispatch').click();
   await page.locator('#purchaseDispatchBody tr').filter({hasText:orderNo})
    .getByRole('button',{name:'確認打單',exact:true}).click();
