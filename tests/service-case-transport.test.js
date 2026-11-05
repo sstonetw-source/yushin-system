@@ -48,3 +48,22 @@ test('environment, current actor, storage and read-back failures fail closed',as
   if(['proof','late-role'].includes(mode))assert.equal(f.storage.size,1,mode);else assert.equal(f.calls.length,0,mode);
  }
 });
+
+test('production service transport requires the exact site and matching Auth, Firestore and Functions projects',async()=>{
+ const f=fixture(),c=f.open();
+ const projectId='yu-shing-company';
+ const options={projectId};
+ c.YUSHIN_PRODUCTION_SERVICE_CASE_BACKEND=true;
+ c.location={origin:'https://sstonetw-source.github.io',pathname:'/yushin-system/'};
+ c.db={app:{options}};
+ c.firebase={auth:()=>({app:{options},currentUser:{uid:'U'}}),
+  app:()=>({functions:()=>({app:{options},httpsCallable:name=>async input=>({data:{name,...input}})})})};
+ c.ensureFormalPurchaseFunctionsCompat=async()=>{c.firebase.functions=true;};
+ const progress=await c.readServiceOrderProgress('O');
+ assert.equal(progress.name,'getServiceOrderProgress');
+ assert.equal(progress.orderId,'O');
+ c.db.app.options={projectId:'preview-20135'};
+ await assert.rejects(c.readServiceOrderProgress('O'),/專案不一致/);
+ c.location.pathname='/another-site/';
+ await assert.rejects(c.readServiceOrderProgress('O'),/尚未在目前環境啟用/);
+});

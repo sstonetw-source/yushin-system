@@ -36,7 +36,7 @@ function rememberVerifiedServiceItem(view,orderId,itemId,progress,category){
     return true;
 }
 function serviceCaseEntryEnabled(){
-    return globalThis.YUSHIN_SERVICE_CASE_EMULATOR===true
+    return !!serviceCaseClientProject()
         &&['admin','sales','warehouse','engineer'].includes(currentUserRole);
 }
 function serviceCaseActionHtml(order){

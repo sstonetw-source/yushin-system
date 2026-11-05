@@ -1,6 +1,6 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
-const {allowServiceCaseEmulator}=require('../functions/service-case-gate');
+const {allowServiceCaseEmulator,serviceCaseBackendProject}=require('../functions/service-case-gate');
 const enabled={ENABLE_SERVICE_CASE_EMULATOR:'true',GCLOUD_PROJECT:'demo-yushin',
   FIRESTORE_EMULATOR_HOST:'127.0.0.1:8080',
   FIREBASE_AUTH_EMULATOR_HOST:'127.0.0.1:9099'};
@@ -31,4 +31,18 @@ test('No production rollout: no uncontrolled environment enables Service writer'
   assert.equal(allowServiceCaseEmulator({
     ...enabled,GCLOUD_PROJECT:'yu-shing-company',ENABLE_SERVICE_CASE_EMULATOR:'true'
   }),false);
+});
+
+test('production candidate requires the independent flag and only the exact non-emulated project',()=>{
+  const production={GCLOUD_PROJECT:'yu-shing-company',ENABLE_PRODUCTION_SERVICE_CASE_BACKEND:'true'};
+  assert.equal(serviceCaseBackendProject(production),'yu-shing-company');
+  assert.equal(serviceCaseBackendProject(enabled),'demo-yushin');
+  for(const override of [
+    {ENABLE_PRODUCTION_SERVICE_CASE_BACKEND:undefined},
+    {GCLOUD_PROJECT:'preview-20135'},
+    {FIREBASE_CONFIG:'{"projectId":"preview-20135"}'},
+    {FIRESTORE_EMULATOR_HOST:'localhost:8080'},
+    {FIREBASE_AUTH_EMULATOR_HOST:'localhost:9099'},
+    {FUNCTIONS_EMULATOR:'true'}
+  ])assert.equal(serviceCaseBackendProject({...production,...override}),'');
 });

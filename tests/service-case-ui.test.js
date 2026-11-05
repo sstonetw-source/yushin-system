@@ -12,7 +12,7 @@ function fixture(){
   ordersCache:[{id:'O',orderNo:'YS-1',items:[{itemId:'I',productType:'SERVICE',itemName:'檢測'}]}],
   document:{getElementById:node,createElement:()=>node('serviceCaseOverlay'),body:{appendChild(){}}},
   escapeHtml:x=>String(x??'').replaceAll('<','&lt;'),escapeAttr:x=>String(x??'').replaceAll('"','&quot;'),inlineJsValue:JSON.stringify,
-  alert:()=>{},serviceCaseTransport:()=>({uid:'U',role:'sales'}),pendingServiceCaseIntent:()=>saved,
+  alert:()=>{},serviceCaseClientProject:()=>'demo-yushin',serviceCaseTransport:()=>({uid:'U',role:'sales'}),pendingServiceCaseIntent:()=>saved,
   readServiceCases:async input=>read(input),readServiceOrderProgress:async orderId=>readOrder(orderId),
   commitServiceCaseIntent:async input=>{calls.push(input);return send(input);}});
  c.globalThis=c;c.window=c;vm.runInContext(source,c);
