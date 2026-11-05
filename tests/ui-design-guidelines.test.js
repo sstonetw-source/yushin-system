@@ -79,7 +79,7 @@ test('mobile record lists use one white card layer without a blue outer well or 
     assert.match(css, /#ordersTable tbody > tr \{ background:var\(--ys-record\)!important;/);
     assert.match(css, /#appContainer \.inventory-mobile-summary > div \{ background: var\(--ys-neutral-soft\);/);
     assert.match(css, /#appContainer #printableQuote \{\s*background:var\(--ys-surface\);/);
-    assert.match(html, /styles\.css\?v=20261104-463/);
+    assert.match(html, /styles\.css\?v=20261105-1/);
 });
 
 

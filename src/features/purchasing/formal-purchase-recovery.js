@@ -1,5 +1,6 @@
 // Browser checkpoint only. The existing PO and incoming Services own all writes.
 let formalPurchaseRecoveryRunning = false;
+let formalPurchaseConfirmationPending=false;
 function formalPurchasePendingKey() {
     return 'formal-po-pending:' + encodeURIComponent(currentUser?.uid || '');
 }
@@ -76,6 +77,7 @@ async function recoverFormalPurchase() {
     if (formalPurchaseRecoveryRunning || poSaveInProgress) return;
     const uid = currentUser?.uid, role = currentUserRole;
     let confirmedPoNo = '';
+    let stage='採購確認';
     const check = () => {
         if (!uid || currentUser?.uid !== uid || currentUserRole !== role
             || !canCreatePurchaseOrderCapability() || !canAccessPage('orders.po'))
@@ -90,6 +92,8 @@ async function recoverFormalPurchase() {
         const result = await commitFormalPurchaseOrder(pending.poRecord, {actorUid:uid, actorRole:role});
         check();
         const savedPo = cacheCommittedFormalPurchase(result);
+        stage='在途登記';
+        if(typeof updatePoSaveStatus==='function')updatePoSaveStatus(`採購單 ${savedPo.poNo} 已確認採購，正在登記在途…`);
         await registerPurchaseIncoming(savedPo.id, savedPo,
             {actorUid:uid, actorRole:role, onStockCommitted:invalidateWarehouseStockCache});
         check();
@@ -114,7 +118,7 @@ async function recoverFormalPurchase() {
         if (currentUser?.uid === uid && currentUserRole === role)
             showActionFeedback(confirmedPoNo
                 ? `採購單 ${confirmedPoNo} 與在途已確認，但畫面更新未完成：${error.message}`
-                : '採購結果尚未確認：' + error.message, 'warning');
+                : `採購${stage==='在途登記'?'已確認；在途登記尚未確認':'確認尚未完成'}。請使用「確認前次採購結果」以原單重試：` + error.message, 'warning');
     } finally {
         formalPurchaseRecoveryRunning = false;
         renderFormalPurchaseRecovery();
@@ -124,9 +128,10 @@ window.recoverFormalPurchase = recoverFormalPurchase;
 
 // Explicit business confirmation. PDF and document reads never enter this path.
 window.confirmSavedPurchaseOrder = async function(poId) {
-    if(formalPurchaseRecoveryRunning || poSaveInProgress || poDraftLoading
+    if(formalPurchaseConfirmationPending || formalPurchaseRecoveryRunning || poSaveInProgress || poDraftLoading
         || !canCreatePurchaseOrderCapability() || !canAccessPage('orders.po'))return;
     const uid=currentUser?.uid,role=currentUserRole,generation=sessionDataGeneration;
+    formalPurchaseConfirmationPending=true;
     try {
         if(pendingFormalPurchase())throw Error('請先使用「確認前次採購結果」核對未完成作業，再確認其他文件。');
         const snap=await db.collection('purchaseOrders').doc(poId).get({source:'server'});
@@ -141,5 +146,5 @@ window.confirmSavedPurchaseOrder = async function(poId) {
         await recoverFormalPurchase();
     } catch(error) {
         if(currentUser?.uid===uid && currentUserRole===role)showActionFeedback(error.message,'warning');
-    }
+    } finally {formalPurchaseConfirmationPending=false;}
 };

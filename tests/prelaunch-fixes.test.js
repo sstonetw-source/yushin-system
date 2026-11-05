@@ -138,7 +138,7 @@ test('purchase summary is independent of the paged demand detail cache',async()=
 test('loaded purchase hides cancellation for fully received orders and checks every item',()=>{
  const controls=new Map();
  const node=id=>{if(!controls.has(id))controls.set(id,{style:{},classList:{toggle(){}},value:'',innerText:''});return controls.get(id);};
- const c=context({poEditingId:'PO1',poDirectStockMode:false,poSaveInProgress:false,poListCache:[],
+ const c=context({poEditingId:'PO1',poDirectStockMode:false,poSaveInProgress:false,poListCache:[],directPoWarehouseOptions:()=>'',
   document:{getElementById:node},getUnifiedBrandNames:()=>[],escapeAttr:x=>x,
   purchaseItemsFromSavedPo:po=>po.items,purchaseOrderSupplierContact:()=>({}),
   isPurchaseTerminalStatus:status=>['CLOSED','CANCELLED'].includes(status),

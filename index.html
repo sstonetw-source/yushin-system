@@ -15,7 +15,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-functions-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261104-463">
+        <link rel="stylesheet" href="styles.css?v=20261105-1">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -896,7 +896,7 @@
             <th>客戶名稱</th>
             <th>產品資訊</th>
             <th>負責業務</th>
-            <th>訂單金額</th>
+            <th>訂單金額（含稅）</th>
             <th id="orderCostHeader">進度</th>
             <th class="no-print">操作</th>
                 </tr>
@@ -988,7 +988,7 @@
                 <span id="purchasePendingStatus" role="status"></span>
             </div>
             <div class="table-wrap"><table class="workflow-list-table">
-                <thead><tr><th class="no-print">合併</th><th>訂單日期</th><th>客戶</th><th>產品資訊</th><th>負責業務</th><th>銷售金額</th><th>交易／開票資料</th><th>進度</th><th>操作</th></tr></thead>
+                <thead><tr><th class="no-print">合併</th><th>訂單日期</th><th>客戶</th><th>產品資訊</th><th>負責業務</th><th>銷售金額（含稅）</th><th>交易／開票資料</th><th>進度</th><th>操作</th></tr></thead>
                 <tbody id="purchasePendingBody"></tbody>
             </table></div>
             <div class="po-load-more-row no-print"><button type="button" id="purchasePendingMoreBtn" class="btn-secondary" style="display:none" onclick="loadPendingPurchaseOrders(false)">載入更多（每次 50 筆）</button></div>
@@ -1012,7 +1012,7 @@
             </div>
 
             <div class="table-wrap"><table class="workflow-list-table">
-                <thead><tr><th>訂單日期</th><th>客戶</th><th>產品資訊</th><th>負責業務</th><th>銷售金額</th><th>交易／開票資料</th><th>進度</th><th>操作</th></tr></thead>
+                <thead><tr><th>訂單日期</th><th>客戶</th><th>產品資訊</th><th>負責業務</th><th>銷售金額（含稅）</th><th>交易／開票資料</th><th>進度</th><th>操作</th></tr></thead>
                 <tbody id="purchaseDispatchBody"></tbody>
             </table></div>
             <div class="po-load-more-row no-print"><button type="button" id="purchaseDispatchMoreBtn" class="btn-secondary" style="display:none" onclick="loadPurchasingDispatchOrders(false)">載入更多（每次 50 筆）</button></div>
@@ -1020,7 +1020,7 @@
         <div id="purchaseCompletedPanel" style="display:none">
             <div class="toolbar no-print"><span id="purchaseCompletedStatus" role="status"></span></div>
 
-            <div class="table-wrap"><table class="workflow-list-table"><thead><tr><th>訂單日期</th><th>客戶</th><th>產品資訊</th><th>負責業務</th><th>銷售金額</th><th>交易／開票資料</th><th>進度</th><th>操作</th></tr></thead><tbody id="purchaseCompletedBody"></tbody></table></div>
+            <div class="table-wrap"><table class="workflow-list-table"><thead><tr><th>訂單日期</th><th>客戶</th><th>產品資訊</th><th>負責業務</th><th>銷售金額（含稅）</th><th>交易／開票資料</th><th>進度</th><th>操作</th></tr></thead><tbody id="purchaseCompletedBody"></tbody></table></div>
             <div class="po-load-more-row no-print"><button type="button" id="purchaseCompletedMoreBtn" class="btn-secondary" style="display:none" onclick="loadMorePurchasingCompleted()">載入更多（每次 50 筆）</button></div>
         </div>
         <div id="purchaseSupplierPanel" style="display:none">
@@ -1275,6 +1275,7 @@
 
                 <div class="no-print" style="margin:8px 0;">
                     <button type="button" id="poAddStockItemBtn" class="btn-secondary" style="display:none;" onclick="addDirectPoItem()">＋ 新增備貨品項</button>
+                    <label>預設入庫倉庫 <select id="poDefaultWarehouse" onchange="updateDirectPoWarehouse(null,this.value)"></select></label>
                     <datalist id="poBrandList"></datalist>
                 </div>
                 <table id="poItemsTable" style="width:100%;margin-top:8px;border-collapse:collapse;">
@@ -1305,8 +1306,9 @@
                     <button type="button" class="btn-secondary" data-download-folder-button onclick="configureDocumentDownloadFolder('purchase')">設定下載資料夾</button>
                     <span data-download-folder="purchase" role="status">使用瀏覽器預設下載</span>
                 </div>
-                <button type="button" id="printPurchaseOrderBtn" onclick="printPurchaseOrder()">📄 儲存文件並下載 PDF</button>
-                <button type="button" id="confirmPoOrderedBtn" hidden onclick="confirmSavedPurchaseOrder(poEditingId)">確認已採購</button>
+                <button type="button" id="savePoDraftBtn" class="btn-secondary" onclick="savePoDraft()">儲存草稿</button>
+                <button type="button" id="printPurchaseOrderBtn" class="btn-secondary" onclick="printPurchaseOrder()">下載 PDF</button>
+                <button type="button" id="confirmPoOrderedBtn" onclick="confirmCurrentPurchaseOrder()">確認已採購</button>
             </div>
         </div>
     </div>
@@ -1706,7 +1708,7 @@
     <script src="modules/order-commercial-details.js?v=20261025-1"></script>
     <script src="modules/order-entry-core.js?v=20261104-460"></script>
 <script src="modules/service-work-core.js?v=20261023-2"></script>
-    <script src="app.js?v=20261104-464"></script>
+    <script src="app.js?v=20261105-1"></script>
     <script src="modules/order-self-order-required.js?v=20261013-1"></script>
     <script src="modules/customer-cancellations.js?v=20261021-3"></script>
     <script src="modules/free-stock-recovery.js?v=20261014-9"></script>

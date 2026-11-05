@@ -7,7 +7,7 @@ const workspace=read('src/features/orders/order-workspace.js'),purchasing=read('
 function section(s,a,b){const start=s.indexOf(a),end=s.indexOf(b,start);assert.ok(start>=0&&end>start);return s.slice(start,end);}
 const scripts=[read('src/shared/workspace-display.js'),read('modules/fulfillment-core.js'),read('modules/order-entry-core.js'),
  `let currentUser={uid:'buyer'},currentUserRole='purchaser',ordersCache=[],purchasingDispatchCache=[],currentDeliveryOrderId=null;
- const pendingDispatchOrderIds=new Set();let sequence=0;
+ const pendingDispatchOrderIds=new Set(),purchaseHistorySupplyCache=new Map(),supplyReceivingCache=[];let sequence=0;
  const db={collection:n=>({doc:id=>({id:id||'AAAAAAAAAAAA'+Date.now()+'-'+(++sequence),path:n+'/'+id,get:async()=>{const data=await nativeRead(n+'/'+id);return {exists:!!data,data:()=>data};}})})};
  const normalizedOrderStatus=o=>o.status==='cancelled'?'cancelled':'normal',normalizedOrderItems=o=>structuredClone(o.items);
  const orderInventorySyncIncomplete=o=>['pending','failed'].includes(o.inventoryReservationStatus);

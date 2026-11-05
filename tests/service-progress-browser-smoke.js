@@ -59,10 +59,10 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
    ordersCache=[{id:'G',orderNo:'YS-20261026-1',orderDate:'2026-10-26',ownerUid:'U',salesName:'業務',customerName:'金額驗收',totalPrice:339000,transactionType:'直',remarks:'冷藏配送',status:'active',
     items:[{itemId:'G1',itemName:'RNeasy Mini Kit',itemCode:'74104',brand:'Qiagen',qty:30,orderedQty:30,unitPrice:11300,receivedQty:0,procurementType:'PURCHASING_PO',deliveryPlan:{mode:'PICKUP'}}]}];renderOrdersList();
   });
-  const amount=page.locator('.order-money-cell');assert.equal(await amount.getAttribute('data-th'),'訂單金額');assert.match(await amount.innerText(),/NT\$ 339,000/);assert.equal(await page.locator('.workflow-price-breakdown').isVisible(),false);
+  const amount=page.locator('.order-money-cell');assert.equal(await amount.getAttribute('data-th'),'訂單金額（含稅）');assert.match(await amount.innerText(),/NT\$ 339,000/);assert.equal(await page.locator('.workflow-price-breakdown').isVisible(),false);
   await page.locator('.order-detail-panel > summary').click();
   const drawer=page.locator('.order-detail-drawer');await drawer.waitFor({state:'visible'});assert.equal(await drawer.evaluate(d=>d.contains(document.activeElement)),true);await page.keyboard.press('Escape');assert.equal(await drawer.isVisible(),false);await page.locator('.order-detail-panel > summary').click();await drawer.waitFor({state:'visible'});
-  const details=page.locator('.order-detail-panel');assert.match(await details.innerText(),/11,300 × 30[\s\S]*品項小計（含稅） NT\$ 339,000/);assert.match(await details.innerText(),/採購方式：採購統一訂貨/);assert.match(await details.innerText(),/交付方式：業務送・主倉自領/);
+  const details=page.locator('.order-detail-panel');assert.match(await details.innerText(),/11,300 × 30＝\s*NT\$ 339,000/);assert.match(await details.innerText(),/採購方式：採購統一訂貨/);assert.match(await details.innerText(),/交付方式：業務送・主倉自領/);
   await page.screenshot({path:'/tmp/order-drawer-'+width+'.png',fullPage:true});
   await details.locator('.order-commercial-editor > summary').click();
   assert.equal(await details.locator('.order-remarks-editor input').inputValue(),'冷藏配送');assert.equal(await details.locator('.order-transaction-cell select').isDisabled(),false);
@@ -91,7 +91,7 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
   await page.evaluate(()=>{ordersCache[0].items[0].receivedQty=0;ordersCache[0].items.push({itemId:'G2',itemName:'其他分頁測試品項',qty:1,unitPrice:5000});window.fixtureCategoriesByItem={G1:['arrival'],G2:['ordering']};activeOrderWorkFilter='arrival';renderOrdersList();});
   assert.equal(await page.locator('#ordersBody .order-product-cell').getByText('其他分頁測試品項',{exact:true}).count(),0);
   await page.locator('.order-detail-panel > summary').click();await drawer.waitFor({state:'visible'});
-  assert.match(await drawer.innerText(),/目前分頁品項/);assert.match(await drawer.innerText(),/訂單總額/);assert.match(await drawer.innerText(),/品項小計/);
+  assert.match(await drawer.innerText(),/目前分頁品項/);assert.match(await drawer.innerText(),/訂單總額/);assert.match(await drawer.innerText(),/× [\d.]+＝/);
   assert.equal(await drawer.getByText('同張訂單其他品項',{exact:true}).count(),0);assert.match(await drawer.innerText(),/其他分頁測試品項/);
   await page.evaluate(()=>{window.openWarehouseDeliveryPlan=()=>{window.deliveryEditorOpened=true;};});
   await drawer.getByRole('button',{name:'修改交付方式／地址'}).first().click();await drawer.waitFor({state:'hidden'});assert.equal(await page.evaluate(()=>window.deliveryEditorOpened),true);

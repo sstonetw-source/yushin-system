@@ -8,6 +8,7 @@ let poAllItems = [];
 let poCurrentCompany = 'yushin';
 let poEditingId = null;
 let poSaveInProgress = false;
+let poConfirmInProgress = false;
 let poDirectStockMode = false;
 let poIncomingSyncPending = false;
 let poNoGeneration = 0;
@@ -32,7 +33,7 @@ function purchaseDocumentHasUnsavedChanges(record) {
 }
 function setPoDraftLoading(loading) {
     poDraftLoading = loading;
-    document.querySelectorAll('#poVendorName, #poDate, #poExpectedDate, #poLeadDays, #poItemsBody input, #poItemsBody button, #poModalOverlay .sub-tab').forEach(control => {
+    document.querySelectorAll('#poVendorName, #poDate, #poExpectedDate, #poLeadDays, #poItemsBody input, #poItemsBody select, #poItemsBody button, #poModalOverlay .sub-tab').forEach(control => {
         control.disabled = loading || (!!poEditingId && (!editingUnconfirmedPurchaseDocument() || control.matches?.('.sub-tab')));
     });
     updatePoSaveButton();
@@ -49,14 +50,16 @@ function updatePoSaveButton() {
     const button = document.getElementById('printPurchaseOrderBtn');
     if (!button) return;
     const waitingForNumber = !poEditingId && !poNoReady;
+    const draftButton=document.getElementById('savePoDraftBtn');
+    if(draftButton) draftButton.disabled=poSaveInProgress||poDraftLoading||waitingForNumber;
     const confirmButton = document.getElementById('confirmPoOrderedBtn');
-    if (confirmButton) confirmButton.disabled=poSaveInProgress||poDraftLoading||(typeof formalPurchaseRecoveryRunning!=='undefined'&&formalPurchaseRecoveryRunning);
+    if (confirmButton) confirmButton.disabled=poConfirmInProgress||waitingForNumber||poSaveInProgress||poDraftLoading||(typeof formalPurchaseRecoveryRunning!=='undefined'&&formalPurchaseRecoveryRunning);
     const copyButton = document.getElementById('poCopyAsNewBtn');
     if (copyButton) copyButton.disabled = poSaveInProgress;
     button.disabled = poSaveInProgress || waitingForNumber || poDraftLoading;
     button.textContent = poDraftLoading ? '載入採購資料中…' : waitingForNumber
         ? (poNoLoading ? '產生單號中…' : '單號未就緒')
-        : poEditingId && !editingUnconfirmedPurchaseDocument() ? '📄 下載 PDF' : '📄 儲存文件並下載 PDF';
+        : poEditingId && !editingUnconfirmedPurchaseDocument() ? '📄 下載 PDF' : '下載 PDF';
 }
 
 function purchaseItemsFromSavedPo(po) {
@@ -73,7 +76,7 @@ function purchaseItemsFromSavedPo(po) {
         brand: item.brand || item.manufacturer || '',
         brandId: item.brandId || '',
         qty: parseFloat(item.qty ?? item.quantity ?? item.count) || 1,
-        unitPrice: parseFloat(item.unitPrice ?? item.costPrice ?? item.cost ?? item.purchasePrice) || 0
+        unitPrice: (value=>value===undefined?null:Number(value))([item.unitPrice,item.costPrice,item.cost,item.purchasePrice].find(value=>value!==null&&value!==undefined&&String(value).trim()!==''&&Number.isFinite(Number(value))))
     })).filter(item => item.itemName || item.itemCode);
 }
 
@@ -212,7 +215,7 @@ window.openDirectStockPurchase = async function(product = null) {
         renderPoItemsTable();
     }
     updatePoModeUI();
-    updatePoSaveStatus('這張採購單尚未建立。確認品項、供應商與單價後，按「儲存文件並下載 PDF」；實際下單後另按「確認已採購」。');
+    updatePoSaveStatus('這張採購單尚未建立。確認品項、供應商與單價後，可儲存草稿或直接確認已採購。');
     document.getElementById('poModalOverlay').classList.add('active');
 
     // 備貨單的空白表單不依賴雲端主檔，先立即顯示；供應商與預設倉庫在背景補齊。
@@ -224,6 +227,7 @@ window.openDirectStockPurchase = async function(product = null) {
         if (!item.warehouseId) item.warehouseId = warehouseId;
     });
     populatePoVendorSuggestions();
+    document.querySelectorAll('#poItemsBody select[aria-label="入庫倉庫"]').forEach((select,index)=>select.innerHTML=directPoWarehouseOptions(poItems[index]?.warehouseId));
     updatePoModeUI();
 };
 
@@ -231,7 +235,7 @@ function emptyDirectPoItem() {
     return {
         orderId:'', sourceType:'STOCK_REPLENISHMENT', sourceId:'',
         itemName:'', itemCode:'', productId:'', brand:'', brandId:'', qty:1, unitPrice:null, supplier:'',
-        productLine:'', fulfillmentType:'WAREHOUSE', warehouseId:defaultWarehouse()?.id || ''
+        productLine:'', fulfillmentType:'WAREHOUSE', warehouseId:document.getElementById('poDefaultWarehouse')?.value||defaultWarehouse()?.id || ''
     };
 }
 
@@ -260,13 +264,34 @@ window.onDirectPoCodeChange = async function(idx, value) {
         productLine: ''
     };
     poAllItems = poItems;
-    const match = requestedCode ? await findProductByCode(requestedCode, preferredBrand) : null;
+    const lookupItem=poItems[idx];
+    let matches=[];
+    updatePoSaveStatus(requestedCode?'正在查詢貨號…':'');
+    try { matches=requestedCode ? await findProductsByCode(requestedCode,{throwOnError:true}) : []; }
+    catch(error){if(poItems[idx]===lookupItem){renderPoItemsTable();updatePoSaveStatus('貨號查詢失敗，請使用原貨號重試：'+error.message,true);}return;}
+    if (poItems[idx]!==lookupItem || poItems[idx].itemCode!==requestedCode) return;
+    let match=matches.length===1?matches[0]:null;
+    if(matches.length>1){
+        poItems[idx].productChoices=matches;
+        renderPoItemsTable();
+        updatePoSaveStatus('此貨號對應多筆商品，請在品名欄選擇正確廠牌與商品。');
+        return;
+    }
+    if(!match)updatePoSaveStatus('找不到有效商品，請核對貨號與廠牌。',true);
     if (!poItems[idx] || String(poItems[idx].itemCode || '').trim() !== requestedCode) return;
+    try {await applyDirectPoProduct(idx,requestedCode,match);}
+    catch(error){updatePoSaveStatus('商品成本讀取失敗，請以原貨號重試：'+error.message,true);}
+};
+
+async function applyDirectPoProduct(idx,requestedCode,match) {
     if (match) {
+        const matchedItem=poItems[idx];
+        updatePoSaveStatus('正在讀取商品成本…');
         const secureCost = await loadVisibleProductCost(match);
-        if (!poItems[idx] || String(poItems[idx].itemCode || '').trim() !== requestedCode) return;
+        if (poItems[idx]!==matchedItem || !poItems[idx] || String(poItems[idx].itemCode || '').trim() !== requestedCode) return;
         poItems[idx] = {
             ...poItems[idx],
+            productChoices:undefined,
             itemCode: match.model || requestedCode,
             itemName: match.nameCn || match.nameEn || '',
             productId: match.productId || stableProductId(match),
@@ -280,6 +305,7 @@ window.onDirectPoCodeChange = async function(idx, value) {
             fulfillmentType: poItems[idx].fulfillmentType || 'WAREHOUSE',
             warehouseId: poItems[idx].warehouseId || defaultWarehouse()?.id || ''
         };
+        updatePoSaveStatus('已帶入商品，請確認供應商、入庫倉庫、數量與成本。');
         const mappedSupplier = supplierForProduct(
             match.brand,
             match.productLine,
@@ -325,6 +351,7 @@ function updatePoModeUI() {
     if (brandList) brandList.innerHTML = getUnifiedBrandNames(false).map(name => `<option value="${escapeAttr(name)}"></option>`).join('');
 
     const viewingExisting = !!poEditingId;
+    overlay?.classList.toggle('po-direct-stock',poDirectStockMode);
     overlay?.classList.toggle('po-viewing-existing', viewingExisting && !editingUnconfirmedPurchaseDocument());
     if (title) title.textContent = viewingExisting ? '查看採購單' : '建立採購單';
     if (existingBanner) existingBanner.style.display = viewingExisting ? 'flex' : 'none';
@@ -338,7 +365,15 @@ function updatePoModeUI() {
     const cancelBtn = document.getElementById('poCancelOutstandingBtn');
     const hasOutstanding = !!savedPo && !isPurchaseTerminalStatus(savedPo.status) && purchaseItemsFromSavedPo(savedPo).some((_, index) => Number(purchaseHistoryItemReceiptProgress(savedPo, index).remainingQty) > 0);
     const confirmBtn = document.getElementById('confirmPoOrderedBtn');
-    if (confirmBtn) { confirmBtn.hidden = !savedPo || savedPo.status!=='DRAFT'; confirmBtn.disabled=poSaveInProgress||poDraftLoading; }
+    if (confirmBtn) { confirmBtn.hidden = !!savedPo && savedPo.status!=='DRAFT'; confirmBtn.disabled=poSaveInProgress||poDraftLoading; }
+    const draftBtn=document.getElementById('savePoDraftBtn');
+    if(draftBtn)draftBtn.hidden=!!savedPo && savedPo.status!=='DRAFT';
+    const warehouseSelect=document.getElementById('poDefaultWarehouse');
+    if(warehouseSelect){
+        if(warehouseSelect.parentElement)warehouseSelect.parentElement.hidden=!poDirectStockMode;
+        warehouseSelect.innerHTML=directPoWarehouseOptions(warehouseSelect.value||(typeof poItems!=='undefined'?poItems[0]?.warehouseId:'')||(typeof defaultWarehouse==='function'?defaultWarehouse()?.id:'')||'');
+        warehouseSelect.disabled=poSaveInProgress||poDraftLoading||(viewingExisting&&!editingUnconfirmedPurchaseDocument());
+    }
     setPoDraftLoading(poDraftLoading);
     if (cancelBtn) cancelBtn.style.display = canCopySafely && hasOutstanding ? '' : 'none';
     const supplierContact = savedPo ? purchaseOrderSupplierContact(savedPo) : purchaseOrderSupplierContact({vendorName:document.getElementById('poVendorName')?.value||''});
@@ -596,6 +631,8 @@ window.generatePoNo = async function() {
 function renderPoItemsTable() {
     const tbody = document.getElementById('poItemsBody');
     tbody.innerHTML = '';
+    const labels=poDirectStockMode?['貨號','廠牌','品名','入庫倉庫','數量','未稅進貨單價','小計','操作']:['品名 / 規格','貨號','廠牌','數量','單價','小計','操作'];
+    document.querySelector('#poItemsTable thead tr').innerHTML=labels.map(label=>`<th>${label}</th>`).join('');
     poItems.forEach((item, idx) => {
         const missingPrice = item.unitPrice === null || item.unitPrice === undefined || item.unitPrice === '' || !Number.isFinite(Number(item.unitPrice)) || Number(item.unitPrice) < 0;
         const tr = document.createElement('tr');
@@ -620,6 +657,15 @@ function renderPoItemsTable() {
                 <td class="no-print" style="border:1px solid #999;padding:4px;text-align:center;"><button type="button" class="btn-small btn-danger" onclick="removePoItem(${idx})">刪除</button></td>
             `;
         }
+        if(poDirectStockMode){
+            const cells=[...tr.children];
+            const warehouse=document.createElement('td');
+            warehouse.innerHTML=`<select aria-label="入庫倉庫" onchange="updateDirectPoWarehouse(${idx},this.value)">${directPoWarehouseOptions(item.warehouseId)}</select>`;
+            if(item.productChoices?.length)cells[0].innerHTML=`<select aria-label="選擇商品" onchange="chooseDirectPoProduct(${idx},this.value)"><option value="">請選擇商品</option>${item.productChoices.map((product,index)=>`<option value="${index}">${escapeHtml([product.brand,product.nameCn||product.nameEn,product.productId].filter(Boolean).join(' · '))}</option>`).join('')}</select>`;
+            tr.replaceChildren(cells[1],cells[2],cells[0],warehouse,cells[3],cells[4],cells[5],cells[6]);
+        }
+        [...tr.children].forEach((cell,index)=>cell.dataset.th=labels[index]);
+        tr.children[poDirectStockMode?6:5].setAttribute('data-po-subtotal','');
         tbody.appendChild(tr);
     });
     recalcPoTotals();
@@ -633,7 +679,7 @@ window.updatePoItem = function(idx, field, value) {
     // input after the browser has already moved focus into it.
     const row = document.getElementById('poItemsBody')?.children[idx];
     if (row) {
-        row.cells[5].textContent=(Number(poItems[idx].qty||0)*Number(poItems[idx].unitPrice||0)).toFixed(0);
+        row.querySelector('[data-po-subtotal]').textContent=(Number(poItems[idx].qty||0)*Number(poItems[idx].unitPrice||0)).toFixed(0);
         const price=row.querySelector('input[onchange*=unitPrice]');
         if(price)price.classList.toggle('po-missing-price',poItems[idx].unitPrice===null);
         if(poItems[idx].unitPrice!==null)row.querySelector('.po-missing-price-hint')?.remove();
@@ -868,9 +914,10 @@ async function printSavedPoDocument(poNo, vendorName) {
     }
 }
 
-window.printPurchaseOrder = async function() {
+window.printPurchaseOrder = async function({download=true} = {}) {
     if (poSaveInProgress || poDraftLoading) return;
     if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
+    if((!poEditingId||editingUnconfirmedPurchaseDocument())&&!canEditPage('orders.po'))return;
     const leadDaysInput=document.getElementById('poLeadDays');
     if((!poEditingId||editingUnconfirmedPurchaseDocument())&&leadDaysInput?.value&&(!Number.isInteger(Number(leadDaysInput.value))||Number(leadDaysInput.value)<0)){
         updatePoSaveStatus('預計交期請輸入 0 或以上的整數天數。',true);
@@ -883,7 +930,7 @@ window.printPurchaseOrder = async function() {
     const actorUid=currentUser?.uid, actorRole=currentUserRole;
     const originalDraft=editingUnconfirmedPurchaseDocument()?poListCache.find(po=>po.id===poEditingId):null;
     poSaveInProgress = true;
-    try { await window.DocumentDownloads.prepare('purchase'); }
+    try { if(download) await window.DocumentDownloads.prepare('purchase'); }
     catch (err) { updatePoSaveStatus(err.message, true); return; }
     finally { poSaveInProgress = false; }
     if (poEditingId && !originalDraft) {
@@ -911,13 +958,17 @@ window.printPurchaseOrder = async function() {
         alert('新增庫存採購單必須指定入庫倉庫，請先建立或選擇倉庫。');
         return;
     }
+    if(poDirectStockMode&&poItems.some(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'&&!warehouseMasterCache.some(warehouse=>warehouse.id===item.warehouseId&&warehouse.active!==false&&!warehouse.systemCustody&&warehouse.warehouseType!=='CUSTODY'&&!warehouse.id.startsWith('custody-')))){
+        updatePoSaveStatus('入庫倉庫無效，請重新選擇有效的實體倉庫。',true);return;
+    }
     if (poDirectStockMode) {
         const unmatchedStockItems = poItems.filter(item => {
             const productId = String(item.productId || '').trim();
-            const match = findPriceItemForOrder({ itemCode:item.itemCode || '', brand:item.brand || '' });
+            const match = priceList.find(product=>String(product.productId||stableProductId(product))===productId&&product.active!==false&&product.status!=='INACTIVE');
             if (!productId || !match) return true;
             const matchedProductId = String(match.productId || stableProductId(match) || '').trim();
             return matchedProductId !== productId
+                || normalizeItemCode(match.model||'')!==normalizeItemCode(item.itemCode||'')
                 || normalizeBrandLookupKey(match.brand || '') !== normalizeBrandLookupKey(item.brand || '');
         });
         if (unmatchedStockItems.length) {
@@ -957,6 +1008,7 @@ window.printPurchaseOrder = async function() {
     }
     const orderIds = [...new Set(poItems.map(item => item.orderId).filter(Boolean))];
     const supplierContact = supplierForVendorName(vendorName);
+    if(poDirectStockMode&&(!supplierContact||supplierContact.active===false)){updatePoSaveStatus('供應商無效，請從有效供應商主檔選擇。',true);return;}
     if (!globalThis.YushinSupplier?.snapshotForPurchaseOrder) {
         throw new Error('Supplier core 未載入，無法建立供應商快照。');
     }
@@ -992,12 +1044,12 @@ window.printPurchaseOrder = async function() {
         purchaseType: poItems.every(item => !item.orderId) ? 'stock' : 'order',
         items: scheduledPoItems.map(item => {
             const brand = resolveBrandName(item.brand || '');
-            return { ...item, brand, brandId:item.brandId || brandIdForName(brand) };
+            const {productChoices,...savedItem}=item;
+            return { ...savedItem, brand, brandId:item.brandId || brandIdForName(brand) };
         }),
         ...globalThis.YushinSupplier.purchaseAmountMetadata(scheduledPoItems),
         createdAt: new Date().toISOString(),
-        lastOutputAt: new Date().toISOString(),
-        lastOutputType: 'PDF',
+        ...(download ? {lastOutputAt:new Date().toISOString(),lastOutputType:'PDF'} : {}),
         ...linkedDocumentFields(orderIds.length === 1 ? DOCUMENT_TYPES.ORDER : '', orderIds.length === 1 ? orderIds[0] : '', orderIds.map(orderId => documentLink(DOCUMENT_TYPES.ORDER, orderId, 'source')))
     };
     poRecord.searchTokens=purchaseOrderSearchTokens(poRecord);
@@ -1020,7 +1072,8 @@ window.printPurchaseOrder = async function() {
         poItems=purchaseItemsFromSavedPo(documentRecord);poAllItems=poItems;renderPoItemsTable();
         updatePoModeUI();
         updatePoSaveStatus(`採購文件 ${poNo} 已儲存，尚未確認採購；下載 PDF 不會增加在途。`);
-        await printSavedPoDocument(poNo,vendorName);
+        if(download) await printSavedPoDocument(poNo,vendorName);
+        return documentRecord;
     } catch(err) {
         if(currentUser?.uid===actorUid && currentUserRole===actorRole && generation===poDirectStockOpenGeneration){
             const message=saved ? '採購文件已儲存，但 PDF 輸出失敗；可由原單重印：' : '文件儲存結果未確認，請保留原單號重試或查詢；尚未執行採購登記：';
@@ -1035,3 +1088,27 @@ window.printPurchaseOrder = async function() {
 // 按下後會先確認，避免不小心點到把還沒印的內容洗掉；確認後清空表單、單號跳下一號，
 // 並且立刻把這個「全新、還是空的」狀態存成本機草稿，這樣萬一使用者按完馬上關網頁，
 // 重開時看到的會是這張全新的空白單，而不是被清掉的上一張。
+
+function directPoWarehouseOptions(selected){
+    return '<option value="">請選擇入庫倉庫</option>'+warehouseMasterCache.filter(warehouse=>warehouse.active!==false&&!warehouse.systemCustody&&warehouse.warehouseType!=='CUSTODY'&&!warehouse.id.startsWith('custody-')).map(warehouse=>`<option value="${escapeAttr(warehouse.id)}" ${warehouse.id===selected?'selected':''}>${escapeHtml(warehouse.name||warehouse.warehouseName||warehouse.id)}</option>`).join('');
+}
+window.updateDirectPoWarehouse=function(index,value){
+    if(poSaveInProgress||poDraftLoading||(poEditingId&&!editingUnconfirmedPurchaseDocument()))return;
+    if(index===null)poItems.forEach(item=>item.warehouseId=value);
+    else if(poItems[index])poItems[index].warehouseId=value;
+    renderPoItemsTable();
+};
+window.chooseDirectPoProduct=async function(index,value){
+    const item=poItems[index],match=value!==''?item?.productChoices?.[Number(value)]:null;
+    if(match){try {await applyDirectPoProduct(index,item.itemCode,match);}
+        catch(error){updatePoSaveStatus('商品成本讀取失敗，請重新選擇商品：'+error.message,true);}}
+};
+window.savePoDraft=()=>printPurchaseOrder({download:false});
+window.confirmCurrentPurchaseOrder=async function(){
+    if(poConfirmInProgress||poSaveInProgress||poDraftLoading||formalPurchaseRecoveryRunning)return;
+    poConfirmInProgress=true;
+    try {
+        const record=await printPurchaseOrder({download:false});
+        if(record)await confirmSavedPurchaseOrder(record.id||record.poNo);
+    } finally {poConfirmInProgress=false;updatePoSaveButton();}
+};

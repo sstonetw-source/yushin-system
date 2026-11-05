@@ -948,7 +948,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   await page.waitForFunction(()=>!poSaveInProgress&&window.poPdfOutputs.length===2);
   assert.equal(calls.filter(row=>row.name==='commitV2FormalPurchase').length,0);
   await page.locator('#confirmPoOrderedBtn').click();
-  await page.waitForFunction(()=>!formalPurchaseRecoveryRunning&&document.getElementById('actionFeedback')?.textContent?.includes('採購結果尚未確認'),null,{timeout:45000});
+  await page.waitForFunction(()=>!formalPurchaseRecoveryRunning&&pendingFormalPurchase()?.poRecord&&document.getElementById('actionFeedback')?.textContent?.includes('確認前次採購結果'),null,{timeout:45000});
   const firstPurchase=calls.filter(row=>row.name==='commitV2FormalPurchase');
   assert.equal(firstPurchase.length,1);
   const commitIntent=firstPurchase[0].data;
