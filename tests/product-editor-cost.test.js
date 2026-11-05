@@ -2,12 +2,12 @@ const {test}=require('node:test'),assert=require('node:assert/strict'),vm=requir
 const source=fs.readFileSync(require('node:path').join(__dirname,'../app.js'),'utf8');
 const code=source.slice(source.indexOf('window.saveProductMasterEditor ='),source.indexOf('function productManagementSource('));
 function setup(role='admin',cost='50',original='20',fail=false){
- const nodes={};for(const id of ['pmEditBrand','pmEditCode','pmEditNameCn','pmEditProductLine','pmEditProductId','pmEditStatus','pmEditCost','pmEditProductType','pmEditServiceKind','pmEditInventoryTracked','pmEditLotTracked','pmEditExpiryTracked'])nodes[id]={value:({pmEditBrand:'Brand',pmEditCode:'001',pmEditNameCn:'Product',pmEditProductId:'p',pmEditStatus:'ACTIVE',pmEditCost:cost,pmEditProductType:'Reagent'})[id]||'',checked:false,dataset:{originalValue:original},focus:()=>{}};
+ const nodes={};for(const id of ['pmEditBrand','pmEditCode','pmEditNameCn','pmEditNameEn','pmEditProductLine','pmEditProductId','pmEditStatus','pmEditCost','pmEditProductType','pmEditServiceKind','pmEditFrequentlySold'])nodes[id]={value:({pmEditBrand:'Brand',pmEditCode:'001',pmEditNameCn:'產品',pmEditNameEn:'Product',pmEditProductId:'p',pmEditStatus:'ACTIVE',pmEditCost:cost,pmEditProductType:'Reagent'})[id]||'',checked:false,dataset:{originalValue:original},focus:()=>{}};
  const writes=[],alerts=[];let invalidated=0;
  const c=vm.createContext({window:{},YushinServiceWork:require('../modules/service-work-core.js'),document:{getElementById:id=>nodes[id]||(nodes[id]={value:'',checked:false})},currentUserRole:role,trueUserRole:role,currentUser:{uid:'admin-id'},
- canManagePendingProductMaster:()=>true,resolveBrandName:x=>x,brandMasterEntryForName:()=>({id:'brand'}),normalizeItemCodeLoose:x=>x,normalizeBrandLookupKey:x=>x,normalizeProductTypeValue:x=>x,
+ canManagePendingProductMaster:()=>role!=='sales',canCreateProductMaster:()=>true,readProductMasterEditorType:()=>nodes.pmEditProductType.value,resolveBrandName:x=>x,brandMasterEntryForName:()=>({id:'brand'}),normalizeItemCodeLoose:x=>x,stableProductId:()=> 'p',normalizeBrandLookupKey:x=>x,normalizeProductTypeValue:x=>x,
  beginActionButton:()=>({}),endActionButton:()=>{},alert:m=>alerts.push(m),firestoreReadWithTimeout:p=>p,findDuplicateProductMaster:async()=>null,syncSavedProductMaster:()=>{},
- db:{collection:name=>({where:()=>({limit:()=>({get:async()=>({docs:[]})})}),doc:id=>({name,id})}),runTransaction:async fn=>{const pending=[];await fn({get:async()=>({exists:true,data:()=>({standardCost:20})}),set:(ref,data)=>pending.push({ref,data})});if(fail)throw Object.assign(Error('internal network detail'),{code:'unavailable'});writes.push(...pending);}},
+ db:{collection:name=>({where:()=>({limit:()=>({get:async()=>({docs:[]})})}),doc:id=>({name,id})}),runTransaction:async fn=>{const pending=[];const result=await fn({get:async ref=>({exists:ref.name!=='products'||!!nodes.pmEditProductId.value,data:()=>({standardCost:20})}),set:(ref,data)=>pending.push({ref,data})});if(fail)throw Object.assign(Error('internal network detail'),{code:'unavailable'});writes.push(...pending);return result;}},
  invalidateVisibleProductCosts:()=>invalidated++,purchaseCostCache:new Map(),productMasterDocToPriceItem:()=>({}),cacheProductLookupItem:()=>{},productManagementResults:[],productManagementOverviewRows:[],renderProductManagementResults:()=>{},renderProductManagementOverview:()=>{},closeProductMasterEditor:()=>{},console:{error:()=>{}}});
  vm.runInContext(source.slice(source.indexOf('function actionFailureMessage('),source.indexOf('async function runEquipmentAction('))+code,c);return {c,nodes,writes,alerts,invalidated:()=>invalidated};
 }
@@ -29,8 +29,6 @@ test('Service product master requires one authoritative subtype before any trans
 test('Service product subtype saves without physical inventory tracking',async()=>{
  const x=setup('purchaser');x.nodes.pmEditProductType.value='Service';
  x.nodes.pmEditServiceKind.value='TISSUE_SLICING';
- for(const key of ['pmEditInventoryTracked','pmEditLotTracked','pmEditExpiryTracked'])
-   x.nodes[key].checked=true;
  await x.c.window.saveProductMasterEditor();
  assert.deepEqual(x.writes.map(w=>w.ref.name),['products']);
  const p=x.writes[0].data;
@@ -41,14 +39,28 @@ test('Service product subtype saves without physical inventory tracking',async()
 test('Switching an edited Service master back to Goods clears the stale workflow classification',async()=>{
  const x=setup('purchaser');x.nodes.pmEditProductType.value='Reagent';
  x.nodes.pmEditServiceKind.value='ONSITE_REPAIR';
- x.nodes.pmEditInventoryTracked.checked=true;
  await x.c.window.saveProductMasterEditor();
  assert.equal(x.writes[0].data.serviceKind,'');
- assert.equal(x.writes[0].data.inventoryTracked,true);
+ for(const key of ['inventoryTracked','lotTracked','expiryTracked']) assert.equal(key in x.writes[0].data,false);
 });
 
 test('sales duplicate guidance uses an existing product without suggesting forbidden maintenance',async()=>{
  const x=setup('sales');x.nodes.pmEditProductId.value='';x.c.canManagePendingProductMaster=()=>false;x.c.canCreateProductMaster=()=>true;
  x.c.findDuplicateProductMaster=async()=>({id:'existing'});await x.c.window.saveProductMasterEditor();
  assert.equal(x.writes.length,0);assert.match(x.alerts[0],/搜尋並使用既有產品/);assert.doesNotMatch(x.alerts[0],/直接編輯/);
+});
+
+test('new product master requires both names and restricts frequent status to product maintainers',async()=>{
+ for(const role of ['sales','purchaser']){
+  const x=setup(role,'20','20');x.nodes.pmEditProductId.value='';
+  x.nodes.pmEditFrequentlySold.checked=true;
+  x.nodes.pmEditFrequentlySold.dataset.originalValue='false';
+  x.nodes.pmEditNameEn.value='  ';
+  await x.c.window.saveProductMasterEditor();
+  assert.equal(x.writes.length,0);assert.match(x.alerts[0],/英文品名/);
+  x.nodes.pmEditNameEn.value=' Product ';
+  await x.c.window.saveProductMasterEditor();
+  assert.equal(x.writes[0].data.nameEn,'Product');
+  assert.equal(x.writes[0].data.isFrequentlySold,role==='purchaser'?true:undefined);
+ }
 });
