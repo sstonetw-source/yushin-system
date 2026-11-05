@@ -10,6 +10,8 @@
     const orderReservationProductionSite = scope.location?.origin === 'https://sstonetw-source.github.io'
         && (path === '/yushin-system' || path.startsWith('/yushin-system/'));
     scope.YUSHIN_PRODUCTION_QUICK_PURCHASE_CONFIG_VERSION = '20261104-transaction-activation-1';
+    // Issue #471 production acceptance.
+    scope.YUSHIN_PRODUCTION_SERVICE_CASE_BACKEND = orderReservationProductionSite;
     // Authorized activation: match the deployed production backend and database retirement gates.
     // Overwrite stale global values; the caller must never inherit an unintended true gate.
     scope.YUSHIN_PRODUCTION_RECEIVING_BACKEND = orderReservationProductionSite;
