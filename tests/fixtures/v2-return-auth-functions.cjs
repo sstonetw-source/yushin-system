@@ -30,4 +30,5 @@ module.exports={...standard,handoffOrderTransfer:service.handoffOrderTransfer,di
  commitServiceCaseEvent:service.commitServiceCaseEvent,
  getServiceCaseStatus:service.getServiceCaseStatus,
  getServiceOrderProgress:service.getServiceOrderProgress,
+ commitOrderServiceAction:service.commitOrderServiceAction,
  commitServiceOrderBilling:service.commitServiceOrderBilling};
