@@ -3,7 +3,7 @@
 const {createHash}=require('node:crypto');
 const {caseDocId}=require('./service-case-service');
 const workflow=require('./shared/workflow-core');
-const {allowServiceCaseEmulator}=require('./service-case-gate');
+const {serviceCaseBackendProject}=require('./service-case-gate');
 function fail(message,code='failed-precondition'){const e=new Error(message);e.code=code;throw e;}
 function billingIntent(data){
   const dateChange=data?.action==='CHANGE_DATE';
@@ -36,8 +36,9 @@ function billingIntent(data){
   return {...intent,hash:createHash('sha256').update(JSON.stringify(intent)).digest('hex')};
 }
 async function commitServiceOrderBilling(db,uid,data){
-  if(!allowServiceCaseEmulator()||db.projectId!=='demo-yushin')
-    fail('服務核銷僅允許 demo-yushin Auth／Firestore Emulator。');
+  const project=serviceCaseBackendProject();
+  if(!project||db.projectId!==project)
+    fail('服務核銷的專案尚未獲准或與資料庫不一致。');
   if(typeof uid!=='string'||!uid)fail('請先登入。','unauthenticated');
   const intent=billingIntent(data),at=new Date().toISOString();
   const orderRef=db.collection('orders').doc(intent.orderId);

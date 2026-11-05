@@ -70,7 +70,7 @@ test('invalid intents and real-project gate fail before any transaction write',a
   {operationId:'short'},{expectedIsBilled:undefined},{completedQty:1},{actorUid:'U'}]){
   const f=fixture();await assert.rejects(bill(f.db,'U',input(extra)));assert.equal(f.count(),0);
  }
- const f=fixture();f.db.projectId='preview-20135';await assert.rejects(bill(f.db,'U',input()),/Emulator/);assert.equal(f.count(),0);
+ const f=fixture();f.db.projectId='preview-20135';await assert.rejects(bill(f.db,'U',input()),/專案/);assert.equal(f.count(),0);
 });
 test('receipt write failure rolls back both order billing and work index',async()=>{
  const f=fixture();f.fail();await assert.rejects(bill(f.db,'U',input()),/receipt failure/);

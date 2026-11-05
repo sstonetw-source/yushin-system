@@ -1,6 +1,6 @@
 // Service billing keeps the original order visible until the server confirms.
 window.serviceBillingDateEnabled=function(order){
-    return globalThis.YUSHIN_SERVICE_CASE_EMULATOR===true
+    return serviceCaseEntryEnabled()
         &&canManageOrderLifecycleCapability()&&canEditPage('orders.list')&&canBusinessSelfOrder(order)
         &&Array.isArray(order.items)&&order.items.length>0
         &&order.items.some(i=>String(i?.productType||'').trim().toUpperCase()==='SERVICE');
