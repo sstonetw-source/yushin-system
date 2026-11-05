@@ -256,6 +256,8 @@ async function commitOrderReservation(db,uid,data){
       }
       const next={...source,itemId,orderedQty,reservedQty:reserve,shortageQty:shortage,
         inventoryProductKey:service||direct?'':productKey,warehouseId};
+      // An untyped physical line must not inherit a service order's summary type.
+      if(!type&&workflowCore.isServiceItem(order))next.productType='Goods';
       if(service||direct)next.reservationStatus='not_required';
       if(!service&&!direct&&!productKey)next.reservationError='missing_product_master';
       nextItems.push(next);
