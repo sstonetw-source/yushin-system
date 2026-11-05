@@ -80,6 +80,27 @@ test('one backend transaction reserves all warehouse items and reconciles all su
  assert.equal(demand('I4').requestedQty,2);
  assert.equal(f.docs.get('reservationOperationReceipts/order-sync-O__sync_1234567890').actorUid,'actor');
 });
+test('a service-first mixed order reserves an untyped goods line without assigning it the service type',async()=>{
+ const f=fixture(),order=f.docs.get('orders/O');
+ f.put('products/S',{productType:'Service',active:true});
+ f.put('products/P',{active:true});
+ f.put('orders/O',{...order,productType:'Service',items:[
+  {itemId:'S1',productId:'S',productType:'Service',qty:1},
+  {...order.items[0],productType:''}
+ ]});
+ const response=await f.run('sales1');
+ assert.deepEqual([response.reservedQty,response.shortageQty],[3,0]);
+ const saved=f.docs.get('orders/O');
+ assert.equal(saved.inventoryReservationStatus,'completed');
+ assert.deepEqual(saved.workCategories,['ordering','delivery','dispatch']);
+ assert.deepEqual(saved.items.map(item=>[item.productType,item.reservedQty]),[['Service',0],['Goods',3]]);
+ assert.equal(f.docs.has('inventoryReservations/O__S1'),false);
+ assert.equal(f.docs.get('inventoryReservations/O__I1').quantity,3);
+ assert.equal([...f.docs.keys()].some(path=>path.startsWith('procurementDemands/')),false);
+ const before=f.snapshot();
+ assert.equal((await f.run('sales1')).status,'already-applied');
+ assert.equal(f.snapshot(),before);
+});
 test('initial whole-order backend chooses an alternate single stocked warehouse without false procurement',async()=>{
  const f=fixture(),order=f.docs.get('orders/O');
  f.put('orders/O',{...order,items:[order.items[0]]});
