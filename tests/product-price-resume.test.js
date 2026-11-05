@@ -68,7 +68,7 @@ function createHarness(products = []) {
         navigator:{ locks:{ request:async (name, options, action) => action() } }
     };
     vm.createContext(context);
-    vm.runInContext(`${focusedSource}\nglobalThis.priceTest = { parseProductPriceUpdateRows, runProductPriceJobBatch, productPriceQuotaDay, readProductPriceJob, saveProductPriceJob, readProductPriceDailyQuota, reserveProductPriceDailyQuota };`, context);
+    vm.runInContext(`${focusedSource}\nglobalThis.priceTest = { parseProductPriceUpdateRows, runProductPriceJobBatch, productPriceQuotaDay, readProductPriceJob, saveProductPriceJob, readProductPriceDailyQuota, reserveProductPriceDailyQuota, productImportJobScope };`, context);
     context.readProductPriceDailyQuota = async () => consumed;
     context.reserveProductPriceDailyQuota = async (day, count) => { consumed += count; };
     context.saveProductPriceJob = async job => { saved.push({ ...job }); };
@@ -252,4 +252,39 @@ test('uncertain partial write keeps cursor, next-day retry compares server and d
     await h.context.priceTest.runProductPriceJobBatch(job);
     assert.equal(job.cursor, 2);
     assert.deepEqual(h.writes, [{ id:'p1', price:150 }, { id:'p2', price:250 }]);
+});
+
+test('full master checkpoints store only fingerprint and progress, with a separate 500-row daily cap', async () => {
+    const h = createHarness();
+    h.context.indexedDB = createFakeIndexedDb();
+    const helpers = h.context.priceTest;
+    const day = helpers.productPriceQuotaDay();
+    const checkpoint = {
+        scope:helpers.productImportJobScope('master'), fingerprint:'sha256-placeholder',
+        filename:'Bio-Rad.xlsx', total:1200, cursor:500, productWrites:42, costWrites:5
+    };
+    await helpers.saveProductPriceJob(checkpoint);
+    const stored = await helpers.readProductPriceJob('master');
+    assert.equal(stored.cursor, 500);
+    assert.equal(stored.fingerprint, checkpoint.fingerprint);
+    assert.equal(stored.rows, undefined);
+    assert.equal(stored.standardCost, undefined);
+    assert.equal(await helpers.readProductPriceJob(), null);
+    await helpers.reserveProductPriceDailyQuota(day, 500, 'master');
+    assert.equal(await helpers.readProductPriceDailyQuota(day, 'master'), 500);
+    await assert.rejects(helpers.reserveProductPriceDailyQuota(day, 1, 'master'), /額度已用完/);
+    assert.equal(await helpers.readProductPriceDailyQuota(day), 0);
+    await assert.rejects(helpers.saveProductPriceJob({ ...checkpoint, scope:'other-project:other-user' }), /帳號或專案已切換/);
+});
+
+test('full master handler validates entire file before cloud preview and only previews the daily chunk', () => {
+    const handler = source.slice(source.indexOf('window.handlePriceExcelUpload ='), source.indexOf('// ===== 2026-10-02：手機功能選單', source.indexOf('window.handlePriceExcelUpload =')));
+    assert.ok(handler.includes('if (importErrors.length)'));
+    assert.ok(handler.indexOf('if (importErrors.length)') < handler.indexOf("reserveProductPriceDailyQuota(day, chunk.length, 'master')"));
+    assert.ok(handler.includes('confirmProductMasterImport(chunkGroups)'));
+    assert.ok(!handler.includes('confirmProductMasterImport(brandGroups, importErrors)'));
+    assert.ok(handler.includes('crypto.subtle.digest'));
+    assert.ok(handler.includes('existingJob.fingerprint === fingerprint'));
+    assert.ok(handler.includes('await saveProductPriceJob(job)'));
+    assert.ok(!handler.includes('rows:allImportedItems'));
 });
