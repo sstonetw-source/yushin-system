@@ -7,7 +7,7 @@ const vm=require('node:vm');
 const root=path.join(__dirname,'..');
 const rollout=fs.readFileSync(path.join(root,'transaction-rollout-config.js'),'utf8');
 const html=fs.readFileSync(path.join(root,'index.html'),'utf8');
-const version='20261105-service-471-acceptance';
+const version='20261104-transaction-activation-1';
 
 test('missing production origin leaves all new transaction flags disabled',()=>{
  const context={YUSHIN_PRODUCTION_QUICK_PURCHASE_LEGACY_BLOCKED:true,YUSHIN_PRODUCTION_QUICK_PURCHASE:true,YUSHIN_PREVIEW_QUICK_PURCHASE:true,
