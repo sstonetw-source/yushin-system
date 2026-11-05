@@ -1524,6 +1524,7 @@ window.handlePriceExcelUpload = async function(input) {
                         try { await markPriceListImportComplete(result.brand, brandTotal, result); }
                         catch (err) { metadataWarnings.push(`${brand}：${err.message}`); }
                     }
+                    // 以 productId 增量合併本機快取，不移除同廠牌其他未上傳產品。
                     const merged = new Map(priceList.map(item => [item.productId || stableProductId(item), item]));
                     (result.items || []).map(productItemWithoutCost).forEach(item => {
                         const id = item.productId || stableProductId(item);
@@ -1544,7 +1545,7 @@ window.handlePriceExcelUpload = async function(input) {
                 renderCompanyAgencyBrandSettings();
                 loadProductManagementOverview();
                 const done = job.cursor === job.total;
-                const message = `${done ? '主檔全部完成' : '本日主檔批次完成'}：${job.cursor}/${job.total} 筆；產品寫入 ${job.productWrites}、成本寫入 ${job.costWrites}、未變 ${job.unchanged}。${done ? '' : '下個美西計費日重新選擇同一 Excel，即可接續。'}`;
+                const message = `${done ? '主檔全部完成' : '本日主檔批次完成'}：${job.cursor}/${job.total} 筆；產品寫入 ${job.productWrites}、成本寫入 ${job.costWrites}、未變 ${job.unchanged}。標準成本與實際採購價分開保存；未出現在檔案中的產品不會被刪除或停用。${done ? '' : '下個美西計費日重新選擇同一 Excel，即可接續。'}`;
                 setPriceUploadProgress(100, message);
                 if (metadataWarnings.length) alert(`${message}\n價目表紀錄警告：${metadataWarnings.join('、')}`);
             });

@@ -975,7 +975,7 @@ test('phase 2 documents link to productId while retaining historical snapshots',
 
 test('phase 2 Product Import supports normalized fields, cost split and preview', () => {
     assert.match(appSource, /產品匯入預覽/);
-    assert.match(appSource, /confirmProductMasterImport\(brandGroups, importErrors\)/);
+    assert.match(appSource, /confirmProductMasterImport\(chunkGroups\)/);
     for (const field of ['單位', '標準成本（含稅）', '庫存管理', '批號管理', '效期管理', '啟用']) {
         assert.ok(appSource.includes(field), `missing import field: ${field}`);
     }
