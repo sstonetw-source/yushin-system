@@ -458,10 +458,12 @@ for(const mixed of [false,true])for(const width of [1280,390])test('shared servi
   await page.waitForFunction(id=>!!ordersCache.find(o=>o.id===id)?.serviceFulfillment.S?.DELIVER,orderId);
   if(mixed){
    assert.equal(await bill.isDisabled(),true,'unacknowledged goods prevent billing after service delivery');
-   await siteOrderAction(page,{sourceId:orderNo},'分批交貨');
+   await row.getByRole('button',{name:'確認送達',exact:true}).click();
    await page.locator('#deliveryFormPanel').waitFor({state:'visible'});
-   await page.locator('#deliveryItemId').selectOption('G');await page.locator('#deliveryShipmentId').selectOption(tag+'-ship');
-   await page.locator('#deliveryDate').fill('2026-10-24');await page.locator('#deliveryQty').fill('1');
+   assert.equal(await page.locator('#deliveryItemId').inputValue(),'G');
+   assert.equal(await page.locator('#deliveryShipmentId').inputValue(),tag+'-ship');
+   assert.equal(await page.locator('#deliveryQty').inputValue(),'1');
+   await page.locator('#deliveryDate').fill('2026-10-24');
    await page.locator('#deliveryFormPanel button[onclick="saveDeliveryRecord()"]').click();
    await page.waitForFunction(id=>!pendingDeliveryOrderIds.has(id)&&ordersCache.find(o=>o.id===id)?.deliveredQty===1,orderId);
    await page.locator('#deliveryModalOverlay button[onclick="closeDeliveryModal()"]').click();
