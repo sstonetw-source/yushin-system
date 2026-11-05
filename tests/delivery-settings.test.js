@@ -69,6 +69,51 @@ function uiFixture(){
  const c=vm.createContext(context);vm.runInContext(fs.readFileSync('modules/delivery-settings.js','utf8'),c);c.setOrderShippingInstructions({});return {c,node,reads};
 }
 const customerSnapshot=(name='A')=>({exists:true,data:()=>({shippingAddresses:[{id:'default',contact:name,phone:'123',address:name+'地址'}],defaultShippingAddressId:'default'})});
+test('adding an edited selected address keeps the original and immediately lists the committed address',async()=>{
+ const f=uiFixture();
+ const button={};
+ let saved=customerSnapshot().data(),writes=0;
+ Object.assign(f.c,{
+  hasBusinessCapability:()=>true,lifecycleRecordId:()=>'new-address',
+  beginActionButton(){},endActionButton(){},showActionFeedback(message){assert.fail(message);},
+  runRoleTransaction:callback=>callback({
+   get:async()=>({exists:true,data:()=>saved}),
+   set(_ref,patch){saved={...saved,...patch};writes++;}
+  })
+ });
+ f.node('orderShippingMode').value='CUSTOMER_SHIP';f.node('orderCustomer').value='A';
+ const first=f.c.loadOrderCustomerAddresses();f.reads[0].resolve(customerSnapshot());await first;
+ f.node('orderShippingAddress').value='另一個地址';
+ await f.c.saveOrderCustomerAddress(button);
+ assert.deepEqual(Array.from(saved.shippingAddresses,a=>[a.id,a.address]),[['default','A地址'],['new-address','另一個地址']]);
+ assert.equal(saved.defaultShippingAddressId,'default');
+ assert.match(f.node('orderCustomerAddress').innerHTML,/A地址.*另一個地址/);
+ assert.equal(f.node('orderCustomerAddress').value,'new-address');
+ assert.equal(f.reads.length,1);
+ await f.c.saveOrderCustomerAddress(button);
+ assert.equal(writes,1);
+ await f.c.setDefaultOrderCustomerAddress(button);
+ assert.equal(saved.defaultShippingAddressId,'new-address');
+ assert.equal(writes,2);
+});
+test('a completed save cannot change the address selector after switching customers',async()=>{
+ const f=uiFixture();
+ let finish;
+ Object.assign(f.c,{
+  hasBusinessCapability:()=>true,lifecycleRecordId:()=>'new-address',
+  beginActionButton(){},endActionButton(){},showActionFeedback(message){assert.fail(message);},
+  runRoleTransaction:()=>new Promise(resolve=>{finish=resolve;})
+ });
+ f.c.setOrderShippingInstructions({mode:'CUSTOMER_SHIP',contact:'A',phone:'123',address:'A地址'});
+ f.node('orderCustomer').value='A';
+ const saving=f.c.saveOrderCustomerAddress({});
+ f.node('orderCustomer').value='B';f.c.orderDeliveryCustomerTyping();
+ const next=f.c.loadOrderCustomerAddresses();f.reads[0].resolve(customerSnapshot('B'));await next;
+ finish({id:'new-address',rows:[{id:'new-address',address:'A地址'}]});await saving;
+ assert.match(f.node('orderCustomerAddress').innerHTML,/B地址/);
+ assert.equal(f.node('orderCustomerAddress').value,'default');
+ assert.equal(f.node('orderShippingAddress').value,'B地址');
+});
 test('new order autofills salesperson preferences and preserves manual edits through background warehouse initialization',()=>{
  const f=uiFixture();f.c.initializeOrderDeliveryDefaults();assert.equal(f.c.orderShippingInstructions().mode,'SALES_SHIP');assert.equal(f.node('orderShippingAddress').value,'業務地址');
  f.node('orderShippingAddress').value='本次地址';f.node('orderShippingFields').oninput({target:{id:'orderShippingAddress'}});f.c.initializeOrderDeliveryDefaults();assert.equal(f.node('orderShippingAddress').value,'本次地址');

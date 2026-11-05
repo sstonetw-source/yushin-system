@@ -8,6 +8,7 @@
 - 設計與限制：`docs/ARCHITECTURE.md`
 - 計算與事件：`docs/BUSINESS_RULES.md`
 - AI / 開發修改守則：`docs/DEVELOPMENT_RULES.md`
+- 歷史需求、發布及驗收：[歷史需求完成度總表](docs/HISTORICAL_REQUIREMENTS.md)。
 - 交易未完成清單仍請對照 `docs/workflow-consistency-audit-20261014.md`。
 
 ## 網站與 Firebase 發布

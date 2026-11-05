@@ -9,10 +9,14 @@
   if(typeof module==='object'&&module.exports)module.exports=api;
   if(typeof document==='undefined')return;
   const $=id=>document.getElementById(id);let customerGeneration=0,customerRows=[],customerKey='',changed=false,profileUid='';
+  let customerAddressSaving=false;
   root.resetDeliverySettings=function(){customerGeneration++;customerRows=[];customerKey='';changed=false;profileUid='';personalActor=null;$('deliverySettingsOverlay')?.remove();};
   const previousSet=root.setOrderShippingInstructions;
   const owner=()=>salesList.find(s=>s.uid===(['admin','purchaser'].includes(currentUserRole)?$('orderOwnerUid')?.value:currentUser?.uid));
   function replaceRecipient(p){for(const key of ['contact','phone','address'])if($('orderShipping'+key[0].toUpperCase()+key.slice(1)))$('orderShipping'+key[0].toUpperCase()+key.slice(1)).value=p[key]||'';}
+  function renderCustomerAddresses(){
+    $('orderCustomerAddress').innerHTML='<option value="">本次自行填寫</option>'+customerRows.map(a=>`<option value="${escapeAttr(a.id)}">${escapeHtml(a.label||a.contact)}｜${escapeHtml(a.address)}</option>`).join('');
+  }
   function controls(p){
     const host=$('orderShippingFields');if(!host)return;
     const mode=$('orderShippingMode');mode.innerHTML='<option value="">請選擇交付方式</option><option value="PICKUP">主倉自領</option><option value="SALES_SHIP">寄給我（寄給負責業務）</option><option value="CUSTOMER_SHIP">直接寄客戶</option>';mode.value=['PICKUP','SALES_SHIP','CUSTOMER_SHIP'].includes(p.mode)?p.mode:'';mode.onchange=()=>root.orderDeliveryChoiceChanged();
@@ -32,6 +36,7 @@
     $('orderCustomerAddress')?.closest('label').style.setProperty('display',customer?'':'none');
     $('orderShippingWarehouse')?.closest('label').style.setProperty('display','none');
     const remember=$('orderCustomerAddress')?.closest('.delivery-choice-row')?.querySelector('div');if(remember)remember.style.display=customer?'':'none';
+    $('orderAddressStatus')?.style.setProperty('display',customer?'':'none');
     for(const key of ['Contact','Phone','Address'])$('orderShipping'+key)?.closest('label').style.setProperty('display',pickup?'none':'');
     if(fill){customerGeneration++;changed=true;if(customer){replaceRecipient({});root.loadOrderCustomerAddresses();}else{const p=salespersonPlan(owner(),defaultWarehouse()?.id||'');const d=owner()?.deliveryDefaults||{};replaceRecipient(mode==='SALES_SHIP'?{...p,address:d.address||''}:{});$('orderShippingWarehouse').value=defaultWarehouse()?.id||'';}}
   };
@@ -57,7 +62,7 @@
     try{const snap=await firestoreReadWithTimeout(db.collection('customers').doc(key).get(),'客戶收件地址');
       if(generation!==customerGeneration||uid!==currentUser?.uid||key!==customerIdForName($('orderCustomer')?.value||''))return;
       const data=snap.exists?snap.data():{};customerRows=data.active!==false?addresses(data.shippingAddresses):[];customerKey=key;
-      $('orderCustomerAddress').innerHTML='<option value="">本次自行填寫</option>'+customerRows.map(a=>`<option value="${escapeAttr(a.id)}">${escapeHtml(a.label||a.contact)}｜${escapeHtml(a.address)}</option>`).join('');
+      renderCustomerAddresses();
       if($('orderShippingMode').value==='CUSTOMER_SHIP'&&fingerprint===JSON.stringify(root.orderShippingInstructions())&&!['contact','phone','address'].some(key=>root.orderShippingInstructions()[key])){const preferred=customerRows.find(a=>a.id===data.defaultShippingAddressId);if(preferred){$('orderCustomerAddress').value=preferred.id;replaceRecipient(preferred);}}
       $('orderAddressStatus').textContent=customerRows.length?'修改本次地址不會覆蓋常用地址。':'此客戶尚無常用地址，可填寫後按「加入常用地址」。';
     }catch(err){if(generation===customerGeneration)$('orderAddressStatus').textContent='常用地址讀取失敗：'+err.message+'；可自行填寫本次地址。';}
@@ -65,13 +70,38 @@
   root.selectOrderCustomerAddress=function(id){const a=customerRows.find(x=>x.id===id);if(a)replaceRecipient(a);changed=true;customerGeneration++;};
   async function saveAddress(button,setDefault){
     if(!hasBusinessCapability()&&currentUserRole!=='admin'&&currentUserRole!=='purchaser')return;
+    if(customerAddressSaving||$('orderShippingMode')?.value!=='CUSTOMER_SHIP')return;
     const name=$('orderCustomer')?.value.trim();if(!name)return alert('請先填寫客戶名稱。');const key=customerIdForName(name),uid=currentUser?.uid;let p;
     try{p=root.YushinWarehouseLogistics.validatePlan({...root.orderShippingInstructions(),mode:'CUSTOMER_SHIP'},true);}catch(err){return alert(err.message);}
-    const id=$('orderCustomerAddress')?.value||lifecycleRecordId(),bs=beginActionButton(button,'儲存中…');
-    try{await runRoleTransaction(async tx=>{const ref=db.collection('customers').doc(key),snap=await tx.get(ref),data=snap.exists?snap.data():{},list=addresses(data.shippingAddresses);if(uid!==currentUser?.uid)throw Error('登入身分已變更。');if(!list.some(a=>a.id===id)&&list.length>=30)throw Error('每個客戶最多 30 個常用地址。');
-      const a={id,label:p.contact,contact:p.contact,phone:p.phone,address:p.address};const next=[...list.filter(x=>x.id!==id),a];tx.set(ref,{customerId:key,name,active:data.active!==false,shippingAddresses:next,defaultShippingAddressId:setDefault||!data.defaultShippingAddressId?id:data.defaultShippingAddressId,updatedAt:new Date().toISOString()},{merge:true});});
-      if(uid===currentUser?.uid&&key===customerIdForName($('orderCustomer')?.value||'')){await root.loadOrderCustomerAddresses();$('orderCustomerAddress').value=id;$('orderAddressStatus').textContent=setDefault?'此地址已設為客戶預設收件地址。':'常用地址已記住；既有訂單不會跟著變更。';}
-    }catch(err){showActionFeedback('地址儲存失敗：'+err.message,'warning');}finally{endActionButton(button,bs);}
+    const generation=customerGeneration, proposedId=lifecycleRecordId(),bs=beginActionButton(button,'儲存中…');
+    customerAddressSaving=true;
+    try{
+      const {id,rows}=await runRoleTransaction(async tx=>{
+        const ref=db.collection('customers').doc(key),snap=await tx.get(ref),data=snap.exists?snap.data():{};
+        if(uid!==currentUser?.uid)throw Error('登入身分已變更。');
+        if(data.active===false)throw Error('客戶已停用。');
+        const rows=addresses(data.shippingAddresses);
+        const existing=rows.find(a=>a.contact===p.contact&&a.phone===p.phone&&a.address===p.address);
+        const id=existing?.id||proposedId;
+        if(!existing){
+          if(rows.length>=30)throw Error('每個客戶最多 30 個常用地址。');
+          rows.push({id,label:p.contact,contact:p.contact,phone:p.phone,address:p.address});
+        }
+        const defaultId=setDefault||!rows.some(a=>a.id===data.defaultShippingAddressId)?id:data.defaultShippingAddressId;
+        if(!existing||defaultId!==data.defaultShippingAddressId){
+          tx.set(ref,{customerId:key,name,active:true,shippingAddresses:rows,defaultShippingAddressId:defaultId,updatedAt:new Date().toISOString()},{merge:true});
+        }
+        return {id,rows};
+      });
+      if(generation!==customerGeneration||uid!==currentUser?.uid||key!==customerIdForName($('orderCustomer')?.value||'')||$('orderShippingMode')?.value!=='CUSTOMER_SHIP')return;
+      customerGeneration++;
+      customerRows=rows;
+      customerKey=key;
+      renderCustomerAddresses();
+      const current=root.orderShippingInstructions();
+      if(current.contact===p.contact&&current.phone===p.phone&&current.address===p.address)$('orderCustomerAddress').value=id;
+      $('orderAddressStatus').textContent=setDefault?'此地址已設為客戶預設收件地址。':'常用地址已記住；既有訂單不會跟著變更。';
+    }catch(err){showActionFeedback('地址儲存失敗：'+err.message,'warning');}finally{customerAddressSaving=false;endActionButton(button,bs);}
   }
   root.saveOrderCustomerAddress=button=>saveAddress(button,false);root.setDefaultOrderCustomerAddress=button=>saveAddress(button,true);
   function overlay(html){let el=$('deliverySettingsOverlay');if(!el){el=document.createElement('div');el.id='deliverySettingsOverlay';el.className='eq-modal-overlay no-print';document.body.appendChild(el);}el.innerHTML='<div class="eq-modal-box warehouse-logistics-modal">'+html+'</div>';el.classList.add('active');}
