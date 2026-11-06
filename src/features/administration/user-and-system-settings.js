@@ -25,10 +25,28 @@ window.renderAdminSalesTable = function() {
                     ? `<button type="button" class="btn-small btn-secondary" style="margin-top:4px;" onclick="sendPasswordResetToUser(${inlineJsValue(u.email)})">📧 寄送密碼重設信</button>`
                     : ''}
             </td>
-            <td data-label="帳號 UID" class="admin-user-uid" style="font-family:monospace;font-size:11px;color:${hasProfile ? '#999' : '#c0392b'};">${escapeHtml(u.uid)}</td>
+            <td data-label="帳號 UID" class="admin-user-uid" style="font-family:monospace;font-size:11px;color:${hasProfile ? '#999' : '#c0392b'};">
+                <span class="admin-uid-value" title="${escapeAttr(u.uid)}">${escapeHtml(u.uid)}</span>
+                <button type="button" class="btn-small btn-secondary admin-uid-copy" onclick="copyAdminUserUid(${inlineJsValue(u.uid)}, this)" aria-label="複製完整帳號 UID">複製</button>
+            </td>
         `;
         tbody.appendChild(tr);
     });
+};
+
+window.copyAdminUserUid = async function(uid, button) {
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
+    try {
+        if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
+        await navigator.clipboard.writeText(String(uid));
+        if (button) {
+            button.textContent = '已複製';
+            window.setTimeout(() => { if (button.isConnected) button.textContent = '複製'; }, 1800);
+        }
+    } catch (err) {
+        // 舊版瀏覽器或非安全來源不支援剪貼簿時，仍允許手動複製完整 UID。
+        window.prompt('複製完整帳號 UID：', String(uid));
+    }
 };
 
 window.saveAdminUserRole=async function(uid, selectEl){
