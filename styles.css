@@ -5024,7 +5024,7 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
   #admin-products .price-list-admin-actions { grid-template-columns:repeat(2,minmax(0,1fr)); }
   #admin-products .price-list-task > summary { padding:12px 8px; text-align:center; }
   #admin-products .price-list-task-body { padding:0 8px 10px; }
-  #admin-products .price-list-admin .table-wrap { width:100%; max-width:100%; overflow:visible; }
+  #admin-products .price-list-management-table { max-width:100%; }
   #admin-products .price-list-management-table,
   #admin-products .price-list-management-table > tbody { display:block; width:100%; min-width:0; }
   #admin-products .price-list-management-table > thead { display:none; }
