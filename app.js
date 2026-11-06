@@ -206,7 +206,9 @@ function writeCachedUserProfile(uid, data={}) {
     } catch (_) {}
 }
 function applyUserProfile(data={}) {
-    currentUserRole=data.role||'sales';
+    const role = data.role || 'sales';
+    if (currentUserRole && currentUserRole !== role) resetSessionData();
+    currentUserRole=role;
     trueUserRole=currentUserRole;
     currentUserName=data.name||'';
     currentUserPhone=data.phone||'';
@@ -1353,8 +1355,10 @@ function revalidateCurrentUserAccess() {
                 if (errorEl) errorEl.innerText = '此帳號已由管理員停用。';
             });
         }
+        const previousRole = currentUserRole;
         applyUserProfile(d);
         writeCachedUserProfile(user.uid, d);
+        if (previousRole !== currentUserRole) showApp();
     }).catch(err => {
         // 網路暫時失敗不登出：維持 Gmail 式長期登入，等下次恢復前景再驗證。
         console.warn('背景驗證帳號狀態失敗：', err);

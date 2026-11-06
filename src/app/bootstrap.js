@@ -115,7 +115,9 @@ function writeCachedUserProfile(uid, data={}) {
     } catch (_) {}
 }
 function applyUserProfile(data={}) {
-    currentUserRole=data.role||'sales';
+    const role = data.role || 'sales';
+    if (currentUserRole && currentUserRole !== role) resetSessionData();
+    currentUserRole=role;
     trueUserRole=currentUserRole;
     currentUserName=data.name||'';
     currentUserPhone=data.phone||'';
