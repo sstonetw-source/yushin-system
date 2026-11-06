@@ -4,34 +4,80 @@
 
 window.renderAdminSalesTable = function() {
     const tbody = document.getElementById('adminSalesBody');
+    const cards = document.getElementById('adminSalesCardList');
     tbody.innerHTML = '';
-    const roleLabel = ROLE_LABELS;
+    const mobileCards = [];
     allUsersCache.forEach((u) => {
         const tr = document.createElement('tr');
         const hasProfile = !!u.name;
+        const name = escapeHtml(u.name || '（尚未設定姓名）');
+        const uid = escapeAttr(u.uid);
+        const uidArg = inlineJsValue(u.uid);
+        const email = u.email ? escapeHtml(u.email) : '<span style="color:#c0392b;font-size:11px;">尚未取得（需等對方登入一次才會同步）</span>';
+        const roleOptions = ['admin','sales','purchaser','warehouse','engineer'].map(role =>
+            `<option value="${role}" ${u.role === role ? 'selected' : ''}>${escapeHtml(ROLE_LABELS[role])}</option>`
+        ).join('');
+        const roleSelect = id => `<select id="${id}" aria-label="身分" onchange="saveAdminUserRole(${uidArg}, this)">${roleOptions}</select>`;
+        const delivery = u.deliveryDefaults?.mode === 'SALES_SHIP' ? '寄到業務地址' : '主倉領貨';
+        const deliveryButton = label => `<button type="button" class="btn-small btn-secondary" onclick="openSalesDeliveryDefaults(${uidArg})">${label}</button>`;
+        const passwordButton = u.mustChangePassword
+            ? `<button type="button" class="btn-small btn-secondary" onclick="toggleMustChangePassword(${uidArg}, false)">取消改密碼要求</button>`
+            : `<button type="button" class="btn-small" onclick="toggleMustChangePassword(${uidArg}, true)">強制下次登入改密碼</button>`;
+        const resetButton = u.email
+            ? `<button type="button" class="btn-small btn-secondary" onclick="sendPasswordResetToUser(${inlineJsValue(u.email)})">寄送密碼重設信</button>`
+            : '';
+        const copyButton = label => `<button type="button" class="btn-small btn-secondary admin-uid-copy" data-copy-label="${label}" onclick="copyAdminUserUid(${inlineJsValue(u.uid)}, this)" aria-label="複製完整帳號 UID">${label}</button>`;
+        const passwordStatus = u.mustChangePassword ? '<span class="status-badge status-soon">下次登入須改密碼</span>' : '';
         tr.innerHTML = `
             <td data-label="代號">${escapeHtml(u.code || '—')}</td>
-            <td data-label="姓名">${escapeHtml(u.name || '（尚未設定姓名）')}</td>
+            <td data-label="姓名">${name}</td>
             <td data-label="電話">${escapeHtml(u.phone || '—')}</td>
-            <td data-label="Email">${u.email ? escapeHtml(u.email) : '<span style="color:#c0392b;font-size:11px;">尚未取得（需等對方登入一次才會同步）</span>'}</td>
-            <td data-label="身份"><select id="adminUserRole-${escapeAttr(u.uid)}" onchange="saveAdminUserRole(${inlineJsValue(u.uid)}, this)">${['admin','sales','purchaser','warehouse','engineer'].map(role=>`<option value="${role}" ${u.role===role?'selected':''}>${escapeHtml(roleLabel[role])}</option>`).join('')}</select></td>
-            <td data-label="領貨／地址"><button type="button" class="btn-small btn-secondary" onclick="openSalesDeliveryDefaults(${inlineJsValue(u.uid)})">${u.deliveryDefaults?.mode==='SALES_SHIP'?'寄到業務地址':'主倉領貨'}</button></td>
+            <td data-label="Email">${email}</td>
+            <td data-label="身份">${roleSelect(`adminUserRole-${uid}`)}</td>
+            <td data-label="領貨／地址">${deliveryButton(delivery)}</td>
             <td data-label="密碼" class="admin-user-password-actions">
-                ${u.mustChangePassword
-                    ? `<span class="status-badge status-soon" style="margin-right:6px;">下次登入須改密碼</span><button type="button" class="btn-small btn-secondary" onclick="toggleMustChangePassword(${inlineJsValue(u.uid)}, false)">取消要求</button>`
-                    : `<button type="button" class="btn-small" onclick="toggleMustChangePassword(${inlineJsValue(u.uid)}, true)">🔒 強制下次登入改密碼</button>`}
-                <br>
-                ${u.email
-                    ? `<button type="button" class="btn-small btn-secondary" style="margin-top:4px;" onclick="sendPasswordResetToUser(${inlineJsValue(u.email)})">📧 寄送密碼重設信</button>`
-                    : ''}
+                ${passwordStatus} ${passwordButton} ${resetButton ? `<br>${resetButton}` : ''}
             </td>
             <td data-label="帳號 UID" class="admin-user-uid" style="font-family:monospace;font-size:11px;color:${hasProfile ? '#999' : '#c0392b'};">
-                <span class="admin-uid-value" title="${escapeAttr(u.uid)}">${escapeHtml(u.uid)}</span>
-                <button type="button" class="btn-small btn-secondary admin-uid-copy" onclick="copyAdminUserUid(${inlineJsValue(u.uid)}, this)" aria-label="複製完整帳號 UID">複製</button>
+                <span class="admin-uid-value" title="${uid}">${escapeHtml(u.uid)}</span>
+                ${copyButton('複製')}
             </td>
         `;
         tbody.appendChild(tr);
+        mobileCards.push(`<article class="admin-mobile-card">
+            <header class="admin-card-heading">
+                <h4>${name}</h4>
+                <span class="admin-card-badge is-role" id="adminUserRoleBadge-${uid}">${escapeHtml(ROLE_LABELS[u.role] || u.role || '業務')}</span>
+            </header>
+            <p class="admin-card-email">${email}</p>
+            ${u.code || u.phone ? `<p class="admin-card-meta">${[u.code, u.phone].filter(Boolean).map(escapeHtml).join(' · ')}</p>` : ''}
+            <div class="admin-card-delivery"><span>領貨與收件</span><span>${delivery}</span></div>
+            ${passwordStatus}
+            <div class="admin-card-actions">
+                <button type="button" class="btn-secondary" aria-controls="adminUserSettings-${uid}" aria-expanded="false" onclick="toggleAdminUserCardPanel(this)">編輯設定</button>
+                <button type="button" aria-controls="adminUserAccount-${uid}" aria-expanded="false" onclick="toggleAdminUserCardPanel(this)">帳號操作</button>
+            </div>
+            <div class="admin-card-menu" id="adminUserSettings-${uid}" hidden>
+                <label class="admin-card-role-field" for="adminMobileUserRole-${uid}">身分 ${roleSelect(`adminMobileUserRole-${uid}`)}</label>
+                ${deliveryButton('編輯領貨與收件設定')}
+            </div>
+            <div class="admin-card-menu" id="adminUserAccount-${uid}" hidden>
+                ${passwordButton}
+                ${resetButton}
+                ${copyButton('複製帳號 UID')}
+            </div>
+        </article>`);
     });
+    if (cards) cards.innerHTML = mobileCards.join('') || '<p>目前沒有人員資料。</p>';
+};
+
+window.toggleAdminUserCardPanel = function(button) {
+    const shouldOpen = button.getAttribute('aria-expanded') === 'false';
+    for (const control of button.parentElement.children) {
+        const open = control === button && shouldOpen;
+        control.setAttribute('aria-expanded', String(open));
+        document.getElementById(control.getAttribute('aria-controls')).hidden = !open;
+    }
 };
 
 window.copyAdminUserUid = async function(uid, button) {
@@ -41,7 +87,7 @@ window.copyAdminUserUid = async function(uid, button) {
         await navigator.clipboard.writeText(String(uid));
         if (button) {
             button.textContent = '已複製';
-            window.setTimeout(() => { if (button.isConnected) button.textContent = '複製'; }, 1800);
+            window.setTimeout(() => { if (button.isConnected) button.textContent = button.dataset.copyLabel || '複製'; }, 1800);
         }
     } catch (err) {
         // 舊版瀏覽器或非安全來源不支援剪貼簿時，仍允許手動複製完整 UID。
@@ -51,25 +97,33 @@ window.copyAdminUserUid = async function(uid, button) {
 
 window.saveAdminUserRole=async function(uid, selectEl){
     if(trueUserRole!=='admin'||currentUserRole!=='admin')return;
-    const select=selectEl||document.getElementById(`adminUserRole-${uid}`);
-    const user=allUsersCache.find(x=>x.uid===uid);
-    const previousRole=user?.role||'sales';
-    const role=select?.value||'sales';
-    if(role===previousRole)return;
-    if(select)select.disabled=true;
-    try{
+    const desktopSelect = document.getElementById(`adminUserRole-${uid}`);
+    const mobileSelect = document.getElementById(`adminMobileUserRole-${uid}`);
+    const selects = [desktopSelect, mobileSelect].filter(Boolean);
+    const select = selectEl || desktopSelect;
+    const user = allUsersCache.find(x => x.uid === uid);
+    const previousRole = user?.role || 'sales';
+    const role = select?.value || 'sales';
+    if (role === previousRole) return;
+    selects.forEach(control => { control.disabled = true; });
+    try {
         await db.collection('users').doc(uid).set({
             role,
             capabilities:role==='engineer'?['business','engineering']:role==='sales'?['business']:[],
             updatedAt:new Date().toISOString()
         },{merge:true});
-        if(user) user.role=role;
-        if(select)select.title='角色已更新';
-    } catch(err) {
-        if(select)select.value=previousRole;
+        if (user) user.role = role;
+        selects.forEach(control => {
+            control.value = role;
+            control.title = '角色已更新';
+        });
+        const badge = document.getElementById(`adminUserRoleBadge-${uid}`);
+        if (badge) badge.textContent = ROLE_LABELS[role];
+    } catch (err) {
+        selects.forEach(control => { control.value = previousRole; });
         alert('更新失敗：'+err.message + '\n請確認目前這筆資料及連線／權限，重試前先查詢作業結果；若持續失敗，請聯絡管理員。');
     } finally {
-        if(select)select.disabled=false;
+        selects.forEach(control => { control.disabled = false; });
     }
 };
 

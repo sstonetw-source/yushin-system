@@ -15,7 +15,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-functions-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261106-10">
+        <link rel="stylesheet" href="styles.css?v=20261106-11">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -1356,6 +1356,10 @@
                 <thead><tr><th>代號</th><th>姓名</th><th>電話</th><th>Email</th><th>身份</th><th>領貨／地址</th><th>密碼</th><th>帳號 UID</th></tr></thead>
                 <tbody id="adminSalesBody"></tbody>
             </table>
+            <div id="adminSalesCards" class="admin-mobile-cards">
+                <h3>人員名單</h3>
+                <div id="adminSalesCardList"></div>
+            </div>
         </div>
 
 
@@ -1400,12 +1404,13 @@
                     </div>
                     <span id="productBatchMaintenanceStatus" class="inline-status" role="status" aria-live="polite"></span>
                     <p id="productOverviewStatus" role="status" aria-live="polite"></p>
-                    <div class="table-wrap">
+                    <div class="table-wrap price-list-table-wrap">
                         <table class="price-list-management-table">
                             <thead><tr><th>廠牌</th><th>目前價目表</th><th>檔案品項數</th><th>最後更新</th><th>狀態</th><th class="no-print">操作</th></tr></thead>
                             <tbody id="productOverviewBody"><tr><td colspan="6" style="color:#888;">正在載入價目表狀態…</td></tr></tbody>
                         </table>
                     </div>
+                    <div id="productOverviewCards" class="admin-mobile-cards"></div>
                     <details id="priceListHistoryDetails" class="product-import-details" ontoggle="if(this.open) loadPriceListHistory()">
                         <summary>匯入／停用／刪除紀錄</summary>
                         <div class="product-import-card">
@@ -1640,7 +1645,7 @@
     <script src="modules/order-commercial-details.js?v=20261025-1"></script>
     <script src="modules/order-entry-core.js?v=20261104-460"></script>
 <script src="modules/service-work-core.js?v=20261023-2"></script>
-    <script src="app.js?v=20261106-7"></script>
+    <script src="app.js?v=20261106-11"></script>
     <script src="modules/order-self-order-required.js?v=20261013-1"></script>
     <script src="modules/customer-cancellations.js?v=20261021-3"></script>
     <script src="modules/free-stock-recovery.js?v=20261014-9"></script>
