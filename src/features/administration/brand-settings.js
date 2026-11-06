@@ -146,29 +146,56 @@ window.renderProductManagementOverview = function() {
     const activeCount = rows.filter(row => row.priceListManaged && row.priceListActive !== false && !row.priceListDeletedAt).length;
     const disabledCount = rows.filter(row => row.priceListActive === false && !!row.priceListFile).length;
     const deletedCount = rows.filter(row => !!row.priceListDeletedAt && !row.priceListFile).length;
-    if (status) status.textContent = `共 ${rows.length} 個廠牌｜啟用價目表 ${activeCount}｜停用 ${disabledCount}｜已刪除 ${deletedCount}`;
-    body.innerHTML = rows.length ? rows.map(row => {
+    if (status) status.textContent = [
+        `${rows.length} 個廠牌`, `${activeCount} 份啟用`,
+        disabledCount ? `${disabledCount} 份停用` : '',
+        deletedCount ? `${deletedCount} 份已刪除` : ''
+    ].filter(Boolean).join(' · ');
+    const cards = document.getElementById('productOverviewCards');
+    const tableRows = [];
+    const mobileCards = [];
+    for (const row of rows) {
         const hasCurrent = !!row.priceListFile;
         const state = priceListStatusLabel(row);
+        const name = escapeHtml(row.name);
+        const brandArg = inlineJsValue(row.name);
+        const file = escapeHtml(row.priceListFile || '尚無版本');
+        const count = row.priceListManaged ? Number(row.priceListProductCount || 0).toLocaleString() : '—';
+        const date = escapeHtml(priceListDateLabel(row.priceListUpdatedAt || row.priceListDeletedAt));
         const toggleLabel = row.priceListActive === false ? '啟用' : '停用';
-        return `<tr>
-            <td data-th="廠牌"><strong>${escapeHtml(row.name)}</strong></td>
-            <td data-th="目前價目表">${escapeHtml(row.priceListFile || '尚無版本')}</td>
-            <td data-th="檔案品項數">${row.priceListManaged ? Number(row.priceListProductCount || 0).toLocaleString() : '—'}</td>
-            <td data-th="最後更新">${escapeHtml(priceListDateLabel(row.priceListUpdatedAt || row.priceListDeletedAt))}</td>
-            <td data-th="狀態"><span class="price-list-state">${escapeHtml(state)}</span></td>
-            <td data-th="操作" class="no-print">
-                <div class="price-list-action-group">
-                    <button type="button" class="btn-small" onclick="openPriceListUploadForBrand(${inlineJsValue(row.name)})">上傳新版</button>
-                    <button type="button" class="btn-small btn-secondary" onclick="showPriceListHistoryForBrand(${inlineJsValue(row.name)})">紀錄</button>
-                    <details class="price-list-more-actions"><summary>更多操作</summary><div class="price-list-more-actions-content">
-                    <button type="button" class="btn-small btn-secondary" onclick="togglePriceListActive(${inlineJsValue(row.name)}, ${row.priceListActive === false ? 'true' : 'false'}, this)" ${!hasCurrent && !row.priceListManaged ? 'title="尚未有版本紀錄，仍可用來停用既有舊價目資料"' : ''}>${toggleLabel}</button>
-                    <button type="button" class="btn-small btn-danger" onclick="deleteEntirePriceList(${inlineJsValue(row.name)}, this)">刪除整個價目表</button>
-                    </div></details>
+        const actions = `<div class="price-list-action-group no-print">
+            <button type="button" class="btn-small" onclick="openPriceListUploadForBrand(${brandArg})">上傳新版</button>
+            <button type="button" class="btn-small btn-secondary" onclick="showPriceListHistoryForBrand(${brandArg})">紀錄</button>
+            <details class="price-list-more-actions">
+                <summary aria-label="更多操作"><span class="price-list-more-label">更多操作</span><span class="price-list-more-icon" aria-hidden="true">⋯</span></summary>
+                <div class="price-list-more-actions-content">
+                    <button type="button" class="btn-small btn-secondary" onclick="togglePriceListActive(${brandArg}, ${row.priceListActive === false}, this)" ${!hasCurrent && !row.priceListManaged ? 'title="尚未有版本紀錄，仍可用來停用既有舊價目資料"' : ''}>${toggleLabel}</button>
+                    <button type="button" class="btn-small btn-danger" onclick="deleteEntirePriceList(${brandArg}, this)">刪除整個價目表</button>
                 </div>
-            </td>
-        </tr>`;
-    }).join('') : '<tr><td colspan="6" style="color:#888;">尚未建立任何廠牌。</td></tr>';
+            </details>
+        </div>`;
+        tableRows.push(`<tr>
+            <td data-th="廠牌"><strong>${name}</strong></td>
+            <td data-th="目前價目表">${file}</td>
+            <td data-th="檔案品項數">${count}</td>
+            <td data-th="最後更新">${date}</td>
+            <td data-th="狀態"><span class="price-list-state">${state}</span></td>
+            <td data-th="操作" class="no-print">${actions}</td>
+        </tr>`);
+        const metadata = [count !== '—' ? `${count} 個品項` : '', date !== '—' ? date : ''].filter(Boolean).join(' · ');
+        mobileCards.push(`<article class="admin-mobile-card">
+            <header class="admin-card-heading">
+                <h4>${name}</h4>
+                <span class="admin-card-badge${state === '啟用' ? ' is-active' : ''}">${state}</span>
+            </header>
+            ${hasCurrent ? `<p class="admin-card-file">${file}</p>` : ''}
+            ${metadata ? `<p class="admin-card-meta">${metadata}</p>` : ''}
+            ${actions}
+        </article>`);
+    }
+    const emptyText = '尚未建立任何廠牌。';
+    body.innerHTML = tableRows.join('') || `<tr><td colspan="6" style="color:#888;">${emptyText}</td></tr>`;
+    if (cards) cards.innerHTML = mobileCards.join('') || `<p>${emptyText}</p>`;
 };
 
 function renderPriceListHistory() {

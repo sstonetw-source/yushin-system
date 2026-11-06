@@ -4970,45 +4970,12 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
  #appContainer :is(#ordersTable,.workflow-list-table) .order-progress-cell small { display:block; max-width:100%; box-sizing:border-box; padding-inline-end:4px; white-space:normal; overflow-wrap:anywhere; }
 }
 
-/* Admin staff directory: compact mobile cards, retaining existing role controls. */
+/* Admin mobile navigation. */
 @media screen and (max-width: 768px) {
   #appContainer #admin-system .sub-nav { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
   #appContainer #admin-system .sub-nav > .sub-tab { width:auto; min-width:0; min-height:44px; padding:9px 6px !important; }
   #appContainer #admin-system #systemVersionLabel { grid-column:1 / -1; justify-self:center; margin:0 !important; }
-  #appContainer #admin-sales { width:100%; max-width:100%; overflow:visible; }
-  #appContainer #admin-sales > table,
-  #appContainer #admin-sales > table > tbody { display:block; width:100%; min-width:0; }
-  #appContainer #admin-sales > table > thead { display:none; }
-  #appContainer #admin-sales #adminSalesBody > tr {
-    display:grid; grid-template-columns:minmax(0,1fr); width:100%; height:auto !important;
-    min-height:0 !important; margin:0 0 12px; padding:12px 14px;
-    border:1px solid var(--ys-border,#d0c8bd); border-radius:12px;
-    background:var(--ys-surface,#fff); box-sizing:border-box;
-  }
-  #appContainer #admin-sales #adminSalesBody > tr > td {
-    display:flex !important; align-items:center; justify-content:space-between; gap:12px;
-    width:auto !important; min-width:0 !important; max-width:100%;
-    height:auto !important; min-height:0 !important; padding:8px 0 !important;
-    border:0; border-bottom:1px solid var(--ys-border,#ddd);
-    box-sizing:border-box; text-align:right; white-space:normal;
-    overflow-wrap:anywhere; word-break:break-word;
-  }
-  #appContainer #admin-sales #adminSalesBody > tr > td:last-child { border-bottom:0; }
-  #appContainer #admin-sales #adminSalesBody > tr > td::before {
-    flex:0 0 72px; text-align:left; color:var(--ys-muted,#667085);
-    font-size:13px; font-weight:600;
-  }
-  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(1)::before { content:"代號"; }
-  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(2)::before { content:"姓名"; }
-  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(3)::before { content:"電話"; }
-  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(4)::before { content:"Email"; }
-  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(5)::before { content:"身分"; }
-  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(6)::before { content:"領貨／地址"; }
-  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(7)::before { content:"密碼"; }
-  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(8)::before { content:"帳號 UID"; }
-  #appContainer #admin-sales #adminSalesBody :is(select,input,button) {
-    max-width:100%; min-width:0; box-sizing:border-box;
-  }
+
 }
 
 
@@ -5024,39 +4991,6 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
   #admin-products .price-list-admin-actions { grid-template-columns:repeat(2,minmax(0,1fr)); }
   #admin-products .price-list-task > summary { padding:12px 8px; text-align:center; }
   #admin-products .price-list-task-body { padding:0 8px 10px; }
-  #admin-products .price-list-management-table { max-width:100%; }
-  #admin-products .price-list-management-table,
-  #admin-products .price-list-management-table > tbody { display:block; width:100%; min-width:0; }
-  #admin-products .price-list-management-table > thead { display:none; }
-  #admin-products #productOverviewBody > tr { display:block; height:auto !important; min-height:0 !important; margin:0 0 12px; padding:12px; border:1px solid var(--ys-border,#c7c1b8); border-radius:10px; background:var(--ys-surface,#fff); box-sizing:border-box; }
-  #admin-products #productOverviewBody > tr > td { display:flex !important; align-items:flex-start; justify-content:space-between; gap:10px; width:100% !important; max-width:100%; min-width:0 !important; height:auto !important; min-height:0 !important; padding:8px 0 !important; border:0; border-bottom:1px solid var(--ys-border,#ddd); text-align:right; overflow-wrap:anywhere; white-space:normal; box-sizing:border-box; }
-  #admin-products #productOverviewBody > tr > td:last-child { display:block !important; border-bottom:0; }
-  #admin-products #productOverviewBody > tr > td::before { flex:0 0 86px; font-weight:600; font-size:13px; color:var(--ys-muted,#667085); text-align:left; }
-  #admin-products #productOverviewBody > tr > td:nth-child(1)::before { content:"廠牌"; }
-  #admin-products #productOverviewBody > tr > td:nth-child(2)::before { content:"目前價目表"; }
-  #admin-products #productOverviewBody > tr > td:nth-child(3)::before { content:"品項數"; }
-  #admin-products #productOverviewBody > tr > td:nth-child(4)::before { content:"最後更新"; }
-  #admin-products #productOverviewBody > tr > td:nth-child(5)::before { content:"狀態"; }
-  #admin-products #productOverviewBody > tr > td:nth-child(6)::before { content:"操作"; display:block; margin-bottom:8px; }
-  #admin-products .price-list-action-group { display:flex; flex-wrap:wrap; gap:8px; }
-  #admin-products .price-list-action-group button { flex:1 1 125px; min-width:0; min-height:44px; white-space:normal; }
-  #admin-system #admin-sales #adminSalesBody > tr > td:nth-child(8) { overflow-wrap:anywhere; word-break:break-all; }
-}
-
-
-/* Admin mobile overflow follow-up: constrain generated content without changing handlers. */
-@media screen and (max-width:768px) {
-  #admin-system, #admin-system .admin-panel, #admin-system .panel { min-width:0; max-width:100%; box-sizing:border-box; }
-  #admin-system button, #admin-system input, #admin-system select { max-width:100%; box-sizing:border-box; }
-  #admin-sales { width:100%; max-width:100%; overflow-x:hidden; }
-  #admin-sales #adminSalesBody > tr { max-width:100%; box-sizing:border-box; }
-  #admin-sales #adminSalesBody > tr > td { min-width:0; max-width:100%; overflow-wrap:anywhere; }
-  #admin-sales #adminSalesBody > tr > td:nth-child(8) { word-break:break-all; overflow-wrap:anywhere; font-size:12px; }
-  #admin-sales #adminSalesBody > tr > td button { min-width:0; max-width:100%; white-space:normal; }
-  #admin-products #productOverviewBody > tr > td[colspan] { display:block !important; text-align:left; }
-  #admin-products #productOverviewBody > tr > td[colspan]::before { content:none; }
-  #admin-products #productOverviewBody > tr > td > * { min-width:0; max-width:100%; }
-  #admin-products #productOverviewBody .price-list-action-group { justify-content:flex-start; width:100%; }
   #admin-products .price-list-task-body button { flex:none; }
 }
 
@@ -5069,102 +5003,6 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
 #admin-products .price-list-more-actions-content button { width:100%; min-width:0; white-space:normal; margin:0; }
 #admin-sales .admin-user-uid .admin-uid-value { display:inline-block; max-width:100%; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:middle; }
 #admin-sales .admin-user-uid .admin-uid-copy { display:inline-block; min-width:48px; margin:4px 0 4px 6px; font-family:inherit; }
-@media screen and (max-width:768px) {
-  #admin-products .price-list-more-actions { flex:1 1 125px; min-width:0; }
-  #admin-products .price-list-more-actions-content { padding:8px 6px; }
-  #admin-sales #adminSalesBody > tr > td.admin-user-uid { display:flex !important; align-items:center; gap:8px; max-width:100%; }
-  #admin-sales #adminSalesBody > tr > td.admin-user-uid .admin-uid-value { flex:1 1 auto; max-width:100%; }
-  #admin-sales #adminSalesBody > tr > td.admin-user-uid .admin-uid-copy { flex:0 0 auto; width:auto; min-height:40px; margin:0; }
-}
-
-/* Admin mobile card repair: override legacy 720px tables and stacked row cells. */
-@media screen and (max-width:768px) {
-  #appContainer #admin-products .table-wrap:has(.price-list-management-table) {
-    overflow-x:visible; width:100%; min-width:0;
-  }
-  #appContainer #admin-products .table-wrap .price-list-management-table {
-    display:block; width:100%; min-width:0; max-width:100%; table-layout:auto;
-  }
-  #appContainer #admin-products .price-list-management-table > tbody { display:block; width:100%; min-width:0; }
-  #appContainer #admin-products .price-list-management-table > thead { display:none; }
-  #appContainer #admin-products #productOverviewBody > tr {
-    display:grid; grid-template-columns:minmax(0,1fr); width:100%; min-width:0;
-    padding:10px 12px; overflow:hidden;
-  }
-  #appContainer #admin-products #productOverviewBody > tr > td {
-    display:grid !important; grid-template-columns:minmax(0,94px) minmax(0,1fr);
-    align-items:start; justify-content:initial; gap:8px; width:100% !important;
-    min-width:0 !important; max-width:100%; padding:9px 0 !important;
-    text-align:left; overflow-wrap:anywhere; word-break:break-word;
-  }
-  #appContainer #admin-products #productOverviewBody > tr > td::before {
-    display:block; position:static; width:auto; min-width:0; margin:0;
-    white-space:normal; text-align:left;
-  }
-  #appContainer #admin-products #productOverviewBody > tr > td:first-child {
-    display:block !important; font-weight:700; font-size:16px; padding:4px 0 10px !important;
-  }
-  #appContainer #admin-products #productOverviewBody > tr > td:first-child::before { display:none; }
-  #appContainer #admin-products #productOverviewBody > tr > td:last-child {
-    display:block !important; min-width:0 !important; padding-bottom:0 !important;
-  }
-  #appContainer #admin-products #productOverviewBody > tr > td:last-child::before {
-    display:block; margin-bottom:8px;
-  }
-  #appContainer #admin-products #productOverviewBody .price-list-action-group {
-    display:grid; grid-template-columns:repeat(2,minmax(0,1fr));
-    align-items:stretch; width:100%; min-width:0; gap:8px;
-  }
-  #appContainer #admin-products #productOverviewBody .price-list-action-group > button {
-    width:100%; min-width:0; max-width:100%; margin:0; white-space:normal;
-  }
-  #appContainer #admin-products #productOverviewBody .price-list-action-group > .price-list-more-actions {
-    grid-column:1/-1; width:100%; min-width:0; max-width:100%; box-sizing:border-box;
-  }
-  #appContainer #admin-products #productOverviewBody > tr > td[colspan] {
-    display:block !important; width:100% !important;
-  }
-  #appContainer #admin-sales #adminSalesBody > tr {
-    display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr);
-    padding:10px 12px; gap:0 10px; overflow:hidden;
-  }
-  #appContainer #admin-sales #adminSalesBody > tr > td {
-    display:grid !important; grid-template-columns:minmax(0,74px) minmax(0,1fr);
-    align-items:center; justify-content:initial; gap:6px; padding:8px 0 !important;
-    text-align:left; overflow-wrap:anywhere; min-width:0;
-  }
-  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(1),
-  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(2) {
-    grid-column:auto; display:block !important; font-weight:700; border-bottom:1px solid var(--ys-border,#ddd);
-  }
-  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(1)::before,
-  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(2)::before { display:none; }
-  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(n+3) { grid-column:1/-1; }
-  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(4) {
-    overflow-wrap:anywhere; word-break:break-word;
-  }
-  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(7) {
-    display:block !important;
-  }
-  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(7)::before {
-    display:block; margin-bottom:6px;
-  }
-  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(7) button {
-    width:auto; max-width:100%; margin:4px 6px 4px 0 !important;
-    display:inline-block; vertical-align:middle; white-space:normal;
-  }
-  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(8) {
-    display:grid !important; grid-template-columns:74px minmax(0,1fr);
-  }
-  #appContainer #admin-sales #adminSalesBody > tr > td.admin-user-uid .admin-uid-value {
-    min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-  }
-  #appContainer #admin-sales #adminSalesBody > tr > td.admin-user-uid .admin-uid-copy {
-    min-height:40px; margin:4px 0; justify-self:end;
-  }
-  #appContainer #admin-system :is(.admin-panel,.panel,.table-wrap) { max-width:100%; min-width:0; }
-}
-
 /* Keep quote save-as-new action next to the active quote number on mobile. */
 .quote-editing-banner #saveLoadedQuoteAsNewBtn { flex:0 0 auto; min-height:40px; padding:8px 12px; white-space:normal; }
 @media screen and (max-width:768px) {
@@ -5173,71 +5011,82 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
   .quote-editing-banner #saveLoadedQuoteAsNewBtn { flex:0 1 auto; max-width:100%; font-size:14px; }
 }
 
-/* Admin card layout refinement: override older mobile table rules. */
-@media (max-width:768px) {
-  #appContainer #admin-products #productOverviewBody > tr { gap:0; }
-  #appContainer #admin-products #productOverviewBody > tr > td:first-child {
-    background:transparent; border-bottom:1px solid var(--ys-border,#ddd);
-    margin-bottom:3px; padding:8px 0 12px !important;
+/* Admin mobile lists use dedicated cards. The desktop tables remain available for print. */
+.admin-mobile-cards, .price-list-more-icon { display:none; }
+
+@media screen and (max-width:768px) {
+  #admin-system, #admin-system .admin-panel, #admin-system .panel {
+    min-width:0; max-width:100%; box-sizing:border-box;
   }
-  #appContainer #admin-products #productOverviewBody > tr > td:last-child::before {
-    content:none !important; display:none !important;
+  #appContainer #admin-sales > table,
+  #appContainer #admin-products .price-list-table-wrap { display:none; }
+  #admin-system .admin-mobile-cards { display:block; }
+  #admin-sales #adminSalesCards > h3 { margin:0 0 12px; }
+  #admin-products #productOverviewStatus { margin:12px 0; color:var(--ys-muted); font-size:14px; }
+
+  #admin-system .admin-mobile-card {
+    display:grid; gap:8px; min-width:0; margin:0 0 12px; padding:14px;
+    border:1px solid var(--ys-border); border-radius:12px; background:#fff;
+    color:var(--ys-text); overflow-wrap:anywhere;
   }
-  #appContainer #admin-products #productOverviewBody > tr > td:last-child {
-    border:0; padding:12px 0 0 !important;
+  #admin-system .admin-mobile-card p { margin:0; }
+  #admin-system .admin-card-heading {
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+    min-width:0; padding-bottom:8px; border-bottom:1px solid var(--ys-border);
   }
-  #appContainer #admin-products #productOverviewBody .price-list-action-group {
-    gap:8px; align-items:stretch;
+  #admin-system .admin-card-heading h4 { margin:0; font-size:17px; line-height:1.35; }
+  #admin-system .admin-card-badge {
+    flex:none; border-radius:6px; padding:3px 7px;
+    background:#f0efed; color:#535b63; font-size:12px; font-weight:600;
   }
-  #appContainer #admin-products #productOverviewBody .price-list-action-group > button,
-  #appContainer #admin-products #productOverviewBody .price-list-action-group > details {
-    box-sizing:border-box; min-height:44px; margin:0;
+  #admin-system .admin-card-badge.is-active { background:#e3f3e8; color:#24613a; }
+  #admin-system .admin-card-badge.is-role { background:#e7f0f8; color:#234d72; }
+  #admin-system .admin-card-meta { font-size:13px; color:var(--ys-muted); }
+  #admin-system .admin-card-delivery {
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+    padding:8px 0; border-block:1px solid var(--ys-border); font-size:14px;
   }
-  #appContainer #admin-sales #adminSalesBody > tr {
-    grid-template-columns:minmax(0,88px) minmax(0,1fr); gap:0;
+  #admin-system .admin-card-delivery > :first-child { color:var(--ys-muted); }
+
+  #admin-system .admin-card-actions,
+  #admin-products .admin-mobile-card .price-list-action-group {
+    display:grid; align-items:start; gap:8px; margin-top:4px;
+    grid-template-columns:repeat(2,minmax(0,1fr));
   }
-  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(1),
-  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(2) {
-    background:transparent; padding:10px 0 !important; border-bottom:1px solid var(--ys-border,#ddd);
-    min-width:0; overflow-wrap:anywhere;
+  #admin-products .admin-mobile-card .price-list-action-group {
+    position:relative; grid-template-columns:minmax(0,1.25fr) minmax(0,1fr) 44px;
   }
-  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(2) { font-size:17px; }
-  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(n+3) {
-    grid-column:1/-1; grid-template-columns:minmax(0,86px) minmax(0,1fr);
-    padding:9px 0 !important;
+  #admin-system .admin-mobile-card :is(button,select) {
+    min-width:0; max-width:100%; min-height:44px; margin:0;
+    padding:8px !important; border-radius:8px !important; font-size:14px !important;
+    white-space:normal;
   }
-  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(n+3)::before {
-    width:auto; min-width:0; flex:none; text-align:left; align-self:center;
+  #admin-system .admin-card-menu:not([hidden]) {
+    display:grid; gap:0; overflow:hidden;
+    border:1px solid var(--ys-border); border-radius:8px;
   }
-  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(6)::before {
-    content:"領貨與收件設定" !important; font-size:12px;
+  #admin-system .admin-card-menu > button {
+    width:100%; background:#fff; color:var(--ys-text); border:0;
+    border-radius:0 !important; box-shadow:none; text-align:left; padding-inline:12px !important;
   }
-  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(7) {
-    display:grid !important; grid-template-columns:minmax(0,86px) minmax(0,1fr);
-    align-items:start; gap:8px;
+  #admin-system .admin-card-menu > button:not(:first-child) { border-top:1px solid var(--ys-border); }
+  #admin-system .admin-card-role-field {
+    display:grid; grid-template-columns:auto minmax(0,1fr); gap:12px;
+    align-items:center; padding:6px 12px;
   }
-  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(7)::before {
-    content:"密碼" !important; margin:6px 0 0;
+  #admin-products .admin-mobile-card .price-list-more-actions {
+    min-width:0; border-radius:8px; box-sizing:border-box;
   }
-  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(7) button {
-    width:100%; min-height:40px; margin:0 0 6px !important;
-    padding:8px !important; font-size:13px !important;
+  #admin-products .admin-mobile-card .price-list-more-actions > summary {
+    min-height:42px; padding:0; list-style:none; font-size:22px;
   }
-  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(7) br { display:none; }
-  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(8) {
-    display:grid !important; grid-template-columns:minmax(0,86px) minmax(0,1fr);
-    align-items:center; gap:8px;
-  }
-  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(8)::before {
-    content:"帳號 UID" !important; grid-column:1; grid-row:1;
-  }
-  #appContainer #admin-sales #adminSalesBody > tr > td.admin-user-uid .admin-uid-value {
-    grid-column:2; grid-row:1; display:block; width:100%; max-width:100%;
-    min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-    word-break:normal;
-  }
-  #appContainer #admin-sales #adminSalesBody > tr > td.admin-user-uid .admin-uid-copy {
-    grid-column:2; grid-row:2; justify-self:start; width:auto; min-height:36px;
-    margin:0 !important;
+  #admin-products .admin-mobile-card .price-list-more-actions > summary::-webkit-details-marker { display:none; }
+  #admin-products .admin-mobile-card .price-list-more-label { display:none; }
+  #admin-products .admin-mobile-card .price-list-more-icon { display:inline; }
+  #admin-products .admin-mobile-card .price-list-more-actions[open] .price-list-more-actions-content {
+    position:absolute; top:calc(100% + 4px); right:0; z-index:2;
+    width:min(220px,100%); box-sizing:border-box;
+    background:#fff; border:1px solid var(--ys-border); border-radius:8px;
+    box-shadow:0 4px 12px #0002;
   }
 }
