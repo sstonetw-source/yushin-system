@@ -34,6 +34,7 @@ function fixture() {
         loadBrandMaster: async () => { brands++; },
         getUnifiedBrandEntries: () => [{ name: 'B', active: true }, { name: 'Disabled', active: false }],
         renderProductManagementOverview: () => { renders++; },
+        refreshProductImportResumeControls: () => {}, // 本測試僅載入價目表模組，不載入本機匯入模組。
         renderPriceListHistory: () => { historyRenders++; }
     });
     vm.runInContext(code + '\nconst loadPriceListHistory = window.loadPriceListHistory;', context);
