@@ -84,3 +84,49 @@ test('role simulation blocks reads and session changes ignore pending history re
     await window.loadPriceListHistory();
     assert.equal(counts().reads, 2);
 });
+
+
+test('local price and master resume controls show only when their jobs remain unfinished', async () => {
+    const importSource = fs.readFileSync(path.join(__dirname, '../src/features/products/product-master-import.js'), 'utf8');
+    const begin = importSource.indexOf('async function refreshProductImportResumeControls()');
+    const end = importSource.indexOf('\nasync function saveProductPriceJob(', begin);
+    assert.ok(begin >= 0 && end > begin);
+    const priceButton = { hidden: false }, masterButton = { hidden: false };
+    let reads = 0;
+    const jobs = { price: null, master: null };
+    const ctx = vm.createContext({
+        document: { getElementById: id => ({
+            productPriceResumeButton: priceButton, productMasterResumeButton: masterButton
+        })[id] },
+        trueUserRole: 'admin', currentUserRole: 'admin', currentUser: { uid: 'tester' },
+        sessionDataGeneration: 0,
+        readProductPriceJob: async kind => {
+            reads++;
+            return jobs[kind === 'master' ? 'master' : 'price'];
+        },
+        console: { warn() {} }
+    });
+    vm.runInContext(importSource.slice(begin, end), ctx);
+    await ctx.refreshProductImportResumeControls();
+    assert.equal(priceButton.hidden, true);
+    assert.equal(masterButton.hidden, true);
+
+    jobs.price = { rows: [1, 2], cursor: 1 };
+    jobs.master = { total: 4, cursor: 2 };
+    await ctx.refreshProductImportResumeControls();
+    assert.equal(priceButton.hidden, false);
+    assert.equal(masterButton.hidden, false);
+
+    jobs.price.cursor = 2;
+    jobs.master.cursor = 4;
+    await ctx.refreshProductImportResumeControls();
+    assert.equal(priceButton.hidden, true);
+    assert.equal(masterButton.hidden, true);
+
+    const beforeDenied = reads;
+    ctx.currentUserRole = 'sales';
+    await ctx.refreshProductImportResumeControls();
+    assert.equal(reads, beforeDenied);
+    assert.equal(priceButton.hidden, true);
+    assert.equal(masterButton.hidden, true);
+});
