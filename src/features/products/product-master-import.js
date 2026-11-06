@@ -868,6 +868,31 @@ async function readProductPriceJob(kind = 'price') {
     });
 }
 
+async function refreshProductImportResumeControls() {
+    const priceButton = document.getElementById('productPriceResumeButton');
+    const masterButton = document.getElementById('productMasterResumeButton');
+    if (!priceButton && !masterButton) return;
+    if (priceButton) priceButton.hidden = true;
+    if (masterButton) masterButton.hidden = true;
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin' || !currentUser?.uid) return;
+    const generation = sessionDataGeneration;
+    const uid = currentUser.uid;
+    try {
+        // 僅讀取本機 IndexedDB 的兩筆匯入工作，絕不增加 Firestore 查詢。
+        const [priceJob, masterJob] = await Promise.all([
+            readProductPriceJob(), readProductPriceJob('master')
+        ]);
+        if (generation !== sessionDataGeneration || currentUser?.uid !== uid ||
+            trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
+        if (priceButton) priceButton.hidden = !(priceJob && Array.isArray(priceJob.rows) &&
+            Number(priceJob.cursor) < priceJob.rows.length);
+        if (masterButton) masterButton.hidden = !(masterJob &&
+            Number(masterJob.total) > 0 && Number(masterJob.cursor) < Number(masterJob.total));
+    } catch (err) {
+        console.warn('本機匯入進度無法讀取，仍可重新選擇 Excel：', err);
+    }
+}
+
 async function saveProductPriceJob(job) {
     if (![productImportJobScope(), productImportJobScope('master')].includes(job.scope)) throw new Error('登入帳號或專案已切換，禁止儲存其他人的匯入進度。');
     const database = await openProductPriceLocalDatabase();
