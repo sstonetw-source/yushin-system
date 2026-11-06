@@ -1,21 +1,85 @@
-const test=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
-const src=fs.readFileSync(require('node:path').join(__dirname,'../app.js'),'utf8');
-const code=src.slice(src.indexOf('let productOverviewCursor=null'),src.indexOf('function priceListDateLabel'));
-function fixture(failure=false){
- let reads=0,brands=0,renders=0;const status={textContent:''};
- const query={orderBy(){return this},limit(n){assert.equal(n,100);return this},get:async()=>{reads++;if(failure)throw Error('offline');return {docs:[{id:'h1',data:()=>({recordType:'PRICE_LIST'})},{id:'h2',data:()=>({recordType:'PRODUCT'})}]}}};
- const c=vm.createContext({window:{},console:{error(){}},currentUserRole:'admin',productOverviewLoading:false,priceListManagementRows:[],priceListHistoryRows:[],
-  document:{getElementById:()=>status},db:{collection:name=>{assert.equal(name,'priceHistory');return query}},firestoreReadWithTimeout:async p=>p,
-  loadBrandMaster:async()=>{brands++},getUnifiedBrandEntries:()=>[{name:'B',active:true},{name:'Disabled',active:false}],renderProductManagementOverview:()=>{renders++},renderPriceListHistory:()=>{}});
- vm.runInContext(code,c);return {c,status,counts:()=>({reads,brands,renders})};
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const vm = require('node:vm');
+const fs = require('node:fs');
+const path = require('node:path');
+const src = fs.readFileSync(path.join(__dirname, '../src/features/administration/brand-settings.js'), 'utf8');
+const code = src.slice(src.indexOf('window.loadProductManagementOverview'), src.indexOf('function priceListDateLabel'));
+
+function fixture() {
+    let reads = 0, brands = 0, renders = 0, historyRenders = 0;
+    const status = { textContent: '' };
+    const body = { innerHTML: '' };
+    const details = { open: false };
+    const elements = { productOverviewStatus: status, priceListHistoryBody: body, priceListHistoryDetails: details };
+    const query = {
+        orderBy() { return this; },
+        limit(n) { assert.equal(n, 100); return this; },
+        get: async () => {
+            reads++;
+            if (context.offline) throw Error('offline');
+            return { docs: [
+                { id: 'h1', data: () => ({ recordType: 'PRICE_LIST' }) },
+                { id: 'h2', data: () => ({ recordType: 'PRODUCT' }) }
+            ] };
+        }
+    };
+    const window = {};
+    const context = vm.createContext({
+        window, console, trueUserRole: 'admin', currentUserRole: 'admin', sessionDataGeneration: 0,
+        productOverviewGenerationLoading: -1, priceListManagementRows: [], priceListHistoryRows: [],
+        document: { getElementById: id => elements[id] },
+        db: { collection: name => { assert.equal(name, 'priceHistory'); return query; } },
+        firestoreReadWithTimeout: async promise => promise, escapeHtml: String,
+        loadBrandMaster: async () => { brands++; },
+        getUnifiedBrandEntries: () => [{ name: 'B', active: true }, { name: 'Disabled', active: false }],
+        renderProductManagementOverview: () => { renders++; },
+        renderPriceListHistory: () => { historyRenders++; }
+    });
+    vm.runInContext(code + '\nconst loadPriceListHistory = window.loadPriceListHistory;', context);
+    return { context, window, details, body, counts: () => ({ reads, brands, renders, historyRenders }) };
 }
-test('price list overview reads bounded history and active brands without scanning products',async()=>{
- const {c,counts}=fixture();await c.window.loadProductManagementOverview();assert.deepEqual(counts(),{reads:1,brands:1,renders:1});
- assert.equal(c.priceListManagementRows.length,1);assert.equal(c.priceListHistoryRows.length,1);assert.equal(c.productOverviewLoading,false);
+
+test('price list only reads history on demand and shares overlapping reads', async () => {
+    const { window, context, counts, details } = fixture();
+    await window.loadProductManagementOverview();
+    assert.deepEqual(counts(), { reads: 0, brands: 1, renders: 1, historyRenders: 0 });
+    assert.equal(context.priceListManagementRows.length, 1);
+    details.open = true;
+    const history = window.loadPriceListHistory();
+    assert.equal(window.loadPriceListHistory(), history);
+    await history;
+    assert.equal(context.priceListHistoryRows.length, 1);
+    await window.loadPriceListHistory();
+    assert.equal(counts().reads, 1);
+    await window.loadProductManagementOverview(true);
+    assert.equal(counts().reads, 2);
 });
-test('history failure is visible rather than a successful empty history',async()=>{
- const {c,status,counts}=fixture(true);await c.window.loadProductManagementOverview();assert.match(status.textContent,/offline/);assert.equal(counts().renders,0);assert.equal(c.productOverviewLoading,false);
+
+test('history failure leaves the overview available and allows retry', async () => {
+    const { window, context, body, counts, details } = fixture();
+    context.offline = true;
+    details.open = true;
+    await window.loadProductManagementOverview();
+    assert.match(body.innerHTML, /offline/);
+    assert.equal(counts().renders, 1);
+    context.offline = false;
+    await window.loadPriceListHistory();
+    assert.equal(counts().historyRenders, 1);
 });
-test('non-admin cannot fetch price list administration',async()=>{
- const {c,counts}=fixture();c.currentUserRole='sales';await c.window.loadProductManagementOverview();assert.equal(counts().reads,0);
+
+test('role simulation blocks reads and session changes ignore pending history results', async () => {
+    const { window, context, counts } = fixture();
+    context.currentUserRole = 'sales';
+    await window.loadProductManagementOverview();
+    await window.loadPriceListHistory();
+    assert.equal(counts().reads, 0);
+    assert.equal(counts().brands, 0);
+    context.currentUserRole = 'admin';
+    const history = window.loadPriceListHistory();
+    context.sessionDataGeneration++;
+    await history;
+    assert.equal(counts().historyRenders, 0);
+    await window.loadPriceListHistory();
+    assert.equal(counts().reads, 2);
 });

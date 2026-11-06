@@ -2129,7 +2129,7 @@ test('purchase order email contact is delegated to supplier core', () => {
 
 test('system audit reconciles procurement demand from linked supply records', () => {
     const start=app.indexOf('window.runSystemDataAudit = async function');
-    const end=app.indexOf('\nwindow.previewInventoryCostMigration',start);
+    const end=app.indexOf('\nfunction setPriceUploadProgress',start);
     const source=app.slice(start,end);
     assert.ok(start>=0&&end>start);
     assert.match(source,/const suppliesByDemand = new Map\(\)/);

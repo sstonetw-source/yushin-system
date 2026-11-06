@@ -1339,21 +1339,18 @@
         <h2 class="workspace-page-title no-print">管理員後台 <button type="button" class="page-help-trigger no-print" data-page-help="admin-system" aria-label="管理員後台功能與注意事項" aria-haspopup="dialog" aria-controls="pageHelpDialog">!</button></h2>
         <div class="sub-nav no-print">
             <div class="sub-tab active" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}" id="admin-sub-sales" onclick="switchAdminTab('sales', this)">人員名單</div>
+            <div class="sub-tab" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}" id="admin-sub-transfer" onclick="switchAdminTab('transfer', this)">業務交接</div>
             <div class="sub-tab" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}" id="admin-sub-agencies" onclick="switchAdminTab('agencies', this)">廠牌管理</div>
             <div class="sub-tab" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}" id="admin-sub-products" onclick="switchAdminTab('products', this)">價目表管理</div>
             <div class="sub-tab" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}" id="admin-sub-statistics" onclick="switchAdminTab('statistics', this)">進銷存分析</div>
             <div class="sub-tab" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}" id="admin-sub-warehouses" onclick="switchAdminTab('warehouses', this)">倉庫管理</div>
             <div class="sub-tab" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}" id="admin-sub-health" onclick="switchAdminTab('health', this)">資料健康</div>
-            <div class="sub-tab" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}" id="admin-sub-transfer" onclick="switchAdminTab('transfer', this)">人員異動交接</div>
-            <div class="sub-tab" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}" id="admin-sub-storage" onclick="switchAdminTab('storage', this)">資料庫管理</div>
+            <div class="sub-tab" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}" id="admin-sub-storage" onclick="switchAdminTab('storage', this)">資料匯出</div>
             <span id="systemVersionLabel" class="no-print" style="margin-left:auto;align-self:center;font-size:11px;color:#777;white-space:nowrap;"></span>
         </div>
 
         <!-- 人員名單管理（與 Firebase 登入帳號綁定：資料來自 users 集合） -->
         <div id="admin-sales" class="admin-panel">
-            <div class="toolbar no-print">
-
-            </div>
             <table>
                 <thead><tr><th>代號</th><th>姓名</th><th>電話</th><th>Email</th><th>身份</th><th>領貨／地址</th><th>密碼</th><th>帳號 UID</th></tr></thead>
                 <tbody id="adminSalesBody"></tbody>
@@ -1371,8 +1368,7 @@
                         </div>
                         <div class="price-list-admin-actions no-print">
                             <button type="button" class="btn-secondary" onclick="downloadProductMasterTemplate()">下載標準範本</button>
-                            <button type="button" onclick="openPriceListUploadForBrand('')">＋ 上傳價目表</button>
-                            <button type="button" class="btn-secondary" onclick="document.getElementById('productImportExcelInput').click()">接續主檔匯入</button>
+                            <button type="button" onclick="openPriceListUploadForBrand('')">＋ 上傳價目表／接續匯入</button>
                             <button type="button" class="btn-secondary" onclick="downloadProductPriceUpdateTemplate()">下載價格更新範本</button>
                             <button type="button" onclick="document.getElementById('productPriceExcelInput').click()">分批更新建議售價</button>
                             <button type="button" class="btn-secondary" onclick="continueProductPriceImport()">繼續上次價格更新</button>
@@ -1382,7 +1378,7 @@
                     <input type="file" id="productImportExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handlePriceExcelUpload(this)">
                     <input type="file" id="productPriceExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handleProductPriceExcelUpload(this)">
                     <p class="no-print" style="margin:8px 0;color:var(--text-secondary,#667085);font-size:12px;">價格專用匯入只更新既有商品的含稅建議售價，每個美西計費日最多核對 1,000 筆。進度保存在此瀏覽器；隔天可按「繼續上次價格更新」，不必重新上傳 Excel。</p>
-                    <p class="no-print" style="margin:8px 0;color:var(--text-secondary,#667085);font-size:12px;">完整主檔（新品、資料、售價與標準成本）每個美西計費日最多核對 500 筆；本機只記錄檔案指紋與完成進度，不保存成本。隔天按「接續主檔匯入」重新選擇完全相同的 Excel 即可繼續。此為單一瀏覽器的保守上限，並非 Firebase 免費額度保證。</p>
+                    <p class="no-print" style="margin:8px 0;color:var(--text-secondary,#667085);font-size:12px;">完整主檔（新品、資料、售價與標準成本）每個美西計費日最多核對 500 筆；本機只記錄檔案指紋與完成進度，不保存成本。隔天按「上傳價目表／接續匯入」重新選擇完全相同的 Excel 即可繼續。此為單一瀏覽器的保守上限，並非 Firebase 免費額度保證。</p>
 
                     <div id="priceUploadProgress" class="product-import-progress" style="display:none;">
                         <div class="product-import-progress-head"><span id="priceUploadStatus">準備中…</span><span id="priceUploadPercent">0%</span></div>
@@ -1396,7 +1392,7 @@
                             <tbody id="productOverviewBody"><tr><td colspan="6" style="color:#888;">正在載入價目表狀態…</td></tr></tbody>
                         </table>
                     </div>
-                    <details id="priceListHistoryDetails" class="product-import-details">
+                    <details id="priceListHistoryDetails" class="product-import-details" ontoggle="if(this.open) loadPriceListHistory()">
                         <summary>匯入／停用／刪除紀錄</summary>
                         <div class="product-import-card">
                             <div class="price-list-history-toolbar no-print">
@@ -1542,11 +1538,7 @@
         <div id="admin-transfer" class="admin-panel" style="display:none;">
             <div class="panel">
                 <h3 style="margin-top:0;">業務代號交接</h3>
-                <p style="font-size:13px;color:#555;line-height:1.7;">
-                    Forecast、估價單、訂單與儀器的資料歸屬以「業務代號」為核心。人員離職或交接時，
-                    不再逐筆把歷史資料改成新同仁姓名；只把該業務代號的目前負責業務交給新同仁。
-                    交接由後端原子更新業務代號主檔及人員設定，保留交接紀錄；原 salesName、建立人與歷史資料不改寫。舊資料缺少 salesCode 時另由受控維護流程處理。
-                </p>
+                <p>更換業務代號的負責人，保留歷史單據的姓名及建立人。</p>
                 <div class="form-grid" style="max-width:760px;margin-top:12px;">
                     <div>
                         <label>要交接的業務代號</label>
@@ -1558,7 +1550,7 @@
                     </div>
                 </div>
                 <div style="margin-top:12px;">
-                    <button onclick="previewSalesTransfer()">🔍 檢查交接內容</button>
+                    <button type="button" id="transferPreviewBtn" onclick="previewSalesTransfer()" disabled>🔍 檢查交接內容</button>
                     <button class="btn-danger" id="transferExecuteBtn" onclick="executeSalesTransfer()" style="display:none;">✅ 確認交接</button>
                 </div>
                 <div id="transferResult" style="margin-top:14px;font-size:13px;white-space:pre-line;"></div>
@@ -1569,22 +1561,16 @@
         <div id="admin-health" class="admin-panel" style="display:none;">
             <div class="panel">
                 <h3 style="margin-top:0;">資料健康</h3>
-                <p style="font-size:13px;color:#555;line-height:1.7;">
-                    手動檢查產品主檔必填資料、重複產品、人員角色、訂單與採購關聯、庫存策略、分倉與庫存預留。
-                    這是唯讀檢查，不會修改或刪除資料；因為會讀取多個集合，不會在登入時自動執行。
-                </p>
+                <p>唯讀檢查產品、人員、訂單、採購與庫存資料。執行時會讀取多個集合。</p>
                 <div class="toolbar no-print" style="display:block;margin-top:12px;">
                     <button id="systemDataAuditBtn" onclick="runSystemDataAudit()">執行資料檢查</button>
-                    <span style="display:block;margin-top:7px;font-size:12px;color:#666;">
-                        會列出產品主檔缺少廠牌／貨號／品名、重複品項、庫存策略異常，以及訂單→採購→供應→庫存之間找不到來源或數量不一致的資料。
-                    </span>
                     <div id="systemDataAuditStatus" style="margin-top:10px;font-size:13px;white-space:pre-line;"></div>
                     <div id="systemDataAuditResults" style="margin-top:10px;"></div>
                 </div>
             </div>
         </div>
 
-        <!-- 資料庫管理：備份、估算雲端資料量與清理舊資料 -->
+        <!-- 部分資料匯出與本機檔案檢查 -->
         <div id="admin-storage" class="admin-panel" style="display:none;">
             <h4 style="margin-top:0;">部分資料匯出與檔案檢查</h4>
             <div class="toolbar no-print" style="display:block;">
@@ -1597,58 +1583,6 @@
                 <div id="databaseBackupStatus" style="margin-top:8px;font-size:13px;"></div>
                 <div id="databaseBackupUploadStatus" style="margin-top:8px;font-size:13px;"></div>
             </div>
-
-            <div class="admin-maintenance-tool" style="display:none;" aria-hidden="true">
-<h4 style="margin-top:28px;">估價單／Forecast／訂單／儀器全歷史搜尋索引</h4>
-            <div class="toolbar no-print" style="display:block;">
-                <button id="orderSearchIndexMigrationBtn" onclick="backfillOrderSearchIndex()">建立／修正全歷史搜尋索引</button>
-                <span style="font-size:12px;color:#666;">
-                    供估價單、Forecast、訂單與儀器的完整歷史搜尋使用。系統每次只讀取 200 筆並分批寫入 searchTokens；訂單同時保留標準化貨號 itemCodeKey。只新增搜尋索引，不會修改金額、狀態或流程紀錄。升級後執行一次即可，重複執行也安全。
-                </span>
-                <div id="orderSearchIndexMigrationStatus" style="margin-top:8px;font-size:13px;"></div>
-            </div>
-</div>
-
-            <div class="panel" style="margin-top:20px;">
-                <h4>正式資料重置</h4>
-                <p style="font-size:13px;color:#666;">為避免部分資料遭刪除，正式環境已停用瀏覽器初始化。資料清理及期初庫存歸零須於核准維護時段由受控後端工具執行，並完成範圍核對與結果驗證。</p>
-            </div>
-
-            <div class="admin-maintenance-tool" style="display:none;" aria-hidden="true">
-<h4 style="margin-top:28px;">舊成本資料安全檢查</h4>
-            <div class="toolbar no-print" style="display:block;">
-                <button id="inventoryCostMigrationPreviewBtn" onclick="previewInventoryCostMigration()">檢查舊成本資料</button>
-                <span style="font-size:12px;color:#666;">
-                    只讀取並統計舊庫存、分倉、收貨、異動與訂單內是否仍含成本欄位；不會修改或刪除任何資料。
-                </span>
-                <div id="inventoryCostMigrationStatus" style="margin-top:8px;font-size:13px;white-space:pre-line;"></div>
-            </div>
-</div>
-
-            <div class="admin-maintenance-tool" style="display:none;" aria-hidden="true">
-<h4 style="margin-top:28px;">廠牌主檔相容層稽核</h4>
-            <div class="toolbar no-print" style="display:block;">
-                <button id="brandMasterAuditBtn" onclick="previewBrandMasterCompatibilityAudit()">檢查廠牌主檔完整性</button>
-                <span style="font-size:12px;color:#666;">
-                    分頁讀取產品主檔、舊價格來源、統計／分公司／供應商設定及歷史交易廠牌，確認所有正式來源廠牌是否已被廠牌主檔名稱或別名涵蓋。只讀取與比對，不會修改資料。
-                </span>
-                <div id="brandMasterAuditStatus" style="margin-top:8px;font-size:13px;white-space:pre-line;"></div>
-            </div>
-</div>
-
-            <h4 style="margin-top:28px;">資料庫用量（估計值）</h4>
-            <div class="toolbar no-print" style="display:block;">
-                <button onclick="calculateStorageUsage()">🔄 計算目前用量</button>
-                <span style="font-size:12px;color:#666;">
-                    這裡統計的是各集合裡文件內容的資料量，用來大致抓感覺；跟 Firebase 主控台顯示的實際帳單用量會有些微差異（Firestore 實際計費還會另外計算索引等額外儲存空間），僅供參考。
-                    點一次會把整個集合的資料都抓一遍，資料量大時可能需要幾秒到十幾秒。
-                </span>
-            </div>
-            <table>
-                <thead><tr><th>集合</th><th>文件數</th><th>估計大小</th></tr></thead>
-                <tbody id="storageUsageBody"><tr><td colspan="3" style="color:#888;">尚未計算，請按上方「計算目前用量」。</td></tr></tbody>
-            </table>
-
 
         </div>
     </div>
@@ -1715,7 +1649,7 @@
     <script src="modules/order-commercial-details.js?v=20261025-1"></script>
     <script src="modules/order-entry-core.js?v=20261104-460"></script>
 <script src="modules/service-work-core.js?v=20261023-2"></script>
-    <script src="app.js?v=20261106-2"></script>
+    <script src="app.js?v=20261106-3"></script>
     <script src="modules/order-self-order-required.js?v=20261013-1"></script>
     <script src="modules/customer-cancellations.js?v=20261021-3"></script>
     <script src="modules/free-stock-recovery.js?v=20261014-9"></script>
@@ -1857,7 +1791,7 @@
             儲存後系統會自動加入今天日期，例如「09/18 老師已送明年度設備預算」。
         </div></div></div><div data-page-help-source="forecast-system" data-help-context=""><div class="inline-help-content"><div class="forecast-form-note">
             Win 原則上搭配 Stage 5；Lost 會保留案件失敗前最後所在 Stage。
-        </div></div></div><div data-page-help-source="inventory-system" data-help-context="inventoryStockPanel"><div class="inline-help-content">現有庫存 = 實體數量；已預留 = 已被客戶訂單保留；可用庫存 = 現有庫存 − 已預留；在途 = 已送出採購單尚未到貨；預計庫存 = 可用庫存 + 在途。安全庫存不足會自動顯示在採購頁的「安全庫存補貨」；依訂單採購則由客戶訂單缺口進入既有採購需求流程。</div></div><div data-page-help-source="inventory-system" data-help-context=""><div class="inline-help-content">「依訂單採購」只由客戶訂單缺口產生採購需求；「安全庫存」在預計庫存低於門檻時，會自動顯示在採購頁的安全庫存補貨。</div></div><div data-page-help-source="quote-system" data-help-context="myQuotesPanel"><div class="inline-help-content">預設只載入近期 50 筆；輸入關鍵字時會搜尋完整歷史資料，不受目前畫面筆數限制。</div></div><div data-page-help-source="quote-system" data-help-context=""><div class="inline-help-content"><div class="three-quote-rounding-note">金額以第一張專案折扣後的含稅總額為基準，加價後無條件進位至千位數。第二、第三張為比價用；產生三估單後會把當時設定與第一張估價內容一併保存在估價單紀錄，可從全部／我的估價單再次調出。</div></div></div><div data-page-help-source="order-system" data-help-context=""><div class="inline-help-content"><span class="order-period-note">未完成工作包含跨年度；已完成依開發票日期篩選目前已載入歷史；工作筆數不受載入更多影響。</span></div></div><div data-page-help-source="order-system" data-help-context=""><div class="inline-help-content"><div class="customer-history-note">以下結果依目前已載入的訂單與估價單資料計算；如需更早的資料，請先在對應清單按「載入更多」。</div></div></div><div data-page-help-source="purchasing-system" data-help-context=""><div class="inline-help-content"><span class="order-period-note">待處理工作涵蓋全部未完成品項，不受日期範圍限制；已完成與全部採購單可依日期查詢。</span></div></div><div data-page-help-source="purchasing-system" data-help-context="purchaseDispatchPanel"><div class="inline-help-content">以下為倉庫待打單品項。</div></div><div data-page-help-source="purchasing-system" data-help-context="purchaseCompletedPanel"><div class="inline-help-content">顯示採購端已完成打單的品項；客戶訂單仍會繼續待出貨、待核銷流程。</div></div><div data-page-help-source="purchasing-system" data-help-context="purchaseSupplierPanel"><div class="inline-help-content">供應商設定改為一列完成：廠牌／產品線、供應商、採購單抬頭與預設交期。底層仍維持 Supplier Master 與廠牌對應，避免同一供應商資料重複。</div></div><div data-page-help-source="purchasing-system" data-help-context=""><div class="inline-help-content">可一次勾選多個到貨品項，支援部分到貨、批號與效期。確認後會在背景處理，可繼續其他操作；完成後同步更新到貨進度、在途、現有庫存與訂單預留。</div></div><div data-page-help-source="admin-system" data-help-context="admin-sales"><div class="inline-help-content"><span style="font-size:12px;color:#666;">請在 Firebase Console 的 Authentication 建立或停用登入帳號，並在 Firestore 的 users 集合更新姓名、代號、電話與身份。此處可查看帳號與寄送密碼重設信。</span></div></div><div data-page-help-source="admin-system" data-help-context="admin-products"><div class="inline-help-content"><p class="price-list-admin-intro">此頁只管理整批價目表與標準成本；單一產品主檔的新增、編輯、庫存狀態與日常操作統一到上方「產品」頁面處理。</p></div></div><div data-page-help-source="admin-system" data-help-context="admin-products"><div class="inline-help-content"><p class="product-import-summary">上傳前會顯示「新增／更新／不變／錯誤」差異預覽。上傳新版只更新檔案內的品項；若要完全換掉舊價格，可先使用「刪除整個價目表」再上傳新版。刪除價目表不會刪除產品主檔、歷史估價單／訂單、庫存或實際採購紀錄。</p></div></div><div data-page-help-source="admin-system" data-help-context="admin-products">
+        </div></div></div><div data-page-help-source="inventory-system" data-help-context="inventoryStockPanel"><div class="inline-help-content">現有庫存 = 實體數量；已預留 = 已被客戶訂單保留；可用庫存 = 現有庫存 − 已預留；在途 = 已送出採購單尚未到貨；預計庫存 = 可用庫存 + 在途。安全庫存不足會自動顯示在採購頁的「安全庫存補貨」；依訂單採購則由客戶訂單缺口進入既有採購需求流程。</div></div><div data-page-help-source="inventory-system" data-help-context=""><div class="inline-help-content">「依訂單採購」只由客戶訂單缺口產生採購需求；「安全庫存」在預計庫存低於門檻時，會自動顯示在採購頁的安全庫存補貨。</div></div><div data-page-help-source="quote-system" data-help-context="myQuotesPanel"><div class="inline-help-content">預設只載入近期 50 筆；輸入關鍵字時會搜尋完整歷史資料，不受目前畫面筆數限制。</div></div><div data-page-help-source="quote-system" data-help-context=""><div class="inline-help-content"><div class="three-quote-rounding-note">金額以第一張專案折扣後的含稅總額為基準，加價後無條件進位至千位數。第二、第三張為比價用；產生三估單後會把當時設定與第一張估價內容一併保存在估價單紀錄，可從全部／我的估價單再次調出。</div></div></div><div data-page-help-source="order-system" data-help-context=""><div class="inline-help-content"><span class="order-period-note">未完成工作包含跨年度；已完成依開發票日期篩選目前已載入歷史；工作筆數不受載入更多影響。</span></div></div><div data-page-help-source="order-system" data-help-context=""><div class="inline-help-content"><div class="customer-history-note">以下結果依目前已載入的訂單與估價單資料計算；如需更早的資料，請先在對應清單按「載入更多」。</div></div></div><div data-page-help-source="purchasing-system" data-help-context=""><div class="inline-help-content"><span class="order-period-note">待處理工作涵蓋全部未完成品項，不受日期範圍限制；已完成與全部採購單可依日期查詢。</span></div></div><div data-page-help-source="purchasing-system" data-help-context="purchaseDispatchPanel"><div class="inline-help-content">以下為倉庫待打單品項。</div></div><div data-page-help-source="purchasing-system" data-help-context="purchaseCompletedPanel"><div class="inline-help-content">顯示採購端已完成打單的品項；客戶訂單仍會繼續待出貨、待核銷流程。</div></div><div data-page-help-source="purchasing-system" data-help-context="purchaseSupplierPanel"><div class="inline-help-content">供應商設定改為一列完成：廠牌／產品線、供應商、採購單抬頭與預設交期。底層仍維持 Supplier Master 與廠牌對應，避免同一供應商資料重複。</div></div><div data-page-help-source="purchasing-system" data-help-context=""><div class="inline-help-content">可一次勾選多個到貨品項，支援部分到貨、批號與效期。確認後會在背景處理，可繼續其他操作；完成後同步更新到貨進度、在途、現有庫存與訂單預留。</div></div><div data-page-help-source="admin-system" data-help-context="admin-sales"><div class="inline-help-content"><span style="font-size:12px;color:#666;">可在此調整角色與領貨地址，或寄送密碼重設信。登入帳號的建立與停用由 Firebase Console 管理。</span></div></div><div data-page-help-source="admin-system" data-help-context="admin-products"><div class="inline-help-content"><p class="price-list-admin-intro">此頁只管理整批價目表與標準成本；單一產品主檔的新增、編輯、庫存狀態與日常操作統一到上方「產品」頁面處理。</p></div></div><div data-page-help-source="admin-system" data-help-context="admin-products"><div class="inline-help-content"><p class="product-import-summary">上傳前會顯示「新增／更新／不變／錯誤」差異預覽。上傳新版只更新檔案內的品項；若要完全換掉舊價格，可先使用「刪除整個價目表」再上傳新版。刪除價目表不會刪除產品主檔、歷史估價單／訂單、庫存或實際採購紀錄。</p></div></div><div data-page-help-source="admin-system" data-help-context="admin-products">
                         <div class="product-import-rules-grid">
                             <div><strong>必要識別</strong><span>廠牌、貨號</span></div>
                             <div><strong>可選填</strong><span>產品線、規格、產品類型、單位、建議售價、標準成本</span></div>

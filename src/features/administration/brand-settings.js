@@ -2,31 +2,31 @@
    管理員雲端後台：人員、廠牌、進銷存、倉庫與資料庫管理
    ========================================================= */
 window.switchAdminTab = function(tab, el) {
-    document.querySelectorAll('#admin-system .sub-tab').forEach(t => t.classList.remove('active'));
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
+    const panel = document.getElementById(`admin-${tab}`);
+    if (!panel || !el) return;
+    document.querySelectorAll('#admin-system .sub-nav .sub-tab').forEach(t => t.classList.remove('active'));
     el.classList.add('active');
-    document.querySelectorAll('.admin-panel').forEach(p => p.style.display = 'none');
-    document.getElementById(`admin-${tab}`).style.display = 'block';
+    document.querySelectorAll('#admin-system .admin-panel').forEach(p => p.style.display = 'none');
+    panel.style.display = 'block';
+    return loadAdminPanel(tab);
+};
 
-    if (tab === 'sales') reloadSalesFromUsers();
-    if (tab === 'products') loadProductManagementOverview();
-    if (tab === 'health') updatePendingProductMasterButton();
-    // 代理廠牌設定只需要價目表，不應順便全量讀取 orders。
-    if (tab === 'agencies') Promise.all([ensureBrandSettingsLoaded(), loadSupplierWarehouseMasters()]).then(() => {
+function loadAdminPanel(tab) {
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
+    if (tab === 'sales') return reloadSalesFromUsers();
+    if (tab === 'transfer') return loadAdminTransferPanel();
+    if (tab === 'products') return loadProductManagementOverview();
+    if (tab === 'agencies') return ensureBrandSettingsLoaded().then(() => {
         renderKeyStatisticBrands();
         renderBrandAliasManager();
         renderCompanyAgencyBrandSettings();
-        renderSupplierMappingAdmin();
-        renderWarehouseMasterAdmin();
     });
-    // 每次進入分析頁重讀範圍內交易及目前餘額，避免過時快取。
-    if (tab === 'statistics') ensureBrandSettingsLoaded().then(async () => {
-        tradeAnalysisFiltersPending=false;
-        tradeAnalysisAppliedFilters=readTradeAnalysisFilters();
-        await loadSalesStatistics(true);
-    }).catch(err => console.error('進銷存分析載入失敗：', err));
-    if (tab === 'warehouses') loadSupplierWarehouseMasters(true).then(renderWarehouseMasterAdmin);
-    if (tab === 'transfer') ensureSalesListLoaded().then(populateTransferDropdowns);
-};
+    if (tab === 'statistics') return ensureBrandSettingsLoaded().then(() => {
+        if (currentUserRole === 'admin') return renderAdminStatistics();
+    });
+    if (tab === 'warehouses') return loadWarehouseMaster(true);
+}
 
 let inventoryReceivingVisible = false;
 let activeProductImportBatch = null;
@@ -38,7 +38,7 @@ let priceListHistoryRows = [];
 let priceListHistoryFilter = '';
 let pendingPriceListUploadBrand = '';
 let productOverviewLimit = 200;
-let productOverviewLoading = false;
+let productOverviewGenerationLoading = -1;
 let brandProductDeleteRunning = false;
 
 window.openInventoryReceiving = function() {
@@ -67,32 +67,61 @@ window.switchInventoryWorkView = async function(receiving) {
 };
 
 let productOverviewCursor=null, productOverviewHasMore=false, productOverviewGeneration=0, productOverviewReloadRequested=false;
-window.loadProductManagementOverview = async function() {
-    if (currentUserRole !== 'admin') return;
-    if (productOverviewLoading) return;
+window.loadProductManagementOverview = async function(refresh = false) {
+    const generation = sessionDataGeneration;
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin' || productOverviewGenerationLoading === generation) return;
     const status = document.getElementById('productOverviewStatus');
-    productOverviewLoading = true;
+    productOverviewGenerationLoading = generation;
     if (status) status.textContent = '正在讀取價目表狀態…';
     try {
-        const historyRequest = firestoreReadWithTimeout(
-            db.collection('priceHistory').orderBy('createdAt', 'desc').limit(100).get(),
-            '價目表操作紀錄'
-        );
-        const [, historySnapshot] = await Promise.all([loadBrandMaster(), historyRequest]);
+        await loadBrandMaster();
+        if (generation !== sessionDataGeneration) return;
         priceListManagementRows = getUnifiedBrandEntries(false)
             .filter(entry => entry?.name && entry.active !== false)
             .sort((a,b) => String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hant'));
-        priceListHistoryRows = (historySnapshot.docs || [])
-            .map(doc => ({ id:doc.id, ...doc.data() }))
-            .filter(row => row.recordType === 'PRICE_LIST');
         renderProductManagementOverview();
-        renderPriceListHistory();
+        if (document.getElementById('priceListHistoryDetails')?.open) await loadPriceListHistory(refresh);
     } catch (err) {
+        if (generation !== sessionDataGeneration) return;
         console.error('價目表管理載入失敗：', err);
         if (status) status.textContent = '價目表狀態載入失敗：' + (err?.message || err);
     } finally {
-        productOverviewLoading = false;
+        if (productOverviewGenerationLoading === generation) productOverviewGenerationLoading = -1;
     }
+};
+
+let priceListHistoryGeneration = -1;
+let priceListHistoryLoad = null;
+window.loadPriceListHistory = function(refresh = false) {
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
+    const generation = sessionDataGeneration;
+    if (priceListHistoryLoad?.generation === generation) return priceListHistoryLoad.request;
+    if (!refresh && priceListHistoryGeneration === generation) return renderPriceListHistory();
+
+    const body = document.getElementById('priceListHistoryBody');
+    body.innerHTML = '<tr><td colspan="6">正在讀取紀錄…</td></tr>';
+    const newEvents = [];
+    const request = firestoreReadWithTimeout(
+        db.collection('priceHistory').orderBy('createdAt', 'desc').limit(100).get(),
+        '價目表操作紀錄'
+    ).then(snapshot => {
+        if (generation !== sessionDataGeneration) return;
+        const history = snapshot.docs
+            .map(doc => ({ id:doc.id, ...doc.data() }))
+            .filter(row => row.recordType === 'PRICE_LIST');
+        const newIds = new Set(newEvents.map(row => row.id));
+        priceListHistoryRows = [...newEvents, ...history.filter(row => !newIds.has(row.id))].slice(0, 100);
+        priceListHistoryGeneration = generation;
+        renderPriceListHistory();
+    }).catch(err => {
+        if (generation !== sessionDataGeneration) return;
+        priceListHistoryGeneration = -1;
+        body.innerHTML = '<tr><td colspan="6">紀錄載入失敗：' + escapeHtml(err.message) + '。請重新開啟紀錄或按重新整理。</td></tr>';
+    }).finally(() => {
+        if (priceListHistoryLoad?.request === request) priceListHistoryLoad = null;
+    });
+    priceListHistoryLoad = { generation, request, newEvents };
+    return request;
 };
 
 function priceListDateLabel(value) {
@@ -142,7 +171,7 @@ window.renderProductManagementOverview = function() {
 function renderPriceListHistory() {
     const body = document.getElementById('priceListHistoryBody');
     const label = document.getElementById('priceListHistoryFilterLabel');
-    if (!body) return;
+    if (!body || priceListHistoryGeneration !== sessionDataGeneration) return;
     const filterKey = normalizeBrandLookupKey(priceListHistoryFilter || '');
     const rows = priceListHistoryRows.filter(row => !filterKey || normalizeBrandLookupKey(row.brand || '') === filterKey);
     if (label) label.textContent = priceListHistoryFilter ? `目前顯示：${priceListHistoryFilter}` : '顯示全部廠牌';
@@ -159,10 +188,10 @@ function renderPriceListHistory() {
 
 window.showPriceListHistoryForBrand = function(brand) {
     priceListHistoryFilter = resolveBrandName(brand || '');
-    renderPriceListHistory();
     const details = document.getElementById('priceListHistoryDetails');
     if (details) {
         details.open = true;
+        loadPriceListHistory();
         details.scrollIntoView?.({ behavior:'smooth', block:'nearest' });
     }
 };
@@ -175,47 +204,6 @@ window.openPriceListUploadForBrand = function(brand = '') {
     input.value = '';
     input.click();
 };
-
-window.bulkSetProductActive = async function(active, button) {
-    if (currentUserRole !== 'admin' || brandProductDeleteRunning) return;
-    const ids = [...document.querySelectorAll('#productOverviewBody input:checked')].map(el=>el.value);
-    if (!ids.length) return alert('請先勾選要處理的產品。');
-    if (!confirm(`確定${active ? '恢復' : '停用'}勾選的 ${ids.length} 個產品？不會刪除舊訂單或成本資料。`)) return;
-    button.disabled = true;
-    let completed = 0;
-    try {
-        for (let offset=0; offset<ids.length; offset+=200) {
-            const slice = ids.slice(offset,offset+200);
-            const batch = db.batch();
-            slice.forEach(id=>batch.update(db.collection('products').doc(id), {active, status:active?'ACTIVE':'INACTIVE', updatedAt:new Date().toISOString(), updatedBy:currentUser.uid}));
-            await batch.commit();
-            completed += slice.length;
-            slice.forEach(id=>{
-                const row = productManagementOverviewRows.find(item=>item.id===id);
-                if (row) {row.active=active;row.status=active?'ACTIVE':'INACTIVE';}
-                priceList.forEach(item=>{if(item.productId===id){item.active=active;item.status=active?'ACTIVE':'INACTIVE';}});
-            });
-        }
-        refreshPriceDatalists();
-        renderProductManagementOverview();
-        invalidateProductFrequentCache();
-        if (productManagementSourceMode === 'frequent') clearProductManagementSearch({ preserveInput:true });
-        alert(`已${active ? '恢復' : '停用'} ${completed} 個產品，可重新匯入修正資料。`);
-    } catch(err) {
-        renderProductManagementOverview();
-        alert(`已完成 ${completed} 個；剩餘處理失敗：${err.message}`);
-    } finally { button.disabled=false; }
-};
-
-async function productMasterRemovalReferences(productId) {
-    const operational=await productMasterOperationalBlockers(productId);
-    if(operational.length)return operational;
-    const queries=['orders','quotes','supplyOrders','inventoryLots','procurementDemands'].flatMap(collection=>
-        [db.collection(collection).where('productId','==',productId).limit(1),
-         ...(['orders','quotes'].includes(collection)?[db.collection(collection).where('productIds','array-contains',productId).limit(1)]:[db.collection(collection).where('productKey','==',productId).limit(1)])]);
-    const snapshots=await Promise.all(queries.map(query=>firestoreReadWithTimeout(query.get(),'檢查歷史產品關聯')));
-    return snapshots.some(snap=>snap.docs.length)?['保留歷史單據／庫存關聯']:[];
-}
 
 function updateBrandPriceListCache(brand, patch) {
     const canonical = resolveBrandName(brand);
@@ -255,7 +243,9 @@ async function commitPriceListBrandEvent(brand, action, metadata, details = {}) 
     batch.set(historyRef, priceListEventRecord(canonical, action, details, now));
     await batch.commit();
     updateBrandPriceListCache(canonical, patch);
-    priceListHistoryRows.unshift({ id:historyRef.id, ...priceListEventRecord(canonical, action, details, now) });
+    const event = { id:historyRef.id, ...priceListEventRecord(canonical, action, details, now) };
+    priceListHistoryRows.unshift(event);
+    if (priceListHistoryLoad?.generation === sessionDataGeneration) priceListHistoryLoad.newEvents.unshift(event);
 }
 
 async function markPriceListImportComplete(brand, productCount, saveResult = {}) {
@@ -472,12 +462,6 @@ window.deleteEntirePriceList = async function(brand, button) {
         if (button) { button.disabled = false; button.textContent = original; }
     }
 };
-
-// 舊的「移除整個廠牌產品」會刪除 Product Master，已由價目表管理流程取代。
-window.deleteEntireBrandProducts = function() {
-    alert('「移除整個廠牌產品」已停用。請使用「刪除整個價目表」；產品主檔不會再從價目表管理頁刪除。');
-};
-
 
 function renderBrandAliasManager() {
     const body = document.getElementById('brandAliasManagerBody');

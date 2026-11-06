@@ -3,15 +3,14 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
-const source = fs.readFileSync(require('node:path').join(__dirname, '..', 'app.js'), 'utf8');
+const source = fs.readFileSync(require('node:path').join(__dirname, '..', 'src/features/administration/user-and-system-settings.js'), 'utf8');
 const start = source.indexOf('const RESTORABLE_BACKUP_COLLECTIONS = new Set([');
-const end = source.indexOf('/* ---------- 估價單／訂單全歷史搜尋索引補建 ---------- */', start);
 const context = vm.createContext({
   window: {}, firebaseConfig: { projectId: 'production' },
   firebase: { firestore: { Timestamp: { fromDate: date => date } } },
   document: {}, currentUserRole: 'admin', trueUserRole: 'admin'
 });
-vm.runInContext(source.slice(start, end) + '\nwindow.validateBackupDocuments = validateBackupDocuments;', context);
+vm.runInContext(source.slice(start) + '\nwindow.validateBackupDocuments = validateBackupDocuments;', context);
 
 function backup(rows, collection = 'orders') {
   return { format: 'yu-shing-firestore-backup', version: 1, projectId: 'production',
@@ -34,7 +33,7 @@ test('backup upload validates project, count, duplicate paths, and collection bo
 });
 
 test('browser inspection never restores transaction or permissions documents', () => {
-  const inspection = source.slice(start, end);
+  const inspection = source.slice(start);
   const html = fs.readFileSync(require('node:path').join(__dirname, '..', 'index.html'), 'utf8');
   const productMaintenance = fs.readFileSync(require('node:path').join(__dirname, '..', 'src/features/products/product-master-import.js'), 'utf8');
   assert.doesNotMatch(inspection, /window\.restoreMissingDatabaseBackupDocuments\s*=/);
