@@ -5059,3 +5059,20 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
   #admin-products #productOverviewBody .price-list-action-group { justify-content:flex-start; width:100%; }
   #admin-products .price-list-task-body button { flex:none; }
 }
+
+
+/* 2026-11-06: admin price-list low-frequency operations and UID copying. */
+#admin-products #productBatchMaintenance button[hidden] { display:none !important; }
+#admin-products .price-list-more-actions { flex:1 1 130px; min-width:130px; border:1px solid var(--ys-border,#c7c1b8); border-radius:7px; background:var(--ys-surface,#fff); }
+#admin-products .price-list-more-actions > summary { display:flex; justify-content:center; align-items:center; min-height:40px; padding:5px 10px; box-sizing:border-box; cursor:pointer; font-size:13px; font-weight:600; }
+#admin-products .price-list-more-actions-content { display:grid; gap:8px; padding:8px; border-top:1px solid var(--ys-border,#c7c1b8); }
+#admin-products .price-list-more-actions-content button { width:100%; min-width:0; white-space:normal; margin:0; }
+#admin-sales .admin-user-uid .admin-uid-value { display:inline-block; max-width:100%; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:middle; }
+#admin-sales .admin-user-uid .admin-uid-copy { display:inline-block; min-width:48px; margin:4px 0 4px 6px; font-family:inherit; }
+@media screen and (max-width:768px) {
+  #admin-products .price-list-more-actions { flex:1 1 125px; min-width:0; }
+  #admin-products .price-list-more-actions-content { padding:8px 6px; }
+  #admin-sales #adminSalesBody > tr > td.admin-user-uid { display:flex !important; align-items:center; gap:8px; max-width:100%; }
+  #admin-sales #adminSalesBody > tr > td.admin-user-uid .admin-uid-value { flex:1 1 auto; max-width:100%; }
+  #admin-sales #adminSalesBody > tr > td.admin-user-uid .admin-uid-copy { flex:0 0 auto; width:auto; min-height:40px; margin:0; }
+}

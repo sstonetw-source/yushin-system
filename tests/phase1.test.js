@@ -5364,3 +5364,45 @@ test('quote and decision-analysis output have no mandatory user-entered fields',
 });
 
 
+
+
+test('admin price-list actions keep existing handlers behind a compact more menu', () => {
+    const start = appSource.indexOf('window.renderProductManagementOverview = function()');
+    const end = appSource.indexOf('\nfunction renderPriceListHistory', start);
+    const source = appSource.slice(start, end);
+    assert.ok(start >= 0 && end > start);
+    assert.match(source, /price-list-more-actions/);
+    assert.match(source, /更多操作/);
+    assert.match(source, /togglePriceListActive/);
+    assert.match(source, /deleteEntirePriceList/);
+    assert.match(source, /openPriceListUploadForBrand/);
+    assert.match(source, /showPriceListHistoryForBrand/);
+    assert.match(source, /尚無版本/);
+});
+
+test('import resume buttons use existing local IndexedDB job state without Firestore calls', () => {
+    assert.match(indexSource, /id="productPriceResumeButton"[^>]*hidden/);
+    assert.match(indexSource, /id="productMasterResumeButton"[^>]*hidden/);
+    const start = appSource.indexOf('async function refreshProductImportResumeControls()');
+    const end = appSource.indexOf('\nasync function saveProductPriceJob(', start);
+    const source = appSource.slice(start, end);
+    assert.ok(start >= 0 && end > start);
+    assert.match(source, /readProductPriceJob\(\)/);
+    assert.match(source, /readProductPriceJob\('master'\)/);
+    assert.match(source, /currentUserRole !== 'admin'/);
+    assert.match(source, /priceJob\.rows\.length/);
+    assert.match(source, /masterJob\.total/);
+    assert.doesNotMatch(source, /db\.collection\(/);
+    assert.match(appSource, /if \(!busy\) void refreshProductImportResumeControls\(\)/);
+});
+
+test('admin UID is shortened visually but its copy action receives the complete value', () => {
+    const start = appSource.indexOf('window.renderAdminSalesTable = function()');
+    const end = appSource.indexOf('\nwindow.saveAdminUserRole', start);
+    const source = appSource.slice(start, end);
+    assert.ok(start >= 0 && end > start);
+    assert.match(source, /admin-uid-value/);
+    assert.match(source, /copyAdminUserUid\(\$\{inlineJsValue\(u\.uid\)\}, this\)/);
+    assert.match(source, /navigator\.clipboard\.writeText\(String\(uid\)\)/);
+    assert.match(source, /trueUserRole !== 'admin'/);
+});

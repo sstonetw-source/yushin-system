@@ -1594,6 +1594,7 @@ function setProductBatchMaintenanceBusy(busy) {
     document.querySelectorAll('#productBatchMaintenance button').forEach(button => {
         button.disabled = productBatchMaintenanceInProgress;
     });
+    if (!busy) void refreshProductImportResumeControls();
 }
 
 function canManagePendingProductMaster() {
@@ -25300,6 +25301,7 @@ window.loadProductManagementOverview = async function(refresh = false) {
     const status = document.getElementById('productOverviewStatus');
     productOverviewGenerationLoading = generation;
     if (status) status.textContent = '正在讀取價目表狀態…';
+    void refreshProductImportResumeControls();
     try {
         await loadBrandMaster();
         if (generation !== sessionDataGeneration) return;
@@ -25361,7 +25363,7 @@ function priceListStatusLabel(row) {
     if (row.priceListDeletedAt && !row.priceListFile) return '已刪除';
     if (row.priceListActive === false) return '停用';
     if (row.priceListFile || row.priceListManaged) return '啟用';
-    return '無版本紀錄';
+    return '尚無版本';
 }
 
 window.renderProductManagementOverview = function() {
@@ -25379,7 +25381,7 @@ window.renderProductManagementOverview = function() {
         const toggleLabel = row.priceListActive === false ? '啟用' : '停用';
         return `<tr>
             <td data-th="廠牌"><strong>${escapeHtml(row.name)}</strong></td>
-            <td data-th="目前價目表">${escapeHtml(row.priceListFile || '尚未建立版本紀錄')}</td>
+            <td data-th="目前價目表">${escapeHtml(row.priceListFile || '尚無版本')}</td>
             <td data-th="檔案品項數">${row.priceListManaged ? Number(row.priceListProductCount || 0).toLocaleString() : '—'}</td>
             <td data-th="最後更新">${escapeHtml(priceListDateLabel(row.priceListUpdatedAt || row.priceListDeletedAt))}</td>
             <td data-th="狀態"><span class="price-list-state">${escapeHtml(state)}</span></td>
@@ -25387,8 +25389,10 @@ window.renderProductManagementOverview = function() {
                 <div class="price-list-action-group">
                     <button type="button" class="btn-small" onclick="openPriceListUploadForBrand(${inlineJsValue(row.name)})">上傳新版</button>
                     <button type="button" class="btn-small btn-secondary" onclick="showPriceListHistoryForBrand(${inlineJsValue(row.name)})">紀錄</button>
+                    <details class="price-list-more-actions"><summary>更多操作</summary><div class="price-list-more-actions-content">
                     <button type="button" class="btn-small btn-secondary" onclick="togglePriceListActive(${inlineJsValue(row.name)}, ${row.priceListActive === false ? 'true' : 'false'}, this)" ${!hasCurrent && !row.priceListManaged ? 'title="尚未有版本紀錄，仍可用來停用既有舊價目資料"' : ''}>${toggleLabel}</button>
                     <button type="button" class="btn-small btn-danger" onclick="deleteEntirePriceList(${inlineJsValue(row.name)}, this)">刪除整個價目表</button>
+                    </div></details>
                 </div>
             </td>
         </tr>`;
@@ -27347,10 +27351,28 @@ window.renderAdminSalesTable = function() {
                     ? `<button type="button" class="btn-small btn-secondary" style="margin-top:4px;" onclick="sendPasswordResetToUser(${inlineJsValue(u.email)})">📧 寄送密碼重設信</button>`
                     : ''}
             </td>
-            <td data-label="帳號 UID" class="admin-user-uid" style="font-family:monospace;font-size:11px;color:${hasProfile ? '#999' : '#c0392b'};">${escapeHtml(u.uid)}</td>
+            <td data-label="帳號 UID" class="admin-user-uid" style="font-family:monospace;font-size:11px;color:${hasProfile ? '#999' : '#c0392b'};">
+                <span class="admin-uid-value" title="${escapeAttr(u.uid)}">${escapeHtml(u.uid)}</span>
+                <button type="button" class="btn-small btn-secondary admin-uid-copy" onclick="copyAdminUserUid(${inlineJsValue(u.uid)}, this)" aria-label="複製完整帳號 UID">複製</button>
+            </td>
         `;
         tbody.appendChild(tr);
     });
+};
+
+window.copyAdminUserUid = async function(uid, button) {
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
+    try {
+        if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
+        await navigator.clipboard.writeText(String(uid));
+        if (button) {
+            button.textContent = '已複製';
+            window.setTimeout(() => { if (button.isConnected) button.textContent = '複製'; }, 1800);
+        }
+    } catch (err) {
+        // 舊版瀏覽器或非安全來源不支援剪貼簿時，仍允許手動複製完整 UID。
+        window.prompt('複製完整帳號 UID：', String(uid));
+    }
 };
 
 window.saveAdminUserRole=async function(uid, selectEl){
@@ -28608,6 +28630,31 @@ async function readProductPriceJob(kind = 'price') {
         transaction.oncomplete = () => database.close();
         transaction.onabort = () => { database.close(); reject(new Error('讀取本機價格更新進度中斷。')); };
     });
+}
+
+async function refreshProductImportResumeControls() {
+    const priceButton = document.getElementById('productPriceResumeButton');
+    const masterButton = document.getElementById('productMasterResumeButton');
+    if (!priceButton && !masterButton) return;
+    if (priceButton) priceButton.hidden = true;
+    if (masterButton) masterButton.hidden = true;
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin' || !currentUser?.uid) return;
+    const generation = sessionDataGeneration;
+    const uid = currentUser.uid;
+    try {
+        // 僅讀取本機 IndexedDB 的兩筆匯入工作，絕不增加 Firestore 查詢。
+        const [priceJob, masterJob] = await Promise.all([
+            readProductPriceJob(), readProductPriceJob('master')
+        ]);
+        if (generation !== sessionDataGeneration || currentUser?.uid !== uid ||
+            trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
+        if (priceButton) priceButton.hidden = !(priceJob && Array.isArray(priceJob.rows) &&
+            Number(priceJob.cursor) < priceJob.rows.length);
+        if (masterButton) masterButton.hidden = !(masterJob &&
+            Number(masterJob.total) > 0 && Number(masterJob.cursor) < Number(masterJob.total));
+    } catch (err) {
+        console.warn('本機匯入進度無法讀取，仍可重新選擇 Excel：', err);
+    }
 }
 
 async function saveProductPriceJob(job) {
