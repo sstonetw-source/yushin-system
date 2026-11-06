@@ -21,6 +21,7 @@
 | 倉庫快速點收 | 2026-11-01 | P1 | [#308](https://github.com/sstonetw-source/yushin-system/issues/308)、[#464](https://github.com/sstonetw-source/yushin-system/pull/464)、[#466](https://github.com/sstonetw-source/yushin-system/pull/466) | 完成 | main | 已發布 | 直接備庫部分收貨已驗，完整角色路徑待驗證 | 原待到貨入口、實收量、完成、錯誤和重試 |
 | 無來源訂單直接採購、待到貨及部分收貨 | 2026-11-04 | P1 | [#464](https://github.com/sstonetw-source/yushin-system/pull/464)、[#466](https://github.com/sstonetw-source/yushin-system/pull/466)、[#467](https://github.com/sstonetw-source/yushin-system/pull/467)、[驗收紀錄](direct-stock-receipt-proof-20261105.md) | 完成 | main | 已發布 | 正式採購 3／實收 1 已驗，前端修正重試待驗證 | 用原操作確認解除待確認，避免再入庫 |
 | 直接採購草稿／確認／下載分離、選倉與成本率 | 2026-11-05 可追溯 | P1 | [#467](https://github.com/sstonetw-source/yushin-system/pull/467)、[測試](releases/order-purchase-interface-20261105.md) | 完成 | main | 前端已發布 | 隔離通過，正式待驗證 | 採購角色桌機／手機依新按鈕確認 |
+| 採購四分頁、成本率與含稅金額對帳 | 2026-11-06 | P1 | [#483](https://github.com/sstonetw-source/yushin-system/issues/483)、[#467](https://github.com/sstonetw-source/yushin-system/pull/467) | 已實作 | 依 #483 關聯 PR | 待查核 Pages 版本 | 正式資料待驗 | 用採購／管理員帳號核對部分採購、部分到貨與交易方式 |
 | 訂單整單交付、貨號／廠牌順序與品項編輯 | 2026-11-04 | P1 | [#460](https://github.com/sstonetw-source/yushin-system/pull/460) | 完成 | main | 前端已發布 | 已有三品項隔離測試，正式待驗證 | 沿用既有功能，地址與交付驗收合併執行 |
 | 直開發票必填發票抬頭 | 2026-11-04 | P1 | [#459](https://github.com/sstonetw-source/yushin-system/pull/459) | 完成 | main | 前端已發布 | 正式角色待驗證 | 新單表單與既有拒絕測試 |
 | 無印章估價單 | 2026-11-04 | P1 | [#455](https://github.com/sstonetw-source/yushin-system/pull/455) | 完成 | main | 前端已發布 | PDF 定向通過，手機實際下載待驗證 | 正式手機開檔 |

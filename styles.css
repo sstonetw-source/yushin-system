@@ -4787,14 +4787,27 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
         background:var(--ys-surface); color:var(--ys-muted); font:inherit; cursor:pointer;
     }
     #appContainer .workflow-order-context-row > td { overflow-wrap:anywhere; }
+    #appContainer .workflow-order-context-row .workflow-record { min-width:0; }
+    #appContainer .workflow-order-context-row .workflow-record strong { white-space:normal; }
+    #appContainer .workflow-order-context-row > td.order-money-cell { white-space:normal; }
+    #appContainer .purchase-work-amount { display:grid; gap:4px; white-space:normal; }
+    #appContainer .workflow-order-context-row > td[data-th="操作"] { min-width:0; }
+    #appContainer .workflow-order-context-row .workflow-inline-actions > button { white-space:normal; }
+    #appContainer .purchase-batch-selection { display:inline-flex; align-items:center; gap:6px; min-height:44px; cursor:pointer; }
+    #appContainer .purchase-batch-selection .pending-purchase-batch-select { margin:0; }
+
 }
 @media screen and (min-width:769px) {
     #appContainer #purchasing-system table:has(.workflow-order-context-row) { table-layout:fixed; width:100%; }
     #appContainer .workflow-order-context-row > td[data-th="產品資訊"] { width:20%; }
-    #appContainer .workflow-order-context-row > td[data-th="操作"] .workflow-inline-actions { flex-wrap:wrap; }
+    #appContainer #purchasing-system .workflow-order-context-row .workflow-inline-actions { flex-wrap:wrap; }
 }
 @media screen and (max-width:768px) {
-    #appContainer .workflow-order-context-row > td:is([data-th="銷售金額"],[data-th="交易／開票資料"]) { grid-column:1/-1; }
+    #appContainer #purchasing-system .workflow-order-context-row { display:grid; }
+    #appContainer #purchasing-system .workflow-order-context-row > td[data-th="客戶名稱"] { grid-row:1; }
+    #appContainer #purchasing-system .workflow-order-context-row > td[data-th="訂單日期"] { grid-row:2; grid-column:1; }
+    #appContainer #purchasing-system .workflow-order-context-row > td[data-th="負責業務"] { grid-row:2; grid-column:2; }
+    #appContainer .workflow-order-context-row > td:is([data-th="金額（含稅）"],[data-th="交易方式"]) { grid-column:1/-1; }
 }
 @media screen {
     #appContainer #purchasing-system .workflow-order-context-row .workflow-product { min-width:0; max-width:none; }
@@ -4805,11 +4818,10 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
     #appContainer #purchasing-system table:has(.workflow-order-context-row) th:nth-last-child(7) { width:9%; }
     #appContainer #purchasing-system table:has(.workflow-order-context-row) th:nth-last-child(6) { width:19%; }
     #appContainer #purchasing-system table:has(.workflow-order-context-row) th:nth-last-child(5) { width:7%; }
-    #appContainer #purchasing-system table:has(.workflow-order-context-row) th:nth-last-child(4) { width:14%; }
-    #appContainer #purchasing-system table:has(.workflow-order-context-row) th:nth-last-child(3) { width:15%; }
+    #appContainer #purchasing-system table:has(.workflow-order-context-row) th:nth-last-child(4) { width:20%; }
+    #appContainer #purchasing-system table:has(.workflow-order-context-row) th:nth-last-child(3) { width:9%; }
     #appContainer #purchasing-system table:has(.workflow-order-context-row) th:nth-last-child(2) { width:10%; }
     #appContainer #purchasing-system table:has(.workflow-order-context-row) th:last-child { width:15%; }
-    #appContainer #purchasePendingPanel table:has(.workflow-order-context-row) th:first-child { width:4%; }
 }
 @media screen {
     #appContainer .order-progress-cell > .workflow-commercial { margin-bottom:8px; padding-bottom:8px; border-bottom:1px solid var(--ys-border); }
@@ -4818,52 +4830,16 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
     #appContainer #purchasing-system .workflow-list-table tbody > .workflow-order-context-row { background:var(--ys-surface); }
 }
 @media screen and (min-width:769px) {
-    #appContainer #purchasing-system .workflow-order-context-row .workflow-inline-actions > button { flex:0 0 auto; white-space:nowrap; }
+    #appContainer #purchasing-system .workflow-order-context-row .workflow-inline-actions > button { flex:0 0 auto; white-space:normal; max-width:100%; }
+}
+@media screen and (min-width:769px) and (max-width:1100px) {
+    #appContainer #purchasing-system .workflow-order-context-row .workflow-inline-actions {
+        flex-direction:column; align-items:stretch;
+    }
+    #appContainer #purchasing-system .workflow-order-context-row .order-detail-panel > summary { justify-content:center; }
 }
 @media screen and (max-width:768px) {
     #appContainer #purchaseWorkSearch { flex:none; height:var(--ys-control-height); }
-}
-/* Keep purchasing work readable on 13-inch laptops without changing its actions.
-   Full commercial details remain available in the existing order drawer. */
-@media screen and (min-width:769px) and (max-width:1440px) {
-    #appContainer #purchasing-system :is(#purchasePendingPanel,#purchaseDispatchPanel,#purchaseCompletedPanel) .table-wrap { overflow-x:visible; }
-    #appContainer #purchasing-system :is(#purchasePendingPanel,#purchaseDispatchPanel,#purchaseCompletedPanel) .workflow-list-table {
-        display:block; width:100%; min-width:0; table-layout:auto;
-    }
-    #appContainer #purchasing-system :is(#purchasePendingPanel,#purchaseDispatchPanel,#purchaseCompletedPanel) .workflow-list-table thead { display:none; }
-    #appContainer #purchasing-system :is(#purchasePendingPanel,#purchaseDispatchPanel,#purchaseCompletedPanel) .workflow-list-table tbody { display:block; }
-    #appContainer #purchasing-system :is(#purchasePendingPanel,#purchaseDispatchPanel,#purchaseCompletedPanel) .workflow-list-table tbody > tr {
-        display:grid; grid-template-columns:minmax(0,1.45fr) minmax(0,1fr) minmax(220px,.9fr);
-        grid-template-areas:"customer owner select" "product date actions" "product money actions" "product progress actions";
-        gap:4px 16px; padding:16px; margin-bottom:12px; border:1px solid var(--ys-border);
-        border-radius:var(--ys-control-radius); background:var(--ys-record);
-    }
-    #appContainer #purchasing-system :is(#purchaseDispatchPanel,#purchaseCompletedPanel) .workflow-list-table tbody > tr {
-        grid-template-areas:"customer owner actions" "product date actions" "product money actions" "product progress actions";
-    }
-    #appContainer #purchasing-system :is(#purchasePendingPanel,#purchaseDispatchPanel,#purchaseCompletedPanel) .workflow-list-table tbody > tr > td {
-        display:block; min-width:0; max-width:none; width:auto; padding:4px 0;
-        background:transparent; white-space:normal; overflow-wrap:anywhere;
-    }
-    #appContainer #purchasing-system :is(#purchasePendingPanel,#purchaseDispatchPanel,#purchaseCompletedPanel) .workflow-order-context-row > td[data-th="客戶"] { grid-area:customer; font-weight:600; }
-    #appContainer #purchasing-system :is(#purchasePendingPanel,#purchaseDispatchPanel,#purchaseCompletedPanel) .workflow-order-context-row > td[data-th="產品資訊"] { grid-area:product; }
-    #appContainer #purchasing-system :is(#purchasePendingPanel,#purchaseDispatchPanel,#purchaseCompletedPanel) .workflow-order-context-row > td[data-th="負責業務"] { grid-area:owner; }
-    #appContainer #purchasing-system :is(#purchasePendingPanel,#purchaseDispatchPanel,#purchaseCompletedPanel) .workflow-order-context-row > td[data-th="訂單日期"] { grid-area:date; }
-    #appContainer #purchasing-system :is(#purchasePendingPanel,#purchaseDispatchPanel,#purchaseCompletedPanel) .workflow-order-context-row > td[data-th="銷售金額"] { grid-area:money; }
-    #appContainer #purchasing-system :is(#purchasePendingPanel,#purchaseDispatchPanel,#purchaseCompletedPanel) .workflow-order-context-row > td[data-th="進度"] { grid-area:progress; }
-    #appContainer #purchasing-system :is(#purchasePendingPanel,#purchaseDispatchPanel,#purchaseCompletedPanel) .workflow-order-context-row > td[data-th="合併"] { grid-area:select; justify-self:end; }
-    #appContainer #purchasing-system :is(#purchasePendingPanel,#purchaseDispatchPanel,#purchaseCompletedPanel) .workflow-order-context-row > td[data-th="操作"] { grid-area:actions; min-width:0; border-bottom:0; }
-    #appContainer #purchasing-system :is(#purchasePendingPanel,#purchaseDispatchPanel,#purchaseCompletedPanel) .workflow-order-context-row:has(.order-detail-panel) > td[data-th="交易／開票資料"] { display:none; }
-    #appContainer #purchasing-system :is(#purchasePendingPanel,#purchaseDispatchPanel,#purchaseCompletedPanel) .workflow-order-context-row:not(:has(.order-detail-panel)) > td[data-th="交易／開票資料"] { grid-column:1/-1; }
-    #appContainer #purchasing-system :is(#purchasePendingPanel,#purchaseDispatchPanel,#purchaseCompletedPanel) .workflow-order-context-row .workflow-inline-actions {
-        display:flex; flex-direction:column; flex-wrap:nowrap; align-items:stretch; gap:8px;
-    }
-    #appContainer #purchasing-system :is(#purchasePendingPanel,#purchaseDispatchPanel,#purchaseCompletedPanel) .workflow-order-context-row .workflow-inline-actions > :is(button,details) { width:100%; min-width:0; }
-    #appContainer #purchasing-system :is(#purchasePendingPanel,#purchaseDispatchPanel,#purchaseCompletedPanel) .workflow-order-context-row .order-detail-panel > summary { justify-content:center; }
-    #appContainer #purchasing-system :is(#purchasePendingPanel,#purchaseDispatchPanel,#purchaseCompletedPanel) .workflow-order-context-row .workflow-inline-actions > button { white-space:normal; }
-    #appContainer #purchasing-system :is(#purchasePendingPanel,#purchaseDispatchPanel,#purchaseCompletedPanel) .workflow-list-table tbody > tr > td[colspan] {
-        grid-column:1/-1; grid-row:1; padding:12px;
-    }
 }
 /* Shared workspace hierarchy and modal ownership; formal documents are unchanged. */
 @media screen {

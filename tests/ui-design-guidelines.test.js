@@ -83,16 +83,11 @@ test('mobile record lists use one white card layer without a blue outer well or 
 });
 
 
-test('purchasing queues use laptop-width cards while preserving their action and fallback content', () => {
-    assert.match(css, /@media screen and \(min-width:769px\) and \(max-width:1440px\)/);
-    for (const id of ['purchasePendingPanel', 'purchaseDispatchPanel', 'purchaseCompletedPanel']) {
-        assert.ok(css.includes('#purchasePendingPanel,#purchaseDispatchPanel,#purchaseCompletedPanel'), id);
-        assert.ok(html.includes(`id="${id}"`), id);
-    }
-    assert.match(css, /grid-template-areas:"customer owner select"/);
-    assert.match(css, /grid-area:actions; min-width:0;/);
-    assert.match(css, /:has\(\.order-detail-panel\) > td\[data-th="交易／開票資料"\] \{ display:none; \}/);
-    assert.match(css, /:not\(:has\(\.order-detail-panel\)\) > td\[data-th="交易／開票資料"\] \{ grid-column:1\/-1; \}/);
+test('purchasing work uses shared tables and mobile cards with visible amounts and transaction method', () => {
+    const headings = '<th>訂單日期</th><th>客戶名稱</th><th>產品資訊</th><th>負責業務</th><th>金額（含稅）</th><th>交易方式</th><th>進度</th>';
+    assert.equal(html.split(headings).length-1, 3);
+    assert.match(css, /\.purchase-work-amount \{ display:grid; gap:4px; white-space:normal;/);
+    assert.ok(css.includes('td:is([data-th="金額（含稅）"],[data-th="交易方式"]) { grid-column:1/-1; }'));
 });
 
 test('order list keeps only field headings bold and summary values at regular weight', () => {

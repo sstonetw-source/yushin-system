@@ -56,8 +56,10 @@ function revalidateCurrentUserAccess() {
                 if (errorEl) errorEl.innerText = '此帳號已由管理員停用。';
             });
         }
+        const previousRole = currentUserRole;
         applyUserProfile(d);
         writeCachedUserProfile(user.uid, d);
+        if (previousRole !== currentUserRole) showApp();
     }).catch(err => {
         // 網路暫時失敗不登出：維持 Gmail 式長期登入，等下次恢復前景再驗證。
         console.warn('背景驗證帳號狀態失敗：', err);
@@ -154,6 +156,10 @@ function resetSessionData() {
     poHistorySearchActive = false;
     poHistorySearchLoading = false;
     purchaseHistorySupplyCache = new Map();
+    purchaseWorkSupplyRequests = new WeakMap();
+    for (const id of ['purchasePendingBody','poListBody','purchaseDispatchBody','purchaseCompletedBody','purchaseAmountReceiving']) {
+        document.getElementById(id)?.replaceChildren();
+    }
     window.resetWarehouseLogistics?.();
     supplyReceivingCache = [];
     supplyReceivingCursor = null;

@@ -67,3 +67,19 @@ test('Home Screen app requests persistent origin storage only after authenticati
     await new Promise(resolve=>setImmediate(resolve));
     assert.equal(persistCalls,1,'ordinary browser views do not request storage persistence');
 });
+
+
+test('authoritative role changes invalidate session data before the new profile takes effect', () => {
+    const start = app.indexOf('function applyUserProfile(');
+    const end = app.indexOf('\nconst DEFAULT_LIST_LIMIT',start);
+    const rolesDuringReset = [];
+    const context = vm.createContext({
+        currentUserRole:'purchaser',trueUserRole:'purchaser',
+        resetSessionData:()=>rolesDuringReset.push(context.currentUserRole)
+    });
+    vm.runInContext(app.slice(start,end),context);
+    context.applyUserProfile({role:'purchaser'});
+    context.applyUserProfile({role:'warehouse'});
+    assert.deepEqual(rolesDuringReset,['purchaser']);
+    assert.equal(context.currentUserRole,'warehouse');
+});
