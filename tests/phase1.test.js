@@ -4943,11 +4943,8 @@ test('protected Product Master costs drive sales statistics without being copied
     assert.match(appSource, /function orderUnitCostForStats/);
     assert.match(appSource, /purchaseCostCache\.get\(productId\)/);
     assert.match(appSource, /loadTradeAnalysisSnapshot\(tab,filters\)/);
-    const start=appSource.indexOf('window.saveMissingCostFromStats');
-    const end=appSource.indexOf('function escapeAttr',start);
-    const source=appSource.slice(start,end);
-    assert.match(source, /collection\('productCosts'\)\.doc\(resolvedProductId\)\.set/);
-    assert.match(source, /procurementType === 'SALES_SELF_ORDER'/);
+    assert.doesNotMatch(indexSource, /id="(?:missingCostOrdersOverlay|tradeAnalysisDetailOverlay)"/);
+    assert.doesNotMatch(appSource, /window\.(?:saveMissingCostFromStats|exportSalesStatisticsExcel|openTradeAnalysisDetail)\s*=/);
 });
 
 test('order Firestore rules verify Product Master identity and embedded cost source', () => {
@@ -5144,7 +5141,7 @@ test('consolidated supplier editor reuses existing suppliers without renaming a 
 
 test('admin trade analysis exposes three responsive tabs and shared item details', () => {
     const adminStart=indexSource.indexOf('<div id="admin-statistics"');
-    const adminSource=indexSource.slice(adminStart,indexSource.indexOf('id="tradeAnalysisDetailOverlay"',adminStart));
+    const adminSource=indexSource.slice(adminStart,indexSource.indexOf('id="admin-warehouses"',adminStart));
     for(const tab of ['purchasing','selling','inventory'])assert.ok(adminSource.includes(`data-analysis-tab="${tab}"`));
     assert.match(adminSource,/id="tradeAnalysisCards"/);
     assert.match(adminSource,/id="unifiedBrandAnalyticsBody"/);

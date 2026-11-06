@@ -32,7 +32,7 @@ function fixture(){
         orderQuantity:order=>order.qty,salesAmount:order=>order.totalPrice,orderUnitCostForStats:()=>null,
         normalizedOrderStatus:order=>order.status==='cancelled'?'cancelled':'normal',localDateString:()=> '2026-10-04',isPurchaseTerminalStatus:status=>['CANCELLED','CLOSED'].includes(status)
     });
-    ['salesStatisticOrderLines','dateInStatsRange','orderUnitSalesAmount','calculateOrderStatsContribution','tradeAnalysisCost','buildTradeAnalysisRows','tradeAnalysisExportRows'].forEach(name=>vm.runInContext(fn(name),context));
+    ['salesStatisticOrderLines','dateInStatsRange','orderUnitSalesAmount','calculateOrderStatsContribution','tradeAnalysisCost','buildTradeAnalysisRows'].forEach(name=>vm.runInContext(fn(name),context));
     return context;
 }
 const filters={start:'2026-10-01',end:'2026-10-04'};
@@ -79,14 +79,6 @@ test('cancelled orders stop pending but preserve completed delivery and return t
     const report=core.summarize(x.buildTradeAnalysisRows(),filters);
     assert.equal(report.totals.pending,100);assert.equal(report.totals.sales,300);
 });
-test('Excel detail sums match the same snapshot totals, including negative return rows',()=>{
-    const x=fixture();const report=core.summarize(x.buildTradeAnalysisRows(),filters);
-    for(const kind of core.kinds){
-        const exported=x.tradeAnalysisExportRows(report,kind);
-        assert.equal(exported.reduce((sum,row)=>sum+(typeof row['金額']==='number'?row['金額']:0),0),report.totals[kind]);
-    }
-    assert.equal(x.tradeAnalysisExportRows(report,'sales')[1]['金額'],-100);
-});
 test('multi-product orders assign deliveries to each item without duplicating sales',()=>{
     const x=fixture();x.salesStatisticsOrders=[{id:'MULTI',salesName:'業務甲',orderNo:'M1',items:[
         {itemId:'I1',productId:'P1',brand:'主要',qty:2,unitPrice:100,totalPrice:200},
@@ -103,37 +95,6 @@ test('zero cost is valid while invalid and absent cost never silently become zer
 test('empty filter result has zero totals and no stale detail rows',()=>{
     const report=core.summarize(fixture().buildTradeAnalysisRows(),{...filters,type:'不存在'});
     for(const kind of core.kinds){assert.equal(report.totals[kind],0);assert.equal(report.details[kind].length,0);}
-});
-
-test('workbook uses every matching row with numeric totals and explicit filter scope',async()=>{
-    const x=fixture();const report=core.summarize(x.buildTradeAnalysisRows(),filters);report.filters=filters;
-    const saved=[];
-    Object.assign(x,{currentUserRole:'admin',beginActionButton:()=>({}),endActionButton:()=>{},ensureXlsxLoaded:async()=>{},alert:message=>{throw Error(message);},
-        XLSX:{utils:{book_new:()=>({sheets:[]}),json_to_sheet:rows=>({rows}),book_append_sheet:(wb,sheet,name)=>wb.sheets.push({sheet,name})},writeFile:wb=>saved.push(wb)}});
-    vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", x);
-vm.runInContext('async '+fn('writeTradeAnalysisWorkbook'),x);
-    await x.writeTradeAnalysisWorkbook(report,core.kinds,{});
-    assert.equal(saved[0].sheets.length,6);
-    const sales=saved[0].sheets.find(row=>row.name==='已銷貨').sheet.rows;
-    assert.equal(sales.length,3);assert.equal(sales.at(-1)['金額'],300);
-    assert.ok(saved[0].sheets[0].sheet.rows.some(row=>row['項目']==='負責業務篩選範圍'));
-    x.currentUserRole='sales';await x.writeTradeAnalysisWorkbook(report,core.kinds,{});
-    assert.equal(saved.length,1,'sales role cannot export company costs');
-});
-
-test('details display is bounded to 100 rows while exported report retains all rows',()=>{
-    const x=fixture();const rows=x.buildTradeAnalysisRows().filter(row=>row.kind==='sales');
-    const report=core.summarize(Array.from({length:101},(_,i)=>({...rows[0],eventId:'D'+i})),filters);report.filters=filters;
-    const elements={};
-    Object.assign(x,{currentUserRole:'admin',tradeAnalysisReady:true,salesStatisticsLoadPromise:null,tradeAnalysisReport:report,window:{},
-        escapeHtml:s=>s,formatStatsMoney:n=>'NT$ '+n,
-        document:{getElementById:id=>elements[id]||(elements[id]={classList:{add(){},remove(){}}})}});
-    const start=source.indexOf('window.openTradeAnalysisDetail = function');const end=source.indexOf('\n};',start)+3;
-    vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", x);
-vm.runInContext(source.slice(start,end),x);x.window.openTradeAnalysisDetail('sales');
-    assert.equal((elements.tradeAnalysisDetailBody.innerHTML.match(/<tr>/g)||[]).length,100);
-    assert.equal(x.tradeAnalysisExportRows(report,'sales').length,101);
-    assert.match(elements.tradeAnalysisDetailSummary.textContent,/匯出包含全部明細/);
 });
 
 test('legacy delivered flags contribute estimated sales and exclude already delivered pending quantities',()=>{

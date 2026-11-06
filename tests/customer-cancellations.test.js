@@ -40,7 +40,7 @@ test('closed return keeps fulfillment complete rather than scheduling replacemen
  const c=vm.createContext({YushinFulfillment:require('../modules/fulfillment-core'),orderQuantity:()=>5,deliveredQuantity:()=>5,returnedQuantity:()=>2,savedReturnRecords:()=>[{qty:2,settlement:'CLOSE'}],savedDeliveryRecords:()=>[{}]});vm.runInContext(app.slice(start,end),c);assert.equal(c.deliveryProgressInfo({}).remaining,0);assert.equal(c.deliveryProgressInfo({}).state,'complete');
 });
 test('closed return reduces actual sales without recreating pending sales',()=>{
- const start=app.indexOf('function calculateOrderStatsContribution('),end=app.indexOf('\nfunction addSalesStatsContribution',start);
+ const start=app.indexOf('function calculateOrderStatsContribution('),end=app.indexOf('\nfunction formatStatsMoney',start);
  const c=vm.createContext({normalizedOrderStatus:()=> 'normal',orderQuantity:()=>5,orderUnitSalesAmount:()=>100,orderUnitCostForStats:()=>50,localDateString:()=> '2026-10-06',savedDeliveryRecords:o=>o.deliveryRecords,savedReturnRecords:o=>o.returnRecords,dateInStatsRange:()=>true});
  vm.runInContext(app.slice(start,end),c);const result=c.calculateOrderStatsContribution({orderDate:'2026-10-01',deliveryRecords:[{date:'2026-10-02',qty:5}],returnRecords:[{date:'2026-10-06',qty:2,settlement:'CLOSE'}]},'2026-10-01','2026-10-06');assert.equal(result.actualSales,300);assert.equal(result.pendingSales,0);
 });

@@ -924,10 +924,6 @@ function salesStatisticOrderLines(order) {
     }));
 }
 
-function newSalesStatsMetric() {
-    return { actualSales: 0, pendingSales: 0, totalSales: 0, actualCost: 0, pendingCost: 0, totalCost: 0, profit: 0, missingCostIds: new Set(), orderIds: new Set(), estimatedSales: 0, estimatedIds: new Set() };
-}
-
 function orderUnitSalesAmount(order) {
     const qty = orderQuantity(order);
     return qty ? salesAmount(order) / qty : (parseFloat(order.unitPrice) || 0);
@@ -948,10 +944,6 @@ function orderUnitCostForStats(order) {
     const productId = orderStatsProductId(order);
     const standardCost = productId ? Number(purchaseCostCache.get(productId)) : NaN;
     return Number.isFinite(standardCost) && standardCost >= 0 ? standardCost : null;
-}
-
-function orderHasCost(order) {
-    return orderUnitCostForStats(order) !== null;
 }
 
 function dateInStatsRange(date, start, end) {
@@ -1005,24 +997,6 @@ function calculateOrderStatsContribution(order, start, end) {
     };
 }
 
-function addSalesStatsContribution(metric, order, contribution) {
-    metric.actualSales += contribution.actualSales;
-    metric.pendingSales += contribution.pendingSales;
-    metric.actualCost += contribution.actualCost;
-    metric.pendingCost += contribution.pendingCost;
-    metric.totalSales = metric.actualSales + metric.pendingSales;
-    metric.totalCost = metric.actualCost + metric.pendingCost;
-    metric.profit = metric.totalSales - metric.totalCost;
-    if (contribution.actualSales || contribution.pendingSales) metric.orderIds.add(order.id);
-    if (!orderHasCost(order) && (contribution.actualQty || contribution.pendingQty)) {
-        metric.missingCostIds.add(`${order.id}:${orderStatsProductId(order) || order.itemId || 'unknown'}`);
-    }
-    if (contribution.estimated) {
-        metric.estimatedSales += contribution.estimatedSales;
-        metric.estimatedIds.add(order.id);
-    }
-}
-
 function formatStatsMoney(value) {
     const rounded = Math.round(value);
     return `${rounded < 0 ? '-NT$ ' : 'NT$ '}${Math.abs(rounded).toLocaleString()}`;
@@ -1036,14 +1010,10 @@ let tradeAnalysisSimpleRows = [];
 let tradeAnalysisSimplePage = 0;
 let tradeAnalysisFiltersPending = false;
 let tradeAnalysisReady = false;
-let tradeAnalysisReport = null;
-let tradeAnalysisDetailKind = '';
-let tradeAnalysisDetailReport = null;
 let tradeAnalysisSourceOrders = new Map();
 let tradeAnalysisTab = 'purchasing';
 let tradeAnalysisSensitiveVisible = true;
 let tradeAnalysisWarehouseStocks = [];
-const TRADE_ANALYSIS_LABELS = {incoming:'待到貨採購',purchases:'已進貨（收貨）',pending:'待送貨訂單',sales:'已銷貨（送貨）',stock:'目前庫存'};
 
 function setTradeAnalysisLoading(loading) {
     const query=document.getElementById('tradeAnalysisQueryBtn');
@@ -1052,7 +1022,6 @@ function setTradeAnalysisLoading(loading) {
         const button=document.getElementById(id);if(button)button.disabled=loading||!tradeAnalysisReady||tradeAnalysisFiltersPending;
     });
     if(loading){
-        closeTradeAnalysisDetail();
         resetSimpleTradeAnalysisDetail();
         document.querySelectorAll('.trade-analysis-cards strong').forEach(el=>el.textContent='讀取中…');
         document.getElementById('tradeAnalysisStatus').textContent='正在讀取此分頁所需資料…';
@@ -1174,67 +1143,6 @@ function buildTradeAnalysisRows() {
     return rows;
 }
 
-function tradeAnalysisExportRows(report,kind) {
-    return report.details[kind].map(row=>({
-        '交易日期':row.date||'','類別':TRADE_ANALYSIS_LABELS[kind],'交易':row.event,'客戶':row.customer||'','供應商':row.supplier||'',
-        '單號':row.documentNo||'','關聯客戶訂單':row.customerOrderNo||'','負責業務':row.sales||'','統計廠牌':row.brand,'實際廠牌':row.rawBrand,
-        '產品線':row.line,'產品類型':row.type,'貨號':row.code,'品名':row.name,'數量':row.qty,
-        '單價／成本':row.unitPrice===null?'待補成本':row.unitPrice,'金額':row.amount===null?'待補成本':row.amount,
-        '狀態':row.status,'到貨方式':row.fulfillment||'','預計到貨日':row.expectedDate||'','倉庫':row.warehouseId||'',
-        '批號':row.lotNo||'','效期':row.expiryDate||'','來源紀錄ID':row.sourceId||'','交易紀錄ID':row.eventId||''
-    }));
-}
-
-window.openTradeAnalysisDetail = function(kind) {
-    if(currentUserRole!=='admin'||!tradeAnalysisReady||salesStatisticsLoadPromise||!TRADE_ANALYSIS_LABELS[kind])return;
-    tradeAnalysisDetailKind=kind;
-    tradeAnalysisDetailReport=tradeAnalysisReport;
-    const report=tradeAnalysisDetailReport;
-    const detailRows=tradeAnalysisExportRows(report,kind);
-    const columns=['交易日期','客戶','供應商','單號','業務','實際廠牌','產品線','產品類型','貨號','品名','數量','單價／成本','金額','交易'];
-    document.getElementById('tradeAnalysisDetailTitle').textContent=TRADE_ANALYSIS_LABELS[kind]+'明細';
-    document.getElementById('tradeAnalysisDetailSummary').textContent=`共 ${detailRows.length} 筆，合計 ${formatStatsMoney(report.totals[kind])}`+(report.missing[kind]?`；${report.missing[kind]} 筆待補成本，未計入金額`:'')+'。'+(['sales','purchases'].includes(kind)?`期間：${report.filters.start} 至 ${report.filters.end}`:'目前全部餘額');
-    document.getElementById('tradeAnalysisDetailHead').innerHTML='<tr>'+columns.map(name=>`<th>${escapeHtml(name)}</th>`).join('')+'</tr>';
-    const visible=detailRows.slice(0,100);
-    document.getElementById('tradeAnalysisDetailBody').innerHTML=visible.length?visible.map(row=>'<tr>'+columns.map(name=>`<td>${escapeHtml(String(row[name]??''))}</td>`).join('')+'</tr>').join(''):`<tr><td colspan="${columns.length}">沒有符合條件的明細。</td></tr>`;
-    if(detailRows.length>100)document.getElementById('tradeAnalysisDetailSummary').textContent+=' 畫面顯示前 100 筆；匯出包含全部明細。';
-    document.getElementById('tradeAnalysisDetailOverlay').classList.add('active');
-};
-window.closeTradeAnalysisDetail = function() {
-    document.getElementById('tradeAnalysisDetailOverlay')?.classList.remove('active');
-};
-
-async function writeTradeAnalysisWorkbook(report,kinds,button) {
-    if(currentUserRole!=='admin'||!report||!kinds.length||kinds.some(kind=>!TRADE_ANALYSIS_LABELS[kind]))return;
-    const state=beginActionButton(button,'匯出中…');
-    if(button&&!state)return;
-    try{
-        await ensureXlsxLoaded();
-        const wb=XLSX.utils.book_new();
-        const filters=report.filters;
-        const summary=[
-            {'項目':'已完成交易期間','內容':`${filters.start} 至 ${filters.end}`},
-            {'項目':'未完成及庫存','內容':'目前全部餘額'},
-            ...[['業務',filters.sales||'全部負責業務'],['廠牌',filters.brand||'全部廠牌'],['產品線',filters.line||'全部產品線'],['產品類型',filters.type||'全部類型']].map(([name,value])=>({'項目':name,'內容':value})),
-            {'項目':'金額口徑','內容':'銷售含稅；採購及庫存依紀錄單位成本；不混合加總不同單位數量。'},
-            {'項目':'負責業務篩選範圍','內容':'只篩銷貨與待送貨；進貨、待到貨、庫存為公司共同數字。'},
-            ...kinds.map(kind=>({'項目':TRADE_ANALYSIS_LABELS[kind],'內容':report.totals[kind],'明細筆數':report.details[kind].length,'待補成本筆數':report.missing[kind]}))
-        ];
-        XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(summary),'篩選與總計');
-        kinds.forEach(kind=>{
-            const rows=tradeAnalysisExportRows(report,kind);
-            rows.push({'交易':'總計','金額':report.totals[kind],'狀態':report.missing[kind]?`有 ${report.missing[kind]} 筆待補成本`:'完整'});
-            const sheet=XLSX.utils.json_to_sheet(rows);
-            sheet['!cols']=Object.keys(rows[0]).map(name=>({wch:['品名','客戶','供應商'].includes(name)?28:18}));
-            XLSX.utils.book_append_sheet(wb,sheet,TRADE_ANALYSIS_LABELS[kind]);
-        });
-        XLSX.writeFile(wb,`進銷存-${kinds.length===1?TRADE_ANALYSIS_LABELS[kinds[0]]:'全部明細'}-${filters.start}-${filters.end}.xlsx`);
-    }catch(err){alert('匯出失敗：'+(err.message||err));}
-    finally{if(button)endActionButton(button,state);}
-}
-window.exportTradeAnalysisDetail = function() {
-    return writeTradeAnalysisWorkbook(tradeAnalysisDetailReport,[tradeAnalysisDetailKind],document.getElementById('tradeAnalysisExport'));
-};
 window.exportTradeAnalysis = async function() {
     if(currentUserRole!=='admin'||!tradeAnalysisReady||salesStatisticsLoadPromise||tradeAnalysisFiltersPending)return;
     const button=document.getElementById('tradeAnalysisWorkbookBtn');
@@ -1310,46 +1218,6 @@ window.setSalesStatisticsPeriod = function(period) {
     document.getElementById('salesStatsEnd').value = end;
     markTradeAnalysisFiltersPending();
 };
-
-function buildSalesStatisticsReport() {
-    const start = document.getElementById('salesStatsStart')?.value || '';
-    const end = document.getElementById('salesStatsEnd')?.value || '';
-    const salesFilter = document.getElementById('salesStatsSalesFilter')?.value || '';
-    const brandFilter = document.getElementById('salesStatsBrandFilter')?.value || '';
-    const typeFilter = document.getElementById('salesStatsTypeFilter')?.value || '';
-    const lineFilter = document.getElementById('salesStatsLineFilter')?.value || '';
-    const byBrand = {}, bySales = {}, byType = {}, byLine = {}, byTransaction = {};
-    const total = newSalesStatsMetric();
-    const details = [];
-
-    salesStatisticsOrders.flatMap(salesStatisticOrderLines).forEach(order => {
-        const sales = stripPhoneSuffix(order.salesName) || '未指定負責業務';
-        const line = productLineForOrder(order);
-        const type = productTypeForOrder(order);
-        const brand = statisticBrandForOrder(order);
-        const transaction = order.transactionType || '未選擇';
-        if ((salesFilter && sales !== salesFilter) || (brandFilter && brand !== brandFilter) || (typeFilter && type !== typeFilter) || (lineFilter && line !== lineFilter)) return;
-        const contribution = calculateOrderStatsContribution(order, start, end);
-        if (!contribution.actualSales && !contribution.pendingSales && !contribution.actualQty && !contribution.pendingQty) return;
-        addSalesStatsContribution(total, order, contribution);
-        if (!byBrand[brand]) byBrand[brand] = newSalesStatsMetric();
-        if (!bySales[sales]) bySales[sales] = newSalesStatsMetric();
-        if (!byType[type]) byType[type] = newSalesStatsMetric();
-        if (!byLine[line]) byLine[line] = newSalesStatsMetric();
-        if (!byTransaction[transaction]) byTransaction[transaction] = newSalesStatsMetric();
-        addSalesStatsContribution(byBrand[brand], order, contribution);
-        addSalesStatsContribution(bySales[sales], order, contribution);
-        addSalesStatsContribution(byType[type], order, contribution);
-        addSalesStatsContribution(byLine[line], order, contribution);
-        addSalesStatsContribution(byTransaction[transaction], order, contribution);
-        details.push({ order, sales, brand, type, line, transaction, contribution });
-    });
-
-    return {
-        start, end, salesFilter, brandFilter, typeFilter, lineFilter,
-        total, byBrand, bySales, byType, byLine, byTransaction, details
-    };
-}
 
 function renderUnifiedBrandAnalytics() {
     if(tradeAnalysisReady&&!salesStatisticsLoadPromise)renderSalesStatistics();
@@ -1445,199 +1313,6 @@ window.renderSalesStatistics = function() {
     const scope=tradeAnalysisTab==='inventory'?'目前庫存':`${filters.start} 至 ${filters.end} 成立的單據`;
     document.getElementById('tradeAnalysisStatus').textContent=scope+`｜共 ${rows.length} 筆`+(missing?`；${missing} 筆缺少成本或批次數量不一致，金額僅加總可確認成本。${tradeAnalysisTab==='selling'?'毛利與毛利率待補成本後顯示。':''}`:'')+(rows.some(row=>row.zeroCost)?`；${rows.filter(row=>row.zeroCost).length} 筆採用零成本，請確認是否為贈品或尚待補登。`:'');
     if(tradeAnalysisFiltersPending)markTradeAnalysisFiltersPending();
-};
-
-function salesStatsMetricExportRows(values, grandTotal, label) {
-    return Object.entries(values)
-        .sort((a, b) => b[1].totalSales - a[1].totalSales)
-        .map(([name, metric]) => ({
-            [label]: name,
-            '實際送貨金額': Math.round(metric.actualSales),
-            '待出貨金額': Math.round(metric.pendingSales),
-            '總金額': Math.round(metric.totalSales),
-            '總成本': Math.round(metric.totalCost),
-            '毛利': metric.missingCostIds.size ? '待補成本' : Math.round(metric.profit),
-            '毛利率': metric.missingCostIds.size ? '待補成本' : metric.totalSales ? (metric.profit / metric.totalSales * 100).toFixed(1) + '%' : '－',
-            '占比': grandTotal ? (metric.totalSales / grandTotal * 100).toFixed(1) + '%' : '－',
-            '成本未填筆數': metric.missingCostIds.size,
-            '歷史推估金額': Math.round(metric.estimatedSales)
-        }));
-}
-
-window.exportSalesStatisticsExcel = async function() {
-    populateSalesStatisticsFilters();
-    const report = buildSalesStatisticsReport();
-    if (!report.start || !report.end) {
-        alert('請先選擇統計起訖日期。');
-        return;
-    }
-    if (!report.details.length) {
-        alert('目前的日期與篩選條件沒有可匯出的季報資料。');
-        return;
-    }
-    try {
-        await ensureXlsxLoaded();
-        const { total } = report;
-        const summaryRows = [
-            { '項目': '統計期間', '內容': `${report.start} 至 ${report.end}` },
-            { '項目': '負責業務篩選', '內容': report.salesFilter || '全部負責業務' },
-            { '項目': '廠牌篩選', '內容': report.brandFilter || '全部廠牌' },
-            { '項目': '類型篩選', '內容': report.typeFilter || '全部類型' },
-            { '項目': '產品線篩選', '內容': report.lineFilter || '全部產品線' },
-            { '項目': '有效訂單筆數', '內容': total.orderIds.size },
-            { '項目': '實際送貨金額', '內容': Math.round(total.actualSales) },
-            { '項目': '待出貨金額', '內容': Math.round(total.pendingSales) },
-            { '項目': '總金額', '內容': Math.round(total.totalSales) },
-            { '項目': '總成本', '內容': Math.round(total.totalCost) },
-            { '項目': '毛利', '內容': total.missingCostIds.size ? '待補成本' : Math.round(total.profit) },
-            { '項目': '毛利率', '內容': total.missingCostIds.size ? '待補成本' : total.totalSales ? (total.profit / total.totalSales * 100).toFixed(1) + '%' : '－' },
-            { '項目': '成本未填筆數', '內容': total.missingCostIds.size },
-            { '項目': '歷史推估金額', '內容': Math.round(total.estimatedSales) },
-            { '項目': '歷史推估筆數', '內容': total.estimatedIds.size }
-        ];
-        const detailRows = report.details
-            .sort((a, b) => (a.order.orderDate || '').localeCompare(b.order.orderDate || ''))
-            .map(({ order, sales, brand, type, line, transaction, contribution }) => {
-                const hasCost = orderHasCost(order);
-                const totalSales = contribution.actualSales + contribution.pendingSales;
-                const totalCost = contribution.actualCost + contribution.pendingCost;
-                return {
-                    '訂單日期': order.orderDate || '',
-                    '來源估價單': order.quoteNo || '',
-                    '採購單號': order.purchaseOrderNo || '',
-                    '客戶名稱': order.customerName || '',
-                    '負責業務': sales,
-                    '統計廠牌': brand,
-                    '原始廠牌': order.brand || '',
-                    '產品類型': type,
-                    '產品線': line,
-                    '貨號': order.itemCode || '',
-                    '品名': order.itemName || '',
-                    '交易方式': transaction,
-                    '訂單數量': orderQuantity(order),
-                    '期間實際送貨數量': contribution.actualQty,
-                    '截至迄日待出貨數量': contribution.pendingQty,
-                    '實際送貨金額': Math.round(contribution.actualSales),
-                    '待出貨金額': Math.round(contribution.pendingSales),
-                    '總金額': Math.round(totalSales),
-                    '總成本': Math.round(totalCost),
-                    '毛利': hasCost ? Math.round(totalSales - totalCost) : '待補成本',
-                    '毛利率': hasCost && totalSales ? ((totalSales - totalCost) / totalSales * 100).toFixed(1) + '%' : hasCost ? '－' : '待補成本',
-                    '成本狀態': hasCost ? '已填' : '未填',
-                    '資料註記': contribution.estimated ? '歷史推估資料' : ''
-                };
-            });
-        const workbook = XLSX.utils.book_new();
-        const appendSheet = (rows, name, widths) => {
-            const sheet = XLSX.utils.json_to_sheet(rows);
-            sheet['!cols'] = widths.map(width => ({ wch: width }));
-            XLSX.utils.book_append_sheet(workbook, sheet, name);
-        };
-        appendSheet(summaryRows, '摘要', [18, 24]);
-        appendSheet(salesStatsMetricExportRows(report.byBrand, total.totalSales, '廠牌'), '廠牌', [18, 16, 16, 16, 16, 16, 12, 12, 14, 16]);
-        appendSheet(salesStatsMetricExportRows(report.bySales, total.totalSales, '業務'), '業務', [18, 16, 16, 16, 16, 16, 12, 12, 14, 16]);
-        appendSheet(salesStatsMetricExportRows(report.byTransaction, total.totalSales, '交易方式'), '交易方式', [18, 16, 16, 16, 16, 16, 12, 12, 14, 16]);
-        appendSheet(detailRows, '訂單明細', [12, 16, 16, 22, 12, 14, 14, 14, 14, 16, 28, 12, 12, 18, 18, 16, 16, 16, 16, 16, 12, 14, 16]);
-        XLSX.writeFile(workbook, `銷售季報_${report.start}_至_${report.end}.xlsx`);
-    } catch (err) {
-        console.error('匯出季報失敗：', err);
-        alert('匯出季報失敗：' + err.message + '\n請確認目前這筆資料及連線／權限，重試前先查詢作業結果；若持續失敗，請聯絡管理員。');
-    }
-};
-
-function renderMissingCostOrders() {
-    const tbody = document.getElementById('missingCostOrdersBody');
-    const summary = document.getElementById('missingCostOrdersSummary');
-    if (!tbody || !summary) return;
-    const report = buildSalesStatisticsReport();
-    const missingRows = report.details.filter(({ order }) => !orderHasCost(order));
-    summary.innerText = `${report.start || '未指定'} 至 ${report.end || '未指定'}，依目前篩選條件共 ${missingRows.length} 筆。請填寫每單位含稅進貨成本。`;
-    tbody.innerHTML = missingRows.length ? missingRows.map(({ order, sales, brand }) => `
-        <tr>
-            <td>${escapeHtml(order.orderDate || '')}</td>
-            <td>${escapeHtml(order.customerName || '')}</td>
-            <td>${escapeHtml(sales)}</td>
-            <td>${escapeHtml(brand)}</td>
-            <td class="missing-cost-product"><strong>${escapeHtml(order.itemName || '－')}</strong><br><small>${escapeHtml(order.itemCode || '')}</small></td>
-            <td>${escapeHtml(String(orderQuantity(order)))}</td>
-            <td>${formatStatsMoney(salesAmount(order))}</td>
-            <td><input type="number" min="0" step="0.01" class="missing-cost-input" aria-label="${escapeAttr(order.itemName || '訂單')}單位成本" onchange="saveMissingCostFromStats(${inlineJsValue(order.id)},${inlineJsValue(order.itemId || '')},${inlineJsValue(orderStatsProductId(order))},${inlineJsValue(order.procurementType || 'PURCHASING_PO')}, this)"><small class="missing-cost-save-state"></small></td>
-        </tr>
-    `).join('') : '<tr><td colspan="8" style="color:#888;padding:18px;">目前篩選範圍內沒有缺少成本的訂單。</td></tr>';
-}
-
-window.openMissingCostOrders = function() {
-    renderMissingCostOrders();
-    document.getElementById('missingCostOrdersOverlay')?.classList.add('active');
-};
-
-window.closeMissingCostOrders = function() {
-    document.getElementById('missingCostOrdersOverlay')?.classList.remove('active');
-};
-
-window.saveMissingCostFromStats = async function(orderId, itemId, productId, procurementType, input) {
-    if (currentUserRole !== 'admin' && currentUserRole !== 'purchaser') {
-        alert('只有採購或管理員可以補填成本。');
-        renderMissingCostOrders();
-        return;
-    }
-    const cost = Number(input.value);
-    if (input.value === '' || !Number.isFinite(cost) || cost < 0) {
-        alert('請輸入大於或等於 0 的單位成本。');
-        input.focus();
-        return;
-    }
-    const state = input.parentElement?.querySelector('.missing-cost-save-state');
-    input.disabled = true;
-    if (state) state.innerText = '儲存中…';
-    try {
-        if (procurementType === 'SALES_SELF_ORDER') {
-            const original = salesStatisticsOrders.find(order => order.id === orderId) || ordersCache.find(order => order.id === orderId);
-            if (!original) throw new Error('找不到原訂單。');
-            const updates = {
-                costPrice: cost,
-                costSource: 'manual_transaction_cost_correction',
-                updatedAt: new Date().toISOString()
-            };
-            if (Array.isArray(original.items) && original.items.length) {
-                updates.items = original.items.map((item, index) => {
-                    const sameItem = itemId ? item.itemId === itemId : index === 0;
-                    return sameItem ? { ...item, costPrice:cost, costSource:'manual_transaction_cost_correction' } : item;
-                });
-            }
-            await db.collection('orders').doc(orderId).set(updates, { merge:true });
-            const applyLocal = order => {
-                if (!order) return;
-                order.costPrice = cost;
-                order.costSource = 'manual_transaction_cost_correction';
-                if (updates.items) order.items = updates.items;
-            };
-            applyLocal(salesStatisticsOrders.find(order => order.id === orderId));
-            applyLocal(ordersCache.find(order => order.id === orderId));
-        } else {
-            const resolvedProductId = String(productId || '').trim();
-            if (!resolvedProductId) throw new Error('這筆訂單找不到產品主檔，無法安全寫入標準成本。');
-            const line = salesStatisticsOrders.flatMap(salesStatisticOrderLines)
-                .find(order => order.id === orderId && orderStatsProductId(order) === resolvedProductId);
-            await db.collection('productCosts').doc(resolvedProductId).set({
-                productId: resolvedProductId,
-                productLineId: line?.productLine || '',
-                standardCost: cost,
-                salesVisible: false,
-                source: 'STATS_COST_UPDATE',
-                updatedAt: new Date().toISOString(),
-                updatedBy: currentUser?.uid || ''
-            }, { merge:true });
-            purchaseCostCache.set(resolvedProductId, cost);
-            invalidateVisibleProductCosts();
-        }
-        renderSalesStatistics();
-        renderMissingCostOrders();
-    } catch (err) {
-        input.disabled = false;
-        if (state) state.innerText = '儲存失敗';
-        alert('成本儲存失敗：' + err.message + '\n請確認目前這筆資料及連線／權限，重試前先查詢作業結果；若持續失敗，請聯絡管理員。');
-    }
 };
 
 function inlineJsValue(value) { return escapeAttr(JSON.stringify(String(value ?? ''))); }
