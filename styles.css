@@ -5164,3 +5164,11 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
   }
   #appContainer #admin-system :is(.admin-panel,.panel,.table-wrap) { max-width:100%; min-width:0; }
 }
+
+/* Keep quote save-as-new action next to the active quote number on mobile. */
+.quote-editing-banner #saveLoadedQuoteAsNewBtn { flex:0 0 auto; min-height:40px; padding:8px 12px; white-space:normal; }
+@media screen and (max-width:768px) {
+  .quote-editing-banner { flex-wrap:wrap; gap:8px; }
+  .quote-editing-banner > div { flex:1 1 170px; min-width:0; }
+  .quote-editing-banner #saveLoadedQuoteAsNewBtn { flex:0 1 auto; max-width:100%; font-size:14px; }
+}
