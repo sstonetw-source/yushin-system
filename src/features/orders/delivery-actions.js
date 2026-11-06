@@ -6,7 +6,24 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
     const cachedOrder = ordersCache.find(item => item.id === orderId);
     if (!cachedOrder || !canManageOrderLifecycleCapability() || !canEditPage('orders.list')) return;
     if(deliveryConfirmationProtectedMode()){
-        openDeliveryModal(orderId);openPartialDeliveryForm();return;
+        const {available,whole}=protectedOrderDeliveryAction(cachedOrder);
+        if(!available)return;
+        openDeliveryModal(orderId);
+        openPartialDeliveryForm();
+        if(whole){
+            const item=document.getElementById('deliveryItemId');
+            if(item&&item.value!==whole.itemId){
+                item.value=whole.itemId;
+                renderDeliveryModal();
+            }
+            const shipment=document.getElementById('deliveryShipmentId');
+            if(shipment&&!shipment.disabled){
+                shipment.value=whole.shipmentId;
+                if(shipment.value===whole.shipmentId)
+                    document.getElementById('deliveryQty').value=whole.quantity;
+            }
+        }
+        return;
     }
     if(orderInventorySyncIncomplete(cachedOrder)){showActionFeedback('訂單庫存尚未同步完成，請先完成同步。','warning');return;}
     const cachedProgress = deliveryProgressInfo(cachedOrder);

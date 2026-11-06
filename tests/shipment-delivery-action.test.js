@@ -41,6 +41,60 @@ test('legacy gate keeps the original partly received and shippable action rule',
  assert.equal(f.c.orderContextActionState(f.order).showPartialDelivery,true);
 });
 
+test('one shipment defaults to whole delivery for goods-only and mixed orders',()=>{
+ for(const mixed of [false,true]){
+  const {c,order}=fixture();
+  order.items[0].qty=5;
+  if(mixed)order.items.unshift({itemId:'S',productType:'Service',qty:1});
+  order.warehouseShipmentRecords.shift();
+  order.deliveryRecords=[];
+  order.returnRecords=[];
+  const {available,whole}=c.orderContextActionState(order).protectedDelivery;
+  assert.equal(available,true);
+  assert.deepEqual({...whole},{itemId:'I',shipmentId:'ship-B',quantity:5});
+  order.items.find(item=>item.itemId==='I').qty=6;
+  assert.equal(c.orderContextActionState(order).protectedDelivery.whole,null);
+ }
+});
+test('multiple pending shipments keep explicit batch selection',()=>{
+ const {c,order}=fixture();
+ order.items[0].qty=9;
+ order.deliveryRecords=[];
+ order.returnRecords=[];
+ const {available,whole}=c.orderContextActionState(order).protectedDelivery;
+ assert.equal(available,true);
+ assert.equal(whole,null);
+});
+test('the whole-delivery action preselects the source and quantity without saving',async()=>{
+ const source=fs.readFileSync('src/features/orders/delivery-actions.js','utf8');
+ const fields={deliveryItemId:{value:'other'},deliveryShipmentId:{value:''},deliveryQty:{value:''}};
+ const c=vm.createContext({ordersCache:[{id:'O'}],pendingDeliveryOrderIds:new Set(),
+  canManageOrderLifecycleCapability:()=>true,canEditPage:()=>true,deliveryConfirmationProtectedMode:()=>true,
+  protectedOrderDeliveryAction:()=>({available:true,whole:{itemId:'I',shipmentId:'ship-B',quantity:5}}),
+  openDeliveryModal(){},openPartialDeliveryForm(){},renderDeliveryModal(){},
+  document:{getElementById:id=>fields[id]}});
+ c.window=c;
+ vm.runInContext(source.slice(0,source.indexOf('window.quickCancelAllDelivery =')),c);
+ await c.quickCompleteDelivery('O');
+ assert.equal(fields.deliveryItemId.value,'I');
+ assert.equal(fields.deliveryShipmentId.value,'ship-B');
+ assert.equal(fields.deliveryQty.value,5);
+});
+test('shipped goods with zero remaining reservation stay in delivery while partial shortages stay visible',()=>{
+ const {order}=fixture();
+ order.items[0]= {itemId:'I',productId:'P',productType:'Goods',qty:5,reservedQty:0,warehouseShippedQty:5};
+ order.warehouseShipmentRecords.shift();
+ order.deliveryRecords=[];
+ order.returnRecords=[];
+ const item=order.items[0],dispatch={returned:0,delivered:0,grossDelivered:0,pending:0,shippable:0};
+ const c=vm.createContext({YushinFulfillment:core,YushinWorkflow:require('../modules/workflow-core'),
+  orderLifecycleInfo:()=>({status:'normal'}),savedDeliveryRecords:o=>o.deliveryRecords,savedReturnRecords:o=>o.returnRecords});
+ vm.runInContext(source.slice(source.indexOf('function orderItemWorkCategory('),source.indexOf('function orderWorkCategories(')),c);
+ assert.deepEqual([...c.orderItemDisplayCategories(order,item,null,dispatch)],['shipping']);
+ item.qty=6;
+ assert.deepEqual([...c.orderItemDisplayCategories(order,item,null,dispatch)],['ordering','shipping']);
+});
+
 function completedFormFixture(){
  const source=fs.readFileSync('src/features/orders/lifecycle-workspace.js','utf8');
  const code=source.slice(source.indexOf('window.openPartialDeliveryForm ='),source.indexOf('\nwindow.openPartialDeliveryForOrder ='));

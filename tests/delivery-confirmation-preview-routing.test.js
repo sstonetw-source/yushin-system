@@ -97,6 +97,7 @@ test('Preview UI opens partial confirmation and keeps reversal read-only, not le
  const calls=[],messages=[];
  const c=vm.createContext({window:null,APP_ENVIRONMENT:'preview',YUSHIN_V2_DELIVERY_EMULATOR:false,
   deliveryConfirmationProtectedMode:()=>true,
+  protectedOrderDeliveryAction:()=>({available:true,whole:null}),
   currentDeliveryOrderId:'O',pendingDeliveryOrderIds:new Set(),ordersCache:[{id:'O'}],
   canManageOrderLifecycleCapability:()=>true,canEditPage:()=>true,
   openDeliveryModal:id=>calls.push('open:'+id),openPartialDeliveryForm:()=>calls.push('partial'),

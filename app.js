@@ -11489,22 +11489,35 @@ function orderContextActionState(order, normalizedItems = null, dispatchStateByI
         return ordered > 0 && received > 0 && received < ordered && Number(state?.shippable || 0) > 0;
     });
     let showPartialDelivery=hasPartialArrival || (items.length > 1 && states.some(state => Number(state?.shippable || 0) > 0));
-    if(deliveryConfirmationProtectedMode()){
-        try{
-            // Customer acknowledgement consumes shipped quota. Once all printed
-            // goods leave the warehouse, shippable is zero but arrival is pending.
-            const frozen=pendingV2DeliveryConfirmation(order.id);
-            const projected=globalThis.YushinFulfillment.projectOrderShipmentReturns({orderId:order.id,items:order.items,
-                shipments:order.warehouseShipmentRecords||[],deliveries:order.deliveryRecords||[],returns:order.returnRecords||[]});
-            showPartialDelivery=!!frozen||(!orderInventorySyncIncomplete(order)
-                &&(order.returnRecords||[]).every(row=>row.settlement==='CLOSE')&&projected.pendingDeliveryQty>0);
-        }catch(_){showPartialDelivery=false;}
-    }
+    const protectedDelivery=deliveryConfirmationProtectedMode()?protectedOrderDeliveryAction(order):null;
+    if(protectedDelivery)showPartialDelivery=protectedDelivery.available;
     return {
+        protectedDelivery,
         showPartialDelivery: normalizedOrderStatus(order) === 'normal'
             && showPartialDelivery,
         showReturn: netDelivered > 0
     };
+}
+
+function protectedOrderDeliveryAction(order) {
+    const unavailable={available:false,whole:null};
+    if(normalizedOrderStatus(order)!=='normal')return unavailable;
+    try {
+        if(pendingV2DeliveryConfirmation(order.id))return {available:true,whole:null};
+        if(orderInventorySyncIncomplete(order)||!(order.returnRecords||[]).every(row=>row.settlement==='CLOSE'))
+            return unavailable;
+        const projected=globalThis.YushinFulfillment.projectOrderShipmentReturns({
+            orderId:order.id,items:order.items,shipments:order.warehouseShipmentRecords||[],
+            deliveries:order.deliveryRecords||[],returns:order.returnRecords||[]
+        });
+        if(!projected.pendingDeliveryQty)return unavailable;
+        const batches=projected.items.flatMap(item=>item.shipments.filter(batch=>batch.pendingQty>0)
+            .map(batch=>({itemId:item.itemId,shipmentId:batch.shipmentId,quantity:batch.pendingQty})));
+        const whole=batches.length===1&&projected.outstandingQty===0?batches[0]:null;
+        return {available:true,whole};
+    } catch (_) {
+        return unavailable;
+    }
 }
 
 function dispatchActionHtml(order, normalizedItems = null, dispatchStateByItem = null) {
@@ -11776,7 +11789,22 @@ function orderItemDisplayCategory(order, item, lifecycleOverride = null, dispatc
 
 function orderItemDisplayCategories(order, item, lifecycleOverride = null, dispatchOverride = null) {
     const dispatch = dispatchOverride || itemDispatchState(order, item);
-    const category=orderItemDisplayCategory(order,item,lifecycleOverride,dispatch);
+    let pendingDelivery=0;
+    const shipments=order.warehouseShipmentRecords?.filter(row=>row.itemId===item.itemId);
+    if(shipments?.length){
+        try {
+            pendingDelivery=globalThis.YushinFulfillment.projectShipmentReturns({
+                orderId:order.id,itemId:item.itemId,productKey:item.inventoryProductKey||item.productId,
+                orderedQty:item.orderedQty??item.qty,shipments,
+                deliveries:savedDeliveryRecords(order).filter(row=>row.itemId===item.itemId),
+                returns:savedReturnRecords(order).filter(row=>row.itemId===item.itemId)
+            }).pendingDeliveryQty;
+        } catch (_) { /* An unverified shipment must not change the displayed work. */ }
+    }
+    // Shipped units awaiting acknowledgement are already covered, so they
+    // must not appear as a fresh shortage in the order list.
+    const displayItem=pendingDelivery?{...item,reservedQty:Number(item.reservedQty||0)+pendingDelivery}:item;
+    const category=orderItemDisplayCategory(order,displayItem,lifecycleOverride,dispatch);
     if(category!=='closed'&&['pending','failed'].includes(order?.inventoryReservationStatus))return [];
     const warehouse=(item.fulfillmentType||order.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP'
         &&String(item.productType||'').trim().toUpperCase()!=='SERVICE';
@@ -11785,7 +11813,7 @@ function orderItemDisplayCategories(order, item, lifecycleOverride = null, dispa
     if(!warehouse || category==='closed' || category==='billing' || category==='complete')return [category];
     const categories=[category];
     if(['ordering','arrival'].includes(category) && dispatch.pending>0)categories.push('dispatch');
-    if(category!=='shipping' && dispatch.shippable>0)categories.push('shipping');
+    if(category!=='shipping' && (dispatch.shippable>0||pendingDelivery>0))categories.push('shipping');
     return categories;
 }
 
@@ -12470,7 +12498,12 @@ window.renderOrdersList = function() {
         const deliveryProgress = deliveryProgressInfo(o, allOrderItems);
         const fulfillmentProgress = canConfirmOrderDelivery ? fulfillmentProgressInfo(o, allOrderItems, dispatchStateByItem) : null;
         const contextActions = orderContextActionState(o, allOrderItems, dispatchStateByItem);
-        const useBatchDelivery = orderDeliveryRequiresItemForm(allOrderItems, deliveryProgress, fulfillmentProgress);
+        const protectedDelivery=contextActions.protectedDelivery;
+        const useBatchDelivery = protectedDelivery ? !protectedDelivery.whole
+            : orderDeliveryRequiresItemForm(allOrderItems, deliveryProgress, fulfillmentProgress);
+        const canOpenDelivery=canConfirmOrderDelivery&&lifecycle.status==='normal'
+            && (protectedDelivery?protectedDelivery.available
+                :deliveryProgress.state!=='complete'&&fulfillmentProgress.shippable>0);
         const deliveryPending = pendingDeliveryOrderIds.has(o.id);
         const billingPending = pendingOrderStatusKeys.has(o.id + ':isBilled');
         const inventorySyncPending = pendingOrderReservationIds.has(o.id);
@@ -12526,7 +12559,7 @@ window.renderOrdersList = function() {
                             || allOrderItems.some(item=>unresolvedV3CustodyReturnExists(o.id,item.itemId)))
                         ? `<button type="button" class="btn-small" onclick="openV3CustodyReturn(${inlineJsValue(o.id)})">保管退貨實收／核對</button>`:''}
                     
-                    ${canConfirmOrderDelivery && lifecycle.status === 'normal' && deliveryProgress.state !== 'complete' && (fulfillmentProgress.shippable>0 || deliveryPending) ? `<button type="button" class="btn-small" onclick="${useBatchDelivery ? 'openPartialDeliveryForOrder' : 'quickCompleteDelivery'}(${inlineJsValue(o.id)})" ${orderInventorySyncIncomplete(o) || lifecycle.status !== 'normal' || deliveryPending || deliveryProgress.state === 'complete' || fulfillmentProgress.shippable<=0 ? 'disabled' : ''}>${deliveryPending ? '處理中…' : useBatchDelivery ? '確認分批送達' : '確認送達'}</button>` : ''}
+                    ${canConfirmOrderDelivery && (canOpenDelivery || deliveryPending) ? `<button type="button" class="btn-small" onclick="${useBatchDelivery ? 'openPartialDeliveryForOrder' : 'quickCompleteDelivery'}(${inlineJsValue(o.id)})" ${orderInventorySyncIncomplete(o) || deliveryPending ? 'disabled' : ''}>${deliveryPending ? '處理中…' : useBatchDelivery ? '確認分批送達' : '確認送達'}</button>` : ''}
                     ${canBusinessSelfOrder(o) ? `<button type="button" class="btn-small order-billing-action ${o.isBilled ? 'btn-secondary' : ''}" onclick="toggleOrderStatus('${o.id}', 'isBilled', ${!o.isBilled})" ${lifecycle.status !== 'normal' || billingPending || inventorySyncPending || (!o.isBilled && o.serviceFulfillment && !allOrderItems.every(item=>orderItemWorkCategory(o,item,lifecycle,dispatchStateByItem.get(item))==='billing')) ? 'disabled' : ''}>${billingPending ? '儲存中…' : o.isBilled ? '已核銷' : (o.serviceFulfillment?'確認已核銷':'核銷')}</button>` : ''}
                     <details class="order-more-menu">
                         <summary title="更多操作">⋯</summary>
@@ -22698,7 +22731,24 @@ window.quickCompleteDelivery = async function(orderIdOverride) {
     const cachedOrder = ordersCache.find(item => item.id === orderId);
     if (!cachedOrder || !canManageOrderLifecycleCapability() || !canEditPage('orders.list')) return;
     if(deliveryConfirmationProtectedMode()){
-        openDeliveryModal(orderId);openPartialDeliveryForm();return;
+        const {available,whole}=protectedOrderDeliveryAction(cachedOrder);
+        if(!available)return;
+        openDeliveryModal(orderId);
+        openPartialDeliveryForm();
+        if(whole){
+            const item=document.getElementById('deliveryItemId');
+            if(item&&item.value!==whole.itemId){
+                item.value=whole.itemId;
+                renderDeliveryModal();
+            }
+            const shipment=document.getElementById('deliveryShipmentId');
+            if(shipment&&!shipment.disabled){
+                shipment.value=whole.shipmentId;
+                if(shipment.value===whole.shipmentId)
+                    document.getElementById('deliveryQty').value=whole.quantity;
+            }
+        }
+        return;
     }
     if(orderInventorySyncIncomplete(cachedOrder)){showActionFeedback('訂單庫存尚未同步完成，請先完成同步。','warning');return;}
     const cachedProgress = deliveryProgressInfo(cachedOrder);
