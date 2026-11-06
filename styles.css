@@ -4969,3 +4969,44 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
 @media screen {
  #appContainer :is(#ordersTable,.workflow-list-table) .order-progress-cell small { display:block; max-width:100%; box-sizing:border-box; padding-inline-end:4px; white-space:normal; overflow-wrap:anywhere; }
 }
+
+/* Admin staff directory: compact mobile cards, retaining existing role controls. */
+@media screen and (max-width: 768px) {
+  #appContainer #admin-system .sub-nav { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+  #appContainer #admin-system .sub-nav > .sub-tab { width:auto; min-width:0; min-height:44px; padding:9px 6px !important; }
+  #appContainer #admin-system #systemVersionLabel { grid-column:1 / -1; justify-self:center; margin:0 !important; }
+  #appContainer #admin-sales { width:100%; max-width:100%; overflow:visible; }
+  #appContainer #admin-sales > table,
+  #appContainer #admin-sales > table > tbody { display:block; width:100%; min-width:0; }
+  #appContainer #admin-sales > table > thead { display:none; }
+  #appContainer #admin-sales #adminSalesBody > tr {
+    display:grid; grid-template-columns:minmax(0,1fr); width:100%; height:auto !important;
+    min-height:0 !important; margin:0 0 12px; padding:12px 14px;
+    border:1px solid var(--ys-border,#d0c8bd); border-radius:12px;
+    background:var(--ys-surface,#fff); box-sizing:border-box;
+  }
+  #appContainer #admin-sales #adminSalesBody > tr > td {
+    display:flex !important; align-items:center; justify-content:space-between; gap:12px;
+    width:auto !important; min-width:0 !important; max-width:100%;
+    height:auto !important; min-height:0 !important; padding:8px 0 !important;
+    border:0; border-bottom:1px solid var(--ys-border,#ddd);
+    box-sizing:border-box; text-align:right; white-space:normal;
+    overflow-wrap:anywhere; word-break:break-word;
+  }
+  #appContainer #admin-sales #adminSalesBody > tr > td:last-child { border-bottom:0; }
+  #appContainer #admin-sales #adminSalesBody > tr > td::before {
+    flex:0 0 72px; text-align:left; color:var(--ys-muted,#667085);
+    font-size:13px; font-weight:600;
+  }
+  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(1)::before { content:"代號"; }
+  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(2)::before { content:"姓名"; }
+  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(3)::before { content:"電話"; }
+  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(4)::before { content:"Email"; }
+  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(5)::before { content:"身分"; }
+  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(6)::before { content:"領貨／地址"; }
+  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(7)::before { content:"密碼"; }
+  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(8)::before { content:"帳號 UID"; }
+  #appContainer #admin-sales #adminSalesBody :is(select,input,button) {
+    max-width:100%; min-width:0; box-sizing:border-box;
+  }
+}
