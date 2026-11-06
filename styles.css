@@ -5020,6 +5020,7 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
   }
   #appContainer #admin-sales > table,
   #appContainer #admin-products .price-list-table-wrap { display:none; }
+  #admin-products > .panel { padding:0; border:0; background:transparent; }
   #admin-system .admin-mobile-cards { display:block; }
   #admin-sales #adminSalesCards > h3 { margin:0 0 12px; }
   #admin-products #productOverviewStatus { margin:12px 0; color:var(--ys-muted); font-size:14px; }
@@ -5061,15 +5062,19 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
     padding:8px !important; border-radius:8px !important; font-size:14px !important;
     white-space:normal;
   }
+  #admin-system .admin-mobile-card :is(.admin-card-actions,.price-list-action-group) > .btn-secondary,
+  #admin-products .admin-mobile-card .price-list-more-actions {
+    background:#fff; color:var(--ys-primary-hover); border-color:var(--ys-primary);
+  }
   #admin-system .admin-card-menu:not([hidden]) {
     display:grid; gap:0; overflow:hidden;
     border:1px solid var(--ys-border); border-radius:8px;
   }
-  #admin-system .admin-card-menu > button {
+  #admin-system .admin-mobile-card .admin-card-menu > button {
     width:100%; background:#fff; color:var(--ys-text); border:0;
     border-radius:0 !important; box-shadow:none; text-align:left; padding-inline:12px !important;
   }
-  #admin-system .admin-card-menu > button:not(:first-child) { border-top:1px solid var(--ys-border); }
+  #admin-system .admin-mobile-card .admin-card-menu > button:not(:first-child) { border-top:1px solid var(--ys-border); }
   #admin-system .admin-card-role-field {
     display:grid; grid-template-columns:auto minmax(0,1fr); gap:12px;
     align-items:center; padding:6px 12px;
