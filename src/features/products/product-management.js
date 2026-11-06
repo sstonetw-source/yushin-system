@@ -23,6 +23,7 @@ function setProductBatchMaintenanceBusy(busy) {
     document.querySelectorAll('#productBatchMaintenance button').forEach(button => {
         button.disabled = productBatchMaintenanceInProgress;
     });
+    if (!busy) void refreshProductImportResumeControls();
 }
 
 function canManagePendingProductMaster() {
