@@ -5042,3 +5042,20 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
   #admin-products .price-list-action-group button { flex:1 1 125px; min-width:0; min-height:44px; white-space:normal; }
   #admin-system #admin-sales #adminSalesBody > tr > td:nth-child(8) { overflow-wrap:anywhere; word-break:break-all; }
 }
+
+
+/* Admin mobile overflow follow-up: constrain generated content without changing handlers. */
+@media screen and (max-width:768px) {
+  #admin-system, #admin-system .admin-panel, #admin-system .panel { min-width:0; max-width:100%; box-sizing:border-box; }
+  #admin-system button, #admin-system input, #admin-system select { max-width:100%; box-sizing:border-box; }
+  #admin-sales { width:100%; max-width:100%; overflow-x:hidden; }
+  #admin-sales #adminSalesBody > tr { max-width:100%; box-sizing:border-box; }
+  #admin-sales #adminSalesBody > tr > td { min-width:0; max-width:100%; overflow-wrap:anywhere; }
+  #admin-sales #adminSalesBody > tr > td:nth-child(8) { word-break:break-all; overflow-wrap:anywhere; font-size:12px; }
+  #admin-sales #adminSalesBody > tr > td button { min-width:0; max-width:100%; white-space:normal; }
+  #admin-products #productOverviewBody > tr > td[colspan] { display:block !important; text-align:left; }
+  #admin-products #productOverviewBody > tr > td[colspan]::before { content:none; }
+  #admin-products #productOverviewBody > tr > td > * { min-width:0; max-width:100%; }
+  #admin-products #productOverviewBody .price-list-action-group { justify-content:flex-start; width:100%; }
+  #admin-products .price-list-task-body button { flex:none; }
+}
