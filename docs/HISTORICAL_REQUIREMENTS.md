@@ -32,11 +32,30 @@
 | 地址貼紙去單號、移除出貨清單列印 | 2026-11-05 | P2 | [#469](https://github.com/sstonetw-source/yushin-system/pull/469) | 完成 | main | 前端已發布 | 隔離通過，正式實物輸出待驗證 | 沿用地址貼紙及 CSV |
 | 訂單客戶卡片、狀態標題與進度／採購文字 | 2026-11-04 | P2 | [#458](https://github.com/sstonetw-source/yushin-system/pull/458)、[#461](https://github.com/sstonetw-source/yushin-system/pull/461)、[#462](https://github.com/sstonetw-source/yushin-system/pull/462)、[#463](https://github.com/sstonetw-source/yushin-system/pull/463)、[#467](https://github.com/sstonetw-source/yushin-system/pull/467) | 完成 | main | 前端已發布 | 定向通過，正式資產已核對 | 依使用者指示，低風險顯示調整無獨立正式驗收 |
 | 儀器資料、保養／維修、日期、到期／逾期及匯出入 | 2026-10-12 可追溯 | P2 | [#55](https://github.com/sstonetw-source/yushin-system/issues/55)、[儀器工作區](../src/features/equipment/equipment-workspace.js) | 部分 | main | 頁面已發布 | 真角色待驗證 | 核對客戶篩選、序號重複／並行與主動通知範圍；30 天狀態提示已存在 |
-| 人員資料及停用、客戶／儀器／文件關聯與交接 | 2026-10-12 可追溯 | P2 | [#454](https://github.com/sstonetw-source/yushin-system/pull/454)、[管理工作區](../src/features/administration/user-and-system-settings.js) | 部分 | main | 前端已發布，交接 Callable 待驗證 | 待驗證 | 正式交接版本及真角色；保留既有 salesCode、歷史姓名與建立者 |
-| 管理員後台及固定角色權限 | 2026-11-01 | P2 | [#452](https://github.com/sstonetw-source/yushin-system/pull/452)、[#454](https://github.com/sstonetw-source/yushin-system/pull/454)、[角色](../src/app/role-capabilities.js)、[Rules](../firestore.rules) | 部分 | main | 已發布既有角色及頁面 | 待驗證 | 剩餘匯出／管理操作逐角色對照；沿用已移除的瀏覽器資料重置入口 |
-| 管理員可編輯逐功能 CRUD／匯出矩陣 | 2026-11-05 可追溯 | P2 | [固定角色](../src/app/role-capabilities.js) | 未實作 | 未合併 | 未發布 | 未驗 | 獨立後續需求，須先確認權限政策 |
+| 人員資料及停用、客戶／儀器／文件關聯與交接 | 2026-10-12 可追溯 | P2 | [#454](https://github.com/sstonetw-source/yushin-system/pull/454)、[管理工作區](../src/features/administration/user-and-system-settings.js) | 部分 | main | 前端已發布，交接 Callable 待驗證 | 待驗證 | [#485](https://github.com/sstonetw-source/yushin-system/issues/485) 追蹤正式交接版本及真角色；保留既有 salesCode、歷史姓名與建立者 |
+| 管理員後台及固定角色權限 | 2026-11-01 | P2 | [#485](https://github.com/sstonetw-source/yushin-system/issues/485)、[#452](https://github.com/sstonetw-source/yushin-system/pull/452)、[#454](https://github.com/sstonetw-source/yushin-system/pull/454) | 已清理入口及按需載入，既有安全邊界待修 | [#487](https://github.com/sstonetw-source/yushin-system/pull/487) | 依 Pages 發布紀錄 | 正式五角色待驗 | 交接部署、強制改密碼、敏感欄位及正式驗收留 #485 |
+| 管理員可編輯逐功能 CRUD／匯出矩陣 | 2026-11-05 可追溯 | P2 | [#486](https://github.com/sstonetw-source/yushin-system/issues/486) | 未實作 | 未合併 | 未發布 | 未驗 | 獨立後續需求，須先確認權限政策 |
 | 成本底層隔離 | 2026-10-06 可追溯 | P2 | [#31](https://github.com/sstonetw-source/yushin-system/issues/31) | 已同意暫緩 | 原固定角色已進 main | 既有範圍已發布 | 完整隔離待驗證 | 依 #31 既有決策 |
 | 價格表與庫存表匯入減少讀寫／傳輸 | 2026-11-01 | P2 | [產品匯入](../src/features/products/product-master-import.js)、[品牌管理](../src/features/administration/brand-settings.js) | 既有匯入，效能證據待驗證 | main | 既有匯入已發布 | 待驗證 | 正式角色操作與差異集讀寫量 |
+
+## 管理員後台盤點（2026-11-06）
+
+盤點基準為 [main ddbc586](https://github.com/sstonetw-source/yushin-system/commit/ddbc586e2f88dd47948ea45d24ba52188285cbbc)，含八個可見分頁及原隱藏工具。沿用 #452 的離線重置工具及瀏覽器只檢查匯出檔案的設計，沿用 #454 的原子交接。
+
+| 分頁／功能 | 分類 | 核對與處理 |
+| --- | --- | --- |
+| 人員名單、角色、領貨及地址 | 保留 | 讀取 `users`，管理員角色與代收設定仍依既有 Rules，帳號建立及停用走 Firebase Console。名單載入只讀人員資料。重設信沿用 Auth，強制改密碼狀態留 #485。 |
+| 業務代號交接 | 保留／整合 | 與人員名單相鄰。進入後讀 `users`、`salesCodes`，交接只走 `transferSalesCodeOwner`。後端在交易內檢查操作者角色及啟用狀態，更新主檔並記錄操作 ID。部署、真角色及直接寫入邊界留 #485。 |
+| 廠牌設定 | 保留 | `brands` 與 `settings` 的統計、別名、報價公司及缺漏補齊操作沿用。開頁移除無關的供應商、供應商對應及倉庫查詢。供應商設定由採購頁維護。 |
+| 價目表管理 | 整合 | 上傳與接續主檔匯入共用同一檔案入口，保留獨立的價格專用匯入、範本、停用、啟用與刪除價格。最近 100 筆候選 `priceHistory` 僅在展開時讀取。移除無呼叫者的批量停用及整個廠牌產品移除舊入口。 |
+| 進銷存分析及 Excel | 保留 | 沿用既有期間、交易及庫存查詢與匯出。重進使用原有短期查詢快取。移除已由分頁明細取代的舊彈窗及季報匯出，移除未連接的手動補成本寫入。 |
+| 倉庫管理 | 保留 | 查詢只載入 `warehouses`。保留新增、編輯、預設倉、啟用／停用，沿用後端對倉庫與交易的既有寫入限制。 |
+| 資料健康 | 保留 | 按下檢查才掃描多個主檔及交易集合，保留錯誤明細與查找捷徑。 |
+| 資料匯出與本機檢查 | 保留 | 保留部分 JSON 匯出與唯讀格式檢查，標示資料範圍及讀取量。原重置與正式還原仍由受控維護處理。 |
+| 用量估算、索引補建、舊成本隔離、廠牌相容稽核 | 移除 | 刪除會掃描 22 個集合的用量估算及三個舊瀏覽器維護入口與實作。保留新交易寫入的搜尋索引及現有廠牌解析。 |
+| 自訂 CRUD／匯出權限 | 後續 | 獨立追蹤 #486。 |
+
+後台及分頁入口要求實際角色與檢視角色均為管理員。Rules 仍以登入帳號的有效 `users` 文件判定權限。業務、採購、倉管、工程師皆無後台入口，仍可依各自業務需求讀共用人員、廠牌及倉庫主檔。採購保留 `products`／`productCosts` 的合法更新及 `priceHistory` 的讀取與新增。倉管保留交接交易原子建立的受限代管倉。正式環境的直接 API／Rules 拒絕、停權及操作回復列入 [#485](https://github.com/sstonetw-source/yushin-system/issues/485)。
 
 ## 維護方式
 

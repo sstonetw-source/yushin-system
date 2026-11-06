@@ -60,7 +60,7 @@ test('brand summary preserves latest price-list metadata regardless of duplicate
 });
 test('price-list event writes the existing brand document and history together',async()=>{
     const writes=[];let committed=false;
-    const c=vm.createContext({resolveBrandName:x=>x,brandMasterEntryForName:()=>({id:'existing-brand-id'}),brandMasterDocumentId:()=> 'new-brand-id',currentUser:{uid:'admin',email:'admin@example.com'},priceListHistoryRows:[],updateBrandPriceListCache:()=>{},
+    const c=vm.createContext({resolveBrandName:x=>x,brandMasterEntryForName:()=>({id:'existing-brand-id'}),brandMasterDocumentId:()=> 'new-brand-id',currentUser:{uid:'admin',email:'admin@example.com'},priceListHistoryRows:[],priceListHistoryLoad:null,sessionDataGeneration:0,updateBrandPriceListCache:()=>{},
         db:{collection:name=>({doc:id=>({name,id:id||'history-id'})}),batch:()=>({set:(ref,data)=>writes.push({ref,data}),commit:async()=>{committed=true;}})}});
     vm.runInContext(app.slice(app.indexOf('function priceListEventRecord('),app.indexOf('async function markPriceListImportComplete(')),c);
     await c.commitPriceListBrandEvent('Beckman Coulter','IMPORT',{priceListFile:'Beckman.xlsx'},{productCount:386});

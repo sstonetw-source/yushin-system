@@ -104,7 +104,7 @@ test('UI uses backend callable and does not bulk rewrite historical sales record
  assert.match(source,/httpsCallable\('transferSalesCodeOwner'\)/);
  assert.doesNotMatch(source,/syncSalesCodeMasterFromUsers|backfillSalesCodeForLegacyRecords|runFirestoreBatchUpdates/);
  const start=source.indexOf('let pendingSalesTransfer = null;');
- const end=source.indexOf('/* ---------- 資料庫用量估算 ---------- */',start);
+ const end=source.indexOf('function formatBytes(bytes)',start);
  assert.ok(start>=0&&end>start);
  assert.doesNotMatch(source.slice(start,end),/db\.batch\(\)/);
 });

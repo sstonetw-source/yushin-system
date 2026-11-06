@@ -447,17 +447,14 @@ test('main navigation exposes focused order and purchasing workspaces', () => {
     assert.match(appSource, /window\.openPurchasingWorkspace/);
 });
 
-test('agency settings do not trigger a full orders statistics query', () => {
-    const switchStart = appSource.indexOf('window.switchAdminTab =');
-    const switchEnd = appSource.indexOf('\n};', switchStart) + 3;
-    const adminSwitch = appSource.slice(switchStart, switchEnd);
-    const agencyLine = adminSwitch.split('\n').find(line => line.includes("tab === 'agencies'"));
-    assert.ok(agencyLine);
-    assert.doesNotMatch(agencyLine, /loadSalesStatistics/);
-    const statisticsStart = adminSwitch.indexOf("if (tab === 'statistics')");
-    const statisticsSource = adminSwitch.slice(statisticsStart);
-    assert.match(statisticsSource, /loadSalesStatistics\(true\)/);
-    assert.doesNotMatch(statisticsSource, /loadPurchasingAnalytics/);
+test('admin tabs load only the masters needed by the selected panel', () => {
+    const start = appSource.indexOf('function loadAdminPanel(tab)');
+    const end = appSource.indexOf('let inventoryReceivingVisible', start);
+    const source = appSource.slice(start, end);
+    assert.match(source, /tab === 'agencies'\) return ensureBrandSettingsLoaded\(\)/);
+    assert.match(source, /tab === 'statistics'\)[\s\S]*?renderAdminStatistics\(\)/);
+    assert.match(source, /tab === 'warehouses'\) return loadWarehouseMaster\(true\)/);
+    assert.doesNotMatch(source, /loadSupplierWarehouseMasters|loadPurchasingAnalytics/);
 });
 
 test('saving one new order updates the local cache without reloading the list', () => {
@@ -743,7 +740,6 @@ test('browser history restores internal pages without forcing Firestore reloads'
 
 
 
-
 test('quote owner wording includes both salespeople and engineers', () => {
     assert.match(appSource, /請選擇負責業務/);
     assert.match(indexSource, /負責業務：<\/label><select id="salesName"/);
@@ -836,7 +832,6 @@ test('quote primary actions focus on PDF delivery workflow without a print butto
 
 
 
-
 test('quote PDF paginates by item rows and repeats the column header on each page', () => {
     assert.match(appSource, /function paginateQuotePdfDocument\(stage, source\)/);
     assert.match(appSource, /createQuotePdfPage\(stage, source, true\)/);
@@ -900,22 +895,9 @@ test('three-quote export uses the same direct PDF engine', () => {
 
 
 
-test('quote and order search-index migration is admin-only batched and idempotent', () => {
-    const start = appSource.indexOf('window.backfillOrderSearchIndex =');
-    const end = appSource.indexOf('\n};', start) + 3;
-    const migration = appSource.slice(start, end);
-    assert.match(migration, /trueUserRole !== 'admin'/);
-    assert.match(migration, /currentUserRole !== 'admin'/);
-    assert.match(migration, /\['quotes','orders','forecasts','equipment'\]/);
-    assert.match(migration, /limit\(200\)/);
-    assert.match(migration, /startAfter\(cursor\)/);
-    assert.match(migration, /buildFullHistorySearchTokens/);
-    assert.match(migration, /data\.itemCodeKey !== normalized/);
-    assert.match(migration, /batch\.update/);
-    assert.match(migration, /orderSearchIndexAwaitingConfirmation/);
-    assert.match(migration, /請在 10 秒內再按一次確認開始/);
-    assert.doesNotMatch(migration, /confirm\(/);
-    assert.doesNotMatch(migration, /collection\('orders'\)\.get\(\)/);
+test('admin workspace retires the hidden browser maintenance tools', () => {
+    assert.doesNotMatch(indexSource, /orderSearchIndexMigrationBtn|brandMasterAuditBtn|inventoryCostMigrationPreviewBtn|storageUsageBody/);
+    assert.doesNotMatch(appSource, /window\.(backfillOrderSearchIndex|previewBrandMasterCompatibilityAudit|previewInventoryCostMigration|runInventoryCostMigration|calculateStorageUsage)\s*=/);
 });
 
 
@@ -1354,19 +1336,7 @@ test('purchasing and orders share brand names and date range semantics across wo
     assert.match(indexSource, /id="poPeriodFilter" onchange="changePurchasePeriod\(this\.value\)"/);
 });
 
-test('Brand Master compatibility removal is guarded by a read-only full-source audit', () => {
-    assert.match(indexSource, /id="brandMasterAuditBtn"/);
-    assert.match(indexSource, /onclick="previewBrandMasterCompatibilityAudit\(\)"/);
-    assert.match(appSource, /function buildBrandMasterCompatibilityAudit/);
-    assert.match(appSource, /canRemoveCompatibilityLayer/);
-    assert.match(appSource, /const historicalCollections = \['orders', 'quotes', 'forecasts', 'equipment'\]/);
-    const audit = appSource.slice(
-        appSource.indexOf('window.previewBrandMasterCompatibilityAudit'),
-        appSource.indexOf('function normalizeThermoBrandList')
-    );
-    assert.match(audit, /readCollectionForMigration\('products'\)/);
-    assert.doesNotMatch(audit, /\.set\(|\.update\(|\.delete\(|db\.batch\(/);
-});
+
 
 test('Forecast brand entry shares primary brands plus an explicit Other input', () => {
     assert.match(indexSource, /<select id="forecastBrand" onchange="onForecastBrandSelectChange\(\)">/);
@@ -1388,7 +1358,7 @@ test('new business records retain stable salesCode ownership without rewriting c
 
 test('sales handoff uses one trusted backend instead of historical bulk updates', () => {
     const start = appSource.indexOf('window.executeSalesTransfer = async function');
-    const end = appSource.indexOf('/* ---------- 資料庫用量估算 ---------- */', start);
+    const end = appSource.indexOf('function formatBytes(bytes)', start);
     const s = appSource.slice(start, end);
     const backend = fs.readFileSync(path.join(__dirname,'../functions/sales-code-transfer-service.js'),'utf8');
     assert.match(s,/httpsCallable\('transferSalesCodeOwner'\)/);
@@ -1805,7 +1775,6 @@ test('Firestore rules keep Product Master standard costs purchaser/admin only', 
 
 
 
-
 test('database backup includes formal Product Master and cost collections', () => {
     assert.match(appSource, /'products'/);
     assert.match(appSource, /'productCosts'/);
@@ -1981,15 +1950,6 @@ test('equipment removal uses soft disable and never Firestore delete', () => {
 });
 
 
-test('V2 legacy inventory cost migration is paginated and moves cost out of operational collections', () => {
-    assert.match(appSource, /function readCollectionForMigration/);
-    assert.match(appSource, /FieldPath\.documentId\(\)/);
-    assert.match(appSource, /inventoryLotCosts/);
-    assert.match(appSource, /FieldValue\.delete\(\)/);
-    assert.doesNotMatch(indexSource, /預覽庫存成本隔離/);
-    assert.doesNotMatch(indexSource, /執行庫存成本隔離/);
-});
-
 
 test('V2 historical COGS is reproducible from exact lot allocations and protected costs', () => {
     assert.match(appSource, /function protectedAllocationCost/);
@@ -2000,12 +1960,13 @@ test('V2 historical COGS is reproducible from exact lot allocations and protecte
 });
 
 
-test('V2 backup and storage audit include fulfillment and protected cost collections', () => {
+test('partial admin export retains fulfillment and protected cost collections', () => {
+    const start = appSource.indexOf('window.downloadDatabaseBackup =');
+    const end = appSource.indexOf('const RESTORABLE_BACKUP_COLLECTIONS', start);
+    const source = appSource.slice(start, end);
     for (const name of ['inventoryLots','inventoryLotCosts','receipts','supplyOrders','dispatchRecords']) {
-        assert.match(appSource, new RegExp("'" + name + "'"));
+        assert.match(source, new RegExp("'" + name + "'"));
     }
-    assert.match(appSource, /受保護批次成本/);
-    assert.match(appSource, /供應／訂貨紀錄/);
 });
 
 
@@ -2113,12 +2074,6 @@ test('all multi-item orders require item-level delivery even when direct ship', 
     assert.match(source, /確保送貨與退貨都能追蹤到正確品項/);
 });
 
-test('legacy cost migration sanitizes delivery and return allocations embedded in orders', () => {
-    assert.match(appSource, /function recordContainsEmbeddedCost/);
-    assert.match(appSource, /legacyOrders: orders\.filter/);
-    assert.match(appSource, /deliveryRecords:\(row\.data\.deliveryRecords\|\|\[\]\)\.map\(sanitizeRecord\)/);
-    assert.match(appSource, /returnRecords:\(row\.data\.returnRecords\|\|\[\]\)\.map\(sanitizeRecord\)/);
-});
 
 
 test('cancel and restore reservations are item-aware', () => {
@@ -2149,7 +2104,7 @@ test('delivery and return deletes reject duplicate submissions and cancelled ord
 
 test('system data audit follows supplyOrders as procurement truth', () => {
   const start=appSource.indexOf('window.runSystemDataAudit = async function()');
-  const end=appSource.indexOf('window.previewInventoryCostMigration',start);
+  const end=appSource.indexOf('function setPriceUploadProgress',start);
   const source=appSource.slice(start,end);
   assert.ok(start>=0&&end>start);
   assert.match(source,/readCollectionInBatches\('supplyOrders'\)/);
@@ -2161,11 +2116,6 @@ test('system data audit follows supplyOrders as procurement truth', () => {
   assert.doesNotMatch(source,/po\.orderId \|\| po\.sourceOrderId/);
 });
 
-test('legacy cost migration also sanitizes aggregate and warehouse stock cost fields', () => {
-  assert.match(appSource,/legacyWarehouseStocks/);
-  assert.match(appSource,/warehouseStocks/);
-  assert.match(appSource,/costSanitizedAt/);
-});
 
 
 test('database backup covers governed master, audit, delivery and Forecast progress data', () => {
@@ -2206,15 +2156,7 @@ test('new order modal has no manual draft UI or typing autosave, while save retr
   assert.match(saveFlow,/localStorage\.removeItem\(savedPendingKey\)/);
 });
 
-test('admin storage exposes a read-only legacy-cost audit without an execution button', () => {
-  assert.match(indexSource,/id="inventoryCostMigrationPreviewBtn"/);
-  assert.match(indexSource,/onclick="previewInventoryCostMigration\(\)"/);
-  assert.match(indexSource,/只讀取並統計舊庫存/);
-  assert.doesNotMatch(indexSource,/onclick="runInventoryCostMigration\(\)"/);
-  const preview=appSource.slice(appSource.indexOf('window.previewInventoryCostMigration'),appSource.indexOf('window.runInventoryCostMigration'));
-  assert.match(preview,/\.map\(name => readCollectionForMigration\(name\)\)/);
-  assert.doesNotMatch(preview,/\.map\(readCollectionForMigration\)/);
-});
+
 
 test('production HTML cache-busts local application assets after main deployments', () => {
   assert.match(indexSource,/styles\.css\?v=\d{8}-\d+/);
@@ -2443,7 +2385,7 @@ test('order and purchasing initialization avoid duplicate brand-driven renders',
     const end=appSource.indexOf('\nfunction ensureSalesListLoaded',start);
     const source=appSource.slice(start,end);
 
-    assert.match(source,/\['quote', 'forecast', 'orders\.list', 'inventory', 'equipment', 'admin'\]\.includes\(mainKey\)/);
+    assert.match(source,/\['quote', 'forecast', 'orders\.list', 'inventory', 'equipment'\]\.includes\(mainKey\)/);
     assert.doesNotMatch(source,/\['quote', 'forecast', 'orders\.list', 'orders\.po'/);
 
     const orderStart=source.indexOf("if (mainKey === 'orders.list')");
@@ -2655,22 +2597,13 @@ test('own-scope forecast does not preload full staff directory', () => {
 });
 
 
-test('admin maintenance keeps bounded index and migration reads; staff transfer is server-only', () => {
+test('admin import comparisons use bounded reads and staff transfer is server-only', () => {
     assert.doesNotMatch(appSource,/async function legacySalesDocsInPages/);
     const transferStart=appSource.indexOf('window.executeSalesTransfer = async function');
-    const transferEnd=appSource.indexOf('/* ---------- 資料庫用量估算 ---------- */',transferStart);
+    const transferEnd=appSource.indexOf('function formatBytes(bytes)',transferStart);
     const transferSource=appSource.slice(transferStart,transferEnd);
     assert.match(transferSource,/httpsCallable\('transferSalesCodeOwner'\)/);
     assert.doesNotMatch(transferSource,/firestoreReadWithTimeout|runFirestoreBatchUpdates/);
-
-    const indexStart=appSource.indexOf('window.backfillOrderSearchIndex = async function');
-    const indexEnd=appSource.indexOf('/* ---------- Product Master',indexStart);
-    const indexSource=appSource.slice(indexStart,indexEnd);
-    assert.match(indexSource,/firestoreReadWithTimeout\([\s\S]*?搜尋索引補建/);
-
-    const migrationStart=appSource.indexOf('async function readCollectionForMigration');
-    const migrationEnd=appSource.indexOf('function recordContainsEmbeddedCost',migrationStart);
-    assert.match(appSource.slice(migrationStart,migrationEnd),/firestoreReadWithTimeout\([\s\S]*?遷移資料/);
 
     const importStateStart=appSource.indexOf('async function loadExistingProductImportState');
     const importStateEnd=appSource.indexOf('async function syncImportedBrandToFormalProductMaster',importStateStart);
@@ -3140,7 +3073,7 @@ test('order list skips search-string work when no keyword and batches DOM insert
 
 
 test('high frequency lookup reads are bounded', () => {
-    assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('products'\)\.doc\(productId\)\.get\(\)[\s\S]*?'產品主檔'/);
+    assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('products'\)\.doc\(productId\)\.get\(\), '讀取產品主檔'/);
     assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('quotes'\)\.doc\(forecast\.sourceId\)\.get\(\)[\s\S]*?'Forecast 來源估價單'/);
     assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('customers'\)[\s\S]*?\.limit\(20\)[\s\S]*?'客戶主檔建議'/);
     assert.match(appSource,/firestoreReadWithTimeout\([\s\S]*?db\.collection\('customers'\)\.doc\(customerId\)\.get\(\)[\s\S]*?'客戶估價偏好'/);
@@ -5010,11 +4943,8 @@ test('protected Product Master costs drive sales statistics without being copied
     assert.match(appSource, /function orderUnitCostForStats/);
     assert.match(appSource, /purchaseCostCache\.get\(productId\)/);
     assert.match(appSource, /loadTradeAnalysisSnapshot\(tab,filters\)/);
-    const start=appSource.indexOf('window.saveMissingCostFromStats');
-    const end=appSource.indexOf('function escapeAttr',start);
-    const source=appSource.slice(start,end);
-    assert.match(source, /collection\('productCosts'\)\.doc\(resolvedProductId\)\.set/);
-    assert.match(source, /procurementType === 'SALES_SELF_ORDER'/);
+    assert.doesNotMatch(indexSource, /id="(?:missingCostOrdersOverlay|tradeAnalysisDetailOverlay)"/);
+    assert.doesNotMatch(appSource, /window\.(?:saveMissingCostFromStats|exportSalesStatisticsExcel|openTradeAnalysisDetail)\s*=/);
 });
 
 test('order Firestore rules verify Product Master identity and embedded cost source', () => {
@@ -5092,7 +5022,7 @@ test('admin data health accepts optional price and checks order lines and planni
     assert.doesNotMatch(appSource,/產品主檔缺少建議售價/);
     assert.match(appSource,/訂單品項找不到產品主檔/);
     assert.match(appSource,/庫存策略與安全庫存不一致/);
-    assert.match(indexSource,/缺少廠牌／貨號／品名/);
+    assert.match(indexSource,/唯讀檢查產品、人員、訂單、採購與庫存資料/);
 });
 
 
@@ -5211,7 +5141,7 @@ test('consolidated supplier editor reuses existing suppliers without renaming a 
 
 test('admin trade analysis exposes three responsive tabs and shared item details', () => {
     const adminStart=indexSource.indexOf('<div id="admin-statistics"');
-    const adminSource=indexSource.slice(adminStart,indexSource.indexOf('id="tradeAnalysisDetailOverlay"',adminStart));
+    const adminSource=indexSource.slice(adminStart,indexSource.indexOf('id="admin-warehouses"',adminStart));
     for(const tab of ['purchasing','selling','inventory'])assert.ok(adminSource.includes(`data-analysis-tab="${tab}"`));
     assert.match(adminSource,/id="tradeAnalysisCards"/);
     assert.match(adminSource,/id="unifiedBrandAnalyticsBody"/);

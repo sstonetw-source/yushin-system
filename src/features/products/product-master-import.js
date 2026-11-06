@@ -41,26 +41,6 @@ function productMasterRecordFromItem(item, source = 'PRODUCT_MASTER') {
     };
 }
 
-async function readCollectionForMigration(name, pageSize = 300) {
-    const rows = [];
-    let cursor = null;
-    while (true) {
-        let query = db.collection(name).orderBy(firebase.firestore.FieldPath.documentId()).limit(pageSize);
-        if (cursor) query = query.startAfter(cursor);
-        const snap = await firestoreReadWithTimeout(
-            query.get(),
-            name + ' 遷移資料'
-        );
-        if (snap.empty) break;
-        snap.docs.forEach(doc => rows.push({ ref:doc.ref, id:doc.id, data:doc.data() || {} }));
-        cursor = snap.docs[snap.docs.length - 1];
-        if (snap.size < pageSize) break;
-    }
-    return rows;
-}
-
-// 共用批次寫入：Firestore 單一 write batch 有筆數上限，因此大型 Product Master／成本更新分批提交。
-// 各操作需可安全重跑；若中途網路失敗，已完成的批次保留，使用者可再次執行未完成部分。
 async function commitMigrationBatch(operations, chunkSize = 400) {
     const safeOperations = Array.isArray(operations)
         ? operations.filter(operation => typeof operation === 'function')
@@ -83,19 +63,6 @@ async function commitMigrationBatch(operations, chunkSize = 400) {
         committed += chunk.length;
     }
     return committed;
-}
-function recordContainsEmbeddedCost(record) {
-    return !!record && (record.cogs !== undefined || (Array.isArray(record.lotAllocations) && record.lotAllocations.some(row => row && (row.cost !== undefined || row.unitCost !== undefined))));
-}
-function inventoryCostMigrationPlan(lots, inventory, receipts, movements, orders = [], warehouseStocks = []) {
-    return {
-        legacyLots: lots.filter(row => row.data.unitCost !== undefined),
-        legacyInventory: inventory.filter(row => row.data.unitCost !== undefined || row.data.cost !== undefined || (Array.isArray(row.data.lots) && row.data.lots.some(lot => lot && (lot.unitCost !== undefined || lot.cost !== undefined)))),
-        legacyWarehouseStocks: warehouseStocks.filter(row => row.data.unitCost !== undefined || row.data.cost !== undefined),
-        legacyReceipts: receipts.filter(row => row.data.unitCost !== undefined || row.data.purchaseNetAmount !== undefined),
-        legacyMovements: movements.filter(row => row.data.unitCost !== undefined || row.data.purchaseNetAmount !== undefined || row.data.cogs !== undefined),
-        legacyOrders: orders.filter(row => [...(row.data.deliveryRecords || []), ...(row.data.returnRecords || [])].some(recordContainsEmbeddedCost))
-    };
 }
 async function readCollectionInBatches(collectionName, batchSize = 500) {
     const rows = [];
@@ -414,57 +381,6 @@ window.runSystemDataAudit = async function() {
     }
 };
 
-window.previewInventoryCostMigration = async function() {
-    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return alert('只有管理員可以執行庫存成本隔離。');
-    const status=document.getElementById('inventoryCostMigrationStatus'), runButton=document.getElementById('inventoryCostMigrationBtn'), previewButton=document.getElementById('inventoryCostMigrationPreviewBtn');
-    if(previewButton)previewButton.disabled=true;if(runButton)runButton.disabled=true;if(status)status.innerText='正在分頁掃描舊庫存成本欄位…';
-    try{
-        // Array.map 會額外傳入 index；不可直接把 readCollectionForMigration 當 callback，
-        // 否則第一個集合會把 index 0 誤當 pageSize，造成 Firestore limit(0) 失敗。
-        const [lots,inventory,receipts,movements,orders,warehouseStocks]=await Promise.all(
-            ['inventoryLots','inventory','receipts','inventoryMovements','orders','warehouseStocks']
-                .map(name => readCollectionForMigration(name))
-        );
-        const plan=inventoryCostMigrationPlan(lots,inventory,receipts,movements,orders,warehouseStocks);window._inventoryCostMigrationPlan=plan;
-        const total=plan.legacyLots.length+plan.legacyInventory.length+plan.legacyWarehouseStocks.length+plan.legacyReceipts.length+plan.legacyMovements.length+plan.legacyOrders.length;
-        if(status)status.innerText=`預覽完成：批次成本 ${plan.legacyLots.length}、庫存文件 ${plan.legacyInventory.length}、分倉成本 ${plan.legacyWarehouseStocks.length}、收貨 ${plan.legacyReceipts.length}、異動 ${plan.legacyMovements.length}、舊訂單成本 ${plan.legacyOrders.length}。\n`+(total?'請先執行「庫存成本隔離」，完成後再部署新版 Firestore Rules。':'沒有發現舊成本欄位，可直接進行新版 Rules 驗證。');
-        if(runButton)runButton.disabled=total===0;
-    }catch(err){console.error('庫存成本隔離預覽失敗：',err);if(status)status.innerText='預覽失敗：'+(err.message||err);}
-    finally{if(previewButton)previewButton.disabled=false;}
-};
-window.runInventoryCostMigration = async function() {
-    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return alert('只有管理員可以執行庫存成本隔離。');
-    const plan=window._inventoryCostMigrationPlan;if(!plan)return alert('請先按「預覽庫存成本隔離」。');
-    if(!confirm('確定執行庫存成本隔離？\n\n舊 inventoryLots 成本會搬到 inventoryLotCosts；公開庫存、收貨與異動文件中的成本欄位會移除。此步驟應在部署新版 Firestore Rules 前完成。'))return;
-    const status=document.getElementById('inventoryCostMigrationStatus'),runButton=document.getElementById('inventoryCostMigrationBtn'),previewButton=document.getElementById('inventoryCostMigrationPreviewBtn');
-    if(runButton)runButton.disabled=true;if(previewButton)previewButton.disabled=true;
-    const del=firebase.firestore.FieldValue.delete(),ops=[],now=new Date().toISOString(),by=currentUser?.uid||'';
-    plan.legacyLots.forEach(row=>{const d=row.data;ops.push(batch=>batch.set(db.collection('inventoryLotCosts').doc(row.id),{lotId:row.id,productKey:d.productKey||'',productId:d.productId||'',warehouseId:d.warehouseId||'',unitCost:Number(d.unitCost||0),sourceType:d.sourceType||'LEGACY_MIGRATION',sourceId:d.sourceId||'',migratedAt:now,migratedBy:by},{merge:true}));ops.push(batch=>batch.update(row.ref,{unitCost:del,costMigratedAt:now}));});
-    plan.legacyInventory.forEach(row=>{const patch={costSanitizedAt:now};if(row.data.unitCost!==undefined)patch.unitCost=del;if(row.data.cost!==undefined)patch.cost=del;if(Array.isArray(row.data.lots))patch.lots=row.data.lots.map(lot=>{if(!lot||typeof lot!=='object')return lot;const {unitCost,cost,...rest}=lot;return rest;});ops.push(batch=>batch.update(row.ref,patch));});
-    plan.legacyWarehouseStocks.forEach(row=>{const patch={costSanitizedAt:now};if(row.data.unitCost!==undefined)patch.unitCost=del;if(row.data.cost!==undefined)patch.cost=del;ops.push(batch=>batch.update(row.ref,patch));});
-    plan.legacyReceipts.forEach(row=>{const patch={costSanitizedAt:now};if(row.data.unitCost!==undefined)patch.unitCost=del;if(row.data.purchaseNetAmount!==undefined)patch.purchaseNetAmount=del;ops.push(batch=>batch.update(row.ref,patch));});
-    plan.legacyMovements.forEach(row=>{const patch={costSanitizedAt:now,costPending:true};if(row.data.unitCost!==undefined)patch.unitCost=del;if(row.data.purchaseNetAmount!==undefined)patch.purchaseNetAmount=del;if(row.data.cogs!==undefined)patch.cogs=del;ops.push(batch=>batch.update(row.ref,patch));});
-    plan.legacyOrders.forEach(row=>{
-        const sanitizeRecord=record=>{
-            if(!record||typeof record!=='object')return record;
-            const {cogs,...rest}=record;
-            if(Array.isArray(rest.lotAllocations)) rest.lotAllocations=rest.lotAllocations.map(allocation=>{
-                if(!allocation||typeof allocation!=='object')return allocation;
-                const {cost,unitCost,...safe}=allocation;
-                return safe;
-            });
-            return rest;
-        };
-        ops.push(batch=>batch.update(row.ref,{
-            deliveryRecords:(row.data.deliveryRecords||[]).map(sanitizeRecord),
-            returnRecords:(row.data.returnRecords||[]).map(sanitizeRecord),
-            costSanitizedAt:now
-        }));
-    });
-    try{if(status)status.innerText=`正在隔離 ${ops.length} 筆寫入，請不要關閉頁面…`;await commitMigrationBatch(ops);window._inventoryCostMigrationPlan=null;if(status)status.innerText='庫存成本隔離完成。正在重新檢查…';await window.previewInventoryCostMigration();}
-    catch(err){console.error('庫存成本隔離失敗：',err);if(status)status.innerText='隔離中斷：'+(err.message||err)+'。流程可重複執行。';if(runButton)runButton.disabled=false;}
-    finally{if(previewButton)previewButton.disabled=false;}
-};
 // Product Master 以單一標準 Excel 作為人工維護入口；匯入時依 productId 增量新增／更新，不刪除未出現在檔案中的產品。
 function setPriceUploadProgress(percent, status, keepVisible = true) {
     const wrap = document.getElementById('priceUploadProgress');

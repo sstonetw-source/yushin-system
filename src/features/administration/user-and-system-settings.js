@@ -18,8 +18,8 @@ window.renderAdminSalesTable = function() {
             <td data-label="領貨／地址"><button type="button" class="btn-small btn-secondary" onclick="openSalesDeliveryDefaults(${inlineJsValue(u.uid)})">${u.deliveryDefaults?.mode==='SALES_SHIP'?'寄到業務地址':'主倉領貨'}</button></td>
             <td data-label="密碼" class="admin-user-password-actions">
                 ${u.mustChangePassword
-                    ? `<span class="status-badge status-soon" style="margin-right:6px;">下次登入須改密碼</span><button type="button" class="btn-small btn-secondary" onclick="toggleMustChangePassword('${u.uid}', false)">取消要求</button>`
-                    : `<button type="button" class="btn-small" onclick="toggleMustChangePassword('${u.uid}', true)">🔒 強制下次登入改密碼</button>`}
+                    ? `<span class="status-badge status-soon" style="margin-right:6px;">下次登入須改密碼</span><button type="button" class="btn-small btn-secondary" onclick="toggleMustChangePassword(${inlineJsValue(u.uid)}, false)">取消要求</button>`
+                    : `<button type="button" class="btn-small" onclick="toggleMustChangePassword(${inlineJsValue(u.uid)}, true)">🔒 強制下次登入改密碼</button>`}
                 <br>
                 ${u.email
                     ? `<button type="button" class="btn-small btn-secondary" style="margin-top:4px;" onclick="sendPasswordResetToUser(${inlineJsValue(u.email)})">📧 寄送密碼重設信</button>`
@@ -32,7 +32,7 @@ window.renderAdminSalesTable = function() {
 };
 
 window.saveAdminUserRole=async function(uid, selectEl){
-    if(trueUserRole!=='admin')return;
+    if(trueUserRole!=='admin'||currentUserRole!=='admin')return;
     const select=selectEl||document.getElementById(`adminUserRole-${uid}`);
     const user=allUsersCache.find(x=>x.uid===uid);
     const previousRole=user?.role||'sales';
@@ -60,6 +60,7 @@ window.saveAdminUserRole=async function(uid, selectEl){
 // 這個系統目前沒有後端），所以做法是：先在該帳號的資料上做記號，等他本人下次登入時，
 // 系統會強制跳出「修改密碼」視窗、擋住其他操作，直到他自己設好新密碼為止。
 window.toggleMustChangePassword = function(uid, value) {
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
     const msg = value ? '確定要要求這個帳號下次登入時必須先修改密碼嗎？' : '確定要取消這個要求嗎？';
     if (!confirm(msg)) return;
 
@@ -73,6 +74,7 @@ window.toggleMustChangePassword = function(uid, value) {
 // 寄送 Firebase 官方的密碼重設信到指定 Email，對方收信後可以自己點連結設定新密碼
 // （適合對方忘記密碼、登不進來的情況；跟「強制下次登入改密碼」是兩種互補的做法）
 window.sendPasswordResetToUser = function(email) {
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
     if (!confirm(`確定要寄送密碼重設信到 ${email} 嗎？`)) return;
     firebase.auth().sendPasswordResetEmail(email).then(() => {
         alert(`密碼重設信已寄出到 ${email}。`);
@@ -95,13 +97,8 @@ async function loadSalesCodeMaster() {
 
 window.reloadSalesFromUsers = function() {
     const generation = sessionDataGeneration;
-    return readCollectionInBatches('users').then(async rows => {
+    return readCollectionInBatches('users').then(rows => {
         if (generation !== sessionDataGeneration) return;
-        salesList = rows
-            .filter(d => d.name && d.code)
-            .map(d => ({ uid:d.id, code:d.code, name:d.name, phone:d.phone || '', deliveryDefaults:d.deliveryDefaults || {}, role:d.role || 'sales', active:d.active !== false, disabled:!!d.disabled }))
-            .sort((a,b)=>String(a.code||'').localeCompare(String(b.code||'')));
-
         allUsersCache = rows.map(d => ({
             uid:d.id, code:d.code || '', name:d.name || '', phone:d.phone || '',
             role:d.role || 'sales', email:d.email || '', disabled:!!d.disabled,
@@ -117,11 +114,7 @@ window.reloadSalesFromUsers = function() {
         applySalesRows(rows);
         salesListLoadPromise = Promise.resolve(salesList);
         if (document.getElementById('admin-statistics')?.style.display === 'block') populateSalesStatisticsFilters();
-        if (generation !== sessionDataGeneration) return;
-        await loadSalesCodeMaster().catch(err => { console.warn('讀取業務代號主檔失敗：', err); salesCodeMasterCache = []; });
-        if (generation !== sessionDataGeneration) return;
         renderAdminSalesTable();
-        populateTransferDropdowns();
     }).catch(err => {
         if (generation !== sessionDataGeneration) return;
         mainPageLoadFailed('admin');
@@ -130,6 +123,30 @@ window.reloadSalesFromUsers = function() {
         renderAdminSalesTable();
     });
 };
+
+// The user directory is shared by both personnel tabs. Sales codes are only needed for handover.
+let adminTransferLoad = null;
+function loadAdminTransferPanel() {
+    const generation = sessionDataGeneration;
+    if (adminTransferLoad?.generation === generation) return adminTransferLoad.request;
+    const result = document.getElementById('transferResult');
+    const preview = document.getElementById('transferPreviewBtn');
+    resetTransferPreview();
+    preview.disabled = true;
+    result.innerText = '正在讀取人員與業務代號…';
+    const request = Promise.all([reloadSalesFromUsers(), loadSalesCodeMaster()]).then(() => {
+        if (generation !== sessionDataGeneration) return;
+        if (!allUsersCache.length) throw new Error('無法取得人員名單');
+        populateTransferDropdowns();
+        preview.disabled = false;
+    }).catch(err => {
+        if (generation === sessionDataGeneration) result.innerText = '載入失敗：' + err.message + '。請重新開啟業務交接分頁。';
+    }).finally(() => {
+        if (adminTransferLoad?.request === request) adminTransferLoad = null;
+    });
+    adminTransferLoad = { generation, request };
+    return request;
+}
 
 /* ---------- 業務代號交接：資料歸屬維持 salesCode，只更換代號目前負責業務 ---------- */
 function populateTransferDropdowns() {
@@ -172,6 +189,7 @@ function getTransferSelection() {
 }
 
 window.previewSalesTransfer = function() {
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin' || document.getElementById('transferPreviewBtn')?.disabled) return;
     const { salesCode, target, currentHolder } = getTransferSelection();
     const resultEl = document.getElementById('transferResult');
     const executeBtn = document.getElementById('transferExecuteBtn');
@@ -203,10 +221,13 @@ window.previewSalesTransfer = function() {
 };
 
 window.executeSalesTransfer = async function() {
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
+    const generation = sessionDataGeneration;
     const { salesCode, target, currentHolder } = getTransferSelection();
     const resultEl = document.getElementById('transferResult');
     const button = document.getElementById('transferExecuteBtn');
     const intent = pendingSalesTransfer;
+    if (button?.disabled) return;
     if (!button || !intent || intent.salesCode !== String(salesCode) ||
         intent.targetUid !== target?.uid || intent.expectedFromUid !== currentHolder?.uid) {
         resultEl.innerText = '交接內容已變更，請重新檢查。';
@@ -220,68 +241,27 @@ window.executeSalesTransfer = async function() {
         const response = await callable(intent);
         if (!['completed','already-applied'].includes(response?.data?.status))
             throw new Error('後端未確認交接完成');
+        if (generation !== sessionDataGeneration) return;
         pendingSalesTransfer = null;
         button.style.display = 'none';
         salesListLoadPromise = null;
-        await reloadSalesFromUsers();
-        resultEl.innerText = '交接完成：' + salesCode + ' 現由 ' + target.name + ' 負責。原始業務姓名與歷史文件未改動。';
+        await loadAdminTransferPanel();
+        if (generation !== sessionDataGeneration) return;
+        const refreshError = resultEl.innerText;
+        resultEl.innerText = '交接完成：' + salesCode + ' 現由 ' + target.name + ' 負責。' + (refreshError ? '\n' + refreshError : '');
     } catch (err) {
+        if (generation !== sessionDataGeneration) return;
         console.error('業務交接後端失敗：',err);
         resultEl.innerText = '交接未確認完成：' + (err.message || err) +
             '\n請先重新檢查目前負責人；若為網路中斷，可保留相同操作 ID 重試，不會重複交接。';
     } finally { button.disabled = false; }
 };
 
-/* ---------- 資料庫用量估算 ---------- */
 function formatBytes(bytes) {
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
     return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
 }
-
-// 統計各集合的文件數與內容大小；這是「文件 JSON 內容」的估計值，
-// 跟 Firebase 主控台的實際帳單用量（還包含索引等額外儲存空間）不完全相同，僅供大致參考
-window.calculateStorageUsage = async function() {
-    const tbody = document.getElementById('storageUsageBody');
-    tbody.innerHTML = '<tr><td colspan="3" style="color:#888;">計算中，請稍候…</td></tr>';
-
-    const collections = [
-        { key: 'quotes', label: '估價單' }, { key: 'forecasts', label: 'Forecast' },
-        { key: 'orders', label: '訂單' }, { key: 'purchaseOrders', label: '採購單' },
-        { key: 'procurementDemands', label: '採購需求' },
-        { key: 'supplyOrders', label: '供應／訂貨紀錄' }, { key: 'receipts', label: '收貨紀錄' }, { key: 'customerReturnReceipts', label: '客戶退貨實收紀錄' },
-        { key: 'dispatchRecords', label: '出貨打單紀錄' }, { key: 'inventory', label: '庫存彙總' },
-        { key: 'inventoryLots', label: '庫存批次' }, { key: 'inventoryLotCosts', label: '受保護批次成本' },
-        { key: 'inventoryReservations', label: '庫存預留' }, { key: 'inventoryMovements', label: '庫存異動' },
-        { key: 'warehouseStocks', label: '分倉庫存' }, { key: 'stockTransferRequests', label: '備貨調回需求' }, { key: 'stockTransfers', label: '倉庫調撥' }, { key: 'products', label: '產品主檔' },
-        { key: 'productCosts', label: '受保護產品成本' }, { key: 'equipment', label: '儀器' },
-        { key: 'users', label: '人員／使用者帳號' }, { key: 'settings', label: '系統設定' }
-    ];
-
-    try {
-        let totalBytes = 0, totalDocs = 0;
-        const rows = [];
-        for (let i = 0; i < collections.length; i++) {
-            const c = collections[i];
-            tbody.innerHTML = `<tr><td colspan="3" style="color:#888;">正在分批讀取 ${escapeHtml(c.label)}（${i + 1}/${collections.length}）…</td></tr>`;
-            const records = await readCollectionInBatches(c.key);
-            const bytes = records.reduce((sum, row) => {
-                const { id, ...data } = row;
-                return sum + new Blob([JSON.stringify(data)]).size;
-            }, 0);
-            totalBytes += bytes;
-            totalDocs += records.length;
-            rows.push({ label:c.label, count:records.length, bytes });
-        }
-        tbody.innerHTML = rows.map(r => `
-            <tr><td>${escapeHtml(r.label)}</td><td>${r.count}</td><td>${formatBytes(r.bytes)}</td></tr>
-        `).join('') + `
-            <tr style="font-weight:bold;background:#f5f5f5;"><td>總計</td><td>${totalDocs}</td><td>${formatBytes(totalBytes)}</td></tr>
-        `;
-    } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="3" style="color:#cc0000;">計算失敗：${escapeHtml(err.message)}</td></tr>`;
-    }
-};
 
 /* ---------- 資料庫備份 ---------- */
 function backupSerializableValue(value) {
@@ -438,85 +418,3 @@ window.previewDatabaseBackupUpload = async function(input) {
     } catch (err) { status.textContent = `檔案檢查失敗：${err.message}`; }
     finally { input.value = ''; }
 };
-
-/* ---------- 估價單／訂單全歷史搜尋索引補建 ---------- */
-let orderSearchIndexMigrationRunning = false;
-let orderSearchIndexAwaitingConfirmation = false;
-let orderSearchIndexConfirmationTimer = null;
-
-window.backfillOrderSearchIndex = async function() {
-    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') {
-        alert('只有管理員可以執行搜尋索引補建。');
-        return;
-    }
-    if (orderSearchIndexMigrationRunning) return;
-    const button = document.getElementById('orderSearchIndexMigrationBtn');
-    const status = document.getElementById('orderSearchIndexMigrationStatus');
-    if (!orderSearchIndexAwaitingConfirmation) {
-        orderSearchIndexAwaitingConfirmation = true;
-        if (status) status.innerText = '這會逐批檢查舊估價單、Forecast、訂單與儀器，只補建搜尋索引，不修改金額、狀態或流程。請在 10 秒內再按一次確認開始。';
-        if (button) button.innerText = '確認開始補建';
-        clearTimeout(orderSearchIndexConfirmationTimer);
-        orderSearchIndexConfirmationTimer = setTimeout(() => {
-            if (orderSearchIndexMigrationRunning) return;
-            orderSearchIndexAwaitingConfirmation = false;
-            if (button) button.innerText = '建立／修正全歷史搜尋索引';
-            if (status?.innerText.includes('請在 10 秒內')) status.innerText = '已取消：未在時間內再次確認。';
-        }, 10000);
-        return;
-    }
-    orderSearchIndexAwaitingConfirmation = false;
-    clearTimeout(orderSearchIndexConfirmationTimer);
-    orderSearchIndexMigrationRunning = true;
-    if (button) { button.disabled = true; button.innerText = '補建中…'; }
-    let scanned = 0, updated = 0;
-    try {
-        for (const collectionName of ['quotes','orders','forecasts','equipment']) {
-            let cursor = null;
-            while (true) {
-                let query = db.collection(collectionName).orderBy(firebase.firestore.FieldPath.documentId()).limit(200);
-                if (cursor) query = query.startAfter(cursor);
-                const snapshot = await firestoreReadWithTimeout(
-                    query.get(),
-                    collectionName + ' 搜尋索引補建'
-                );
-                if (snapshot.empty) break;
-                const batch = db.batch();
-                let writes = 0;
-                snapshot.docs.forEach(doc => {
-                    const data = doc.data() || {};
-                    const type = collectionName === 'quotes' ? 'quote'
-                        : collectionName === 'forecasts' ? 'forecast'
-                        : collectionName === 'equipment' ? 'equipment' : 'order';
-                    const searchTokens = buildFullHistorySearchTokens(type, { id: doc.id, ...data });
-                    const update = {};
-                    if (JSON.stringify(data.searchTokens || []) !== JSON.stringify(searchTokens)) update.searchTokens = searchTokens;
-                    if (collectionName === 'orders') {
-                        const sourceCode = data.itemCode || data.productCode || data.model || '';
-                        const normalized = normalizeHistoryItemCode(sourceCode);
-                        if (normalized && data.itemCodeKey !== normalized) update.itemCodeKey = normalized;
-                    }
-                    scanned += 1;
-                    if (Object.keys(update).length) {
-                        batch.update(doc.ref, update);
-                        writes += 1;
-                        updated += 1;
-                    }
-                });
-                if (writes) await batch.commit();
-                cursor = snapshot.docs[snapshot.docs.length - 1];
-                if (status) status.innerText = `${collectionName === 'quotes' ? '估價單' : collectionName === 'forecasts' ? 'Forecast' : collectionName === 'equipment' ? '儀器' : '訂單'}：已檢查 ${scanned} 筆，更新 ${updated} 筆搜尋索引…`;
-                if (snapshot.size < 200) break;
-            }
-        }
-        if (status) status.innerText = `完成：共檢查 ${scanned} 筆估價單／Forecast／訂單／儀器，建立或修正 ${updated} 筆全歷史搜尋索引。`;
-    } catch (err) {
-        console.error('全歷史搜尋索引補建失敗：', err);
-        if (status) status.innerText = `補建中斷：已檢查 ${scanned} 筆、更新 ${updated} 筆。可重新執行，已完成資料不會重複修改。`;
-        alert('搜尋索引補建未完成，請確認 Firestore 權限與網路連線後再試。');
-    } finally {
-        orderSearchIndexMigrationRunning = false;
-        if (button) { button.disabled = false; button.innerText = '建立／修正全歷史搜尋索引'; }
-    }
-};
-

@@ -22,7 +22,7 @@ test('admin backend separates price-list management from Product Master editing'
 });
 
 test('whole price-list deletion preserves Product Master documents',()=>{
-  const fn=sliceBetween(app,'window.deleteEntirePriceList = async function','// 舊的「移除整個廠牌產品」');
+  const fn=sliceBetween(app,'window.deleteEntirePriceList = async function','function renderBrandAliasManager');
   assert.match(fn,/listPrice:firebase\.firestore\.FieldValue\.delete\(\)/);
   assert.match(fn,/batch\.delete\(db\.collection\('productCosts'\)/);
   assert.match(fn,/batch\.set\(db\.collection\('products'\)/);

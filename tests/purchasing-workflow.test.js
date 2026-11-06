@@ -1091,7 +1091,7 @@ test('full returns stay in fulfillment instead of closing the order', () => {
 
 test('cancelled orders keep actual delivered sales but no pending sales', () => {
     const start=app.indexOf('function calculateOrderStatsContribution');
-    const end=app.indexOf('\nfunction addSalesStatsContribution',start);
+    const end=app.indexOf('\nfunction formatStatsMoney',start);
     const source=app.slice(start,end);
     assert.ok(start>=0&&end>start);
     const context=vm.createContext({
@@ -2094,7 +2094,7 @@ test('purchase history separates PO document status from receipt progress', () =
 
 test('tabbed analysis uses the same item calculations for screen and workbook', () => {
     const start=app.indexOf('window.renderSalesStatistics = function()');
-    const source=app.slice(start,app.indexOf('function salesStatsMetricExportRows',start));
+    const source=app.slice(start,app.indexOf('function inlineJsValue',start));
     assert.match(source,/buildSimpleTradeAnalysis\(tradeAnalysisAppliedFilters\)/);
     assert.match(source,/tradeAnalysisSimpleRows=rows/);
     const exportSource=app.slice(app.indexOf('window.exportTradeAnalysis ='),app.indexOf('function populateSalesStatisticsFilters'));
@@ -2129,7 +2129,7 @@ test('purchase order email contact is delegated to supplier core', () => {
 
 test('system audit reconciles procurement demand from linked supply records', () => {
     const start=app.indexOf('window.runSystemDataAudit = async function');
-    const end=app.indexOf('\nwindow.previewInventoryCostMigration',start);
+    const end=app.indexOf('\nfunction setPriceUploadProgress',start);
     const source=app.slice(start,end);
     assert.ok(start>=0&&end>start);
     assert.match(source,/const suppliesByDemand = new Map\(\)/);

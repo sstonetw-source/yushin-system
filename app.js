@@ -1001,7 +1001,7 @@ function initializePageData(mainKey, options = {}) {
     if (!force && loadedMainPages.has(mainKey)) return;
     dirtyMainPages.delete(mainKey);
 
-    if (['quote', 'forecast', 'orders.list', 'inventory', 'equipment', 'admin'].includes(mainKey)) {
+    if (['quote', 'forecast', 'orders.list', 'inventory', 'equipment'].includes(mainKey)) {
         ensureBrandSettingsLoaded().then(() => {
             if (mainKey === 'forecast' && canAccessPage('forecast')) renderForecastList();
             if (mainKey === 'orders.list' && canAccessPage('orders.list')) renderOrdersList();
@@ -1078,7 +1078,10 @@ function initializePageData(mainKey, options = {}) {
         }
         // Brand Master 已由上方 ensureBrandSettingsLoaded() 共用載入與重畫。
     }
-    if (mainKey === 'admin') jobs.push(reloadSalesFromUsers());
+    if (mainKey === 'admin') {
+        const activeTab = document.querySelector('#admin-system .sub-nav .sub-tab.active');
+        jobs.push(loadAdminPanel(activeTab?.id.replace('admin-sub-', '') || 'sales'));
+    }
     const request = Promise.allSettled(jobs).then(results=>{
         if(requestedUid!==currentUser?.uid || requestedRole!==currentUserRole)return;
         if(results.some(result=>result.status==='rejected'))mainPageLoadFailed(mainKey);
@@ -1483,6 +1486,8 @@ function resetSessionData() {
     orderModalOpenGeneration++; orderDraftProductCheckGeneration++;
     forecastHistorySearchResults=[]; quoteHistorySearchResults=[]; orderHistorySearchResults=[];
     salesList=[]; salesListLoadPromise=null; allUsersCache=[]; salesCodeMasterCache=[];
+    priceListHistoryRows=[]; priceListHistoryFilter='';
+    resetTransferPreview();
     salesStatisticsOrders=[]; tradeAnalysisReady=false;
     salesStatisticsLoadPromise=null; inventoryAnalysisReceipts=[]; inventoryAnalysisStocks=[]; inventoryAnalysisLots=[];
     inventoryAnalysisLotCosts.clear(); inventoryAnalysisSupplyOrders=[]; inventoryAnalysisDirectShipSupplyOrders=[];
@@ -6058,123 +6063,6 @@ async function syncLegacyBrandSettingsToMaster() {
         await upsertBrandMaster(canonical, { companies, isKeyBrand, aliases, replaceCompanies: true, replaceAliases: true });
     }
 }
-
-const BRAND_AUDIT_BLOCKING_SOURCES = new Set([
-    'products', 'statistics', 'companyAgencies', 'supplierMappings'
-]);
-
-function brandAuditNamesFromRecord(source, record = {}) {
-    const data = record?.data || record || {};
-    if (source === 'statistics' || source === 'companyAgencies') return [String(data.name || data || '')];
-    if (source === 'supplierMappings') return [data.brandName || data.brand || ''];
-    if (source === 'orders') return [
-        data.brand || '',
-        ...normalizedOrderItems(data).map(item => item.brand || '')
-    ];
-    if (source === 'quotes') return [
-        data.brand || '',
-        ...(Array.isArray(data.items) ? data.items.map(item => item.brand || '') : [])
-    ];
-    return [data.brand || data.brandName || ''];
-}
-
-function buildBrandMasterCompatibilityAudit(masterEntries, sources) {
-    const master = (masterEntries || []).filter(entry => entry && entry.active !== false && entry.name);
-    const coverage = new Map();
-    master.forEach(entry => {
-        [entry.name, ...(entry.aliases || [])].forEach(name => {
-            const key = normalizeBrandLookupKey(name);
-            if (key) coverage.set(key, entry.name);
-        });
-    });
-
-    const found = new Map();
-    Object.entries(sources || {}).forEach(([source, rows]) => {
-        (rows || []).forEach(row => {
-            brandAuditNamesFromRecord(source, row).forEach(raw => {
-                const name = String(raw || '').trim();
-                const key = normalizeBrandLookupKey(name);
-                if (!key || ['其他', '其他廠牌'].some(skip => normalizeBrandLookupKey(skip) === key)) return;
-                if (!found.has(key)) found.set(key, { name, sources: new Set(), blocking: false });
-                const item = found.get(key);
-                item.sources.add(source);
-                if (BRAND_AUDIT_BLOCKING_SOURCES.has(source)) item.blocking = true;
-            });
-        });
-    });
-
-    const rows = [...found.entries()].map(([key, item]) => ({
-        name: item.name,
-        sources: [...item.sources].sort(),
-        blocking: item.blocking,
-        covered: coverage.has(key),
-        canonicalName: coverage.get(key) || ''
-    })).sort((a, b) => Number(b.blocking) - Number(a.blocking) || a.name.localeCompare(b.name, 'zh-Hant'));
-
-    return {
-        masterCount: master.length,
-        rows,
-        missingBlocking: rows.filter(row => row.blocking && !row.covered),
-        missingHistorical: rows.filter(row => !row.blocking && !row.covered),
-        canRemoveCompatibilityLayer: rows.every(row => !row.blocking || row.covered)
-    };
-}
-
-window.previewBrandMasterCompatibilityAudit = async function() {
-    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') {
-        alert('只有管理員可以執行廠牌主檔相容層稽核。');
-        return;
-    }
-    const button = document.getElementById('brandMasterAuditBtn');
-    const status = document.getElementById('brandMasterAuditStatus');
-    if (button?.disabled) return;
-    if (button) button.disabled = true;
-    if (status) status.innerText = '正在讀取正式主檔與廠牌設定…';
-    try {
-        await Promise.all([loadBrandMaster(), loadSupplierWarehouseMasters()]);
-        const sources = {
-            products: (await readCollectionForMigration('products')).map(row => row.data),
-            statistics: [
-                ...keyStatisticBrands.map(name => ({ name })),
-                ...Object.entries(keyStatisticBrandAliases).flatMap(([name, aliases]) => [
-                    { name }, ...(aliases || []).map(alias => ({ name: alias }))
-                ])
-            ],
-            companyAgencies: Object.values(companyAgencyBrands).flat().map(name => ({ name })),
-            supplierMappings: supplierMappingCache
-        };
-
-        const historicalCollections = ['orders', 'quotes', 'forecasts', 'equipment'];
-        for (let index = 0; index < historicalCollections.length; index++) {
-            const name = historicalCollections[index];
-            if (status) status.innerText = `正在分頁檢查歷史廠牌快照（${index + 1}/${historicalCollections.length}）：${name}…`;
-            sources[name] = await readCollectionForMigration(name);
-        }
-
-        const report = buildBrandMasterCompatibilityAudit(brandMasterCache, sources);
-        window._brandMasterCompatibilityAudit = report;
-        const blockingNames = report.missingBlocking.map(row => `${row.name}（${row.sources.join('、')}）`);
-        const historicalNames = report.missingHistorical.map(row => `${row.name}（${row.sources.join('、')}）`);
-        const lines = [
-            `廠牌主檔：${report.masterCount} 個啟用廠牌；所有來源共辨識 ${report.rows.length} 個廠牌。`,
-            report.canRemoveCompatibilityLayer
-                ? '正式來源檢查通過：相容層已具備移除條件。'
-                : `尚不可移除相容層：${blockingNames.length} 個正式來源廠牌尚未進入廠牌主檔。`,
-            blockingNames.length ? `需先補齊：${blockingNames.join('；')}` : '正式來源缺漏：0。',
-            historicalNames.length
-                ? `歷史快照另有 ${historicalNames.length} 個未對應名稱（不阻擋移除，但應確認是否為別名）：${historicalNames.join('；')}`
-                : '歷史快照未對應名稱：0。',
-            '本功能僅讀取與比對，不會修改或刪除資料。'
-        ];
-        if (status) status.innerText = lines.join('\n');
-    } catch (err) {
-        console.error('廠牌主檔相容層稽核失敗：', err);
-        if (status) status.innerText = '稽核失敗：' + (err.message || err);
-    } finally {
-        if (button) button.disabled = false;
-    }
-};
-
 
 function normalizeThermoBrandList(brands) {
     return dedupeBrandsCaseInsensitive((brands || []).map(value => resolveBrandName(value)).filter(Boolean));
@@ -25341,31 +25229,31 @@ window.exportEquipmentExcel = async function() {
    管理員雲端後台：人員、廠牌、進銷存、倉庫與資料庫管理
    ========================================================= */
 window.switchAdminTab = function(tab, el) {
-    document.querySelectorAll('#admin-system .sub-tab').forEach(t => t.classList.remove('active'));
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
+    const panel = document.getElementById(`admin-${tab}`);
+    if (!panel || !el) return;
+    document.querySelectorAll('#admin-system .sub-nav .sub-tab').forEach(t => t.classList.remove('active'));
     el.classList.add('active');
-    document.querySelectorAll('.admin-panel').forEach(p => p.style.display = 'none');
-    document.getElementById(`admin-${tab}`).style.display = 'block';
+    document.querySelectorAll('#admin-system .admin-panel').forEach(p => p.style.display = 'none');
+    panel.style.display = 'block';
+    return loadAdminPanel(tab);
+};
 
-    if (tab === 'sales') reloadSalesFromUsers();
-    if (tab === 'products') loadProductManagementOverview();
-    if (tab === 'health') updatePendingProductMasterButton();
-    // 代理廠牌設定只需要價目表，不應順便全量讀取 orders。
-    if (tab === 'agencies') Promise.all([ensureBrandSettingsLoaded(), loadSupplierWarehouseMasters()]).then(() => {
+function loadAdminPanel(tab) {
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
+    if (tab === 'sales') return reloadSalesFromUsers();
+    if (tab === 'transfer') return loadAdminTransferPanel();
+    if (tab === 'products') return loadProductManagementOverview();
+    if (tab === 'agencies') return ensureBrandSettingsLoaded().then(() => {
         renderKeyStatisticBrands();
         renderBrandAliasManager();
         renderCompanyAgencyBrandSettings();
-        renderSupplierMappingAdmin();
-        renderWarehouseMasterAdmin();
     });
-    // 每次進入分析頁重讀範圍內交易及目前餘額，避免過時快取。
-    if (tab === 'statistics') ensureBrandSettingsLoaded().then(async () => {
-        tradeAnalysisFiltersPending=false;
-        tradeAnalysisAppliedFilters=readTradeAnalysisFilters();
-        await loadSalesStatistics(true);
-    }).catch(err => console.error('進銷存分析載入失敗：', err));
-    if (tab === 'warehouses') loadSupplierWarehouseMasters(true).then(renderWarehouseMasterAdmin);
-    if (tab === 'transfer') ensureSalesListLoaded().then(populateTransferDropdowns);
-};
+    if (tab === 'statistics') return ensureBrandSettingsLoaded().then(() => {
+        if (currentUserRole === 'admin') return renderAdminStatistics();
+    });
+    if (tab === 'warehouses') return loadWarehouseMaster(true);
+}
 
 let inventoryReceivingVisible = false;
 let activeProductImportBatch = null;
@@ -25377,7 +25265,7 @@ let priceListHistoryRows = [];
 let priceListHistoryFilter = '';
 let pendingPriceListUploadBrand = '';
 let productOverviewLimit = 200;
-let productOverviewLoading = false;
+let productOverviewGenerationLoading = -1;
 let brandProductDeleteRunning = false;
 
 window.openInventoryReceiving = function() {
@@ -25406,32 +25294,61 @@ window.switchInventoryWorkView = async function(receiving) {
 };
 
 let productOverviewCursor=null, productOverviewHasMore=false, productOverviewGeneration=0, productOverviewReloadRequested=false;
-window.loadProductManagementOverview = async function() {
-    if (currentUserRole !== 'admin') return;
-    if (productOverviewLoading) return;
+window.loadProductManagementOverview = async function(refresh = false) {
+    const generation = sessionDataGeneration;
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin' || productOverviewGenerationLoading === generation) return;
     const status = document.getElementById('productOverviewStatus');
-    productOverviewLoading = true;
+    productOverviewGenerationLoading = generation;
     if (status) status.textContent = '正在讀取價目表狀態…';
     try {
-        const historyRequest = firestoreReadWithTimeout(
-            db.collection('priceHistory').orderBy('createdAt', 'desc').limit(100).get(),
-            '價目表操作紀錄'
-        );
-        const [, historySnapshot] = await Promise.all([loadBrandMaster(), historyRequest]);
+        await loadBrandMaster();
+        if (generation !== sessionDataGeneration) return;
         priceListManagementRows = getUnifiedBrandEntries(false)
             .filter(entry => entry?.name && entry.active !== false)
             .sort((a,b) => String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hant'));
-        priceListHistoryRows = (historySnapshot.docs || [])
-            .map(doc => ({ id:doc.id, ...doc.data() }))
-            .filter(row => row.recordType === 'PRICE_LIST');
         renderProductManagementOverview();
-        renderPriceListHistory();
+        if (document.getElementById('priceListHistoryDetails')?.open) await loadPriceListHistory(refresh);
     } catch (err) {
+        if (generation !== sessionDataGeneration) return;
         console.error('價目表管理載入失敗：', err);
         if (status) status.textContent = '價目表狀態載入失敗：' + (err?.message || err);
     } finally {
-        productOverviewLoading = false;
+        if (productOverviewGenerationLoading === generation) productOverviewGenerationLoading = -1;
     }
+};
+
+let priceListHistoryGeneration = -1;
+let priceListHistoryLoad = null;
+window.loadPriceListHistory = function(refresh = false) {
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
+    const generation = sessionDataGeneration;
+    if (priceListHistoryLoad?.generation === generation) return priceListHistoryLoad.request;
+    if (!refresh && priceListHistoryGeneration === generation) return renderPriceListHistory();
+
+    const body = document.getElementById('priceListHistoryBody');
+    body.innerHTML = '<tr><td colspan="6">正在讀取紀錄…</td></tr>';
+    const newEvents = [];
+    const request = firestoreReadWithTimeout(
+        db.collection('priceHistory').orderBy('createdAt', 'desc').limit(100).get(),
+        '價目表操作紀錄'
+    ).then(snapshot => {
+        if (generation !== sessionDataGeneration) return;
+        const history = snapshot.docs
+            .map(doc => ({ id:doc.id, ...doc.data() }))
+            .filter(row => row.recordType === 'PRICE_LIST');
+        const newIds = new Set(newEvents.map(row => row.id));
+        priceListHistoryRows = [...newEvents, ...history.filter(row => !newIds.has(row.id))].slice(0, 100);
+        priceListHistoryGeneration = generation;
+        renderPriceListHistory();
+    }).catch(err => {
+        if (generation !== sessionDataGeneration) return;
+        priceListHistoryGeneration = -1;
+        body.innerHTML = '<tr><td colspan="6">紀錄載入失敗：' + escapeHtml(err.message) + '。請重新開啟紀錄或按重新整理。</td></tr>';
+    }).finally(() => {
+        if (priceListHistoryLoad?.request === request) priceListHistoryLoad = null;
+    });
+    priceListHistoryLoad = { generation, request, newEvents };
+    return request;
 };
 
 function priceListDateLabel(value) {
@@ -25481,7 +25398,7 @@ window.renderProductManagementOverview = function() {
 function renderPriceListHistory() {
     const body = document.getElementById('priceListHistoryBody');
     const label = document.getElementById('priceListHistoryFilterLabel');
-    if (!body) return;
+    if (!body || priceListHistoryGeneration !== sessionDataGeneration) return;
     const filterKey = normalizeBrandLookupKey(priceListHistoryFilter || '');
     const rows = priceListHistoryRows.filter(row => !filterKey || normalizeBrandLookupKey(row.brand || '') === filterKey);
     if (label) label.textContent = priceListHistoryFilter ? `目前顯示：${priceListHistoryFilter}` : '顯示全部廠牌';
@@ -25498,10 +25415,10 @@ function renderPriceListHistory() {
 
 window.showPriceListHistoryForBrand = function(brand) {
     priceListHistoryFilter = resolveBrandName(brand || '');
-    renderPriceListHistory();
     const details = document.getElementById('priceListHistoryDetails');
     if (details) {
         details.open = true;
+        loadPriceListHistory();
         details.scrollIntoView?.({ behavior:'smooth', block:'nearest' });
     }
 };
@@ -25514,47 +25431,6 @@ window.openPriceListUploadForBrand = function(brand = '') {
     input.value = '';
     input.click();
 };
-
-window.bulkSetProductActive = async function(active, button) {
-    if (currentUserRole !== 'admin' || brandProductDeleteRunning) return;
-    const ids = [...document.querySelectorAll('#productOverviewBody input:checked')].map(el=>el.value);
-    if (!ids.length) return alert('請先勾選要處理的產品。');
-    if (!confirm(`確定${active ? '恢復' : '停用'}勾選的 ${ids.length} 個產品？不會刪除舊訂單或成本資料。`)) return;
-    button.disabled = true;
-    let completed = 0;
-    try {
-        for (let offset=0; offset<ids.length; offset+=200) {
-            const slice = ids.slice(offset,offset+200);
-            const batch = db.batch();
-            slice.forEach(id=>batch.update(db.collection('products').doc(id), {active, status:active?'ACTIVE':'INACTIVE', updatedAt:new Date().toISOString(), updatedBy:currentUser.uid}));
-            await batch.commit();
-            completed += slice.length;
-            slice.forEach(id=>{
-                const row = productManagementOverviewRows.find(item=>item.id===id);
-                if (row) {row.active=active;row.status=active?'ACTIVE':'INACTIVE';}
-                priceList.forEach(item=>{if(item.productId===id){item.active=active;item.status=active?'ACTIVE':'INACTIVE';}});
-            });
-        }
-        refreshPriceDatalists();
-        renderProductManagementOverview();
-        invalidateProductFrequentCache();
-        if (productManagementSourceMode === 'frequent') clearProductManagementSearch({ preserveInput:true });
-        alert(`已${active ? '恢復' : '停用'} ${completed} 個產品，可重新匯入修正資料。`);
-    } catch(err) {
-        renderProductManagementOverview();
-        alert(`已完成 ${completed} 個；剩餘處理失敗：${err.message}`);
-    } finally { button.disabled=false; }
-};
-
-async function productMasterRemovalReferences(productId) {
-    const operational=await productMasterOperationalBlockers(productId);
-    if(operational.length)return operational;
-    const queries=['orders','quotes','supplyOrders','inventoryLots','procurementDemands'].flatMap(collection=>
-        [db.collection(collection).where('productId','==',productId).limit(1),
-         ...(['orders','quotes'].includes(collection)?[db.collection(collection).where('productIds','array-contains',productId).limit(1)]:[db.collection(collection).where('productKey','==',productId).limit(1)])]);
-    const snapshots=await Promise.all(queries.map(query=>firestoreReadWithTimeout(query.get(),'檢查歷史產品關聯')));
-    return snapshots.some(snap=>snap.docs.length)?['保留歷史單據／庫存關聯']:[];
-}
 
 function updateBrandPriceListCache(brand, patch) {
     const canonical = resolveBrandName(brand);
@@ -25594,7 +25470,9 @@ async function commitPriceListBrandEvent(brand, action, metadata, details = {}) 
     batch.set(historyRef, priceListEventRecord(canonical, action, details, now));
     await batch.commit();
     updateBrandPriceListCache(canonical, patch);
-    priceListHistoryRows.unshift({ id:historyRef.id, ...priceListEventRecord(canonical, action, details, now) });
+    const event = { id:historyRef.id, ...priceListEventRecord(canonical, action, details, now) };
+    priceListHistoryRows.unshift(event);
+    if (priceListHistoryLoad?.generation === sessionDataGeneration) priceListHistoryLoad.newEvents.unshift(event);
 }
 
 async function markPriceListImportComplete(brand, productCount, saveResult = {}) {
@@ -25811,12 +25689,6 @@ window.deleteEntirePriceList = async function(brand, button) {
         if (button) { button.disabled = false; button.textContent = original; }
     }
 };
-
-// 舊的「移除整個廠牌產品」會刪除 Product Master，已由價目表管理流程取代。
-window.deleteEntireBrandProducts = function() {
-    alert('「移除整個廠牌產品」已停用。請使用「刪除整個價目表」；產品主檔不會再從價目表管理頁刪除。');
-};
-
 
 function renderBrandAliasManager() {
     const body = document.getElementById('brandAliasManagerBody');
@@ -27035,10 +26907,6 @@ function salesStatisticOrderLines(order) {
     }));
 }
 
-function newSalesStatsMetric() {
-    return { actualSales: 0, pendingSales: 0, totalSales: 0, actualCost: 0, pendingCost: 0, totalCost: 0, profit: 0, missingCostIds: new Set(), orderIds: new Set(), estimatedSales: 0, estimatedIds: new Set() };
-}
-
 function orderUnitSalesAmount(order) {
     const qty = orderQuantity(order);
     return qty ? salesAmount(order) / qty : (parseFloat(order.unitPrice) || 0);
@@ -27059,10 +26927,6 @@ function orderUnitCostForStats(order) {
     const productId = orderStatsProductId(order);
     const standardCost = productId ? Number(purchaseCostCache.get(productId)) : NaN;
     return Number.isFinite(standardCost) && standardCost >= 0 ? standardCost : null;
-}
-
-function orderHasCost(order) {
-    return orderUnitCostForStats(order) !== null;
 }
 
 function dateInStatsRange(date, start, end) {
@@ -27116,24 +26980,6 @@ function calculateOrderStatsContribution(order, start, end) {
     };
 }
 
-function addSalesStatsContribution(metric, order, contribution) {
-    metric.actualSales += contribution.actualSales;
-    metric.pendingSales += contribution.pendingSales;
-    metric.actualCost += contribution.actualCost;
-    metric.pendingCost += contribution.pendingCost;
-    metric.totalSales = metric.actualSales + metric.pendingSales;
-    metric.totalCost = metric.actualCost + metric.pendingCost;
-    metric.profit = metric.totalSales - metric.totalCost;
-    if (contribution.actualSales || contribution.pendingSales) metric.orderIds.add(order.id);
-    if (!orderHasCost(order) && (contribution.actualQty || contribution.pendingQty)) {
-        metric.missingCostIds.add(`${order.id}:${orderStatsProductId(order) || order.itemId || 'unknown'}`);
-    }
-    if (contribution.estimated) {
-        metric.estimatedSales += contribution.estimatedSales;
-        metric.estimatedIds.add(order.id);
-    }
-}
-
 function formatStatsMoney(value) {
     const rounded = Math.round(value);
     return `${rounded < 0 ? '-NT$ ' : 'NT$ '}${Math.abs(rounded).toLocaleString()}`;
@@ -27147,14 +26993,10 @@ let tradeAnalysisSimpleRows = [];
 let tradeAnalysisSimplePage = 0;
 let tradeAnalysisFiltersPending = false;
 let tradeAnalysisReady = false;
-let tradeAnalysisReport = null;
-let tradeAnalysisDetailKind = '';
-let tradeAnalysisDetailReport = null;
 let tradeAnalysisSourceOrders = new Map();
 let tradeAnalysisTab = 'purchasing';
 let tradeAnalysisSensitiveVisible = true;
 let tradeAnalysisWarehouseStocks = [];
-const TRADE_ANALYSIS_LABELS = {incoming:'待到貨採購',purchases:'已進貨（收貨）',pending:'待送貨訂單',sales:'已銷貨（送貨）',stock:'目前庫存'};
 
 function setTradeAnalysisLoading(loading) {
     const query=document.getElementById('tradeAnalysisQueryBtn');
@@ -27163,7 +27005,6 @@ function setTradeAnalysisLoading(loading) {
         const button=document.getElementById(id);if(button)button.disabled=loading||!tradeAnalysisReady||tradeAnalysisFiltersPending;
     });
     if(loading){
-        closeTradeAnalysisDetail();
         resetSimpleTradeAnalysisDetail();
         document.querySelectorAll('.trade-analysis-cards strong').forEach(el=>el.textContent='讀取中…');
         document.getElementById('tradeAnalysisStatus').textContent='正在讀取此分頁所需資料…';
@@ -27285,67 +27126,6 @@ function buildTradeAnalysisRows() {
     return rows;
 }
 
-function tradeAnalysisExportRows(report,kind) {
-    return report.details[kind].map(row=>({
-        '交易日期':row.date||'','類別':TRADE_ANALYSIS_LABELS[kind],'交易':row.event,'客戶':row.customer||'','供應商':row.supplier||'',
-        '單號':row.documentNo||'','關聯客戶訂單':row.customerOrderNo||'','負責業務':row.sales||'','統計廠牌':row.brand,'實際廠牌':row.rawBrand,
-        '產品線':row.line,'產品類型':row.type,'貨號':row.code,'品名':row.name,'數量':row.qty,
-        '單價／成本':row.unitPrice===null?'待補成本':row.unitPrice,'金額':row.amount===null?'待補成本':row.amount,
-        '狀態':row.status,'到貨方式':row.fulfillment||'','預計到貨日':row.expectedDate||'','倉庫':row.warehouseId||'',
-        '批號':row.lotNo||'','效期':row.expiryDate||'','來源紀錄ID':row.sourceId||'','交易紀錄ID':row.eventId||''
-    }));
-}
-
-window.openTradeAnalysisDetail = function(kind) {
-    if(currentUserRole!=='admin'||!tradeAnalysisReady||salesStatisticsLoadPromise||!TRADE_ANALYSIS_LABELS[kind])return;
-    tradeAnalysisDetailKind=kind;
-    tradeAnalysisDetailReport=tradeAnalysisReport;
-    const report=tradeAnalysisDetailReport;
-    const detailRows=tradeAnalysisExportRows(report,kind);
-    const columns=['交易日期','客戶','供應商','單號','業務','實際廠牌','產品線','產品類型','貨號','品名','數量','單價／成本','金額','交易'];
-    document.getElementById('tradeAnalysisDetailTitle').textContent=TRADE_ANALYSIS_LABELS[kind]+'明細';
-    document.getElementById('tradeAnalysisDetailSummary').textContent=`共 ${detailRows.length} 筆，合計 ${formatStatsMoney(report.totals[kind])}`+(report.missing[kind]?`；${report.missing[kind]} 筆待補成本，未計入金額`:'')+'。'+(['sales','purchases'].includes(kind)?`期間：${report.filters.start} 至 ${report.filters.end}`:'目前全部餘額');
-    document.getElementById('tradeAnalysisDetailHead').innerHTML='<tr>'+columns.map(name=>`<th>${escapeHtml(name)}</th>`).join('')+'</tr>';
-    const visible=detailRows.slice(0,100);
-    document.getElementById('tradeAnalysisDetailBody').innerHTML=visible.length?visible.map(row=>'<tr>'+columns.map(name=>`<td>${escapeHtml(String(row[name]??''))}</td>`).join('')+'</tr>').join(''):`<tr><td colspan="${columns.length}">沒有符合條件的明細。</td></tr>`;
-    if(detailRows.length>100)document.getElementById('tradeAnalysisDetailSummary').textContent+=' 畫面顯示前 100 筆；匯出包含全部明細。';
-    document.getElementById('tradeAnalysisDetailOverlay').classList.add('active');
-};
-window.closeTradeAnalysisDetail = function() {
-    document.getElementById('tradeAnalysisDetailOverlay')?.classList.remove('active');
-};
-
-async function writeTradeAnalysisWorkbook(report,kinds,button) {
-    if(currentUserRole!=='admin'||!report||!kinds.length||kinds.some(kind=>!TRADE_ANALYSIS_LABELS[kind]))return;
-    const state=beginActionButton(button,'匯出中…');
-    if(button&&!state)return;
-    try{
-        await ensureXlsxLoaded();
-        const wb=XLSX.utils.book_new();
-        const filters=report.filters;
-        const summary=[
-            {'項目':'已完成交易期間','內容':`${filters.start} 至 ${filters.end}`},
-            {'項目':'未完成及庫存','內容':'目前全部餘額'},
-            ...[['業務',filters.sales||'全部負責業務'],['廠牌',filters.brand||'全部廠牌'],['產品線',filters.line||'全部產品線'],['產品類型',filters.type||'全部類型']].map(([name,value])=>({'項目':name,'內容':value})),
-            {'項目':'金額口徑','內容':'銷售含稅；採購及庫存依紀錄單位成本；不混合加總不同單位數量。'},
-            {'項目':'負責業務篩選範圍','內容':'只篩銷貨與待送貨；進貨、待到貨、庫存為公司共同數字。'},
-            ...kinds.map(kind=>({'項目':TRADE_ANALYSIS_LABELS[kind],'內容':report.totals[kind],'明細筆數':report.details[kind].length,'待補成本筆數':report.missing[kind]}))
-        ];
-        XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(summary),'篩選與總計');
-        kinds.forEach(kind=>{
-            const rows=tradeAnalysisExportRows(report,kind);
-            rows.push({'交易':'總計','金額':report.totals[kind],'狀態':report.missing[kind]?`有 ${report.missing[kind]} 筆待補成本`:'完整'});
-            const sheet=XLSX.utils.json_to_sheet(rows);
-            sheet['!cols']=Object.keys(rows[0]).map(name=>({wch:['品名','客戶','供應商'].includes(name)?28:18}));
-            XLSX.utils.book_append_sheet(wb,sheet,TRADE_ANALYSIS_LABELS[kind]);
-        });
-        XLSX.writeFile(wb,`進銷存-${kinds.length===1?TRADE_ANALYSIS_LABELS[kinds[0]]:'全部明細'}-${filters.start}-${filters.end}.xlsx`);
-    }catch(err){alert('匯出失敗：'+(err.message||err));}
-    finally{if(button)endActionButton(button,state);}
-}
-window.exportTradeAnalysisDetail = function() {
-    return writeTradeAnalysisWorkbook(tradeAnalysisDetailReport,[tradeAnalysisDetailKind],document.getElementById('tradeAnalysisExport'));
-};
 window.exportTradeAnalysis = async function() {
     if(currentUserRole!=='admin'||!tradeAnalysisReady||salesStatisticsLoadPromise||tradeAnalysisFiltersPending)return;
     const button=document.getElementById('tradeAnalysisWorkbookBtn');
@@ -27421,46 +27201,6 @@ window.setSalesStatisticsPeriod = function(period) {
     document.getElementById('salesStatsEnd').value = end;
     markTradeAnalysisFiltersPending();
 };
-
-function buildSalesStatisticsReport() {
-    const start = document.getElementById('salesStatsStart')?.value || '';
-    const end = document.getElementById('salesStatsEnd')?.value || '';
-    const salesFilter = document.getElementById('salesStatsSalesFilter')?.value || '';
-    const brandFilter = document.getElementById('salesStatsBrandFilter')?.value || '';
-    const typeFilter = document.getElementById('salesStatsTypeFilter')?.value || '';
-    const lineFilter = document.getElementById('salesStatsLineFilter')?.value || '';
-    const byBrand = {}, bySales = {}, byType = {}, byLine = {}, byTransaction = {};
-    const total = newSalesStatsMetric();
-    const details = [];
-
-    salesStatisticsOrders.flatMap(salesStatisticOrderLines).forEach(order => {
-        const sales = stripPhoneSuffix(order.salesName) || '未指定負責業務';
-        const line = productLineForOrder(order);
-        const type = productTypeForOrder(order);
-        const brand = statisticBrandForOrder(order);
-        const transaction = order.transactionType || '未選擇';
-        if ((salesFilter && sales !== salesFilter) || (brandFilter && brand !== brandFilter) || (typeFilter && type !== typeFilter) || (lineFilter && line !== lineFilter)) return;
-        const contribution = calculateOrderStatsContribution(order, start, end);
-        if (!contribution.actualSales && !contribution.pendingSales && !contribution.actualQty && !contribution.pendingQty) return;
-        addSalesStatsContribution(total, order, contribution);
-        if (!byBrand[brand]) byBrand[brand] = newSalesStatsMetric();
-        if (!bySales[sales]) bySales[sales] = newSalesStatsMetric();
-        if (!byType[type]) byType[type] = newSalesStatsMetric();
-        if (!byLine[line]) byLine[line] = newSalesStatsMetric();
-        if (!byTransaction[transaction]) byTransaction[transaction] = newSalesStatsMetric();
-        addSalesStatsContribution(byBrand[brand], order, contribution);
-        addSalesStatsContribution(bySales[sales], order, contribution);
-        addSalesStatsContribution(byType[type], order, contribution);
-        addSalesStatsContribution(byLine[line], order, contribution);
-        addSalesStatsContribution(byTransaction[transaction], order, contribution);
-        details.push({ order, sales, brand, type, line, transaction, contribution });
-    });
-
-    return {
-        start, end, salesFilter, brandFilter, typeFilter, lineFilter,
-        total, byBrand, bySales, byType, byLine, byTransaction, details
-    };
-}
 
 function renderUnifiedBrandAnalytics() {
     if(tradeAnalysisReady&&!salesStatisticsLoadPromise)renderSalesStatistics();
@@ -27558,199 +27298,6 @@ window.renderSalesStatistics = function() {
     if(tradeAnalysisFiltersPending)markTradeAnalysisFiltersPending();
 };
 
-function salesStatsMetricExportRows(values, grandTotal, label) {
-    return Object.entries(values)
-        .sort((a, b) => b[1].totalSales - a[1].totalSales)
-        .map(([name, metric]) => ({
-            [label]: name,
-            '實際送貨金額': Math.round(metric.actualSales),
-            '待出貨金額': Math.round(metric.pendingSales),
-            '總金額': Math.round(metric.totalSales),
-            '總成本': Math.round(metric.totalCost),
-            '毛利': metric.missingCostIds.size ? '待補成本' : Math.round(metric.profit),
-            '毛利率': metric.missingCostIds.size ? '待補成本' : metric.totalSales ? (metric.profit / metric.totalSales * 100).toFixed(1) + '%' : '－',
-            '占比': grandTotal ? (metric.totalSales / grandTotal * 100).toFixed(1) + '%' : '－',
-            '成本未填筆數': metric.missingCostIds.size,
-            '歷史推估金額': Math.round(metric.estimatedSales)
-        }));
-}
-
-window.exportSalesStatisticsExcel = async function() {
-    populateSalesStatisticsFilters();
-    const report = buildSalesStatisticsReport();
-    if (!report.start || !report.end) {
-        alert('請先選擇統計起訖日期。');
-        return;
-    }
-    if (!report.details.length) {
-        alert('目前的日期與篩選條件沒有可匯出的季報資料。');
-        return;
-    }
-    try {
-        await ensureXlsxLoaded();
-        const { total } = report;
-        const summaryRows = [
-            { '項目': '統計期間', '內容': `${report.start} 至 ${report.end}` },
-            { '項目': '負責業務篩選', '內容': report.salesFilter || '全部負責業務' },
-            { '項目': '廠牌篩選', '內容': report.brandFilter || '全部廠牌' },
-            { '項目': '類型篩選', '內容': report.typeFilter || '全部類型' },
-            { '項目': '產品線篩選', '內容': report.lineFilter || '全部產品線' },
-            { '項目': '有效訂單筆數', '內容': total.orderIds.size },
-            { '項目': '實際送貨金額', '內容': Math.round(total.actualSales) },
-            { '項目': '待出貨金額', '內容': Math.round(total.pendingSales) },
-            { '項目': '總金額', '內容': Math.round(total.totalSales) },
-            { '項目': '總成本', '內容': Math.round(total.totalCost) },
-            { '項目': '毛利', '內容': total.missingCostIds.size ? '待補成本' : Math.round(total.profit) },
-            { '項目': '毛利率', '內容': total.missingCostIds.size ? '待補成本' : total.totalSales ? (total.profit / total.totalSales * 100).toFixed(1) + '%' : '－' },
-            { '項目': '成本未填筆數', '內容': total.missingCostIds.size },
-            { '項目': '歷史推估金額', '內容': Math.round(total.estimatedSales) },
-            { '項目': '歷史推估筆數', '內容': total.estimatedIds.size }
-        ];
-        const detailRows = report.details
-            .sort((a, b) => (a.order.orderDate || '').localeCompare(b.order.orderDate || ''))
-            .map(({ order, sales, brand, type, line, transaction, contribution }) => {
-                const hasCost = orderHasCost(order);
-                const totalSales = contribution.actualSales + contribution.pendingSales;
-                const totalCost = contribution.actualCost + contribution.pendingCost;
-                return {
-                    '訂單日期': order.orderDate || '',
-                    '來源估價單': order.quoteNo || '',
-                    '採購單號': order.purchaseOrderNo || '',
-                    '客戶名稱': order.customerName || '',
-                    '負責業務': sales,
-                    '統計廠牌': brand,
-                    '原始廠牌': order.brand || '',
-                    '產品類型': type,
-                    '產品線': line,
-                    '貨號': order.itemCode || '',
-                    '品名': order.itemName || '',
-                    '交易方式': transaction,
-                    '訂單數量': orderQuantity(order),
-                    '期間實際送貨數量': contribution.actualQty,
-                    '截至迄日待出貨數量': contribution.pendingQty,
-                    '實際送貨金額': Math.round(contribution.actualSales),
-                    '待出貨金額': Math.round(contribution.pendingSales),
-                    '總金額': Math.round(totalSales),
-                    '總成本': Math.round(totalCost),
-                    '毛利': hasCost ? Math.round(totalSales - totalCost) : '待補成本',
-                    '毛利率': hasCost && totalSales ? ((totalSales - totalCost) / totalSales * 100).toFixed(1) + '%' : hasCost ? '－' : '待補成本',
-                    '成本狀態': hasCost ? '已填' : '未填',
-                    '資料註記': contribution.estimated ? '歷史推估資料' : ''
-                };
-            });
-        const workbook = XLSX.utils.book_new();
-        const appendSheet = (rows, name, widths) => {
-            const sheet = XLSX.utils.json_to_sheet(rows);
-            sheet['!cols'] = widths.map(width => ({ wch: width }));
-            XLSX.utils.book_append_sheet(workbook, sheet, name);
-        };
-        appendSheet(summaryRows, '摘要', [18, 24]);
-        appendSheet(salesStatsMetricExportRows(report.byBrand, total.totalSales, '廠牌'), '廠牌', [18, 16, 16, 16, 16, 16, 12, 12, 14, 16]);
-        appendSheet(salesStatsMetricExportRows(report.bySales, total.totalSales, '業務'), '業務', [18, 16, 16, 16, 16, 16, 12, 12, 14, 16]);
-        appendSheet(salesStatsMetricExportRows(report.byTransaction, total.totalSales, '交易方式'), '交易方式', [18, 16, 16, 16, 16, 16, 12, 12, 14, 16]);
-        appendSheet(detailRows, '訂單明細', [12, 16, 16, 22, 12, 14, 14, 14, 14, 16, 28, 12, 12, 18, 18, 16, 16, 16, 16, 16, 12, 14, 16]);
-        XLSX.writeFile(workbook, `銷售季報_${report.start}_至_${report.end}.xlsx`);
-    } catch (err) {
-        console.error('匯出季報失敗：', err);
-        alert('匯出季報失敗：' + err.message + '\n請確認目前這筆資料及連線／權限，重試前先查詢作業結果；若持續失敗，請聯絡管理員。');
-    }
-};
-
-function renderMissingCostOrders() {
-    const tbody = document.getElementById('missingCostOrdersBody');
-    const summary = document.getElementById('missingCostOrdersSummary');
-    if (!tbody || !summary) return;
-    const report = buildSalesStatisticsReport();
-    const missingRows = report.details.filter(({ order }) => !orderHasCost(order));
-    summary.innerText = `${report.start || '未指定'} 至 ${report.end || '未指定'}，依目前篩選條件共 ${missingRows.length} 筆。請填寫每單位含稅進貨成本。`;
-    tbody.innerHTML = missingRows.length ? missingRows.map(({ order, sales, brand }) => `
-        <tr>
-            <td>${escapeHtml(order.orderDate || '')}</td>
-            <td>${escapeHtml(order.customerName || '')}</td>
-            <td>${escapeHtml(sales)}</td>
-            <td>${escapeHtml(brand)}</td>
-            <td class="missing-cost-product"><strong>${escapeHtml(order.itemName || '－')}</strong><br><small>${escapeHtml(order.itemCode || '')}</small></td>
-            <td>${escapeHtml(String(orderQuantity(order)))}</td>
-            <td>${formatStatsMoney(salesAmount(order))}</td>
-            <td><input type="number" min="0" step="0.01" class="missing-cost-input" aria-label="${escapeAttr(order.itemName || '訂單')}單位成本" onchange="saveMissingCostFromStats(${inlineJsValue(order.id)},${inlineJsValue(order.itemId || '')},${inlineJsValue(orderStatsProductId(order))},${inlineJsValue(order.procurementType || 'PURCHASING_PO')}, this)"><small class="missing-cost-save-state"></small></td>
-        </tr>
-    `).join('') : '<tr><td colspan="8" style="color:#888;padding:18px;">目前篩選範圍內沒有缺少成本的訂單。</td></tr>';
-}
-
-window.openMissingCostOrders = function() {
-    renderMissingCostOrders();
-    document.getElementById('missingCostOrdersOverlay')?.classList.add('active');
-};
-
-window.closeMissingCostOrders = function() {
-    document.getElementById('missingCostOrdersOverlay')?.classList.remove('active');
-};
-
-window.saveMissingCostFromStats = async function(orderId, itemId, productId, procurementType, input) {
-    if (currentUserRole !== 'admin' && currentUserRole !== 'purchaser') {
-        alert('只有採購或管理員可以補填成本。');
-        renderMissingCostOrders();
-        return;
-    }
-    const cost = Number(input.value);
-    if (input.value === '' || !Number.isFinite(cost) || cost < 0) {
-        alert('請輸入大於或等於 0 的單位成本。');
-        input.focus();
-        return;
-    }
-    const state = input.parentElement?.querySelector('.missing-cost-save-state');
-    input.disabled = true;
-    if (state) state.innerText = '儲存中…';
-    try {
-        if (procurementType === 'SALES_SELF_ORDER') {
-            const original = salesStatisticsOrders.find(order => order.id === orderId) || ordersCache.find(order => order.id === orderId);
-            if (!original) throw new Error('找不到原訂單。');
-            const updates = {
-                costPrice: cost,
-                costSource: 'manual_transaction_cost_correction',
-                updatedAt: new Date().toISOString()
-            };
-            if (Array.isArray(original.items) && original.items.length) {
-                updates.items = original.items.map((item, index) => {
-                    const sameItem = itemId ? item.itemId === itemId : index === 0;
-                    return sameItem ? { ...item, costPrice:cost, costSource:'manual_transaction_cost_correction' } : item;
-                });
-            }
-            await db.collection('orders').doc(orderId).set(updates, { merge:true });
-            const applyLocal = order => {
-                if (!order) return;
-                order.costPrice = cost;
-                order.costSource = 'manual_transaction_cost_correction';
-                if (updates.items) order.items = updates.items;
-            };
-            applyLocal(salesStatisticsOrders.find(order => order.id === orderId));
-            applyLocal(ordersCache.find(order => order.id === orderId));
-        } else {
-            const resolvedProductId = String(productId || '').trim();
-            if (!resolvedProductId) throw new Error('這筆訂單找不到產品主檔，無法安全寫入標準成本。');
-            const line = salesStatisticsOrders.flatMap(salesStatisticOrderLines)
-                .find(order => order.id === orderId && orderStatsProductId(order) === resolvedProductId);
-            await db.collection('productCosts').doc(resolvedProductId).set({
-                productId: resolvedProductId,
-                productLineId: line?.productLine || '',
-                standardCost: cost,
-                salesVisible: false,
-                source: 'STATS_COST_UPDATE',
-                updatedAt: new Date().toISOString(),
-                updatedBy: currentUser?.uid || ''
-            }, { merge:true });
-            purchaseCostCache.set(resolvedProductId, cost);
-            invalidateVisibleProductCosts();
-        }
-        renderSalesStatistics();
-        renderMissingCostOrders();
-    } catch (err) {
-        input.disabled = false;
-        if (state) state.innerText = '儲存失敗';
-        alert('成本儲存失敗：' + err.message + '\n請確認目前這筆資料及連線／權限，重試前先查詢作業結果；若持續失敗，請聯絡管理員。');
-    }
-};
-
 function inlineJsValue(value) { return escapeAttr(JSON.stringify(String(value ?? ''))); }
 function escapeAttr(str) {
     return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -27793,8 +27340,8 @@ window.renderAdminSalesTable = function() {
             <td data-label="領貨／地址"><button type="button" class="btn-small btn-secondary" onclick="openSalesDeliveryDefaults(${inlineJsValue(u.uid)})">${u.deliveryDefaults?.mode==='SALES_SHIP'?'寄到業務地址':'主倉領貨'}</button></td>
             <td data-label="密碼" class="admin-user-password-actions">
                 ${u.mustChangePassword
-                    ? `<span class="status-badge status-soon" style="margin-right:6px;">下次登入須改密碼</span><button type="button" class="btn-small btn-secondary" onclick="toggleMustChangePassword('${u.uid}', false)">取消要求</button>`
-                    : `<button type="button" class="btn-small" onclick="toggleMustChangePassword('${u.uid}', true)">🔒 強制下次登入改密碼</button>`}
+                    ? `<span class="status-badge status-soon" style="margin-right:6px;">下次登入須改密碼</span><button type="button" class="btn-small btn-secondary" onclick="toggleMustChangePassword(${inlineJsValue(u.uid)}, false)">取消要求</button>`
+                    : `<button type="button" class="btn-small" onclick="toggleMustChangePassword(${inlineJsValue(u.uid)}, true)">🔒 強制下次登入改密碼</button>`}
                 <br>
                 ${u.email
                     ? `<button type="button" class="btn-small btn-secondary" style="margin-top:4px;" onclick="sendPasswordResetToUser(${inlineJsValue(u.email)})">📧 寄送密碼重設信</button>`
@@ -27807,7 +27354,7 @@ window.renderAdminSalesTable = function() {
 };
 
 window.saveAdminUserRole=async function(uid, selectEl){
-    if(trueUserRole!=='admin')return;
+    if(trueUserRole!=='admin'||currentUserRole!=='admin')return;
     const select=selectEl||document.getElementById(`adminUserRole-${uid}`);
     const user=allUsersCache.find(x=>x.uid===uid);
     const previousRole=user?.role||'sales';
@@ -27835,6 +27382,7 @@ window.saveAdminUserRole=async function(uid, selectEl){
 // 這個系統目前沒有後端），所以做法是：先在該帳號的資料上做記號，等他本人下次登入時，
 // 系統會強制跳出「修改密碼」視窗、擋住其他操作，直到他自己設好新密碼為止。
 window.toggleMustChangePassword = function(uid, value) {
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
     const msg = value ? '確定要要求這個帳號下次登入時必須先修改密碼嗎？' : '確定要取消這個要求嗎？';
     if (!confirm(msg)) return;
 
@@ -27848,6 +27396,7 @@ window.toggleMustChangePassword = function(uid, value) {
 // 寄送 Firebase 官方的密碼重設信到指定 Email，對方收信後可以自己點連結設定新密碼
 // （適合對方忘記密碼、登不進來的情況；跟「強制下次登入改密碼」是兩種互補的做法）
 window.sendPasswordResetToUser = function(email) {
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
     if (!confirm(`確定要寄送密碼重設信到 ${email} 嗎？`)) return;
     firebase.auth().sendPasswordResetEmail(email).then(() => {
         alert(`密碼重設信已寄出到 ${email}。`);
@@ -27870,13 +27419,8 @@ async function loadSalesCodeMaster() {
 
 window.reloadSalesFromUsers = function() {
     const generation = sessionDataGeneration;
-    return readCollectionInBatches('users').then(async rows => {
+    return readCollectionInBatches('users').then(rows => {
         if (generation !== sessionDataGeneration) return;
-        salesList = rows
-            .filter(d => d.name && d.code)
-            .map(d => ({ uid:d.id, code:d.code, name:d.name, phone:d.phone || '', deliveryDefaults:d.deliveryDefaults || {}, role:d.role || 'sales', active:d.active !== false, disabled:!!d.disabled }))
-            .sort((a,b)=>String(a.code||'').localeCompare(String(b.code||'')));
-
         allUsersCache = rows.map(d => ({
             uid:d.id, code:d.code || '', name:d.name || '', phone:d.phone || '',
             role:d.role || 'sales', email:d.email || '', disabled:!!d.disabled,
@@ -27892,11 +27436,7 @@ window.reloadSalesFromUsers = function() {
         applySalesRows(rows);
         salesListLoadPromise = Promise.resolve(salesList);
         if (document.getElementById('admin-statistics')?.style.display === 'block') populateSalesStatisticsFilters();
-        if (generation !== sessionDataGeneration) return;
-        await loadSalesCodeMaster().catch(err => { console.warn('讀取業務代號主檔失敗：', err); salesCodeMasterCache = []; });
-        if (generation !== sessionDataGeneration) return;
         renderAdminSalesTable();
-        populateTransferDropdowns();
     }).catch(err => {
         if (generation !== sessionDataGeneration) return;
         mainPageLoadFailed('admin');
@@ -27905,6 +27445,30 @@ window.reloadSalesFromUsers = function() {
         renderAdminSalesTable();
     });
 };
+
+// The user directory is shared by both personnel tabs. Sales codes are only needed for handover.
+let adminTransferLoad = null;
+function loadAdminTransferPanel() {
+    const generation = sessionDataGeneration;
+    if (adminTransferLoad?.generation === generation) return adminTransferLoad.request;
+    const result = document.getElementById('transferResult');
+    const preview = document.getElementById('transferPreviewBtn');
+    resetTransferPreview();
+    preview.disabled = true;
+    result.innerText = '正在讀取人員與業務代號…';
+    const request = Promise.all([reloadSalesFromUsers(), loadSalesCodeMaster()]).then(() => {
+        if (generation !== sessionDataGeneration) return;
+        if (!allUsersCache.length) throw new Error('無法取得人員名單');
+        populateTransferDropdowns();
+        preview.disabled = false;
+    }).catch(err => {
+        if (generation === sessionDataGeneration) result.innerText = '載入失敗：' + err.message + '。請重新開啟業務交接分頁。';
+    }).finally(() => {
+        if (adminTransferLoad?.request === request) adminTransferLoad = null;
+    });
+    adminTransferLoad = { generation, request };
+    return request;
+}
 
 /* ---------- 業務代號交接：資料歸屬維持 salesCode，只更換代號目前負責業務 ---------- */
 function populateTransferDropdowns() {
@@ -27947,6 +27511,7 @@ function getTransferSelection() {
 }
 
 window.previewSalesTransfer = function() {
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin' || document.getElementById('transferPreviewBtn')?.disabled) return;
     const { salesCode, target, currentHolder } = getTransferSelection();
     const resultEl = document.getElementById('transferResult');
     const executeBtn = document.getElementById('transferExecuteBtn');
@@ -27978,10 +27543,13 @@ window.previewSalesTransfer = function() {
 };
 
 window.executeSalesTransfer = async function() {
+    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
+    const generation = sessionDataGeneration;
     const { salesCode, target, currentHolder } = getTransferSelection();
     const resultEl = document.getElementById('transferResult');
     const button = document.getElementById('transferExecuteBtn');
     const intent = pendingSalesTransfer;
+    if (button?.disabled) return;
     if (!button || !intent || intent.salesCode !== String(salesCode) ||
         intent.targetUid !== target?.uid || intent.expectedFromUid !== currentHolder?.uid) {
         resultEl.innerText = '交接內容已變更，請重新檢查。';
@@ -27995,68 +27563,27 @@ window.executeSalesTransfer = async function() {
         const response = await callable(intent);
         if (!['completed','already-applied'].includes(response?.data?.status))
             throw new Error('後端未確認交接完成');
+        if (generation !== sessionDataGeneration) return;
         pendingSalesTransfer = null;
         button.style.display = 'none';
         salesListLoadPromise = null;
-        await reloadSalesFromUsers();
-        resultEl.innerText = '交接完成：' + salesCode + ' 現由 ' + target.name + ' 負責。原始業務姓名與歷史文件未改動。';
+        await loadAdminTransferPanel();
+        if (generation !== sessionDataGeneration) return;
+        const refreshError = resultEl.innerText;
+        resultEl.innerText = '交接完成：' + salesCode + ' 現由 ' + target.name + ' 負責。' + (refreshError ? '\n' + refreshError : '');
     } catch (err) {
+        if (generation !== sessionDataGeneration) return;
         console.error('業務交接後端失敗：',err);
         resultEl.innerText = '交接未確認完成：' + (err.message || err) +
             '\n請先重新檢查目前負責人；若為網路中斷，可保留相同操作 ID 重試，不會重複交接。';
     } finally { button.disabled = false; }
 };
 
-/* ---------- 資料庫用量估算 ---------- */
 function formatBytes(bytes) {
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
     return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
 }
-
-// 統計各集合的文件數與內容大小；這是「文件 JSON 內容」的估計值，
-// 跟 Firebase 主控台的實際帳單用量（還包含索引等額外儲存空間）不完全相同，僅供大致參考
-window.calculateStorageUsage = async function() {
-    const tbody = document.getElementById('storageUsageBody');
-    tbody.innerHTML = '<tr><td colspan="3" style="color:#888;">計算中，請稍候…</td></tr>';
-
-    const collections = [
-        { key: 'quotes', label: '估價單' }, { key: 'forecasts', label: 'Forecast' },
-        { key: 'orders', label: '訂單' }, { key: 'purchaseOrders', label: '採購單' },
-        { key: 'procurementDemands', label: '採購需求' },
-        { key: 'supplyOrders', label: '供應／訂貨紀錄' }, { key: 'receipts', label: '收貨紀錄' }, { key: 'customerReturnReceipts', label: '客戶退貨實收紀錄' },
-        { key: 'dispatchRecords', label: '出貨打單紀錄' }, { key: 'inventory', label: '庫存彙總' },
-        { key: 'inventoryLots', label: '庫存批次' }, { key: 'inventoryLotCosts', label: '受保護批次成本' },
-        { key: 'inventoryReservations', label: '庫存預留' }, { key: 'inventoryMovements', label: '庫存異動' },
-        { key: 'warehouseStocks', label: '分倉庫存' }, { key: 'stockTransferRequests', label: '備貨調回需求' }, { key: 'stockTransfers', label: '倉庫調撥' }, { key: 'products', label: '產品主檔' },
-        { key: 'productCosts', label: '受保護產品成本' }, { key: 'equipment', label: '儀器' },
-        { key: 'users', label: '人員／使用者帳號' }, { key: 'settings', label: '系統設定' }
-    ];
-
-    try {
-        let totalBytes = 0, totalDocs = 0;
-        const rows = [];
-        for (let i = 0; i < collections.length; i++) {
-            const c = collections[i];
-            tbody.innerHTML = `<tr><td colspan="3" style="color:#888;">正在分批讀取 ${escapeHtml(c.label)}（${i + 1}/${collections.length}）…</td></tr>`;
-            const records = await readCollectionInBatches(c.key);
-            const bytes = records.reduce((sum, row) => {
-                const { id, ...data } = row;
-                return sum + new Blob([JSON.stringify(data)]).size;
-            }, 0);
-            totalBytes += bytes;
-            totalDocs += records.length;
-            rows.push({ label:c.label, count:records.length, bytes });
-        }
-        tbody.innerHTML = rows.map(r => `
-            <tr><td>${escapeHtml(r.label)}</td><td>${r.count}</td><td>${formatBytes(r.bytes)}</td></tr>
-        `).join('') + `
-            <tr style="font-weight:bold;background:#f5f5f5;"><td>總計</td><td>${totalDocs}</td><td>${formatBytes(totalBytes)}</td></tr>
-        `;
-    } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="3" style="color:#cc0000;">計算失敗：${escapeHtml(err.message)}</td></tr>`;
-    }
-};
 
 /* ---------- 資料庫備份 ---------- */
 function backupSerializableValue(value) {
@@ -28213,88 +27740,6 @@ window.previewDatabaseBackupUpload = async function(input) {
     } catch (err) { status.textContent = `檔案檢查失敗：${err.message}`; }
     finally { input.value = ''; }
 };
-
-/* ---------- 估價單／訂單全歷史搜尋索引補建 ---------- */
-let orderSearchIndexMigrationRunning = false;
-let orderSearchIndexAwaitingConfirmation = false;
-let orderSearchIndexConfirmationTimer = null;
-
-window.backfillOrderSearchIndex = async function() {
-    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') {
-        alert('只有管理員可以執行搜尋索引補建。');
-        return;
-    }
-    if (orderSearchIndexMigrationRunning) return;
-    const button = document.getElementById('orderSearchIndexMigrationBtn');
-    const status = document.getElementById('orderSearchIndexMigrationStatus');
-    if (!orderSearchIndexAwaitingConfirmation) {
-        orderSearchIndexAwaitingConfirmation = true;
-        if (status) status.innerText = '這會逐批檢查舊估價單、Forecast、訂單與儀器，只補建搜尋索引，不修改金額、狀態或流程。請在 10 秒內再按一次確認開始。';
-        if (button) button.innerText = '確認開始補建';
-        clearTimeout(orderSearchIndexConfirmationTimer);
-        orderSearchIndexConfirmationTimer = setTimeout(() => {
-            if (orderSearchIndexMigrationRunning) return;
-            orderSearchIndexAwaitingConfirmation = false;
-            if (button) button.innerText = '建立／修正全歷史搜尋索引';
-            if (status?.innerText.includes('請在 10 秒內')) status.innerText = '已取消：未在時間內再次確認。';
-        }, 10000);
-        return;
-    }
-    orderSearchIndexAwaitingConfirmation = false;
-    clearTimeout(orderSearchIndexConfirmationTimer);
-    orderSearchIndexMigrationRunning = true;
-    if (button) { button.disabled = true; button.innerText = '補建中…'; }
-    let scanned = 0, updated = 0;
-    try {
-        for (const collectionName of ['quotes','orders','forecasts','equipment']) {
-            let cursor = null;
-            while (true) {
-                let query = db.collection(collectionName).orderBy(firebase.firestore.FieldPath.documentId()).limit(200);
-                if (cursor) query = query.startAfter(cursor);
-                const snapshot = await firestoreReadWithTimeout(
-                    query.get(),
-                    collectionName + ' 搜尋索引補建'
-                );
-                if (snapshot.empty) break;
-                const batch = db.batch();
-                let writes = 0;
-                snapshot.docs.forEach(doc => {
-                    const data = doc.data() || {};
-                    const type = collectionName === 'quotes' ? 'quote'
-                        : collectionName === 'forecasts' ? 'forecast'
-                        : collectionName === 'equipment' ? 'equipment' : 'order';
-                    const searchTokens = buildFullHistorySearchTokens(type, { id: doc.id, ...data });
-                    const update = {};
-                    if (JSON.stringify(data.searchTokens || []) !== JSON.stringify(searchTokens)) update.searchTokens = searchTokens;
-                    if (collectionName === 'orders') {
-                        const sourceCode = data.itemCode || data.productCode || data.model || '';
-                        const normalized = normalizeHistoryItemCode(sourceCode);
-                        if (normalized && data.itemCodeKey !== normalized) update.itemCodeKey = normalized;
-                    }
-                    scanned += 1;
-                    if (Object.keys(update).length) {
-                        batch.update(doc.ref, update);
-                        writes += 1;
-                        updated += 1;
-                    }
-                });
-                if (writes) await batch.commit();
-                cursor = snapshot.docs[snapshot.docs.length - 1];
-                if (status) status.innerText = `${collectionName === 'quotes' ? '估價單' : collectionName === 'forecasts' ? 'Forecast' : collectionName === 'equipment' ? '儀器' : '訂單'}：已檢查 ${scanned} 筆，更新 ${updated} 筆搜尋索引…`;
-                if (snapshot.size < 200) break;
-            }
-        }
-        if (status) status.innerText = `完成：共檢查 ${scanned} 筆估價單／Forecast／訂單／儀器，建立或修正 ${updated} 筆全歷史搜尋索引。`;
-    } catch (err) {
-        console.error('全歷史搜尋索引補建失敗：', err);
-        if (status) status.innerText = `補建中斷：已檢查 ${scanned} 筆、更新 ${updated} 筆。可重新執行，已完成資料不會重複修改。`;
-        alert('搜尋索引補建未完成，請確認 Firestore 權限與網路連線後再試。');
-    } finally {
-        orderSearchIndexMigrationRunning = false;
-        if (button) { button.disabled = false; button.innerText = '建立／修正全歷史搜尋索引'; }
-    }
-};
-
 /* ---------- Product Master：正式主檔與資料維護 ---------- */
 let productMasterMigrationRunning = false;
 
@@ -28338,26 +27783,6 @@ function productMasterRecordFromItem(item, source = 'PRODUCT_MASTER') {
     };
 }
 
-async function readCollectionForMigration(name, pageSize = 300) {
-    const rows = [];
-    let cursor = null;
-    while (true) {
-        let query = db.collection(name).orderBy(firebase.firestore.FieldPath.documentId()).limit(pageSize);
-        if (cursor) query = query.startAfter(cursor);
-        const snap = await firestoreReadWithTimeout(
-            query.get(),
-            name + ' 遷移資料'
-        );
-        if (snap.empty) break;
-        snap.docs.forEach(doc => rows.push({ ref:doc.ref, id:doc.id, data:doc.data() || {} }));
-        cursor = snap.docs[snap.docs.length - 1];
-        if (snap.size < pageSize) break;
-    }
-    return rows;
-}
-
-// 共用批次寫入：Firestore 單一 write batch 有筆數上限，因此大型 Product Master／成本更新分批提交。
-// 各操作需可安全重跑；若中途網路失敗，已完成的批次保留，使用者可再次執行未完成部分。
 async function commitMigrationBatch(operations, chunkSize = 400) {
     const safeOperations = Array.isArray(operations)
         ? operations.filter(operation => typeof operation === 'function')
@@ -28380,19 +27805,6 @@ async function commitMigrationBatch(operations, chunkSize = 400) {
         committed += chunk.length;
     }
     return committed;
-}
-function recordContainsEmbeddedCost(record) {
-    return !!record && (record.cogs !== undefined || (Array.isArray(record.lotAllocations) && record.lotAllocations.some(row => row && (row.cost !== undefined || row.unitCost !== undefined))));
-}
-function inventoryCostMigrationPlan(lots, inventory, receipts, movements, orders = [], warehouseStocks = []) {
-    return {
-        legacyLots: lots.filter(row => row.data.unitCost !== undefined),
-        legacyInventory: inventory.filter(row => row.data.unitCost !== undefined || row.data.cost !== undefined || (Array.isArray(row.data.lots) && row.data.lots.some(lot => lot && (lot.unitCost !== undefined || lot.cost !== undefined)))),
-        legacyWarehouseStocks: warehouseStocks.filter(row => row.data.unitCost !== undefined || row.data.cost !== undefined),
-        legacyReceipts: receipts.filter(row => row.data.unitCost !== undefined || row.data.purchaseNetAmount !== undefined),
-        legacyMovements: movements.filter(row => row.data.unitCost !== undefined || row.data.purchaseNetAmount !== undefined || row.data.cogs !== undefined),
-        legacyOrders: orders.filter(row => [...(row.data.deliveryRecords || []), ...(row.data.returnRecords || [])].some(recordContainsEmbeddedCost))
-    };
 }
 async function readCollectionInBatches(collectionName, batchSize = 500) {
     const rows = [];
@@ -28711,57 +28123,6 @@ window.runSystemDataAudit = async function() {
     }
 };
 
-window.previewInventoryCostMigration = async function() {
-    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return alert('只有管理員可以執行庫存成本隔離。');
-    const status=document.getElementById('inventoryCostMigrationStatus'), runButton=document.getElementById('inventoryCostMigrationBtn'), previewButton=document.getElementById('inventoryCostMigrationPreviewBtn');
-    if(previewButton)previewButton.disabled=true;if(runButton)runButton.disabled=true;if(status)status.innerText='正在分頁掃描舊庫存成本欄位…';
-    try{
-        // Array.map 會額外傳入 index；不可直接把 readCollectionForMigration 當 callback，
-        // 否則第一個集合會把 index 0 誤當 pageSize，造成 Firestore limit(0) 失敗。
-        const [lots,inventory,receipts,movements,orders,warehouseStocks]=await Promise.all(
-            ['inventoryLots','inventory','receipts','inventoryMovements','orders','warehouseStocks']
-                .map(name => readCollectionForMigration(name))
-        );
-        const plan=inventoryCostMigrationPlan(lots,inventory,receipts,movements,orders,warehouseStocks);window._inventoryCostMigrationPlan=plan;
-        const total=plan.legacyLots.length+plan.legacyInventory.length+plan.legacyWarehouseStocks.length+plan.legacyReceipts.length+plan.legacyMovements.length+plan.legacyOrders.length;
-        if(status)status.innerText=`預覽完成：批次成本 ${plan.legacyLots.length}、庫存文件 ${plan.legacyInventory.length}、分倉成本 ${plan.legacyWarehouseStocks.length}、收貨 ${plan.legacyReceipts.length}、異動 ${plan.legacyMovements.length}、舊訂單成本 ${plan.legacyOrders.length}。\n`+(total?'請先執行「庫存成本隔離」，完成後再部署新版 Firestore Rules。':'沒有發現舊成本欄位，可直接進行新版 Rules 驗證。');
-        if(runButton)runButton.disabled=total===0;
-    }catch(err){console.error('庫存成本隔離預覽失敗：',err);if(status)status.innerText='預覽失敗：'+(err.message||err);}
-    finally{if(previewButton)previewButton.disabled=false;}
-};
-window.runInventoryCostMigration = async function() {
-    if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return alert('只有管理員可以執行庫存成本隔離。');
-    const plan=window._inventoryCostMigrationPlan;if(!plan)return alert('請先按「預覽庫存成本隔離」。');
-    if(!confirm('確定執行庫存成本隔離？\n\n舊 inventoryLots 成本會搬到 inventoryLotCosts；公開庫存、收貨與異動文件中的成本欄位會移除。此步驟應在部署新版 Firestore Rules 前完成。'))return;
-    const status=document.getElementById('inventoryCostMigrationStatus'),runButton=document.getElementById('inventoryCostMigrationBtn'),previewButton=document.getElementById('inventoryCostMigrationPreviewBtn');
-    if(runButton)runButton.disabled=true;if(previewButton)previewButton.disabled=true;
-    const del=firebase.firestore.FieldValue.delete(),ops=[],now=new Date().toISOString(),by=currentUser?.uid||'';
-    plan.legacyLots.forEach(row=>{const d=row.data;ops.push(batch=>batch.set(db.collection('inventoryLotCosts').doc(row.id),{lotId:row.id,productKey:d.productKey||'',productId:d.productId||'',warehouseId:d.warehouseId||'',unitCost:Number(d.unitCost||0),sourceType:d.sourceType||'LEGACY_MIGRATION',sourceId:d.sourceId||'',migratedAt:now,migratedBy:by},{merge:true}));ops.push(batch=>batch.update(row.ref,{unitCost:del,costMigratedAt:now}));});
-    plan.legacyInventory.forEach(row=>{const patch={costSanitizedAt:now};if(row.data.unitCost!==undefined)patch.unitCost=del;if(row.data.cost!==undefined)patch.cost=del;if(Array.isArray(row.data.lots))patch.lots=row.data.lots.map(lot=>{if(!lot||typeof lot!=='object')return lot;const {unitCost,cost,...rest}=lot;return rest;});ops.push(batch=>batch.update(row.ref,patch));});
-    plan.legacyWarehouseStocks.forEach(row=>{const patch={costSanitizedAt:now};if(row.data.unitCost!==undefined)patch.unitCost=del;if(row.data.cost!==undefined)patch.cost=del;ops.push(batch=>batch.update(row.ref,patch));});
-    plan.legacyReceipts.forEach(row=>{const patch={costSanitizedAt:now};if(row.data.unitCost!==undefined)patch.unitCost=del;if(row.data.purchaseNetAmount!==undefined)patch.purchaseNetAmount=del;ops.push(batch=>batch.update(row.ref,patch));});
-    plan.legacyMovements.forEach(row=>{const patch={costSanitizedAt:now,costPending:true};if(row.data.unitCost!==undefined)patch.unitCost=del;if(row.data.purchaseNetAmount!==undefined)patch.purchaseNetAmount=del;if(row.data.cogs!==undefined)patch.cogs=del;ops.push(batch=>batch.update(row.ref,patch));});
-    plan.legacyOrders.forEach(row=>{
-        const sanitizeRecord=record=>{
-            if(!record||typeof record!=='object')return record;
-            const {cogs,...rest}=record;
-            if(Array.isArray(rest.lotAllocations)) rest.lotAllocations=rest.lotAllocations.map(allocation=>{
-                if(!allocation||typeof allocation!=='object')return allocation;
-                const {cost,unitCost,...safe}=allocation;
-                return safe;
-            });
-            return rest;
-        };
-        ops.push(batch=>batch.update(row.ref,{
-            deliveryRecords:(row.data.deliveryRecords||[]).map(sanitizeRecord),
-            returnRecords:(row.data.returnRecords||[]).map(sanitizeRecord),
-            costSanitizedAt:now
-        }));
-    });
-    try{if(status)status.innerText=`正在隔離 ${ops.length} 筆寫入，請不要關閉頁面…`;await commitMigrationBatch(ops);window._inventoryCostMigrationPlan=null;if(status)status.innerText='庫存成本隔離完成。正在重新檢查…';await window.previewInventoryCostMigration();}
-    catch(err){console.error('庫存成本隔離失敗：',err);if(status)status.innerText='隔離中斷：'+(err.message||err)+'。流程可重複執行。';if(runButton)runButton.disabled=false;}
-    finally{if(previewButton)previewButton.disabled=false;}
-};
 // Product Master 以單一標準 Excel 作為人工維護入口；匯入時依 productId 增量新增／更新，不刪除未出現在檔案中的產品。
 function setPriceUploadProgress(percent, status, keepVisible = true) {
     const wrap = document.getElementById('priceUploadProgress');

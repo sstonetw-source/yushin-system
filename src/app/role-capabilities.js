@@ -347,7 +347,7 @@ function initializePageData(mainKey, options = {}) {
     if (!force && loadedMainPages.has(mainKey)) return;
     dirtyMainPages.delete(mainKey);
 
-    if (['quote', 'forecast', 'orders.list', 'inventory', 'equipment', 'admin'].includes(mainKey)) {
+    if (['quote', 'forecast', 'orders.list', 'inventory', 'equipment'].includes(mainKey)) {
         ensureBrandSettingsLoaded().then(() => {
             if (mainKey === 'forecast' && canAccessPage('forecast')) renderForecastList();
             if (mainKey === 'orders.list' && canAccessPage('orders.list')) renderOrdersList();
@@ -424,7 +424,10 @@ function initializePageData(mainKey, options = {}) {
         }
         // Brand Master 已由上方 ensureBrandSettingsLoaded() 共用載入與重畫。
     }
-    if (mainKey === 'admin') jobs.push(reloadSalesFromUsers());
+    if (mainKey === 'admin') {
+        const activeTab = document.querySelector('#admin-system .sub-nav .sub-tab.active');
+        jobs.push(loadAdminPanel(activeTab?.id.replace('admin-sub-', '') || 'sales'));
+    }
     const request = Promise.allSettled(jobs).then(results=>{
         if(requestedUid!==currentUser?.uid || requestedRole!==currentUserRole)return;
         if(results.some(result=>result.status==='rejected'))mainPageLoadFailed(mainKey);

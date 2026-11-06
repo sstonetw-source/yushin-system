@@ -184,6 +184,8 @@ function resetSessionData() {
     orderModalOpenGeneration++; orderDraftProductCheckGeneration++;
     forecastHistorySearchResults=[]; quoteHistorySearchResults=[]; orderHistorySearchResults=[];
     salesList=[]; salesListLoadPromise=null; allUsersCache=[]; salesCodeMasterCache=[];
+    priceListHistoryRows=[]; priceListHistoryFilter='';
+    resetTransferPreview();
     salesStatisticsOrders=[]; tradeAnalysisReady=false;
     salesStatisticsLoadPromise=null; inventoryAnalysisReceipts=[]; inventoryAnalysisStocks=[]; inventoryAnalysisLots=[];
     inventoryAnalysisLotCosts.clear(); inventoryAnalysisSupplyOrders=[]; inventoryAnalysisDirectShipSupplyOrders=[];
