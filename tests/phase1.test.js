@@ -1790,8 +1790,9 @@ test('admin price-list management is the single bulk Product Import entry', () =
     assert.doesNotMatch(indexSource, /id="productManagementTools"/);
     assert.match(indexSource, /id="productBatchMaintenance"/);
     assert.match(indexSource, /admin-sub-products[^>]*>價目表管理</);
-    assert.match(indexSource, /＋ 上傳價目表/);
-    assert.match(indexSource, /下載標準範本/);
+    assert.match(indexSource, /匯入產品主檔/);
+    assert.match(indexSource, /openPriceListUploadForBrand\(\x27\x27\)/);
+    assert.match(indexSource, /下載產品主檔範本/);
     assert.match(indexSource, /新增／更新／不變／錯誤/);
 });
 
@@ -1974,7 +1975,8 @@ test('partial admin export retains fulfillment and protected cost collections', 
 test('V2 admin UI no longer exposes the legacy migration deployment panel', () => {
     assert.doesNotMatch(indexSource, /部署 PR #30 的 Firestore Rules \/ Indexes/);
     assert.doesNotMatch(indexSource, /庫存成本隔離，直到顯示 0/);
-    assert.match(indexSource, /＋ 上傳價目表/);
+    assert.match(indexSource, /匯入產品主檔/);
+    assert.match(indexSource, /openPriceListUploadForBrand\(\x27\x27\)/);
     assert.match(indexSource, /handlePriceExcelUpload\(this\)/);
 });
 
@@ -4257,7 +4259,7 @@ test('standalone price updater is available while protected cost import remains 
 
     assert.match(indexSource,/id="productBatchMaintenance"/);
     assert.match(indexSource,/handlePriceExcelUpload\(this\)/);
-    assert.match(indexSource,/下載標準範本/);
+    assert.match(indexSource,/下載產品主檔範本/);
     assert.match(indexSource,/建議售價與標準成本/);
     assert.match(indexSource,/新增／更新／不變／錯誤/);
     assert.match(indexSource,/handleProductPriceExcelUpload\(this\)/);
