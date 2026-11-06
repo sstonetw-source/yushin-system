@@ -5010,3 +5010,35 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
     max-width:100%; min-width:0; box-sizing:border-box;
   }
 }
+
+
+/* Admin price-list tasks: two clear workflows without changing import handlers. */
+#admin-products .price-list-admin-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; width:100%; margin:10px 0 0; align-items:start; }
+#admin-products .price-list-task { min-width:0; border:1px solid var(--ys-border,#c7c1b8); border-radius:10px; background:var(--ys-surface,#fff); }
+#admin-products .price-list-task > summary { cursor:pointer; padding:13px 14px; min-height:44px; box-sizing:border-box; font-weight:650; }
+#admin-products .price-list-task-body { padding:0 12px 12px; display:flex; flex-direction:column; gap:8px; }
+#admin-products .price-list-task-body p { margin:0 0 4px; font-size:13px; color:var(--ys-muted,#667085); }
+#admin-products .price-list-task-body button { width:100%; min-height:44px; white-space:normal; }
+#admin-products .price-list-refresh { grid-column:1/-1; justify-self:end; }
+@media screen and (max-width:768px) {
+  #admin-products .price-list-admin-actions { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  #admin-products .price-list-task > summary { padding:12px 8px; text-align:center; }
+  #admin-products .price-list-task-body { padding:0 8px 10px; }
+  #admin-products .price-list-admin .table-wrap { width:100%; max-width:100%; overflow:visible; }
+  #admin-products .price-list-management-table,
+  #admin-products .price-list-management-table > tbody { display:block; width:100%; min-width:0; }
+  #admin-products .price-list-management-table > thead { display:none; }
+  #admin-products #productOverviewBody > tr { display:block; height:auto !important; min-height:0 !important; margin:0 0 12px; padding:12px; border:1px solid var(--ys-border,#c7c1b8); border-radius:10px; background:var(--ys-surface,#fff); box-sizing:border-box; }
+  #admin-products #productOverviewBody > tr > td { display:flex !important; align-items:flex-start; justify-content:space-between; gap:10px; width:100% !important; max-width:100%; min-width:0 !important; height:auto !important; min-height:0 !important; padding:8px 0 !important; border:0; border-bottom:1px solid var(--ys-border,#ddd); text-align:right; overflow-wrap:anywhere; white-space:normal; box-sizing:border-box; }
+  #admin-products #productOverviewBody > tr > td:last-child { display:block !important; border-bottom:0; }
+  #admin-products #productOverviewBody > tr > td::before { flex:0 0 86px; font-weight:600; font-size:13px; color:var(--ys-muted,#667085); text-align:left; }
+  #admin-products #productOverviewBody > tr > td:nth-child(1)::before { content:"廠牌"; }
+  #admin-products #productOverviewBody > tr > td:nth-child(2)::before { content:"目前價目表"; }
+  #admin-products #productOverviewBody > tr > td:nth-child(3)::before { content:"品項數"; }
+  #admin-products #productOverviewBody > tr > td:nth-child(4)::before { content:"最後更新"; }
+  #admin-products #productOverviewBody > tr > td:nth-child(5)::before { content:"狀態"; }
+  #admin-products #productOverviewBody > tr > td:nth-child(6)::before { content:"操作"; display:block; margin-bottom:8px; }
+  #admin-products .price-list-action-group { display:flex; flex-wrap:wrap; gap:8px; }
+  #admin-products .price-list-action-group button { flex:1 1 125px; min-width:0; min-height:44px; white-space:normal; }
+  #admin-system #admin-sales #adminSalesBody > tr > td:nth-child(8) { overflow-wrap:anywhere; word-break:break-all; }
+}
