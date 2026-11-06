@@ -62,15 +62,17 @@ const {chromium}=require('playwright-core'),{spawnSync}=require('node:child_proc
  await page.evaluate(()=>document.getElementById('poModalOverlay').classList.remove('active'));
  await page.addScriptTag({content:fs.readFileSync('modules/receiving-core.js','utf8')});
  await page.addScriptTag({content:fs.readFileSync('modules/supply-core.js','utf8')});
+ await page.addScriptTag({content:fs.readFileSync('modules/workflow-core.js','utf8')});
  await page.addScriptTag({content:fs.readFileSync('src/shared/workspace-display.js','utf8')});
  const workspace=fs.readFileSync('src/features/purchasing/purchasing-workspace.js','utf8');
+ await page.addScriptTag({content:workspace.slice(workspace.indexOf('let purchaseWorkSupplyRequests'),workspace.indexOf('let purchaseDemandSummaryRows'))});
  await page.addScriptTag({content:workspace.slice(workspace.indexOf('function renderPurchasingReceivingWorkList('),workspace.indexOf('window.renderPoList ='))});
  await page.addScriptTag({content:`
  let supplyReceivingCache=[{id:'S',sourceType:'STOCK_REPLENISHMENT',type:'PURCHASING_PO',qty:3,receivedQty:1,unitCost:120,status:'PARTIAL_RECEIPT',itemCode:'X1',itemName:'試劑 B',brand:'B',warehouseId:'BRANCH',purchaseDocumentNo:'PO1',supplier:'供應商 A',orderDate:'2026-11-05'}];
- const ordersCache=[],purchaseHistorySupplyCache=new Map();const purchasingReceivingReady=true;
+ const ordersCache=[],purchaseHistorySupplyCache=new Map();const purchasingReceivingReady=true,activeReceivingSupplyReady=true;
  const inlineJsValue=JSON.stringify,buildReceivingEvidenceIndex=()=>new Map(),purchaseFilterContext=()=>({}),receivingSourceOrderForItem=()=>null,purchaseLineMatchesFilters=()=>true;
  const canConfirmSupplyReceipt=()=>true,supplyCancelActionHtml=()=>'',receivingDueInfo=()=>({sortRank:3}),receivingWaitHtml=()=>'',receivingDueHtml=()=>'';
- const renderReceiptTasks=()=>{},receivingSupplyMetrics=()=>({count:1,quantity:2}),localDateString=()=> '2026-11-05';
+ const renderReceiptTasks=()=>{},formatStatsMoney=value=>'NT$ '+value,localDateString=()=> '2026-11-05';
  document.querySelectorAll('.content-section').forEach(el=>el.classList.remove('active'));
  document.getElementById('purchasing-system').classList.add('active');
  document.getElementById('purchasing-system').style.display='block';
@@ -83,7 +85,9 @@ const {chromium}=require('playwright-core'),{spawnSync}=require('node:child_proc
  assert.deepEqual(pageErrors,[]);
  assert.ok(await page.locator('#poListBody').isVisible());
  const text=await page.locator('#poListBody').textContent();
- assert.match(text,/庫存/);assert.match(text,/PO1/);assert.match(text,/供應商 A/);assert.match(text,/分倉/);assert.match(text,/NT\$ 378/);
+ assert.match(text,/庫存/);assert.match(text,/PO1/);assert.match(text,/供應商 A/);assert.match(text,/分倉/);assert.match(text,/銷售金額：—[\s\S]*採購成本：NT\$ 252[\s\S]*成本率：—/);
+ assert.match(await page.locator('#purchaseAmountReceiving').textContent(),/含稅.*NT\$ 252/);
+ assert.equal(await page.locator('#poListBody [data-th="交易方式"]').textContent(),'—');
  assert.match(text,/已到貨 1／應到貨 3/);assert.match(text,/待到貨 2/);
  for(const width of [1440,390]){
   await page.setViewportSize({width,height:1000});

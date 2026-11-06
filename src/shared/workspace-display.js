@@ -94,7 +94,7 @@ function workflowPurchaseOrderDetails(order) {
     return `<details class="order-detail-panel"><summary aria-haspopup="dialog" aria-expanded="false">明細</summary><dialog class="order-detail-drawer" aria-label="訂單明細"><header class="order-drawer-heading"><h3>訂單明細</h3><button type="button" class="btn-secondary" data-order-drawer-close autofocus>關閉</button></header><div class="order-detail-content"><section class="order-drawer-section"><h4>訂單摘要</h4><dl class="order-drawer-summary">${field('單號',order.orderNo)}${field('客戶',order.customerName||order.customer)}${field('負責業務',order.salesName)}${field('訂單日期',order.orderDate)}${field('訂單總額（含稅）',order.totalPrice==null?'待確認':'NT$ '+order.totalPrice)}</dl></section><section class="order-drawer-section"><h4>全部訂單品項</h4><div class="workflow-price-breakdown">${items.map(item=>`<div>${purchaseProductSummary(item,0,null)}${workflowSalesAmount(order,item)}<small>交付方式：${escapeHtml(globalThis.YushinOrderEntry?.deliveryLabel(item,order.shippingInstructions||{})||'未填寫')}</small></div>`).join('')}</div></section><section class="order-drawer-section"><h4>交易與備註</h4>${workflowCommercialSummary(order)}<dl class="order-drawer-summary">${field('訂單備註',order.remarks)}</dl></section><section class="order-drawer-section"><button type="button" class="btn-secondary" onclick="openOrderStatusHistory(${inlineJsValue(order.id)})">查看操作紀錄</button></section></div></dialog></details>`;
 }
 // Keep stage-specific action handlers and quantities; only reorganize the presentation.
-function organizePurchasingOrderRow(row, order, item) {
+function organizePurchasingOrderRow(row, order, item, finance) {
     row.classList.add('workflow-order-context-row');
     row.dataset.menuTitle=[order?.customerName,order?.orderNo,order?.orderDate].filter(Boolean).join(' · ');
     row.dataset.menuScope='整張訂單操作';
@@ -103,17 +103,17 @@ function organizePurchasingOrderRow(row, order, item) {
     if (!product) return;
     product.dataset.th='產品資訊';
     const date=find('需求日期');if(date) date.dataset.th='訂單日期';
-    const customer=find('客戶／用途');if(customer) customer.dataset.th='客戶';
+    const customer=find('客戶／用途')||find('客戶');if(customer) customer.dataset.th='客戶名稱';
     const quantity=find('數量'),progress=find('到貨進度');
     if (progress) { progress.dataset.th='進度'; quantity?.remove(); }
     else if (quantity) quantity.dataset.th='進度';
-    const money=document.createElement('td');money.dataset.th='銷售金額';money.className='order-money-cell';money.innerHTML=workflowSalesAmount(order,item)+purchasingFinancialSummary(order,item);
-    const commercial=document.createElement('td');commercial.dataset.th='交易／開票資料';commercial.innerHTML=workflowCommercialSummary(order);
+    const money=document.createElement('td');money.dataset.th='金額（含稅）';money.className='order-money-cell';
+    renderPurchaseWorkAmount(money, order, item, finance);
+    const commercial=document.createElement('td');commercial.dataset.th='交易方式';commercial.textContent=order?.transactionType || '—';
     const actions=find('操作');
     const area=actions?.querySelector('.workflow-inline-actions')||actions;
     if (order&&area) area.insertAdjacentHTML('afterbegin',workflowPurchaseOrderDetails(order));
-    [find('合併'),find('訂單日期')||find('需求日期'),find('客戶')||find('客戶／用途'),product,find('負責業務'),money,commercial,progress||quantity,actions].filter(Boolean).forEach(cell=>row.appendChild(cell));
-    row.closest('table')?.classList.add('workflow-order-context-table');
+    [find('訂單日期')||find('需求日期'),customer,product,find('負責業務'),money,commercial,progress||quantity,actions].filter(Boolean).forEach(cell=>row.appendChild(cell));
     bindOrderDetailDrawer(row);
 }
 
@@ -138,25 +138,45 @@ window.organizeInventoryList=function(body,chosenWarehouse){
  }
 };
 
-// Financial context uses only authorized, already loaded supply records.
-function purchasingFinancialSummary(order,item,supplies=null){
-    if(!['purchaser','admin'].includes(currentUserRole))return '';
-    const rows=supplies||[...new Map([...purchaseHistorySupplyCache.values(),...supplyReceivingCache].map(row=>[row.id,row])).values()]
-        .filter(row=>row.orderId===order?.id&&row.itemId===item.itemId&&!isPurchaseTerminalStatus(row.status));
-    const valid=value=>value!==null&&value!==undefined&&String(value).trim()!==''&&Number.isFinite(Number(value))&&Number(value)>=0;
-    const qty=rows.reduce((sum,row)=>sum+Number(row.qty||0),0);
-    const complete=rows.length>0&&qty>0&&rows.every(row=>valid(row.unitCost));
-    const cost=complete?globalThis.YushinSupplier.purchaseAmountMetadata(rows.map(row=>({qty:Number(row.qty),unitPrice:Number(row.unitCost)}))).totalIncTax:null;
-    const stock=!order;
-    const sales=!stock&&valid(item.unitPrice)&&qty>0?Number(item.unitPrice)*qty:null;
-    const money=value=>'NT$ '+escapeHtml(value.toLocaleString('zh-TW',{maximumFractionDigits:2}));
-    const ratio=complete&&sales>0?escapeHtml((cost/sales*100).toLocaleString('zh-TW',{maximumFractionDigits:2}))+'%':'—';
-    return `<details class="purchase-financial-details"><summary>採購成本（含稅）：${complete?money(cost):'待確認'}</summary><small>比較數量：${escapeHtml(qty)}（採購數量）</small><small>銷售金額（含稅）：${sales===null?'—':money(sales)}</small><small>成本率：${stock?'—':ratio}${!stock?'（預估）':''}</small></details>`;
+// Amount projections share the purchase document tax and rounding rules.
+function purchaseWorkMoney(value) {
+    return 'NT$ ' + value.toLocaleString('zh-TW', {maximumFractionDigits:2});
+}
+
+function purchaseSupplyCost(supply, qty) {
+    const value = supply.unitCost;
+    if (!(qty > 0) || value == null || String(value).trim() === '' || !Number.isFinite(Number(value)) || Number(value) < 0) return null;
+    return globalThis.YushinSupplier.purchaseAmountMetadata([{qty, unitPrice:Number(value)}]).totalIncTax;
+}
+
+function purchaseWorkAmounts(order, item, {qty, supplies = [], estimate = false, stock = false, service = false, incomplete = false}) {
+    const rawItem = order?.items?.find((row, index) => String(row.itemId || `item-${index + 1}`) === item.itemId);
+    const price = String((rawItem ? rawItem.unitPrice : item.unitPrice) ?? '').replace(/,/g,'').trim();
+    const sales = !stock && order && qty > 0 && price !== '' && Number.isFinite(Number(price))
+        ? Math.round((Number(price) * qty + Number.EPSILON) * 100) / 100 : null;
+    const costs = supplies.map(supply => purchaseSupplyCost(supply, supply.qty));
+    const cost = !incomplete && costs.length && costs.every(value => value !== null)
+        ? costs.reduce((total, value) => total + value, 0) : null;
+    const ratio = sales > 0 && cost !== null ? cost / sales * 100 : null;
+    return {sales, cost, ratio, estimate, stock, service};
+}
+
+function purchaseWorkAmountMarkup(amounts, showCost, loading = false) {
+    const {sales, cost, ratio, estimate, stock, service} = amounts;
+    const salesText = stock ? '—' : sales === null ? '待確認' : purchaseWorkMoney(sales);
+    const costText = loading ? '讀取中…' : service ? '—' : cost === null ? '成本待確認' : purchaseWorkMoney(cost);
+    const ratioText = stock || service || sales === 0 ? '—'
+        : loading ? '讀取中…' : ratio === null ? '待確認' : ratio.toLocaleString('zh-TW', {maximumFractionDigits:2}) + '%';
+    return `<div class="workflow-amount purchase-work-amount"><strong>銷售金額：${salesText}</strong>${showCost
+        ? `<span>${estimate ? '預估' : ''}採購成本：${costText}</span><span>${estimate ? '預估' : ''}成本率：${ratioText}</span>` : ''}</div>`;
 }
 
 function purchaseHistoryFinancialSummary(po,item,quantity){
     if(!['purchaser','admin'].includes(currentUserRole))return '';
     const order=item.orderId?receivingSourceOrderForItem(item):null;
     const salesItem=order?normalizedOrderItems(order).find(row=>row.itemId===item.itemId):null;
-    return purchasingFinancialSummary(item.orderId?(order||{id:item.orderId}):null,salesItem||{},[{qty:quantity,unitCost:item.unitPrice}]);
+    const {cost,sales,ratio}=purchaseWorkAmounts(order,salesItem||{},{
+        qty:quantity, supplies:[{qty:quantity,unitCost:item.unitPrice}], stock:!item.orderId
+    });
+    return `<details class="purchase-financial-details"><summary>採購成本（含稅）：${cost===null?'待確認':purchaseWorkMoney(cost)}</summary><small>比較數量：${escapeHtml(quantity)}（採購數量）</small><small>銷售金額（含稅）：${sales===null?'—':purchaseWorkMoney(sales)}</small><small>成本率：${ratio===null?'—':ratio.toLocaleString('zh-TW',{maximumFractionDigits:2})+'%'}</small></details>`;
 }

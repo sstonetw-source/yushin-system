@@ -459,6 +459,21 @@ test('business users cannot read Product Master standard costs', async () => {
   await assertSucceeds(getDoc(doc(db('buyer1'), 'productCosts/p2')));
 });
 
+test('purchase work cost reads are restricted to purchaser and admin', async () => {
+  await seed('productCosts/work-list', {standardCost:0});
+  await seed('supplyOrders/work-list', {orderId:'work-list',type:'PURCHASING_PO',ownerUid:'sales1',unitCost:10});
+  const costs = client => getDoc(doc(client,'productCosts/work-list'));
+  const supplies = client => getDocs(query(collection(client,'supplyOrders'),where('orderId','in',['work-list'])));
+  for (const uid of ['buyer1','admin']) {
+    assert.equal((await assertSucceeds(costs(db(uid)))).data().standardCost,0);
+    assert.equal((await assertSucceeds(supplies(db(uid)))).docs[0].data().unitCost,10);
+  }
+  for (const uid of ['sales1','eng1','wh1']) {
+    await assertFails(costs(db(uid)));
+    await assertFails(supplies(db(uid)));
+  }
+});
+
 test('sales may create a temporary product but cannot create or modify Product Master cost', async () => {
   const product = { productId:'p3', status:'TEMPORARY', active:true, source:'QUICK_CREATE', createdBy:'sales1', updatedBy:'sales1', listPrice:0, nameEn:'Test product', specification:'10 tests' };
   await assertSucceeds(setDoc(doc(db('sales1'), 'products/p3'), product));

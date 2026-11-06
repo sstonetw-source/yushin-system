@@ -5,8 +5,9 @@ const fs=require('node:fs'),assert=require('node:assert/strict'),{chromium}=requ
 const read=p=>fs.readFileSync(p,'utf8');
 const workspace=read('src/features/orders/order-workspace.js'),purchasing=read('src/features/purchasing/purchasing-workspace.js');
 function section(s,a,b){const start=s.indexOf(a),end=s.indexOf(b,start);assert.ok(start>=0&&end>start);return s.slice(start,end);}
-const scripts=[read('src/shared/workspace-display.js'),read('modules/fulfillment-core.js'),read('modules/order-entry-core.js'),
- `let currentUser={uid:'buyer'},currentUserRole='purchaser',ordersCache=[],purchasingDispatchCache=[],currentDeliveryOrderId=null;
+const scripts=[read('src/shared/workspace-display.js'),read('modules/fulfillment-core.js'),read('modules/order-entry-core.js'),read('modules/workflow-core.js'),
+ `let currentUser={uid:'buyer'},currentUserRole='purchaser',ordersCache=[],purchasingDispatchCache=[],purchasingView='dispatch',currentDeliveryOrderId=null;
+ const visibleProductCostGeneration=0,readTradeAnalysisSuppliesByOrders=async()=>[],runReadJobs=jobs=>Promise.all(jobs.map(job=>job()));
  const pendingDispatchOrderIds=new Set(),purchaseHistorySupplyCache=new Map(),supplyReceivingCache=[];let sequence=0;
  const db={collection:n=>({doc:id=>({id:id||'AAAAAAAAAAAA'+Date.now()+'-'+(++sequence),path:n+'/'+id,get:async()=>{const data=await nativeRead(n+'/'+id);return {exists:!!data,data:()=>data};}})})};
  const normalizedOrderStatus=o=>o.status==='cancelled'?'cancelled':'normal',normalizedOrderItems=o=>structuredClone(o.items);
@@ -28,6 +29,7 @@ const scripts=[read('src/shared/workspace-display.js'),read('modules/fulfillment
  section(workspace,'function itemDispatchState(','function orderLifecycleActionButtons('),
  read('src/services/dispatch-preparation.js'),
  section(workspace,'function dispatchActionHtml(','\n\nasync function refreshAffectedOrderCaches'),
+ section(purchasing,'let purchaseWorkSupplyRequests','let purchaseDemandSummaryRows'),
  section(purchasing,'function renderPurchasingDispatchOrders(','\nfunction pendingPurchaseLines(')];
 (async()=>{
  const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','google-chrome-stable','chromium'].map(n=>spawnSync('which',[n],{encoding:'utf8'})).find(r=>r.status===0)?.stdout.trim();

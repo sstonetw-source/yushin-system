@@ -1451,6 +1451,10 @@ function resetSessionData() {
     poHistorySearchActive = false;
     poHistorySearchLoading = false;
     purchaseHistorySupplyCache = new Map();
+    purchaseWorkSupplyRequests = new WeakMap();
+    for (const id of ['purchasePendingBody','poListBody','purchaseDispatchBody','purchaseCompletedBody','purchaseAmountReceiving']) {
+        document.getElementById(id)?.replaceChildren();
+    }
     window.resetWarehouseLogistics?.();
     supplyReceivingCache = [];
     supplyReceivingCursor = null;
@@ -3238,7 +3242,7 @@ function workflowPurchaseOrderDetails(order) {
     return `<details class="order-detail-panel"><summary aria-haspopup="dialog" aria-expanded="false">明細</summary><dialog class="order-detail-drawer" aria-label="訂單明細"><header class="order-drawer-heading"><h3>訂單明細</h3><button type="button" class="btn-secondary" data-order-drawer-close autofocus>關閉</button></header><div class="order-detail-content"><section class="order-drawer-section"><h4>訂單摘要</h4><dl class="order-drawer-summary">${field('單號',order.orderNo)}${field('客戶',order.customerName||order.customer)}${field('負責業務',order.salesName)}${field('訂單日期',order.orderDate)}${field('訂單總額（含稅）',order.totalPrice==null?'待確認':'NT$ '+order.totalPrice)}</dl></section><section class="order-drawer-section"><h4>全部訂單品項</h4><div class="workflow-price-breakdown">${items.map(item=>`<div>${purchaseProductSummary(item,0,null)}${workflowSalesAmount(order,item)}<small>交付方式：${escapeHtml(globalThis.YushinOrderEntry?.deliveryLabel(item,order.shippingInstructions||{})||'未填寫')}</small></div>`).join('')}</div></section><section class="order-drawer-section"><h4>交易與備註</h4>${workflowCommercialSummary(order)}<dl class="order-drawer-summary">${field('訂單備註',order.remarks)}</dl></section><section class="order-drawer-section"><button type="button" class="btn-secondary" onclick="openOrderStatusHistory(${inlineJsValue(order.id)})">查看操作紀錄</button></section></div></dialog></details>`;
 }
 // Keep stage-specific action handlers and quantities; only reorganize the presentation.
-function organizePurchasingOrderRow(row, order, item) {
+function organizePurchasingOrderRow(row, order, item, finance) {
     row.classList.add('workflow-order-context-row');
     row.dataset.menuTitle=[order?.customerName,order?.orderNo,order?.orderDate].filter(Boolean).join(' · ');
     row.dataset.menuScope='整張訂單操作';
@@ -3247,17 +3251,17 @@ function organizePurchasingOrderRow(row, order, item) {
     if (!product) return;
     product.dataset.th='產品資訊';
     const date=find('需求日期');if(date) date.dataset.th='訂單日期';
-    const customer=find('客戶／用途');if(customer) customer.dataset.th='客戶';
+    const customer=find('客戶／用途')||find('客戶');if(customer) customer.dataset.th='客戶名稱';
     const quantity=find('數量'),progress=find('到貨進度');
     if (progress) { progress.dataset.th='進度'; quantity?.remove(); }
     else if (quantity) quantity.dataset.th='進度';
-    const money=document.createElement('td');money.dataset.th='銷售金額';money.className='order-money-cell';money.innerHTML=workflowSalesAmount(order,item)+purchasingFinancialSummary(order,item);
-    const commercial=document.createElement('td');commercial.dataset.th='交易／開票資料';commercial.innerHTML=workflowCommercialSummary(order);
+    const money=document.createElement('td');money.dataset.th='金額（含稅）';money.className='order-money-cell';
+    renderPurchaseWorkAmount(money, order, item, finance);
+    const commercial=document.createElement('td');commercial.dataset.th='交易方式';commercial.textContent=order?.transactionType || '—';
     const actions=find('操作');
     const area=actions?.querySelector('.workflow-inline-actions')||actions;
     if (order&&area) area.insertAdjacentHTML('afterbegin',workflowPurchaseOrderDetails(order));
-    [find('合併'),find('訂單日期')||find('需求日期'),find('客戶')||find('客戶／用途'),product,find('負責業務'),money,commercial,progress||quantity,actions].filter(Boolean).forEach(cell=>row.appendChild(cell));
-    row.closest('table')?.classList.add('workflow-order-context-table');
+    [find('訂單日期')||find('需求日期'),customer,product,find('負責業務'),money,commercial,progress||quantity,actions].filter(Boolean).forEach(cell=>row.appendChild(cell));
     bindOrderDetailDrawer(row);
 }
 
@@ -3282,27 +3286,47 @@ window.organizeInventoryList=function(body,chosenWarehouse){
  }
 };
 
-// Financial context uses only authorized, already loaded supply records.
-function purchasingFinancialSummary(order,item,supplies=null){
-    if(!['purchaser','admin'].includes(currentUserRole))return '';
-    const rows=supplies||[...new Map([...purchaseHistorySupplyCache.values(),...supplyReceivingCache].map(row=>[row.id,row])).values()]
-        .filter(row=>row.orderId===order?.id&&row.itemId===item.itemId&&!isPurchaseTerminalStatus(row.status));
-    const valid=value=>value!==null&&value!==undefined&&String(value).trim()!==''&&Number.isFinite(Number(value))&&Number(value)>=0;
-    const qty=rows.reduce((sum,row)=>sum+Number(row.qty||0),0);
-    const complete=rows.length>0&&qty>0&&rows.every(row=>valid(row.unitCost));
-    const cost=complete?globalThis.YushinSupplier.purchaseAmountMetadata(rows.map(row=>({qty:Number(row.qty),unitPrice:Number(row.unitCost)}))).totalIncTax:null;
-    const stock=!order;
-    const sales=!stock&&valid(item.unitPrice)&&qty>0?Number(item.unitPrice)*qty:null;
-    const money=value=>'NT$ '+escapeHtml(value.toLocaleString('zh-TW',{maximumFractionDigits:2}));
-    const ratio=complete&&sales>0?escapeHtml((cost/sales*100).toLocaleString('zh-TW',{maximumFractionDigits:2}))+'%':'—';
-    return `<details class="purchase-financial-details"><summary>採購成本（含稅）：${complete?money(cost):'待確認'}</summary><small>比較數量：${escapeHtml(qty)}（採購數量）</small><small>銷售金額（含稅）：${sales===null?'—':money(sales)}</small><small>成本率：${stock?'—':ratio}${!stock?'（預估）':''}</small></details>`;
+// Amount projections share the purchase document tax and rounding rules.
+function purchaseWorkMoney(value) {
+    return 'NT$ ' + value.toLocaleString('zh-TW', {maximumFractionDigits:2});
+}
+
+function purchaseSupplyCost(supply, qty) {
+    const value = supply.unitCost;
+    if (!(qty > 0) || value == null || String(value).trim() === '' || !Number.isFinite(Number(value)) || Number(value) < 0) return null;
+    return globalThis.YushinSupplier.purchaseAmountMetadata([{qty, unitPrice:Number(value)}]).totalIncTax;
+}
+
+function purchaseWorkAmounts(order, item, {qty, supplies = [], estimate = false, stock = false, service = false, incomplete = false}) {
+    const rawItem = order?.items?.find((row, index) => String(row.itemId || `item-${index + 1}`) === item.itemId);
+    const price = String((rawItem ? rawItem.unitPrice : item.unitPrice) ?? '').replace(/,/g,'').trim();
+    const sales = !stock && order && qty > 0 && price !== '' && Number.isFinite(Number(price))
+        ? Math.round((Number(price) * qty + Number.EPSILON) * 100) / 100 : null;
+    const costs = supplies.map(supply => purchaseSupplyCost(supply, supply.qty));
+    const cost = !incomplete && costs.length && costs.every(value => value !== null)
+        ? costs.reduce((total, value) => total + value, 0) : null;
+    const ratio = sales > 0 && cost !== null ? cost / sales * 100 : null;
+    return {sales, cost, ratio, estimate, stock, service};
+}
+
+function purchaseWorkAmountMarkup(amounts, showCost, loading = false) {
+    const {sales, cost, ratio, estimate, stock, service} = amounts;
+    const salesText = stock ? '—' : sales === null ? '待確認' : purchaseWorkMoney(sales);
+    const costText = loading ? '讀取中…' : service ? '—' : cost === null ? '成本待確認' : purchaseWorkMoney(cost);
+    const ratioText = stock || service || sales === 0 ? '—'
+        : loading ? '讀取中…' : ratio === null ? '待確認' : ratio.toLocaleString('zh-TW', {maximumFractionDigits:2}) + '%';
+    return `<div class="workflow-amount purchase-work-amount"><strong>銷售金額：${salesText}</strong>${showCost
+        ? `<span>${estimate ? '預估' : ''}採購成本：${costText}</span><span>${estimate ? '預估' : ''}成本率：${ratioText}</span>` : ''}</div>`;
 }
 
 function purchaseHistoryFinancialSummary(po,item,quantity){
     if(!['purchaser','admin'].includes(currentUserRole))return '';
     const order=item.orderId?receivingSourceOrderForItem(item):null;
     const salesItem=order?normalizedOrderItems(order).find(row=>row.itemId===item.itemId):null;
-    return purchasingFinancialSummary(item.orderId?(order||{id:item.orderId}):null,salesItem||{},[{qty:quantity,unitCost:item.unitPrice}]);
+    const {cost,sales,ratio}=purchaseWorkAmounts(order,salesItem||{},{
+        qty:quantity, supplies:[{qty:quantity,unitCost:item.unitPrice}], stock:!item.orderId
+    });
+    return `<details class="purchase-financial-details"><summary>採購成本（含稅）：${cost===null?'待確認':purchaseWorkMoney(cost)}</summary><small>比較數量：${escapeHtml(quantity)}（採購數量）</small><small>銷售金額（含稅）：${sales===null?'—':purchaseWorkMoney(sales)}</small><small>成本率：${ratio===null?'—':ratio.toLocaleString('zh-TW',{maximumFractionDigits:2})+'%'}</small></details>`;
 }
 // Shared modal ownership. Originals retain their handlers; no transaction data is copied.
 (function(root){
@@ -13137,11 +13161,107 @@ function pendingProcurementDisplayLines(order, normalizedItems = null, dispatchS
     }).filter(Boolean);
 }
 
-function receivingSupplyMetrics(filters = purchaseFilterContext()) {
+let purchaseWorkSupplyRequests = new WeakMap();
+
+function canViewPurchaseWorkCosts() {
+    return ['purchaser','admin'].includes(currentUserRole);
+}
+
+function purchaseOutstandingSupply(supply) {
+    return {...supply, qty:globalThis.YushinSupply.receiptProgress(supply).remainingQty};
+}
+
+function purchaseSupplySourceItem(supply, items) {
+    if (supply.itemId) return items.find(item => item.itemId === String(supply.itemId));
+    const index = supply.orderItemIndex;
+    return index != null && String(index).trim() !== '' ? items[Number(index)] : null;
+}
+
+function confirmedPurchaseWorkSupplies(order, item, supplies) {
+    const itemIndex = order.items?.findIndex((row,index) => String(row.itemId || `item-${index+1}`) === item.itemId);
+    return supplies.filter(supply => supply.orderId === order.id && (supply.itemId
+        ? String(supply.itemId) === item.itemId
+        : itemIndex >= 0 && supply.orderItemIndex != null && String(supply.orderItemIndex).trim() !== ''
+            && Number(supply.orderItemIndex) === itemIndex))
+        .map(supply => {
+            const progress = globalThis.YushinSupply.receiptProgress(supply);
+            return {...supply, qty:progress.receivedQty + progress.remainingQty};
+        }).filter(supply => supply.qty > 0);
+}
+
+function renderPurchaseWorkAmount(cell, order, item, finance) {
+    const showCost = canViewPurchaseWorkCosts();
+    const service = YushinWorkflow.isServiceItem(item);
+    const loading = Boolean(finance.targets && showCost && order && !service && (finance.estimate || finance.confirmed));
+    cell.innerHTML = purchaseWorkAmountMarkup(purchaseWorkAmounts(order,item,{...finance,service,supplies:showCost ? finance.supplies : []}),showCost,loading);
+    if (loading) finance.targets.push({cell,order,item,finance});
+}
+
+async function loadPurchaseWorkAmounts(targets) {
+    if (!targets.length || !canViewPurchaseWorkCosts()) return;
+    const uid = currentUser?.uid, role = currentUserRole;
+    const requestCache = purchaseWorkSupplyRequests;
+    const generation = visibleProductCostGeneration;
+    const stillAuthorized = () => uid === currentUser?.uid && role === currentUserRole
+        && requestCache === purchaseWorkSupplyRequests;
+    const known = [...new Map([...purchaseHistorySupplyCache.values(),...supplyReceivingCache].map(row=>[row.id,row])).values()];
+    const ordersToLoad = new Set();
+    for (const target of targets) {
+        if (!target.finance.confirmed) continue;
+        const {order,item} = target;
+        target.supplies = confirmedPurchaseWorkSupplies(order,item,known);
+        const expected = Number(item.supplyOrderedQty || 0);
+        const covered = target.supplies.reduce((sum,supply)=>sum+supply.qty,0);
+        if (!(expected > 0 && expected === covered && target.supplies.every(supply=>purchaseSupplyCost(supply,supply.qty)!==null))) {
+            if (!requestCache.has(order)) ordersToLoad.add(order);
+            target.loadSupply = true;
+        }
+    }
+    if (ordersToLoad.size) {
+        const request = readTradeAnalysisSuppliesByOrders([...ordersToLoad].map(order=>order.id))
+            .then(rows => {
+                const byOrder = new Map();
+                for (const row of rows) {
+                    if (!byOrder.has(row.orderId)) byOrder.set(row.orderId,[]);
+                    byOrder.get(row.orderId).push(row);
+                }
+                return byOrder;
+            }).catch(() => null);
+        for (const order of ordersToLoad) {
+            const projection = request.then(rows => rows ? rows.get(order.id) || [] : null);
+            requestCache.set(order,projection);
+        }
+    }
+    await runReadJobs(targets.map(({cell,order,item,finance,supplies,loadSupply}) => async () => {
+        if (!cell.isConnected || !stillAuthorized()) return;
+        let qty = finance.qty;
+        let incomplete = false;
+        if (finance.estimate) {
+            const product = {...item,model:item.itemCode,productId:finance.productId};
+            const id = product.productId || (product.brand && product.model ? stableProductId(product) : '');
+            const cost = id ? purchaseCostCache.get(id) ?? await loadVisibleProductCost({...product,productId:id}) : null;
+            if (generation !== visibleProductCostGeneration) return;
+            supplies = [{qty,unitCost:cost}];
+        } else {
+            if (loadSupply) {
+                const rows = await requestCache.get(order);
+                supplies = rows ? confirmedPurchaseWorkSupplies(order,item,rows) : [];
+            }
+            const confirmedQty = supplies.reduce((sum,supply)=>sum+supply.qty,0);
+            incomplete = confirmedQty < Number(item.supplyOrderedQty || 0);
+            if (confirmedQty > 0) qty = confirmedQty;
+        }
+        if (!cell.isConnected || !stillAuthorized()) return;
+        cell.innerHTML = purchaseWorkAmountMarkup(purchaseWorkAmounts(order,item,{...finance,qty,supplies,incomplete}),true);
+        if (supplies.length) cell.title = `金額計算數量：${qty}`;
+    }),4);
+}
+
+function receivingSupplyMetrics(filters = purchaseFilterContext(), visibleSupplyIds = null) {
     const metrics = { count:0, amount:0, missingCost:0, quantity:0 };
     const seen = new Set();
     supplyReceivingCache.forEach(supply => {
-        if (seen.has(supply.id)) return;
+        if (seen.has(supply.id) || (visibleSupplyIds && !visibleSupplyIds.has(supply.id))) return;
         seen.add(supply.id);
         const progress = globalThis.YushinSupply?.receiptProgress(supply);
         if (!progress || !['ORDERED', 'PARTIAL_RECEIPT'].includes(progress.status) || !(progress.remainingQty > 0)) return;
@@ -13149,15 +13269,23 @@ function receivingSupplyMetrics(filters = purchaseFilterContext()) {
         // Standalone company stock is shared; linked supplies retain their sales filter.
         // A cancelled customer order does not cancel the real supplier commitment.
         const effectiveFilters = supply.orderId ? filters : {...filters, selectedSales:''};
-        if (!purchaseLineMatchesFilters(order?.orderDate || supply.orderDate || supply.createdAt,
+        if (!visibleSupplyIds && !purchaseLineMatchesFilters(order?.orderDate || supply.orderDate || supply.createdAt,
             order?.salesName || supply.salesName || '', supply.brand, effectiveFilters)) return;
         metrics.count += 1;
         metrics.quantity += progress.remainingQty;
-        const cost = tradeAnalysisCost(supply.unitCost);
+        const cost = canViewPurchaseWorkCosts() ? purchaseSupplyCost(supply, progress.remainingQty) : null;
         if (cost === null) metrics.missingCost += 1;
-        else metrics.amount += progress.remainingQty * cost;
+        else metrics.amount += cost;
     });
     return metrics;
+}
+
+function receivingWorkCardAmount({count, amount, missingCost}) {
+    if (!activeReceivingSupplyReady) return activeReceivingSupplyError || '讀取中…';
+    if (!canViewPurchaseWorkCosts()) return '成本不顯示';
+    const label = '待到貨採購成本（含稅）';
+    if (!missingCost) return label + ' ' + formatStatsMoney(amount);
+    return `${label}未完整${count > missingCost ? '｜已確認 ' + formatStatsMoney(amount) : ''}（${missingCost} 筆待確認）`;
 }
 
 let purchaseDemandSummaryRows = [], purchaseDemandSummaryReady = false, purchaseDemandSummaryError = '';
@@ -13233,11 +13361,11 @@ function renderPurchasingWorkCards(normalizedItemsByOrder = null, completedRows 
         const amount = document.getElementById(amountId);
         const useDemand=category==='ordering'&&demandOrderingRows;
         const baseCount=category === 'arrival' ? receiving.count : useDemand?demandOrderingRows.length+serviceRows.length:metrics[category].count;
-        const baseAmount=category === 'arrival' ? receiving.amount : useDemand?demandOrderingAmount+serviceAmount:metrics[category].amount;
+        const baseAmount=useDemand?demandOrderingAmount+serviceAmount:metrics[category].amount;
         if (count) count.textContent = category === 'ordering' && !purchaseDemandSummaryReady ? (purchaseDemandSummaryError || '讀取中…') : category==='arrival' && !activeReceivingSupplyReady ? (activeReceivingSupplyError || '讀取中…') : !orderWorkQueueReady && category === 'dispatch' ? (orderWorkQueueError || '讀取中…') : `${baseCount} ${category === 'arrival' ? '筆供應' : '品項'}`;
-        if (amount) amount.textContent = category === 'arrival' && !activeReceivingSupplyReady ? (activeReceivingSupplyError || '讀取中…') : category === 'arrival' && !canCreatePurchaseOrderCapability()
-            ? '成本不顯示'
-            : (category === 'arrival' ? '採購金額 ' : '銷售金額 ') + formatStatsMoney(baseAmount) + (category === 'arrival' && receiving.missingCost ? `（${receiving.missingCost} 筆待補成本）` : '');
+        if (amount) amount.textContent = category === 'arrival'
+            ? receivingWorkCardAmount(receiving)
+            : '銷售金額 ' + formatStatsMoney(baseAmount);
     });
     const stockingSummary = document.getElementById('purchaseStockingSummary');
     if (stockingSummary) {
@@ -13272,7 +13400,7 @@ function purchasingCompletedRows(filters = purchaseFilterContext(), normalizedIt
             const directShip = (item.fulfillmentType || order.fulfillmentType || 'WAREHOUSE') === 'DIRECT_SHIP';
             if (!directShip && (Number(item.dispatchPreparedQty || 0) <= 0 || Number(state.pending || 0) > 0)) return;
             if (!purchaseLineMatchesFilters(order.orderDate, order.salesName, item.brand, filters)) return;
-            rows.push({ order, item, state });
+            rows.push({ order, item, state, category });
         });
     });
     return rows;
@@ -13282,10 +13410,11 @@ function renderPurchasingCompletedOrders(completedRows = null) {
     const body = document.getElementById('purchaseCompletedBody');
     const status = document.getElementById('purchaseCompletedStatus');
     if (!body) return;
+    const targets = purchasingView === 'completed' ? [] : null;
     const allRows = completedRows || purchasingCompletedRows();
     const rows = allRows.filter(({order,item})=>workflowLineMatchesSearch(order,item,document.getElementById('purchaseWorkSearch')?.value)).slice(0, purchasingCompletedVisibleLimit);
-    body.innerHTML = rows.map(({order, item, state}) => `<tr><td data-th="訂單日期">${workflowRecordSummary(order, order.orderDate)}</td><td data-th="客戶">${escapeHtml(order.customerName || order.customer || '')}</td><td data-th="已完成採購品項">${purchaseProductSummary(item, state.prepared || item.dispatchPreparedQty || item.qty, null)}</td><td data-th="數量">${workflowQuantitySummary(state.prepared || item.dispatchPreparedQty || item.qty,(item.fulfillmentType || order.fulfillmentType) === 'DIRECT_SHIP' ? '已到貨' : '待送貨')}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="操作" class="no-print"><button type="button" class="btn-small btn-secondary" onclick="openOrderStatusHistory(${inlineJsValue(order.id)})">查看紀錄</button></td></tr>`).join('');
-    [...body.children].forEach((row,index)=>organizePurchasingOrderRow(row,rows[index].order,rows[index].item));
+    body.innerHTML = rows.map(({order, item, state, category}) => `<tr><td data-th="訂單日期">${workflowRecordSummary(order, order.orderDate)}</td><td data-th="客戶">${escapeHtml(order.customerName || order.customer || '')}</td><td data-th="已完成採購品項">${purchaseProductSummary(item, state.prepared || item.dispatchPreparedQty || item.qty, null)}</td><td data-th="數量">${workflowQuantitySummary(state.prepared || item.dispatchPreparedQty || item.qty,(item.fulfillmentType || order.fulfillmentType) === 'DIRECT_SHIP' ? '已到貨' : '已打單')}${category ? `<small class="purchase-item-description">${escapeHtml(workflowWorkCategoryLabel(category))}</small>` : ''}</td><td data-th="負責業務">${escapeHtml(order.salesName || '')}</td><td data-th="操作" class="no-print"><button type="button" class="btn-small btn-secondary" onclick="openOrderStatusHistory(${inlineJsValue(order.id)})">查看紀錄</button></td></tr>`).join('');
+    [...body.children].forEach((row,index)=>organizePurchasingOrderRow(row,rows[index].order,rows[index].item,{qty:rows[index].item.orderedQty ?? rows[index].item.qty, confirmed:true, targets}));
     if (status) status.textContent = rows.length
         ? `已顯示 ${rows.length} 筆採購已完成品項${purchasingDispatchHasMore || allRows.length > rows.length ? '；可載入更多' : ''}`
         : '目前沒有採購已完成品項';
@@ -13295,6 +13424,7 @@ function renderPurchasingCompletedOrders(completedRows = null) {
         more.disabled = purchasingDispatchLoading;
         more.textContent = purchasingDispatchLoading ? '載入中…' : '載入更多（每次 50 筆）';
     }
+    if (targets) return loadPurchaseWorkAmounts(targets);
 }
 
 window.loadMorePurchasingCompleted = async function() {
@@ -13612,6 +13742,7 @@ async function loadPurchasingDispatchOrders(reset=true, options={}) {
         purchasingDispatchHasMore = !!orderPaginationState && orderPaginationState.sourceIndex < orderPaginationState.sources.length;
         return ordersCache;
     }
+    if (reset) purchaseWorkSupplyRequests = new WeakMap();
     purchasingDispatchError = '';
     purchasingDispatchLoading = true;
     let normalizedItemsByOrder = null;
@@ -13770,6 +13901,7 @@ function renderPurchasingDispatchOrders(normalizedItemsByOrder = null, filterCon
     const status=document.getElementById('purchaseDispatchStatus');
     const more=document.getElementById('purchaseDispatchMoreBtn');
     if(!body)return;
+    const targets = purchasingView === 'dispatch' ? [] : null;
     body.innerHTML='';
     const fragment=document.createDocumentFragment();
     let shown=0;
@@ -13800,7 +13932,7 @@ function renderPurchasingDispatchOrders(normalizedItemsByOrder = null, filterCon
                 : '<span class="order-progress-badge">唯讀</span>';
             const tr=document.createElement('tr');
             tr.innerHTML=`<td data-th="訂單日期">${workflowRecordSummary(order, order.orderDate)}</td><td data-th="客戶">${escapeHtml(order.customerName||order.customer||'')}</td><td data-th="待打單品項">${purchaseProductSummary(item, quantity, null)}</td><td data-th="數量">${workflowQuantitySummary(quantity,'待打單')}</td><td data-th="負責業務">${escapeHtml(order.salesName||'')}</td><td data-th="操作"><div class="workflow-inline-actions">${action}</div></td>`;
-            organizePurchasingOrderRow(tr,order,item);
+            organizePurchasingOrderRow(tr,order,item,{qty:quantity, confirmed:true, targets});
             fragment.appendChild(tr);
             shown++;
         });
@@ -13808,6 +13940,7 @@ function renderPurchasingDispatchOrders(normalizedItemsByOrder = null, filterCon
     body.appendChild(fragment);
     if(status)status.textContent=purchasingDispatchLoading?'載入中…':purchasingDispatchError||(shown?`已顯示 ${shown} 筆待打單品項`:'目前沒有待打單品項');
     if(more){more.style.display=purchasingDispatchHasMore?'':'none';more.disabled=purchasingDispatchLoading;}
+    if (targets) return loadPurchaseWorkAmounts(targets);
 }
 
 function pendingPurchaseLines(order) {
@@ -13912,6 +14045,7 @@ function pendingServicePurchaseRows(filters, itemMap = null){
 function renderPendingPurchaseOrders(itemMap = null, filterContext = null) {
     const body = document.getElementById('purchasePendingBody');
     if (!body) return;
+    const targets = purchasingView === 'ordering' ? [] : null;
     body.innerHTML = '';
     const fragment = document.createDocumentFragment();
     const filters = filterContext || purchaseFilterContext();
@@ -13924,8 +14058,8 @@ function renderPendingPurchaseOrders(itemMap = null, filterContext = null) {
         const action=canCreatePurchaseOrderCapability()&&serviceCaseClientProject()
             ? serviceOrderActionButton(order,item,'EXECUTE','確認已執行') : '—';
         const row=document.createElement('tr');
-        row.innerHTML=`<td data-th="合併" class="no-print"></td><td data-th="需求日期">${workflowRecordSummary(order,order.orderDate)}</td><td data-th="客戶／用途">${escapeHtml(order.customerName||order.customer||'')}</td><td data-th="待採購品項">${purchaseProductSummary(item,qty,null)}<div class="record-reference">待執行</div></td><td data-th="數量">${workflowQuantitySummary(qty,'待執行')}</td><td data-th="負責業務">${escapeHtml(order.salesName||'')}</td><td data-th="操作"><div class="workflow-inline-actions">${action}</div></td>`;
-        organizePurchasingOrderRow(row,order,item);
+        row.innerHTML=`<td data-th="需求日期">${workflowRecordSummary(order,order.orderDate)}</td><td data-th="客戶／用途">${escapeHtml(order.customerName||order.customer||'')}</td><td data-th="待採購品項">${purchaseProductSummary(item,qty,null)}<div class="record-reference">待執行</div></td><td data-th="數量">${workflowQuantitySummary(qty,'待執行')}</td><td data-th="負責業務">${escapeHtml(order.salesName||'')}</td><td data-th="操作"><div class="workflow-inline-actions">${action}</div></td>`;
+        organizePurchasingOrderRow(row,order,item,{qty});
         fragment.appendChild(row);
         shown++;
     }
@@ -13951,13 +14085,13 @@ function renderPendingPurchaseOrders(itemMap = null, filterContext = null) {
         if (!workflowLineMatchesSearch(order,{...demand,itemName:demand.itemName||item.itemName,brand},document.getElementById('purchaseWorkSearch')?.value)) continue;
         const qty=Math.max(0,Number(demand.remainingToOrderQty||0));
         const statusLabel=globalThis.YushinProcurementDemand?.statusLabel(demand.status)||'待採購';
-        let customer=order?.customerName||order?.customer||'';
+        let customer=order?.customerName||order?.customer||'—';
         let actionHtml='';
         const selfOrder=!!order&&(item.procurementType||order.procurementType||'PURCHASING_PO')==='SALES_SELF_ORDER';
         const batchSelectable=sourceType==='SALES_ORDER'&&!!order&&!selfOrder;
         if(batchSelectable)visibleSelectableIds.add(String(demand.id||''));
         const selectionHtml=batchSelectable
-            ? `<input type="checkbox" class="pending-purchase-batch-select" aria-label="選取合併採購" ${selectedPendingPurchaseDemandIds.has(String(demand.id||''))?'checked':''} onchange="togglePendingPurchaseSelection(${inlineJsValue(demand.id||'')},this.checked)">`
+            ? `<label class="purchase-batch-selection"><input type="checkbox" class="pending-purchase-batch-select" aria-label="選取合併採購" ${selectedPendingPurchaseDemandIds.has(String(demand.id||''))?'checked':''} onchange="togglePendingPurchaseSelection(${inlineJsValue(demand.id||'')},this.checked)">合併</label>`
             : '';
 
         if(sourceType==='STOCK_REPLENISHMENT'){
@@ -13981,8 +14115,8 @@ function renderPendingPurchaseOrders(itemMap = null, filterContext = null) {
 
         const row=document.createElement('tr');
         row.classList.add('procurement-demand-row');
-        row.innerHTML=`<td data-th="合併" class="no-print" style="text-align:center;">${selectionHtml}</td><td data-th="需求日期">${workflowRecordSummary(order, date)}</td><td data-th="客戶／用途">${escapeHtml(customer)}<div class="record-reference">${order?.orderNo ? `來源客戶訂單・${escapeHtml(order.orderNo)}` : order?.quoteNo ? `來源估價單・${escapeHtml(order.quoteNo)}` : '客戶訂單採購需求'}</div></td><td data-th="待採購品項">${purchaseProductSummary({...demand, itemName:demand.itemName || item.itemName, itemCode:demand.itemCode || item.itemCode, brand}, qty, null)}<div style="font-size:11px;color:#667584;margin-top:3px;">${sourceType==='STOCK_REPLENISHMENT'?'備庫採購':'客戶訂單'}・${escapeHtml(statusLabel)}</div></td><td data-th="數量">${workflowQuantitySummary(qty,'待採購')}</td><td data-th="負責業務">${escapeHtml(salesName)}</td><td data-th="操作"><div class="workflow-inline-actions">${actionHtml}</div></td>`;
-        organizePurchasingOrderRow(row,order,item);
+        row.innerHTML=`<td data-th="需求日期">${workflowRecordSummary(order, date)}</td><td data-th="客戶／用途">${escapeHtml(customer)}<div class="record-reference">${!order?.orderNo && order?.quoteNo ? `來源估價單・${escapeHtml(order.quoteNo)}` : ''}</div></td><td data-th="待採購品項">${purchaseProductSummary({...demand, itemName:demand.itemName || item.itemName, itemCode:demand.itemCode || item.itemCode, brand}, qty, null)}</td><td data-th="數量">${workflowQuantitySummary(qty,'待採購')}${statusLabel==='待採購'?'':`<small class="purchase-item-description">${escapeHtml(statusLabel)}</small>`}</td><td data-th="負責業務">${escapeHtml(salesName)}</td><td data-th="操作"><div class="workflow-inline-actions">${selectionHtml}${actionHtml}</div></td>`;
+        organizePurchasingOrderRow(row,order,item,{qty, productId:demand.productId || item.productId, estimate:true, targets});
         fragment.appendChild(row);
         shown++;
     }
@@ -14000,6 +14134,7 @@ function renderPendingPurchaseOrders(itemMap = null, filterContext = null) {
             : procurementDemandHasMore ? '目前這一批沒有符合篩選的需求，可載入更多' : '目前沒有待採購需求');
     const more=document.getElementById('purchasePendingMoreBtn');
     if(more){more.style.display=procurementDemandHasMore?'':'none';more.disabled=pendingPurchaseLoading;}
+    if (targets) return loadPurchaseWorkAmounts(targets);
 }
 
 window.loadPendingPurchaseOrders = async function(reset = true) {
@@ -14973,7 +15108,7 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
     const workKeyword = inventory ? '' : document.getElementById('purchaseWorkSearch')?.value || '';
     const historySearch = !inventory && document.getElementById('poListSearch');
     if (historySearch) historySearch.hidden = true;
-    if (head) head.innerHTML = inventory ? '<th>訂單日期</th><th>客戶</th><th>待到貨品項</th><th>數量</th><th>負責業務</th><th>到貨進度</th><th class="no-print">操作</th>' : '<th>訂單日期</th><th>客戶</th><th>產品資訊</th><th>負責業務</th><th>銷售金額（含稅）</th><th>交易／開票資料</th><th>進度</th><th class="no-print">操作</th>';
+    if (head) head.innerHTML = inventory ? '<th>訂單日期</th><th>客戶</th><th>待到貨品項</th><th>數量</th><th>負責業務</th><th>到貨進度</th><th class="no-print">操作</th>' : '<th>訂單日期</th><th>客戶名稱</th><th>產品資訊</th><th>負責業務</th><th>金額（含稅）</th><th>交易方式</th><th>進度</th><th class="no-print">操作</th>';
     tbody.innerHTML = '';
     const fragment = document.createDocumentFragment();
 
@@ -14985,6 +15120,7 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
     let overdueCount = 0;
     let planRiskCount = 0;
     const representedSupplyIds = new Set();
+    const visibleSupplyIds = new Set();
     const evidenceIndex = buildReceivingEvidenceIndex();
     const supplyById = new Map(supplyReceivingCache.map(supply => [supply.id, supply]));
     const orderById = new Map(ordersCache.map(order => [order.id, order]));
@@ -15006,6 +15142,7 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
             evidenceCount += evidence.length;
             if (!evidence.length) missingEvidence++;
             const evidenceSupplies = evidence.map(entry => supplyById.get(entry.id)).filter(Boolean);
+            evidenceSupplies.forEach(supply => visibleSupplyIds.add(supply.id));
             const due = receivingDueInfo(evidenceSupplies);
             const planRisk = receivingPlanRiskInfo(order, item, evidenceSupplies);
             if (due.status === 'late') overdueCount++;
@@ -15030,7 +15167,13 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
                 <td data-th="負責業務">${escapeHtml(order.salesName || '')}</td>
                 <td data-th="到貨進度"><span class="workflow-quantity">已到貨 ${progress.received}／應到貨 ${progress.target}</span><small class="purchase-item-description">待到貨 ${Math.max(0, progress.target-progress.received)}</small>${receivingWaitHtml(evidenceSupplies)}${receivingDueHtml(due)}${receivingPlanRiskHtml(planRisk)}</td>
                 <td data-th="操作" class="no-print"><div class="workflow-inline-actions">${actionHtml}</div></td>`;
-            if (!inventory) organizePurchasingOrderRow(tr,order,item);
+            if (!inventory) {
+                const supplies = [...new Map(evidenceSupplies.map(supply=>[supply.id,supply])).values()]
+                    .filter(supply => purchaseSupplySourceItem(supply,items)?.itemId === item.itemId)
+                    .map(purchaseOutstandingSupply).filter(supply=>supply.qty>0);
+                const qty = supplies.reduce((sum,supply)=>sum+supply.qty,0);
+                organizePurchasingOrderRow(tr,order,item,{qty:qty || progress.remaining,supplies});
+            }
             tr.dataset.receivingDueRank = String(due.sortRank);
             tr.dataset.receivingPlanRiskRank = String(planRisk.sortRank ?? 4);
             tr.dataset.receivingExpectedDate = due.expectedDate || '';
@@ -15094,17 +15237,19 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
             <td data-th="負責業務">${escapeHtml(salesName)}</td>
             <td data-th="到貨進度">${escapeHtml(sourceLabel)}｜已到貨 ${supplyProgress.receivedQty}／應到貨 ${ordered}<small class="purchase-item-description">待到貨 ${remaining}</small>${receivingWaitHtml([supply])}${receivingDueHtml(due)}</td>
             <td data-th="操作" class="no-print"><div class="workflow-inline-actions">${sourceOrder && sourceStatus !== 'normal' && canCreatePurchaseOrderCapability() ? customerCancellationActions(supply) : actionHtml}</div></td>`;
-        if (!inventory) organizePurchasingOrderRow(tr,sourceOrder,sourceOrder ? normalizedOrderItems(sourceOrder).find(item=>item.itemId===supply.itemId)||{} : {});
+        if (!inventory) {
+            const item = sourceOrder ? purchaseSupplySourceItem(supply,normalizedOrderItems(sourceOrder)) : null;
+            organizePurchasingOrderRow(tr,sourceOrder,item || {},{qty:remaining,supplies:[purchaseOutstandingSupply(supply)],stock:!supply.orderId});
+        }
         if (!inventory && !supply.orderId) {
-            tr.querySelector('[data-th="銷售金額"]').innerHTML='—'+purchasingFinancialSummary(null,supply,[supply]);
             tr.querySelector('[data-th="產品資訊"]').insertAdjacentHTML('beforeend',`<small>${escapeHtml(supply.supplier||supply.supplierName||'')} · 入庫倉庫：${escapeHtml(warehouseMasterCache.find(warehouse=>warehouse.id===supply.warehouseId)?.name||warehouseMasterCache.find(warehouse=>warehouse.id===supply.warehouseId)?.warehouseName||supply.warehouseId||'待確認')}</small>`);
-            tr.querySelector('[data-th="交易／開票資料"]').textContent='—';
         }
         tr.dataset.receivingDueRank = String(due.sortRank);
         tr.dataset.receivingPlanRiskRank = '4';
         tr.dataset.receivingExpectedDate = due.expectedDate || '';
         tr.dataset.receivingOrderDate = date || '';
         fragment.appendChild(tr);
+        visibleSupplyIds.add(supply.id);
         standaloneSupplyCount++;
     });
 
@@ -15128,8 +15273,14 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
         button.textContent = '前往倉庫收貨';
     });
     const totalRows = workCount + standaloneSupplyCount;
-    const supplyMetrics = receivingSupplyMetrics(filters);
+    const supplyMetrics = receivingSupplyMetrics(filters, inventory ? null : visibleSupplyIds);
     if (inventory) updateInventoryReceivingCount(supplyMetrics.count);
+    else if (activeReceivingSupplyReady) {
+        const count = document.getElementById('purchaseCountReceiving');
+        const amount = document.getElementById('purchaseAmountReceiving');
+        if (count) count.textContent = `${supplyMetrics.count} 筆供應`;
+        if (amount) amount.textContent = receivingWorkCardAmount(supplyMetrics);
+    }
     if (emptyHint) {
         emptyHint.style.display = totalRows === 0 ? 'block' : 'none';
         emptyHint.textContent = !purchasingReceivingReady ? '正在載入待到貨工作…' : '目前沒有待到貨品項。';

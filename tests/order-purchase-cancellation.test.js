@@ -19,14 +19,14 @@ function metricsFixture(){
   purchaseFilterContext:()=>({selectedSales:'',selectedBrand:''}),
   receivingSourceOrderForItem:s=>s.orderId?{status:s.orderId==='O1'?'cancelled':'normal',salesName:s.orderId==='O1'?'Sales A':'Sales B'}:null,
   purchaseLineMatchesFilters:(_date,sales,brand,f)=>(!f.selectedSales||sales===f.selectedSales)&&(!f.selectedBrand||brand===f.selectedBrand),
-  YushinSupply:supplyCore
+  YushinSupply:supplyCore,YushinSupplier:require('../modules/supplier-core'),currentUserRole:'purchaser'
  });
- vm.runInContext(fn('tradeAnalysisCost')+'\n'+fn('receivingSupplyMetrics'),context);return context;
+ vm.runInContext(['canViewPurchaseWorkCosts','purchaseSupplyCost','receivingSupplyMetrics'].map(fn).join('\n'),context);return context;
 }
 test('receiving totals include cancelled customer commitments and use only remaining purchase cost',()=>{
  const c=metricsFixture();c.supplyReceivingCache.push(c.supplyReceivingCache[0]);
- assert.deepEqual(JSON.parse(JSON.stringify(c.receivingSupplyMetrics())),{count:4,quantity:12,amount:10813,missingCost:1});
- assert.deepEqual(JSON.parse(JSON.stringify(c.receivingSupplyMetrics({selectedSales:'Sales A'}))),{count:3,quantity:6,amount:10333,missingCost:1});
+ assert.deepEqual(JSON.parse(JSON.stringify(c.receivingSupplyMetrics())),{count:4,quantity:12,amount:11354,missingCost:1});
+ assert.deepEqual(JSON.parse(JSON.stringify(c.receivingSupplyMetrics({selectedSales:'Sales A'}))),{count:3,quantity:6,amount:10850,missingCost:1});
  assert.equal(c.receivingSupplyMetrics({selectedBrand:'Different'}).count,0);
 });
 test('both purchasing methods show cancellation only to admin or purchaser, never terminal or self-order',()=>{

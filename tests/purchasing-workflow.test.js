@@ -878,7 +878,7 @@ test('cancelled warehouse source still receives into free stock while direct shi
 });
 
 test('receiving card counts standalone stock replenishment and does not hide it by salesperson', () => {
-    const start=app.indexOf('function receivingSupplyMetrics');
+    const start=app.indexOf('function canViewPurchaseWorkCosts');
     const end=app.indexOf('\nfunction renderPurchasingWorkCards',start);
     const source=app.slice(start,end);
     assert.ok(start>=0&&end>start);
@@ -892,22 +892,23 @@ test('receiving card counts standalone stock replenishment and does not hide it 
         purchaseFilterContext:()=>({start:'',end:'',selectedSales:'Sales A',selectedBrand:'',selectableBrands:['Beckman']}),
         purchaseLineMatchesFilters:(date,sales,brand,filters)=>{seenFilters=filters;return true;},
         receivingSourceOrderForItem:()=>null,
-        tradeAnalysisCost:value=>value==null?null:Number(value),
+        YushinSupplier:require('../modules/supplier-core'),currentUserRole:'purchaser',
         YushinReceiving:receiving,
         YushinSupply:supply,
         window:{YushinReceiving:receiving,YushinSupply:supply}
     });
     vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", context);
-vm.runInContext(source,context);
+const costStart=app.indexOf('function purchaseSupplyCost(');
+    vm.runInContext(app.slice(costStart,app.indexOf('\n}',costStart)+2)+'\n'+source,context);
     const result=context.receivingSupplyMetrics();
-    assert.deepEqual(JSON.parse(JSON.stringify(result)),{count:2,amount:1800,missingCost:0,quantity:13});
+    assert.deepEqual(JSON.parse(JSON.stringify(result)),{count:2,amount:1890,missingCost:0,quantity:13});
     assert.equal(seenFilters.selectedSales,'Sales A');
     const cardsStart=app.indexOf('function renderPurchasingWorkCards');
     const cardsEnd=app.indexOf('\nfunction purchasingCompletedRows',cardsStart);
     const cards=app.slice(cardsStart,cardsEnd);
     assert.match(cards,/const receiving = receivingSupplyMetrics\(filters\)/);
     assert.match(cards,/category === 'arrival' \? receiving.count/);
-    assert.match(cards,/category === 'arrival' \? receiving.amount/);
+    assert.match(cards,/receivingWorkCardAmount\(receiving\)/);
 });
 
 test('formal purchase order commit immediately hydrates the receiving supply cache', () => {
@@ -2332,7 +2333,7 @@ test('procurement need date stays separate from supplier ETA', () => {
 
 test('grouped procurement selection only builds compatible warehouse purchase orders', () => {
     assert.match(html,/id="purchasePendingBatchPoBtn"[^>]+onclick="openSelectedPurchaseDraft\(\)"/);
-    assert.match(html,/<th class="no-print">合併<\/th>/);
+    assert.match(app,/data-th="操作"><div class="workflow-inline-actions">\$\{selectionHtml\}/);
     assert.match(app,/const selectedPendingPurchaseDemandIds = new Set\(\)/);
     assert.match(app,/class="pending-purchase-batch-select"/);
 

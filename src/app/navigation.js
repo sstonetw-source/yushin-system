@@ -154,6 +154,10 @@ function resetSessionData() {
     poHistorySearchActive = false;
     poHistorySearchLoading = false;
     purchaseHistorySupplyCache = new Map();
+    purchaseWorkSupplyRequests = new WeakMap();
+    for (const id of ['purchasePendingBody','poListBody','purchaseDispatchBody','purchaseCompletedBody','purchaseAmountReceiving']) {
+        document.getElementById(id)?.replaceChildren();
+    }
     window.resetWarehouseLogistics?.();
     supplyReceivingCache = [];
     supplyReceivingCursor = null;
