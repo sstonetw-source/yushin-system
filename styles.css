@@ -4787,6 +4787,8 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
         background:var(--ys-surface); color:var(--ys-muted); font:inherit; cursor:pointer;
     }
     #appContainer .workflow-order-context-row > td { overflow-wrap:anywhere; }
+    #appContainer .workflow-order-context-row .workflow-record { min-width:0; }
+    #appContainer .workflow-order-context-row .workflow-record strong { white-space:normal; }
     #appContainer .workflow-order-context-row > td.order-money-cell { white-space:normal; }
     #appContainer .purchase-work-amount { display:grid; gap:4px; white-space:normal; }
     #appContainer .workflow-order-context-row > td[data-th="操作"] { min-width:0; }
@@ -4798,7 +4800,7 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
 @media screen and (min-width:769px) {
     #appContainer #purchasing-system table:has(.workflow-order-context-row) { table-layout:fixed; width:100%; }
     #appContainer .workflow-order-context-row > td[data-th="產品資訊"] { width:20%; }
-    #appContainer .workflow-order-context-row > td[data-th="操作"] .workflow-inline-actions { flex-wrap:wrap; }
+    #appContainer #purchasing-system .workflow-order-context-row .workflow-inline-actions { flex-wrap:wrap; }
 }
 @media screen and (max-width:768px) {
     #appContainer #purchasing-system .workflow-order-context-row { display:grid; }
@@ -4828,7 +4830,13 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
     #appContainer #purchasing-system .workflow-list-table tbody > .workflow-order-context-row { background:var(--ys-surface); }
 }
 @media screen and (min-width:769px) {
-    #appContainer #purchasing-system .workflow-order-context-row .workflow-inline-actions > button { flex:0 1 auto; white-space:normal; }
+    #appContainer #purchasing-system .workflow-order-context-row .workflow-inline-actions > button { flex:0 0 auto; white-space:normal; max-width:100%; }
+}
+@media screen and (min-width:769px) and (max-width:1100px) {
+    #appContainer #purchasing-system .workflow-order-context-row .workflow-inline-actions {
+        flex-direction:column; align-items:stretch;
+    }
+    #appContainer #purchasing-system .workflow-order-context-row .order-detail-panel > summary { justify-content:center; }
 }
 @media screen and (max-width:768px) {
     #appContainer #purchaseWorkSearch { flex:none; height:var(--ys-control-height); }

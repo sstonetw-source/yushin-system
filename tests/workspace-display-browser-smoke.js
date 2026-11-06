@@ -81,6 +81,11 @@ function fn(name){const a=source.indexOf('function '+name+'('),b=source.indexOf(
    const transaction=row.locator('td[data-th="交易方式"]');assert.equal(await transaction.innerText(),'直');assert.equal(await transaction.isVisible(),true);
    assert.equal(await row.evaluate(element=>getComputedStyle(element).display),width<769?'grid':'table-row');
    if(view==='receiving') assert.match(await page.locator('#purchaseAmountReceiving').textContent(),/含稅.*NT\$ 32/);
+   assert.ok(await row.locator('td[data-th="操作"]').evaluate(cell=>{
+    const boundary=cell.getBoundingClientRect();
+    return [...cell.querySelectorAll('button, .order-detail-panel > summary')].filter(el=>el.getClientRects().length)
+      .every(el=>el.getBoundingClientRect().right<=boundary.right+1);
+   }),view+' action controls fit at '+width+'px');
    await row.locator('.order-detail-panel > summary').click();
    await row.locator('dialog[open]').waitFor({state:'visible'});
    assert.equal(await row.locator('dialog').evaluate(e=>e.open),true);
