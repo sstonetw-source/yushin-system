@@ -4940,7 +4940,9 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
 /* Shared workflow presentation; formal printed documents remain unchanged. */
 @media screen {
  #appContainer .content-section .workflow-list-table .workflow-customer-link,
- #appContainer #ordersTable .workflow-customer-link { display:inline-flex; min-height:44px; line-height:1.5; align-items:flex-start; justify-content:flex-start; }
+ #appContainer #ordersTable .workflow-customer-link { display:inline-flex; min-height:0; line-height:1.5; align-items:flex-start; justify-content:flex-start; vertical-align:top; }
+ #appContainer :is(#ordersTable,.workflow-list-table) td:is([data-th="客戶"],[data-th="客戶名稱"],[data-th="客戶／用途"]) { text-align:left; vertical-align:top; }
+ #appContainer :is(#ordersTable,.workflow-list-table) td:is([data-th="客戶"],[data-th="客戶名稱"],[data-th="客戶／用途"]) .workflow-customer-link { text-align:left; margin:0; }
  #appContainer .workflow-amount { font-variant-numeric:tabular-nums; line-height:1.5; }
  #appContainer .workflow-list-table .workflow-amount strong,
  #appContainer #ordersTable .workflow-amount strong { display:inline; }

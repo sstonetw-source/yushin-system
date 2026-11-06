@@ -316,7 +316,7 @@ test('order work cards and filters use item-level work states', () => {
     assert.match(app, /metrics\[category\]\.count\+\+/);
     assert.match(app, /\(displayCategoriesByItem\.get\(item\) \|\| \[\]\)\.includes\(activeOrderWorkFilter\)/);
     assert.match(app, /const primaryStatus=displayCategories\[0\]\|\|'ordering'/);
-    assert.match(app, /<strong class="order-item-status-heading">訂單狀態<\/strong>：<span class="order-progress-badge">/);
+    assert.doesNotMatch(app, /<strong class="order-item-status-heading">訂單狀態<\/strong>/);
     assert.match(app, /function pendingProcurementDisplayLines\(order, normalizedItems = null, dispatchStateByItem = null, lifecycleOverride = null\)/);
     assert.match(app, /orderItemWorkCategory\(order, item, lifecycle, dispatch\) !== 'ordering'/);
     assert.match(app, /\['dispatch', '待打單'\]/);

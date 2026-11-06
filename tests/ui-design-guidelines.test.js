@@ -99,11 +99,11 @@ test('order cards keep commercial details in the drawer and a compact mobile cus
     const progressLine = orderWorkspace.split('\n').find(line => line.includes('<td data-th="進度" class="order-progress-cell">'));
     assert.ok(progressLine);
     assert.doesNotMatch(progressLine, /workflowCommercialSummary\(o\)/);
-    assert.match(progressLine, /<strong class="order-item-status-heading">訂單狀態<\/strong>/);
+    assert.doesNotMatch(progressLine, /<strong class="order-item-status-heading">訂單狀態<\/strong>/);
     assert.match(orderWorkspace, /<h4>交易與備註<\/h4>/);
     assert.match(orderWorkspace, /<dt>交易方式<\/dt>/);
     assert.match(orderWorkspace, /<dt>發票抬頭<\/dt>/);
     assert.match(css, /td\.order-customer-cell \{\s*display:flex;\s*align-items:center;/);
-    assert.match(css, /strong\.order-item-status-heading \{\s*font-weight:700;/);
+    assert.match(css, /\.workflow-customer-link \{ display:inline-flex; min-height:0;/);
 });
 
