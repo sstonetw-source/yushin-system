@@ -5076,3 +5076,91 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
   #admin-sales #adminSalesBody > tr > td.admin-user-uid .admin-uid-value { flex:1 1 auto; max-width:100%; }
   #admin-sales #adminSalesBody > tr > td.admin-user-uid .admin-uid-copy { flex:0 0 auto; width:auto; min-height:40px; margin:0; }
 }
+
+/* Admin mobile card repair: override legacy 720px tables and stacked row cells. */
+@media screen and (max-width:768px) {
+  #appContainer #admin-products .table-wrap:has(.price-list-management-table) {
+    overflow-x:visible; width:100%; min-width:0;
+  }
+  #appContainer #admin-products .table-wrap .price-list-management-table {
+    display:block; width:100%; min-width:0; max-width:100%; table-layout:auto;
+  }
+  #appContainer #admin-products .price-list-management-table > tbody { display:block; width:100%; min-width:0; }
+  #appContainer #admin-products .price-list-management-table > thead { display:none; }
+  #appContainer #admin-products #productOverviewBody > tr {
+    display:grid; grid-template-columns:minmax(0,1fr); width:100%; min-width:0;
+    padding:10px 12px; overflow:hidden;
+  }
+  #appContainer #admin-products #productOverviewBody > tr > td {
+    display:grid !important; grid-template-columns:minmax(0,94px) minmax(0,1fr);
+    align-items:start; justify-content:initial; gap:8px; width:100% !important;
+    min-width:0 !important; max-width:100%; padding:9px 0 !important;
+    text-align:left; overflow-wrap:anywhere; word-break:break-word;
+  }
+  #appContainer #admin-products #productOverviewBody > tr > td::before {
+    display:block; position:static; width:auto; min-width:0; margin:0;
+    white-space:normal; text-align:left;
+  }
+  #appContainer #admin-products #productOverviewBody > tr > td:first-child {
+    display:block !important; font-weight:700; font-size:16px; padding:4px 0 10px !important;
+  }
+  #appContainer #admin-products #productOverviewBody > tr > td:first-child::before { display:none; }
+  #appContainer #admin-products #productOverviewBody > tr > td:last-child {
+    display:block !important; min-width:0 !important; padding-bottom:0 !important;
+  }
+  #appContainer #admin-products #productOverviewBody > tr > td:last-child::before {
+    display:block; margin-bottom:8px;
+  }
+  #appContainer #admin-products #productOverviewBody .price-list-action-group {
+    display:grid; grid-template-columns:repeat(2,minmax(0,1fr));
+    align-items:stretch; width:100%; min-width:0; gap:8px;
+  }
+  #appContainer #admin-products #productOverviewBody .price-list-action-group > button {
+    width:100%; min-width:0; max-width:100%; margin:0; white-space:normal;
+  }
+  #appContainer #admin-products #productOverviewBody .price-list-action-group > .price-list-more-actions {
+    grid-column:1/-1; width:100%; min-width:0; max-width:100%; box-sizing:border-box;
+  }
+  #appContainer #admin-products #productOverviewBody > tr > td[colspan] {
+    display:block !important; width:100% !important;
+  }
+  #appContainer #admin-sales #adminSalesBody > tr {
+    display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+    padding:10px 12px; gap:0 10px; overflow:hidden;
+  }
+  #appContainer #admin-sales #adminSalesBody > tr > td {
+    display:grid !important; grid-template-columns:minmax(0,74px) minmax(0,1fr);
+    align-items:center; justify-content:initial; gap:6px; padding:8px 0 !important;
+    text-align:left; overflow-wrap:anywhere; min-width:0;
+  }
+  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(1),
+  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(2) {
+    grid-column:auto; display:block !important; font-weight:700; border-bottom:1px solid var(--ys-border,#ddd);
+  }
+  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(1)::before,
+  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(2)::before { display:none; }
+  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(n+3) { grid-column:1/-1; }
+  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(4) {
+    overflow-wrap:anywhere; word-break:break-word;
+  }
+  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(7) {
+    display:block !important;
+  }
+  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(7)::before {
+    display:block; margin-bottom:6px;
+  }
+  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(7) button {
+    width:auto; max-width:100%; margin:4px 6px 4px 0 !important;
+    display:inline-block; vertical-align:middle; white-space:normal;
+  }
+  #appContainer #admin-sales #adminSalesBody > tr > td:nth-child(8) {
+    display:grid !important; grid-template-columns:74px minmax(0,1fr);
+  }
+  #appContainer #admin-sales #adminSalesBody > tr > td.admin-user-uid .admin-uid-value {
+    min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  #appContainer #admin-sales #adminSalesBody > tr > td.admin-user-uid .admin-uid-copy {
+    min-height:40px; margin:4px 0; justify-self:end;
+  }
+  #appContainer #admin-system :is(.admin-panel,.panel,.table-wrap) { max-width:100%; min-width:0; }
+}
