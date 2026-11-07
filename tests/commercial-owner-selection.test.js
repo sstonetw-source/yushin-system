@@ -68,7 +68,7 @@ test('editing preserves both existing creator metadata and its legacy absence wi
  for(const audit of [{createdByUid:'old-creator',createdByName:'原建立人',createdByRole:'sales'},{}]){
   const existing={ownerUid:'retired',salesCode:'R1',salesName:'原負責人',createdAt:'old-date',...audit};let written;
   const candidate={quoteNo:'Q',ownerUid:'replacement',salesCode:'NEW',salesName:'新負責人',createdByUid:'buyer1',createdByName:'新建立人',createdByRole:'purchaser'};
-  const context=vm.createContext({editingQuoteNo:'Q',DOCUMENT_TYPES:{FORECAST:'forecast'},buildFullHistorySearchTokens:()=>[],
+  const context=vm.createContext({editingQuoteNo:'Q',sessionDataGeneration:0,canUseQuote:()=>false,DOCUMENT_TYPES:{FORECAST:'forecast'},buildFullHistorySearchTokens:()=>[],
    db:{collection:()=>({doc:()=>({})})},
    runRoleTransaction:async callback=>callback({get:async()=>({exists:true,data:()=>existing}),set:(_ref,data)=>{written={...data};}})});
   vm.runInContext(fn('persistQuoteOutputRecord'),context);await context.persistQuoteOutputRecord(candidate);

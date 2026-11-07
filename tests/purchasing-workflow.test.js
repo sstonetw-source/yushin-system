@@ -435,7 +435,7 @@ test('receiving work list renders one row per order item and keeps PO records in
     const renderStart = app.indexOf('window.renderPoList = function(');
     const renderSource = app.slice(renderStart, app.indexOf('// 把「採購訂單」', renderStart));
     assert.match(renderSource, /if \(purchasingView === 'receiving'\) \{[\s\S]*?renderPurchasingReceivingWorkList\(normalizedItemsByOrder, filterContext, dispatchStatesByOrder, lifecyclesByOrder\);[\s\S]*?return;/);
-    assert.match(renderSource, /const poRows = poHistorySearchActive \? poHistorySearchResults : poListCache/);
+    assert.match(renderSource, /const poRows = \[\.\.\.\(poHistorySearchActive \? poHistorySearchResults : poListCache\)\]\s*\.sort\(/);
 });
 
 test('receiving evidence uses supplyOrders as the only procurement source', () => {
