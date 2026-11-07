@@ -135,6 +135,18 @@ function compareBusinessRecordsNewestFirst(a, b, dateField, numberField) {
     return String(b?.[numberField] || b?.id || '').localeCompare(String(a?.[numberField] || a?.id || ''));
 }
 
+// Quote and PO history use the original creation time. Documents without it
+// remain accessible through legacy pagination, after the dated history.
+function compareCreatedDocumentsNewestFirst(a, b, dateField, numberField) {
+    const created = row => row.createdAt?.toMillis?.() ?? (Date.parse(row.createdAt) || 0);
+    const difference = created(b) - created(a);
+    if (difference) return difference;
+    if (!created(a)) return compareBusinessRecordsNewestFirst(a, b, dateField, numberField);
+    const aId = String(a.id || a[numberField] || '');
+    const bId = String(b.id || b[numberField] || '');
+    return aId < bId ? 1 : aId > bId ? -1 : 0;
+}
+
 // 核銷日期代表完成單據核銷；不代表發票開立或款項入帳。既有核銷操作紀錄可推回日期；
 // 若舊資料完全沒有操作紀錄，才暫以訂單日期顯示，避免既有完成訂單從統計消失。
 function orderBillingDate(order) {

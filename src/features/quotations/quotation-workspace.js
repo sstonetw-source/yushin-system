@@ -2555,12 +2555,6 @@ window.printThreeQuotes = async function() {
         };
         await persistQuoteOutputRecord(quoteData, '三家估價 PDF');
 
-        const cachedIndex = myQuotesCache.findIndex(q => q.quoteNo === quoteData.quoteNo);
-        if (cachedIndex >= 0) myQuotesCache[cachedIndex] = { ...myQuotesCache[cachedIndex], ...quoteData };
-        const historyIndex = quoteHistorySearchResults.findIndex(q => q.quoteNo === quoteData.quoteNo);
-        if (historyIndex >= 0) quoteHistorySearchResults[historyIndex] = { ...quoteHistorySearchResults[historyIndex], ...quoteData };
-        writeAppDataCache('quotes', myQuotesCache);
-
         const first = createQuotePdfStage(quoteData);
         firstStage = first.stage;
         await waitForPdfImages(first.documentNode);
@@ -2621,6 +2615,7 @@ function persistQuoteOutputRecord(quoteData, outputLabel = '輸出') {
     quoteData.searchTokens = buildFullHistorySearchTokens('quote', quoteData);
     const quoteRef = db.collection('quotes').doc(quoteData.quoteNo);
     const updatingExisting = !!editingQuoteNo && editingQuoteNo === quoteData.quoteNo;
+    const generation = sessionDataGeneration;
 
     return runRoleTransaction(async transaction => {
         const snapshot = await transaction.get(quoteRef);
@@ -2630,17 +2625,24 @@ function persistQuoteOutputRecord(quoteData, outputLabel = '輸出') {
             throw conflict;
         }
 
+        const existing = snapshot.exists ? snapshot.data() || {} : {};
         if (snapshot.exists && updatingExisting) {
-            const existing = snapshot.data() || {};
             // 編輯既有估價單時，表單只代表可編輯內容；成交、三估單、文件連結等背景欄位
             // 必須由 merge 保留。建立者與建立時間也屬稽核欄位，不可因重新輸出而改寫。
             for (const key of ['ownerUid','salesCode','salesName','createdByUid','createdByName','createdByRole']) {
                 if (key in existing) quoteData[key] = existing[key]; else delete quoteData[key];
             }
-            quoteData.createdAt = existing.createdAt || quoteData.createdAt;
+            if (existing.createdAt) quoteData.createdAt = existing.createdAt;
+            else delete quoteData.createdAt;
         }
         transaction.set(quoteRef, quoteData, { merge: true });
-    }).then(() => {
+        return { ...existing, ...quoteData, id: quoteRef.id };
+    }).then(saved => {
+        if (generation === sessionDataGeneration && saved && canUseQuote(saved)) {
+            myQuotesCache = [saved, ...myQuotesCache.filter(row => row.id !== saved.id)];
+            quoteHistorySearchResults = quoteHistorySearchResults.map(row => row.id === saved.id ? saved : row);
+            writeAppDataCache('quotes', myQuotesCache);
+        }
         if (!editingQuoteNo) {
             setQuoteEditingContext(quoteData.quoteNo);
             setQuoteOwnerSelection(quoteData, true);
@@ -3320,8 +3322,7 @@ async function runQuoteHistorySearch() {
             const now = Date.now();
             if (now - lastIntermediateRenderAt >= 100 || snapshot.size < DEFAULT_LIST_LIMIT) {
                 lastIntermediateRenderAt = now;
-                quoteHistorySearchResults = [...records.values()]
-                    .sort((a,b)=>compareBusinessRecordsNewestFirst(a,b,'quoteDate','quoteNo'));
+                quoteHistorySearchResults = [...records.values()];
                 renderMyQuotesList();
             }
             updateQuoteHistorySearchUi(`全歷史搜尋中：已檢查 ${checked} 筆候選資料，找到 ${records.size} 筆…`);
@@ -3333,8 +3334,7 @@ async function runQuoteHistorySearch() {
             await Promise.resolve();
         }
         if (generation !== quoteHistorySearchGeneration) return;
-        quoteHistorySearchResults = [...records.values()]
-            .sort((a,b)=>compareBusinessRecordsNewestFirst(a,b,'quoteDate','quoteNo'));
+        quoteHistorySearchResults = [...records.values()];
         updateQuoteHistorySearchUi(`全歷史搜尋完成：找到 ${records.size} 筆`);
     } catch (err) {
         if (generation !== quoteHistorySearchGeneration) return;
@@ -3395,22 +3395,25 @@ window.switchQuoteView = function(view, el, options = {}) {
 };
 
 function createMyQuotesPaginationState() {
-    const sources = [];
+    const scopedQueries = [];
+    const collection = () => db.collection('quotes');
     if (canViewAllData('quotes')) {
-        // 全公司估價單直接由 Firestore 依日期分頁，不能先按公司／單號分組後才在前端重排。
-        sources.push({ cursor: null, query: () => db.collection('quotes').orderBy('quoteDate', 'desc') });
+        scopedQueries.push(collection);
     } else {
-        if (currentUserCode) sources.push({ cursor: null, query: () => db.collection('quotes').where('salesCode', '==', currentUserCode).orderBy('quoteDate', 'desc') });
-        if (currentUser?.uid) sources.push({ cursor: null, query: () => db.collection('quotes').where('ownerUid', '==', currentUser.uid).orderBy('quoteDate', 'desc') });
-
+        const code = currentUserCode, uid = currentUser?.uid;
+        if (code) scopedQueries.push(() => collection().where('salesCode', '==', code));
+        if (uid) scopedQueries.push(() => collection().where('ownerUid', '==', uid));
     }
-    return { sources, sourceIndex: 0 };
+    const sourcesFor = field => scopedQueries.map(scoped => ({
+        cursor: null, rows: [], done: false, query: () => scoped().orderBy(field, 'desc')
+    }));
+    return { sources: sourcesFor('createdAt'), legacySources: sourcesFor('quoteDate') };
 }
 
 function updateMyQuotesLoadMoreButton() {
     const button = document.getElementById('myQuotesLoadMoreBtn');
     const refreshButton = document.getElementById('quoteHistoryRefreshBtn');
-    const hasMore = !!myQuotesPaginationState && myQuotesPaginationState.sourceIndex < myQuotesPaginationState.sources.length;
+    const hasMore = myQuotesPaginationState && [...myQuotesPaginationState.sources, ...myQuotesPaginationState.legacySources].some(source => !source.done || source.rows.length);
     if (button) {
         button.style.display = hasMore ? '' : 'none';
         button.disabled = myQuotesPageLoading;
@@ -3445,27 +3448,45 @@ async function loadMyQuotesPage(reset) {
     updateMyQuotesLoadMoreButton();
     // 重新整理時保留目前畫面，背景抓到新資料後再一次替換，避免每次先清空造成長時間白畫面。
     const records = new Map(reset ? [] : myQuotesCache.map(quote => [quote.id, quote]));
-    let remainingReads = DEFAULT_LIST_LIMIT;
+    const state = myQuotesPaginationState;
+    const cloneSources = sources => sources.map(source => ({ ...source, rows: [...source.rows] }));
+    const sources = cloneSources(state.sources);
+    const legacySources = cloneSources(state.legacySources);
+    let remainingReads = DEFAULT_LIST_LIMIT * Math.max(1, sources.length);
+    let added = 0;
     try {
-        while (remainingReads > 0 && myQuotesPaginationState.sourceIndex < myQuotesPaginationState.sources.length) {
-            const source = myQuotesPaginationState.sources[myQuotesPaginationState.sourceIndex];
-            const requested = remainingReads;
-            let query = source.query().limit(requested);
-            if (source.cursor) query = query.startAfter(source.cursor);
-            const snapshot = await firestoreReadWithTimeout(query.get(), '估價單');
-            if (requestedRole !== currentUserRole || requestedUid !== currentUser?.uid) {
-                myQuotesReloadRequested = true;
-                return;
+        for (const group of [sources, legacySources]) {
+            const legacy = group === legacySources;
+            while (added < DEFAULT_LIST_LIMIT) {
+                // Every ownership stream must have a head before choosing the newest.
+                // A bounded buffer keeps each query paginated and avoids rereading its rows.
+                const needRows = group.filter(source => !source.done && !source.rows.length);
+                if (needRows.length && remainingReads <= 0) break;
+                for (const source of needRows) {
+                    const requested = Math.min(DEFAULT_LIST_LIMIT, remainingReads);
+                    if (!requested) break;
+                    let query = source.query().limit(requested);
+                    if (source.cursor) query = query.startAfter(source.cursor);
+                    const snapshot = await firestoreReadWithTimeout(query.get(), '估價單');
+                    if (requestedRole !== currentUserRole || requestedUid !== currentUser?.uid || state !== myQuotesPaginationState) return;
+                    remainingReads -= snapshot.size;
+                    source.done = snapshot.size < requested;
+                    if (!snapshot.empty) source.cursor = snapshot.docs[snapshot.docs.length - 1];
+                    source.rows = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+                        .filter(row => legacy ? !row.createdAt : !!row.createdAt);
+                }
+                if (group.some(source => !source.done && !source.rows.length)) continue;
+                const ready = group.filter(source => source.rows.length);
+                if (!ready.length) break;
+                ready.sort((a,b) => compareCreatedDocumentsNewestFirst(a.rows[0], b.rows[0], 'quoteDate', 'quoteNo'));
+                const row = ready[0].rows.shift();
+                if (!records.has(row.id)) added++;
+                records.set(row.id, row);
             }
-            if (!snapshot.empty) {
-                source.cursor = snapshot.docs[snapshot.docs.length - 1];
-                snapshot.forEach(doc => records.set(doc.id, { id: doc.id, ...doc.data() }));
-                myQuotesCache = [...records.values()];
-            }
-            remainingReads -= snapshot.size;
-            if (snapshot.size < requested) myQuotesPaginationState.sourceIndex++;
+            if (group.some(source => !source.done || source.rows.length)) break;
         }
-        myQuotesCache.sort((a, b) => compareBusinessRecordsNewestFirst(a, b, 'quoteDate', 'quoteNo'));
+        myQuotesPaginationState = { sources, legacySources };
+        myQuotesCache = [...records.values()];
         writeAppDataCache('quotes', myQuotesCache);
         renderMyQuotesList();
         if (!currentUserName && myQuotesCache.length === 0) {
@@ -3476,7 +3497,6 @@ async function loadMyQuotesPage(reset) {
         if(requestedRole!==currentUserRole||requestedUid!==currentUser?.uid)return;
         mainPageLoadFailed('quote');
         console.error(err);
-        myQuotesCache = [...records.values()].sort((a, b) => compareBusinessRecordsNewestFirst(a, b, 'quoteDate', 'quoteNo'));
         renderMyQuotesList();
         alert(err?.code === 'firestore-read-timeout'
             ? '估價單資料讀取逾時，請稍候片刻後再試。'
@@ -3558,7 +3578,8 @@ window.renderMyQuotesList = function() {
     let shown = 0;
 
     const isAdminViewingAll = canViewAllData('quotes');
-    const visibleQuoteSource = (quoteHistorySearchActive ? quoteHistorySearchResults : myQuotesCache).filter(canUseQuote);
+    const visibleQuoteSource = (quoteHistorySearchActive ? quoteHistorySearchResults : myQuotesCache).filter(canUseQuote)
+        .sort((a,b) => compareCreatedDocumentsNewestFirst(a,b,'quoteDate','quoteNo'));
     populateMyQuoteSalesFilter();
     populateMyQuoteBrandFilter(visibleQuoteSource);
     const salesFilter = document.getElementById('myQuoteSalesFilter')?.value || '';
