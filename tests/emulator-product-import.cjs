@@ -66,3 +66,9 @@ test('partial completion reports acknowledged rows; rerun skips the successful c
  const writes=h.metrics.writes;ops[1]=h.op('productCosts',id,{standardCost:30},{standardCost:25});
  await h.c.commitMigrationBatch(ops,1);assert.equal(h.metrics.writes-writes,1);
 });
+
+test('import source remains a persisted change, not a discarded audit-only patch',async()=>{
+ const h=harness();const id='import-source';await seed('products',id,{source:'MANUAL',listPrice:100});
+ await h.c.commitMigrationBatch([h.op('products',id,{source:'PRODUCT_IMPORT',updatedAt:'now'},{source:'MANUAL'})],100);
+ assert.equal((await read('products',id)).source,'PRODUCT_IMPORT');assert.equal(h.metrics.writes,1);
+});

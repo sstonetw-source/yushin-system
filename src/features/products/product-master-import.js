@@ -65,7 +65,7 @@ async function commitMigrationBatch(operations, chunkSize = 400) {
                     checks.forEach((check, index) => {
                         const snapshot = snapshots[index];
                         const current = snapshot.exists ? snapshot.data() : undefined;
-                        const fields = Object.keys(check.patch).filter(field => !['updatedAt','updatedBy','createdAt','lastImportBatch','lastImportFile','lastImportedAt','source'].includes(field));
+                        const fields = Object.keys(check.patch).filter(field => !['updatedAt','updatedBy','createdAt','lastImportBatch','lastImportFile','lastImportedAt'].includes(field));
                         const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
                         if (current && fields.every(field => equal(current[field], check.patch[field]))) return;
                         if (!!current !== !!check.expected || fields.some(field => !equal(current?.[field], check.expected?.[field]) && !equal(current?.[field], check.patch[field]))) {
