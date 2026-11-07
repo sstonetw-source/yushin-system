@@ -4,7 +4,7 @@ const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES
  ? process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwright' : 'playwright-core');
 const {spawnSync}=require('node:child_process');
 const root=path.resolve(__dirname,'..');
-const chrome=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','google-chrome-stable','chromium'].find(name=>spawnSync('which',[name]).status===0);
+const chrome=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','google-chrome-stable','chromium'].map(name=>spawnSync('which',[name],{encoding:'utf8'})).find(result=>result.status===0)?.stdout.trim();
 const html=fs.readFileSync(path.join(root,'index.html'),'utf8').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace(/<link[^>]*rel="stylesheet"[^>]*>/gi,'');
 const setup=`
  let currentUserRole='warehouse',currentUser={uid:'warehouse'},currentUserName='測試倉管';
@@ -36,34 +36,36 @@ const setup=`
 `;
 (async()=>{
  const server=http.createServer((_req,res)=>{res.setHeader('content-type','text/html');res.end(html);});
- await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ assert.ok(chrome,'Headless Chrome required');
  const browser=await chromium.launch({executablePath:chrome,args:['--no-sandbox']});
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));
  try{
-  const page=await browser.newPage({viewport:{width:390,height:844}});
+  const context=await browser.newContext({viewport:{width:390,height:844}});
+  const page=await context.newPage();
   page.setDefaultTimeout(5000);
-  await page.addInitScript(()=>{window.print=()=>{};});
-  const commits=new Map(),requests=[];let release,drop=true;
+  await context.addInitScript(()=>{window.print=()=>{};});
+  const commits=new Map(),requests=[];let release,drop=true,failureAt=0;
   page.on('pageerror',e=>{throw e;});
-  await page.exposeFunction('commitParcelProbe',job=>new Promise(resolve=>{
-   requests.push(JSON.parse(JSON.stringify(job)));
+  await page.context().exposeFunction('commitParcelProbe',job=>new Promise(resolve=>{
+   requests.push(JSON.parse(JSON.stringify(job)));const attempt=requests.length;
    const execute=()=>{
     if(!commits.has(job.operationId))commits.set(job.operationId,job.qty);
-    resolve(drop?(drop=false,{error:'response lost'}):{ok:true});
+    resolve(drop||attempt===failureAt?(drop=false,{error:'response lost'}):{ok:true});
    };
    if(requests.length===1)release=execute;else execute();
   }));
-  async function mount(){
-   await page.goto('http://127.0.0.1:'+server.address().port);
-   await page.addStyleTag({path:path.join(root,'styles.css')});
-   await page.addScriptTag({content:setup});
-   await page.addScriptTag({path:path.join(root,'modules/warehouse-logistics.js')});
-   await page.addScriptTag({content:`
+  async function mount(target=page){
+   await target.goto('http://127.0.0.1:'+server.address().port);
+   await target.addStyleTag({path:path.join(root,'styles.css')});
+   await target.addScriptTag({content:setup});
+   await target.addScriptTag({path:path.join(root,'modules/warehouse-logistics.js')});
+   await target.addScriptTag({content:`
     warehouseParcelSourceRows=()=>all;
     commitWarehouseParcelJob=async job=>{const result=await commitParcelProbe(job);if(result.error)throw Error(result.error);};
     renderInventoryShipping=()=>renderWarehouseParcels();
    `});
-   await page.addScriptTag({path:path.join(root,'modules/warehouse-parcels.js')});
-   await page.evaluate(()=>renderWarehouseParcels());
+   await target.addScriptTag({path:path.join(root,'modules/warehouse-parcels.js')});
+   await target.evaluate(()=>renderWarehouseParcels());
   }
   await mount();
   assert.equal(await page.locator('#warehouseParcelCards .parcel-card').count(),2,'same recipient is split by physical source warehouse');
@@ -94,16 +96,34 @@ const setup=`
   assert.equal(requests[1].qty,1);
   assert.equal(commits.size,2,'lost-response replay keeps one result per item');
   assert.equal(requests.length,3);
+  // A completed first item stays completed when the second reply is lost.
+  const before=requests.length;failureAt=before+2;
+  await mount();
+  await page.locator('#warehouseParcelCards .parcel-card').first().getByRole('button',{name:'確認寄出',exact:true}).click();
+  await dialog.getByRole('button',{name:'確認寄出',exact:true}).click();
+  await page.locator('.parcel-task').getByRole('button',{name:'核對／重試原寄貨'}).waitFor();
+  assert.equal(await page.locator('.parcel-task').innerText().then(t=>t.includes('已確認 1／2')),true);
+  const second=await page.context().newPage();
+  await mount(second);
+  assert.equal(await second.locator('.parcel-task').count(),1,'same-browser tab restores progress');
+  const taskId=await page.evaluate(()=>JSON.parse(localStorage.getItem(Object.keys(localStorage).find(k=>k.startsWith('warehouse-parcels:'))))[0].id);
+  await Promise.all([page.evaluate(id=>resumeWarehouseParcel(id),taskId),second.evaluate(id=>resumeWarehouseParcel(id),taskId)]);
+  await page.waitForFunction(()=>!document.querySelector('.parcel-task'));
+  await second.waitForFunction(()=>!document.querySelector('.parcel-task'));
+  assert.equal(requests.length,before+3,'cross-tab lock sends only the unfinished item once');
+  assert.equal(requests[before+1].operationId,requests[before+2].operationId);
+  await second.close();
+  const afterRetry=requests.length;
   // Browser storage failure must prevent dispatch and leave the confirmation open.
   await mount();
   await page.locator('#warehouseParcelCards .parcel-card').first().getByRole('button',{name:'確認寄出',exact:true}).click();
   await page.evaluate(()=>{Storage.prototype.setItem=()=>{throw Error('quota');};});
   await dialog.getByRole('button',{name:'確認寄出',exact:true}).click();
   assert.ok(await dialog.isVisible());
-  assert.equal(requests.length,3);
+  assert.equal(requests.length,afterRetry);
   await dialog.getByRole('button',{name:'返回',exact:true}).click();
   await page.evaluate(()=>{currentUserRole='sales';renderWarehouseParcels();});
   assert.equal(await page.locator('#warehouseParcelCards button').count(),0);
-  console.log('PASS recipient grouping, partial quantities, non-blocking confirmation, lost response and reload replay, storage failure, role denial');
+  console.log('PASS recipient grouping, partial quantities, non-blocking confirmation, lost response and reload replay, cross-tab lock, partially completed retry, storage failure, role denial');
  }finally{await browser.close();server.closeAllConnections();await new Promise(r=>server.close(r));}
 })().catch(e=>{console.error(e);process.exitCode=1;});

@@ -1,7 +1,7 @@
 /* Recipient cards and durable browser jobs call the existing warehouse writers. */
 (function(root){
   'use strict';
-  let groups=[],editing=null,notice='';
+  let groups=[],editing=null,notice='',visibleLimit=50;
   const active=new Set();
   const el=id=>document.getElementById(id);
   function actor(){
@@ -45,6 +45,7 @@
   function taskCards(tasks){
     return tasks.map(t=>'<article class="parcel-card parcel-task"><strong>'+escapeHtml(t.plan.contact)+'</strong><p role="status">'+
       (active.has(t.id)?'寄出中…':escapeHtml(t.error||'上次寄貨尚未確認，請核對原操作。'))+'</p><p>已確認 '+t.jobs.filter(j=>j.done).length+'／'+t.jobs.length+' 個品項</p>'+
+      '<details><summary>本次寄貨明細</summary><p>'+escapeHtml(t.date)+' · '+escapeHtml(t.notes||'')+'</p>'+t.jobs.map(j=>'<p>'+escapeHtml(j.row.item.itemCode)+' × '+j.qty+' · '+(j.done?'已確認':'待核對')+'</p>').join('')+'</details>'+
       (active.has(t.id)?'':'<button type="button" class="btn-secondary" onclick="resumeWarehouseParcel('+inlineJsValue(t.id)+')">核對／重試原寄貨</button>')+'</article>').join('');
   }
   root.renderWarehouseParcels=function(){
@@ -56,7 +57,7 @@
       const warehouse=el('parcelWarehouseFilter')?.value||'',mode=el('inventoryDeliveryModeFilter')?.value||'';
       rows=rows.filter(row=>(!warehouse||row.warehouseId===warehouse)&&(!mode||root.YushinWarehouseLogistics.plan(row.item.deliveryPlan||row.order.shippingInstructions||{}).mode===mode));
       groups=groupRows(rows).filter(g=>!blocked(g.rows,tasks));
-      host.innerHTML=taskCards(tasks)+groups.slice(0,50).map((g,index)=>{
+      host.innerHTML=taskCards(tasks)+groups.slice(0,visibleLimit).map((g,index)=>{
         const p=g.plan,wh=warehouseMasterCache.find(w=>w.id===g.warehouseId);
         const complete=p.contact&&p.phone&&p.address;
         const items=root.YushinWarehouseLogistics.aggregateRows(g.rows);
@@ -67,8 +68,8 @@
           '<details><summary>訂單與寄送明細</summary>'+g.rows.map(r=>'<p>'+escapeHtml(r.order.orderNo||r.order.quoteNo||'來源訂單')+' · '+escapeHtml(r.order.customerName||'')+' · '+escapeHtml(r.order.salesName||'')+'</p><button type="button" class="btn-secondary" onclick="openWarehouseDeliveryPlan('+inlineJsValue(r.order.id)+','+inlineJsValue(r.item.itemId)+')">編輯收件資料</button>').join('')+'<p>'+escapeHtml(p.notes)+'</p></details>'+
           '<div class="parcel-actions">'+(complete?'<button type="button" class="btn-secondary" onclick="printWarehouseParcel('+index+',this)">列印貼紙</button><button type="button" onclick="openWarehouseParcel('+index+',this)">確認寄出</button>':
           '<button type="button" onclick="openWarehouseDeliveryPlan('+inlineJsValue(g.rows[0].order.id)+','+inlineJsValue(g.rows[0].item.itemId)+')">補收件資料</button>')+'</div></article>';
-      }).join('');
-      if(status)status.textContent=notice||(orderWorkQueueError?'寄貨清單讀取失敗，請重新載入。':!orderWorkQueueReady?'正在讀取待寄貨…':groups.length+' 件待寄貨'+(tasks.length?' · '+tasks.length+' 件處理中／待核對':'')+(groups.length>50?'，先顯示 50 件。':''));
+      }).join('')+(groups.length>visibleLimit?'<button type="button" class="btn-secondary" onclick="loadMoreWarehouseParcels()">載入更多待寄貨</button>':'');
+      if(status)status.textContent=notice||(orderWorkQueueError?'寄貨清單讀取失敗，請重新載入。':!orderWorkQueueReady?'正在讀取待寄貨…':groups.length+' 件待寄貨'+(tasks.length?' · '+tasks.length+' 件處理中／待核對':'')+(groups.length>visibleLimit?'，已顯示 '+visibleLimit+' 件。':''));
       const select=el('parcelWarehouseFilter');
       if(select){
         const value=select.value;
@@ -79,6 +80,7 @@
       host.innerHTML='<p role="alert">'+escapeHtml(error.message)+'</p>';
     }
   };
+  root.loadMoreWarehouseParcels=function(){visibleLimit+=50;root.renderWarehouseParcels();};
   async function freshGroup(index){
     const a=actor(),group=groups[index];if(!group)throw Error('清單已更新，請重新選擇收件人。');
     const keys=group.rows.map(r=>r.key);
