@@ -54,10 +54,12 @@
     try{
       const a=actor(),tasks=read(a);
       let rows=root.warehouseParcelSourceRows?.()||[];
-      const warehouse=el('parcelWarehouseFilter')?.value||'',mode=el('inventoryDeliveryModeFilter')?.value||'';
-      rows=rows.filter(row=>(!warehouse||row.warehouseId===warehouse)&&(!mode||root.YushinWarehouseLogistics.plan(row.item.deliveryPlan||row.order.shippingInstructions||{}).mode===mode));
+      const kind=root.inventoryShippingActiveKind?.(),mainId=defaultWarehouse()?.id||'';
+      const inScope=id=>kind==='main'?id===mainId:kind==='branch'?!!id&&id!==mainId:true;
+      const warehouse=kind==='branch'?(el('parcelWarehouseFilter')?.value||''):'',mode=el('inventoryDeliveryModeFilter')?.value||'';
+      rows=rows.filter(row=>inScope(row.warehouseId)&&(!warehouse||row.warehouseId===warehouse)&&(!mode||root.YushinWarehouseLogistics.plan(row.item.deliveryPlan||row.order.shippingInstructions||{}).mode===mode));
       groups=groupRows(rows).filter(g=>!blocked(g.rows,tasks));
-      host.innerHTML=taskCards(tasks)+groups.slice(0,visibleLimit).map((g,index)=>{
+      host.innerHTML=taskCards(tasks.filter(t=>t.jobs.some(j=>inScope(j.row.warehouseId))))+groups.slice(0,visibleLimit).map((g,index)=>{
         const p=g.plan,wh=warehouseMasterCache.find(w=>w.id===g.warehouseId);
         const complete=p.contact&&p.phone&&p.address;
         const items=root.YushinWarehouseLogistics.aggregateRows(g.rows);
@@ -73,8 +75,9 @@
       const select=el('parcelWarehouseFilter');
       if(select){
         const value=select.value;
-        select.innerHTML='<option value="">全部出貨倉庫</option>'+warehouseMasterCache.filter(w=>w.active!==false&&!w.systemCustody).map(w=>'<option value="'+escapeAttr(w.id)+'">'+escapeHtml(w.warehouseName||w.id)+'</option>').join('');
-        select.value=value;
+        select.innerHTML='<option value="">全部來源分倉</option>'+warehouseMasterCache.filter(w=>w.active!==false&&!w.systemCustody&&w.id!==mainId).map(w=>'<option value="'+escapeAttr(w.id)+'">'+escapeHtml(w.warehouseName||w.id)+'</option>').join('');
+        if([...select.options].some(option=>option.value===value))select.value=value;
+        select.hidden=kind==='main';
       }
     }catch(error){
       host.innerHTML='<p role="alert">'+escapeHtml(error.message)+'</p>';

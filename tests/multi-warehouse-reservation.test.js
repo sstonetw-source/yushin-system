@@ -6,6 +6,15 @@ test('splits a request across eligible physical warehouses without inventing sto
  const plan=planMultiWarehouseReservation({warehouses,stocks:{W1:{onHand:4,reserved:0},W2:{onHand:8,reserved:2},W3:{onHand:99},'custody-A':{onHand:99}},requestedQty:10});
  assert.deepEqual(plan,{requestedQty:10,allocations:[{warehouseId:'W1',qty:4},{warehouseId:'W2',qty:6}],allocatedQty:10,shortageQty:0});
 });
+test('default main warehouse supplies first unless an authorized source was explicitly chosen',()=>{
+ const stock={W1:{onHand:10,reserved:2},W2:{onHand:12,reserved:1}};
+ assert.deepEqual(planMultiWarehouseReservation({warehouses,stocks:stock,requestedQty:7}).allocations,
+  [{warehouseId:'W1',qty:7}]);
+ assert.deepEqual(planMultiWarehouseReservation({warehouses,stocks:stock,requestedQty:7,currentWarehouseId:'W2'}).allocations,
+  [{warehouseId:'W2',qty:7}]);
+ assert.deepEqual(planMultiWarehouseReservation({warehouses,stocks:{W1:{onHand:0},W2:{onHand:7}},requestedQty:7}).allocations,
+  [{warehouseId:'W2',qty:7}]);
+});
 test('reports only the remaining shortage and never includes disabled or custody stock',()=>{
  const plan=planMultiWarehouseReservation({warehouses,stocks:{W1:{onHand:3,reserved:1},W2:{onHand:1,reserved:0},W3:{onHand:99},'custody-A':{onHand:99}},requestedQty:7});
  assert.equal(plan.allocatedQty,3);assert.equal(plan.shortageQty,4);
