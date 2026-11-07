@@ -124,6 +124,22 @@ const setup=`
   await dialog.getByRole('button',{name:'返回',exact:true}).click();
   await page.evaluate(()=>{currentUserRole='sales';renderWarehouseParcels();});
   assert.equal(await page.locator('#warehouseParcelCards button').count(),0);
+  // Long recipient details and item names remain whole on continued labels.
+  await mount();
+  await page.evaluate(()=>{
+    window.labelAlerts=[];window.alert=message=>labelAlerts.push(message);
+    const plan={...recipient,address:'台北市中正區仁愛路一段一百二十三號十二樓之三國際醫療研究中心臨床檢驗科收件處'};
+    printWarehouseAddressGroups([{warehouseId:'main',plan,rows:Array.from({length:24},(_,i)=>({qty:i+1,item:{itemCode:'LONG-'+i,itemName:'臨床檢驗用多項生化免疫分析試劑組含配套校正液及品質控制材料'}}))}]);
+  });
+  await page.waitForFunction(()=>document.getElementById('warehousePrintFrame')?.contentDocument?.querySelectorAll('.label').length>1);
+  const printed=await page.locator('#warehousePrintFrame').evaluate(frame=>{
+    const doc=frame.contentDocument,ruler=doc.createElement('div');ruler.style.height='67mm';doc.body.append(ruler);
+    const limit=ruler.getBoundingClientRect().height;ruler.remove();
+    return {pages:[...doc.querySelectorAll('.label')].map(n=>({height:n.getBoundingClientRect().height,recipient:n.querySelector('h2').textContent,address:n.querySelector('.address').textContent})),rows:doc.querySelectorAll('tbody tr').length,limit};
+  });
+  assert.deepEqual(await page.evaluate(()=>labelAlerts),[]);
+  assert.equal(printed.rows,24);
+  assert.ok(printed.pages.every(p=>p.height<=printed.limit&&p.recipient.includes('王小姐')&&p.address.endsWith('臨床檢驗科收件處')));
   console.log('PASS recipient grouping, partial quantities, non-blocking confirmation, lost response and reload replay, cross-tab lock, partially completed retry, storage failure, role denial');
  }finally{await browser.close();server.closeAllConnections();await new Promise(r=>server.close(r));}
 })().catch(e=>{console.error(e);process.exitCode=1;});

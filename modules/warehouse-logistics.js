@@ -401,6 +401,8 @@
         while(part.getBoundingClientRect().height>limit){
           const body=part.querySelector('tbody');
           if(!body||body.rows.length<2){
+            part.classList.add('compact');
+            if(part.getBoundingClientRect().height<=limit)break;
             alert('收件資料或品項過長，超過 100 × 75 mm 貼紙範圍，請核對列印內容。');
             return;
           }
@@ -409,6 +411,7 @@
           part.after(next);
           while(part.getBoundingClientRect().height>limit&&body.rows.length>1)
             nextBody.prepend(body.lastElementChild);
+          if(part.getBoundingClientRect().height>limit)part.classList.add('compact');
           if(part.getBoundingClientRect().height>limit){
             alert('單筆品項超過貼紙範圍，請核對列印內容。');return;
           }
@@ -417,7 +420,7 @@
       }
       frame.contentWindow.focus();frame.contentWindow.print();
     };
-    frame.srcdoc=`<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><title>出貨貼紙</title><style>@page{size:100mm 75mm;margin:4mm}*{box-sizing:border-box}body{width:92mm;margin:0;font:11px sans-serif;color:#000}section{break-after:page;overflow-wrap:anywhere}section:last-child{break-after:auto}header{font-weight:bold;border-bottom:1px solid;padding-bottom:2mm}header span,h2 span{float:right}h2{font-size:19px;margin:3mm 0}h2 span{font-size:14px}.address{font-size:22px;font-weight:bold;line-height:1.25;margin:3mm 0}table{width:100%;border-collapse:collapse;font-size:11px}th,td{text-align:left;padding:1mm 0;border-bottom:1px solid #bbb}th:last-child,td:last-child{text-align:right}footer{margin-top:2mm;font-size:10px}</style></head><body>${pages.join('')}</body></html>`;
+    frame.srcdoc=`<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><title>出貨貼紙</title><style>@page{size:100mm 75mm;margin:4mm}*{box-sizing:border-box}body{width:92mm;margin:0;font:11px sans-serif;color:#000}section{break-after:page;overflow-wrap:anywhere}section:last-child{break-after:auto}header{font-weight:bold;border-bottom:1px solid;padding-bottom:2mm}header span,h2 span{float:right}h2{font-size:19px;margin:3mm 0}h2 span{font-size:14px}.address{font-size:22px;font-weight:bold;line-height:1.25;margin:3mm 0}table{width:100%;border-collapse:collapse;font-size:11px}th,td{text-align:left;padding:1mm 0;border-bottom:1px solid #bbb}th:last-child,td:last-child{text-align:right}footer{margin-top:2mm;font-size:10px}.compact .address{font-size:18px;margin:2mm 0}.compact h2{font-size:17px;margin:2mm 0}.compact table{font-size:10px}.compact th,.compact td{padding:.5mm 0}.compact footer{margin-top:1mm}</style></head><body>${pages.join('')}</body></html>`;
     document.body.appendChild(frame);
   }
   root.printWarehouseDeliveryEditor=function(){if(!allowed()||!editor)return;try{printAddressLabels([{warehouseId:editor.row.warehouseId,plan:readFields()}]);}catch(err){alert(err.message);}};
