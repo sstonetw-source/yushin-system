@@ -2383,7 +2383,7 @@ for(const width of [1280,390])test('full site '+width+'px fifteen-line original 
   await siteOpen(page);await siteLogin(page,accounts.warehouse,'warehouse');await siteNav(page,'inventory');await page.locator('#inventoryReceivingTabBtn').click();
   const button=index=>page.locator('#inventoryReceivingBody button[data-receipt-supply="'+x.supplies[index]+'"]').first();
   await button(13).waitFor({state:'visible'});
-  assert.match(await page.locator('#inventoryReceivingBody').textContent(),/依權限不顯示成本/);
+  assert.doesNotMatch(await page.locator('#inventoryReceivingBody').textContent(),/NT\$|採購單價|待收金額/);
   async function submit(index,qty,lose){
    await button(index).click();await page.locator('#poReceiptBatchBody .po-receive-qty').fill(String(qty));
    await page.locator('#poReceiptBatchBody .po-receive-lot').fill('SITE15-'+index+'-'+qty);await page.locator('#poReceiptBatchBody .po-receive-expiry').fill('2028-01-01');

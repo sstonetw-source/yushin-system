@@ -41,6 +41,7 @@ const setup=`
  try{
   const page=await browser.newPage({viewport:{width:390,height:844}});
   page.setDefaultTimeout(5000);
+  await page.addInitScript(()=>{window.print=()=>{};});
   const commits=new Map(),requests=[];let release,drop=true;
   page.on('pageerror',e=>{throw e;});
   await page.exposeFunction('commitParcelProbe',job=>new Promise(resolve=>{
@@ -104,5 +105,5 @@ const setup=`
   await page.evaluate(()=>{currentUserRole='sales';renderWarehouseParcels();});
   assert.equal(await page.locator('#warehouseParcelCards button').count(),0);
   console.log('PASS recipient grouping, partial quantities, non-blocking confirmation, lost response and reload replay, storage failure, role denial');
- }finally{await browser.close();await new Promise(r=>server.close(r));}
+ }finally{await browser.close();server.closeAllConnections();await new Promise(r=>server.close(r));}
 })().catch(e=>{console.error(e);process.exitCode=1;});
