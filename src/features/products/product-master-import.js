@@ -977,13 +977,32 @@ async function runProductPriceJobBatch(job) {
         return;
     }
     const now = new Date().toISOString();
-    const operations = changed.map(({ product, price }) => batch => {
-        batch.set(db.collection('products').doc(product.id), {
-            listPrice:price, updatedAt:now, updatedBy:currentUser.uid
-        }, { merge:true });
-    });
+    // Firestore transaction 於提交前重新核對 server 文件；價格在預覽後被別人修改時安全停止。
+    // 每筆交易只更新 listPrice，且同一文件的讀取與寫入具備並行衝突重試保護。
     setPriceUploadProgress(65, `正在更新 ${changed.length} 筆異動價格…`);
-    await commitMigrationBatch(operations);
+    let committed = 0;
+    for (const { product, price } of changed) {
+        try {
+            await db.runTransaction(async transaction => {
+                const ref = db.collection('products').doc(product.id);
+                const snapshot = await transaction.get(ref);
+                if (!snapshot.exists) throw new Error(`產品「${product.manufacturerPartNo || product.id}」已刪除，請重新匯入核對。`);
+                const current = snapshot.data() || {};
+                const expectedPrice = Number(product.listPrice || 0);
+                const currentPrice = Number(current.listPrice || 0);
+                if (currentPrice === price) return;
+                if (currentPrice !== expectedPrice) {
+                    throw new Error(`產品「${product.manufacturerPartNo || product.id}」價格已被其他使用者修改，請重新匯入核對；未覆蓋新價格。`);
+                }
+                transaction.update(ref, { listPrice:price, updatedAt:now, updatedBy:currentUser.uid });
+            });
+            committed += 1;
+        } catch (err) {
+            err.committedOperations = committed;
+            err.totalOperations = changed.length;
+            throw err;
+        }
+    }
     changed.forEach(({ product, price }) => {
         const cached = priceList.find(item => (item.productId || '') === product.id);
         if (cached) cached.price = price;
