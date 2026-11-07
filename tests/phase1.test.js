@@ -4000,7 +4000,7 @@ test('Product Import is incremental, splits standard cost securely, and never re
     assert.match(syncSource,/PRODUCT_MASTER_IMPORT_FIELDS/);
     assert.match(syncSource,/item\.listPriceProvided !== true\) delete product\.listPrice/);
     assert.match(syncSource,/field === 'listPrice' && item\.listPriceProvided !== true/);
-    assert.match(syncSource,/commitMigrationBatch\(operations, 200\)/);
+    assert.match(syncSource,/commitMigrationBatch\(operations, 100\)/);
     assert.doesNotMatch(syncSource,/\.delete\(/);
 
     const templateStart=appSource.indexOf('window.downloadProductMasterTemplate = async function');
@@ -4848,7 +4848,7 @@ test('formal orders allow primary or Other brand selection but still require Pro
 test('Product Master and Product Import use active Brand Master brands', () => {
     assert.match(appSource, /id="pmBrandList"/);
     assert.match(appSource, /brandMasterEntryForName\(brand\)/);
-    const start = appSource.indexOf('async function saveProductMasterBrand(imported, brand)');
+    const start = appSource.indexOf('async function saveProductMasterBrand(imported, brand,');
     const end = appSource.indexOf('\n}\n', start) + 2;
     const source = appSource.slice(start, end);
     assert.match(source, /upsertBrandMaster\(brand, \{ active:true \}\)/);

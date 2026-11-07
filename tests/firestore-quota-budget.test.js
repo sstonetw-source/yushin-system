@@ -24,7 +24,7 @@ function importContext(records = {}) {
         })},
         commitMigrationBatch:async ops=>{for(const op of ops)op({set:(ref,data)=>writes.push({ref,data})});}
     });
-    vm.runInContext(app.slice(app.indexOf('async function loadExistingProductImportState'),app.indexOf('async function saveProductMasterBrand')),context);
+    vm.runInContext(app.slice(app.indexOf('function productImportOperation'),app.indexOf('async function saveProductMasterBrand')),context);
     return {context,queries,writes};
 }
 test('large imports read only requested IDs, deduplicate, and skip absent cost fields',async()=>{

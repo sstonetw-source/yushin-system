@@ -48,13 +48,39 @@ async function commitMigrationBatch(operations, chunkSize = 400) {
     if (!safeOperations.length) return 0;
 
     const safeChunkSize = Math.max(1, Math.min(400, Number(chunkSize) || 400));
+    const importDatabase = db;
+    const importUid = safeOperations.some(operation => operation.importChecks) ? currentUser?.uid : undefined;
     let committed = 0;
     for (let i = 0; i < safeOperations.length; i += safeChunkSize) {
         const chunk = safeOperations.slice(i, i + safeChunkSize);
-        const batch = db.batch();
-        chunk.forEach(operation => operation(batch));
         try {
-            await batch.commit();
+            if (chunk.some(operation => operation.importChecks)) {
+                // 沿用既有 writer；每批讀完才寫，只有異動文件需要額外交易讀取。
+                await db.runTransaction(async transaction => {
+                    if (!['admin', 'purchaser'].includes(currentUserRole) || currentUser?.uid !== importUid || db !== importDatabase) throw new Error('權限已改變，禁止匯入寫入。');
+                    if (chunk.some(operation => !operation.importChecks)) throw new Error('匯入寫入檢查不完整，已停止本批。');
+                    const checks = chunk.flatMap(operation => operation.importChecks);
+                    const snapshots = await Promise.all(checks.map(check => transaction.get(check.ref)));
+                    const pending = [];
+                    checks.forEach((check, index) => {
+                        const snapshot = snapshots[index];
+                        const current = snapshot.exists ? snapshot.data() : undefined;
+                        const fields = Object.keys(check.patch).filter(field => !['updatedAt','updatedBy','createdAt','lastImportBatch','lastImportFile','lastImportedAt','source'].includes(field));
+                        const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+                        if (current && fields.every(field => equal(current[field], check.patch[field]))) return;
+                        if (!!current !== !!check.expected || fields.some(field => !equal(current?.[field], check.expected?.[field]) && !equal(current?.[field], check.patch[field]))) {
+                            throw new Error(`產品「${check.ref.id}」資料已被其他操作修改或刪除，請重新匯入核對；未覆蓋新資料。`);
+                        }
+                        pending.push(check);
+                    });
+                    if (!['admin', 'purchaser'].includes(currentUserRole) || currentUser?.uid !== importUid || db !== importDatabase) throw new Error('登入身分或專案已改變，禁止匯入寫入。');
+                    pending.forEach(check => transaction.set(check.ref, check.patch, { merge:true }));
+                });
+            } else {
+                const batch = db.batch();
+                chunk.forEach(operation => operation(batch));
+                await batch.commit();
+            }
         } catch (err) {
             err.committedOperations = committed;
             err.totalOperations = safeOperations.length;
@@ -415,6 +441,12 @@ function productImportValueEqual(field, currentValue, nextValue) {
 
 // 只核對本次匯入的文件；正式儲存仍重新讀取，避免沿用過期預覽。
 
+function productImportOperation(checks) {
+    const operation = batch => checks.forEach(check => batch.set(check.ref, check.patch, { merge:true }));
+    operation.importChecks = checks;
+    return operation;
+}
+
 async function loadExistingProductImportState(productIds = [], costProductIds = []) {
     const uniqueProductIds = [...new Set((productIds || []).map(id => String(id || '').trim()).filter(Boolean))];
     const uniqueCostProductIds = [...new Set((costProductIds || []).map(id => String(id || '').trim()).filter(Boolean))];
@@ -431,7 +463,7 @@ async function loadExistingProductImportState(productIds = [], costProductIds = 
             for (let i = offset; i < Math.min(offset + 120, requestedIds.length); i += 30) {
                 const ids = requestedIds.slice(i, i + 30);
                 queries.push(firestoreReadWithTimeout(
-                    db.collection(collectionName).where(firebase.firestore.FieldPath.documentId(), 'in', ids).get(),
+                    db.collection(collectionName).where(firebase.firestore.FieldPath.documentId(), 'in', ids).get({ source:'server' }),
                     label
                 ));
             }
@@ -460,7 +492,7 @@ async function resolveProductImportIdentities(items) {
         const queries = [];
         for (let i = offset; i < Math.min(offset + 120, codes.length); i += 30) {
             queries.push(firestoreReadWithTimeout(
-                db.collection('products').where('normalizedPartNo', 'in', codes.slice(i, i + 30)).get(),
+                db.collection('products').where('normalizedPartNo', 'in', codes.slice(i, i + 30)).get({ source:'server' }),
                 '產品匯入廠牌與貨號比對'
             ));
         }
@@ -479,15 +511,15 @@ async function resolveProductImportIdentities(items) {
     });
 }
 
-async function syncImportedBrandToFormalProductMaster(imported, storedBrand) {
+async function syncImportedBrandToFormalProductMaster(imported, storedBrand, previewState = null) {
     const canWriteFormalMaster = currentUserRole === 'admin' || currentUserRole === 'purchaser';
-    if (!canWriteFormalMaster) return { productWrites:0, costWrites:0, unchangedRows:0 };
+    if (!canWriteFormalMaster) throw new Error('只有管理員或採購可以匯入產品主檔。');
 
     const normalizedItems = normalizeProductMasterList((imported || []).map(item => ({ ...item, brand: storedBrand })));
     await resolveProductImportIdentities(normalizedItems);
     const productIds = [...new Set(normalizedItems.map(item => item.productId).filter(Boolean))];
     const costProductIds = [...new Set(normalizedItems.filter(item => item.standardCostProvided === true).map(item => item.productId).filter(Boolean))];
-    const { existingProducts, existingCosts } = await loadExistingProductImportState(productIds, costProductIds);
+    const { existingProducts, existingCosts } = previewState || await loadExistingProductImportState(productIds, costProductIds);
 
     const now = new Date().toISOString();
     const updatedBy = currentUser?.uid || '';
@@ -551,17 +583,17 @@ async function syncImportedBrandToFormalProductMaster(imported, storedBrand) {
         }
         if (productPatch) productWrites += 1;
         if (costPatch) costWrites += 1;
-        operations.push(batch => {
-            if (productPatch) batch.set(db.collection('products').doc(product.productId), productPatch, { merge:true });
-            if (costPatch) batch.set(db.collection('productCosts').doc(product.productId), costPatch, { merge:true });
-        });
+        operations.push(productImportOperation([
+            ...(productPatch ? [{ ref:db.collection('products').doc(product.productId), patch:productPatch, expected:existingProduct }] : []),
+            ...(costPatch ? [{ ref:db.collection('productCosts').doc(product.productId), patch:costPatch, expected:existingCosts.get(product.productId) }] : [])
+        ]));
     });
 
-    await commitMigrationBatch(operations, 200);
+    await commitMigrationBatch(operations, 100);
     return { productWrites, costWrites, unchangedRows, items:normalizedItems };
 }
 
-async function saveProductMasterBrand(imported, brand) {
+async function saveProductMasterBrand(imported, brand, previewState = null) {
     brand = resolveBrandName(brand);
     if (!brandMasterEntryForName(brand)) {
         if (currentUserRole === 'admin') {
@@ -571,7 +603,7 @@ async function saveProductMasterBrand(imported, brand) {
         }
     }
     const normalizedItems = normalizeProductMasterList((imported || []).map(item => ({ ...item, brand })));
-    const syncResult = await syncImportedBrandToFormalProductMaster(normalizedItems, brand);
+    const syncResult = await syncImportedBrandToFormalProductMaster(normalizedItems, brand, previewState);
     (syncResult.items || normalizedItems).map(productItemWithoutCost).forEach(item => cacheProductLookupItem(item));
     return { brand, ...syncResult };
 }
@@ -660,6 +692,7 @@ async function summarizeProductMasterImport(groups, errors = []) {
     });
 
     return {
+        importState:{ existingProducts, existingCosts },
         total:rows.length,
         added,
         updated,
@@ -978,31 +1011,13 @@ async function runProductPriceJobBatch(job) {
     }
     const now = new Date().toISOString();
     // Firestore transaction 於提交前重新核對 server 文件；價格在預覽後被別人修改時安全停止。
-    // 每筆交易只更新 listPrice，且同一文件的讀取與寫入具備並行衝突重試保護。
+    // 沿用批次 writer，每 100 筆異動共用一個交易；不變資料不增加交易讀取。
     setPriceUploadProgress(65, `正在更新 ${changed.length} 筆異動價格…`);
-    let committed = 0;
-    for (const { product, price } of changed) {
-        try {
-            await db.runTransaction(async transaction => {
-                const ref = db.collection('products').doc(product.id);
-                const snapshot = await transaction.get(ref);
-                if (!snapshot.exists) throw new Error(`產品「${product.manufacturerPartNo || product.id}」已刪除，請重新匯入核對。`);
-                const current = snapshot.data() || {};
-                const expectedPrice = Number(product.listPrice || 0);
-                const currentPrice = Number(current.listPrice || 0);
-                if (currentPrice === price) return;
-                if (currentPrice !== expectedPrice) {
-                    throw new Error(`產品「${product.manufacturerPartNo || product.id}」價格已被其他使用者修改，請重新匯入核對；未覆蓋新價格。`);
-                }
-                transaction.update(ref, { listPrice:price, updatedAt:now, updatedBy:currentUser.uid });
-            });
-            committed += 1;
-        } catch (err) {
-            err.committedOperations = committed;
-            err.totalOperations = changed.length;
-            throw err;
-        }
-    }
+    const operations = changed.map(({ product, price }) => productImportOperation([{
+        ref:db.collection('products').doc(product.id),
+        patch:{ listPrice:price, updatedAt:now, updatedBy:currentUser.uid }, expected:product
+    }]));
+    await commitMigrationBatch(operations, 100);
     changed.forEach(({ product, price }) => {
         const cached = priceList.find(item => (item.productId || '') === product.id);
         if (cached) cached.price = price;
@@ -1144,7 +1159,7 @@ window.handleProductCostExcelUpload = async function(input) {
             const chunk = deduped.slice(i, i + 10);
             const codes = chunk.map(row => normalizeItemCodeLoose(row.code));
             const snap = await firestoreReadWithTimeout(
-                db.collection('products').where('normalizedPartNo', 'in', codes).get(),
+                db.collection('products').where('normalizedPartNo', 'in', codes).get({ source:'server' }),
                 '批次產品成本貨號核對'
             );
             const docs = snap.docs.map(doc => ({ id:doc.id, ...doc.data() }));
@@ -1168,7 +1183,7 @@ window.handleProductCostExcelUpload = async function(input) {
             const snap = await firestoreReadWithTimeout(
                 db.collection('productCosts')
                     .where(firebase.firestore.FieldPath.documentId(), 'in', ids)
-                    .get(),
+                    .get({ source:'server' }),
                 '既有產品成本核對'
             );
             snap.docs.forEach(doc => existingCosts.set(doc.id, doc.data() || {}));
@@ -1189,9 +1204,9 @@ window.handleProductCostExcelUpload = async function(input) {
         }
 
         const now = new Date().toISOString();
-        const operations = changed.map(({product, cost}) => batch => {
+        const operations = changed.map(({product, cost}) => {
             const productId = product.id || product.productId;
-            batch.set(db.collection('productCosts').doc(productId), {
+            return productImportOperation([{ ref:db.collection('productCosts').doc(productId), patch:{
                 productId,
                 productLineId: product.productLineId || product.productLine || '',
                 standardCost: cost,
@@ -1199,10 +1214,10 @@ window.handleProductCostExcelUpload = async function(input) {
                 source: 'COST_UPDATE',
                 updatedAt: now,
                 updatedBy: currentUser?.uid || ''
-            }, { merge:true });
+            }, expected:existingCosts.get(productId) }]);
         });
         setPriceUploadProgress(60, `更新 ${changed.length} 筆標準成本…`);
-        await commitMigrationBatch(operations);
+        await commitMigrationBatch(operations, 100);
         visibleProductCostCache.clear();
         setPriceUploadProgress(100, `完成：已更新 ${changed.length} 筆標準成本；產品主檔與建議售價未變更。`);
         input.value = '';
@@ -1401,6 +1416,7 @@ window.handlePriceExcelUpload = async function(input) {
                 if (!(currentUserRole === 'admin' || currentUserRole === 'purchaser') || job.scope !== productImportJobScope('master')) {
                     throw new Error('匯入途中帳號或角色已切換，本批尚未寫入。');
                 }
+                await saveProductPriceJob(job);
                 activeProductImportBatch = { id:`master-${fingerprint.slice(0,16)}`, file:file.name, date:new Date().toISOString() };
                 const itemsByBrand = new Map();
                 chunk.forEach(item => {
@@ -1414,7 +1430,7 @@ window.handlePriceExcelUpload = async function(input) {
                 const metadataWarnings = [];
                 for (const { brand, items } of itemsByBrand.values()) {
                     setPriceUploadProgress(75, `儲存「${brand}」本批 ${items.length} 筆…`);
-                    const result = await saveProductMasterBrand(items, brand);
+                    const result = await saveProductMasterBrand(items, brand, pendingPriceImportPreview.importState);
                     batchProductWrites += result.productWrites;
                     batchCostWrites += result.costWrites;
                     batchUnchanged += result.unchangedRows;
