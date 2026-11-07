@@ -49,3 +49,26 @@ test('creation-time history merges both ownership streams before paging and reta
   {poNo:'PO-YS-05',poDate:'2026-11-06',createdAt:'2026-11-07T02:00:00Z'},
   'poDate','poNo')<0);
 });
+
+test('same-time cross-company order survives JSON cache and filtering',()=>{
+ const stock=fs.readFileSync('src/features/inventory/inventory-workspace.js','utf8');
+ const context=vm.createContext({});vm.runInContext(stock.slice(stock.indexOf('function compareBusinessRecordsNewestFirst('),stock.indexOf('// 核銷日期')),context);
+ const rows=[{id:'YS-1',createdAt:'2026-11-07T03:00:00Z'},{id:'DS-1',createdAt:'2026-11-07T03:00:00Z'},{id:'MS-1',createdAt:'2026-11-07T04:00:00Z',quoteDate:'2025-01-01'},{id:'legacy',quoteDate:'2026-11-08'}];
+ const sort=rows=>rows.sort((a,b)=>context.compareCreatedDocumentsNewestFirst(a,b,'quoteDate','quoteNo')).map(x=>x.id);
+ assert.deepEqual(sort(rows),['MS-1','YS-1','DS-1','legacy']);
+ assert.deepEqual(sort(JSON.parse(JSON.stringify(rows))),['MS-1','YS-1','DS-1','legacy']);
+ assert.deepEqual(sort(rows.filter(x=>x.id!=='MS-1')),['YS-1','DS-1','legacy']);
+});
+
+test('reprinting preserves creation while save-as-new keeps new creation time',async()=>{
+ const code=app.slice(app.indexOf('function persistQuoteOutputRecord('),app.indexOf('function quoteDataForPdfExport('));
+ for(const existing of [{createdAt:'2025-01-01T00:00:00Z',ownerUid:'owner'},{ownerUid:'owner'},null]){
+  let written,cached;const context=vm.createContext({editingQuoteNo:'OLD',sessionDataGeneration:1,myQuotesCache:[],quoteHistorySearchResults:[],canUseQuote:()=>true,buildFullHistorySearchTokens:()=>[],DOCUMENT_TYPES:{FORECAST:'FORECAST'},console,alert:assert.fail,db:{collection:()=>({doc:id=>({id})})},runRoleTransaction:fn=>fn({get:async()=>({exists:!!existing,data:()=>existing}),set:(_ref,data)=>{written={...data};}}),writeAppDataCache:(_kind,rows)=>{cached=JSON.parse(JSON.stringify(rows));}});
+  vm.runInContext(code,context);
+  for(let repeat=0;repeat<2;repeat++){
+   await context.persistQuoteOutputRecord({quoteNo:existing?'OLD':'NEW',createdAt:'2026-11-07T03:00:00Z',quoteDate:'2025-01-01'});
+   const expected=existing?existing.createdAt:'2026-11-07T03:00:00Z';
+   assert.equal(written.createdAt,expected);assert.equal(cached[0].createdAt,expected);
+  }
+ }
+});
