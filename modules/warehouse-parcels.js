@@ -112,7 +112,7 @@
       if(!dialog){dialog=document.createElement('dialog');dialog.id='warehouseParcelDialog';dialog.className='parcel-dialog';document.body.append(dialog);}
       dialog.innerHTML='<h3>確認寄出給 '+escapeHtml(group.plan.contact)+'</h3><p>'+escapeHtml(group.plan.address)+'</p>'+
         '<label>寄出日期<input id="parcelDate" type="date" value="'+editing.date+'"></label>'+
-        '<div class="parcel-confirm-items">'+jobs.map((j,i)=>'<label><span>'+escapeHtml(j.row.item.itemCode)+' '+escapeHtml(j.row.item.itemName)+'</span><input aria-label="本次寄出數量" data-parcel-quantity="'+i+'" type="number" min="1" step="1" max="'+j.qty+'" value="'+j.qty+'" '+(j.plan.mode==='CUSTOMER_SHIP'&&!j.priorShipment?'':'readonly')+'></label>').join('')+'</div>'+
+        '<div class="parcel-confirm-items">'+jobs.map((j,i)=>'<label><span>'+escapeHtml(j.row.item.itemCode)+' '+escapeHtml(j.row.item.itemName)+'</span><input aria-label="本次寄出數量" data-parcel-quantity="'+i+'" type="number" min="0" step="any" max="'+j.qty+'" value="'+j.qty+'" '+(j.plan.mode==='CUSTOMER_SHIP'&&!j.priorShipment?'':'readonly')+'></label>').join('')+'</div>'+
         '<label>寄貨備註<input id="parcelNotes" maxlength="500"></label><p id="parcelConfirmError" role="alert"></p><div class="parcel-actions"><button type="button" class="btn-secondary" onclick="document.getElementById(\'warehouseParcelDialog\').close()">返回</button><button type="button" onclick="confirmWarehouseParcel(this)">確認寄出</button></div>';
       dialog.showModal();
     }catch(error){showActionFeedback(error.message,'warning');}
@@ -126,7 +126,7 @@
       if(!/^\d{4}-\d{2}-\d{2}$/.test(task.date)||new Date(task.date+'T00:00:00Z').toISOString().slice(0,10)!==task.date)throw Error('請核對寄出日期。');
       document.querySelectorAll('[data-parcel-quantity]').forEach(input=>{
         const job=task.jobs[Number(input.dataset.parcelQuantity)],qty=Number(input.value);
-        if(!Number.isSafeInteger(qty)||qty<=0||qty>job.row.qty||((job.priorShipment||job.plan.mode!=='CUSTOMER_SHIP')&&qty!==job.qty))throw Error('請核對本次寄出數量。');
+        if(!Number.isFinite(qty)||qty<=0||qty>job.row.qty||((job.priorShipment||job.plan.mode!=='CUSTOMER_SHIP')&&qty!==job.qty))throw Error('請核對本次寄出數量。');
         job.qty=qty;
       });
       // Persist only the frozen operation inputs, never product costs or full order data.
