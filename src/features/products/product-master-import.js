@@ -822,8 +822,8 @@ window.downloadProductCostUpdateTemplate = async function() {
 };
 
 // 價格更新只存本機進度；不建立雲端排程、額外 Collection 或第二套產品 writer。
-const PRODUCT_PRICE_DAILY_ROW_LIMIT = 1000;
-const PRODUCT_MASTER_DAILY_ROW_LIMIT = 500;
+const PRODUCT_PRICE_BATCH_ROW_LIMIT = 1000;
+const PRODUCT_MASTER_BATCH_ROW_LIMIT = 500;
 const PRODUCT_PRICE_LOCAL_DB = 'yushin-product-price-import';
 
 function productImportJobScope(kind = 'price') {
@@ -835,13 +835,6 @@ function productPriceImportScope() {
     const uid = currentUser?.uid || '';
     if (!projectId || !uid) throw new Error('請先確認 Firebase 專案及登入帳號，再使用價格更新。');
     return `${projectId}:${uid}`;
-}
-
-function productPriceQuotaDay(date = new Date()) {
-    // Firestore 免費額度約在太平洋時間午夜重置；保守限制每個瀏覽器帳號一天處理一批。
-    return new Intl.DateTimeFormat('en-CA', {
-        timeZone:'America/Los_Angeles', year:'numeric', month:'2-digit', day:'2-digit'
-    }).format(date);
 }
 
 function openProductPriceLocalDatabase() {
@@ -905,41 +898,6 @@ async function saveProductPriceJob(job) {
     });
 }
 
-async function readProductPriceDailyQuota(day, kind = 'price') {
-    const database = await openProductPriceLocalDatabase();
-    const key = `quota:${productImportJobScope(kind)}:${day}`;
-    return new Promise((resolve, reject) => {
-        const transaction = database.transaction('jobs', 'readonly');
-        const request = transaction.objectStore('jobs').get(key);
-        request.onsuccess = () => resolve(Number(request.result?.rows || 0));
-        request.onerror = () => reject(new Error('無法核對今日已使用的匯入預算。'));
-        transaction.oncomplete = () => database.close();
-        transaction.onabort = () => { database.close(); reject(new Error('今日匯入預算讀取中斷。')); };
-    });
-}
-
-async function reserveProductPriceDailyQuota(day, rows, kind = 'price') {
-    const database = await openProductPriceLocalDatabase();
-    const key = `quota:${productImportJobScope(kind)}:${day}`;
-    const limit = kind === 'master' ? PRODUCT_MASTER_DAILY_ROW_LIMIT : PRODUCT_PRICE_DAILY_ROW_LIMIT;
-    return new Promise((resolve, reject) => {
-        const transaction = database.transaction('jobs', 'readwrite');
-        const store = transaction.objectStore('jobs');
-        const request = store.get(key);
-        request.onsuccess = () => {
-            const total = Number(request.result?.rows || 0) + rows;
-            if (total > limit) {
-                transaction.abort();
-                return;
-            }
-            store.put({ scope:key, rows:total });
-        };
-        transaction.oncomplete = () => { database.close(); resolve(); };
-        transaction.onerror = () => { database.close(); reject(new Error('預留本機匯入額度失敗。')); };
-        transaction.onabort = () => { database.close(); reject(new Error('今天的匯入額度已用完，請下個美西計費日繼續。')); };
-    });
-}
-
 async function withProductPriceImportLock(action) {
     // 不容許兩個分頁同時重送相同批次；無安全鎖支援時拒絕執行雲端操作。
     if (typeof navigator === 'undefined' || !navigator.locks?.request) {
@@ -981,17 +939,9 @@ async function runProductPriceJobBatch(job) {
     if (!(currentUserRole === 'admin' || currentUserRole === 'purchaser') || job.scope !== productPriceImportScope()) {
         throw new Error('登入身分或專案已改變，禁止接續原本的價格更新。');
     }
-    const today = productPriceQuotaDay();
-    const processedToday = await readProductPriceDailyQuota(today);
-    const availableToday = Math.max(0, PRODUCT_PRICE_DAILY_ROW_LIMIT - processedToday);
-    if (!availableToday) {
-        setPriceUploadProgress(0, `今天已核對 ${PRODUCT_PRICE_DAILY_ROW_LIMIT} 筆。下一個美西計費日再按「繼續上次價格更新」；本次沒有雲端讀寫。`, false);
-        return;
-    }
-    const chunk = job.rows.slice(job.cursor, job.cursor + availableToday);
+    // 單批上限不等於 Firebase 每日剩餘額度；同一天可多次接續。
+    const chunk = job.rows.slice(job.cursor, job.cursor + PRODUCT_PRICE_BATCH_ROW_LIMIT);
     if (!chunk.length) return;
-    // 先在本機預留預算，即使中斷、回覆遺失或切換檔案，當日也不重複使用這份保守額度。
-    await reserveProductPriceDailyQuota(today, chunk.length);
     setPriceUploadProgress(25, `正在核對 ${job.brand} 第 ${job.cursor + 1}～${job.cursor + chunk.length} 筆…`);
     const resolved = [];
     const missing = [];
@@ -1049,7 +999,7 @@ async function runProductPriceJobBatch(job) {
     rebuildPriceItemLookup();
     if (productManagementResults.length) renderProductManagementResults();
     const done = job.cursor === job.rows.length;
-    setPriceUploadProgress(100, `${done ? '全部完成' : '本日批次完成'}：${job.cursor}/${job.rows.length} 筆；更新 ${job.updated}、未變 ${job.unchanged}。${done ? '原檔未上傳雲端。' : '下個美西計費日可以繼續。'}`);
+    setPriceUploadProgress(100, `${done ? '全部完成' : '本批完成'}：${job.cursor}/${job.rows.length} 筆；更新 ${job.updated}、未變 ${job.unchanged}。${done ? '原檔未上傳雲端。' : '可立即繼續下一批；若遇 Firebase 資源限制，請稍後接續。'}`);
 }
 
 window.continueProductPriceImport = async function() {
@@ -1105,7 +1055,7 @@ window.handleProductPriceExcelUpload = async function(input) {
                 createdAt:new Date().toISOString(), lastCompletedAt:''
             };
             await saveProductPriceJob(job);
-            setPriceUploadProgress(15, `本機已保存 ${rows.length} 筆；每天最多核對 ${PRODUCT_PRICE_DAILY_ROW_LIMIT} 筆。`);
+            setPriceUploadProgress(15, `本機已保存 ${rows.length} 筆；每批最多核對 ${PRODUCT_PRICE_BATCH_ROW_LIMIT} 筆，可同一天多次接續。`);
             await runProductPriceJobBatch(job);
         });
     } catch (err) {
@@ -1415,14 +1365,8 @@ window.handlePriceExcelUpload = async function(input) {
                     };
                 }
                 if (job.scope !== productImportJobScope('master')) throw new Error('專案或帳號已切換。');
-                const day = productPriceQuotaDay();
-                const used = await readProductPriceDailyQuota(day, 'master');
-                const available = Math.max(0, PRODUCT_MASTER_DAILY_ROW_LIMIT - used);
-                if (!available) {
-                    setPriceUploadProgress(0, `本日已核對 ${PRODUCT_MASTER_DAILY_ROW_LIMIT} 筆產品主檔。下個美西計費日請重新選同一 Excel 接續；未讀寫雲端。`, false);
-                    return;
-                }
-                const chunk = allImportedItems.slice(job.cursor, job.cursor + available);
+                // 每次最多核對一批，不使用瀏覽器累計額度阻擋後續匯入。
+                const chunk = allImportedItems.slice(job.cursor, job.cursor + PRODUCT_MASTER_BATCH_ROW_LIMIT);
                 if (!chunk.length) return;
                 const chunkGroupsMap = new Map();
                 chunk.forEach(item => {
@@ -1431,10 +1375,8 @@ window.handlePriceExcelUpload = async function(input) {
                     chunkGroupsMap.get(key).imported.push(item);
                 });
                 const chunkGroups = [...chunkGroupsMap.values()];
-                // 預覽也會讀雲端：先保守扣除本機每日額度，避免只按預覽就超量。
-                await reserveProductPriceDailyQuota(day, chunk.length, 'master');
                 if (!await confirmProductMasterImport(chunkGroups)) {
-                    setPriceUploadProgress(0, '已取消本批寫入；進度未前進。再次比對仍須使用本日剩餘額度。', false);
+                    setPriceUploadProgress(0, '已取消本批寫入；進度未前進。再次執行會重新核對雲端。', false);
                     return;
                 }
                 if (!(currentUserRole === 'admin' || currentUserRole === 'purchaser') || job.scope !== productImportJobScope('master')) {
@@ -1486,7 +1428,7 @@ window.handlePriceExcelUpload = async function(input) {
                 renderCompanyAgencyBrandSettings();
                 loadProductManagementOverview();
                 const done = job.cursor === job.total;
-                const message = `${done ? '主檔全部完成' : '本日主檔批次完成'}：${job.cursor}/${job.total} 筆；產品寫入 ${job.productWrites}、成本寫入 ${job.costWrites}、未變 ${job.unchanged}。標準成本與實際採購價分開保存；未出現在檔案中的產品不會被刪除或停用。${done ? '' : '下個美西計費日重新選擇同一 Excel，即可接續。'}`;
+                const message = `${done ? '主檔全部完成' : '本批主檔完成'}：${job.cursor}/${job.total} 筆；產品寫入 ${job.productWrites}、成本寫入 ${job.costWrites}、未變 ${job.unchanged}。標準成本與實際採購價分開保存；未出現在檔案中的產品不會被刪除或停用。${done ? '' : '可立即重新選擇同一 Excel 接續；遇資源限制時請稍後再試。'}`;
                 setPriceUploadProgress(100, message);
                 if (metadataWarnings.length) alert(`${message}\n價目表紀錄警告：${metadataWarnings.join('、')}`);
             });
