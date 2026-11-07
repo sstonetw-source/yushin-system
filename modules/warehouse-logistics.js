@@ -391,8 +391,33 @@
       return `<section class="label"><header>又鑫生物科技有限公司<span>出貨貼紙</span></header><h2>${escapeHtml(p.contact)} <span>${escapeHtml(p.phone)}</span></h2><div class="address">${escapeHtml(p.address)}</div>${products?`<table><thead><tr><th>貨號／品項</th><th>數量</th></tr></thead><tbody>${products}</tbody></table>`:''}${p.notes?`<p>${escapeHtml(p.notes)}</p>`:''}<footer>寄件單位　${escapeHtml(warehouseName(warehouseId))}<br>聯絡窗口　${escapeHtml(currentUserName||'')}</footer></section>`;
     });
     let frame=$('warehousePrintFrame');if(frame)frame.remove();frame=document.createElement('iframe');frame.id='warehousePrintFrame';frame.className='warehouse-print-frame';
-    frame.onload=()=>{frame.contentWindow.focus();frame.contentWindow.print();};
-    frame.srcdoc=`<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><title>出貨貼紙</title><style>@page{size:100mm 75mm;margin:4mm}*{box-sizing:border-box}body{margin:0;font:11px sans-serif;color:#000}section{break-after:page;overflow-wrap:anywhere}section:last-child{break-after:auto}header{font-weight:bold;border-bottom:1px solid;padding-bottom:2mm}header span,h2 span{float:right}h2{font-size:19px;margin:3mm 0}h2 span{font-size:14px}.address{font-size:22px;font-weight:bold;line-height:1.25;margin:3mm 0}table{width:100%;border-collapse:collapse;font-size:11px}th,td{text-align:left;padding:1mm 0;border-bottom:1px solid #bbb}th:last-child,td:last-child{text-align:right}footer{margin-top:2mm;font-size:10px}</style></head><body>${pages.join('')}</body></html>`;
+    frame.onload=()=>{
+      const doc=frame.contentDocument;
+      const ruler=doc.createElement('div');ruler.style.height='67mm';doc.body.append(ruler);
+      const limit=ruler.getBoundingClientRect().height;ruler.remove();
+      // Repeat recipient information when the product list needs another label.
+      for(const page of [...doc.querySelectorAll('.label')]){
+        let part=page;
+        while(part.getBoundingClientRect().height>limit){
+          const body=part.querySelector('tbody');
+          if(!body||body.rows.length<2){
+            alert('收件資料或品項過長，超過 100 × 75 mm 貼紙範圍，請核對列印內容。');
+            return;
+          }
+          const next=part.cloneNode(true),nextBody=next.querySelector('tbody');
+          nextBody.replaceChildren();
+          part.after(next);
+          while(part.getBoundingClientRect().height>limit&&body.rows.length>1)
+            nextBody.prepend(body.lastElementChild);
+          if(part.getBoundingClientRect().height>limit){
+            alert('單筆品項超過貼紙範圍，請核對列印內容。');return;
+          }
+          part=next;
+        }
+      }
+      frame.contentWindow.focus();frame.contentWindow.print();
+    };
+    frame.srcdoc=`<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><title>出貨貼紙</title><style>@page{size:100mm 75mm;margin:4mm}*{box-sizing:border-box}body{width:92mm;margin:0;font:11px sans-serif;color:#000}section{break-after:page;overflow-wrap:anywhere}section:last-child{break-after:auto}header{font-weight:bold;border-bottom:1px solid;padding-bottom:2mm}header span,h2 span{float:right}h2{font-size:19px;margin:3mm 0}h2 span{font-size:14px}.address{font-size:22px;font-weight:bold;line-height:1.25;margin:3mm 0}table{width:100%;border-collapse:collapse;font-size:11px}th,td{text-align:left;padding:1mm 0;border-bottom:1px solid #bbb}th:last-child,td:last-child{text-align:right}footer{margin-top:2mm;font-size:10px}</style></head><body>${pages.join('')}</body></html>`;
     document.body.appendChild(frame);
   }
   root.printWarehouseDeliveryEditor=function(){if(!allowed()||!editor)return;try{printAddressLabels([{warehouseId:editor.row.warehouseId,plan:readFields()}]);}catch(err){alert(err.message);}};
