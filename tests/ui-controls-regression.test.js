@@ -72,7 +72,7 @@ test('the screen-only tab refactor does not alter formal document blocks', () =>
 
 test('all work tabs stay plain text without decorative emojis or icon markup', () => {
     const tabHtml = [...html.matchAll(/<(?:div|button)\b[^>]*class="sub-tab(?: active)?"[^>]*>([^<]+)<\/(?:div|button)>/g)];
-    assert.equal(tabHtml.length, 19, 'all quote, company, admin and analytics work tabs should be audited');
+    assert.equal(tabHtml.length, 17, 'all quote, company, admin and analytics work tabs should be audited');
     for (const [, content] of tabHtml) {
         const label = content.trim();
         assert.ok(label && !/<(?:svg|img|i|span)\b/i.test(label), 'tab contains nested icon markup: ' + label);

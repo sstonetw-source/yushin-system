@@ -49,7 +49,7 @@ test('all working modules show one consistent page title', () => {
     assert.ok(html.includes('id="quote-system" class="content-section active">'));
     assert.match(html, /<h2 class="workspace-page-title no-print">估價單 <button[^>]*data-page-help="quote-system"/);
     assert.equal((html.match(/<div class="nav-tab(?: active)?" role="button" tabindex="0"/g) || []).length, 8);
-    assert.equal((html.match(/<div class="sub-tab(?: active)?" role="button" tabindex="0"/g) || []).length, 16);
+    assert.equal((html.match(/<div class="sub-tab(?: active)?" role="button" tabindex="0"/g) || []).length, 14);
     assert.ok(html.includes("onkeydown=\"if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}\""));
     assert.ok(css.includes('#appContainer .forecast-status-active'));
     assert.ok(css.includes('.order-work-card, .product-brand-button):is(.active, [aria-pressed="true"], [aria-selected="true"])'));

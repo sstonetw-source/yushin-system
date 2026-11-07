@@ -2109,10 +2109,10 @@ test('removed purchase dashboard leaves no duplicate aging UI', () => {
     assert.match(app,/purchasingAnalyticsMetrics\(/);
 });
 
-test('purchase order freezes supplier snapshot and records communication events', () => {
+test('purchase order freezes supplier snapshot without the retired email communication path', () => {
     assert.match(app, /snapshotForPurchaseOrder/);
     assert.match(app, /supplierSnapshot,/);
-    assert.match(app, /purchaseOrderCommunications/);
+    assert.doesNotMatch(app, /purchaseOrderCommunications/);
     assert.doesNotMatch(app, /communicationEvent\(po,contact/);
     assert.doesNotMatch(app, /lastCommunicationState:event\.state/);
     assert.doesNotMatch(app, /verifiedSent:\s*true/);
