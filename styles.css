@@ -4854,6 +4854,8 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
  #appContainer .inventory-compact-row .inventory-more-menu-popover { display:none; }
  #appContainer .inventory-detail-dialog .order-detail-content { padding:0 20px 20px; overflow:auto; max-height:calc(100dvh - 90px); }
  #appContainer .inventory-detail-dialog dd { font-weight:400; }
+ /* Shared menu panels appear only after moving into the modal, never as native details dropdowns. */
+ #appContainer :is(.order-more-menu,.quote-more-menu,.po-more-menu,.inventory-more-menu) > [class$="-menu-popover"] { display:none!important; }
  .workspace-menu-dialog { width:min(480px,calc(100vw - 32px)); max-height:85dvh; padding:0; border:1px solid var(--ys-border); border-radius:var(--ys-control-radius); background:var(--ys-surface); color:var(--ys-text); overflow:auto; overscroll-behavior:contain; }
  .workspace-menu-dialog::backdrop { background:rgb(30 36 40 / 35%); }
  .workspace-menu-dialog > header { position:sticky; top:0; background:var(--ys-surface); border-bottom:1px solid var(--ys-border); padding:16px; display:grid; grid-template-columns:1fr auto; gap:8px; z-index:1; }

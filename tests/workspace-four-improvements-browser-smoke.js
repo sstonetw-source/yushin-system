@@ -7,7 +7,14 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','chrom
  await page.setContent('<html lang="zh-Hant"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="appContainer"><div id="ordersBody" class="content-section active" style="padding-top:400px"><table><tbody><tr data-menu-title="客戶甲 · YS-1 · 2026-10-27" data-menu-scope="整張訂單操作"><td><details class="order-more-menu"><summary>更多</summary><div class="order-more-menu-popover"><button onclick="window.actionCount=(window.actionCount||0)+1">複製成新訂單</button></div></details></td></tr></tbody></table></div><div style="height:2000px"></div></div>');
  await page.addStyleTag({content:read('styles.css')});await page.addScriptTag({content:read('src/shared/workspace-interactions.js')});
  await page.evaluate(()=>{initializeWorkspaceMenus();initializeWorkspaceMenus();window.scrollTo(0,100);});
- const y=await page.evaluate(()=>scrollY);await page.locator('.order-more-menu > summary').click();await page.locator('.workspace-menu-dialog[open]').waitFor();
+ const y=await page.evaluate(()=>scrollY);
+ const transition=await page.evaluate(()=>{
+  document.querySelector('.order-more-menu > summary').click();
+  const panel=document.querySelector('.order-more-menu > .order-more-menu-popover');
+  return {inlineDisplay:getComputedStyle(panel).display,dialogAlreadyOpen:!!document.querySelector('.workspace-menu-dialog[open]')};
+ });
+ assert.equal(transition.inlineDisplay,'none','native details must never flash an inline dropdown before the modal toggle handler');
+ await page.locator('.workspace-menu-dialog[open]').waitFor();
  assert.match(await page.locator('.workspace-menu-dialog header').innerText(),/客戶甲.*YS-1/);
  assert.equal(await page.locator('.workspace-menu-dialog').evaluate(d=>d.workspaceSourceSection.id),'ordersBody');
  assert.equal(await page.evaluate(()=>document.body.style.position),'fixed');
