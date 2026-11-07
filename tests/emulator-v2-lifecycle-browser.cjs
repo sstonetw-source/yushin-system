@@ -930,7 +930,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   // shipment commits before its HTTP reply is lost; reload resumes that ID.
   await siteLogout(page);await siteLogin(page,fixture.accounts.warehouse,'warehouse');
   async function openShipmentBatch(){
-   await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();
+   await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();await page.locator('#parcelAdvanced').evaluate(node=>{node.open=true;});
    await page.waitForFunction(()=>orderWorkQueueReady&&!orderWorkQueueError&&warehouseMasterCache.length>0,null,{timeout:45000});
    const main=await page.evaluate(()=>defaultWarehouse()?.id||'');
    await page.locator(main===fixture.warehouseIds[0]?'#inventoryShippingMainBtn':'#inventoryShippingBranchBtn').click();
@@ -1406,7 +1406,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   // Ship the five ORIGINAL holds from the OTHER warehouse using its actual
   // location row. Original item.warehouseId remains A throughout this action.
   async function openOtherWarehouseBatch(){
-   await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();
+   await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();await page.locator('#parcelAdvanced').evaluate(node=>{node.open=true;});
    await page.waitForFunction(()=>orderWorkQueueReady&&!orderWorkQueueError&&warehouseMasterCache.length>0,null,{timeout:45000});
    const main=await page.evaluate(()=>defaultWarehouse()?.id||'');
    await page.locator(main===fixture.warehouseIds[1]?'#inventoryShippingMainBtn':'#inventoryShippingBranchBtn').click();
@@ -1817,7 +1817,7 @@ for(const width of [1280,390])test('full site '+width+'px original multi-item pu
 
   await siteLogout(page);await siteLogin(page,x.accounts.warehouse,'warehouse');
   async function openShipment(id,warehouseId){
-   await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();
+   await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();await page.locator('#parcelAdvanced').evaluate(node=>{node.open=true;});
    await page.waitForFunction(()=>orderWorkQueueReady&&!orderWorkQueueError&&warehouseMasterCache.length>0,null,{timeout:45000});
    const main=await page.evaluate(()=>defaultWarehouse()?.id||'');
    await page.locator(main===warehouseId?'#inventoryShippingMainBtn':'#inventoryShippingBranchBtn').click();
@@ -2484,7 +2484,7 @@ for(const width of [1280,390])test('original order transfer '+width+'px keeps so
  // Scope presentation caches to source documents read from the real server.
  // No transaction, Callable or rendering handler is replaced by a stub.
  const shipping=async()=>{
-  await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();await page.locator('#inventoryShippingTransferBtn').click();
+  await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();await page.locator('#parcelAdvanced').evaluate(node=>{node.open=true;});await page.locator('#inventoryShippingTransferBtn').click();
   await page.evaluate(async({orderId,from,to})=>{
    await loadInventoryWorkspace();
    const order=await db.collection('orders').doc(orderId).get({source:'server'});
@@ -2549,7 +2549,7 @@ for(const width of [1280,390])test('original owner handoff '+width+'px keeps sou
  // Scope presentation caches to source documents read from the real server.
  // No transaction, Callable or rendering handler is replaced by a stub.
  const shipping=async()=>{
-  await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();await page.locator('#inventoryShippingMainBtn').click();
+  await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();await page.locator('#parcelAdvanced').evaluate(node=>{node.open=true;});await page.locator('#inventoryShippingMainBtn').click();
   await page.evaluate(async({orderId,from,to})=>{
    await loadInventoryWorkspace();
    const order=await db.collection('orders').doc(orderId).get({source:'server'});

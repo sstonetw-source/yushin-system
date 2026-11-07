@@ -43,7 +43,7 @@
   if(typeof module==='object'&&module.exports)module.exports=api;
   if(typeof document==='undefined')return;
 
-  let view='stock',receivingKind='purchase',shippingKind='main',shippingScope='customer',shippingLimit=50;
+  let view='stock',receivingKind='purchase',shippingKind='all',shippingScope='customer',shippingLimit=50;
   let returnReady=false,returnError='',loadPromise=null;
   let warehouseError='',workspaceContext='';
   const shipmentPending=new Set();
@@ -205,7 +205,7 @@
     const all=currentShippingRows().filter(r=>['CUSTOMER_SHIP','SALES_SHIP'].includes(root.YushinWarehouseLogistics.plan(r.item.deliveryPlan||r.order.shippingInstructions||{}).mode));
     const mainId=defaultWarehouse()?.id||'';
     const planOf=r=>root.YushinWarehouseLogistics.executionPlan(r,warehouseMasterCache,mainId);
-    const sets={main:all.filter(r=>!r.branch),branch:all.filter(r=>r.branch)};
+    const sets={all,main:all.filter(r=>!r.branch),branch:all.filter(r=>r.branch)};
     const confirmed=orderWorkQueueReady&&!orderWorkQueueError;
     for(const [kind,label] of Object.entries({main:'主倉寄貨',branch:'分倉寄貨'})){
       const button=el('inventoryShipping'+kind[0].toUpperCase()+kind.slice(1)+'Btn');if(!button)continue;
@@ -250,6 +250,7 @@
     const batch=document.querySelector?.('.inventory-shipping-batch-actions');if(batch)batch.hidden=empty;
     root.renderMainTransferRequests?.();
     updateBadges();
+    root.renderWarehouseParcels?.();
   };
   root.loadMoreInventoryShipping=function(){shippingLimit+=50;renderInventoryShipping();};
 
