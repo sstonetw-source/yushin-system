@@ -151,6 +151,7 @@ function resetSessionData() {
     pendingPurchaseError = '';
     poListCache = [];
     poListCursor = null;
+    poListLegacy = false;
     poListHasMore = false;
     poHistorySearchResults = [];
     poHistorySearchActive = false;

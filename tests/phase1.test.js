@@ -683,9 +683,9 @@ test('failed billing write restores the previous state and unlocks the button', 
 });
 
 
-test('quote and order lists use global business-date ordering across companies', () => {
-    assert.match(appSource, /db\.collection\('quotes'\)\.orderBy\('quoteDate', 'desc'\)/);
-    assert.match(appSource, /compareBusinessRecordsNewestFirst\(a, b, 'quoteDate', 'quoteNo'\)/);
+test('quote lists use creation ordering and order lists retain business-date ordering across companies', () => {
+    assert.match(appSource, /sourcesFor\('createdAt'\)/);
+    assert.match(appSource, /compareCreatedDocumentsNewestFirst\(a,b,'quoteDate','quoteNo'\)/);
     assert.match(appSource, /db\.collection\('orders'\)/);
     assert.match(appSource, /orderBy\('orderDate', 'desc'\)/);
     assert.match(appSource, /compareBusinessRecordsNewestFirst\(a, b, 'orderDate', 'id'\)/);
@@ -2886,7 +2886,7 @@ test('existing quote output preserves audit and background metadata', () => {
     const end=appSource.indexOf('\nfunction quoteDataForPdfExport',start);
     const source=appSource.slice(start,end);
     assert.match(source,/if \(snapshot\.exists && updatingExisting\)/);
-    assert.match(source,/quoteData\.createdAt = existing\.createdAt \|\| quoteData\.createdAt/);
+    assert.match(source,/if \(existing\.createdAt\) quoteData\.createdAt = existing\.createdAt;\s*else delete quoteData\.createdAt;/);
     assert.match(source,/\['ownerUid','salesCode','salesName','createdByUid','createdByName','createdByRole'\]/);
     assert.match(source,/if \(key in existing\) quoteData\[key\] = existing\[key\]; else delete quoteData\[key\]/);
     assert.match(source,/transaction\.set\(quoteRef, quoteData, \{ merge: true \}\)/);
@@ -3205,7 +3205,7 @@ test('successful history searches avoid duplicate final render', () => {
         const success=source.slice(0,catchAt);
         const completionAt=success.lastIndexOf('全歷史搜尋完成');
         assert.ok(completionAt > 0);
-        const completionWindow=success.slice(Math.max(0,completionAt-500));
+        const completionWindow=success.slice(success.lastIndexOf(resultName + ' =', completionAt));
         assert.match(completionWindow,new RegExp(resultName + ' ='));
         assert.match(completionWindow,new RegExp(statusName + '\\('));
         assert.doesNotMatch(completionWindow,new RegExp(renderName + '\\(\\)'));
@@ -4558,7 +4558,7 @@ test('primary work lists keep the default 50-row pagination guard', () => {
     const purchaseStart=appSource.indexOf('async function loadPurchaseOrderPage');
     const purchaseEnd=appSource.indexOf('window.loadMyPurchaseOrders',purchaseStart);
     const purchaseSource=appSource.slice(purchaseStart,purchaseEnd);
-    assert.match(purchaseSource,/orderBy\('poNo','desc'\)\.limit\(DEFAULT_LIST_LIMIT\)/);
+    assert.match(purchaseSource,/orderBy\(poListLegacy \? 'poNo' : 'createdAt', 'desc'\)\.limit\(DEFAULT_LIST_LIMIT\)/);
     assert.match(purchaseSource,/where\('status','in',\['ORDERED','PARTIAL_RECEIPT'\]\)\.limit\(DEFAULT_LIST_LIMIT\)/);
 
     const equipmentStart=appSource.indexOf('window.loadEquipmentFromCloud = function');
