@@ -1,44 +1,15 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const vm = require('node:vm');
+const path = require('node:path');
 
-const source = fs.readFileSync(require('node:path').join(__dirname, '..', 'src/features/administration/user-and-system-settings.js'), 'utf8');
-const start = source.indexOf('const RESTORABLE_BACKUP_COLLECTIONS = new Set([');
-const context = vm.createContext({
-  window: {}, firebaseConfig: { projectId: 'production' },
-  firebase: { firestore: { Timestamp: { fromDate: date => date } } },
-  document: {}, currentUserRole: 'admin', trueUserRole: 'admin'
-});
-vm.runInContext(source.slice(start) + '\nwindow.validateBackupDocuments = validateBackupDocuments;', context);
-
-function backup(rows, collection = 'orders') {
-  return { format: 'yu-shing-firestore-backup', version: 1, projectId: 'production',
-    documentCount: rows.length, collections: { [collection]: rows } };
-}
-test('backup upload validates project, count, duplicate paths, and collection boundaries', () => {
-  const row = { id: 'o1', path: 'orders/o1', data: { customerName: '測試' } };
-  const validate = context.window.validateBackupDocuments;
-  assert.equal(validate(backup([row])).length, 1);
-  assert.throws(() => validate({ ...backup([row]), projectId: 'another' }), /不同 Firebase/);
-  assert.throws(() => validate({ ...backup([row]), documentCount: 2 }), /數量/);
-  assert.throws(() => validate(backup([row, row])), /重複/);
-  assert.throws(() => validate(backup([{ ...row, path: 'settings/rolePermissions' }])), /路徑/);
-  assert.equal(validate(backup([{ id:'u1', path:'users/u1', data:{ role:'admin' } }], 'users')).length, 0);
-  assert.equal(validate(backup([{
-    id:'SALES_ORDER%3Ao1%3Ai1',
-    path:'procurementDemands/SALES_ORDER%3Ao1%3Ai1',
-    data:{ demandId:'SALES_ORDER:o1:i1', requestedQty:5, orderedQty:0, receivedQty:0 }
-  }], 'procurementDemands')).length, 1);
-});
-
-test('browser inspection never restores transaction or permissions documents', () => {
-  const inspection = source.slice(start);
-  const html = fs.readFileSync(require('node:path').join(__dirname, '..', 'index.html'), 'utf8');
-  const productMaintenance = fs.readFileSync(require('node:path').join(__dirname, '..', 'src/features/products/product-master-import.js'), 'utf8');
-  assert.doesNotMatch(inspection, /window\.restoreMissingDatabaseBackupDocuments\s*=/);
-  assert.doesNotMatch(inspection, /transaction\.set\(ref, row\.data\)/);
-  assert.doesNotMatch(html, /id="databaseBackupRestoreBtn"|id="testDataResetExecuteBtn"|id="testDataResetPreviewBtn"/);
-  assert.doesNotMatch(productMaintenance, /window\.executeTestDataReset\s*=|window\.previewTestDataReset\s*=/);
-  assert.match(html, /不是完整資料庫備份/);
+test('admin navigation retires the browser data export and keeps diagnostics in page help', () => {
+    const read = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+    const html = read('index.html');
+    const help = read('modules/page-help.js');
+    const app = read('app.js');
+    assert.doesNotMatch(html, /id="admin-(?:sub-)?storage"|id="admin-sub-health"|id="databaseBackup\w*"|id="testDataReset\w*"/);
+    assert.doesNotMatch(app, /downloadDatabaseBackup|previewDatabaseBackupUpload|restoreMissingDatabaseBackupDocuments|window\.(?:execute|preview)TestDataReset\s*=/);
+    assert.match(help, /window\.switchAdminTab\('health'\)/);
+    assert.match(html, /id="systemDataAuditBtn"/);
 });

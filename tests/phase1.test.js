@@ -1358,7 +1358,7 @@ test('new business records retain stable salesCode ownership without rewriting c
 
 test('sales handoff uses one trusted backend instead of historical bulk updates', () => {
     const start = appSource.indexOf('window.executeSalesTransfer = async function');
-    const end = appSource.indexOf('function formatBytes(bytes)', start);
+    const end = appSource.indexOf('\n};', start);
     const s = appSource.slice(start, end);
     const backend = fs.readFileSync(path.join(__dirname,'../functions/sales-code-transfer-service.js'),'utf8');
     assert.match(s,/httpsCallable\('transferSalesCodeOwner'\)/);
@@ -1961,17 +1961,6 @@ test('V2 historical COGS is reproducible from exact lot allocations and protecte
 });
 
 
-test('partial admin export retains fulfillment and protected cost collections', () => {
-    const start = appSource.indexOf('window.downloadDatabaseBackup =');
-    const end = appSource.indexOf('const RESTORABLE_BACKUP_COLLECTIONS', start);
-    const source = appSource.slice(start, end);
-    for (const name of ['inventoryLots','inventoryLotCosts','receipts','supplyOrders','dispatchRecords']) {
-        assert.match(source, new RegExp("'" + name + "'"));
-    }
-});
-
-
-
 test('V2 admin UI no longer exposes the legacy migration deployment panel', () => {
     assert.doesNotMatch(indexSource, /部署 PR #30 的 Firestore Rules \/ Indexes/);
     assert.doesNotMatch(indexSource, /庫存成本隔離，直到顯示 0/);
@@ -2119,14 +2108,6 @@ test('system data audit follows supplyOrders as procurement truth', () => {
 });
 
 
-
-test('database backup covers governed master, audit, delivery and Forecast progress data', () => {
-  for (const name of ['productLines','priceHistory','deliveries','auditLogs']) assert.match(appSource,new RegExp("'"+name+"'"));
-  assert.doesNotMatch(appSource,/collectionGroup\('progress'\)/);
-  assert.match(appSource,/collection\('progress'\)/);
-  assert.match(appSource,/data\.forecastProgress/);
-  assert.match(appSource,/path:\`forecasts\/\$\{forecast\.id\}\/progress\/\$\{id\}\`/);
-});
 
 test('Forecast list queries have production composite indexes for every ownership path', () => {
   const forecastIndexes = firestoreIndexes.indexes
@@ -2602,7 +2583,7 @@ test('own-scope forecast does not preload full staff directory', () => {
 test('admin import comparisons use bounded reads and staff transfer is server-only', () => {
     assert.doesNotMatch(appSource,/async function legacySalesDocsInPages/);
     const transferStart=appSource.indexOf('window.executeSalesTransfer = async function');
-    const transferEnd=appSource.indexOf('function formatBytes(bytes)',transferStart);
+    const transferEnd=appSource.indexOf('\n};',transferStart);
     const transferSource=appSource.slice(transferStart,transferEnd);
     assert.match(transferSource,/httpsCallable\('transferSalesCodeOwner'\)/);
     assert.doesNotMatch(transferSource,/firestoreReadWithTimeout|runFirestoreBatchUpdates/);
@@ -4973,7 +4954,7 @@ test('inventory projected stock and replenishment center avoid duplicate repleni
 
 
 test('admin data health is a dedicated read-only check and validates Product Master plus inventory policy', () => {
-    assert.match(indexSource,/id="admin-sub-health"/);
+    assert.doesNotMatch(indexSource,/id="admin-sub-health"/);
     assert.match(indexSource,/id="admin-health"/);
     assert.match(indexSource,/執行資料檢查/);
     assert.equal((indexSource.match(/id="systemDataAuditBtn"/g)||[]).length,1);

@@ -9,7 +9,7 @@
         'purchasing-system': { title: '採購', permission: 'orders.po', purpose: '處理訂單採購、備貨及安全庫存補貨，追蹤採購單與到貨。', notes: ['建立採購前核對供應商、數量與成本；建立後列入待到貨。', '客戶取消訂單，不代表供應商採購也已取消；無法取消的貨到貨後成為庫存。', '完成打單後，客戶訂單仍須繼續送貨與核銷。'] },
         'inventory-system': { title: '倉庫', permission: 'inventory', purpose: '查看各倉庫庫存，辦理收貨、出貨、調撥與領貨。', notes: ['退貨申請不增加庫存，實際點收後才入庫。', '主倉自領由訂單負責業務按已送貨才扣帳；寄給負責業務後仍待送客戶；直接寄客戶的出貨會登錄已送貨，不代表客戶已簽收。', '主倉自領配到分倉庫存，才產生訂單調回需求；採購也可主動發起主倉備貨。'] },
         'equipment-system': { title: '儀器', permission: 'equipment', purpose: '管理客戶儀器與維修、保養、校正紀錄，追蹤下次到期日。', notes: ['批次匯入依儀器編號新增或更新，保留既有維修保養紀錄。', '匯出只包含目前已載入的篩選結果。', '儀器資料依歸屬維護；維修保養紀錄由工程師或管理員處理。'] },
-        'admin-system': { title: '管理員後台', permission: 'admin', purpose: '管理人員、廠牌、價目表與倉庫設定，查看分析與執行資料維護。', notes: ['單一產品的日常操作請到「產品」頁面。', '資料檢查、備份與用量計算會讀取資料，需手動執行。', '刪除、清除資料或交接前，先核對預覽與確認訊息。'] }
+        'admin-system': { title: '管理員後台', permission: 'admin', purpose: '管理人員、廠牌、價目表與倉庫設定，查看分析與執行資料維護。', notes: ['單一產品的日常操作請到「產品」頁面。', '資料健康的檢查會讀取多個集合，請按需手動執行。', '刪除價目表或交接前，先核對預覽與確認訊息。'] }
     };
     const adminPages = {
         'admin-sales': { purpose: '查看人員帳號、角色與聯絡資訊，寄送密碼重設信。', notes: ['登入帳號在 Firebase Authentication 建立或停用。', '姓名、代號與角色需在使用者資料中一致設定。'] },
@@ -19,7 +19,6 @@
         'admin-warehouses': { purpose: '管理倉庫、外倉及收件設定。', notes: ['出貨依實際庫存所在倉庫安排。', '外倉出貨請從倉庫出貨分頁處理。'] },
         'admin-health': { purpose: '檢查主檔缺漏、重複資料及訂單、採購、庫存關聯。', notes: ['這是唯讀檢查，不會修改或刪除資料。', '需讀取多個資料集合，請按需手動執行。'] },
         'admin-transfer': { purpose: '將業務代號交接給接手同仁。', notes: ['先檢查交接內容，再確認執行。', '交接依業務代號處理，保留歷史姓名與操作紀錄。'] },
-        'admin-storage': { purpose: '備份與檢查資料庫，依需求清理測試資料。', notes: ['備份與用量計算會讀取全部資料，請按需執行。', '清除前核對保留範圍；永久清除無法直接復原。', '補回缺少的文件前，先檢查上傳備份內容。'] }
     };
     const visible = node => !!node && !node.hidden && node.getClientRects().length > 0;
     function section(body, title, lines) {
@@ -40,6 +39,7 @@
         const dialog = document.getElementById('pageHelpDialog');
         const body = document.getElementById('pageHelpBody');
         let trigger = null;
+        let focusAfterClose = null;
         document.addEventListener('click', event => {
             const button = event.target.closest('[data-page-help]');
             if (!button) return;
@@ -54,6 +54,19 @@
             section(body, '頁面功能', [content.purpose]);
             const restriction = roleNote(page);
             section(body, '注意事項', restriction ? [...content.notes, restriction] : content.notes);
+            if (key === 'admin-system' && adminContext !== 'admin-health' && typeof getPagePermission === 'function' && getPagePermission('admin') === 'edit') {
+                const diagnostics = document.createElement('button');
+                diagnostics.type = 'button';
+                diagnostics.className = 'btn-secondary';
+                diagnostics.textContent = '開啟資料健康';
+                diagnostics.addEventListener('click', () => {
+                    window.switchAdminTab('health');
+                    const heading = document.getElementById('adminHealthTitle');
+                    if (visible(heading)) focusAfterClose = heading;
+                    dialog.close();
+                });
+                body.append(diagnostics);
+            }
             dialog.showModal();
             body.scrollTop = 0;
         });
@@ -62,7 +75,11 @@
             const rect = dialog.getBoundingClientRect();
             if (event.target === dialog && (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom)) dialog.close();
         });
-        dialog.addEventListener('close', () => { if (trigger?.isConnected) trigger.focus(); });
+        dialog.addEventListener('close', () => {
+            const target = focusAfterClose || trigger;
+            focusAfterClose = null;
+            if (target?.isConnected) target.focus();
+        });
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
     else init();

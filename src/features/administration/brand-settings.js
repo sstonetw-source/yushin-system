@@ -4,9 +4,9 @@
 window.switchAdminTab = function(tab, el) {
     if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
     const panel = document.getElementById(`admin-${tab}`);
-    if (!panel || !el) return;
+    if (!panel || (!el && tab !== 'health')) return;
     document.querySelectorAll('#admin-system .sub-nav .sub-tab').forEach(t => t.classList.remove('active'));
-    el.classList.add('active');
+    el?.classList.add('active');
     document.querySelectorAll('#admin-system .admin-panel').forEach(p => p.style.display = 'none');
     panel.style.display = 'block';
     return loadAdminPanel(tab);
