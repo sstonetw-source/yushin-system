@@ -115,7 +115,7 @@
       dialog.innerHTML='<h3>確認寄出給 '+escapeHtml(group.plan.contact)+'</h3><p>'+escapeHtml(group.plan.address)+'</p>'+
         '<label>寄出日期<input id="parcelDate" type="date" value="'+editing.date+'"></label>'+
         '<div class="parcel-confirm-items">'+jobs.map((j,i)=>'<label><span>'+escapeHtml(j.row.item.itemCode)+' '+escapeHtml(j.row.item.itemName)+'</span><input aria-label="本次寄出數量" data-parcel-quantity="'+i+'" type="number" min="0" step="any" max="'+j.qty+'" value="'+j.qty+'" '+(j.plan.mode==='CUSTOMER_SHIP'&&!j.priorShipment?'':'readonly')+'></label>').join('')+'</div>'+
-        '<label>寄貨備註<input id="parcelNotes" maxlength="500"></label><p id="parcelConfirmError" role="alert"></p><div class="parcel-actions"><button type="button" class="btn-secondary" onclick="document.getElementById(\'warehouseParcelDialog\').close()">返回</button><button type="button" onclick="confirmWarehouseParcel(this)">確認寄出</button></div>';
+        '<label>寄貨備註<input id="parcelNotes" maxlength="500"></label><p>本頁會在背景處理；關頁或手機暫停後，請回來核對原寄貨。</p><p id="parcelConfirmError" role="alert"></p><div class="parcel-actions"><button type="button" class="btn-secondary" onclick="document.getElementById(\'warehouseParcelDialog\').close()">返回</button><button type="button" onclick="confirmWarehouseParcel(this)">確認寄出</button></div>';
       dialog.showModal();
     }catch(error){showActionFeedback(error.message,'warning');}
     finally{endActionButton(button,state);}
