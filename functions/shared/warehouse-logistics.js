@@ -170,6 +170,27 @@
   function rows(includeCustody=false){return root.YushinInventoryWorkspace.shippingRows(orderWorkQueueCache,warehouseMasterCache,defaultWarehouse()?.id||'',{status:normalizedOrderStatus,incomplete:orderInventorySyncIncomplete,items:normalizedOrderItems,dispatch:itemDispatchState,includeCustody,locations:root.v2WarehouseShipmentLocations,
     pending:(orderId,itemId)=>typeof pendingV2WarehouseShipment==='function'?pendingV2WarehouseShipment(orderId,itemId):null});}
   function rowPlan(row){return executionPlan(row,warehouseMasterCache,defaultWarehouse()?.id||'');}
+  root.warehouseParcelSourceRows=()=>rows().filter(r=>['CUSTOMER_SHIP','SALES_SHIP'].includes(rowPlan(r).mode));
+  root.prepareWarehouseParcelJobs=function(list){
+    for(const row of list){
+      const p=rowPlan(row),remaining=Number(row.item.qty||row.item.orderedQty||0)-Math.max(0,Number(row.item.deliveredQty||0)-Number(row.item.returnedQty||0));
+      if(p.mode!=='CUSTOMER_SHIP'&&(row.qty!==remaining||row.qty!==Number(row.item.reservedQty)))throw Error(row.item.itemCode+'：剩餘數量須全部到貨並打單後才可寄給業務。');
+    }
+    return batchJobs(list,rowPlan,lifecycleRecordId()).map(job=>{
+      const prior=job.row.priorShipment;
+      return {...job,expectedPlan:prior?.expectedPlan||savedRowPlan(job.row),
+        operationId:prior?.operationId||job.operationId,qty:prior?.quantity||job.qty,
+        priorShipment:prior||null};
+    });
+  };
+  root.commitWarehouseParcelJob=async function(job,date,notes){
+    const {row,plan:p,qty,operationId}=job;
+    if(p.mode==='CUSTOMER_SHIP')return root.commitInventoryShipment({orderId:row.order.id,itemId:row.item.itemId,qty,
+      date:job.priorShipment?.date||date,notes:job.priorShipment?job.priorShipment.notes:(notes||p.notes),
+      operationId,expectedWarehouseId:row.warehouseId,expectedPlan:job.expectedPlan});
+    return root.commitWarehouseTransfer({id:operationId,orderId:row.order.id,itemId:row.item.itemId,qty,handoff:true,
+      expectedWarehouseId:row.warehouseId,expectedPlan:job.expectedPlan});
+  };
   function savedRowPlan(row){return plan(row.item.deliveryPlan||row.order.shippingInstructions||{});}
   function canSetPlan(order){return allowed()||(root.YushinOrderCommercialDetails.beforeReceipt(order)&&canManageOrderLifecycleCapability()&&canEditPage('orders.list')&&order.ownerUid===currentUser?.uid);}
   function context(){return currentUser?.uid+'|'+currentUserRole;}
@@ -307,7 +328,9 @@
   function batchProgress(jobs){const status=$('warehouseShippingBatchProgress');if(status)status.textContent=`已完成 ${jobs.filter(j=>j.done).length}／${jobs.length} 個品項`;
     for(const [i,j] of jobs.entries()){const el=$('warehouseShippingBatchRow'+i);if(el)el.textContent=j.done?'已完成':j.error?'未完成：'+j.error:'待處理';}
   }
+  root.warehouseLegacyBatchActive=()=>!!shippingBatch?.jobs.some(j=>!j.done)||batchOpening;
   root.openWarehouseShippingBatch=async function(){
+    if(root.hasWarehouseParcelWork?.())return showActionFeedback('請先核對處理中的寄貨，再使用進階批次操作。','warning');
     if(!allowed()||shippingBatch?.busy||batchOpening)return;
     if(shippingBatch?.jobs.some(j=>!j.done)){return showActionFeedback('請先完成或關閉目前的批次視窗。','warning');}
     batchOpening=true;const button=$('warehouseShippingBatchBtn'),bs=beginActionButton(button,'核對中…');
@@ -359,15 +382,42 @@
       else {showActionFeedback(`已完成 ${result.completed}／${result.total} 個品項；未完成項目可在此重試，不會重複扣庫存。`,'warning');}
     }finally{batch.busy=false;endActionButton(button,bs);if(shippingBatch===batch)button.textContent='重試未完成品項';updateSelection();}
   };
+  root.printWarehouseAddressGroups=printAddressLabels;
   function printAddressLabels(groups){
-    const pages=groups.map(({warehouseId,plan:p})=>{
+    const pages=groups.map(({warehouseId,plan:p,rows:list=[]})=>{
       if(p.mode==='PICKUP')throw Error('業務自取不需地址貼紙。');
       validatePlan(p,true);
-      return `<section class="label"><h2>收件人：${escapeHtml(p.contact)}</h2><h2>${escapeHtml(p.phone)}</h2><div class="address">${escapeHtml(p.address)}</div><p>${escapeHtml(p.notes)}</p><p>寄出倉庫：${escapeHtml(warehouseName(warehouseId))}</p><small>又鑫生物科技｜02-2100-1008</small></section>`;
+      const products=aggregateRows(list).map(a=>`<tr><td>${escapeHtml(a.item.itemCode)}　${escapeHtml(a.item.itemName)}</td><td>${a.qty}</td></tr>`).join('');
+      return `<section class="label"><header>又鑫生物科技有限公司<span>出貨貼紙</span></header><h2>${escapeHtml(p.contact)} <span>${escapeHtml(p.phone)}</span></h2><div class="address">${escapeHtml(p.address)}</div>${products?`<table><thead><tr><th>貨號／品項</th><th>數量</th></tr></thead><tbody>${products}</tbody></table>`:''}${p.notes?`<p>${escapeHtml(p.notes)}</p>`:''}<footer>寄件單位　${escapeHtml(warehouseName(warehouseId))}<br>聯絡窗口　${escapeHtml(currentUserName||'')}</footer></section>`;
     });
     let frame=$('warehousePrintFrame');if(frame)frame.remove();frame=document.createElement('iframe');frame.id='warehousePrintFrame';frame.className='warehouse-print-frame';
-    frame.onload=()=>{frame.contentWindow.focus();frame.contentWindow.print();};
-    frame.srcdoc=`<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><title>收件地址貼紙</title><style>@page{size:100mm 150mm;margin:8mm}body{font:16px sans-serif;color:#111}section{break-after:page}section:last-child{break-after:auto}.label{overflow-wrap:anywhere}.address{font-size:26px;line-height:1.5}h2{font-size:22px}</style></head><body>${pages.join('')}</body></html>`;
+    frame.onload=()=>{
+      const doc=frame.contentDocument;
+      const ruler=doc.createElement('div');ruler.style.height='67mm';doc.body.append(ruler);
+      const limit=ruler.getBoundingClientRect().height;ruler.remove();
+      // Repeat recipient information when the product list needs another label.
+      for(const page of [...doc.querySelectorAll('.label')]){
+        let part=page;
+        while(part.getBoundingClientRect().height>limit){
+          const body=part.querySelector('tbody');
+          if(!body||body.rows.length<2){
+            alert('收件資料或品項過長，超過 100 × 75 mm 貼紙範圍，請核對列印內容。');
+            return;
+          }
+          const next=part.cloneNode(true),nextBody=next.querySelector('tbody');
+          nextBody.replaceChildren();
+          part.after(next);
+          while(part.getBoundingClientRect().height>limit&&body.rows.length>1)
+            nextBody.prepend(body.lastElementChild);
+          if(part.getBoundingClientRect().height>limit){
+            alert('單筆品項超過貼紙範圍，請核對列印內容。');return;
+          }
+          part=next;
+        }
+      }
+      frame.contentWindow.focus();frame.contentWindow.print();
+    };
+    frame.srcdoc=`<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><title>出貨貼紙</title><style>@page{size:100mm 75mm;margin:4mm}*{box-sizing:border-box}body{width:92mm;margin:0;font:11px sans-serif;color:#000}section{break-after:page;overflow-wrap:anywhere}section:last-child{break-after:auto}header{font-weight:bold;border-bottom:1px solid;padding-bottom:2mm}header span,h2 span{float:right}h2{font-size:19px;margin:3mm 0}h2 span{font-size:14px}.address{font-size:22px;font-weight:bold;line-height:1.25;margin:3mm 0}table{width:100%;border-collapse:collapse;font-size:11px}th,td{text-align:left;padding:1mm 0;border-bottom:1px solid #bbb}th:last-child,td:last-child{text-align:right}footer{margin-top:2mm;font-size:10px}</style></head><body>${pages.join('')}</body></html>`;
     document.body.appendChild(frame);
   }
   root.printWarehouseDeliveryEditor=function(){if(!allowed()||!editor)return;try{printAddressLabels([{warehouseId:editor.row.warehouseId,plan:readFields()}]);}catch(err){alert(err.message);}};
