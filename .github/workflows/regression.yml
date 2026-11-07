@@ -87,6 +87,7 @@ jobs:
           node tests/order-entry-browser-smoke.js
           node tests/frequent-products-browser-smoke.js
           node tests/inventory-lot-browser-smoke.js
+          node tests/warehouse-parcels-browser-smoke.cjs
       - name: Chrome service, stock, dispatch, delivery and returns
         if: matrix.group == 'workflow'
         run: |

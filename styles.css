@@ -5095,3 +5095,80 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
     box-shadow:0 4px 12px #0002;
   }
 }
+
+/* Compact warehouse work navigation and task cards. */
+@media screen {
+ #appContainer #inventory-system .warehouse-compact-tabs {
+   display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin:12px 0;
+ }
+ #appContainer #inventory-system .warehouse-compact-tabs .order-work-card {
+   display:flex; flex-direction:row; flex-wrap:wrap; align-items:center; justify-content:center;
+   gap:4px 8px; width:100%; min-width:0; min-height:44px; padding:8px !important;
+   font-size:14px !important; line-height:1.4;
+ }
+ #appContainer #inventory-system .warehouse-compact-tabs .order-work-card strong { font-size:14px; }
+ #inventoryShippingPanel .warehouse-shipping-filters { margin:8px 0; }
+ #inventoryShippingPanel .warehouse-shipping-filters > summary,
+ #inventory-system .warehouse-task-details > summary {
+   display:flex; align-items:center; min-height:44px; cursor:pointer; color:var(--ys-primary);
+ }
+ #inventory-system .warehouse-task-details > div { padding:8px 0; font-size:14px; }
+ #inventory-system .warehouse-task-details p { margin:4px 0; }
+ #inventory-system .warehouse-task-item > span,
+ #inventory-system .warehouse-task-item > small,
+ #inventory-system .warehouse-task-info > span,
+ #inventory-system .warehouse-task-info > small { display:block; }
+ #inventory-system .warehouse-task-row small { color:var(--ys-muted); font-size:13px; }
+ #inventory-system .warehouse-task-quantity > small { display:block; }
+ #inventory-system .warehouse-task-quantity > strong { font-size:20px; }
+}
+@media screen and (max-width:768px) {
+ #appContainer #inventory-system .warehouse-task-row {
+   display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:8px 12px;
+   padding:14px; border:1px solid var(--ys-border); border-radius:12px; box-shadow:none;
+ }
+ #appContainer #inventory-system .warehouse-task-row > td {
+   width:auto; padding:0; border:0; min-width:0; background:transparent; text-align:left;
+ }
+ #appContainer #inventory-system .warehouse-task-row > td::before { display:none; }
+ #appContainer #inventory-system .warehouse-task-row > :is(.warehouse-task-item,.warehouse-task-info) { grid-column:1/-1; }
+ #appContainer #inventory-system .warehouse-task-row > .warehouse-task-info {
+   padding-block:8px; border-block:1px solid var(--ys-border);
+ }
+ #appContainer #inventory-system .warehouse-task-row > .warehouse-task-check { grid-column:1/-1; justify-self:end; }
+ #appContainer #inventory-system .warehouse-task-row > .warehouse-task-quantity { align-self:center; }
+ #appContainer #inventory-system .warehouse-task-row > .warehouse-task-action { align-self:center; text-align:right; }
+ #appContainer #inventory-system .warehouse-task-action > button { min-height:44px; margin:0; }
+ #inventory-system .warehouse-task-details > div { overflow-wrap:anywhere; }
+ #inventory-system .warehouse-shipping-filters .toolbar { padding:8px 0; border:0; background:transparent; }
+}
+@media screen and (max-width:768px) {
+ #appContainer #inventoryShippingBody .warehouse-task-row > .warehouse-task-check { grid-column:2; grid-row:1; }
+ #appContainer #inventoryShippingBody .warehouse-task-row > .warehouse-task-item { grid-column:1; grid-row:1; }
+}
+@media screen {
+ .parcel-toolbar { display:flex; align-items:center; gap:8px; margin:12px 0; }
+ .parcel-toolbar > strong { margin-right:auto; font-size:18px; }
+ .parcel-filter-menu > summary,#parcelAdvanced > summary,.parcel-card > details > summary { cursor:pointer; min-height:44px; display:flex; align-items:center; color:var(--ys-primary); }
+ .parcel-filter-menu { position:relative; }
+ .parcel-filter-menu[open] { flex:1; }
+ .parcel-filter-menu select { width:100%; box-sizing:border-box; min-height:44px; margin:4px 0; }
+ .parcel-card { padding:16px; margin:12px 0; background:var(--ys-surface); border:1px solid var(--ys-border); border-radius:12px; overflow-wrap:anywhere; }
+ .parcel-card > header { display:flex; gap:12px; align-items:center; justify-content:space-between; }
+ .parcel-card h3 { margin:0; font-size:20px; }
+ .parcel-card > header > span { font-size:13px; color:var(--ys-primary); background:var(--ys-selected); padding:4px 8px; border-radius:8px; }
+ .parcel-card p { margin:6px 0; }
+ .parcel-meta { font-size:13px; color:var(--ys-muted); }
+ .parcel-address { line-height:1.5; }
+ .parcel-items { list-style:none; margin:12px 0 0; padding:0; border-top:1px solid var(--ys-border); }
+ .parcel-items li { display:flex; gap:12px; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--ys-border); }
+ .parcel-items li > strong { flex:none; }
+ .parcel-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:12px; }
+ #appContainer .parcel-actions button,.parcel-dialog button { min-height:44px; margin:0; }
+ .parcel-dialog { width:min(560px,calc(100vw - 32px)); max-height:85dvh; overflow:auto; border:1px solid var(--ys-border); border-radius:12px; background:var(--ys-surface); box-sizing:border-box; padding:20px; }
+ .parcel-dialog::backdrop { background:#0006; }
+ .parcel-dialog label { display:block; margin:10px 0; }
+ .parcel-dialog input { width:100%; min-height:44px; box-sizing:border-box; padding:8px; font:inherit; }
+ .parcel-confirm-items > label { display:grid; grid-template-columns:minmax(0,1fr) 90px; gap:12px; align-items:center; }
+ .parcel-task { border-left:4px solid var(--ys-primary); }
+}
