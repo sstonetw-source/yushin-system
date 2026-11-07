@@ -2484,7 +2484,7 @@ for(const width of [1280,390])test('original order transfer '+width+'px keeps so
  // Scope presentation caches to source documents read from the real server.
  // No transaction, Callable or rendering handler is replaced by a stub.
  const shipping=async()=>{
-  await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();await page.selectOption('#inventoryShippingScope','transfer');
+  await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();await page.locator('#inventoryShippingTransferBtn').click();
   await page.evaluate(async({orderId,from,to})=>{
    await loadInventoryWorkspace();
    const order=await db.collection('orders').doc(orderId).get({source:'server'});
@@ -2549,7 +2549,7 @@ for(const width of [1280,390])test('original owner handoff '+width+'px keeps sou
  // Scope presentation caches to source documents read from the real server.
  // No transaction, Callable or rendering handler is replaced by a stub.
  const shipping=async()=>{
-  await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();await page.selectOption('#inventoryShippingScope','customer');
+  await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();await page.locator('#inventoryShippingMainBtn').click();
   await page.evaluate(async({orderId,from,to})=>{
    await loadInventoryWorkspace();
    const order=await db.collection('orders').doc(orderId).get({source:'server'});
@@ -2563,7 +2563,7 @@ for(const width of [1280,390])test('original owner handoff '+width+'px keeps sou
   await page.locator('#warehouseShippingBatchBtn').click();await page.locator('#warehouseShippingBatchConfirm').click();
   await page.waitForFunction(()=>document.getElementById('actionFeedback')?.textContent?.includes('未完成項目'));
   assert.equal(calls.length,1);assert.equal(await page.evaluate(()=>pendingOrderTransferOperations()[0].action),'HANDOFF');
-  await siteOpen(page,'warehouse');await shipping();await page.selectOption('#inventoryShippingScope','transfer');
+  await siteOpen(page,'warehouse');await shipping();await page.locator('#inventoryShippingTransferBtn').click();
   await page.evaluate(()=>renderMainTransferRequests());
   if(width===390){
    await page.evaluate(()=>{globalThis.YUSHIN_ORDER_TRANSFER_HANDOFF_EMULATOR=false;});
