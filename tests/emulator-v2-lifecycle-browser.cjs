@@ -2484,7 +2484,7 @@ for(const width of [1280,390])test('original order transfer '+width+'px keeps so
  // Scope presentation caches to source documents read from the real server.
  // No transaction, Callable or rendering handler is replaced by a stub.
  const shipping=async()=>{
-  await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();await page.locator('#parcelAdvanced').evaluate(node=>{node.open=true;});await page.locator('#inventoryShippingTransferBtn').click();
+  await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();await page.locator('#inventoryShippingBranchBtn').click();
   await page.evaluate(async({orderId,from,to})=>{
    await loadInventoryWorkspace();
    const order=await db.collection('orders').doc(orderId).get({source:'server'});
@@ -2495,7 +2495,7 @@ for(const width of [1280,390])test('original order transfer '+width+'px keeps so
  const receiving=async()=>{await siteNav(page,'inventory');await page.locator('#inventoryReceivingTabBtn').click();await page.locator('#inventoryTransferReceivingTab').click();await page.evaluate(()=>loadWarehouseTransferQueue(true));};
  try{
   await siteOpen(page);await siteLogin(page,{uid,email},'warehouse');await shipping();
-  await page.locator('#mainTransferRequestBody').getByRole('button',{name:'登記出貨',exact:true}).click();
+  await page.locator('#mainTransferRequestBody').getByRole('button',{name:'確認寄出',exact:true}).click();
   await page.waitForFunction(drop=>{const text=document.getElementById('actionFeedback')?.textContent||'';return text.includes(drop?'調撥未完成':'已出貨至主倉');},width===1280);
   if(width===1280){
    await siteOpen(page,'warehouse');await shipping();
@@ -2563,7 +2563,7 @@ for(const width of [1280,390])test('original owner handoff '+width+'px keeps sou
   await page.locator('#warehouseShippingBatchBtn').click();await page.locator('#warehouseShippingBatchConfirm').click();
   await page.waitForFunction(()=>document.getElementById('actionFeedback')?.textContent?.includes('未完成項目'));
   assert.equal(calls.length,1);assert.equal(await page.evaluate(()=>pendingOrderTransferOperations()[0].action),'HANDOFF');
-  await siteOpen(page,'warehouse');await shipping();await page.locator('#inventoryShippingTransferBtn').click();
+  await siteOpen(page,'warehouse');await shipping();await page.locator('#inventoryShippingBranchBtn').click();
   await page.evaluate(()=>renderMainTransferRequests());
   if(width===390){
    await page.evaluate(()=>{globalThis.YUSHIN_ORDER_TRANSFER_HANDOFF_EMULATOR=false;});

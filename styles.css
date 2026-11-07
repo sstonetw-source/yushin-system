@@ -5103,6 +5103,9 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
  #appContainer #inventory-system .warehouse-compact-tabs {
    display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin:12px 0;
  }
+ #appContainer #inventory-system .warehouse-shipping-scope-tabs {
+   grid-template-columns:repeat(2,minmax(0,1fr));
+ }
  #appContainer #inventory-system .warehouse-compact-tabs .order-work-card {
    display:flex; flex-direction:row; flex-wrap:wrap; align-items:center; justify-content:center;
    gap:4px 8px; width:100%; min-width:0; min-height:44px; padding:8px !important;

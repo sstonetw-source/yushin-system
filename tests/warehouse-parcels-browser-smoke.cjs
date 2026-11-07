@@ -69,6 +69,15 @@ const setup=`
   }
   await mount();
   assert.equal(await page.locator('#warehouseParcelCards .parcel-card').count(),2,'same recipient is split by physical source warehouse');
+  await page.evaluate(()=>{window.inventoryShippingActiveKind=()=> 'main';renderWarehouseParcels();});
+  assert.equal(await page.locator('#warehouseParcelCards .parcel-card').count(),1,'main-warehouse tab excludes branch parcels');
+  assert.match(await page.locator('#warehouseParcelCards').innerText(),/ABC-001/);
+  assert.doesNotMatch(await page.locator('#warehouseParcelCards').innerText(),/ABC-003/);
+  await page.evaluate(()=>{window.inventoryShippingActiveKind=()=> 'branch';renderWarehouseParcels();});
+  assert.equal(await page.locator('#warehouseParcelCards .parcel-card').count(),1,'branch tab excludes main parcels');
+  assert.match(await page.locator('#warehouseParcelCards').innerText(),/ABC-003/);
+  assert.doesNotMatch(await page.locator('#warehouseParcelCards').innerText(),/ABC-001/);
+  await page.evaluate(()=>{delete window.inventoryShippingActiveKind;renderWarehouseParcels();});
   const first=page.locator('#warehouseParcelCards .parcel-card').first();
   await first.getByRole('button',{name:'列印貼紙'}).click();
   await page.waitForFunction(()=>document.getElementById('warehousePrintFrame')?.contentDocument?.body?.textContent.includes('ABC-001'));

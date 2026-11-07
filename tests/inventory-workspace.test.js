@@ -129,13 +129,13 @@ function workspaceUiFixture({returnsFail=false,purchaseFail=false}={}){
    showActionFeedback:()=>calls.push('toast')});
  vm.runInContext(code,c);return {c,el,cards,calls};
 }
-test('mailing view excludes pickup and transfers, and a retained branch selection never hides main shipments',()=>{
+test('main and branch mailing tabs isolate customer shipments without counting pickups or transfers',async()=>{
  const {c,el}=workspaceUiFixture();c.YushinWarehouseLogistics=require('../modules/warehouse-logistics');c.inlineJsValue=JSON.stringify;
  c.warehouseMasterCache=[{id:'MAIN',warehouseName:'主倉'},{id:'BRANCH',warehouseName:'分倉'}];
  c.orderWorkQueueCache=[['main','MAIN','CUSTOMER_SHIP'],['mail','BRANCH','SALES_SHIP'],['pickup','MAIN','PICKUP'],['transfer','BRANCH','PICKUP'],['missing','BRANCH','']].map(([id,warehouseId,mode])=>({id,shippingInstructions:{mode},items:[{itemId:'A',warehouseId,qty:1}]}));
- c.renderInventoryShipping();assert.match(el('inventoryShippingStatus').textContent,/2 筆/);c.switchInventoryShippingKind('main');assert.match(el('inventoryShippingStatus').textContent,/1 筆/);assert.doesNotMatch(el('inventoryShippingBody').innerHTML,/主倉領取/);assert.equal(el('inventoryShippingTabBtn').textContent,'出貨（2）');
- c.switchInventoryShippingKind('branch');el('inventoryShippingWarehouse').value='BRANCH';c.renderInventoryShipping();assert.match(el('inventoryShippingBody').innerHTML,/寄給負責業務/);
- c.switchInventoryShippingKind('main');assert.match(el('inventoryShippingStatus').textContent,/1 筆/);assert.match(el('inventoryShippingBody').innerHTML,/直接寄客戶/);
+ c.renderInventoryShipping();assert.match(el('inventoryShippingStatus').textContent,/1 筆/);assert.doesNotMatch(el('inventoryShippingBody').innerHTML,/主倉領取/);assert.equal(el('inventoryShippingTabBtn').textContent,'寄貨（2）');
+ await c.switchInventoryShippingKind('branch');el('inventoryShippingWarehouse').value='BRANCH';c.renderInventoryShipping();assert.match(el('inventoryShippingBody').innerHTML,/寄給負責業務/);assert.doesNotMatch(el('inventoryShippingBody').innerHTML,/直接寄客戶/);
+ await c.switchInventoryShippingKind('main');assert.match(el('inventoryShippingStatus').textContent,/1 筆/);assert.match(el('inventoryShippingBody').innerHTML,/直接寄客戶/);assert.doesNotMatch(el('inventoryShippingBody').innerHTML,/寄給負責業務/);
  el('inventoryDeliveryModeFilter').value='SALES_SHIP';c.renderInventoryShipping();assert.match(el('inventoryShippingStatus').textContent,/0 筆/);
 });
 test('single warehouse shipment UI passes a detached warehouse and recipient snapshot to the service',async()=>{
@@ -155,7 +155,7 @@ test('return loading failure does not mark purchase or shipping as empty or bloc
  const {c,el,cards,calls}=workspaceUiFixture({returnsFail:true});
  await c.loadInventoryWorkspace();
  assert.equal(el('inventoryReceivingTabBtn').textContent,'收貨（—）');
- assert.equal(el('inventoryShippingTabBtn').textContent,'出貨（0）');
+ assert.equal(el('inventoryShippingTabBtn').textContent,'寄貨（0）');
  assert.match(cards[0].innerHTML,/0 筆/);assert.match(cards[1].innerHTML,/—/);
  assert.equal(el('inventoryReceivingError').hidden,true);
  c.switchInventoryReceivingKind('returns');
