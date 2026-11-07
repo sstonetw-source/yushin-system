@@ -385,10 +385,12 @@
   root.printWarehouseAddressGroups=printAddressLabels;
   function printAddressLabels(groups){
     const pages=groups.map(({warehouseId,plan:p,rows:list=[]})=>{
+      const sender=warehouseMasterCache.find(w=>w.id===warehouseId);
+      if(!sender?.warehouseName)throw Error('寄件倉庫資料不完整，請重新載入後再列印。');
       if(p.mode==='PICKUP')throw Error('業務自取不需地址貼紙。');
       validatePlan(p,true);
       const products=aggregateRows(list).map(a=>`<tr><td>${escapeHtml(a.item.itemCode)}　${escapeHtml(a.item.itemName)}</td><td>${a.qty}</td></tr>`).join('');
-      return `<section class="label"><header>又鑫生物科技有限公司<span>出貨貼紙</span></header><h2>${escapeHtml(p.contact)} <span>${escapeHtml(p.phone)}</span></h2><div class="address">${escapeHtml(p.address)}</div>${products?`<table><thead><tr><th>貨號／品項</th><th>數量</th></tr></thead><tbody>${products}</tbody></table>`:''}${p.notes?`<p>${escapeHtml(p.notes)}</p>`:''}<footer>寄件單位　${escapeHtml(warehouseName(warehouseId))}<br>聯絡窗口　${escapeHtml(currentUserName||'')}</footer></section>`;
+      return `<section class="label"><header>又鑫生物科技有限公司<span>出貨貼紙</span></header><h2>${escapeHtml(p.contact)} <span>${escapeHtml(p.phone)}</span></h2><div class="address">${escapeHtml(p.address)}</div>${products?`<table><thead><tr><th>貨號／品項</th><th>數量</th></tr></thead><tbody>${products}</tbody></table>`:''}${p.notes?`<p>${escapeHtml(p.notes)}</p>`:''}<footer>寄件單位　${escapeHtml(sender.warehouseName)}<br>聯絡窗口　${escapeHtml(currentUserName||'')}</footer></section>`;
     });
     let frame=$('warehousePrintFrame');if(frame)frame.remove();frame=document.createElement('iframe');frame.id='warehousePrintFrame';frame.className='warehouse-print-frame';
     frame.onload=()=>{
