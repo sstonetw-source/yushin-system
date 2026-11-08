@@ -720,7 +720,8 @@ test('original quick and form lifecycle actions reconcile frozen operations thro
     const reply=await httpsCallable(x.actor.functions,name)(payload);
     if(lose){lose=false;throw Error('lifecycle UI reply lost');}return reply;
    }})},runRoleTransaction:()=>{throw Error('legacy writer forbidden');}});
-  c.window=c;vm.runInContext(fs.readFileSync('src/services/order-lifecycle.js','utf8'),c);
+  c.window=c;require('./helpers/ui-work-action-fixture.cjs')(c);
+  vm.runInContext(fs.readFileSync('src/services/order-lifecycle.js','utf8'),c);
   const quick=fs.readFileSync('src/features/orders/lifecycle-workspace.js','utf8');
   vm.runInContext(quick.slice(quick.indexOf('function applySavedOrderLifecycle('),quick.indexOf('window.toggleOrderProgressStatus')),c);
   const form=fs.readFileSync('src/features/orders/delivery-actions.js','utf8');
