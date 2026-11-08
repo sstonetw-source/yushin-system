@@ -29,7 +29,7 @@ window.alert=x=>messages.push(x);
    await page.setContent('<html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><body><div id="appContainer"><section id="order-system" class="content-section active"><div id="actions" class="order-actions"></div></section><div id="poReceiptBatchOverlay" class="eq-modal-overlay"><div class="eq-modal-box"><h3 id="poReceiptBatchTitle"></h3><div class="table-wrap"><table><tbody id="poReceiptBatchBody"></tbody></table></div></div></div></div></body></html>');
    await page.addStyleTag({content:fs.readFileSync('styles.css','utf8')});
    for(const content of [bootstrap,section('function inlineJsValue(', '// 早期估價單/訂單'),section('function canReceiveInventoryCapability(', 'function canManageEquipmentCapability('),
-    section('function directShipReceiptActionHtml(', 'window.openSelfOrderModal ='),section('window.openSupplyReceipt =', 'const receiptTaskJobs ='),
+    section('function directShipReceiptActionHtml(', 'window.openSelfOrderModal ='),section('function receiptItemRowHtml(', 'window.receiveSupplyOrder ='),section('window.openSupplyReceipt =', 'const receiptTaskJobs ='),
     section('function orderSourceSyncIncomplete(', 'async function syncNewOrderSourceDocuments('),section('function canRetryOrderInventorySync(', 'async function writeOrderInventorySyncState('),
     section('function orderInventorySyncStatusHtml(', "window.addEventListener('beforeunload'"),section('window.retryOrderInventoryReservation =', '// 採購主頁資料')])await page.addScriptTag({content});
    for(const role of ['sales','engineer','purchaser','warehouse','admin']){
