@@ -946,7 +946,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   assert.equal(firstShipped.source.deliveredQty,0);assert.deepEqual(firstShipped.source.deliveryRecords,[]);assert.equal(firstShipped.source.isDelivered,false);
   await siteOpen(page,'warehouse');await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();
   await page.locator((await page.evaluate(()=>defaultWarehouse()?.id))===fixture.warehouseIds[0]?'#inventoryShippingMainBtn':'#inventoryShippingBranchBtn').click();
-  assert.match(await page.locator('.parcel-task').innerText(),/× 2/);
+  assert.match(await page.locator('.parcel-task').textContent(),/× 2/);
   await page.locator('.parcel-task').getByRole('button',{name:'核對／重試原寄貨'}).click();
   await page.waitForFunction(()=>!hasWarehouseParcelWork(),null,{timeout:45000});
   const shipmentCalls=calls.filter(row=>row.name==='shipV2WarehouseItem');assert.equal(shipmentCalls.length,2);assert.deepEqual(shipmentCalls[1].data,firstShipmentIntent);
@@ -1431,7 +1431,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   require('../modules/fulfillment-core').validateShipmentMovement(newShipment,(await db.collection('inventoryMovements').doc(newShipment.movementId).get()).data(),{orderId:fixture.sourceId,itemId:'S',productKey:fixture.productKey});
   await siteOpen(page,'warehouse');await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();
   await page.locator((await page.evaluate(()=>defaultWarehouse()?.id))===fixture.warehouseIds[1]?'#inventoryShippingMainBtn':'#inventoryShippingBranchBtn').click();
-  assert.match(await page.locator('.parcel-task').innerText(),/× 5/);
+  assert.match(await page.locator('.parcel-task').textContent(),/× 5/);
   await page.locator('.parcel-task').getByRole('button',{name:'核對／重試原寄貨'}).click();await page.waitForFunction(()=>!hasWarehouseParcelWork(),null,{timeout:45000});
   assert.deepEqual(calls.filter(row=>row.name==='shipV2WarehouseItem').at(-1).data,otherShipmentIntent);
   assert.deepEqual(await facts(fixture),otherShipped);assert.deepEqual((await demandRef.get()).data(),lastDemand);
@@ -1561,7 +1561,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
    {orderId:fixture.sourceId,itemId:'S',productKey:fixture.productKey});
   await siteOpen(page,'warehouse');await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();
   await page.locator((await page.evaluate(()=>defaultWarehouse()?.id))===fixture.warehouseIds[0]?'#inventoryShippingMainBtn':'#inventoryShippingBranchBtn').click();
-  assert.match(await page.locator('.parcel-task').innerText(),/× 3/);
+  assert.match(await page.locator('.parcel-task').textContent(),/× 3/);
   await page.locator('.parcel-task').getByRole('button',{name:'核對／重試原寄貨'}).click();await page.waitForFunction(()=>!hasWarehouseParcelWork(),null,{timeout:45000});
   assert.deepEqual(calls.filter(row=>row.name==='shipV2WarehouseItem').at(-1).data,lastShipmentIntent);
   assert.deepEqual(await facts(fixture),finalShipped);assert.equal(finalShipped.source.warehouseShipmentRecords.length,4);
@@ -1850,7 +1850,7 @@ for(const width of [1280,390])test('full site '+width+'px original multi-item pu
     assert.equal(intent.warehouseId,warehouseId);assert.equal(intent.itemId,id);
     await siteOpen(page,'warehouse');await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();
     await page.locator((await page.evaluate(()=>defaultWarehouse()?.id))===warehouseId?'#inventoryShippingMainBtn':'#inventoryShippingBranchBtn').click();
-    assert.match(await page.locator('.parcel-task').innerText(),/× 2/);
+    assert.match(await page.locator('.parcel-task').textContent(),/× 2/);
     await page.locator('.parcel-task').getByRole('button',{name:'核對／重試原寄貨'}).click();await page.waitForFunction(()=>!hasWarehouseParcelWork(),null,{timeout:45000});
     assert.deepEqual(logisticsCalls.filter(row=>row.name==='shipV2WarehouseItem').at(-1).data,intent);
     assert.deepEqual(await x.snapshot(),after);
