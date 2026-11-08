@@ -44,6 +44,7 @@
     return [...map.values()];
   }
   function stoppedTask(task){
+    if(active.has(task.id))return false;
     return ['unsupported-reservation-location','production-order-transfer-disabled'].includes(task.errorCode)
       ||String(task.error||'').startsWith('寄貨已停止：')
       ||(/^寄貨結果待核對：預留「[^」]+」含尚未啟用的位置資料，已停止作業。/.test(String(task.error||'')));
