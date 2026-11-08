@@ -13,14 +13,27 @@ const ids=['quote-system','forecast-system','product-system','order-system','pur
   const quoteSource=fs.readFileSync('src/features/quotations/quotation-workspace.js','utf8');
   const rowTemplate=quoteSource.slice(quoteSource.indexOf('window.addQuoteRow =')).match(/tr.innerHTML = `([\s\S]*?)`;/)[1];
   await page.evaluate(template=>{const rowCount=1,itemData={model:'74104',nameCn:'核酸純化試劑組',nameEn:'RNeasy Mini Kit (50)',brand:'Qiagen',spec:'50 preps',qty:2,price:12000},escapeAttr=x=>String(x),brandIdForName=()=>'';document.getElementById('quoteItems').innerHTML='<tr>'+eval('`'+template+'`')+'</tr>';},rowTemplate);
-  let first;
+  let first, documentHeadingX, workspaceHeadingX;
   for(const id of ids){
    await page.evaluate(id=>{document.querySelectorAll('.content-section').forEach(e=>{e.style.display=e.id===id?'block':'none';});},id);
    const title=await page.locator('#'+id+' .workspace-page-title').evaluate(e=>{const s=getComputedStyle(e),r=e.getBoundingClientRect();return {x:r.x,y:r.y,font:s.fontFamily,size:s.fontSize,weight:s.fontWeight,color:s.color};});
-   first??=title;assert.deepEqual(title,first,'heading alignment and typography: '+id+' '+width);
+   const {x,...typographyAndVerticalAlignment}=title;
+   first??=typographyAndVerticalAlignment;
+   assert.deepEqual(typographyAndVerticalAlignment,first,'heading vertical alignment and typography: '+id+' '+width);
+   // Data-heavy workspaces intentionally expand to 1440px on desktop, while
+   // formal quote and Forecast layouts retain the original 1150px width.
+   if(['quote-system','forecast-system'].includes(id)) {
+    documentHeadingX??=x;
+    assert.ok(Math.abs(x-documentHeadingX)<1,'document workspace horizontal alignment: '+id+' '+width);
+   } else {
+    workspaceHeadingX??=x;
+    assert.ok(Math.abs(x-workspaceHeadingX)<1,'data workspace horizontal alignment: '+id+' '+width);
+   }
    const controls=await page.locator('#'+id+' input:not([type=hidden]),#'+id+' select').evaluateAll(es=>es.filter(e=>e.getClientRects().length).map(e=>({font:getComputedStyle(e).fontFamily,bg:getComputedStyle(e).backgroundColor})));assert.ok(controls.every(c=>c.font===title.font),id+' field font');
    if(process.env.WARM_SAND_SCREENSHOT_DIR){fs.mkdirSync(process.env.WARM_SAND_SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:process.env.WARM_SAND_SCREENSHOT_DIR+'/'+id+'-'+width+'.png',fullPage:true});}
   }
+  if(width===1440)assert.ok(workspaceHeadingX<documentHeadingX,'data workspaces use more desktop width');
+  if(width===390)assert.ok(Math.abs(workspaceHeadingX-documentHeadingX)<1,'mobile workspaces use the same width');
   await page.evaluate(()=>{document.querySelectorAll('.content-section').forEach(e=>e.style.display=e.id==='quote-system'?'block':'none');});
   const input=page.locator('#clientName');await input.fill('暖砂測試客戶');assert.equal(await input.inputValue(),'暖砂測試客戶');if(width===390){const bounds=await page.locator('#quoteItems tr').boundingBox();assert.ok(bounds.x+bounds.width<=width,'quote card fits viewport');assert.ok(await page.locator('#quoteItems input:not([type=hidden]),#quoteItems textarea,#quoteItems select').evaluateAll(es=>es.filter(e=>e.getClientRects().length).every(e=>e.getBoundingClientRect().right<=innerWidth)));}assert.equal(await input.evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(240, 235, 226)');assert.ok((await input.boundingBox()).height>=44);
   assert.equal(await page.evaluate(()=>getComputedStyle(document.body).backgroundColor),'rgb(216, 208, 195)');
