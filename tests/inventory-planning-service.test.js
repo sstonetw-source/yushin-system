@@ -1,6 +1,23 @@
 const test=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
 const core=require('../modules/inventory-core'),source=fs.readFileSync('src/services/inventory-planning.js','utf8'),feature=fs.readFileSync('src/features/inventory/inventory-workspace.js','utf8');
 const plain=x=>JSON.parse(JSON.stringify(x));
+test('legacy no-stock records use the order-only choice without rewriting historical state',()=>{
+ const context=vm.createContext({YushinInventory:core});
+ vm.runInContext(feature.slice(feature.indexOf('const INVENTORY_STOCK_POLICIES ='),feature.indexOf('function inventoryProjectedStock')),context);
+ assert.equal(context.inventoryStockPolicy({stockPolicy:'NO_STOCK'}),'ORDER_ONLY');
+ assert.equal(context.inventoryStockPolicy({stockPolicy:'ORDER_ONLY'}),'ORDER_ONLY');
+ assert.equal(context.inventoryStockPolicy({stockPolicy:'SAFETY_STOCK',safetyStock:5}),'SAFETY_STOCK');
+ assert.equal(context.inventoryStockPolicyLabel('NO_STOCK'),'依訂單採購');
+ assert.equal(core.planningSettings('NO_STOCK',0).stockPolicy,'NO_STOCK','legacy data contract remains readable');
+ const html=fs.readFileSync('index.html','utf8');
+ for(const id of ['inventoryPolicyFilter','inventoryPolicySettingSelect']){
+  const select=html.match(new RegExp(`<select id="${id}"[^>]*>([\\s\\S]*?)<\\/select>`));
+  assert.ok(select,id);
+  assert.doesNotMatch(select[1],/value="NO_STOCK"/);
+  assert.match(select[1],/value="ORDER_ONLY"/);
+  assert.match(select[1],/value="SAFETY_STOCK"/);
+ }
+});
 function fixture({role='admin',archived=false}={}){
  const docs=new Map([['inventory/I',{productKey:'P',productId:'P',onHand:0,reserved:0,incoming:0,listArchived:archived,stockPolicy:'ORDER_ONLY',safetyStock:0}]]),reads=[],writes=[],queries=[];
  const state={fail:false,lost:false,replay:false,beforeReplay:null,afterRead:null,afterCommit:null};
