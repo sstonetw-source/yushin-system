@@ -8,6 +8,34 @@ body { font-family: "Microsoft JhengHei", Arial, sans-serif; background-color: #
 .nav-spacer { flex-grow: 1; }
 .auth-status { color: #fff; font-size: 12px; padding: 8px 10px; }
 .auth-status button { margin-left: 8px; }
+/* Desktop navigation keeps every authorized module on one line; account tools open on demand. */
+@media screen and (min-width: 641px) {
+    #appContainer .nav-tabs { flex-wrap: nowrap; gap: 2px; padding: 8px 12px 0; }
+    #appContainer .nav-tab { flex: 0 0 auto; gap: 5px; margin-right: 0; padding: 10px clamp(6px, .8vw, 12px); white-space: nowrap; font-size: 13px; }
+    #appContainer .nav-tab .nav-icon { width: 16px; height: 16px; }
+    #appContainer .nav-spacer { min-width: 0; }
+    #appContainer .auth-status { position: relative; flex: 0 0 auto; padding: 0 0 5px; }
+    #appContainer .auth-menu-toggle { margin: 0; min-height: 35px; padding: 6px 11px; white-space: nowrap; }
+    #appContainer .auth-menu-content { display: none; position: absolute; z-index: 1500; right: 0; top: calc(100% + 4px); width: 265px; box-sizing: border-box; padding: 12px; border: 1px solid #cbd3dd; border-radius: 9px; background: #fff; box-shadow: 0 10px 26px rgba(0,0,0,.17); color: #24384b; }
+    #appContainer .auth-status.is-open .auth-menu-content { display: grid; gap: 8px; }
+    #appContainer .auth-menu-content #authUserLabel { overflow-wrap: anywhere; line-height: 1.5; }
+    #appContainer .auth-menu-content :is(select,button) { box-sizing: border-box; width: 100%; min-height: 36px; margin: 0; }
+}
+@media screen and (min-width: 641px) and (max-width: 1080px) {
+    #appContainer .nav-tabs { position: relative; gap: 8px; padding: 8px 12px; }
+    #appContainer .mobile-nav-toggle { display: flex; align-items: center; gap: 8px; box-sizing: border-box; width: calc(100% - 125px); min-height: 40px; padding: 7px 12px; border: 1px solid var(--ys-border,#cbd3dd); border-radius: 8px; background: var(--ys-surface,#fff); color: var(--ys-text,#24384b); font: inherit; cursor: pointer; }
+    #appContainer .nav-tabs:not(.mobile-open) .nav-tab, #appContainer .nav-spacer { display: none !important; }
+    #appContainer .nav-tabs.mobile-open { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); }
+    #appContainer .nav-tabs.mobile-open .mobile-nav-toggle { grid-column: 1 / -1; }
+    #appContainer .nav-tabs.mobile-open .nav-tab { display: flex; min-height: 42px; justify-content: center; border-radius: 6px; }
+    #appContainer .auth-status { position: absolute; right: 12px; top: 9px; z-index: 20; margin: 0; }
+}
+@media screen and (max-width: 640px) {
+    #appContainer .auth-menu-toggle { display: none !important; }
+    #appContainer .auth-menu-content { display: grid; grid-column: 1 / -1; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; width: 100%; }
+    #appContainer .auth-menu-content :is(#authUserLabel,#viewAsRoleSelect) { grid-column: 1 / -1; }
+    #appContainer .auth-menu-content button { margin: 0; width: 100%; min-height: 44px; }
+}
 #loginScreen { position: fixed; inset: 0; background: linear-gradient(135deg, #003366, #001a33); display: flex; align-items: center; justify-content: center; z-index: 999; }
 #authStarting { position: fixed; inset: 0; background: #f4f4f9; z-index: 999; color: #003366; box-sizing: border-box; overflow: auto; }
 .auth-starting-nav { display: flex; align-items: center; gap: 12px; min-height: 62px; padding: 10px 18px; box-sizing: border-box; background: #003366; color: #fff; font-size: 18px; font-weight: bold; }
@@ -150,7 +178,7 @@ body { font-family: "Microsoft JhengHei", Arial, sans-serif; background-color: #
 .product-selection-head, .product-management-select-cell { width:42px; text-align:center; }
 .product-selection-head input, .product-management-select-cell input { width:18px; height:18px; margin:0; cursor:pointer; }
 .product-management-table tr.is-selected { background:#f4f8fc; }
-.product-management-actions { display:flex; gap:6px; flex-wrap:wrap; min-width:150px; }
+.product-management-actions { display:table-cell; min-width:195px; white-space:nowrap; }
 .product-management-table td:nth-child(5) { max-width:280px; white-space:normal; }
 .product-management-tools {
     width:100%;
@@ -2763,7 +2791,7 @@ html[data-app-environment="preview"] body { border-top: 0; }
 .inventory-replenishment-details[hidden] { display:none !important; }
 .inventory-details-toggle { display:none; }
 #inventoryListTable th:last-child,
-#inventoryListBody .inventory-actions-cell { min-width:260px; width:260px; }
+#inventoryListBody .inventory-actions-cell { min-width:220px; width:220px; }
 #inventoryListBody .inventory-row-actions {
   display:grid;
   grid-template-columns:repeat(2,minmax(0,1fr));
@@ -3508,11 +3536,24 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
 }
 #product-system .product-selection-actions button:disabled { opacity: .5; cursor: not-allowed; }
 #product-system .product-management-actions button {
-    min-width: 64px;
-    min-height: 44px;
-    margin: 3px;
-    padding: 8px 12px;
+    min-width: 0;
+    min-height: 34px;
+    margin: 0;
+    padding: 6px 8px;
 }
+#product-system .product-management-actions > button + button { margin-left: 4px; }
+#product-system .product-management-table { min-width: 1100px; }
+#product-system .product-management-table td { padding-top: 8px; padding-bottom: 8px; vertical-align: middle; }
+#product-system .product-management-table td:nth-child(2) { white-space: nowrap; }
+#product-system .product-management-table td:nth-child(8) { white-space: nowrap; text-align: right; }
+#product-system .product-management-table td:nth-child(7) { overflow-wrap: anywhere; }
+#product-system .product-results-wrap { overflow-x: auto; }
+#product-system .product-row-actions-dialog { width: min(330px,calc(100vw - 32px)); max-width: none; box-sizing: border-box; padding: 16px; border: 1px solid #cbd3dd; border-radius: 10px; background: #fff; box-shadow: 0 10px 30px rgba(0,0,0,.18); color: #24384b; }
+#product-system .product-row-actions-dialog::backdrop { background: rgba(0,0,0,.27); }
+#product-system .product-row-actions-dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+#product-system .product-row-more-actions { display: grid; gap: 7px; }
+#product-system .product-row-more-actions button { width: 100%; min-height: 40px; text-align: left; }
+#product-system .product-row-more-actions .btn-danger { color: #b42318; }
 
 #product360Content .product-360-grid { grid-template-columns: minmax(0, 1fr); }
 
@@ -3542,20 +3583,23 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
 }
 #product-system #productSearchBrandButtons {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
     justify-content: flex-start;
     width: 100%;
     gap: 8px;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    padding-bottom: 4px;
 }
 #product-system #productSearchBrandButtons .product-brand-button {
     flex: 0 0 auto;
     width: auto;
-    min-width: 116px;
+    min-width: 100px;
     max-width: 100%;
-    min-height: 42px;
+    min-height: 36px;
     margin: 0;
-    padding: 8px 14px;
+    padding: 6px 10px;
 }
 #product-system .product-search-toolbar #productManagementSearch {
     width: 100%;
@@ -3570,6 +3614,11 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
     min-height: 44px;
     margin: 0;
 }
+@media screen and (min-width: 769px) {
+    #product-system .product-search-toolbar { grid-template-columns: minmax(200px, 1fr) repeat(3,minmax(94px,auto)); gap: 8px; padding: 11px 13px; }
+    #product-system .product-search-toolbar #productManagementSearch { grid-column: 1; }
+    #product-system .product-search-toolbar > button { max-width: none; min-height: 40px; }
+}
 @media screen and (max-width: 600px) {
     #product-system .product-search-toolbar {
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3579,6 +3628,8 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
     #product-system #productSearchBrandButtons {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
+        overflow-x: visible;
+        padding-bottom: 0;
     }
     #product-system #productSearchBrandButtons .product-brand-button {
         width: 100%;
@@ -4938,11 +4989,70 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
 }
 @media screen {
  #appContainer #inventoryListTable th { text-align:left; font-size:16px; font-weight:700; }
- #appContainer #inventoryListBody .inventory-compact-row .inventory-actions-cell { width:160px; min-width:0; }
+ #appContainer #inventoryListBody .inventory-compact-row .inventory-actions-cell { width:220px; min-width:220px; }
  #appContainer #inventoryListBody .inventory-compact-row .inventory-row-actions > button { width:auto; }
  #appContainer .inventory-toolbar :is(input[type="search"],select) { min-height:44px; font-size:15px; font-family:var(--ys-font-family); border:1px solid var(--ys-border); border-radius:var(--ys-control-radius); background:var(--ys-surface); color:var(--ys-text); padding:8px 12px; box-sizing:border-box; }
  #appContainer .inventory-secondary-list { margin:12px 0; }
  #appContainer .inventory-secondary-list > summary { min-height:44px; display:flex; align-items:center; color:var(--ys-muted); cursor:pointer; }
+}
+/* Desktop workspaces use extra width for tables, without altering formal quote/PDF layouts. */
+@media screen and (min-width: 769px) {
+  #appContainer :is(#product-system,#order-system,#purchasing-system,#inventory-system,#admin-system,#equipment-system) { max-width: 1440px; }
+  #admin-sales { overflow-x: auto; }
+  #admin-sales > table { width: 100%; min-width: 1050px; table-layout: auto; }
+  #admin-sales > table :is(th,td) { padding: 8px 7px; vertical-align: middle; }
+  #admin-sales > table td:nth-child(4) { min-width: 180px; overflow-wrap: anywhere; }
+  #admin-sales > table td:nth-child(5) select { width: 105px; min-width: 0; }
+  #admin-sales .admin-user-password-actions { min-width: 115px; }
+  #admin-sales .admin-user-password-actions .status-badge { display: inline-block; margin-bottom: 4px; }
+  #admin-sales .admin-user-uid { max-width: 150px; white-space: nowrap; }
+  #admin-sales .admin-user-uid .admin-uid-value { max-width: 78px; }
+  #admin-sales .admin-user-uid .admin-uid-copy { margin: 0 0 0 4px; }
+  #admin-sales .admin-account-menu-content { display: grid; gap: 8px; }
+  #admin-sales .admin-account-menu-content button { display: block; min-height: 40px; width: 100%; margin: 0; white-space: normal; text-align: left; }
+  #purchasing-system #purchaseFilterToolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+  #purchasing-system #poListSearch { flex: 1 1 280px; min-width: 220px; max-width: none; }
+  #purchasing-system #purchaseFilterToolbar select { min-height: 40px; }
+  #poListPanel .po-history-table-wrap { max-width: 100%; overflow-x: auto; }
+  #poListPanel .workflow-list-table { min-width: 1170px; width: 100%; }
+  #poListPanel .workflow-list-table :is(th,td) { padding: 9px 7px; vertical-align: middle; }
+  #poListPanel .workflow-list-table :is(th,td):nth-child(8),
+  #poListPanel .workflow-list-table :is(th,td):nth-child(9) { text-align: right; white-space: nowrap; }
+  #poListPanel .workflow-list-table :is(th,td):nth-child(5),
+  #poListPanel .workflow-list-table :is(th,td):nth-child(6) { white-space: nowrap; }
+}
+#admin-sales .admin-account-dialog { width: min(350px,calc(100vw - 32px)); max-width: none; box-sizing: border-box; padding: 16px; border: 1px solid #cbd3dd; border-radius: 10px; background: #fff; box-shadow: 0 10px 30px rgba(0,0,0,.18); color: #24384b; }
+#admin-sales .admin-account-dialog::backdrop { background: rgba(0,0,0,.27); }
+#admin-sales .admin-account-dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+/* Warehouse master: one label per field, aligned responsive grid and shared action row. */
+#admin-warehouses .warehouse-master-form { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; align-items: end; margin-top: 12px; }
+#admin-warehouses .warehouse-master-field { display: grid; gap: 5px; min-width: 0; }
+#admin-warehouses .warehouse-master-field label { font-size: 13px; font-weight: 600; }
+#admin-warehouses .warehouse-master-field :is(input,select) { width: 100%; min-width: 0; min-height: 40px; box-sizing: border-box; }
+#admin-warehouses .warehouse-master-address { grid-column: span 2; }
+#admin-warehouses .warehouse-master-default { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; font-size: 13px; }
+#admin-warehouses .warehouse-master-default input { margin: 0; }
+#admin-warehouses .warehouse-master-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; grid-column: 1 / -1; }
+#admin-warehouses .warehouse-master-actions button { min-height: 40px; margin: 0; }
+@media screen and (max-width: 1100px) {
+  #admin-warehouses .warehouse-master-form { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
+@media screen and (max-width: 640px) {
+  #admin-warehouses .warehouse-master-form { grid-template-columns: minmax(0,1fr); }
+  #admin-warehouses .warehouse-master-address { grid-column: auto; }
+  #admin-warehouses .warehouse-master-actions { justify-content: stretch; }
+  #admin-warehouses .warehouse-master-actions button { flex: 1 1 120px; }
+}
+@media screen {
+  #appContainer :is(.inventory-maintenance,.inventory-secondary-list) > summary { gap: 9px; box-sizing: border-box; margin: 0; padding: 8px 12px; border: 1px solid var(--ys-border,#cbd3dd); border-radius: 8px; background: var(--ys-surface,#fff); font-weight: 600; }
+  #appContainer :is(.inventory-maintenance,.inventory-secondary-list) > summary::after { content: '⌄'; margin-left: auto; font-size: 18px; }
+  #appContainer :is(.inventory-maintenance,.inventory-secondary-list)[open] > summary::after { content: '⌃'; }
+}
+@media screen and (max-width: 768px) {
+  #product-system .product-management-table, #poListPanel .workflow-list-table { min-width: 0; }
+  #product-system .product-management-actions { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+  #product-system .product-management-actions button { min-height: 44px; }
+  #appContainer #inventoryListBody .inventory-compact-row .inventory-actions-cell { width: auto; min-width: 0; }
 }
 #appContainer #product-system > .workspace-page-title { display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
 .product-master-create-actions { display:flex; justify-content:flex-end; margin-left:auto; }

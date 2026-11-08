@@ -36,7 +36,12 @@ window.renderAdminSalesTable = function() {
             <td data-label="身份">${roleSelect(`adminUserRole-${uid}`)}</td>
             <td data-label="領貨／地址">${deliveryButton(delivery)}</td>
             <td data-label="密碼" class="admin-user-password-actions">
-                ${passwordStatus} ${passwordButton} ${resetButton ? `<br>${resetButton}` : ''}
+                ${passwordStatus}
+                <button type="button" class="btn-small btn-secondary admin-account-trigger" onclick="this.nextElementSibling.showModal()">帳號操作</button>
+                <dialog class="admin-account-dialog" aria-label="帳號管理" onclick="if(event.target.closest('.admin-account-menu-content button')) this.close()">
+                    <div class="admin-account-dialog-heading"><strong>帳號管理</strong><button type="button" class="btn-small btn-secondary" onclick="this.closest('dialog').close()">關閉</button></div>
+                    <div class="admin-account-menu-content">${passwordButton}${resetButton}</div>
+                </dialog>
             </td>
             <td data-label="帳號 UID" class="admin-user-uid" style="font-family:monospace;font-size:11px;color:${hasProfile ? '#999' : '#c0392b'};">
                 <span class="admin-uid-value" title="${uid}">${escapeHtml(u.uid)}</span>
