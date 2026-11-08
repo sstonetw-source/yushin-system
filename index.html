@@ -96,12 +96,9 @@
 
     <!-- ============ 產品管理 ============ -->
     <div id="product-system" class="content-section">
-        <div class="product-page-heading no-print">
-            <h2 class="workspace-page-title">產品 <button type="button" class="page-help-trigger" data-page-help="product-system" aria-label="產品功能與注意事項" aria-haspopup="dialog" aria-controls="pageHelpDialog">!</button></h2>
-            <div class="product-master-create-actions">
-                <button type="button" id="createProductMasterBtn" onclick="openNewProductMasterEditor()" style="display:none;">新增產品主檔</button>
-            </div>
-        </div>
+        <h2 class="workspace-page-title no-print">產品 <button type="button" class="page-help-trigger" data-page-help="product-system" aria-label="產品功能與注意事項" aria-haspopup="dialog" aria-controls="pageHelpDialog">!</button>
+            <span class="product-master-create-actions"><button type="button" id="createProductMasterBtn" onclick="openNewProductMasterEditor()" style="display:none;">新增產品主檔</button></span>
+        </h2>
         <div class="toolbar no-print product-search-toolbar">
             <div class="product-search-brand-field"><div class="field-help-heading"><strong>廠牌（點選查看常賣品項）</strong></div><input type="hidden" id="productManagementSearchBrand"><div id="productSearchBrandButtons" class="product-search-brand-buttons" role="group" aria-label="選擇搜尋廠牌">正在載入廠牌…</div></div>
             <input id="productManagementSearch" type="search" oninput="updateProductSearchControls()" placeholder="輸入貨號搜尋產品">
