@@ -15,7 +15,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-functions-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-        <link rel="stylesheet" href="styles.css?v=20261107-6">
+        <link rel="stylesheet" href="styles.css?v=20261108-2">
 </head>
 <body>
     <div id="previewEnvironmentBanner" class="preview-environment-banner no-print" hidden>PREVIEW／測試環境｜資料與正式系統分離</div>
@@ -96,10 +96,9 @@
 
     <!-- ============ 產品管理 ============ -->
     <div id="product-system" class="content-section">
-        <h2 class="workspace-page-title no-print">產品 <button type="button" class="page-help-trigger no-print" data-page-help="product-system" aria-label="產品功能與注意事項" aria-haspopup="dialog" aria-controls="pageHelpDialog">!</button></h2>
-        <div class="product-master-create-actions no-print">
-            <button type="button" id="createProductMasterBtn" onclick="openNewProductMasterEditor()" style="display:none;">新增產品主檔</button>
-        </div>
+        <h2 class="workspace-page-title no-print">產品 <button type="button" class="page-help-trigger" data-page-help="product-system" aria-label="產品功能與注意事項" aria-haspopup="dialog" aria-controls="pageHelpDialog">!</button>
+            <span class="product-master-create-actions"><button type="button" id="createProductMasterBtn" onclick="openNewProductMasterEditor()" style="display:none;">新增產品主檔</button></span>
+        </h2>
         <div class="toolbar no-print product-search-toolbar">
             <div class="product-search-brand-field"><div class="field-help-heading"><strong>廠牌（點選查看常賣品項）</strong></div><input type="hidden" id="productManagementSearchBrand"><div id="productSearchBrandButtons" class="product-search-brand-buttons" role="group" aria-label="選擇搜尋廠牌">正在載入廠牌…</div></div>
             <input id="productManagementSearch" type="search" oninput="updateProductSearchControls()" placeholder="輸入貨號搜尋產品">
@@ -771,9 +770,14 @@
                 <option value="unknown">尚無紀錄</option>
             </select>
             <button onclick="openEquipmentModal()">＋ 新增儀器</button>
-            <button class="btn-secondary" onclick="document.getElementById('eqExcelInput').click()">📤 批次上傳 Excel</button>
+            <details class="equipment-excel-tools">
+                <summary>Excel 匯入／匯出</summary>
+                <div class="equipment-excel-actions">
+                    <button type="button" class="btn-secondary" onclick="document.getElementById('eqExcelInput').click()">📤 批次上傳 Excel</button>
+                    <button type="button" class="btn-secondary" onclick="exportEquipmentExcel()">📥 匯出目前篩選結果（已載入）</button>
+                </div>
+            </details>
             <input type="file" id="eqExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handleEquipmentExcelUpload(this)">
-            <button class="btn-secondary" onclick="exportEquipmentExcel()">📥 匯出目前篩選結果（已載入）</button>
         </div>
 
         <table id="eqListTable">
@@ -1036,8 +1040,8 @@
         <div id="purchaseSupplierPanel" style="display:none">
 
             <div class="panel supplier-setting-panel" style="margin-top:16px;">
-                <strong>供應商設定</strong>
-                <p style="font-size:12px;color:#666;margin:6px 0 12px;">同一供應商可對應多個廠牌；產品線留白代表該廠牌的預設供應商。</p>
+                <h3 class="supplier-setting-title">供應商設定</h3>
+                <p class="supplier-setting-description">同一供應商可對應多個廠牌；產品線留白代表該廠牌的預設供應商。</p>
                 <input id="supplierSettingEditingMappingId" type="hidden">
                 <input id="supplierSettingEditingSupplierId" type="hidden">
                 <datalist id="supplierSettingSuggestions"></datalist>
@@ -1456,9 +1460,9 @@
                         <div id="otherStatisticBrands"></div>
                     </details>
                 </div>
-                <div class="stat-brand-add">
-                    <input type="text" id="newStatisticBrandName" placeholder="手動新增廠牌（沒有產品主檔時使用）">
-                    <label style="font-size:13px;display:inline-flex;align-items:center;gap:5px;"><input type="checkbox" id="newStatisticBrandIndependent"> 獨立統計</label>
+                <div class="stat-brand-add no-print">
+                    <label class="stat-brand-new-field">手動新增廠牌<input type="text" id="newStatisticBrandName" placeholder="沒有產品主檔時使用"></label>
+                    <label class="stat-brand-independent-field"><input type="checkbox" id="newStatisticBrandIndependent"> 獨立統計</label>
                     <button type="button" class="btn-secondary" onclick="addStatisticBrand()">＋ 新增廠牌</button>
                 </div>
                 <button style="margin-top:10px;" onclick="saveKeyStatisticBrands()">💾 儲存廠牌與統計設定</button>
@@ -1641,7 +1645,7 @@
     <script src="modules/free-stock-recovery.js?v=20261014-9"></script>
     <script src="modules/inventory-workspace.js?v=20261107-4"></script>
     <script src="modules/warehouse-logistics.js?v=20261107-4"></script>
-    <script src="modules/warehouse-parcels.js?v=20261107-4"></script>
+    <script src="modules/warehouse-parcels.js?v=20261108-2"></script>
     <script src="modules/delivery-settings.js?v=20261105-addresses"></script>
     <script src="modules/order-entry-ui.js?v=20261104-459"></script>
     <script src="modules/quote-decision-analysis.js?v=20261005-5"></script>
