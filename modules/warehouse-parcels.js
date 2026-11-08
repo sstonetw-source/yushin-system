@@ -59,18 +59,18 @@
       const warehouse=kind==='branch'?(el('parcelWarehouseFilter')?.value||''):'',mode=el('inventoryDeliveryModeFilter')?.value||'';
       rows=rows.filter(row=>inScope(row.warehouseId)&&(!warehouse||row.warehouseId===warehouse)&&(!mode||root.YushinWarehouseLogistics.plan(row.item.deliveryPlan||row.order.shippingInstructions||{}).mode===mode));
       groups=groupRows(rows).filter(g=>!blocked(g.rows,tasks));
-      host.innerHTML=taskCards(tasks.filter(t=>t.jobs.some(j=>inScope(j.row.warehouseId))))+groups.slice(0,visibleLimit).map((g,index)=>{
+      const scopedTasks=tasks.filter(t=>t.jobs.some(j=>inScope(j.row.warehouseId)));
+      host.innerHTML=taskCards(scopedTasks)+groups.slice(0,visibleLimit).map((g,index)=>{
         const p=g.plan,wh=warehouseMasterCache.find(w=>w.id===g.warehouseId);
         const complete=p.contact&&p.phone&&p.address;
         const items=root.YushinWarehouseLogistics.aggregateRows(g.rows);
-        return '<article class="parcel-card"><header><h3>'+escapeHtml(p.contact||'待補收件人')+'</h3><span>'+escapeHtml(root.YushinWarehouseLogistics.modes[p.mode])+'</span></header>'+
-          '<p class="parcel-meta">'+escapeHtml(wh?.warehouseName||g.warehouseId)+'出貨</p>'+
-          '<p>'+escapeHtml(p.phone)+'</p><p class="parcel-address">'+escapeHtml(p.address)+'</p>'+
-          '<ul class="parcel-items">'+items.map(item=>'<li><span>'+escapeHtml(item.item.itemCode)+'　'+escapeHtml(item.item.itemName)+'</span><strong>× '+item.qty+'</strong></li>').join('')+'</ul>'+
-          '<details><summary>訂單與寄送明細</summary>'+g.rows.map(r=>'<p>'+escapeHtml(r.order.orderNo||r.order.quoteNo||'來源訂單')+' · '+escapeHtml(r.order.customerName||'')+' · '+escapeHtml(r.order.salesName||'')+'</p><button type="button" class="btn-secondary" onclick="openWarehouseDeliveryPlan('+inlineJsValue(r.order.id)+','+inlineJsValue(r.item.itemId)+')">編輯收件資料</button>').join('')+'<p>'+escapeHtml(p.notes)+'</p></details>'+
+        return '<article class="parcel-card parcel-simple-card"><div class="parcel-destination"><span class="parcel-field-caption">寄給誰／寄到哪裡</span><h3>'+escapeHtml(p.contact||'待補收件人')+'</h3><p class="parcel-address">'+escapeHtml(p.address||'尚未填寫收件地址')+'</p></div>'+
+          '<div class="parcel-contents"><strong class="parcel-field-caption">要寄的貨品</strong><ul class="parcel-items">'+items.map(item=>'<li><span>'+escapeHtml(item.item.itemCode)+'　'+escapeHtml(item.item.itemName)+'</span><strong>× '+item.qty+'</strong></li>').join('')+'</ul></div>'+
+          '<details class="parcel-extra-details"><summary>更多資訊／修改收件資料</summary><p>來源：'+escapeHtml(wh?.warehouseName||g.warehouseId)+'</p><p>寄送方式：'+escapeHtml(root.YushinWarehouseLogistics.modes[p.mode])+'</p><p>電話：'+escapeHtml(p.phone||'待補')+'</p>'+g.rows.map(r=>'<p>'+escapeHtml(r.order.orderNo||r.order.quoteNo||'來源訂單')+' · '+escapeHtml(r.order.customerName||'')+' · '+escapeHtml(r.order.salesName||'')+'</p><button type="button" class="btn-secondary" onclick="openWarehouseDeliveryPlan('+inlineJsValue(r.order.id)+','+inlineJsValue(r.item.itemId)+')">編輯收件資料</button>').join('')+'<p>'+escapeHtml(p.notes)+'</p></details>'+
           '<div class="parcel-actions">'+(complete?'<button type="button" class="btn-secondary" onclick="printWarehouseParcel('+index+',this)">列印貼紙</button><button type="button" onclick="openWarehouseParcel('+index+',this)">確認寄出</button>':
           '<button type="button" onclick="openWarehouseDeliveryPlan('+inlineJsValue(g.rows[0].order.id)+','+inlineJsValue(g.rows[0].item.itemId)+')">補收件資料</button>')+'</div></article>';
-      }).join('')+(groups.length>visibleLimit?'<button type="button" class="btn-secondary" onclick="loadMoreWarehouseParcels()">載入更多待寄貨</button>':'');
+      }).join('')+(groups.length>visibleLimit?'<button type="button" class="btn-secondary" onclick="loadMoreWarehouseParcels()">載入更多待寄貨</button>':'')+
+        (!groups.length&&!scopedTasks.length&&orderWorkQueueReady&&!orderWorkQueueError?'<p class="parcel-empty-state">目前沒有需要寄出的貨品。</p>':'');
       if(status)status.textContent=notice||(orderWorkQueueError?'寄貨清單讀取失敗，請重新載入。':!orderWorkQueueReady?'正在讀取待寄貨…':groups.length+' 件待寄貨'+(tasks.length?' · '+tasks.length+' 件處理中／待核對':'')+(groups.length>visibleLimit?'，已顯示 '+visibleLimit+' 件。':''));
       const select=el('parcelWarehouseFilter');
       if(select){

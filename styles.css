@@ -906,8 +906,12 @@ button:focus-visible { outline: 2px solid var(--ys-primary); outline-offset: 2px
 .stat-brand-card { border:1px solid #d6dde5; border-radius:7px; padding:10px; margin-bottom:8px; background:#fafbfd; }
 .stat-brand-card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; font-weight:bold; }
 .stat-brand-other-row { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:7px 4px; border-bottom:1px solid #eee; font-size:13px; }
-.stat-brand-add { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
-.stat-brand-add input { min-width:220px; padding:7px 9px; border:1px solid #bbb; border-radius:4px; }
+.stat-brand-add { display:flex; flex-wrap:wrap; gap:12px; align-items:end; margin-top:16px; }
+.stat-brand-new-field { display:grid; gap:6px; flex:1 1 250px; max-width:480px; font-size:14px; font-weight:600; }
+.stat-brand-add input[type="text"] { min-width:0; width:100%; box-sizing:border-box; min-height:44px; padding:8px 12px; border:1px solid var(--ys-border); border-radius:var(--ys-control-radius); }
+.stat-brand-independent-field { display:inline-flex; align-items:center; gap:7px; min-height:44px; font-size:14px; white-space:nowrap; }
+.stat-brand-independent-field input[type="checkbox"] { min-width:0; width:18px; height:18px; margin:0; }
+.stat-brand-add > button { min-height:44px; margin:0; }
 .stat-brand-search-tools { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
 .stat-brand-search-tools input { min-width:0; flex:1; padding:8px 9px; border:1px solid #bbb; border-radius:4px; }
 .stat-brand-search-tools small { color:#777; white-space:nowrap; }
@@ -2665,24 +2669,30 @@ html[data-app-environment="preview"] body { border-top: 0; }
 }
 .supplier-setting-grid {
     display: grid;
-    grid-template-columns: minmax(130px, 1fr) minmax(120px, .9fr) minmax(160px, 1.2fr) minmax(160px, 1.2fr) minmax(190px, 1.35fr) minmax(100px, .65fr) auto;
-    gap: 10px;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 12px;
     align-items: end;
 }
+.supplier-setting-title { margin:0; color:var(--ys-text); font-size:18px; }
+.supplier-setting-description { margin:6px 0 16px; color:var(--ys-muted); font-size:13px; }
 .supplier-setting-grid label {
     display: grid;
-    gap: 5px;
+    gap: 7px;
     font-weight: 600;
+    font-size:14px;
     min-width: 0;
 }
 .supplier-setting-grid input {
     width: 100%;
     box-sizing: border-box;
+    min-height:44px;
 }
 .supplier-setting-actions {
     display: flex;
     gap: 8px;
     white-space: nowrap;
+    grid-column:1 / -1;
+    justify-content:flex-end;
 }
 @media (max-width: 900px) {
     .admin-analytics-heading {
@@ -4902,9 +4912,19 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
  #appContainer .inventory-secondary-list { margin:12px 0; }
  #appContainer .inventory-secondary-list > summary { min-height:44px; display:flex; align-items:center; color:var(--ys-muted); cursor:pointer; }
 }
-.product-master-create-actions { display:flex; justify-content:flex-start; margin:0 0 14px; }
+.product-page-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:14px; }
+#appContainer .product-page-heading > .workspace-page-title { margin:0; }
+.product-master-create-actions { display:flex; justify-content:flex-end; }
 .product-master-create-actions button { background:var(--ys-primary); color:#fff; font-weight:700; min-height:44px; }
-@media (max-width:600px) { .product-master-create-actions button { width:100%; } }
+@media (max-width:600px) { .product-page-heading { flex-wrap:wrap; } .product-master-create-actions { width:100%; } .product-master-create-actions button { width:100%; } }
+
+.equipment-excel-tools { position:relative; flex:0 0 auto; }
+#appContainer .equipment-excel-tools > summary { display:flex; align-items:center; min-height:44px; box-sizing:border-box; padding:8px 12px; border:1px solid var(--ys-border); border-radius:var(--ys-control-radius); background:var(--ys-surface); color:var(--ys-text); cursor:pointer; }
+.equipment-excel-tools[open] { flex-basis:100%; }
+.equipment-excel-tools[open] > summary { width:max-content; }
+.equipment-excel-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+.equipment-excel-actions button { min-height:44px; margin:0; }
+@media (max-width:600px) { .equipment-excel-tools, .equipment-excel-tools[open] { flex-basis:100%; } .equipment-excel-tools > summary { width:100%; } .equipment-excel-actions button { flex:1 1 100%; } }
 
 /* Shared modal footer actions use the same touch target and primary palette. */
 :is(#appContainer, .eq-modal-overlay, .modal-overlay, .modal) .modal-actions > button { min-height:var(--ys-control-height,44px) !important; border-radius:var(--ys-control-radius,8px) !important; }
@@ -5169,6 +5189,18 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
  .parcel-items li { display:flex; gap:12px; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--ys-border); }
  .parcel-items li > strong { flex:none; }
  .parcel-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:12px; }
+ .parcel-simple-card { padding:14px 16px; }
+ .parcel-simple-card .parcel-destination h3 { margin:4px 0; font-size:19px; }
+ .parcel-simple-card .parcel-address { margin:4px 0 12px; font-size:16px; font-weight:600; line-height:1.5; }
+ .parcel-field-caption { display:block; font-size:13px; font-weight:600; color:var(--ys-muted); }
+ .parcel-contents { padding-top:12px; border-top:1px solid var(--ys-border); }
+ .parcel-simple-card .parcel-items { margin-top:4px; border-top:0; }
+ .parcel-simple-card .parcel-items li { align-items:start; }
+ .parcel-simple-card .parcel-items li:last-child { border-bottom:0; }
+ .parcel-extra-details { border-top:1px solid var(--ys-border); }
+ .parcel-extra-details > summary { font-size:13px; }
+ .parcel-extra-details p { font-size:13px; color:var(--ys-muted); }
+ .parcel-empty-state { padding:28px 16px; text-align:center; color:var(--ys-muted); background:var(--ys-surface); border:1px solid var(--ys-border); border-radius:12px; }
  #appContainer .parcel-actions button,.parcel-dialog button { min-height:44px; margin:0; }
  .parcel-dialog { width:min(560px,calc(100vw - 32px)); max-height:85dvh; overflow:auto; border:1px solid var(--ys-border); border-radius:12px; background:var(--ys-surface); box-sizing:border-box; padding:20px; }
  .parcel-dialog::backdrop { background:#0006; }

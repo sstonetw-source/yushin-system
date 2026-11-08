@@ -79,6 +79,9 @@ const setup=`
   assert.doesNotMatch(await page.locator('#warehouseParcelCards').innerText(),/ABC-001/);
   await page.evaluate(()=>{delete window.inventoryShippingActiveKind;renderWarehouseParcels();});
   const first=page.locator('#warehouseParcelCards .parcel-card').first();
+  assert.match(await first.locator('.parcel-destination').innerText(),/王小姐/,'recipient and address stay prominent');
+  assert.match(await first.locator('.parcel-contents').innerText(),/ABC-001/,'product and quantity stay prominent');
+  assert.equal(await first.locator('.parcel-extra-details').evaluate(node=>node.open),false,'secondary shipping information starts collapsed');
   await first.getByRole('button',{name:'列印貼紙'}).click();
   await page.waitForFunction(()=>document.getElementById('warehousePrintFrame')?.contentDocument?.body?.textContent.includes('ABC-001'));
   const label=await page.locator('#warehousePrintFrame').evaluate(frame=>frame.srcdoc);
