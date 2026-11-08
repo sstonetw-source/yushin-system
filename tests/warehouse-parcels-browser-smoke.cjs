@@ -46,6 +46,10 @@ const setup=`
   await context.addInitScript(()=>{window.print=()=>{};});
   const commits=new Map(),requests=[];let release,drop=true,failureAt=0;
   page.on('pageerror',e=>{throw e;});
+  const waitForParcelTaskCleared=target=>target.waitForFunction(()=>{
+    const key=Object.keys(localStorage).find(name=>name.startsWith('warehouse-parcels:'));
+    return !key||JSON.parse(localStorage.getItem(key)||'[]').length===0;
+  });
   await page.context().exposeFunction('commitParcelProbe',job=>new Promise(resolve=>{
    requests.push(JSON.parse(JSON.stringify(job)));const attempt=requests.length;
    const execute=()=>{
@@ -106,7 +110,7 @@ const setup=`
   const originalId=requests[0].operationId;
   await mount();
   await page.locator('.parcel-task').getByRole('button',{name:'核對／重試原寄貨'}).click();
-  await page.waitForFunction(()=>!document.querySelector('.parcel-task'));
+  await waitForParcelTaskCleared(page);
   assert.equal(requests[1].operationId,originalId);
   assert.equal(requests[1].qty,1);
   assert.equal(commits.size,2,'lost-response replay keeps one result per item');
@@ -123,8 +127,8 @@ const setup=`
   assert.equal(await second.locator('.parcel-task').count(),1,'same-browser tab restores progress');
   const taskId=await page.evaluate(()=>JSON.parse(localStorage.getItem(Object.keys(localStorage).find(k=>k.startsWith('warehouse-parcels:'))))[0].id);
   await Promise.all([page.evaluate(id=>resumeWarehouseParcel(id),taskId),second.evaluate(id=>resumeWarehouseParcel(id),taskId)]);
-  await page.waitForFunction(()=>!document.querySelector('.parcel-task'));
-  await second.waitForFunction(()=>!document.querySelector('.parcel-task'));
+  await waitForParcelTaskCleared(page);
+  await waitForParcelTaskCleared(second);
   assert.equal(requests.length,before+3,'cross-tab lock sends only the unfinished item once');
   assert.equal(requests[before+1].operationId,requests[before+2].operationId);
   await second.close();
