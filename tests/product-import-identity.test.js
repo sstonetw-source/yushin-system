@@ -21,7 +21,7 @@ function setup(products = {}, costs = {}) {
         }})},
         commitMigrationBatch:async ops=>{ops.forEach(op=>op({set:(ref,data)=>{writes.push({ref,data});const records=ref.name==='products'?products:costs;records[ref.id]={...records[ref.id],...data};}}));}
     });
-    vm.runInContext(app.slice(app.indexOf('async function loadExistingProductImportState'),app.indexOf('async function saveProductMasterBrand')),c);
+    vm.runInContext(app.slice(app.indexOf('function productImportOperation'),app.indexOf('async function saveProductMasterBrand')),c);
     return {c,writes,queries};
 }
 const row=()=>({productId:'new-id',brand:'Beckman Coulter',model:'A63881',nameEn:'AMPure XP',standardCostProvided:true,standardCost:35259,listPriceProvided:true});

@@ -168,7 +168,7 @@ jobs:
         run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --test tests/emulator-location-shipment.cjs"
       - name: Compile and test Firestore rules
         if: matrix.suite == 'rules'
-        run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --max-old-space-size=4096 --test tests/firestore-rules.test.js"
+        run: npx --yes firebase-tools@15 emulators:exec --only firestore --project demo-yushin "node --max-old-space-size=4096 --test --test-concurrency=1 tests/firestore-rules.test.js tests/emulator-product-import.cjs"
 
   # Keep the existing required check named exactly "regression". A failure,
   # cancellation or skip in any full-suite group must fail this merge gate.

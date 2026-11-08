@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '../src/features/products/product-master-import.js'), 'utf8');
-const start = source.indexOf('const PRODUCT_PRICE_DAILY_ROW_LIMIT');
+const start = source.indexOf('const PRODUCT_PRICE_BATCH_ROW_LIMIT');
 const end = source.indexOf('\nwindow.handleProductCostExcelUpload', start);
 assert.ok(start >= 0 && end > start);
 const focusedSource = source.slice(start, end);
@@ -16,7 +16,9 @@ function createHarness(products = []) {
     const writes = [];
     const messages = [];
     const saved = [];
-    let consumed = 0;
+    const transactionReads = [];
+    let beforeTransaction = () => {};
+    let afterTransaction = () => {};
     let approved = true;
     const context = {
         window:{},
@@ -42,6 +44,7 @@ function createHarness(products = []) {
                 };
             }
         },
+        productImportOperation:checks => { const operation = batch => checks.forEach(c => batch.set(c.ref,c.patch,{merge:true})); operation.importChecks=checks; return operation; },
         currentUserRole:'admin', currentUser:{ uid:'staff-1' },
         priceList:[], productManagementResults:[],
         normalizeItemCodeLoose:value => String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, ''),
@@ -67,15 +70,26 @@ function createHarness(products = []) {
         console,
         navigator:{ locks:{ request:async (name, options, action) => action() } }
     };
+    context.db.runTransaction = async action => {
+        beforeTransaction();
+        const pending = [];
+        await action({
+            get:async ref => { transactionReads.push(ref.id); const row=records.find(row=>row.id===ref.id); return {exists:!!row,data:()=>({...row})}; },
+            set:(ref,patch) => pending.push({ref,patch})
+        });
+        pending.forEach(({ref,patch})=>{Object.assign(records.find(row=>row.id===ref.id),patch);writes.push({id:ref.id,price:patch.listPrice});});
+        afterTransaction();
+    };
     vm.createContext(context);
-    vm.runInContext(`${focusedSource}\nglobalThis.priceTest = { parseProductPriceUpdateRows, runProductPriceJobBatch, productPriceQuotaDay, readProductPriceJob, saveProductPriceJob, readProductPriceDailyQuota, reserveProductPriceDailyQuota, productImportJobScope };`, context);
-    context.readProductPriceDailyQuota = async () => consumed;
-    context.reserveProductPriceDailyQuota = async (day, count) => { consumed += count; };
+    const writerStart = source.indexOf('async function commitMigrationBatch(');
+    vm.runInContext(source.slice(writerStart,source.indexOf('async function readCollectionInBatches',writerStart)),context);
+    vm.runInContext(`${focusedSource}\nglobalThis.priceTest = { parseProductPriceUpdateRows, runProductPriceJobBatch, readProductPriceJob, saveProductPriceJob, productImportJobScope };`, context);
     context.saveProductPriceJob = async job => { saved.push({ ...job }); };
     return {
         context, records, reads, writes, messages, saved,
-        get consumed() { return consumed; },
-        set consumed(value) { consumed = value; },
+        transactionReads,
+        set beforeTransaction(fn) { beforeTransaction=fn; },
+        set afterTransaction(fn) { afterTransaction=fn; },
         set approved(value) { approved = value; },
         job(rows, overrides = {}) {
             return { scope:'demo-yushin:staff-1', brand:'Bio-Rad', filename:'Bio-Rad-價格更新.xlsx',
@@ -155,7 +169,7 @@ test('price-only batch reads only requested products and writes only changed lis
     const job = h.job([{ code:'A-1', price:150 }, { code:'B2', price:200 }]);
     await h.context.priceTest.runProductPriceJobBatch(job);
     assert.equal(h.reads.length, 1);
-    assert.equal(h.consumed, 2);
+    assert.equal(h.transactionReads.length, h.writes.length);
     assert.deepEqual(h.writes, [{ id:'p1', price:150 }]);
     assert.equal(job.cursor, 2);
     assert.equal(job.updated, 1);
@@ -174,27 +188,20 @@ test('missing or ambiguous product blocks the entire batch without writes or cur
     assert.equal(job.cursor, 0);
     assert.equal(h.writes.length, 0);
     assert.equal(h.saved.length, 0);
-    assert.equal(h.consumed, 2);
+    assert.equal(h.transactionReads.length, h.writes.length);
 });
 
-test('daily cap pauses without more server reads and previous progress resumes without duplicate writes', async () => {
-    const h = createHarness([
-        { id:'p1', normalizedPartNo:'A1', manufacturerPartNo:'A1', brandName:'Bio-Rad', listPrice:100 },
-        { id:'p2', normalizedPartNo:'B2', manufacturerPartNo:'B2', brandName:'Bio-Rad', listPrice:200 }
-    ]);
-    const job = h.job([{ code:'A1', price:150 }, { code:'B2', price:250 }]);
-    h.consumed = 999;
+test('same day batches stop at 1000 and immediately continue, repeated file writes nothing', async () => {
+    const products=Array.from({length:1001},(_,i)=>({id:`p${i}`,normalizedPartNo:`A${i}`,manufacturerPartNo:`A${i}`,brandName:'Bio-Rad',listPrice:100}));
+    const h=createHarness(products);
+    const rows=products.map(p=>({code:p.manufacturerPartNo,price:150}));
+    const job=h.job(rows);
     await h.context.priceTest.runProductPriceJobBatch(job);
-    assert.equal(job.cursor, 1);
-    assert.deepEqual(h.writes, [{ id:'p1', price:150 }]);
-    assert.equal(h.consumed, 1000);
-    const readsAfterFirst = h.reads.length;
+    assert.equal(job.cursor,1000); assert.equal(h.writes.length,1000); assert.equal(h.transactionReads.length,1000);
     await h.context.priceTest.runProductPriceJobBatch(job);
-    assert.equal(h.reads.length, readsAfterFirst);
-    h.consumed = 0; // 模擬隔天免費額度重置
-    await h.context.priceTest.runProductPriceJobBatch(job);
-    assert.equal(job.cursor, 2);
-    assert.deepEqual(h.writes, [{ id:'p1', price:150 }, { id:'p2', price:250 }]);
+    assert.equal(job.cursor,1001); assert.equal(h.writes.length,1001);
+    await h.context.priceTest.runProductPriceJobBatch(h.job(rows));
+    assert.equal(h.writes.length,1001); assert.equal(h.transactionReads.length,1001);
 });
 
 test('cancelled update and role changes do not write price changes', async () => {
@@ -209,82 +216,90 @@ test('cancelled update and role changes do not write price changes', async () =>
     assert.equal(h.reads.length, 1);
 });
 
-test('IndexedDB saves unfinished Excel rows and a daily quota shared by replacement files', async () => {
-    const h = createHarness();
-    h.context.indexedDB = createFakeIndexedDb();
-    const helpers = h.context.priceTest;
-    const job = h.job([{ code:'A1', price:150 }, { code:'B2', price:200 }]);
-    await helpers.saveProductPriceJob(job);
-    const resumed = await helpers.readProductPriceJob();
-    assert.equal(resumed.rows.length, 2);
-    assert.equal(resumed.cursor, 0);
-    const day = helpers.productPriceQuotaDay();
-    await helpers.reserveProductPriceDailyQuota(day, 800);
-    await helpers.reserveProductPriceDailyQuota(day, 200);
-    assert.equal(await helpers.readProductPriceDailyQuota(day), 1000);
-    await assert.rejects(helpers.reserveProductPriceDailyQuota(day, 1), /額度已用完/);
-    // 新檔取代進度不會重置同一帳號的每日匯入預算。
-    await helpers.saveProductPriceJob(h.job([{ code:'C3', price:300 }]));
-    assert.equal((await helpers.readProductPriceJob()).rows[0].code, 'C3');
-    assert.equal(await helpers.readProductPriceDailyQuota(day), 1000);
-});
-
-test('uncertain partial write keeps cursor, next-day retry compares server and does not write twice', async () => {
-    const h = createHarness([
-        { id:'p1', normalizedPartNo:'A1', manufacturerPartNo:'A1', brandName:'Bio-Rad', listPrice:100 },
-        { id:'p2', normalizedPartNo:'B2', manufacturerPartNo:'B2', brandName:'Bio-Rad', listPrice:100 }
-    ]);
-    const job = h.job([{ code:'A1', price:150 }, { code:'B2', price:250 }]);
-    let first = true;
-    h.context.commitMigrationBatch = async operations => {
-        for (const operation of operations) {
-            operation({ set(ref, data) {
-                h.records.find(row => row.id === ref.id).listPrice = data.listPrice;
-                h.writes.push({ id:ref.id, price:data.listPrice });
-            } });
-            if (first) { first = false; throw new Error('模擬成功寫入後回覆遺失'); }
-        }
-    };
-    await assert.rejects(h.context.priceTest.runProductPriceJobBatch(job), /回覆遺失/);
-    assert.equal(job.cursor, 0);
-    assert.deepEqual(h.writes, [{ id:'p1', price:150 }]);
-    h.consumed = 0; // 下一個計費日允許重新比對原本的兩筆
-    await h.context.priceTest.runProductPriceJobBatch(job);
-    assert.equal(job.cursor, 2);
-    assert.deepEqual(h.writes, [{ id:'p1', price:150 }, { id:'p2', price:250 }]);
-});
-
-test('full master checkpoints store only fingerprint and progress, with a separate 500-row daily cap', async () => {
-    const h = createHarness();
-    h.context.indexedDB = createFakeIndexedDb();
-    const helpers = h.context.priceTest;
-    const day = helpers.productPriceQuotaDay();
-    const checkpoint = {
-        scope:helpers.productImportJobScope('master'), fingerprint:'sha256-placeholder',
-        filename:'Bio-Rad.xlsx', total:1200, cursor:500, productWrites:42, costWrites:5
-    };
+test('IndexedDB preserves separate price and master checkpoints, replacement and scope', async () => {
+    const h=createHarness();h.context.indexedDB=createFakeIndexedDb();const helpers=h.context.priceTest;
+    await helpers.saveProductPriceJob(h.job([{code:'A1',price:150}]));
+    assert.equal((await helpers.readProductPriceJob()).rows[0].code,'A1');
+    const checkpoint={scope:helpers.productImportJobScope('master'),fingerprint:'sha256',total:1200,cursor:500};
     await helpers.saveProductPriceJob(checkpoint);
-    const stored = await helpers.readProductPriceJob('master');
-    assert.equal(stored.cursor, 500);
-    assert.equal(stored.fingerprint, checkpoint.fingerprint);
-    assert.equal(stored.rows, undefined);
-    assert.equal(stored.standardCost, undefined);
-    assert.equal(await helpers.readProductPriceJob(), null);
-    await helpers.reserveProductPriceDailyQuota(day, 500, 'master');
-    assert.equal(await helpers.readProductPriceDailyQuota(day, 'master'), 500);
-    await assert.rejects(helpers.reserveProductPriceDailyQuota(day, 1, 'master'), /額度已用完/);
-    assert.equal(await helpers.readProductPriceDailyQuota(day), 0);
-    await assert.rejects(helpers.saveProductPriceJob({ ...checkpoint, scope:'other-project:other-user' }), /帳號或專案已切換/);
+    assert.equal((await helpers.readProductPriceJob('master')).cursor,500);
+    assert.equal((await helpers.readProductPriceJob('master')).rows,undefined);
+    await helpers.saveProductPriceJob(h.job([{code:'C3',price:300}]));
+    assert.equal((await helpers.readProductPriceJob()).rows[0].code,'C3');
+    await assert.rejects(helpers.saveProductPriceJob({...checkpoint,scope:'other'}),/帳號或專案已切換/);
 });
 
-test('full master handler validates entire file before cloud preview and only previews the daily chunk', () => {
+test('lost commit response leaves cursor unchanged and same-day retry does not write twice', async () => {
+    const h=createHarness([{id:'p1',normalizedPartNo:'A1',manufacturerPartNo:'A1',brandName:'Bio-Rad',listPrice:100}]);
+    const job=h.job([{code:'A1',price:150}]);
+    h.afterTransaction=()=>{throw Error('回覆遺失');};
+    await assert.rejects(h.context.priceTest.runProductPriceJobBatch(job),/回覆遺失/);
+    assert.equal(job.cursor,0);assert.equal(h.writes.length,1);
+    h.afterTransaction=()=>{};
+    await h.context.priceTest.runProductPriceJobBatch(job);
+    assert.equal(job.cursor,1);assert.equal(h.writes.length,1);
+});
+
+test('concurrent price edit and server permission denial stop without progress or overwrite',async()=>{
+    for(const mode of ['conflict','permission']) {
+        const h=createHarness([{id:'p1',normalizedPartNo:'A1',manufacturerPartNo:'A1',brandName:'Bio-Rad',listPrice:100}]);
+        h.beforeTransaction=()=>{if(mode==='permission')throw Object.assign(Error('permission-denied'),{code:'permission-denied'});h.records[0].listPrice=130;};
+        const job=h.job([{code:'A1',price:150}]);
+        await assert.rejects(h.context.priceTest.runProductPriceJobBatch(job),mode==='conflict'?/其他操作修改/:/permission-denied/);
+        assert.equal(h.writes.length,0);assert.equal(job.cursor,0);assert.equal(h.saved.length,0);
+    }
+});
+
+test('full master handler validates entire file before cloud preview and only previews the bounded chunk', () => {
     const handler = source.slice(source.indexOf('window.handlePriceExcelUpload ='), source.indexOf('// ===== 2026-10-02：手機功能選單', source.indexOf('window.handlePriceExcelUpload =')));
     assert.ok(handler.includes('if (importErrors.length)'));
-    assert.ok(handler.indexOf('if (importErrors.length)') < handler.indexOf("reserveProductPriceDailyQuota(day, chunk.length, 'master')"));
+    assert.ok(handler.indexOf('if (importErrors.length)') < handler.indexOf("confirmProductMasterImport(chunkGroups)"));
     assert.ok(handler.includes('confirmProductMasterImport(chunkGroups)'));
     assert.ok(!handler.includes('confirmProductMasterImport(brandGroups, importErrors)'));
     assert.ok(handler.includes('crypto.subtle.digest'));
     assert.ok(handler.includes('existingJob.fingerprint === fingerprint'));
     assert.ok(handler.includes('await saveProductPriceJob(job)'));
     assert.ok(!handler.includes('rows:allImportedItems'));
+});
+
+test('master upload handles 501 rows in same-day 500/1 batches, interruption, replacement and duplicate validation',async()=>{
+ const h=createHarness();const c=h.context;let checkpoint=null,loaded,fail=false,allowReplace=true;
+ let rows=Array.from({length:501},(_,i)=>({'貨號':`A${i}`,'廠牌':'Bio-Rad','英文品名':`Product ${i}`,'建議售價':100}));
+ const records=new Map(),batches=[],errors=[];
+ Object.assign(c,{
+  pendingPriceListUploadBrand:'',brandProductDeleteRunning:false,productMasterMigrationRunning:false,
+  setProductBatchMaintenanceBusy:()=>{},ensureXlsxLoaded:async()=>{},
+  FileReader:class {readAsArrayBuffer(){loaded=this.onload({target:{result:new Uint8Array([1])}});}},
+  XLSX:{read:()=>({SheetNames:['master'],Sheets:{master:rows}})},
+  isProductImportPlaceholderCode:()=>false,resolveBrandName:x=>x,normalizeImportedProductCode:(_,x)=>x,
+  normalizeProductTypeValue:()=> 'Goods',stableProductId:x=>x.model,
+  crypto:{subtle:{digest:async()=>new Uint8Array([rows.length%256])}},
+  withProductPriceImportLock:fn=>fn(),productImportJobScope:()=> 'demo-yushin:staff-1:master',
+  readProductPriceJob:async()=>checkpoint&&structuredClone(checkpoint),
+  saveProductPriceJob:async job=>{checkpoint=structuredClone(job);},
+  confirm:()=>allowReplace,
+  confirmProductMasterImport:async(groups,errors=[])=>{if(errors.length){errors.forEach(x=>batches.push(x));return false;}batches.push(groups.flatMap(g=>g.imported).length);return true;},
+  pendingPriceImportPreview:{importState:{}},
+  saveProductMasterBrand:async(items,brand)=>{
+   let writes=0;for(const item of items){if(!records.has(item.model)){records.set(item.model,item);writes++;}if(fail){fail=false;throw Error('network interrupted');}}
+   return {brand,items,productWrites:writes,costWrites:0,unchangedRows:items.length-writes};
+  },
+  productItemWithoutCost:x=>x,markPriceListImportComplete:async()=>{},
+  renderPriceBrandOptions:()=>{},renderCompanyAgencyBrandSettings:()=>{},loadProductManagementOverview:()=>{},
+  invalidateVisibleProductCosts:()=>{},purchaseCostCache:new Map(),
+  alert:x=>errors.push(x),activeProductImportBatch:null
+ });
+ const start=source.indexOf('window.handlePriceExcelUpload =');
+ vm.runInContext(source.slice(start,source.indexOf('// ===== 2026-10-02：手機功能選單',start)),c);
+ async function upload(){await c.window.handlePriceExcelUpload({files:[{name:'Bio-Rad.xlsx'}],value:'file'});await loaded;}
+ fail=true;await upload();assert.equal(checkpoint.cursor,0);assert.equal(records.size,1);assert.match(errors.pop(),/network interrupted/);
+ await upload();assert.equal(checkpoint.cursor,500);assert.equal(records.size,500);
+ await upload();assert.equal(checkpoint.cursor,501);assert.equal(records.size,501);
+ assert.deepEqual(batches,[500,500,1]);
+ await upload();assert.equal(checkpoint.cursor,500);assert.equal(records.size,501); // complete file starts fresh and compares existing data
+ rows=[{'貨號':'NEW','廠牌':'Bio-Rad'}];allowReplace=false;
+ await upload();assert.equal(checkpoint.total,501);assert.equal(records.has('NEW'),false);
+ allowReplace=true;await upload();assert.equal(checkpoint.total,1);assert.equal(records.has('NEW'),true);
+ rows=[{'貨號':'DUP','廠牌':'Bio-Rad'},{'貨號':'DUP','廠牌':'Bio-Rad'}];
+ await upload();assert.match(batches.at(-1),/重複出現/);assert.equal(records.has('DUP'),false);
 });
