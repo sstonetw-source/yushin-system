@@ -72,6 +72,7 @@ const {chromium}=require('playwright-core'),{spawnSync}=require('node:child_proc
  const ordersCache=[],purchaseHistorySupplyCache=new Map();const purchasingReceivingReady=true,activeReceivingSupplyReady=true;
  const inlineJsValue=JSON.stringify,buildReceivingEvidenceIndex=()=>new Map(),purchaseFilterContext=()=>({}),receivingSourceOrderForItem=()=>null,purchaseLineMatchesFilters=()=>true;
  const canConfirmSupplyReceipt=()=>true,supplyCancelActionHtml=()=>'',receivingDueInfo=()=>({sortRank:3}),receivingWaitHtml=()=>'',receivingDueHtml=()=>'';
+ const receiptTaskInFlight=()=>false;
  const renderReceiptTasks=()=>{},formatStatsMoney=value=>'NT$ '+value,localDateString=()=> '2026-11-05';
  document.querySelectorAll('.content-section').forEach(el=>el.classList.remove('active'));
  document.getElementById('purchasing-system').classList.add('active');

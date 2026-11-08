@@ -96,7 +96,8 @@ const setup=`
   await dialog.getByRole('spinbutton').first().fill('1');
   await dialog.getByRole('button',{name:'確認寄出',exact:true}).click();
   await page.waitForFunction(()=>!document.getElementById('warehouseParcelDialog').open);
-  assert.equal(await page.locator('.parcel-task').count(),1);
+  assert.equal(await page.locator('.parcel-task').count(),0,'in-flight parcel task card disappears immediately');
+  assert.match(await page.locator('#uiWorkActionStatus').innerText(),/背景處理中 1 筆/);
   await page.locator('#warehouseParcelCards .parcel-card:not(.parcel-task)').getByRole('button',{name:'確認寄出',exact:true}).click();
   assert.ok(await dialog.isVisible(),'other recipients remain operable during a blocked request');
   await dialog.getByRole('button',{name:'返回',exact:true}).click();
