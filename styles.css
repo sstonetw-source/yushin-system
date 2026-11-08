@@ -5179,13 +5179,15 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
  #appContainer #inventoryShippingBody .warehouse-task-row > .warehouse-task-item { grid-column:1; grid-row:1; }
 }
 @media screen {
+ #warehouseParcelCards { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr)); gap:12px; align-items:stretch; }
+ #warehouseParcelCards > .parcel-empty-state,#warehouseParcelCards > .parcel-guard-note,#warehouseParcelCards > button { grid-column:1/-1; }
  .parcel-toolbar { display:flex; align-items:center; gap:8px; margin:12px 0; }
  .parcel-toolbar > strong { margin-right:auto; font-size:18px; }
  .parcel-filter-menu > summary,#parcelAdvanced > summary,.parcel-card > details > summary { cursor:pointer; min-height:44px; display:flex; align-items:center; color:var(--ys-primary); }
  .parcel-filter-menu { position:relative; }
  .parcel-filter-menu[open] { flex:1; }
  .parcel-filter-menu select { width:100%; box-sizing:border-box; min-height:44px; margin:4px 0; }
- .parcel-card { padding:16px; margin:12px 0; background:var(--ys-surface); border:1px solid var(--ys-border); border-radius:12px; overflow-wrap:anywhere; }
+ .parcel-card { padding:16px; margin:0; background:var(--ys-surface); border:1px solid var(--ys-border); border-radius:12px; overflow-wrap:anywhere; display:flex; flex-direction:column; }
  .parcel-card > header { display:flex; gap:12px; align-items:center; justify-content:space-between; }
  .parcel-card h3 { margin:0; font-size:20px; }
  .parcel-card > header > span { font-size:13px; color:var(--ys-primary); background:var(--ys-selected); padding:4px 8px; border-radius:8px; }
@@ -5195,10 +5197,11 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
  .parcel-items { list-style:none; margin:12px 0 0; padding:0; border-top:1px solid var(--ys-border); }
  .parcel-items li { display:flex; gap:12px; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--ys-border); }
  .parcel-items li > strong { flex:none; }
- .parcel-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:12px; }
+ .parcel-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:auto; padding-top:12px; }
  .parcel-simple-card { padding:14px 16px; }
  .parcel-simple-card .parcel-destination h3 { margin:4px 0; font-size:19px; }
  .parcel-simple-card .parcel-address { margin:4px 0 12px; font-size:16px; font-weight:600; line-height:1.5; }
+ .parcel-simple-card .parcel-recipient-phone { font-size:13px; color:var(--ys-muted); margin:-6px 0 12px; }
  .parcel-field-caption { display:block; font-size:13px; font-weight:600; color:var(--ys-muted); }
  .parcel-contents { padding-top:12px; border-top:1px solid var(--ys-border); }
  .parcel-simple-card .parcel-items { margin-top:4px; border-top:0; }
@@ -5208,6 +5211,7 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
  .parcel-extra-details > summary { font-size:13px; }
  .parcel-extra-details p { font-size:13px; color:var(--ys-muted); }
  .parcel-empty-state { padding:28px 16px; text-align:center; color:var(--ys-muted); background:var(--ys-surface); border:1px solid var(--ys-border); border-radius:12px; }
+ .parcel-guard-note { padding:10px 12px; border-radius:8px; background:var(--ys-selected); color:var(--ys-primary); font-size:13px; }
  #appContainer .parcel-actions button,.parcel-dialog button { min-height:44px; margin:0; }
  .parcel-dialog { width:min(560px,calc(100vw - 32px)); max-height:85dvh; overflow:auto; border:1px solid var(--ys-border); border-radius:12px; background:var(--ys-surface); box-sizing:border-box; padding:20px; }
  .parcel-dialog::backdrop { background:#0006; }

@@ -129,14 +129,16 @@ function workspaceUiFixture({returnsFail=false,purchaseFail=false}={}){
    showActionFeedback:()=>calls.push('toast')});
  vm.runInContext(code,c);return {c,el,cards,calls};
 }
-test('main and branch mailing tabs isolate customer shipments without counting pickups or transfers',async()=>{
+test('main and branch mailing tabs include transfer requests but never treat main pickup as direct shipment',async()=>{
  const {c,el}=workspaceUiFixture();c.YushinWarehouseLogistics=require('../modules/warehouse-logistics');c.inlineJsValue=JSON.stringify;
  c.warehouseMasterCache=[{id:'MAIN',warehouseName:'主倉'},{id:'BRANCH',warehouseName:'分倉'}];
  c.orderWorkQueueCache=[['main','MAIN','CUSTOMER_SHIP'],['mail','BRANCH','SALES_SHIP'],['pickup','MAIN','PICKUP'],['transfer','BRANCH','PICKUP'],['missing','BRANCH','']].map(([id,warehouseId,mode])=>({id,shippingInstructions:{mode},items:[{itemId:'A',warehouseId,qty:1}]}));
- c.renderInventoryShipping();assert.match(el('inventoryShippingStatus').textContent,/1 筆/);assert.doesNotMatch(el('inventoryShippingBody').innerHTML,/主倉領取/);assert.equal(el('inventoryShippingTabBtn').textContent,'寄貨（2）');
- await c.switchInventoryShippingKind('branch');el('inventoryShippingWarehouse').value='BRANCH';c.renderInventoryShipping();assert.match(el('inventoryShippingBody').innerHTML,/寄給負責業務/);assert.doesNotMatch(el('inventoryShippingBody').innerHTML,/直接寄客戶/);
- await c.switchInventoryShippingKind('main');assert.match(el('inventoryShippingStatus').textContent,/1 筆/);assert.match(el('inventoryShippingBody').innerHTML,/直接寄客戶/);assert.doesNotMatch(el('inventoryShippingBody').innerHTML,/寄給負責業務/);
- el('inventoryDeliveryModeFilter').value='SALES_SHIP';c.renderInventoryShipping();assert.match(el('inventoryShippingStatus').textContent,/0 筆/);
+ c.mainTransferParcelEntries=()=>({ready:true,error:'',entries:[{kind:'order',warehouseId:'BRANCH'},{kind:'stock',warehouseId:'BRANCH'}]});
+ let renderCount=0;c.renderWarehouseParcels=()=>{renderCount++;};
+ c.renderInventoryShipping();assert.match(el('inventoryShippingMainBtn').innerHTML,/1 筆/);assert.match(el('inventoryShippingBranchBtn').innerHTML,/3 筆/);assert.equal(el('inventoryShippingTabBtn').textContent,'寄貨（4）');
+ await c.switchInventoryShippingKind('branch');assert.match(el('inventoryShippingBranchBtn').innerHTML,/3 筆/);
+ await c.switchInventoryShippingKind('main');assert.match(el('inventoryShippingMainBtn').innerHTML,/1 筆/);
+ assert.ok(renderCount>=3);
 });
 test('single warehouse shipment UI passes a detached warehouse and recipient snapshot to the service',async()=>{
  const {c}=workspaceUiFixture();
