@@ -34,6 +34,7 @@ jobs:
           node --check modules/warehouse-logistics.js
           node --check modules/main-warehouse-transfers.js
           node --check modules/delivery-settings.js
+          node --check modules/home-screen-install.js
           node --check app.js
           node --check modules/customer-cancellations.js
           node --check modules/document-downloads.js

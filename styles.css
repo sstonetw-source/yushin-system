@@ -4880,6 +4880,14 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
  #personalSettingsForm section { border-top:1px solid var(--ys-border); padding:12px 0; }
  #personalSettingsForm label { display:block; margin:8px 0; }
  #personalSettingsForm :is(input,select) { width:100%; box-sizing:border-box; min-height:44px; font:inherit; }
+ #personalSettingsForm .home-screen-install { background:var(--ys-surface); border:1px solid var(--ys-border); border-radius:12px; padding:14px; margin:12px 0; }
+ #personalSettingsForm .home-screen-install h4 { margin:0 0 8px; }
+ #personalSettingsForm .home-screen-install > p { margin:6px 0 10px; color:var(--ys-muted); font-size:14px; }
+ #homeScreenInstallButton { width:100%; min-height:44px; text-align:center; }
+ #homeScreenInstallButton[hidden], #homeScreenInstallGuide[hidden] { display:none!important; }
+ #homeScreenInstallGuide { margin-top:10px; background:var(--ys-record); padding:10px 12px; border-radius:8px; font-size:14px; line-height:1.65; }
+ #homeScreenInstallGuide ol { margin:8px 0; padding-left:22px; }
+ #homeScreenInstallGuide li + li { margin-top:4px; }
  .inventory-work-table[hidden],.inventory-shipping-batch-actions[hidden] { display:none!important; }
 }
 @media screen and (max-width:768px) {
