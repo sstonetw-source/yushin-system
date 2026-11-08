@@ -1301,7 +1301,7 @@ function renderPendingPurchaseOrders(itemMap = null, filterContext = null) {
         const batchSelectable=sourceType==='SALES_ORDER'&&!!order&&!selfOrder;
         if(batchSelectable)visibleSelectableIds.add(String(demand.id||''));
         const selectionHtml=batchSelectable
-            ? `<label class="purchase-batch-selection"><input type="checkbox" class="pending-purchase-batch-select" aria-label="選取合併採購" ${selectedPendingPurchaseDemandIds.has(String(demand.id||''))?'checked':''} onchange="togglePendingPurchaseSelection(${inlineJsValue(demand.id||'')},this.checked)">合併</label>`
+            ? `<label class="purchase-batch-selection"><input type="checkbox" class="pending-purchase-batch-select" aria-label="選取合併採購" ${selectedPendingPurchaseDemandIds.has(String(demand.id||''))?'checked':''} onchange="togglePendingPurchaseSelection(${inlineJsValue(demand.id||'')},this.checked)">合併採購</label>`
             : '';
 
         if(sourceType==='STOCK_REPLENISHMENT'){
@@ -1325,7 +1325,7 @@ function renderPendingPurchaseOrders(itemMap = null, filterContext = null) {
 
         const row=document.createElement('tr');
         row.classList.add('procurement-demand-row');
-        row.innerHTML=`<td data-th="需求日期">${workflowRecordSummary(order, date)}</td><td data-th="客戶／用途">${escapeHtml(customer)}<div class="record-reference">${!order?.orderNo && order?.quoteNo ? `來源估價單・${escapeHtml(order.quoteNo)}` : ''}</div></td><td data-th="待採購品項">${purchaseProductSummary({...demand, itemName:demand.itemName || item.itemName, itemCode:demand.itemCode || item.itemCode, brand}, qty, null)}</td><td data-th="數量">${workflowQuantitySummary(qty,'待採購')}${statusLabel==='待採購'?'':`<small class="purchase-item-description">${escapeHtml(statusLabel)}</small>`}</td><td data-th="負責業務">${escapeHtml(salesName)}</td><td data-th="操作"><div class="workflow-inline-actions">${selectionHtml}${actionHtml}</div></td>`;
+        row.innerHTML=`<td data-th="需求日期">${workflowRecordSummary(order, date)}</td><td data-th="客戶／用途">${selectionHtml}<span class="purchase-customer-name">${escapeHtml(customer)}</span><div class="record-reference">${!order?.orderNo && order?.quoteNo ? `來源估價單・${escapeHtml(order.quoteNo)}` : ''}</div></td><td data-th="待採購品項">${purchaseProductSummary({...demand, itemName:demand.itemName || item.itemName, itemCode:demand.itemCode || item.itemCode, brand}, qty, null)}</td><td data-th="數量">${workflowQuantitySummary(qty,'待採購')}${statusLabel==='待採購'?'':`<small class="purchase-item-description">${escapeHtml(statusLabel)}</small>`}</td><td data-th="負責業務">${escapeHtml(salesName)}</td><td data-th="操作"><div class="workflow-inline-actions">${actionHtml}</div></td>`;
         organizePurchasingOrderRow(row,order,item,{qty, productId:demand.productId || item.productId, estimate:true, targets});
         fragment.appendChild(row);
         shown++;

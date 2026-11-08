@@ -95,7 +95,7 @@ test('order list keeps only field headings bold and summary values at regular we
     assert.match(css, /#appContainer :is\(#ordersTable,\.workflow-list-table,\.inventory-work-table table\) td\[data-th\]::before \{ font-size:16px; font-weight:700;/);
 });
 
-test('order cards keep commercial details in the drawer and a compact mobile customer row', () => {
+test('order cards keep commercial details in the drawer and a stacked mobile customer field', () => {
     const progressLine = orderWorkspace.split('\n').find(line => line.includes('<td data-th="進度" class="order-progress-cell">'));
     assert.ok(progressLine);
     assert.doesNotMatch(progressLine, /workflowCommercialSummary\(o\)/);
@@ -103,7 +103,7 @@ test('order cards keep commercial details in the drawer and a compact mobile cus
     assert.match(orderWorkspace, /<h4>交易與備註<\/h4>/);
     assert.match(orderWorkspace, /<dt>交易方式<\/dt>/);
     assert.match(orderWorkspace, /<dt>發票抬頭<\/dt>/);
-    assert.match(css, /td\.order-customer-cell \{\s*display:flex;\s*align-items:center;/);
+    assert.match(css, /td\.order-customer-cell \{\s*display:flex;\s*flex-direction:column;\s*align-items:flex-start;/);
     assert.match(css, /\.workflow-customer-link \{ display:inline-flex; min-height:0;/);
 });
 

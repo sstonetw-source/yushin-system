@@ -4950,17 +4950,18 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
     }
 }
 
-/* Mobile order card: keep the customer heading and link on one compact row. */
+/* Mobile order card: align the heading above the customer link. */
 @media screen and (max-width:768px) {
     #appContainer #ordersTable #ordersBody > tr > td.order-customer-cell {
         display:flex;
-        align-items:center;
+        flex-direction:column;
+        align-items:flex-start;
         flex-wrap:wrap;
         gap:4px 12px;
         padding:4px 0 6px;
     }
     #appContainer #ordersTable #ordersBody > tr > td.order-customer-cell::before {
-        display:inline;
+        display:block;
         flex:0 0 auto;
         margin:0;
     }
@@ -5220,3 +5221,34 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
  .parcel-confirm-items > label { display:grid; grid-template-columns:minmax(0,1fr) 90px; gap:12px; align-items:center; }
  .parcel-task { border-left:4px solid var(--ys-primary); }
 }
+
+/* Quantity-driven receiving uses the same inputs on phone and desktop. */
+#poReceiptBatchOverlay .receipt-dialog-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+#poReceiptBatchTitle { min-width:0; overflow-wrap:anywhere; }
+#poReceiptBatchOverlay .receipt-dialog-heading > button { flex:none; white-space:nowrap; }
+#poReceiptBatchOverlay table { width:100%; table-layout:fixed; }
+#poReceiptBatchOverlay :is(th,td) { overflow-wrap:anywhere; vertical-align:top; }
+#poReceiptBatchOverlay :is(input,label) { width:100%; min-width:0; box-sizing:border-box; }
+#poReceiptBatchOverlay input { min-height:44px; font-size:16px; }
+#poReceiptBatchOverlay .receipt-dialog-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; margin-top:16px; }
+#appContainer .purchase-customer-name { display:block; overflow-wrap:anywhere; }
+#appContainer .purchase-batch-selection { display:flex; align-items:center; gap:8px; min-height:44px; margin:0 0 8px; }
+#appContainer .workflow-customer-link { max-width:100%; overflow-wrap:anywhere; white-space:normal; }
+@media screen and (max-width:768px) {
+ #appContainer .workflow-list-table td[data-th="客戶名稱"]:has(.purchase-batch-selection) { display:flex; flex-direction:column; align-items:flex-start; }
+ #appContainer .workflow-list-table td[data-th="客戶名稱"]:has(.purchase-batch-selection)::before { order:1; }
+ #appContainer .workflow-list-table .purchase-batch-selection { order:0; }
+ #appContainer .workflow-list-table .purchase-customer-name { order:2; }
+ #appContainer .workflow-list-table td[data-th="客戶名稱"] .record-reference { order:3; }
+ #poReceiptBatchOverlay .eq-modal-box { width:calc(100% - 24px); max-width:calc(100% - 24px) !important; padding:16px; box-sizing:border-box; }
+ #poReceiptBatchOverlay .table-wrap { overflow:visible; }
+ #poReceiptBatchOverlay :is(table,tbody) { display:block; width:100%; min-width:0; }
+ #poReceiptBatchOverlay thead { display:none; }
+ #poReceiptBatchOverlay tbody > tr { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px 8px; margin:16px 0; padding:14px; border:1px solid var(--ys-border); border-radius:8px; background:var(--ys-surface); }
+ #poReceiptBatchOverlay tbody > tr > td { display:block; grid-column:1 / -1; width:auto; min-width:0; padding:0; border:0; text-align:left; }
+ #poReceiptBatchOverlay tbody > tr > td.receipt-stat { grid-column:auto; }
+ #poReceiptBatchOverlay tbody > tr > td::before { content:attr(data-th); display:block; margin-bottom:6px; font-weight:700; }
+ #poReceiptBatchOverlay .receipt-dialog-actions > button { flex:1; }
+}
+
+#poReceiptBatchOverlay .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; border:0; }
