@@ -46,6 +46,10 @@ const setup=`
   await context.addInitScript(()=>{window.print=()=>{};});
   const commits=new Map(),requests=[];let release,drop=true,failureAt=0;
   page.on('pageerror',e=>{throw e;});
+  const waitForParcelTaskCleared=target=>target.waitForFunction(()=>{
+    const key=Object.keys(localStorage).find(name=>name.startsWith('warehouse-parcels:'));
+    return !key||JSON.parse(localStorage.getItem(key)||'[]').length===0;
+  });
   await page.context().exposeFunction('commitParcelProbe',job=>new Promise(resolve=>{
    requests.push(JSON.parse(JSON.stringify(job)));const attempt=requests.length;
    const execute=()=>{
@@ -58,6 +62,8 @@ const setup=`
    await target.goto('http://127.0.0.1:'+server.address().port);
    await target.addStyleTag({path:path.join(root,'styles.css')});
    await target.addScriptTag({content:setup});
+   const feedbackSource=fs.readFileSync(path.join(root,'src/shared/action-feedback.js'),'utf8');
+   await target.addScriptTag({content:feedbackSource.slice(feedbackSource.indexOf('const uiWorkActions = new Map();'))});
    await target.addScriptTag({path:path.join(root,'modules/warehouse-logistics.js')});
    await target.addScriptTag({content:`
     warehouseParcelSourceRows=()=>all;
@@ -94,7 +100,8 @@ const setup=`
   await dialog.getByRole('spinbutton').first().fill('1');
   await dialog.getByRole('button',{name:'確認寄出',exact:true}).click();
   await page.waitForFunction(()=>!document.getElementById('warehouseParcelDialog').open);
-  assert.equal(await page.locator('.parcel-task').count(),1);
+  assert.equal(await page.locator('.parcel-task').count(),0,'in-flight parcel task card disappears immediately');
+  assert.match(await page.locator('#uiWorkActionStatus').innerText(),/背景處理中 1 筆/);
   await page.locator('#warehouseParcelCards .parcel-card:not(.parcel-task)').getByRole('button',{name:'確認寄出',exact:true}).click();
   assert.ok(await dialog.isVisible(),'other recipients remain operable during a blocked request');
   await dialog.getByRole('button',{name:'返回',exact:true}).click();
@@ -103,7 +110,7 @@ const setup=`
   const originalId=requests[0].operationId;
   await mount();
   await page.locator('.parcel-task').getByRole('button',{name:'核對／重試原寄貨'}).click();
-  await page.waitForFunction(()=>!document.querySelector('.parcel-task'));
+  await waitForParcelTaskCleared(page);
   assert.equal(requests[1].operationId,originalId);
   assert.equal(requests[1].qty,1);
   assert.equal(commits.size,2,'lost-response replay keeps one result per item');
@@ -120,8 +127,8 @@ const setup=`
   assert.equal(await second.locator('.parcel-task').count(),1,'same-browser tab restores progress');
   const taskId=await page.evaluate(()=>JSON.parse(localStorage.getItem(Object.keys(localStorage).find(k=>k.startsWith('warehouse-parcels:'))))[0].id);
   await Promise.all([page.evaluate(id=>resumeWarehouseParcel(id),taskId),second.evaluate(id=>resumeWarehouseParcel(id),taskId)]);
-  await page.waitForFunction(()=>!document.querySelector('.parcel-task'));
-  await second.waitForFunction(()=>!document.querySelector('.parcel-task'));
+  await waitForParcelTaskCleared(page);
+  await waitForParcelTaskCleared(second);
   assert.equal(requests.length,before+3,'cross-tab lock sends only the unfinished item once');
   assert.equal(requests[before+1].operationId,requests[before+2].operationId);
   await second.close();

@@ -106,7 +106,8 @@ function uiFixture(){
  Object.assign(f.c,{inventoryCache:[item],inventorySearchResults:[],inventoryReplenishmentCache:[],inventoryItemById:()=>item,inventoryAggregateStock:()=>item,
   lifecycleRecordId:()=> 'OP'+(++seq),canManageInventoryStockPolicy:()=>['admin','purchaser'].includes(f.c.currentUserRole),INVENTORY_STOCK_POLICIES:core.STOCK_POLICIES,
   confirm:()=>true,beginActionButton:()=>({}),endActionButton(){},alert:m=>messages.push(m),showActionFeedback:m=>messages.push(m),writeAppDataCache(){},markMainPageDirty(){},renderInventoryList(){},renderInventoryReplenishmentCenter(){}});
- f.c.window=f.c;vm.runInContext(feature.slice(feature.indexOf('function canManageInventoryList()'),feature.indexOf('window.setInventoryStockPolicy=')),f.c);
+ f.c.window=f.c;require('./helpers/ui-work-action-fixture.cjs')(f.c);
+ vm.runInContext(feature.slice(feature.indexOf('function canManageInventoryList()'),feature.indexOf('window.setInventoryStockPolicy=')),f.c);
  return {...f,messages,item};
 }
 test('Feature keeps policy operation after lost response and does not overwrite later current cache',async()=>{

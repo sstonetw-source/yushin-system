@@ -39,6 +39,17 @@ window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
     if(retry&&retry.nextStatus!==nextStatus){alert('請先確認前次取消／恢復結果。');return;}
     if (pendingLifecycleOrderIds.has(orderId) || (!retry&&normalizedOrderStatus(cachedOrder) === nextStatus)) return;
     if(!retry&&nextStatus==='cancelled'&&!confirmOrderCancellation(cachedOrder))return;
+    const uiAction = beginUiWorkAction('order-lifecycle', orderId,
+        `${nextStatus==='cancelled'?'取消':'恢復'}訂單 ${cachedOrder.orderNo||orderId}`, () => {
+            if (document.getElementById('order-system')?.classList.contains('active')) renderOrdersList();
+        },{resume:!!retry,onVerify:()=>{
+            let original=null;
+            try { original=lifecycleProtectedMode()?pendingV2OrderLifecycle(orderId):null; }
+            catch(error) { alert(error.message); return; }
+            if(!original || original.nextStatus!==nextStatus){alert('原操作憑證無法核對，請重新載入訂單後確認，不要建立新交易。');return;}
+            quickSetOrderLifecycle(orderId,nextStatus);
+        }});
+    if (!uiAction) return;
     pendingLifecycleOrderIds.add(orderId);
     renderOrdersList();
     if (currentDeliveryOrderId === orderId) { renderDeliveryModal(); renderOrderLifecycleModal(); }
@@ -49,13 +60,15 @@ window.quickSetOrderLifecycle = async function(orderId, nextStatus) {
         // The lifecycle transaction already synchronizes stock and purchase demand.
         applySavedOrderLifecycle(orderId,savedOrder);
         pendingLifecycleOrderIds.delete(orderId);
+        uiAction.finish('success');
         renderOrdersList();
         if (currentDeliveryOrderId === orderId) { renderDeliveryModal(); renderOrderLifecycleModal(); }
     } catch (err) {
         pendingLifecycleOrderIds.delete(orderId);
+        uiAction.finish(committed ? 'success' : uiWorkResultUncertain(err) ? 'unknown' : 'failure');
         renderOrdersList();
         if (currentDeliveryOrderId === orderId) { renderDeliveryModal(); renderOrderLifecycleModal(); }
-        alert((committed?'訂單狀態已確認，但畫面更新失敗；請重新讀取，勿重建作業：':`${nextStatus === 'normal' ? '恢復' : '取消'}訂單結果未確認：`) + err.message);
+        alert((committed?'訂單狀態已確認，但畫面更新失敗；請重新讀取，勿重建作業：':uiWorkResultUncertain(err)?`${nextStatus === 'normal' ? '恢復' : '取消'}訂單結果未確認，請先核對原交易：`:`${nextStatus === 'normal' ? '恢復' : '取消'}訂單失敗，原畫面已恢復：`) + err.message);
     }
 };
 

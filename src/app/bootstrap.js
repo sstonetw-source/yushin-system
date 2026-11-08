@@ -442,6 +442,7 @@ window.addEventListener('DOMContentLoaded', () => {
             });
         } else {
             resetSessionData();
+            if (typeof clearUiWorkActions === 'function') clearUiWorkActions();
             currentUser = null;
             window.DocumentDownloads?.setUser('');
             currentUserRole = null;

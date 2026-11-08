@@ -460,7 +460,7 @@ function quickLifecycleActionFixture(nextStatus){
  let resolveCommit,rejectCommit,transactions=0;
  const commit=new Promise((resolve,reject)=>{resolveCommit=resolve;rejectCommit=reject;});
  const before={id:'O',status:nextStatus==='normal'?'cancelled':'active',orderStatus:nextStatus==='normal'?'cancelled':'normal',orderStatusDate:'2026-10-01',orderStatusReason:'original',orderLifecycleHistory:[],items:[]};
- const c=vm.createContext({window:{},ordersCache:[structuredClone(before)],pendingLifecycleOrderIds:new Set(),
+ const c=vm.createContext({window:{},currentUser:{uid:'U'},currentUserRole:'sales',ordersCache:[structuredClone(before)],pendingLifecycleOrderIds:new Set(),
   canManageOrderLifecycleCapability:()=>true,canEditPage:()=>true,
   normalizedOrderStatus:o=>o.orderStatus,confirmOrderCancellation:()=>true,
   localDateString:()=> '2026-10-15',deliveryActor:()=> 'U',
@@ -471,6 +471,7 @@ function quickLifecycleActionFixture(nextStatus){
   runRoleTransaction:async fn=>{transactions++;await fn({get:async()=>({exists:true,data:()=>structuredClone(before)}),update:()=>{}});await commit;},
   adjustInventoryReservationForLifecycle:async()=>({items:[]}),orderWorkIndexFields:()=>({}),
   normalizedOrderItems:o=>o.items,syncOrderIntoPurchasingCaches:()=>{},writeAppDataCache:()=>{},alert:()=>{}});
+ require('./helpers/ui-work-action-fixture.cjs')(c);
  vm.runInContext(fs.readFileSync('src/services/order-lifecycle.js','utf8'),c);
  vm.runInContext(app.slice(app.indexOf('function applySavedOrderLifecycle('),app.indexOf('window.toggleOrderProgressStatus')),c);
  return {c,before,resolveCommit,rejectCommit,transactions:()=>transactions};

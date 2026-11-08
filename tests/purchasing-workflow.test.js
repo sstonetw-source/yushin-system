@@ -8,6 +8,7 @@ const fulfillment = require('../modules/fulfillment-core.js');
 const supply = require('../modules/supply-core.js');
 const receiving = require('../modules/receiving-core.js');
 const demand = require('../modules/procurement-demand-core.js');
+const installUiWorkActions = require('./helpers/ui-work-action-fixture.cjs');
 
 const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
@@ -687,6 +688,7 @@ test('manual ordered action records supply and source item only once after an un
         renderPurchasingView:()=>switched.push(['render']),showActionFeedback:()=>{},alert:()=>{}
     });
     vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", context);
+installUiWorkActions(context);
 vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/services/quick-purchase.js'),'utf8') + source,context);
     context.requestQuickPurchaseDetails = async () => ({supplier:'Vendor',unitCost:100,expectedQty:context.procurementDemandForOrderItem(order,order.items[0]).remainingToOrderQty});
     await context.window.markPurchaseItemOrdered('O1','I1',button);
@@ -754,6 +756,7 @@ test('manual ordered action can add a later genuine shortage without duplicating
         switchPurchasingView:()=>{},showActionFeedback:()=>{},alert:()=>{}
     });
     vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", context);
+installUiWorkActions(context);
 vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/services/quick-purchase.js'),'utf8') + source,context);
     context.requestQuickPurchaseDetails = async () => ({supplier:'Vendor',unitCost:100,expectedQty:context.procurementDemandForOrderItem(order,order.items[0]).remainingToOrderQty});
     await context.window.markPurchaseItemOrdered('O1','I1',button);
@@ -1832,6 +1835,7 @@ test('warehouse quick ordered action registers incoming atomically and idempoten
         switchPurchasingView:()=>{},showActionFeedback:()=>{},alert:()=>{}
     });
     vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", context);
+installUiWorkActions(context);
 vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/services/quick-purchase.js'),'utf8') + source,context);
 
     const button={disabled:false,textContent:'已採購',isConnected:false};

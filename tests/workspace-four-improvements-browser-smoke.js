@@ -79,6 +79,7 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','chrom
  globalThis.YushinInventory={isListArchived:()=>false,stockIsEmpty:x=>!(x.onHand||x.reserved||x.incoming)};
  `});
  const inventorySource=read('src/features/inventory/inventory-workspace.js');
+ await page.addScriptTag({content:read('src/shared/action-feedback.js').slice(read('src/shared/action-feedback.js').indexOf('const uiWorkActions = new Map();'))});
  await page.addScriptTag({content:inventorySource.slice(inventorySource.indexOf('window.renderInventoryList=function()'),inventorySource.indexOf('window.openInventoryReplenishment ='))});
  await page.evaluate(()=>{currentUserRole='admin';renderInventoryList();});
  assert.equal(await page.locator('#inventoryListBody > tr > td').count(),7);

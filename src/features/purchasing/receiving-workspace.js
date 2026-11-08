@@ -98,6 +98,19 @@ const restoredReceiptTaskUsers = new Set();
 function receiptTaskKey(supplyId, ownerUid = currentUser?.uid || '') {
     return `${ownerUid}:${supplyId}`;
 }
+function receiptTaskInFlight(supplyId) {
+    const job = receiptTaskJobs.get(receiptTaskKey(supplyId));
+    return job?.state === 'queued' || job?.state === 'running';
+}
+function refreshReceiptActionLists() {
+    if (document.getElementById('inventory-system')?.classList.contains('active')) {
+        renderPendingInventoryItems();
+        if (inventoryReceivingVisible) renderPurchasingReceivingWorkList(null,null,null,null,true);
+    }
+    if (document.getElementById('purchasing-system')?.classList.contains('active')) {
+        renderPurchasingReceivingWorkList();
+    }
+}
 function persistReceiptTasks(ownerUid) {
     try {
         const jobs=[...receiptTaskJobs.values()].filter(job=>job.ownerUid===ownerUid&&job.state!=='done');
@@ -176,6 +189,7 @@ async function runReceiptTask(job) {
     job.state='running';job.error='';
     persistReceiptTasks(job.ownerUid);
     renderReceiptTasks();
+    refreshReceiptActionLists();
     const affectedOrderIds=new Set();
     const supplyId=job.supplyId;
     try {
@@ -202,6 +216,7 @@ async function runReceiptTask(job) {
             if(button.dataset.receiptSupply===supplyId){button.dataset.receiptConfirmed='true';button.disabled=true;button.textContent='到貨已確認';}
         });
         renderReceiptTasks();
+        refreshReceiptActionLists();
         showActionFeedback(`${job.label}：到貨已確認。`,'success');
         await refreshReceiptTaskViews(affectedOrderIds,assertJobActor);
     } catch(err) {
@@ -215,7 +230,7 @@ async function runReceiptTask(job) {
             ? '已確認到貨，後續處理尚未完成。請用原資料重試。'
             : `結果待確認：${err.message||err}。請用原資料重試。`;
         persistReceiptTasks(job.ownerUid);
-        if(currentUser?.uid===job.ownerUid&&currentUserRole===job.actorRole)renderReceiptTasks();
+        if(currentUser?.uid===job.ownerUid&&currentUserRole===job.actorRole){renderReceiptTasks();refreshReceiptActionLists();}
     }
 }
 

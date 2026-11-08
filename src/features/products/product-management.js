@@ -655,7 +655,8 @@ function renderProductManagementResults() {
         const key = identity(product);
         identityCounts.set(key, (identityCounts.get(key) || 0) + 1);
     });
-    const visibleResults = productManagementResults.slice(0, productManagementVisibleLimit);
+    const visibleResults = productManagementResults.slice(0, productManagementVisibleLimit)
+        .filter(product => !uiWorkActionPending('product-status',product.productId||product.id));
     body.innerHTML = visibleResults.length
         ? visibleResults.map(product => productManagementRow(product, (identityCounts.get(identity(product)) || 0) > 1)).join('')
         : productManagementSourceMode === 'search' && productManagementActiveSearch?.hasMore
@@ -963,6 +964,11 @@ window.setProductMasterActive = async function(productId, active) {
     const button = actionButtonFromEventOrSelector();
     const state = beginActionButton(button, active ? '啟用中…' : '停用中…');
     if (button && !state) return;
+    const uiAction=beginUiWorkAction('product-status',id,`${active?'啟用產品主檔':'停用產品主檔'} ${code||id}`,()=>{
+        if(document.getElementById('productManagementBody'))renderProductManagementResults();
+    });
+    if(!uiAction){endActionButton(button,state);return;}
+    let committed=false,failure=null;
     try {
         const now = new Date().toISOString();
         const patch = {
@@ -972,6 +978,7 @@ window.setProductMasterActive = async function(productId, active) {
             updatedBy: currentUser?.uid || ''
         };
         await db.collection('products').doc(id).set(patch, { merge:true });
+        committed=true;
 
         const next = { ...product, ...patch, productId:product.productId || id };
         invalidateProductFrequentCache();
@@ -994,9 +1001,11 @@ window.setProductMasterActive = async function(productId, active) {
             : `已停用產品主檔：${brand} / ${code}；歷史資料保留。`;
         showActionFeedback(active ? '產品已重新啟用。' : '產品已停用，不再提供日常選用。');
     } catch (err) {
+        failure=err;
         console.error('更新產品主檔狀態失敗：', err);
-        alert('更新產品狀態失敗：' + (err?.message || err));
+        alert((committed||uiWorkResultUncertain(err)?'產品狀態結果待確認：':'更新產品狀態失敗：') + (err?.message || err));
     } finally {
+        uiAction.finish(committed?'success':failure&&uiWorkResultUncertain(failure)?'unknown':'failure');
         endActionButton(button, state);
     }
 };

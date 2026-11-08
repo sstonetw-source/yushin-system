@@ -59,6 +59,8 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
     const renderOrdersList=()=>{document.getElementById('list').innerHTML=orderLifecycleActionButtons(ordersCache[0],orderLifecycleInfo(ordersCache[0]),deliveryProgressInfo(),{});};
     const selectOrderProgressTab=()=>{};`});
    await page.addScriptTag({content:read('src/services/order-lifecycle.js')});
+   const feedbackSource=read('src/shared/action-feedback.js');
+   await page.addScriptTag({content:feedbackSource.slice(feedbackSource.indexOf('const uiWorkActions = new Map();'))});
    await page.addScriptTag({content:section(workspace,'function orderLifecycleActionButtons(','// Only a fully ready')});
    await page.addScriptTag({content:section(read('src/features/orders/lifecycle-workspace.js'),'function applySavedOrderLifecycle(','window.toggleOrderProgressStatus')});
    await page.addScriptTag({content:section(actions,'function renderOrderLifecycleStatusOptions(','// Customer return mutations')});

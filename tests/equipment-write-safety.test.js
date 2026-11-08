@@ -1,5 +1,6 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const app=fs.readFileSync('app.js','utf8');
+const installUiWorkActions=require('./helpers/ui-work-action-fixture.cjs');
 const source=app.slice(app.indexOf('window.saveEquipmentFromModal = async function'),app.indexOf('function loadEquipmentFromCloudThenReopen'));
 function database(){
   const docs=new Map(),writes=[];let seq=0,tail=Promise.resolve(),fail=false,hold=null;
@@ -20,14 +21,14 @@ function context(storage,{id=null,logs=[]}={}){
   nodes.eqSales.selectedOptions=[{dataset:{historical:id?'true':''}}];
   const local=id?[{id,model:'M1',logs:structuredClone(logs)}]:[];
   const c=vm.createContext({window:{},document:{getElementById:id=>nodes[id]},equipmentList:local,currentEquipmentId:id,
-    db:storage.db,alert:s=>alerts.push(s),confirm:()=>true,currentUser:{uid:'E1',email:'e1'},currentUserName:'工程師',
+    db:storage.db,alert:s=>alerts.push(s),confirm:()=>true,currentUser:{uid:'E1',email:'e1'},currentUserRole:'engineer',currentUserName:'工程師',
     equipmentOwnerFromSelection:()=>({salesName:'工程師',salesCode:'E1',ownerUid:'E1'}),getBrandFieldValue:()=> 'Roche',customerIdForName:()=> 'C1',salesCodeForName:()=> 'E1',syncCustomerMaster:()=> 'C1',
     buildFullHistorySearchTokens:()=>[],getNextAssetId:()=> 'EQ-E1-00001',rememberRecentCustomerName:()=>{},
     loadEquipmentFromCloudThenReopen:()=>{},showActionFeedback:()=>{},writeAppDataCache:()=>{},renderEquipmentList:()=>{},
     openEquipmentModal:()=>{},closeEquipmentModal:()=>{},actionButtonFromEventOrSelector:()=>null,
     localDateString:()=> '2026-10-13',lifecycleRecordId:()=> 'log-'+(++seq),console:{error:()=>{}},
     beginActionButton:b=>{if(b){b.disabled=true;return {}; }return null;},endActionButton:b=>{if(b)b.disabled=false;}
-  });c.window=c;vm.runInContext(source,c);return {c,nodes,alerts,local};
+  });c.window=c;installUiWorkActions(c);vm.runInContext(source,c);return {c,nodes,alerts,local};
 }
 test('equipment double save submits once and retry reuses the same document',async()=>{
   const d=database();let release;d.setHold(new Promise(r=>release=r));const f=context(d);

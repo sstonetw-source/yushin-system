@@ -45,12 +45,15 @@ function fn(name){const a=source.indexOf('function '+name+'('),b=source.indexOf(
    const runReadJobs=jobs=>Promise.all(jobs.map(job=>job()));
    const formatStatsMoney=value=>'NT$ '+value,receivingSourceOrderForItem=supply=>ordersCache.find(o=>o.id===supply.orderId);
    const canReceiveInventoryCapability=()=>['purchaser','warehouse','admin'].includes(currentUserRole),canConfirmSupplyReceipt=()=>canReceiveInventoryCapability(),supplyCancelActionHtml=()=>'',receivingWaitHtml=()=>'',receivingDueHtml=()=>'',receivingPlanRiskHtml=()=>'',renderReceiptTasks=()=>{};
+   const receiptTaskInFlight=()=>false;
    const db={collection:()=>{throw Error('Unexpected database read');}};
   `});
   await page.addScriptTag({content:fs.readFileSync('modules/supplier-core.js','utf8')});
   await page.addScriptTag({content:fs.readFileSync('modules/workflow-core.js','utf8')});
   await page.addScriptTag({content:fs.readFileSync('modules/receiving-core.js','utf8')});
   await page.addScriptTag({content:fs.readFileSync('modules/supply-core.js','utf8')});
+  const feedbackSource=fs.readFileSync('src/shared/action-feedback.js','utf8');
+  await page.addScriptTag({content:feedbackSource.slice(feedbackSource.indexOf('const uiWorkActions = new Map();'))});
   await page.addScriptTag({content:fs.readFileSync('src/features/orders/service-order-actions.js','utf8')});
   await page.addScriptTag({content:fs.readFileSync('src/shared/workspace-display.js','utf8')});
   await page.addScriptTag({content:source.slice(source.indexOf('let purchaseWorkSupplyRequests'),source.indexOf('let purchaseDemandSummaryRows'))});

@@ -260,6 +260,7 @@ window.renderEquipmentList = function() {
 
     const source = equipmentSearchActive ? equipmentSearchResults : equipmentList;
     source.forEach(eq => {
+        if (uiWorkActionPending('equipment-disable',eq.id)) return;
         const searchable = `${eq.customerName || ''} ${eq.brand || ''} ${eq.salesName || ''} ${eq.model || ''} ${eq.serialNo || ''} ${eq.assetId || ''} ${eq.location || ''} ${eq.notes || ''}`.toLowerCase();
         // 全資料搜尋已由 searchTokens + fullHistoryRecordMatches 完成，不再以畫面欄位二次縮小結果。
         if (!equipmentSearchActive && keyword && !searchable.includes(keyword)) return;
@@ -500,18 +501,25 @@ function actionFailureMessage(action, err, record = '') {
         : '資料庫未確認操作成功。';
     return `${action}失敗${record ? '（' + record + '）' : ''}：${reason}請保留目前資料，確認連線或權限後重試；若持續失敗，請聯絡管理員。`;
 }
-async function runEquipmentAction(key, action, label, callback, button) {
+async function runEquipmentAction(key, action, label, callback, button, options = {}) {
     if (equipmentActionsPending.has(key)) return false;
+    const uiAction=options.optimisticScope?beginUiWorkAction(options.optimisticScope,key,`${action} ${label}`,()=>{
+        if(document.getElementById('equipment-system')?.classList.contains('active'))renderEquipmentList();
+    }):null;
+    if(options.optimisticScope&&!uiAction)return false;
     equipmentActionsPending.add(key);
     const state = beginActionButton(button, '處理中…');
     const hint = document.getElementById('eqSaveHint');
     if (hint) hint.textContent = action + '中…';
+    let completed=false,failure=null;
     try {
         await callback();
+        completed=true;
         if (hint) hint.textContent = '✓ ' + action + '完成：' + label;
         showActionFeedback(action + '完成：' + label);
         return true;
     } catch (err) {
+        failure=err;
         console.error(action, label, err);
         const message = actionFailureMessage(action, err, label);
         if (hint) hint.textContent = message;
@@ -519,6 +527,7 @@ async function runEquipmentAction(key, action, label, callback, button) {
         return false;
     } finally {
         equipmentActionsPending.delete(key);
+        uiAction?.finish(completed?'success':failure&&uiWorkResultUncertain(failure)?'unknown':'failure');
         endActionButton(button, state);
     }
 }
@@ -552,7 +561,7 @@ window.deleteEquipment = async function(eqId) {
         writeAppDataCache('equipment', equipmentList);
         renderEquipmentList();
         if (currentEquipmentId === eqId) closeEquipmentModal();
-    }, actionButtonFromEventOrSelector('#eqModalDeleteBtn'));
+    }, actionButtonFromEventOrSelector('#eqModalDeleteBtn'), {optimisticScope:'equipment-disable'});
 };
 
 function equipmentLogRealIndex(eq, log) {
