@@ -269,6 +269,22 @@ test('v2 concentrated source moves physical reserved stock and original location
  await f.receipt();const ledger=f.docs.get('inventoryReservations/ORDER__I');assert.deepEqual(ledger.locations,[{warehouseId:'MAIN',reservedQty:3}]);assert.equal('warehouseId' in ledger,false);assert.equal(ledger.locationSchemaVersion,2);assert.deepEqual(ledger.lifecycleWarehouseIds,['A','MAIN']);assert.equal(ledger.quantity,3);assert.equal(f.docs.get('inventory/P').reserved,5);assert.equal(f.docs.get('warehouseStocks/MAIN__P').reserved,3);
  const before=f.snapshot();await f.receipt();assert.equal(f.snapshot(),before);
 });
+test('production v2 order transfer remains atomic and disabled until both independent approvals are present',async()=>{
+ const project='yu-shing-company',gate={GCLOUD_PROJECT:project,ENABLE_PRODUCTION_ORDER_TRANSFER_DISPATCH_BACKEND:'true'};
+ const f=v2OrderTransferFixture();f.db.projectId=project;
+ const before=f.snapshot();await assert.rejects(commitOrderTransferPhysical(f.db,'U',f.send,'DISPATCH',gate),/獨立啟用/);
+ assert.equal(f.snapshot(),before);
+ const accepted={...gate,ENABLE_PRODUCTION_ORDER_TRANSFER_V2_BACKEND:'true'};
+ f.setRetry(true);assert.equal((await commitOrderTransferPhysical(f.db,'U',f.send,'DISPATCH',accepted)).status,'applied');
+ const once=f.snapshot();assert.equal((await commitOrderTransferPhysical(f.db,'U',f.send,'DISPATCH',accepted)).status,'already-applied');
+ assert.equal(f.snapshot(),once);
+ assert.equal(f.docs.get('orders/ORDER').items[0].transferPendingId,f.send.id);
+ const received={...accepted,ENABLE_PRODUCTION_ORDER_TRANSFER_RECEIVE_BACKEND:'true'};
+ assert.equal((await commitOrderTransferPhysical(f.db,'U',f.receive,'RECEIVE',received)).status,'applied');
+ const final=f.snapshot();assert.equal((await commitOrderTransferPhysical(f.db,'U',f.receive,'RECEIVE',received)).status,'already-applied');
+ assert.equal(f.snapshot(),final);assert.equal(f.docs.get('inventoryReservations/ORDER__I').locationSchemaVersion,2);
+ assert.equal('warehouseId' in f.docs.get('inventoryReservations/ORDER__I'),false);
+});
 test('v2 transfer refuses disabled gate split source third warehouse or altered location contract without partial writes',async()=>{
  for(const modify of [f=>{f.docs.get('inventoryReservations/ORDER__I').locations=[{warehouseId:'A',reservedQty:1},{warehouseId:'MAIN',reservedQty:2}];},f=>{f.docs.get('inventoryReservations/ORDER__I').lifecycleWarehouseIds=['A','OTHER'];},f=>{f.docs.get('inventoryReservations/ORDER__I').ownerUid='OTHER';}]){
   const f=v2OrderTransferFixture();modify(f);const before=f.snapshot();await assert.rejects(f.dispatch());assert.equal(f.snapshot(),before);
@@ -284,6 +300,23 @@ test('backend handoff atomically moves reserved goods into assigned custody with
  assert.equal(f.docs.get('inventoryReservations/ORDER__I').warehouseId,'custody-S');assert.equal(f.docs.get('orders/ORDER').items[0].custodyTransferId,f.input.id);assert.equal(f.docs.get('orders/ORDER').deliveryRecords,undefined);
  assert.equal(f.docs.get('stockTransfers/'+f.input.id).kind,'HANDOFF');assert.equal(f.docs.get('stockTransfers/'+f.input.id).status,'RECEIVED');assert.equal(f.docs.get('warehouses/custody-S').ownerUid,'S');assert.equal(f.docs.get('inventoryLotCosts/'+f.input.id+'-0').costSourceLotId,'L');
  await assert.rejects(f.receipt(),/業務交接/);
+});
+test('production v2 custody HANDOFF is opt-in, retains original proof and never double-moves stock',async()=>{
+ const f=handoffFixture(),ledger=f.docs.get('inventoryReservations/ORDER__I');delete ledger.warehouseId;
+ Object.assign(ledger,{locationSchemaVersion:2,ownerUid:'S',salesCode:'01',locations:[{warehouseId:'A',reservedQty:3}],lifecycleWarehouseIds:['A']});
+ f.db.projectId='yu-shing-company';
+ const env={GCLOUD_PROJECT:'yu-shing-company',ENABLE_PRODUCTION_ORDER_TRANSFER_HANDOFF_BACKEND:'true'};
+ const before=f.snapshot();await assert.rejects(commitOrderTransferPhysical(f.db,'U',f.input,'HANDOFF',env),/獨立啟用/);
+ assert.equal(f.snapshot(),before);
+ const enabled={...env,ENABLE_PRODUCTION_ORDER_TRANSFER_V2_BACKEND:'true'};
+ f.setRetry(true);assert.equal((await commitOrderTransferPhysical(f.db,'U',f.input,'HANDOFF',enabled)).status,'applied');
+ const committed=f.snapshot();assert.equal((await commitOrderTransferPhysical(f.db,'U',f.input,'HANDOFF',enabled)).status,'already-applied');
+ assert.equal(f.snapshot(),committed);
+ const custody=f.docs.get('inventoryReservations/ORDER__I');assert.equal(custody.locationSchemaVersion,3);
+ assert.deepEqual(custody.locations,[{warehouseId:'custody-S',reservedQty:3}]);
+ assert.equal(custody.custodyTransferId,f.input.id);assert.equal(f.docs.get('inventory/P').reserved,5);
+ assert.ok(f.docs.has('reservationOperationReceipts/order-transfer-dispatch-'+f.input.id));
+ assert.equal(f.docs.get('orders/ORDER').deliveryRecords,undefined);
 });
 test('handoff independently gated and refuses wrong custody v2 disabled location target collision or final failure atomically',async()=>{
  for(const mutate of [f=>{f.input.toWarehouseId='custody-OTHER';},f=>f.put('warehouses/custody-S',{active:true,systemCustody:true,ownerUid:'OTHER'}),f=>f.put('inventoryLots/'+f.input.id+'-0',{sentinel:true}),f=>{f.docs.get('inventoryReservations/ORDER__I').locationSchemaVersion=2;},f=>f.setFail(true)]){

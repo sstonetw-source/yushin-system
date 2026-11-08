@@ -8,6 +8,36 @@ const {deliveryReversalBackendProject}=require('../functions/delivery-reversal-g
 const {customerReturnBackendProject}=require('../functions/customer-return-gate');
 const {customerReturnRequestBackendProject}=require('../functions/customer-return-request-gate');
 const {orderLifecycleBackendProject}=require('../functions/order-lifecycle-preview-gate');
+const {orderTransferProject}=require('../functions/order-transfer-physical-service');
+test('merging order transfer preparation cannot activate production without a separate cutover',()=>{
+ const vm=require('node:vm'),fs=require('node:fs');
+ const scope={location:{origin:'https://sstonetw-source.github.io',hostname:'sstonetw-source.github.io',pathname:'/yushin-system/'},
+  YUSHIN_PRODUCTION_ORDER_TRANSFER_HANDOFF_BACKEND:true,YUSHIN_PRODUCTION_ORDER_TRANSFER_HANDOFF_LEGACY_BLOCKED:true};
+ vm.runInNewContext(fs.readFileSync('transaction-rollout-config.js','utf8'),scope);
+ for(const action of ['DISPATCH','HANDOFF','RECEIVE']){
+  assert.equal(scope['YUSHIN_PRODUCTION_ORDER_TRANSFER_'+action+'_BACKEND'],false);
+  assert.equal(scope['YUSHIN_PRODUCTION_ORDER_TRANSFER_'+action+'_LEGACY_BLOCKED'],false);
+  assert.equal(orderTransferProject(action,{GCLOUD_PROJECT:'yu-shing-company'}),'');
+ }
+});
+test('separately approved order-transfer browser gates require both flags and the exact GitHub Pages origin',()=>{
+ const vm=require('node:vm'),fs=require('node:fs');
+ const source=fs.readFileSync('src/infrastructure/production-transaction.js','utf8');
+ for(const action of ['DISPATCH','HANDOFF','RECEIVE']){
+  const kind='ORDER_TRANSFER_'+action,scope={APP_ENVIRONMENT:'production',
+   location:{origin:'https://sstonetw-source.github.io',pathname:'/yushin-system/'},
+   ['YUSHIN_PRODUCTION_'+kind+'_BACKEND']:true,
+   ['YUSHIN_PRODUCTION_'+kind+'_LEGACY_BLOCKED']:true};
+  vm.runInNewContext(source,scope);
+  assert.equal(scope.productionTransactionBackendRequired(kind),true);
+  assert.equal(scope.productionTransactionBackendEnabled(kind),true);
+  scope['YUSHIN_PRODUCTION_'+kind+'_BACKEND']=false;
+  assert.equal(scope.productionTransactionBackendEnabled(kind),false);
+  scope['YUSHIN_PRODUCTION_'+kind+'_BACKEND']=true;
+  scope.location.origin='https://unapproved.example';
+  assert.equal(scope.productionTransactionBackendEnabled(kind),false);
+ }
+});
 test('fresh warehouse and sales pages load Functions before any transaction UI executes',()=>{
  const html=require('node:fs').readFileSync('index.html','utf8');
  const sdk=html.indexOf('https://www.gstatic.com/firebasejs/10.8.0/firebase-functions-compat.js');
