@@ -37,8 +37,11 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','chrom
  const db={collection:name=>{if(name!=='users')throw Error('unexpected collection');return {doc:uid=>{if(uid!=='SELF')throw Error('other user access');return {get:async()=>({exists:true,data:()=>({name:'本人',code:'S1',email:'me@example.com',phone:'old',role:'sales'})}),update:async data=>{if(window.failSave)throw Error('測試離線');window.writes.push({uid,data});}};}};}};
  const firebase={firestore:{FieldValue:{serverTimestamp:()=> 'SERVER_TIMESTAMP'}}};
  `});
- await page.addScriptTag({content:read('modules/warehouse-logistics.js')});await page.addScriptTag({content:read('modules/delivery-settings.js')});
+ await page.addScriptTag({content:read('modules/warehouse-logistics.js')});await page.addScriptTag({content:read('modules/home-screen-install.js')});await page.addScriptTag({content:read('modules/delivery-settings.js')});
  await page.evaluate(()=>openPersonalSettings());await page.locator('#personalMode').waitFor();assert.equal(await page.locator('#personalSettingsForm input').count(),4);
+ assert.equal(await page.locator('#homeScreenInstallButton').count(),1);
+ await page.locator('#homeScreenInstallButton').click();assert.equal(await page.locator('#homeScreenInstallGuide').isVisible(),true);
+ assert.equal(await page.evaluate(()=>writes.length),0,'the home-screen button must not submit personal settings');
  await page.locator('#personalMode').selectOption('SALES_SHIP');await page.locator('#personalPhone').fill('0912345678');
  await page.locator('#personalContact').fill('本人收件');await page.locator('#personalDeliveryPhone').fill('0912345678');await page.locator('#personalAddress').fill('台北市測試地址');
  const confirmations=[];page.on('dialog',dialog=>{confirmations.push(dialog.message());dialog.accept();});await page.locator('#personalSettingsForm [type=submit]').click();await page.waitForFunction(()=>writes.length===1);
