@@ -22,10 +22,10 @@ function setup(storage=new Map()){
     });
     const start=source.indexOf('const receiptTaskJobs = new Map();');const end=source.indexOf('\nfunction purchaseItemsFromSavedPo',start);
     vm.runInContext(source.slice(start,end),x);
-    return {x,calls,notices,storage,controls,select:(id,operation,qty=3)=>{x.poReceiptTargetId='supply:'+id;x.poReceiptOperationId=operation;selected=[row(qty,5)];}};
+    return {x,calls,notices,storage,controls,setRows:rows=>{selected=rows;},select:(id,operation,qty=3)=>{x.poReceiptTargetId='supply:'+id;x.poReceiptOperationId=operation;selected=[row(qty,5)];}};
 }
 function row(qty,max,index=0){
-    const fields={'.po-receive-select':{checked:true},'.po-receive-qty':{value:String(qty),max:String(max)},'.po-receive-lot':{value:'LOT'},'.po-receive-expiry':{value:'2027-01-01'}};
+    const fields={'.po-receive-qty':{value:String(qty),max:String(max)},'.po-receive-lot':{value:'LOT'},'.po-receive-expiry':{value:'2027-01-01'}};
     return {dataset:{index:String(index)},querySelector:key=>fields[key]};
 }
 test('confirm closes the modal before the receiving transaction completes',async()=>{
@@ -111,4 +111,24 @@ test('legacy task adopts role only when original user explicitly retries',async(
     assert.equal(JSON.parse(storage.get('yushin-receipt-tasks:U1'))[0].actorRole,undefined);
     const retry=x.window.retryReceiptTask('S1');assert.equal(calls[0].args[4],'LEGACY-0');
     assert.equal(calls[0].args[5].actorRole,'admin');calls[0].resolve([]);await retry;
+});
+
+test('zero quantity is skipped while a positive decimal is received without selection controls',async()=>{
+    const {x,calls,setRows}=setup();setRows([row(0,5,0),row(1.25,5,1)]);
+    const pending=x.window.savePoReceiptBatch();
+    const transactions=calls.filter(c=>c.args);
+    assert.equal(transactions.length,1);assert.equal(transactions[0].args[1],1.25);
+    assert.equal(transactions[0].args[4],'OP1-1');transactions[0].resolve([]);await pending;
+});
+test('blank input blocks all entries before closing or writing',async()=>{
+    const {x,calls,setRows,notices}=setup();setRows([row(1,5),row('',5,1)]);
+    await x.window.savePoReceiptBatch();assert.equal(calls.length,0);assert.match(notices[0][1],/有效/);
+});
+test('all-zero inputs explain that a positive quantity is needed',async()=>{
+    const {x,calls,setRows,notices}=setup();setRows([row(0,5),row(0,5,1)]);
+    await x.window.savePoReceiptBatch();assert.equal(calls.length,0);assert.match(notices[0][1],/至少.*大於 0/);
+});
+test('permission denial does not close the dialog or queue a receipt',async()=>{
+    const {x,calls}=setup();x.canConfirmSupplyReceipt=()=>false;
+    await x.window.savePoReceiptBatch();assert.equal(calls.length,0);
 });

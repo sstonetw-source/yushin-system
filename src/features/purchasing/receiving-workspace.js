@@ -31,6 +31,26 @@ window.closePoReceiptBatch = function() {
 };
 
 
+function receiptItemRowHtml(supply) {
+    const ordered=Math.max(0,Number(supply.qty||0));
+    const received=Math.max(0,Number(supply.receivedQty||0));
+    const remaining=Math.max(0,ordered-received);
+    const directShip=(supply.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP';
+    const warehouse=(typeof warehouseMasterCache==='undefined'?[]:warehouseMasterCache).find(row=>row.id===supply.warehouseId);
+    const warehouseName=directShip?'原廠直送':warehouse?.name||warehouse?.warehouseName||supply.warehouseId||'待確認';
+    return `<tr data-index="0">
+      <td data-th="品名">${escapeHtml(supply.itemName||'')}</td>
+      <td data-th="廠牌／貨號">${escapeHtml(supply.brand||'')} · ${escapeHtml(supply.itemCode||'')}</td>
+      <td data-th="收貨倉庫">${escapeHtml(warehouseName)}</td>
+      <td data-th="採購數量" class="receipt-stat">${ordered}</td>
+      <td data-th="已到貨" class="receipt-stat">${received}</td>
+      <td data-th="未到貨" class="receipt-stat">${remaining}</td>
+      <td data-th="本次到貨數量"><label><span class="sr-only">本次到貨數量</span><input type="number" class="po-receive-qty" min="0" max="${remaining}" step="any" value="${remaining}" required></label></td>
+      <td data-th="批號"><label><span class="sr-only">批號</span><input type="text" class="po-receive-lot" placeholder="批號" ${directShip?'disabled':''}></label></td>
+      <td data-th="效期"><label><span class="sr-only">效期</span><input type="date" class="po-receive-expiry" ${directShip?'disabled':''}></label></td>
+    </tr>`;
+}
+
 window.receiveSupplyOrder = function(supplyId) {
     if (!canReceiveInventoryCapability()) { alert('您沒有到貨入庫權限。'); return; }
     if (receiptTaskBlocksSupply(supplyId)) return;
@@ -44,15 +64,7 @@ window.receiveSupplyOrder = function(supplyId) {
     const title=document.getElementById('poReceiptBatchTitle');
     if(title)title.textContent=directShip ? `原廠直送到貨｜${supply.internalNo||supplyId}` : `到貨入庫｜${supply.internalNo||supplyId}`;
     const body=document.getElementById('poReceiptBatchBody');
-    body.innerHTML=`<tr data-index="0">
-      <td><input type="checkbox" class="po-receive-select" checked></td>
-      <td>${escapeHtml(supply.itemCode||'')}</td>
-      <td>${escapeHtml(supply.itemName||'')}</td>
-      <td>${Number(supply.qty||0)}</td><td>${Number(supply.receivedQty||0)}</td><td>${remaining}</td>
-      <td><input type="number" class="po-receive-qty" min="0" max="${remaining}" step="any" value="${remaining}" style="width:85px;"></td>
-      <td><input type="text" class="po-receive-lot" placeholder="批號" ${directShip ? 'disabled' : ''}></td>
-      <td><input type="date" class="po-receive-expiry" ${directShip ? 'disabled' : ''}></td>
-    </tr>`;
+    body.innerHTML=receiptItemRowHtml(supply);
     document.getElementById('poReceiptBatchOverlay')?.classList.add('active');
 };
 
@@ -76,16 +88,7 @@ window.openSupplyReceipt = function(supplyId) {
     if (title) title.textContent = directShip
         ? `原廠直送到貨｜${supply.internalNo || supply.id}｜${supply.itemCode || supply.itemName || ''}`
         : `到貨入庫｜${supply.internalNo || supply.id}｜${supply.itemCode || supply.itemName || ''}`;
-    body.innerHTML = `
-        <tr data-index="0">
-            <td><input type="checkbox" class="po-receive-select" checked></td>
-            <td>${escapeHtml(supply.itemCode || '')}</td>
-            <td>${escapeHtml(supply.itemName || '')}</td>
-            <td>${ordered}</td><td>${received}</td><td>${remaining}</td>
-            <td><input type="number" class="po-receive-qty" min="0" max="${remaining}" step="any" value="${remaining}" style="width:85px;"></td>
-            <td><input type="text" class="po-receive-lot" placeholder="批號" ${directShip ? 'disabled' : ''}></td>
-            <td><input type="date" class="po-receive-expiry" ${directShip ? 'disabled' : ''}></td>
-        </tr>`;
+    body.innerHTML=receiptItemRowHtml(supply);
     document.getElementById('poReceiptBatchOverlay')?.classList.add('active');
 };
 
@@ -221,12 +224,19 @@ window.savePoReceiptBatch = async function() {
     if(!poId?.startsWith('supply:')){alert('到貨必須從供應紀錄進入，請重新開啟待到貨品項。');return;}
     const supplyId=poId.slice(7);
     if(receiptTaskBlocksSupply(supplyId))return;
-    const rows=[...document.querySelectorAll('#poReceiptBatchBody tr')].filter(row=>row.querySelector('.po-receive-select')?.checked);
-    const entries=rows.map(row=>({itemIndex:Number(row.dataset.index),qty:Number(row.querySelector('.po-receive-qty')?.value||0),
-        lotNo:(row.querySelector('.po-receive-lot')?.value||'').trim(),expiryDate:row.querySelector('.po-receive-expiry')?.value||''}));
-    if(!entries.length||entries.some((entry,index)=>!Number.isFinite(entry.qty)||entry.qty<=0||entry.qty>Number(rows[index].querySelector('.po-receive-qty')?.max)||!Number.isInteger(entry.itemIndex))){
-        alert('請勾選到貨品項，數量須大於 0 且不可超過未收數量。');return;
+    const rows=[...document.querySelectorAll('#poReceiptBatchBody tr')];
+    const entries=[];
+    for(const row of rows){
+        const input=row.querySelector('.po-receive-qty');
+        const raw=String(input?.value??'').trim();
+        const qty=Number(raw),max=Number(input?.max),itemIndex=Number(row.dataset.index);
+        if(!raw||!Number.isFinite(qty)||qty<0||!Number.isFinite(max)||qty>max||!Number.isInteger(itemIndex)||itemIndex<0){
+            alert('本次到貨數量須為有效的非負數，且不可超過未收數量。');input?.focus?.();return;
+        }
+        if(qty===0)continue;
+        entries.push({itemIndex,qty,lotNo:(row.querySelector('.po-receive-lot')?.value||'').trim(),expiryDate:row.querySelector('.po-receive-expiry')?.value||''});
     }
+    if(!entries.length){alert('請至少填寫一個大於 0 的本次到貨數量。');return;}
     const operationBase=poReceiptOperationId||ensureReceiptOperationId(supplyId);
     const supply=supplyReceivingCache.find(row=>row.id===supplyId)||pendingSupplyCache.find(row=>row.id===supplyId);
     if(!supply||!canConfirmSupplyReceipt(supply)){showActionFeedback('目前沒有這筆到貨確認權限，請重新開啟訂單。','warning');return;}

@@ -2333,7 +2333,7 @@ test('procurement need date stays separate from supplier ETA', () => {
 
 test('grouped procurement selection only builds compatible warehouse purchase orders', () => {
     assert.match(html,/id="purchasePendingBatchPoBtn"[^>]+onclick="openSelectedPurchaseDraft\(\)"/);
-    assert.match(app,/data-th="操作"><div class="workflow-inline-actions">\$\{selectionHtml\}/);
+    assert.match(app,/data-th="客戶／用途">\$\{selectionHtml\}<span class="purchase-customer-name">/);
     assert.match(app,/const selectedPendingPurchaseDemandIds = new Set\(\)/);
     assert.match(app,/class="pending-purchase-batch-select"/);
 
