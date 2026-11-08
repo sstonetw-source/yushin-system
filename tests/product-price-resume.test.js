@@ -191,17 +191,17 @@ test('missing or ambiguous product blocks the entire batch without writes or cur
     assert.equal(h.transactionReads.length, h.writes.length);
 });
 
-test('same day batches stop at 1000 and immediately continue, repeated file writes nothing', async () => {
-    const products=Array.from({length:1001},(_,i)=>({id:`p${i}`,normalizedPartNo:`A${i}`,manufacturerPartNo:`A${i}`,brandName:'Bio-Rad',listPrice:100}));
+test('same day batches stop at 2000 and immediately continue, repeated file writes nothing', async () => {
+    const products=Array.from({length:2001},(_,i)=>({id:`p${i}`,normalizedPartNo:`A${i}`,manufacturerPartNo:`A${i}`,brandName:'Bio-Rad',listPrice:100}));
     const h=createHarness(products);
     const rows=products.map(p=>({code:p.manufacturerPartNo,price:150}));
     const job=h.job(rows);
     await h.context.priceTest.runProductPriceJobBatch(job);
-    assert.equal(job.cursor,1000); assert.equal(h.writes.length,1000); assert.equal(h.transactionReads.length,1000);
+    assert.equal(job.cursor,2000); assert.equal(h.writes.length,2000); assert.equal(h.transactionReads.length,2000);
     await h.context.priceTest.runProductPriceJobBatch(job);
-    assert.equal(job.cursor,1001); assert.equal(h.writes.length,1001);
+    assert.equal(job.cursor,2001); assert.equal(h.writes.length,2001);
     await h.context.priceTest.runProductPriceJobBatch(h.job(rows));
-    assert.equal(h.writes.length,1001); assert.equal(h.transactionReads.length,1001);
+    assert.equal(h.writes.length,2001); assert.equal(h.transactionReads.length,2001);
 });
 
 test('cancelled update and role changes do not write price changes', async () => {
@@ -262,9 +262,9 @@ test('full master handler validates entire file before cloud preview and only pr
     assert.ok(!handler.includes('rows:allImportedItems'));
 });
 
-test('master upload handles 501 rows in same-day 500/1 batches, interruption, replacement and duplicate validation',async()=>{
+test('master upload handles 1001 rows in same-day 1000/1 batches, interruption, replacement and duplicate validation',async()=>{
  const h=createHarness();const c=h.context;let checkpoint=null,loaded,fail=false,allowReplace=true;
- let rows=Array.from({length:501},(_,i)=>({'貨號':`A${i}`,'廠牌':'Bio-Rad','英文品名':`Product ${i}`,'建議售價':100}));
+ let rows=Array.from({length:1001},(_,i)=>({'貨號':`A${i}`,'廠牌':'Bio-Rad','英文品名':`Product ${i}`,'建議售價':100}));
  const records=new Map(),batches=[],errors=[];
  Object.assign(c,{
   pendingPriceListUploadBrand:'',brandProductDeleteRunning:false,productMasterMigrationRunning:false,
@@ -293,12 +293,12 @@ test('master upload handles 501 rows in same-day 500/1 batches, interruption, re
  vm.runInContext(source.slice(start,source.indexOf('// ===== 2026-10-02：手機功能選單',start)),c);
  async function upload(){await c.window.handlePriceExcelUpload({files:[{name:'Bio-Rad.xlsx'}],value:'file'});await loaded;}
  fail=true;await upload();assert.equal(checkpoint.cursor,0);assert.equal(records.size,1);assert.match(errors.pop(),/network interrupted/);
- await upload();assert.equal(checkpoint.cursor,500);assert.equal(records.size,500);
- await upload();assert.equal(checkpoint.cursor,501);assert.equal(records.size,501);
- assert.deepEqual(batches,[500,500,1]);
- await upload();assert.equal(checkpoint.cursor,500);assert.equal(records.size,501); // complete file starts fresh and compares existing data
+ await upload();assert.equal(checkpoint.cursor,1000);assert.equal(records.size,1000);
+ await upload();assert.equal(checkpoint.cursor,1001);assert.equal(records.size,1001);
+ assert.deepEqual(batches,[1000,1000,1]);
+ await upload();assert.equal(checkpoint.cursor,1000);assert.equal(records.size,1001); // complete file starts fresh and compares existing data
  rows=[{'貨號':'NEW','廠牌':'Bio-Rad'}];allowReplace=false;
- await upload();assert.equal(checkpoint.total,501);assert.equal(records.has('NEW'),false);
+ await upload();assert.equal(checkpoint.total,1001);assert.equal(records.has('NEW'),false);
  allowReplace=true;await upload();assert.equal(checkpoint.total,1);assert.equal(records.has('NEW'),true);
  rows=[{'貨號':'DUP','廠牌':'Bio-Rad'},{'貨號':'DUP','廠牌':'Bio-Rad'}];
  await upload();assert.match(batches.at(-1),/重複出現/);assert.equal(records.has('DUP'),false);

@@ -855,8 +855,8 @@ window.downloadProductCostUpdateTemplate = async function() {
 };
 
 // 價格更新只存本機進度；不建立雲端排程、額外 Collection 或第二套產品 writer。
-const PRODUCT_PRICE_BATCH_ROW_LIMIT = 1000;
-const PRODUCT_MASTER_BATCH_ROW_LIMIT = 500;
+const PRODUCT_PRICE_BATCH_ROW_LIMIT = 2000;
+const PRODUCT_MASTER_BATCH_ROW_LIMIT = 1000;
 const PRODUCT_PRICE_LOCAL_DB = 'yushin-product-price-import';
 
 function productImportJobScope(kind = 'price') {

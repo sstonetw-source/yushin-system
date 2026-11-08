@@ -1382,7 +1382,7 @@
                             <details class="price-list-task">
                                 <summary>更新商品價格</summary>
                                 <div class="price-list-task-body">
-                                    <p>僅更新既有商品的含稅建議售價，不變更成本及其他商品資料。</p>
+                                    <p>價格專用匯入只更新既有商品的含稅建議售價，每次最多核對 2,000 筆。</p>
                                     <button type="button" class="btn-secondary" onclick="downloadProductPriceUpdateTemplate()">下載價格更新範本</button>
                                     <button type="button" onclick="document.getElementById('productPriceExcelInput').click()">選擇 Excel 更新價格</button>
                                     <button type="button" id="productPriceResumeButton" class="btn-secondary" hidden onclick="continueProductPriceImport()">繼續上次更新</button>
@@ -1391,7 +1391,7 @@
                             <details class="price-list-task">
                                 <summary>匯入產品主檔</summary>
                                 <div class="price-list-task-body">
-                                    <p>新增商品或更新完整商品資料、售價與標準成本。</p>
+                                    <p>完整主檔（新品、資料、售價與標準成本）每次最多核對 1,000 筆；本機只記錄檔案指紋與完成進度。</p>
                                     <button type="button" class="btn-secondary" onclick="downloadProductMasterTemplate()">下載產品主檔範本</button>
                                     <button type="button" onclick="openPriceListUploadForBrand('')">上傳 Excel</button>
                                     <button type="button" id="productMasterResumeButton" class="btn-secondary" hidden onclick="openPriceListUploadForBrand('')">接續上次匯入（重新選原檔）</button>
@@ -1402,8 +1402,6 @@
                     </div>
                     <input type="file" id="productImportExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handlePriceExcelUpload(this)">
                     <input type="file" id="productPriceExcelInput" accept=".xlsx,.xls" style="display:none;" onchange="handleProductPriceExcelUpload(this)">
-                    <p class="no-print" style="margin:8px 0;color:var(--text-secondary,#667085);font-size:12px;">價格專用匯入只更新既有商品的含稅建議售價，每個美西計費日最多核對 1,000 筆。進度保存在此瀏覽器；隔天可按「繼續上次更新」，不必重新上傳 Excel。</p>
-                    <p class="no-print" style="margin:8px 0;color:var(--text-secondary,#667085);font-size:12px;">完整主檔（新品、資料、售價與標準成本）每個美西計費日最多核對 500 筆；本機只記錄檔案指紋與完成進度，不保存成本。隔天按「匯入產品主檔」中的「上傳 Excel／接續匯入」重新選擇完全相同的 Excel 即可繼續。此為單一瀏覽器的保守上限，並非 Firebase 免費額度保證。</p>
 
                     <div id="priceUploadProgress" class="product-import-progress" style="display:none;">
                         <div class="product-import-progress-head"><span id="priceUploadStatus">準備中…</span><span id="priceUploadPercent">0%</span></div>
@@ -1637,7 +1635,7 @@
     <script src="modules/order-commercial-details.js?v=20261025-1"></script>
     <script src="modules/order-entry-core.js?v=20261104-460"></script>
 <script src="modules/service-work-core.js?v=20261023-2"></script>
-    <script src="app.js?v=20261107-3"></script>
+    <script src="app.js?v=20261108-1"></script>
     <script src="modules/order-self-order-required.js?v=20261013-1"></script>
     <script src="modules/customer-cancellations.js?v=20261021-3"></script>
     <script src="modules/free-stock-recovery.js?v=20261014-9"></script>
