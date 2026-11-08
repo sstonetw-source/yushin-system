@@ -4042,3 +4042,62 @@ test('purchasing cutover keeps document drafts usable but rejects stale purchase
  await adminDatabase.doc('supplyOrders/trusted-cutover-purchase').set(supply);
  assert.equal((await getDoc(doc(client,'supplyOrders/trusted-cutover-purchase'))).exists(),true);
 });
+
+// Production cutover denies cached order writers even if their front-end flags
+// are stale. Admin SDK transactions remain independent of these client rules.
+test('order transfer cutover is irreversible and rejects non-admin gate writes',async()=>{
+ for(const uid of ['buyer1','wh1','sales1','eng1'])
+  await assertFails(setDoc(doc(db(uid),'settings/orderTransferCutover'),{backendOnly:true}));
+ const ref=doc(db('admin'),'settings/orderTransferCutover');
+ await assertSucceeds(setDoc(ref,{backendOnly:false}));
+ await assertSucceeds(updateDoc(ref,{backendOnly:true}));
+ for(const value of [false,'true',1,null,deleteField()])
+  await assertFails(updateDoc(ref,{backendOnly:value}));
+ await assertFails(setDoc(ref,{description:'cannot remove retirement'}));
+ await assertFails(deleteDoc(ref));
+ await assertSucceeds(updateDoc(ref,{description:'keep the backend authoritative'}));
+});
+
+test('order transfer cutover rejects cached dispatch and handoff batches for every receiver without partial stock writes',async()=>{
+ for(const uid of ['admin','buyer1','wh1'])for(const handoff of [false,true]){
+  await env.clearFirestore();
+  await seed('users/'+uid,{role:uid==='admin'?'admin':uid==='buyer1'?'purchaser':'warehouse',active:true});
+  await seedWarehouseLogistics();
+  await seed('settings/orderTransferCutover',{backendOnly:true});
+  const client=db(uid),data={...transferData({linked:true,handoff}),createdByUid:uid};
+  const old=(await getDoc(doc(client,'orders/logistics'))).data(),b=writeBatch(client);
+  b.set(doc(client,'stockTransfers/T'),data);
+  b.update(doc(client,'warehouseStocks/MAIN__P'),{onHand:6,reserved:0});
+  b.update(doc(client,'inventory/P'),{transferInTransit:handoff?0:4,transferFreeInTransit:0});
+  if(handoff){
+   b.set(doc(client,'warehouseStocks/custody-sales1__P'),{productKey:'P',warehouseId:'custody-sales1',onHand:4,reserved:4,incoming:0});
+   b.set(doc(client,'warehouses/custody-sales1'),{warehouseName:'業務保管',active:true,isDefault:false,systemCustody:true,warehouseType:'CUSTODY',ownerUid:'sales1',sourceTransferId:'T'});
+  }
+  b.update(doc(client,'orders/logistics'),{items:[{...old.items[0],...(handoff?{warehouseId:'custody-sales1',custodyTransferId:'T'}:{transferPendingId:'T'})}],warehouseLogisticsId:'T',logisticsTransfersPending:handoff?0:1,logisticsHistory:[{id:'T'}],workCategories:['delivery'],updatedAt:'2026-10-09'});
+  await assertFails(b.commit());
+  assert.equal((await getDoc(doc(client,'warehouseStocks/MAIN__P'))).data().onHand,10);
+  assert.equal((await getDoc(doc(client,'stockTransfers/T'))).exists(),false);
+  assert.deepEqual((await getDoc(doc(client,'orders/logistics'))).data().items,old.items);
+ }
+});
+
+test('order transfer cutover blocks a pre-cutover receipt and its reservation evidence atomically',async()=>{
+ await seedWarehouseLogistics();const client=db('buyer1'),data=transferData({linked:true});
+ const old=(await getDoc(doc(client,'orders/logistics'))).data();
+ const b=writeBatch(client);b.set(doc(client,'stockTransfers/T'),data);b.update(doc(client,'warehouseStocks/MAIN__P'),{onHand:6,reserved:0});b.update(doc(client,'inventory/P'),{transferInTransit:4,transferFreeInTransit:0});b.update(doc(client,'orders/logistics'),{items:[{...old.items[0],transferPendingId:'T'}],warehouseLogisticsId:'T',logisticsTransfersPending:1,logisticsHistory:[{id:'T'}],workCategories:['delivery'],updatedAt:'2026-10-09'});await assertSucceeds(b.commit());
+ await seed('settings/orderTransferCutover',{backendOnly:true});
+ const receipt=writeBatch(client);receipt.update(doc(client,'stockTransfers/T'),{status:'RECEIVED',receivedByUid:'buyer1',receivedAt:'2026-10-09'});receipt.set(doc(client,'warehouseStocks/EXT__P'),{productKey:'P',warehouseId:'EXT',onHand:4,reserved:4,incoming:0});receipt.update(doc(client,'inventory/P'),{transferInTransit:0,transferFreeInTransit:0});receipt.update(doc(client,'orders/logistics'),{items:[{...old.items[0],warehouseId:'EXT',transferPendingId:''}],warehouseLogisticsId:'T',warehouseLogisticsEventId:'T-received',logisticsTransfersPending:0,logisticsHistory:[{id:'T'},{id:'received'}],updatedAt:'2026-10-09'});
+ const evidence={inventoryId:'P',warehouseStockId:'EXT__P',previousWarehouseStockId:'MAIN__P',movementId:'T-in',reservationIds:['logistics__A']};
+ receipt.update(doc(client,'inventoryReservations/logistics__A'),{warehouseId:'EXT',stockEvidence:evidence});
+ receipt.set(doc(client,'inventoryMovements/T-in'),{type:'warehouse_transfer_in',sourceType:'WAREHOUSE_TRANSFER',sourceId:'T',productKey:'P',warehouseId:'EXT',qty:4,reservationStockEvidence:evidence});
+ await assertFails(receipt.commit());
+ assert.equal((await getDoc(doc(client,'stockTransfers/T'))).data().status,'IN_TRANSIT');
+ assert.equal((await getDoc(doc(client,'inventoryReservations/logistics__A'))).data().warehouseId,'MAIN');
+ assert.equal((await getDoc(doc(client,'warehouseStocks/EXT__P'))).exists(),false);
+});
+
+test('order transfer cutover preserves non-order free-stock dispatch and receipt',async()=>{
+ await seedWarehouseLogistics();await seed('settings/orderTransferCutover',{backendOnly:true});const data=transferData();
+ const client=db('buyer1'),b=writeBatch(client);b.set(doc(client,'stockTransfers/T'),data);b.update(doc(client,'warehouseStocks/MAIN__P'),{onHand:7,reserved:4});b.update(doc(client,'inventory/P'),{transferInTransit:3,transferFreeInTransit:3});await assertSucceeds(b.commit());
+ const receipt=writeBatch(client);receipt.update(doc(client,'stockTransfers/T'),{status:'RECEIVED',receivedByUid:'buyer1',receivedAt:'2026-10-09'});receipt.set(doc(client,'warehouseStocks/EXT__P'),{productKey:'P',warehouseId:'EXT',onHand:3,reserved:0,incoming:0});receipt.update(doc(client,'inventory/P'),{transferInTransit:0,transferFreeInTransit:0});await assertSucceeds(receipt.commit());
+});

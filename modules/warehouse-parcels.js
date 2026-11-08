@@ -43,9 +43,19 @@
     }
     return [...map.values()];
   }
+  function stoppedTask(task){
+    if(active.has(task.id))return false;
+    return ['unsupported-reservation-location','production-order-transfer-disabled'].includes(task.errorCode)
+      ||String(task.error||'').startsWith('寄貨已停止：')
+      ||(/^寄貨結果待核對：預留「[^」]+」含尚未啟用的位置資料，已停止作業。/.test(String(task.error||'')));
+  }
+  function taskMessage(task){
+    const message=String(task.error||'上次寄貨尚未確認，請核對原操作。');
+    return stoppedTask(task)?message.replace(/^寄貨結果待核對：/,'寄貨已停止：'):message;
+  }
   function taskCards(tasks){
     return tasks.filter(t=>!active.has(t.id)).map(t=>'<article class="parcel-card parcel-task"><strong>'+escapeHtml(t.plan.contact)+'</strong><p role="status">'+
-      (active.has(t.id)?'寄出中…':escapeHtml(t.error||'上次寄貨尚未確認，請核對原操作。'))+'</p><p>已確認 '+t.jobs.filter(j=>j.done).length+'／'+t.jobs.length+' 個品項</p>'+
+      (active.has(t.id)?'寄出中…':escapeHtml(taskMessage(t)))+'</p><p>已確認 '+t.jobs.filter(j=>j.done).length+'／'+t.jobs.length+' 個品項</p>'+
       '<details><summary>本次寄貨明細</summary><p>'+escapeHtml(t.date)+' · '+escapeHtml(t.notes||'')+'</p>'+t.jobs.map(j=>'<p>'+escapeHtml(j.row.item.itemCode)+' × '+j.qty+' · '+(j.done?'已確認':'待核對')+'</p>').join('')+'</details>'+
       (active.has(t.id)?'':'<button type="button" class="btn-secondary" onclick="resumeWarehouseParcel('+inlineJsValue(t.id)+')">核對／重試原寄貨</button>')+'</article>').join('');
   }
@@ -95,7 +105,7 @@
         (transfers?.error?'<p class="parcel-guard-note" role="alert">調撥資料讀取失敗：'+escapeHtml(transfers.error)+' <button type="button" onclick="loadMainTransferRequests(true)">重新載入</button></p>':'')+
         (transfers?.hasMore?'<p class="parcel-guard-note">備貨需求先顯示 50 筆，處理後會載入後續項目。</p>':'')+
         (!groups.length&&!transferRows.length&&!scopedTasks.length&&!recoveryCards&&orderWorkQueueReady&&!orderWorkQueueError&&(!transfers||transfers.ready&&!transfers.error)?'<p class="parcel-empty-state">目前沒有需要寄出的貨品。</p>':'');
-      if(status)status.textContent=notice||(orderWorkQueueError?'寄貨清單讀取失敗，請重新載入。':!orderWorkQueueReady||transfers&&!transfers.ready?'正在讀取寄貨資料…':(groups.length+transferRows.length)+' 件待寄貨'+(tasks.length?' · '+tasks.length+' 件處理中／待核對':'')+(groups.length>visibleLimit?'，已顯示部分品項。':''));
+      if(status)status.textContent=notice||(orderWorkQueueError?'寄貨清單讀取失敗，請重新載入。':!orderWorkQueueReady||transfers&&!transfers.ready?'正在讀取寄貨資料…':(groups.length+transferRows.length)+' 件待寄貨'+(tasks.some(stoppedTask)?' · '+tasks.filter(stoppedTask).length+' 件已停止':'')+(tasks.some(t=>!stoppedTask(t))?' · '+tasks.filter(t=>!stoppedTask(t)).length+' 件處理中／待核對':'')+(groups.length>visibleLimit?'，已顯示部分品項。':''));
     }catch(error){
       host.innerHTML='<p role="alert">'+escapeHtml(error.message)+'</p>';
     }
@@ -204,7 +214,7 @@
       definitivelyBlocked=error?.code==='unsupported-reservation-location'
         ||error?.code==='production-order-transfer-disabled';
       const description=(definitivelyBlocked?'寄貨已停止：':'寄貨結果待核對：')+String(error.message||error);
-      try{await update(a,id,task=>task?{...task,error:description}:null);}
+      try{await update(a,id,task=>task?{...task,error:description,errorCode:String(error?.code||'')}:null);}
       catch(_){if(same(a))notice='寄貨進度儲存失敗，請保留此瀏覽器並核對原操作。';}
     }finally{
       active.delete(id);
