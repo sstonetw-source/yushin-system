@@ -30,3 +30,93 @@ function actionButtonFromEventOrSelector(selector = '') {
     return eventButton || (selector ? document.querySelector(selector) : null);
 }
 
+// Shared presentation-only state for work-list actions. Business writes, retry
+// credentials and authorization stay with their existing services. Keeping this
+// overlay separate from cached records prevents a stale list refresh from
+// making an in-flight action appear actionable again.
+const uiWorkActions = new Map();
+function uiWorkActionKey(scope, id, uid = currentUser?.uid, role = currentUserRole) {
+    return JSON.stringify([uid || '', role || '', String(scope), String(id)]);
+}
+function uiWorkActionPending(scope, id) {
+    return uiWorkActions.has(uiWorkActionKey(scope, id));
+}
+function uiWorkResultUncertain(error) {
+    const code = String(error?.code || '').replace(/^(?:firestore|functions)\//, '').toLowerCase();
+    if (['permission-denied', 'unauthenticated', 'invalid-argument', 'failed-precondition', 'not-found', 'already-exists'].includes(code)) return false;
+    if (['unavailable', 'deadline-exceeded', 'cancelled', 'unknown', 'network-request-failed', 'firestore-read-timeout'].includes(code)) return true;
+    // A plain Error can be thrown after a successful commit (e.g. lost reply or
+    // failed cache repaint). Without a trustworthy rejection code, err on the
+    // side of requiring authoritative reconciliation rather than permitting a
+    // new business transaction from the old card.
+    return true;
+}
+function renderUiWorkActions() {
+    if (typeof document === 'undefined' || !document.body?.appendChild || !document.createElement) return;
+    let panel = document.getElementById('uiWorkActionStatus');
+    const jobs = [...uiWorkActions.values()].filter(job =>
+        job.uid === currentUser?.uid && job.role === currentUserRole);
+    if (!jobs.length) { if (panel) panel.hidden = true; return; }
+    if (!panel) {
+        panel = document.createElement('aside');
+        panel.id = 'uiWorkActionStatus';
+        panel.className = 'ui-work-action-status no-print';
+        panel.setAttribute('role', 'status');
+        panel.setAttribute('aria-live', 'polite');
+        document.body.appendChild(panel);
+    }
+    panel.hidden = false;
+    const running = jobs.filter(job => job.state === 'pending');
+    const uncertain = jobs.filter(job => job.state === 'unknown');
+    panel.replaceChildren();
+    const summary = document.createElement('strong');
+    summary.textContent = `背景處理中 ${running.length} 筆${uncertain.length ? `・待確認 ${uncertain.length} 筆` : ''}`;
+    panel.appendChild(summary);
+    jobs.slice(0, 4).forEach(job => {
+        const line = document.createElement('div');
+        line.textContent = `${job.label}：${job.state === 'unknown' ? '結果待確認，請核對原交易' : '處理中…'}`;
+        panel.appendChild(line);
+        if (job.state === 'unknown' && typeof job.onVerify === 'function') {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'btn-small btn-secondary';
+            button.textContent = '核對原操作憑證';
+            button.onclick = () => {
+                if (job.uid !== currentUser?.uid || job.role !== currentUserRole) return;
+                try { job.onVerify(); } catch (error) { console.warn('原操作憑證核對失敗', error); }
+            };
+            panel.appendChild(button);
+        }
+    });
+}
+function clearUiWorkActions() {
+    uiWorkActions.clear();
+    renderUiWorkActions();
+}
+function beginUiWorkAction(scope, id, label, onUpdate = null, options = {}) {
+    const uid = currentUser?.uid, role = currentUserRole;
+    if (!uid || !id) return null;
+    const key = uiWorkActionKey(scope, id, uid, role);
+    const existing = uiWorkActions.get(key);
+    if (existing && !(existing.state === 'unknown' && options.resume === true)) return null;
+    const job = existing || { uid, role, label: String(label || '工作'), state: 'pending' };
+    job.state = 'pending';
+    if (typeof options.onVerify === 'function') job.onVerify = options.onVerify;
+    uiWorkActions.set(key, job);
+    const refresh = () => {
+        renderUiWorkActions();
+        if (uid === currentUser?.uid && role === currentUserRole && typeof onUpdate === 'function') {
+            try { onUpdate(); } catch (error) { console.warn('操作畫面更新失敗', error); }
+        }
+    };
+    refresh();
+    return Object.freeze({
+        finish(outcome = 'success') {
+            if (uiWorkActions.get(key) !== job) return;
+            if (outcome === 'unknown') job.state = 'unknown';
+            else uiWorkActions.delete(key);
+            refresh();
+        }
+    });
+}
+

@@ -104,7 +104,7 @@
   root.updateInventoryWorkspaceBadges=updateBadges;
   root.renderInventoryPurchaseReceiving=function(){
     const body=el('inventoryReceivingBody');if(!body)return;
-    const rows=purchaseRows(supplyReceivingCache).sort((a,b)=>String(a.supplierName||a.supplier||'').localeCompare(String(b.supplierName||b.supplier||''),'zh-Hant')||String(a.purchaseDocumentNo||a.purchaseOrderNo||'').localeCompare(String(b.purchaseDocumentNo||b.purchaseOrderNo||'')));
+    const rows=purchaseRows(supplyReceivingCache).filter(s=>!receiptTaskInFlight(s.id)).sort((a,b)=>String(a.supplierName||a.supplier||'').localeCompare(String(b.supplierName||b.supplier||''),'zh-Hant')||String(a.purchaseDocumentNo||a.purchaseOrderNo||'').localeCompare(String(b.purchaseDocumentNo||b.purchaseOrderNo||'')));
     const empty=rows.length===0&&activeReceivingSupplyReady&&!activeReceivingSupplyError;const table=body.closest?.('.inventory-work-table');if(table)table.hidden=empty;
     el('inventoryReceivingHead').innerHTML='<th>品項</th><th>收貨資訊</th><th>待收數量</th><th>操作</th>';
     body.innerHTML=rows.slice(0,50).map(s=>{

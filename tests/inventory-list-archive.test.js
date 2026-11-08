@@ -1,5 +1,6 @@
 const test=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
 const path=require('node:path'),core=require('../modules/inventory-core.js');
+const installUiWorkActions=require('./helpers/ui-work-action-fixture.cjs');
 const src=fs.readFileSync(path.join(__dirname,'../app.js'),'utf8');
 const code=src.slice(src.indexOf('function canManageInventoryList()'),src.indexOf('function applyInventoryPlanningPatchToCaches'));
 test('archive hides only empty stock and automatically shows new stock or reservations',()=>{
@@ -30,7 +31,7 @@ function setup({live={},warehouses=[],role='admin',fail=false}={}){
   writeAppDataCache(){},inventoryCache:[],markMainPageDirty(){},renderInventoryList(){},renderInventoryReplenishmentCenter(){},showActionFeedback:message=>events.push(['success',message])});
  vm.runInContext("globalThis.runRoleTransaction ||= callback => db.runTransaction(callback); globalThis.supplyOrdersCollection ||= () => db.collection('supplyOrders'); globalThis.syncReceivingSupplyViews ||= () => {};", x);
 vm.runInContext(fs.readFileSync('src/services/inventory-planning.js','utf8'),x);
-vm.runInContext(code,x);return {x,events,item,storage,release,run:archived=>x.window.setInventoryListArchived('I1',archived,{})};
+installUiWorkActions(x);vm.runInContext(code,x);return {x,events,item,storage,release,run:archived=>x.window.setInventoryListArchived('I1',archived,{})};
 }
 test('archive atomically records audit and suppresses double click',async()=>{
  const a=setup(),p=a.run(true);await a.run(true);a.release();await p;

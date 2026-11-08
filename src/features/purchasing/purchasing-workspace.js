@@ -1246,6 +1246,7 @@ function pendingServicePurchaseRows(filters, itemMap = null){
         if(!order.serviceFulfillment||orderInventorySyncIncomplete(order)||normalizedOrderStatus(order)!=='normal')return [];
         return (itemMap?.get(order.id)||normalizedOrderItems(order)).filter(item=>
             YushinWorkflow.isServiceItem(item)
+            && !serviceWorkItemPending(order.id,item.itemId)
             &&YushinWorkflow.serviceItemWorkCategory(order,item)==='ordering'
             &&purchaseLineMatchesFilters(order.orderDate,order.salesName,item.brand,filters)
         ).map(item=>({order,item}));
@@ -1280,6 +1281,7 @@ function renderPendingPurchaseOrders(itemMap = null, filterContext = null) {
         .sort((a,b)=>String(a.scheduleDate||a.createdAt||'').localeCompare(String(b.scheduleDate||b.createdAt||'')));
 
     for(const demand of rows){
+        if (uiWorkActionPending('purchase-item', `${demand.sourceId}::${demand.sourceItemId}`)) continue;
         const sourceType=String(demand.sourceType||'');
         const order=sourceType==='SALES_ORDER'
             ? procurementDemandSourceOrderCache.get(String(demand.sourceId||'')) || null
@@ -1554,6 +1556,7 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button, recover
     pendingPurchaseOrderKeys.add(actionKey);
     const originalLabel = button?.textContent || '已採購';
     if (button) { button.disabled = true; button.textContent = '處理中…'; }
+    let uiAction = null, committed = false, failure = null;
     try {
         const actorUid=currentUser?.uid, actorRole=currentUserRole;
         if(recoveryDetails && !quickPurchaseBackendPilotEnabled())
@@ -1562,7 +1565,12 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button, recover
         if (!purchaseDetails) return;
         if (!canCreatePurchaseOrderCapability() || !canAccessPage('orders.po')) return;
         if (!purchaseDetails.supplier || !Number.isFinite(purchaseDetails.unitCost) || purchaseDetails.unitCost < 0) throw new Error('請確認供應商與有效的實際單位成本。');
+        uiAction = beginUiWorkAction('purchase-item', actionKey, `確認已採購 ${orderId}／${itemId}`, () => {
+            if (document.getElementById('purchasing-system')?.classList.contains('active')) renderPendingPurchaseOrders();
+        },{resume:!!recoveryDetails});
+        if (!uiAction) return;
         const { savedOrder, savedSupply, savedDemand, incomingProductKey, incomingWarehouseId } = await commitQuickPurchase(orderId, itemId, purchaseDetails, actorUid, actorRole);
+        committed = true;
         if (incomingProductKey && incomingWarehouseId) invalidateWarehouseStockCache(incomingProductKey,incomingWarehouseId);
         const index = ordersCache.findIndex(order => order.id === orderId);
         if (index >= 0 && savedOrder) ordersCache[index] = savedOrder;
@@ -1581,10 +1589,12 @@ window.markPurchaseItemOrdered = async function(orderId, itemId, button, recover
         if(typeof renderQuickPurchaseRecovery==='function')renderQuickPurchaseRecovery();
         showActionFeedback('已採購，品項已列入待到貨，可繼續處理下一筆。', 'success');
     } catch (err) {
+        failure = err;
         if(typeof renderQuickPurchaseRecovery==='function')renderQuickPurchaseRecovery();
-        alert('切換為已採購失敗：' + err.message + '\n請確認目前這筆資料及連線／權限，重試前先查詢作業結果；若持續失敗，請聯絡管理員。');
+        alert((committed || uiWorkResultUncertain(err) ? '採購結果待確認：' : '切換為已採購失敗：') + err.message + '\n請確認目前這筆資料及連線／權限，重試前先查詢作業結果；若持續失敗，請聯絡管理員。');
     } finally {
         pendingPurchaseOrderKeys.delete(actionKey);
+        uiAction?.finish(committed ? 'success' : failure && uiWorkResultUncertain(failure) ? 'unknown' : 'failure');
         if (button?.isConnected) { button.disabled = false; button.textContent = originalLabel; }
     }
 };
@@ -2362,6 +2372,8 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
             const progress = receivingWorkProgress(order, item);
             const evidence = receivingEvidenceForWorkItem(order, item, itemIndex, evidenceIndex);
             evidence.forEach(entry => representedSupplyIds.add(entry.id));
+            const visibleEvidence = evidence.filter(entry => !receiptTaskInFlight(entry.id));
+            if (evidence.length && !visibleEvidence.length) return;
             evidenceCount += evidence.length;
             if (!evidence.length) missingEvidence++;
             const evidenceSupplies = evidence.map(entry => supplyById.get(entry.id)).filter(Boolean);
@@ -2373,9 +2385,9 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
 
             const actionHtml = !canReceiveInventoryCapability()
                 ? '<span class="order-progress-badge">唯讀</span>'
-                : evidence.length
-                    ? evidence.map((entry, index) => {
-                        const suffix = evidence.length > 1 ? ` ${index + 1}/${evidence.length}` : '';
+                : visibleEvidence.length
+                    ? visibleEvidence.map((entry, index) => {
+                        const suffix = visibleEvidence.length > 1 ? ` ${index + 1}/${visibleEvidence.length}` : '';
                         const supply = supplyById.get(entry.id);
                         const receiveButton = `<button type="button" class="btn-small btn-secondary" data-receipt-supply="${escapeAttr(entry.id)}" onclick="openSupplyReceipt(${inlineJsValue(entry.id)})">📥 到貨入庫${suffix}</button>`;
                         return [canConfirmSupplyReceipt(supply)?receiveButton:'<span class="order-progress-badge">待負責業務確認直送到貨</span>', supplyCancelActionHtml(supply)].filter(Boolean).join(' ');
@@ -2409,6 +2421,7 @@ function renderPurchasingReceivingWorkList(normalizedItemsByOrder = null, filter
     // 例如庫存補貨，或客戶訂單取消後供應商仍照常出貨。這些不可從採購頁消失。
     supplyReceivingCache.forEach(supply => {
         if (representedSupplyIds.has(supply.id)) return;
+        if (receiptTaskInFlight(supply.id)) return;
         const supplyProgress = globalThis.YushinSupply?.receiptProgress(supply);
         if (!supplyProgress) return;
         const ordered = supplyProgress.orderedQty;

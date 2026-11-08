@@ -647,24 +647,30 @@ window.permanentlyDeleteForecast = async function(id) {
     if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
     const item=forecastCache.find(row=>row.id===id);
     if(!confirm(`永久刪除 Forecast「${item?.customerName||id}」及其進度紀錄？此操作無法復原。`))return;
+    const button=actionButtonFromEventOrSelector(),buttonState=beginActionButton(button,'刪除中…');
+    if(button&&!buttonState)return;
     try{
         await deleteCollectionInBatches(`forecasts/${id}/progress`);
         await db.collection('forecasts').doc(id).delete();
         forecastCache=forecastCache.filter(row=>row.id!==id);
         forecastHistorySearchResults=forecastHistorySearchResults.filter(row=>row.id!==id);
         renderForecastList();
-    }catch(err){alert('永久刪除失敗：'+(err.message||err));}
+    }catch(err){alert('永久刪除結果待確認：'+(err.message||err)+'。請先核對原資料，避免重複刪除。');}
+    finally{endActionButton(button,buttonState);}
 };
 
 window.permanentlyDeleteQuote = async function(quoteNo) {
     if (trueUserRole !== 'admin' || currentUserRole !== 'admin') return;
     if(!confirm(`永久刪除估價單「${quoteNo}」？此操作無法復原；已建立的 Forecast／訂單不會連帶刪除。`))return;
+    const button=actionButtonFromEventOrSelector(),buttonState=beginActionButton(button,'刪除中…');
+    if(button&&!buttonState)return;
     try{
         await db.collection('quotes').doc(quoteNo).delete();
         myQuotesCache=myQuotesCache.filter(row=>row.quoteNo!==quoteNo);
         quoteHistorySearchResults=quoteHistorySearchResults.filter(row=>row.quoteNo!==quoteNo);
         renderMyQuotesList();
-    }catch(err){alert('永久刪除失敗：'+(err.message||err));}
+    }catch(err){alert('永久刪除結果待確認：'+(err.message||err)+'。請先核對原資料，避免重複刪除。');}
+    finally{endActionButton(button,buttonState);}
 };
 
 function assertOrderEligibleForPermanentDelete(order) {

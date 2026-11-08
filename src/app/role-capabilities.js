@@ -195,6 +195,9 @@ function showApp() {
     if (authStarting) authStarting.style.display = 'none';
     if (loginScreen) loginScreen.style.display = 'none';
     if (appContainer) appContainer.style.display = 'block';
+    // The work indicator is scoped to the real account and selected view role.
+    // Repaint it on role changes so no previous role's operations are displayed.
+    if (typeof renderUiWorkActions === 'function') renderUiWorkActions();
 
     const label = document.getElementById('authUserLabel');
     if (label) {

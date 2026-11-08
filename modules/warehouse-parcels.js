@@ -44,7 +44,7 @@
     return [...map.values()];
   }
   function taskCards(tasks){
-    return tasks.map(t=>'<article class="parcel-card parcel-task"><strong>'+escapeHtml(t.plan.contact)+'</strong><p role="status">'+
+    return tasks.filter(t=>!active.has(t.id)).map(t=>'<article class="parcel-card parcel-task"><strong>'+escapeHtml(t.plan.contact)+'</strong><p role="status">'+
       (active.has(t.id)?'寄出中…':escapeHtml(t.error||'上次寄貨尚未確認，請核對原操作。'))+'</p><p>已確認 '+t.jobs.filter(j=>j.done).length+'／'+t.jobs.length+' 個品項</p>'+
       '<details><summary>本次寄貨明細</summary><p>'+escapeHtml(t.date)+' · '+escapeHtml(t.notes||'')+'</p>'+t.jobs.map(j=>'<p>'+escapeHtml(j.row.item.itemCode)+' × '+j.qty+' · '+(j.done?'已確認':'待核對')+'</p>').join('')+'</details>'+
       (active.has(t.id)?'':'<button type="button" class="btn-secondary" onclick="resumeWarehouseParcel('+inlineJsValue(t.id)+')">核對／重試原寄貨</button>')+'</article>').join('');
@@ -170,7 +170,11 @@
   async function run(a,id){
     if(active.has(id))return;
     active.add(id);
+    const uiAction=beginUiWorkAction('warehouse-parcel',id,`寄貨確認 ${id}`,()=>{
+      if(same(a))root.renderWarehouseParcels();
+    },{resume:true});
     root.renderWarehouseParcels();
+    let resolved=false;
     try{
       await lock(storageKey(a)+':task:'+id,async()=>{
         const task=read(a).find(t=>t.id===id);if(!task)return;
@@ -190,6 +194,7 @@
           if(!same(a))throw Error('登入身分已變更。');
         }
         await update(a,id,()=>null);
+        resolved=true;
         if(same(a)){notice='已確認寄出給 '+task.plan.contact+'。';markMainPageDirty('inventory','orders.list','orders.po','admin');root.renderInventoryShipping?.();}
       });
     }catch(error){
@@ -197,6 +202,7 @@
       catch(_){if(same(a))notice='寄貨進度儲存失敗，請保留此瀏覽器並核對原操作。';}
     }finally{
       active.delete(id);
+      uiAction?.finish(resolved?'success':'unknown');
       if(same(a))root.renderWarehouseParcels();
     }
   }

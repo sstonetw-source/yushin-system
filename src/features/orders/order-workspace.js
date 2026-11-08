@@ -1251,6 +1251,9 @@ window.renderOrdersList = function() {
     renderOrderWorkCards(baseOrders, normalizedItemsByOrder, dispatchStatesByOrder, lifecyclesByOrder);
 
     baseOrders.forEach(o => {
+        // Pending status changes leave the authoritative cache untouched, but
+        // must not reappear in an action queue on a stale list repaint.
+        if (activeOrderWorkFilter !== 'all' && uiWorkActionPending('order-lifecycle', o.id)) return;
         const allOrderItems = normalizedItemsByOrder.get(o.id) || [];
         const detailsEditable=globalThis.YushinOrderCommercialDetails.canEdit(o)&&!window.orderCommercialEditPending?.has(o.id);
         const detailsLocked=!globalThis.YushinOrderCommercialDetails.beforeReceipt(o);
@@ -1270,6 +1273,7 @@ window.renderOrdersList = function() {
         shown++;
 
         matchedOrderItems.forEach((displayItem,displayIndex)=>{
+        if(activeOrderWorkFilter!=='all'&&serviceWorkItemPending(o.id,displayItem.itemId))return;
         const orderItems=[displayItem],displayRowKey=o.id+':'+displayItem.itemId;
         const tr = document.createElement('tr');
         tr.dataset.orderId=o.id;tr.dataset.menuTitle=[o.customerName,o.orderNo||o.quoteNo||'未編單號',o.orderDate].filter(Boolean).join(' · ');
