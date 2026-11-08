@@ -448,10 +448,16 @@ function productManagementRow(product, duplicate = false) {
       <td data-th="狀態">${product.isFrequentlySold === true ? '常賣・' : ''}${inactive ? '停用' : duplicate ? '重複主檔・請核對' : escapeHtml(status === 'TEMPORARY' ? '待補主檔' : '啟用')}</td>
       <td data-th="操作" class="no-print product-management-actions">
         ${productId ? `<button type="button" class="btn-small btn-secondary" onclick="copyProductInformation(${inlineJsValue(productId)}, this)">複製資訊</button>` : ''}
-        ${productId && canManagePendingProductMaster() ? `<button type="button" class="btn-small btn-secondary" ${inactive && !product.isFrequentlySold ? 'disabled' : ''} onclick="setProductFrequentlySold(${inlineJsValue(productId)}, ${product.isFrequentlySold !== true}, this)">${product.isFrequentlySold === true ? '移出常賣' : '設為常賣'}</button>` : ''}
         ${productId ? `<button type="button" class="btn-small btn-secondary" onclick="openProduct360(${inlineJsValue(productId)})">庫存</button>` : ''}
-        ${canManagePendingProductMaster() ? `<button type="button" class="btn-small btn-secondary" onclick="openProductMasterEditor(${inlineJsValue(productId)})">編輯</button>` : ''}
-        ${canDelete ? `<button type="button" class="btn-small btn-danger" onclick="deleteProductMaster(${inlineJsValue(productId)})">刪除</button>` : ''}
+        ${productId && (canManagePendingProductMaster() || canDelete) ? `<button type="button" class="btn-small btn-secondary product-row-more-trigger" onclick="this.nextElementSibling.showModal()">更多</button>
+          <dialog class="product-row-actions-dialog" aria-label="更多產品操作">
+            <div class="product-row-actions-dialog-heading"><strong>更多產品操作</strong><button type="button" class="btn-small btn-secondary" onclick="this.closest('dialog').close()">關閉</button></div>
+            <div class="product-row-more-actions">
+              ${canManagePendingProductMaster() ? `<button type="button" class="btn-small btn-secondary" ${inactive && !product.isFrequentlySold ? 'disabled' : ''} onclick="this.closest('dialog').close();setProductFrequentlySold(${inlineJsValue(productId)}, ${product.isFrequentlySold !== true}, this)">${product.isFrequentlySold === true ? '移出常賣' : '設為常賣'}</button>` : ''}
+              ${canManagePendingProductMaster() ? `<button type="button" class="btn-small btn-secondary" onclick="this.closest('dialog').close();openProductMasterEditor(${inlineJsValue(productId)})">編輯</button>` : ''}
+              ${canDelete ? `<button type="button" class="btn-small btn-danger" onclick="this.closest('dialog').close();deleteProductMaster(${inlineJsValue(productId)})">刪除</button>` : ''}
+            </div>
+          </dialog>` : ''}
       </td>
     </tr>`;
 }

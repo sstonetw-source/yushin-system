@@ -81,6 +81,7 @@ jobs:
           WORKSPACE_SCREENSHOT_DIR: artifacts/workspace-layout
         run: |
           node tests/ui-control-browser-smoke.js
+          node tests/desktop-layout-browser-smoke.js
           node tests/number-wheel-browser-smoke.js
           node tests/quick-brand-browser-smoke.js
           node tests/warm-sand-browser-smoke.js

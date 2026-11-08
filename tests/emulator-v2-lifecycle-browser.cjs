@@ -248,6 +248,8 @@ async function siteLogin(page,account,role){
 }
 async function siteLogout(page){
  await siteMenu(page);
+ const accountMenu=page.locator('.auth-menu-toggle');
+ if(await accountMenu.isVisible() && await accountMenu.getAttribute('aria-expanded')!=='true')await accountMenu.click();
  await page.locator('button[onclick="handleLogout()"]').click();await page.locator('#loginScreen').waitFor({state:'visible'});
 }
 async function siteMenu(page){

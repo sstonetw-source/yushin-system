@@ -19,7 +19,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-functions-compat.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-    <link rel="stylesheet" href="styles.css?v=20261108-6">
+    <link rel="stylesheet" href="styles.css?v=20261108-7">
     <script src="modules/home-screen-install.js?v=20261108-1"></script>
 </head>
 <body>
@@ -83,17 +83,20 @@
         <div class="nav-tab" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}" data-permission-page="equipment" data-main-nav="equipment" onclick="const nav=this.closest('.nav-tabs'); nav?.classList.remove('mobile-open'); nav?.querySelector('.mobile-nav-toggle')?.setAttribute('aria-expanded','false'); nav?.querySelector('.mobile-nav-toggle')?.setAttribute('aria-label','開啟功能選單'); switchMainTab('equipment-system', this)"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h8v5H8zM10 8v8M14 8v8M7 16h10M6 20h12M4 20h16"/></svg>儀器</div>
         <div class="nav-tab" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}" id="navAdminTab" data-permission-page="admin" data-main-nav="admin" onclick="const nav=this.closest('.nav-tabs'); nav?.classList.remove('mobile-open'); nav?.querySelector('.mobile-nav-toggle')?.setAttribute('aria-expanded','false'); nav?.querySelector('.mobile-nav-toggle')?.setAttribute('aria-label','開啟功能選單'); switchMainTab('admin-system', this)"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l2 1 2-.5 1 2 2 1 0 2 2 2-1 2 1 2-2 1 0 2-2 1-1 2-2-.5-2 1-2-1-2 .5-1-2-2-1 0-2-2-1 1-2-1-2 2-2 0-2 2-1 1-2 2 .5zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg>管理員後台</div>
         <div class="nav-spacer"></div>
-        <div class="auth-status" id="authStatus">
-            <span id="authUserLabel"></span>
-            <select id="viewAsRoleSelect" style="display:none;" onchange="switchViewRole(this.value)">
-                <option value="admin">🛠️ 檢視身份：管理員</option>
-                <option value="sales">👤 檢視身份：業務</option>
-                <option value="purchaser">🛒 檢視身份：採購</option>
-                <option value="warehouse">📦 檢視身份：倉管</option>
-                <option value="engineer">🔧 檢視身份：工程師</option>
-            </select>
-            <button class="btn-secondary" onclick="openPersonalSettings()">個人設定</button>
-            <button class="btn-secondary" onclick="handleLogout()">登出</button>
+        <div class="auth-status" id="authStatus" onfocusout="if(!this.contains(event.relatedTarget)){this.classList.remove('is-open');this.querySelector('.auth-menu-toggle')?.setAttribute('aria-expanded','false')}" onkeydown="if(event.key==='Escape'){this.classList.remove('is-open');this.querySelector('.auth-menu-toggle')?.setAttribute('aria-expanded','false');this.querySelector('.auth-menu-toggle')?.focus()}">
+            <button type="button" class="auth-menu-toggle btn-secondary" aria-controls="authMenuContent" aria-expanded="false" onclick="const expanded=this.closest('.auth-status').classList.toggle('is-open');this.setAttribute('aria-expanded',String(expanded))">帳號設定 <span aria-hidden="true">▾</span></button>
+            <div class="auth-menu-content" id="authMenuContent">
+                <span id="authUserLabel"></span>
+                <select id="viewAsRoleSelect" style="display:none;" onchange="switchViewRole(this.value)">
+                    <option value="admin">🛠️ 檢視身份：管理員</option>
+                    <option value="sales">👤 檢視身份：業務</option>
+                    <option value="purchaser">🛒 檢視身份：採購</option>
+                    <option value="warehouse">📦 檢視身份：倉管</option>
+                    <option value="engineer">🔧 檢視身份：工程師</option>
+                </select>
+                <button class="btn-secondary" onclick="openPersonalSettings()">個人設定</button>
+                <button class="btn-secondary" onclick="handleLogout()">登出</button>
+            </div>
         </div>
     </div>
 
@@ -964,7 +967,8 @@
                 <input type="date" id="purchasePeriodEnd" aria-label="採購統計結束日期" onchange="renderPurchasingView()">
             </div>
             <input type="search" id="purchaseWorkSearch" aria-label="搜尋目前採購工作" placeholder="搜尋目前工作：單號 / 客戶 / 廠牌 / 貨號 / 品名" oninput="renderPurchasingView()">
-
+            <input type="search" aria-label="搜尋採購單" id="poListSearch" placeholder="搜尋全部採購單：單號 / 供應商 / 採購人員 / 品項" oninput="schedulePurchaseOrderHistorySearch()" hidden>
+            <span id="poHistorySearchStatus" role="status"></span>
         </div>
 
         <div class="panel no-print purchase-replenishment-panel" id="purchaseReplenishmentPanel" style="display:none;">
@@ -1002,14 +1006,10 @@
         </div>
         <!-- 採購訂單：列出所有已經產生過的採購單（發給廠商下單用的那種），只有採購／管理員看得到 -->
         <div id="poListPanel" style="display:none">
-            <div class="toolbar no-print">
-                <input type="search" aria-label="搜尋採購單" id="poListSearch" placeholder="搜尋全部採購單：單號 / 供應商 / 採購人員 / 品項" oninput="schedulePurchaseOrderHistorySearch()">
-                <span id="poHistorySearchStatus" role="status"></span>
-            </div>
-            <table class="workflow-list-table">
+            <div class="table-wrap po-history-table-wrap"><table class="workflow-list-table">
                 <thead><tr id="poListHeadRow"><th>單號</th><th>公司</th><th>供應商</th><th>採購人員</th><th>採購日期</th><th>預計到貨</th><th>等待天數</th><th>品項數</th><th>總計金額</th><th>到貨進度</th><th class="no-print">操作</th></tr></thead>
                 <tbody id="poListBody"></tbody>
-            </table>
+            </table></div>
             <div class="empty-hint" id="poListEmptyHint" style="display:none;">目前還沒有產生過任何採購單。</div>
             <div class="po-load-more-row no-print"><button type="button" id="poLoadMoreBtn" class="btn-secondary" style="display:none;" onclick="loadMorePurchaseOrders()">載入更多（每次 50 筆）</button></div>
         </div>
@@ -1519,13 +1519,17 @@
                 <strong>倉庫管理</strong>
 
                 <input id="warehouseMasterEditingId" type="hidden">
-                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;">
-                    <div><label>倉庫名稱</label><input id="warehouseMasterName" type="text" placeholder="例如：又鑫倉庫"></div>
-                    <div><label>收件人</label><input id="warehouseMasterContact" type="text"></div><div><label>電話</label><input id="warehouseMasterPhone" type="tel"></div><div><label>收貨地址</label><input id="warehouseMasterAddress" type="text"></div>
-                    <div><label>倉庫類型</label><select id="warehouseMasterType" onchange="if(this.value==='EXTERNAL')document.getElementById('warehouseMasterDefault').checked=false"><option value="INTERNAL">公司倉庫</option><option value="EXTERNAL">外部倉庫</option></select></div>
-                    <label style="font-size:13px;"><input id="warehouseMasterDefault" type="checkbox"> 預設倉庫（限公司倉庫）</label>
-                    <button type="button" id="warehouseMasterSaveBtn" onclick="saveWarehouseMaster()">＋ 新增倉庫</button>
-                    <button type="button" class="btn-secondary" onclick="clearWarehouseMasterEditor()">取消編輯</button>
+                <div class="warehouse-master-form">
+                    <div class="warehouse-master-field"><label for="warehouseMasterName">倉庫名稱</label><input id="warehouseMasterName" type="text" placeholder="例如：又鑫倉庫"></div>
+                    <div class="warehouse-master-field"><label for="warehouseMasterContact">收件人</label><input id="warehouseMasterContact" type="text"></div>
+                    <div class="warehouse-master-field"><label for="warehouseMasterPhone">電話</label><input id="warehouseMasterPhone" type="tel"></div>
+                    <div class="warehouse-master-field warehouse-master-address"><label for="warehouseMasterAddress">收貨地址</label><input id="warehouseMasterAddress" type="text"></div>
+                    <div class="warehouse-master-field"><label for="warehouseMasterType">倉庫類型</label><select id="warehouseMasterType" onchange="if(this.value==='EXTERNAL')document.getElementById('warehouseMasterDefault').checked=false"><option value="INTERNAL">公司倉庫</option><option value="EXTERNAL">外部倉庫</option></select></div>
+                    <label class="warehouse-master-default"><input id="warehouseMasterDefault" type="checkbox"> 預設倉庫（限公司倉庫）</label>
+                    <div class="warehouse-master-actions">
+                        <button type="button" id="warehouseMasterSaveBtn" onclick="saveWarehouseMaster()">＋ 新增倉庫</button>
+                        <button type="button" class="btn-secondary" onclick="clearWarehouseMasterEditor()">取消編輯</button>
+                    </div>
                 </div>
                 <div id="warehouseMasterStatus" role="status" style="font-size:12px;color:#666;margin-top:8px;"></div>
                 <div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th>倉庫</th><th>類型</th><th>預設</th><th>狀態</th><th>操作</th></tr></thead><tbody id="warehouseMasterBody"></tbody></table></div>
@@ -1632,7 +1636,7 @@
     <script src="modules/order-commercial-details.js?v=20261025-1"></script>
     <script src="modules/order-entry-core.js?v=20261104-460"></script>
 <script src="modules/service-work-core.js?v=20261023-2"></script>
-    <script src="app.js?v=20261108-5"></script>
+    <script src="app.js?v=20261108-6"></script>
     <script src="modules/order-self-order-required.js?v=20261013-1"></script>
     <script src="modules/customer-cancellations.js?v=20261021-3"></script>
     <script src="modules/free-stock-recovery.js?v=20261014-9"></script>
