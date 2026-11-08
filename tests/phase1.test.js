@@ -393,7 +393,7 @@ test('low-stock inventory can hand off to formal replenishment purchase flow wit
 
 test('inventory page owns stock policy and safety-stock replenishment only applies to that policy', () => {
     assert.match(indexSource,/id="inventoryPolicyFilter"/);
-    assert.match(indexSource,/>不備庫</);
+    assert.doesNotMatch(indexSource,/<option value="NO_STOCK">/);
     assert.match(indexSource,/>安全庫存</);
     assert.match(indexSource,/>依訂單採購</);
     assert.match(indexSource,/庫存策略/);

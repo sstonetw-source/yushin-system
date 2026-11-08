@@ -9252,12 +9252,15 @@ function warehouseStockTotals(productKey) {
 const INVENTORY_STOCK_POLICIES = YushinInventory.STOCK_POLICIES;
 
 function inventoryStockPolicy(item = {}) {
- return YushinInventory.stockPolicyFor(item);
+ // Historical NO_STOCK had the same replenishment behavior as ORDER_ONLY.
+ // Keep its stored value untouched; surface one canonical choice for all users.
+ const policy=YushinInventory.stockPolicyFor(item);
+ return policy===INVENTORY_STOCK_POLICIES.NO_STOCK?INVENTORY_STOCK_POLICIES.ORDER_ONLY:policy;
 }
 
 function inventoryStockPolicyLabel(policy) {
  return ({
-   NO_STOCK:'不備庫',
+   NO_STOCK:'依訂單採購', // legacy data and already-issued audit receipts
    SAFETY_STOCK:'安全庫存',
    ORDER_ONLY:'依訂單採購'
  })[String(policy||'').toUpperCase()] || '依訂單採購';
@@ -9377,7 +9380,7 @@ function canManageInventoryStockPolicy() {
  return currentUserRole === 'admin' || currentUserRole === 'purchaser';
 }
 
-function inventoryStockPolicyBadge(item = {}) {const policy=inventoryStockPolicy(item),className=policy===INVENTORY_STOCK_POLICIES.SAFETY_STOCK?'is-safety':policy===INVENTORY_STOCK_POLICIES.NO_STOCK?'is-none':'is-order';return `<span class="inventory-policy-badge ${className}">${escapeHtml(inventoryStockPolicyLabel(policy))}</span>`;}
+function inventoryStockPolicyBadge(item = {}) {const policy=inventoryStockPolicy(item),className=policy===INVENTORY_STOCK_POLICIES.SAFETY_STOCK?'is-safety':'is-order';return `<span class="inventory-policy-badge ${className}">${escapeHtml(inventoryStockPolicyLabel(policy))}</span>`;}
 
 window.renderInventoryList=function(){
  const body=document.getElementById('inventoryListBody');if(!body)return;const k=(document.getElementById('inventorySearch')?.value||'').toLowerCase(),stateFilter=document.getElementById('inventoryStateFilter')?.value||'all',policyFilter=document.getElementById('inventoryPolicyFilter')?.value||'',brands=populateInventoryBrandFilter(),brandFilter=document.getElementById('inventoryBrandFilter')?.value||'',rowsHtml=[],inventoryRows=inventorySearchActive?inventorySearchResults:inventoryCache,activeWarehouseCount=warehouseMasterCache.filter(warehouse=>warehouse.active!==false).length;
