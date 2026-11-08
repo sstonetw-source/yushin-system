@@ -40,14 +40,22 @@ const fs=require('node:fs'),assert=require('node:assert/strict'),{spawnSync}=req
    await page.getByRole('button',{name:'Brand',exact:true}).click();assert.equal(await page.evaluate(()=>queryCount),1);
    for(const role of ['sales','engineer','warehouse','purchaser','admin']){
     await page.evaluate(role=>{currentUserRole=role;trueUserRole=role;renderProductManagementResults();},role);
-    assert.equal(await page.getByRole('button',{name:'移出常賣',exact:true}).count(),['admin','purchaser'].includes(role)?1:0);
+    const canManage=['admin','purchaser'].includes(role);
+    assert.equal(await page.locator('.product-row-more-trigger').count(),canManage?1:0);
+    if(canManage){
+     await page.locator('.product-row-more-trigger').click();
+     assert.equal(await page.getByRole('button',{name:'移出常賣',exact:true}).count(),1);
+     await page.locator('.product-row-actions-dialog[open]').getByRole('button',{name:'關閉'}).click();
+    }
     assert.equal(await page.getByRole('button',{name:'複製資訊',exact:true}).count(),1);
    }
    const row=page.locator('#productManagementBody tr').first();
-   if(width===390){assert.equal(await row.locator('button').evaluateAll(bs=>bs.every(b=>b.getBoundingClientRect().height>=44)),true);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);}
+   if(width===390){assert.equal(await row.locator('button:visible').evaluateAll(bs=>bs.every(b=>b.getBoundingClientRect().height>=44)),true);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);}
    await page.screenshot({path:'/tmp/product-frequent-'+width+'.png',fullPage:true});
+   await row.locator('.product-row-more-trigger').click();
    await page.getByRole('button',{name:'移出常賣',exact:true}).click();await page.waitForFunction(()=>writeCount===1&&productManagementResults.length===0);
    await page.evaluate(()=>{productManagementResults=[records[1]];productManagementSourceMode='search';renderProductManagementResults();});
+   await page.locator('#productManagementBody .product-row-more-trigger').click();
    await page.getByRole('button',{name:'設為常賣',exact:true}).click();await page.waitForFunction(()=>writeCount===2);
    await page.getByRole('button',{name:'Brand',exact:true}).click();await page.waitForFunction(()=>productManagementResults.length===1);
    assert.equal(await page.locator('#productManagementBody').getByText('B-002',{exact:true}).count(),1);
