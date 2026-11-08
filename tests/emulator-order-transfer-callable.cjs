@@ -202,3 +202,26 @@ test('V2 Custody fails atomically if either source has insufficient lot quantiti
  assert.equal(await f.read('warehouseStocks','custody-OWNER__'+f.productKey),undefined);
  assert.equal(await f.read('inventoryMovements',input.id+'-out-1'),undefined);
 });
+
+
+test('production transfer requires database retirement gate before stock writes and retains original replay',async()=>{
+ const f=await fixture('production-retirement');
+ // The actual Admin client is still hard-bound to demo-yushin. Only the service
+ // project facade exercises the production branch; no production access occurs.
+ assert.equal(db.projectId,'demo-yushin');
+ const productionDb={projectId:'yu-shing-company',collection:db.collection.bind(db),runTransaction:db.runTransaction.bind(db)};
+ const productionEnv={GCLOUD_PROJECT:'yu-shing-company',ENABLE_PRODUCTION_ORDER_TRANSFER_DISPATCH_BACKEND:'true'};
+ const gate=db.collection('settings').doc('orderTransferCutover');
+ const send=()=>commitOrderTransferPhysical(productionDb,f.uid,f.send,'DISPATCH',productionEnv);
+ await gate.delete();const before=await f.snapshot();
+ await assert.rejects(send(),/舊交易入口封鎖/);assert.deepEqual(await f.snapshot(),before);
+ for(const backendOnly of [false,'true',1]){
+  await gate.set({backendOnly});
+  await assert.rejects(send(),/舊交易入口封鎖/);assert.deepEqual(await f.snapshot(),before);
+ }
+ await gate.set({backendOnly:true});
+ try{
+  assert.equal((await send()).status,'applied');const after=await f.snapshot();
+  assert.equal((await send()).status,'already-applied');assert.deepEqual(await f.snapshot(),after);
+ }finally{await gate.delete();}
+});

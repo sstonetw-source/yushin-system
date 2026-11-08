@@ -34,6 +34,13 @@ async function commitOrderTransferPhysical(db,uid,data,action,env=process.env){
  return db.runTransaction(async tx=>{
   const ref=(n,k)=>db.collection(n).doc(k),actorSnap=await tx.get(ref('users',uid)),actor=actorSnap.exists?actorSnap.data():null;
   if(!actor||actor.active===false||actor.disabled===true||!['admin','purchaser','warehouse'].includes(actor.role))fail('目前角色不能處理訂單調撥','permission-denied');
+  // A database gate retires cached SDK writers before production Admin writes.
+  // Read it inside the stock transaction so cutover and inventory are consistent.
+  if(project==='yu-shing-company'){
+   const cutover=await tx.get(ref('settings','orderTransferCutover'));
+   if(!cutover.exists||cutover.data().backendOnly!==true)
+    fail('訂單調撥尚未完成舊交易入口封鎖，請保留原操作等待管理員確認');
+  }
   const transferRef=ref('stockTransfers',intent.id),transfer=await tx.get(transferRef),t=transfer.exists?transfer.data():null;
   const proofRef=ref('reservationOperationReceipts','order-transfer-dispatch-'+intent.id),proofSnap=await tx.get(proofRef),proof=proofSnap.exists?proofSnap.data():null;
   const receiveRef=action==='RECEIVE'?ref('reservationOperationReceipts','order-transfer-receipt-'+intent.operationId):null;

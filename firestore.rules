@@ -1,3 +1,6 @@
+// Cutover model: settings/orderTransferCutover.backendOnly (bool, optional,
+// irreversible once true) retires client writes for stockTransfers with a
+// nonempty orderId and their order/reservation witnesses; free transfers stay unchanged.
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -205,6 +208,13 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // settings/orderTransferCutover.backendOnly is an irreversible bool gate.
+    // It retires only order-linked browser transfer writers, not free-stock transfers.
+    function orderTransferBackendOnly() {
+      let gate = /databases/$(database)/documents/settings/orderTransferCutover;
+      return exists(gate) && get(gate).data.get('backendOnly', false) == true;
+    }
+
     match /settings/{id} {
       allow read: if active();
       // Approved cutover gates are one-way: a cached client or routine admin
@@ -227,6 +237,9 @@ service cloud.firestore {
           || resource.data.get('backendOnly', false) != true
           || request.resource.data.get('backendOnly', false) == true)
         && (id != 'deliveryCutover'
+          || resource.data.get('backendOnly', false) != true
+          || request.resource.data.get('backendOnly', false) == true)
+        && (id != 'orderTransferCutover'
           || resource.data.get('backendOnly', false) != true
           || request.resource.data.get('backendOnly', false) == true)
         && (id != 'lifecycleCutover'
@@ -872,7 +885,7 @@ service cloud.firestore {
         let index = transfer.itemIndex;
         let oldItem = before.items[index];
         let newItem = after.items[index];
-        return canReceiveInventory() && sameCommercialOwner() && preservesCreator()
+        return !orderTransferBackendOnly() && canReceiveInventory() && sameCommercialOwner() && preservesCreator()
           && transfer.orderId == orderId && transfer.itemId == oldItem.itemId
           && index is int && index >= 0 && index < before.items.size()
           && before.items.size() == after.items.size()
@@ -1937,7 +1950,9 @@ service cloud.firestore {
       }
 
       allow get, list: if canReceiveInventory();
-      allow create: if canReceiveInventory() && request.resource.data.id == id
+      allow create: if canReceiveInventory()
+        && (request.resource.data.get('orderId', '') == '' || !orderTransferBackendOnly())
+        && request.resource.data.id == id
         && request.resource.data.createdByUid == request.auth.uid
         && request.resource.data.qty is number && request.resource.data.qty > 0
         && request.resource.data.reservedQty is number && request.resource.data.reservedQty >= 0
@@ -1949,7 +1964,9 @@ service cloud.firestore {
         && transferOrderEvidence(request.resource.data) && transferSourceStock(request.resource.data)
         && transferAggregate(request.resource.data, false)
         && (request.resource.data.kind != 'HANDOFF' || transferTargetStock(request.resource.data));
-      allow update: if canReceiveInventory() && ((resource.data.status == 'IN_TRANSIT'
+      allow update: if canReceiveInventory()
+        && (resource.data.get('orderId', '') == '' || !orderTransferBackendOnly())
+        && ((resource.data.status == 'IN_TRANSIT'
         && request.resource.data.status == 'RECEIVED' && request.resource.data.receivedByUid == request.auth.uid
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','receivedAt','receivedByUid','autoAllocationQty','autoAllocatedQty','allocationCompleted'])
         && request.resource.data.get('autoAllocationQty', resource.data.qty - resource.data.reservedQty) == (resource.data.get('orderId', '') == '' ? resource.data.qty - resource.data.reservedQty : 0)
@@ -2220,6 +2237,7 @@ service cloud.firestore {
             || (movement.get('sourceType', '') == 'SUPPLY_ORDER'
               && getAfter(/databases/$(database)/documents/supplyOrders/$(movement.sourceId)).data.get('orderId', '') == data.orderId)
             || (movement.get('sourceType', '') == 'WAREHOUSE_TRANSFER'
+              && !orderTransferBackendOnly()
               && getAfter(/databases/$(database)/documents/stockTransfers/$(movement.sourceId)).data.get('orderId', '') == data.orderId));
       }
 
@@ -2634,7 +2652,7 @@ service cloud.firestore {
         let oldTransfer = get(path).data;
         let transfer = getAfter(path).data;
         let stockPath = /databases/$(database)/documents/warehouseStocks/$(e.previousWarehouseStockId);
-        return movement.get('sourceType', '') == 'WAREHOUSE_TRANSFER'
+        return !orderTransferBackendOnly() && movement.get('sourceType', '') == 'WAREHOUSE_TRANSFER'
           && e.reservationIds.size() == 1 && exists(path) && oldTransfer.status == 'IN_TRANSIT'
           && transfer.status == 'RECEIVED' && transfer.receivedByUid == request.auth.uid
           && transfer.orderId == data.orderId && transfer.itemId == data.itemId
