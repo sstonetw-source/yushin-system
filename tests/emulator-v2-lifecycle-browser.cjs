@@ -945,13 +945,15 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   assert.equal(firstShipped.source.items[0].reservedQty,7);assert.equal(firstShipped.inventory.onHand,prepared.inventory.onHand-2);assert.equal(firstShipped.inventory.reserved,prepared.inventory.reserved-2);
   assert.equal(firstShipped.source.deliveredQty,0);assert.deepEqual(firstShipped.source.deliveryRecords,[]);assert.equal(firstShipped.source.isDelivered,false);
   await siteOpen(page,'warehouse');await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();
+  await page.locator((await page.evaluate(()=>defaultWarehouse()?.id))===fixture.warehouseIds[0]?'#inventoryShippingMainBtn':'#inventoryShippingBranchBtn').click();
   assert.match(await page.locator('.parcel-task').innerText(),/× 2/);
   await page.locator('.parcel-task').getByRole('button',{name:'核對／重試原寄貨'}).click();
   await page.waitForFunction(()=>!hasWarehouseParcelWork(),null,{timeout:45000});
   const shipmentCalls=calls.filter(row=>row.name==='shipV2WarehouseItem');assert.equal(shipmentCalls.length,2);assert.deepEqual(shipmentCalls[1].data,firstShipmentIntent);
   assert.deepEqual(await facts(fixture),firstShipped);
   await openShipmentBatch();await page.locator('[data-parcel-quantity="0"]').fill('2');
-  await page.locator('#parcelDate').fill('2026-10-21');await page.locator('#warehouseParcelDialog').getByRole('button',{name:'確認寄出'}).click();
+  await page.locator('#parcelDate').fill('2026-10-21');const secondShipmentRequest=page.waitForRequest(request=>new URL(request.url()).pathname.endsWith('/shipV2WarehouseItem'));
+  await page.locator('#warehouseParcelDialog').getByRole('button',{name:'確認寄出'}).click();await secondShipmentRequest;
   await page.waitForFunction(()=>!hasWarehouseParcelWork(),null,{timeout:45000});
   const shipped=await facts(fixture),shipmentRecords=shipped.source.warehouseShipmentRecords;
   assert.equal(shipmentRecords.length,2);assert.equal(shipped.source.items[0].warehouseShippedQty,4);assert.equal(shipped.source.items[0].reservedQty,5);assert.equal(shipped.source.items[0].shortageQty,3);
@@ -1428,6 +1430,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   for(const field of ['deliveryRecords','returnRecords','returnRequests','deliveredQty','returnedQty','isDelivered'])assert.deepEqual(otherShipped.source[field],fullyReceived.source[field]);
   require('../modules/fulfillment-core').validateShipmentMovement(newShipment,(await db.collection('inventoryMovements').doc(newShipment.movementId).get()).data(),{orderId:fixture.sourceId,itemId:'S',productKey:fixture.productKey});
   await siteOpen(page,'warehouse');await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();
+  await page.locator((await page.evaluate(()=>defaultWarehouse()?.id))===fixture.warehouseIds[1]?'#inventoryShippingMainBtn':'#inventoryShippingBranchBtn').click();
   assert.match(await page.locator('.parcel-task').innerText(),/× 5/);
   await page.locator('.parcel-task').getByRole('button',{name:'核對／重試原寄貨'}).click();await page.waitForFunction(()=>!hasWarehouseParcelWork(),null,{timeout:45000});
   assert.deepEqual(calls.filter(row=>row.name==='shipV2WarehouseItem').at(-1).data,otherShipmentIntent);
@@ -1557,6 +1560,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
    (await db.collection('inventoryMovements').doc(lastShipment.movementId).get()).data(),
    {orderId:fixture.sourceId,itemId:'S',productKey:fixture.productKey});
   await siteOpen(page,'warehouse');await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();
+  await page.locator((await page.evaluate(()=>defaultWarehouse()?.id))===fixture.warehouseIds[0]?'#inventoryShippingMainBtn':'#inventoryShippingBranchBtn').click();
   assert.match(await page.locator('.parcel-task').innerText(),/× 3/);
   await page.locator('.parcel-task').getByRole('button',{name:'核對／重試原寄貨'}).click();await page.waitForFunction(()=>!hasWarehouseParcelWork(),null,{timeout:45000});
   assert.deepEqual(calls.filter(row=>row.name==='shipV2WarehouseItem').at(-1).data,lastShipmentIntent);
@@ -1828,7 +1832,8 @@ for(const width of [1280,390])test('full site '+width+'px original multi-item pu
   for(const [index,id] of ids.entries()){
    const warehouseIndex=index===1?1:0,warehouseId=x.warehouses[warehouseIndex],productIndex=index===2?1:0,before=await x.snapshot();
    await openShipment(id,warehouseId);assert.equal(await page.locator('[data-parcel-quantity="0"]').inputValue(),String(quantities[index]));
-   await page.locator('#parcelDate').fill('2026-10-22');await page.locator('#warehouseParcelDialog').getByRole('button',{name:'確認寄出'}).click();
+   await page.locator('#parcelDate').fill('2026-10-22');const shipmentRequest=page.waitForRequest(request=>new URL(request.url()).pathname.endsWith('/shipV2WarehouseItem'));
+   await page.locator('#warehouseParcelDialog').getByRole('button',{name:'確認寄出'}).click();await shipmentRequest;
    if(id==='I2')await page.locator('.parcel-task').getByRole('button',{name:'核對／重試原寄貨'}).waitFor({state:'visible',timeout:45000});
    else await page.waitForFunction(()=>!hasWarehouseParcelWork(),null,{timeout:45000});
    const after=await x.snapshot();
@@ -1844,6 +1849,7 @@ for(const width of [1280,390])test('full site '+width+'px original multi-item pu
     const intent=logisticsCalls.filter(row=>row.name==='shipV2WarehouseItem').at(-1).data;
     assert.equal(intent.warehouseId,warehouseId);assert.equal(intent.itemId,id);
     await siteOpen(page,'warehouse');await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();
+    await page.locator((await page.evaluate(()=>defaultWarehouse()?.id))===warehouseId?'#inventoryShippingMainBtn':'#inventoryShippingBranchBtn').click();
     assert.match(await page.locator('.parcel-task').innerText(),/× 2/);
     await page.locator('.parcel-task').getByRole('button',{name:'核對／重試原寄貨'}).click();await page.waitForFunction(()=>!hasWarehouseParcelWork(),null,{timeout:45000});
     assert.deepEqual(logisticsCalls.filter(row=>row.name==='shipV2WarehouseItem').at(-1).data,intent);
