@@ -269,9 +269,11 @@ test('v2 concentrated source moves physical reserved stock and original location
  await f.receipt();const ledger=f.docs.get('inventoryReservations/ORDER__I');assert.deepEqual(ledger.locations,[{warehouseId:'MAIN',reservedQty:3}]);assert.equal('warehouseId' in ledger,false);assert.equal(ledger.locationSchemaVersion,2);assert.deepEqual(ledger.lifecycleWarehouseIds,['A','MAIN']);assert.equal(ledger.quantity,3);assert.equal(f.docs.get('inventory/P').reserved,5);assert.equal(f.docs.get('warehouseStocks/MAIN__P').reserved,3);
  const before=f.snapshot();await f.receipt();assert.equal(f.snapshot(),before);
 });
-test('production v2 order transfer remains atomic and disabled until both independent approvals are present',async()=>{
+test('production v2 order transfer requires retired legacy writers and both independent approvals',async()=>{
  const project='yu-shing-company',gate={GCLOUD_PROJECT:project,ENABLE_PRODUCTION_ORDER_TRANSFER_DISPATCH_BACKEND:'true'};
  const f=v2OrderTransferFixture();f.db.projectId=project;
+ const unretired=f.snapshot();await assert.rejects(commitOrderTransferPhysical(f.db,'U',f.send,'DISPATCH',gate),/舊交易入口封鎖/);
+ assert.equal(f.snapshot(),unretired);f.docs.set('settings/orderTransferCutover',{backendOnly:true});
  const before=f.snapshot();await assert.rejects(commitOrderTransferPhysical(f.db,'U',f.send,'DISPATCH',gate),/獨立啟用/);
  assert.equal(f.snapshot(),before);
  const accepted={...gate,ENABLE_PRODUCTION_ORDER_TRANSFER_V2_BACKEND:'true'};
@@ -306,6 +308,8 @@ test('production v2 custody HANDOFF is opt-in, retains original proof and never 
  Object.assign(ledger,{locationSchemaVersion:2,ownerUid:'S',salesCode:'01',locations:[{warehouseId:'A',reservedQty:3}],lifecycleWarehouseIds:['A']});
  f.db.projectId='yu-shing-company';
  const env={GCLOUD_PROJECT:'yu-shing-company',ENABLE_PRODUCTION_ORDER_TRANSFER_HANDOFF_BACKEND:'true'};
+ const unretired=f.snapshot();await assert.rejects(commitOrderTransferPhysical(f.db,'U',f.input,'HANDOFF',env),/舊交易入口封鎖/);
+ assert.equal(f.snapshot(),unretired);f.docs.set('settings/orderTransferCutover',{backendOnly:true});
  const before=f.snapshot();await assert.rejects(commitOrderTransferPhysical(f.db,'U',f.input,'HANDOFF',env),/獨立啟用/);
  assert.equal(f.snapshot(),before);
  const enabled={...env,ENABLE_PRODUCTION_ORDER_TRANSFER_V2_BACKEND:'true'};
