@@ -39,6 +39,8 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
     return {...input,status:'applied'};
    }}),refreshAffectedOrderCaches=async()=>{};
   `});
+  const feedbackSource=read('src/shared/action-feedback.js');
+  await page.addScriptTag({content:feedbackSource.slice(feedbackSource.indexOf('const uiWorkActions = new Map();'))});
   await page.addScriptTag({content:read('src/features/orders/service-order-actions.js')});
   await page.addScriptTag({content:read('modules/workflow-core.js')});
   await page.addScriptTag({content:read('modules/order-commercial-details.js')});

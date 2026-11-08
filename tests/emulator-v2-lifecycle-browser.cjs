@@ -111,6 +111,8 @@ async function open(page,fixture){
   +section(read('src/app/bootstrap.js'),'function applyUserProfile(','const DEFAULT_LIST_LIMIT')
   +section(role,'window.handleLogin =','window.handleLogout =')});
  await page.addScriptTag({content:read('src/services/order-lifecycle.js')});
+ const feedbackSource=read('src/shared/action-feedback.js');
+ await page.addScriptTag({content:feedbackSource.slice(feedbackSource.indexOf('const uiWorkActions = new Map();'))});
  await page.addScriptTag({content:section(workspace,'function orderLifecycleActionButtons(','// Only a fully ready')});
  await page.addScriptTag({content:section(read('src/features/orders/lifecycle-workspace.js'),'function confirmOrderCancellation(','window.toggleOrderProgressStatus')});
  await page.addScriptTag({content:read('modules/free-stock-recovery.js')});

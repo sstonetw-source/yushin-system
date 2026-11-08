@@ -58,6 +58,8 @@ const setup=`
    await target.goto('http://127.0.0.1:'+server.address().port);
    await target.addStyleTag({path:path.join(root,'styles.css')});
    await target.addScriptTag({content:setup});
+   const feedbackSource=fs.readFileSync(path.join(root,'src/shared/action-feedback.js'),'utf8');
+   await target.addScriptTag({content:feedbackSource.slice(feedbackSource.indexOf('const uiWorkActions = new Map();'))});
    await target.addScriptTag({path:path.join(root,'modules/warehouse-logistics.js')});
    await target.addScriptTag({content:`
     warehouseParcelSourceRows=()=>all;
