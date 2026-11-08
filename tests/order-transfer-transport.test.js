@@ -29,3 +29,29 @@ test('handoff cannot clear checkpoint when server proof differs',async()=>{
  const f=fixture(),c=f.open();await assert.rejects(c.commitOrderTransferBackend('HANDOFF','T',{...f.input,toWarehouseId:'custody-X'}),/憑證/);
  assert.equal(f.storage.size,1);
 });
+test('production HANDOFF calls only the authorized backend, preserves exact intent and never selects Emulator',async()=>{
+ const f=fixture(),c=f.open(),input={...f.input,toWarehouseId:'custody-S'};
+ let transfer=null,emulatorCalls=0,backendCalls=0;
+ const functions={useEmulator(){emulatorCalls++;},httpsCallable:name=>async payload=>{
+  assert.equal(name,'handoffOrderTransfer');backendCalls++;
+  transfer={...payload,kind:'HANDOFF',status:'RECEIVED',ownerUid:'S',receivedByUid:'U',receivedByRole:'warehouse',
+   orderTransferIntentHash:'verified',deliveryPlan:payload.expectedPlan,createdByUid:'U',createdByRole:'warehouse'};
+  return {data:{action:'HANDOFF',id:payload.id,operationId:payload.id,status:'applied',actorUid:'U',actorRole:'warehouse'}};
+ }};
+ const app={options:{projectId:'yu-shing-company'},functions:()=>functions};
+ functions.app=app;
+ c.firebase={auth:()=>({app,currentUser:c.currentUser}),app:()=>app,functions:true};
+ c.db={app,collection:()=>({doc:()=>({get:async()=>({exists:!!transfer,data:()=>structuredClone(transfer)})})})};
+ c.APP_ENVIRONMENT='production';
+ c.productionTransactionBackendRequired=kind=>kind==='ORDER_TRANSFER_HANDOFF';
+ c.productionTransactionBackendEnabled=kind=>kind==='ORDER_TRANSFER_HANDOFF';
+ c.mainTransferBackendContext=()=>{throw Error('Emulator transport must not be used');};
+ assert.equal(c.orderTransferBackendRequired('HANDOFF','T','O','I'),true);
+ await c.commitOrderTransferBackend('HANDOFF','T',input);
+ assert.equal(backendCalls,1);assert.equal(emulatorCalls,0);assert.equal(f.storage.size,0);
+ const denied=f.open();denied.APP_ENVIRONMENT='production';
+ denied.productionTransactionBackendRequired=kind=>kind==='ORDER_TRANSFER_HANDOFF';
+ denied.productionTransactionBackendEnabled=()=>false;
+ await assert.rejects(denied.commitOrderTransferBackend('HANDOFF','T',input),/禁止回退舊交易/);
+ assert.equal(f.storage.size,0);
+});

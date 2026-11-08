@@ -67,7 +67,10 @@ const setup=`
    await target.addScriptTag({path:path.join(root,'modules/warehouse-logistics.js')});
    await target.addScriptTag({content:`
     warehouseParcelSourceRows=()=>all;
-    commitWarehouseParcelJob=async job=>{const result=await commitParcelProbe(job);if(result.error)throw Error(result.error);};
+    commitWarehouseParcelJob=async job=>{
+      if(window.blockLocation)throw Object.assign(Error('預留含尚未啟用的位置資料'),{code:'unsupported-reservation-location'});
+      const result=await commitParcelProbe(job);if(result.error)throw Error(result.error);
+    };
     renderInventoryShipping=()=>renderWarehouseParcels();
    `});
    await target.addScriptTag({path:path.join(root,'modules/warehouse-parcels.js')});
@@ -143,6 +146,16 @@ const setup=`
   await dialog.getByRole('button',{name:'返回',exact:true}).click();
   await page.evaluate(()=>{currentUserRole='sales';renderWarehouseParcels();});
   assert.equal(await page.locator('#warehouseParcelCards button').count(),0);
+  // A known server-side compatibility rejection is stopped, not left as a
+  // permanently "background processing / uncertain" job. The original
+  // operation remains recoverable when the approved backend is available.
+  await mount();await page.evaluate(()=>window.blockLocation=true);
+  await page.locator('#warehouseParcelCards .parcel-card').first().getByRole('button',{name:'確認寄出',exact:true}).click();
+  await dialog.getByRole('button',{name:'確認寄出',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('.parcel-task')?.textContent.includes('寄貨已停止'));
+  assert.equal(await page.locator('#uiWorkActionStatus').isHidden(),true);
+  assert.equal(await page.locator('.parcel-task').count(),1);
+  assert.match(await page.locator('.parcel-task').innerText(),/核對／重試原寄貨/);
   // Long recipient details and item names remain whole on continued labels.
   await mount();
   await page.evaluate(()=>{

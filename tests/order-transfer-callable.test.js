@@ -2,9 +2,21 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const {orderTransferProject,orderTransferIntent,createOrderTransferPhysicalCallables}=require('../functions/order-transfer-physical-service');
 const env={GCLOUD_PROJECT:'demo-yushin',FUNCTIONS_EMULATOR:'true',FIRESTORE_EMULATOR_HOST:'localhost:8080',FIREBASE_AUTH_EMULATOR_HOST:'localhost:9099',ENABLE_ORDER_TRANSFER_DISPATCH_EMULATOR:'true'};
-test('order transfer physical gates are independent and never authorize Preview or production',()=>{
+test('order transfer physical gates stay independent; production requires exact action/project and no Emulator',()=>{
  assert.equal(orderTransferProject('DISPATCH',env),'demo-yushin');assert.equal(orderTransferProject('RECEIVE',env),'');
  for(const patch of [{GCLOUD_PROJECT:'preview-20135'},{GCLOUD_PROJECT:'yu-shing-company'},{FIREBASE_AUTH_EMULATOR_HOST:'remote:9099'},{FUNCTIONS_EMULATOR:''}])assert.equal(orderTransferProject('DISPATCH',{...env,...patch}),'');
+ for(const action of ['DISPATCH','HANDOFF','RECEIVE']){
+  const flag='ENABLE_PRODUCTION_ORDER_TRANSFER_'+action+'_BACKEND',prod={GCLOUD_PROJECT:'yu-shing-company',[flag]:'true'};
+  assert.equal(orderTransferProject(action,prod),'yu-shing-company');
+  for(const other of ['DISPATCH','HANDOFF','RECEIVE'].filter(candidate=>candidate!==action))
+   assert.equal(orderTransferProject(other,prod),'');
+  for(const patch of [{[flag]:'false'},{[flag]:true},{GCLOUD_PROJECT:'preview-20135'},
+   {FUNCTIONS_EMULATOR:'true'},{FIRESTORE_EMULATOR_HOST:'localhost:8080'},
+   {FIREBASE_AUTH_EMULATOR_HOST:'localhost:9099'},{GCP_PROJECT:'other'},
+   {FIREBASE_CONFIG:JSON.stringify({projectId:'other'})}])
+   assert.equal(orderTransferProject(action,{...prod,...patch}),'');
+ }
+ assert.equal(orderTransferProject('UNKNOWN',{GCLOUD_PROJECT:'yu-shing-company',ENABLE_PRODUCTION_ORDER_TRANSFER_HANDOFF_BACKEND:'true'}),'');
 });
 test('fixed order transfer intents reject extra fields handoff and mutable actor claims',()=>{
  const source={id:'T',orderId:'O',itemId:'I',fromWarehouseId:'A',toWarehouseId:'B',qty:3};

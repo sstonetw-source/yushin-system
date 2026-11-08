@@ -1,13 +1,16 @@
 'use strict';
 const {createHash}=require('node:crypto');
 const {projectIdFromEnvironment}=require('./grouped-reservation-gate');
+const {allowProductionTransaction}=require('./production-transaction-gate');
 const reservation=require('./shared/reservation-core'),logistics=require('./shared/warehouse-logistics');
 const fulfillment=require('./shared/fulfillment-core'),inventory=require('./shared/inventory-core');
 function fail(message,code='failed-precondition'){throw Object.assign(Error(message),{code});}
 function id(v){if(typeof v!=='string'||!v||v!==v.trim()||v.includes('/')||v.length>96)fail('訂單調撥識別碼不正確','invalid-argument');return v;}
 function orderTransferProject(action,env=process.env){
  const local=v=>typeof v==='string'&&/^(localhost|127\.0\.0\.1):[0-9]+$/.test(v);
- return ['DISPATCH','RECEIVE','HANDOFF'].includes(action)&&projectIdFromEnvironment(env)==='demo-yushin'
+ if(!['DISPATCH','RECEIVE','HANDOFF'].includes(action))return '';
+ if(allowProductionTransaction('ORDER_TRANSFER_'+action,env))return 'yu-shing-company';
+ return projectIdFromEnvironment(env)==='demo-yushin'
   &&env['ENABLE_ORDER_TRANSFER_'+action+'_EMULATOR']==='true'&&env.FUNCTIONS_EMULATOR==='true'
   &&local(env.FIRESTORE_EMULATOR_HOST)&&local(env.FIREBASE_AUTH_EMULATOR_HOST)?'demo-yushin':'';
 }
@@ -91,7 +94,9 @@ async function commitOrderTransferPhysical(db,uid,data,action,env=process.env){
   if(ledger.ownerUid&&ledger.ownerUid!==order.ownerUid||ledger.salesCode&&ledger.salesCode!==order.salesCode)fail('原預留與訂單負責人不一致');
   if(handoff&&source.schemaVersion!==1&&!custodyV3)fail('業務交接預留版本尚未支援');
   if(source.schemaVersion===2){
-   if(env.ENABLE_ORDER_TRANSFER_V2_EMULATOR!=='true')fail('v2訂單調撥尚未獨立啟用');
+   if(!(project==='demo-yushin'&&env.ENABLE_ORDER_TRANSFER_V2_EMULATOR==='true'
+     ||project==='yu-shing-company'&&env.ENABLE_PRODUCTION_ORDER_TRANSFER_V2_BACKEND==='true'))
+    fail('v2訂單調撥尚未獨立啟用');
    if(ledger.ownerUid!==order.ownerUid||ledger.salesCode!==order.salesCode
     ||!Array.isArray(ledger.lifecycleWarehouseIds)||(ledger.lifecycleWarehouseIds.length<1||ledger.lifecycleWarehouseIds.length>2)
     ||new Set(ledger.lifecycleWarehouseIds).size!==ledger.lifecycleWarehouseIds.length

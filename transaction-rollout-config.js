@@ -29,6 +29,15 @@
     scope.YUSHIN_PRODUCTION_DISPATCH_LEGACY_BLOCKED = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_SHIPMENT_BACKEND = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_SHIPMENT_LEGACY_BLOCKED = orderReservationProductionSite;
+    // Order transfer and Custody HANDOFF still require separate production
+    // Functions, V2 source and real-role acceptance. Keep both entry and
+    // legacy cutover disabled until the explicit release is approved.
+    scope.YUSHIN_PRODUCTION_ORDER_TRANSFER_DISPATCH_BACKEND = false;
+    scope.YUSHIN_PRODUCTION_ORDER_TRANSFER_DISPATCH_LEGACY_BLOCKED = false;
+    scope.YUSHIN_PRODUCTION_ORDER_TRANSFER_HANDOFF_BACKEND = false;
+    scope.YUSHIN_PRODUCTION_ORDER_TRANSFER_HANDOFF_LEGACY_BLOCKED = false;
+    scope.YUSHIN_PRODUCTION_ORDER_TRANSFER_RECEIVE_BACKEND = false;
+    scope.YUSHIN_PRODUCTION_ORDER_TRANSFER_RECEIVE_LEGACY_BLOCKED = false;
     scope.YUSHIN_PRODUCTION_ORDER_LIFECYCLE_BACKEND = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_ORDER_LIFECYCLE_LEGACY_BLOCKED = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_FORMAL_PURCHASE = ['yu-shing-company.web.app','yu-shing-company.firebaseapp.com'].includes(host)

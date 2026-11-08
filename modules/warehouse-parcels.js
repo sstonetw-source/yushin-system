@@ -174,7 +174,7 @@
       if(same(a))root.renderWarehouseParcels();
     },{resume:true});
     root.renderWarehouseParcels();
-    let resolved=false;
+    let resolved=false,definitivelyBlocked=false;
     try{
       await lock(storageKey(a)+':task:'+id,async()=>{
         const task=read(a).find(t=>t.id===id);if(!task)return;
@@ -198,11 +198,17 @@
         if(same(a)){notice='已確認寄出給 '+task.plan.contact+'。';markMainPageDirty('inventory','orders.list','orders.po','admin');root.renderInventoryShipping?.();}
       });
     }catch(error){
-      try{await update(a,id,task=>task?{...task,error:'寄貨結果待核對：'+String(error.message||error)}:null);}
+      // The legacy transaction guard rejects unsupported location ledgers
+      // before committing. Keep the frozen task for later recovery, but do not
+      // report a known precondition rejection as a background unknown result.
+      definitivelyBlocked=error?.code==='unsupported-reservation-location'
+        ||error?.code==='production-order-transfer-disabled';
+      const description=(definitivelyBlocked?'寄貨已停止：':'寄貨結果待核對：')+String(error.message||error);
+      try{await update(a,id,task=>task?{...task,error:description}:null);}
       catch(_){if(same(a))notice='寄貨進度儲存失敗，請保留此瀏覽器並核對原操作。';}
     }finally{
       active.delete(id);
-      uiAction?.finish(resolved?'success':'unknown');
+      uiAction?.finish(resolved?'success':definitivelyBlocked?'failed':'unknown');
       if(same(a))root.renderWarehouseParcels();
     }
   }

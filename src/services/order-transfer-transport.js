@@ -4,7 +4,7 @@ function pendingOrderTransferOperations(){
  for(let n=0;n<sessionStorage.length;n++){
   const key=sessionStorage.key(n);if(!key?.startsWith(prefix))continue;
   try{const p=JSON.parse(sessionStorage.getItem(key));
-   if(!['DISPATCH','HANDOFF','RECEIVE'].includes(p.action)||p.uid!==currentUser?.uid||p.role!==currentUserRole||p.project!=='demo-yushin'
+   if(!['DISPATCH','HANDOFF','RECEIVE'].includes(p.action)||p.uid!==currentUser?.uid||p.role!==currentUserRole||!['demo-yushin','yu-shing-company'].includes(p.project)
     ||typeof p.payload?.id!=='string'||!p.payload.id||p.payload.id.includes('/')||key!==orderTransferKey(p.action,p.payload.id))throw Error('invalid');
    if(Object.keys(p.payload).sort().join(',')!==(p.action!=='RECEIVE'?'expectedPlan,fromWarehouseId,id,itemId,orderId,qty,toWarehouseId':'id,operationId')||(p.action==='RECEIVE'&&!/^[A-Za-z0-9_-]{12,96}$/.test(p.payload.operationId)))throw Error('invalid');
    rows.push({...p,id:p.payload.id});
@@ -14,7 +14,37 @@ function pendingOrderTransferOperations(){
 }
 function orderTransferBackendRequired(action,id,orderId='',itemId=''){
  return (typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview')||globalThis.YUSHIN_ORDER_TRANSFER_DISPATCH_EMULATOR===true
-  ||globalThis.YUSHIN_ORDER_TRANSFER_HANDOFF_EMULATOR===true||globalThis.YUSHIN_ORDER_TRANSFER_RECEIVE_EMULATOR===true||pendingOrderTransferOperations().some(p=>p.error||p.id===id||(orderId&&p.payload.orderId===orderId&&p.payload.itemId===itemId));
+  ||globalThis.YUSHIN_ORDER_TRANSFER_HANDOFF_EMULATOR===true||globalThis.YUSHIN_ORDER_TRANSFER_RECEIVE_EMULATOR===true
+  ||(typeof productionTransactionBackendRequired==='function'&&productionTransactionBackendRequired('ORDER_TRANSFER_'+action))
+  ||pendingOrderTransferOperations().some(p=>p.error||p.id===id||(orderId&&p.payload.orderId===orderId&&p.payload.itemId===itemId));
+}
+function orderTransferBackendContext(action){
+ const kind='ORDER_TRANSFER_'+action;
+ if(typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled(kind)){
+  if(typeof firebase==='undefined'||!firebase.auth||!firebase.functions||typeof db==='undefined')
+   throw Error('正式訂單調撥後端尚未準備完成，禁止回退舊交易。');
+  const auth=firebase.auth(),functions=firebase.app().functions('asia-east1');
+  const uid=currentUser?.uid,role=currentUserRole,project='yu-shing-company';
+  const check=()=>{
+   if(!productionTransactionBackendEnabled(kind)||firebase.app().options?.projectId!==project
+    ||auth.app?.options?.projectId!==project||functions.app?.options?.projectId!==project
+    ||db.app?.options?.projectId!==project||!!auth.emulatorConfig)
+    throw Error('正式訂單調撥環境或啟用旗標已變更，請保留原操作。');
+   if(!uid||auth.currentUser?.uid!==uid||currentUser?.uid!==uid||currentUserRole!==role
+    ||!['admin','purchaser','warehouse'].includes(role)
+    ||!canReceiveInventoryCapability()||!canAccessPage('inventory'))
+    throw Error('登入身分或正式訂單調撥權限已變更。');
+  };
+  check();return {uid,role,project,functions,emulator:false,check};
+ }
+ if(typeof productionTransactionBackendRequired==='function'&&productionTransactionBackendRequired(kind))
+  throw Object.assign(Error('正式訂單調撥後端尚未啟用，禁止回退舊交易。'),
+   {code:'production-order-transfer-disabled'});
+ if(globalThis['YUSHIN_ORDER_TRANSFER_'+action+'_EMULATOR']!==true)
+  throw Error('訂單調撥後端尚未在此環境啟用，禁止回退舊交易。');
+ return mainTransferBackendContext({emulatorFlag:'YUSHIN_ORDER_TRANSFER_'+action+'_EMULATOR',
+  previewFlag:'YUSHIN_UNSUPPORTED_ORDER_TRANSFER_PREVIEW',
+  roles:['admin','purchaser','warehouse'],authorized:()=>canReceiveInventoryCapability()&&canAccessPage('inventory')});
 }
 const orderTransferInFlight=new Map();
 function commitOrderTransferBackend(action,id,input){
@@ -27,12 +57,11 @@ async function submitOrderTransferBackend(action,id,input){
  if(typeof ensureReservationFunctionsCompat==='function')await ensureReservationFunctionsCompat();
  if(uid!==currentUser?.uid||role!==currentUserRole)throw Error('載入後端期間登入身分已變更。');
  if(!['DISPATCH','HANDOFF','RECEIVE'].includes(action)||typeof id!=='string'||!id||id!==id.trim()||id.includes('/')||id.length>96)throw Error('訂單調撥原識別碼不正確。');
- const flag='YUSHIN_ORDER_TRANSFER_'+action+'_EMULATOR';
- if(globalThis[flag]!==true)throw Error('訂單調撥後端尚未在此環境啟用，禁止回退舊交易。');
- const {project,functions,check}=mainTransferBackendContext({emulatorFlag:flag,previewFlag:'YUSHIN_UNSUPPORTED_ORDER_TRANSFER_PREVIEW',roles:['admin','purchaser','warehouse'],authorized:()=>canReceiveInventoryCapability()&&canAccessPage('inventory')});
+ const {project,functions,emulator,check}=orderTransferBackendContext(action);
  const key=orderTransferKey(action,id),pending=pendingOrderTransferOperations();if(pending.some(p=>p.error))throw Error('尚有無法核對的訂單調撥暫存。');
  let saved=pending.find(p=>p.action===action&&p.id===id);
- if(saved){if(input&&JSON.stringify(saved.payload)!==JSON.stringify(input))throw Error('原調撥內容已保存，不可修改。');}
+ if(saved){if(saved.project!==project)throw Error('原訂單調撥屬於其他專案，請回原環境核對。');
+  if(input&&JSON.stringify(saved.payload)!==JSON.stringify(input))throw Error('原調撥內容已保存，不可修改。');}
  else{
   let payload=input;
   if(action!=='RECEIVE'){
@@ -50,7 +79,7 @@ async function submitOrderTransferBackend(action,id,input){
   if(prior!==null){const concurrent=JSON.parse(prior);if(concurrent.uid!==uid||concurrent.role!==role||concurrent.project!==project)throw Error('原操作暫存已變更。');saved=concurrent;}
   else{sessionStorage.setItem(key,raw);if(sessionStorage.getItem(key)!==raw)throw Error('無法保存原調撥意圖，尚未送出。');}
  }
- check();functions.useEmulator('127.0.0.1',5001);
+ check();if(emulator)functions.useEmulator('127.0.0.1',5001);
  const response=await functions.httpsCallable(action==='HANDOFF'?'handoffOrderTransfer':action==='DISPATCH'?'dispatchOrderTransfer':'receiveOrderTransfer')(saved.payload);check();const r=response?.data;
  if(!['applied','already-applied'].includes(r?.status)||r.action!==action||r.id!==id||r.actorUid!==uid||r.actorRole!==role
   ||r.operationId!==(action!=='RECEIVE'?id:saved.payload.operationId))throw Error('訂單調撥回覆無法核對，請保留原操作。');
