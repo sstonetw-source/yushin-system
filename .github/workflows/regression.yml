@@ -77,6 +77,8 @@ jobs:
         run: npm install --no-save --no-package-lock @firebase/rules-unit-testing firebase firebase-admin@14.2.0 playwright-core@1.56.0 esbuild@0.25.0 html2canvas@1.4.1 jspdf@2.5.2
       - name: Chrome layout, search, documents and order entry
         if: matrix.group == 'layout'
+        env:
+          WORKSPACE_SCREENSHOT_DIR: artifacts/workspace-layout
         run: |
           node tests/ui-control-browser-smoke.js
           node tests/number-wheel-browser-smoke.js
@@ -102,6 +104,15 @@ jobs:
           node tests/delivery-confirmation-browser-smoke.js
           node tests/lifecycle-browser-smoke.js
           node tests/customer-return-browser-smoke.js
+
+      - name: Save workspace layout screenshots
+        if: always() && matrix.group == 'layout'
+        uses: actions/upload-artifact@v4
+        with:
+          name: workspace-layout-screenshots
+          path: artifacts/workspace-layout
+          if-no-files-found: ignore
+          retention-days: 7
 
   # Every Emulator matrix entry starts on a separate runner: the fixed
   # localhost ports and test data never overlap. Internal suite ordering stays

@@ -151,5 +151,31 @@ function fn(name){const a=source.indexOf('function '+name+'('),b=source.indexOf(
    .getByRole('button',{name:'確認打單'}).waitFor({state:'visible'});
   await page.evaluate(()=>{ordersCache=[];purchasingDispatchCache=[];renderPurchasingDispatchOrders();});assert.equal(await page.locator('#purchaseDispatchBody tr').count(),0);assert.match(await page.locator('#purchaseDispatchStatus').textContent(),/目前沒有/);
   assert.deepEqual(errors,[]);console.log('Unified work lists '+width+'px: four actual queues, escaped references, product quantities, five-role actions, empty state, and cached scoped cost reads.');await page.close();
- }}finally{await browser.close();}
+ }
+ const receiptSource=fs.readFileSync('src/features/purchasing/receiving-workspace.js','utf8');
+ const start=receiptSource.indexOf('function receiptItemRowHtml('),end=receiptSource.indexOf('window.receiveSupplyOrder =',start);
+ for(const width of [320,390,430,1280]){
+  const page=await browser.newPage({viewport:{width,height:1000}});
+  await page.setContent('<html lang="zh-Hant"><meta name="viewport" content="width=device-width,initial-scale=1"><body></body></html>');
+  await page.evaluate(html=>{
+   const parsed=new DOMParser().parseFromString(html,'text/html');
+   document.body.append(parsed.getElementById('poReceiptBatchOverlay'));
+   document.getElementById('poReceiptBatchOverlay').classList.add('active');
+   document.getElementById('poReceiptBatchTitle').textContent='到貨入庫｜MO-20261108-LONG-REFERENCE-測試長單號';
+  },html);
+  await page.addStyleTag({content:fs.readFileSync('styles.css','utf8')});
+  await page.addScriptTag({content:`const warehouseMasterCache=[{id:'MAIN',name:'又鑫主倉'}];const escapeHtml=s=>String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');`+receiptSource.slice(start,end)});
+  await page.evaluate(()=>{document.getElementById('poReceiptBatchBody').innerHTML=receiptItemRowHtml({qty:2.5,receivedQty:1,warehouseId:'MAIN',brand:'Qiagen',itemCode:'52304',itemName:'QIAamp RNA Blood Mini Kit (50) 長品名與規格測試'});});
+  assert.equal(await page.locator('#poReceiptBatchBody input[type="checkbox"]').count(),0);
+  assert.equal(await page.locator('.po-receive-qty').inputValue(),'1.5');
+  await page.locator('.po-receive-qty').fill('0.5');
+  assert.equal(await page.locator('.po-receive-qty').inputValue(),'0.5');
+  assert.match(await page.locator('#poReceiptBatchBody').innerText(),/又鑫主倉/);
+  const overflow=await page.locator('#poReceiptBatchOverlay .eq-modal-box').evaluate(box=>[...box.querySelectorAll('input,button,td,h3')].filter(el=>{const r=el.getBoundingClientRect();return r.width>0&&(r.left<0||r.right>innerWidth+1);}).map(el=>el.outerHTML));
+  assert.deepEqual(overflow,[],width+'px receipt overflow');
+  if(width<768)assert.equal(await page.locator('#poReceiptBatchBody tr').evaluate(row=>getComputedStyle(row).display),'grid');
+  if(process.env.WORKSPACE_SCREENSHOT_DIR){fs.mkdirSync(process.env.WORKSPACE_SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:process.env.WORKSPACE_SCREENSHOT_DIR+'/receiving-'+width+'.png',fullPage:true});}
+  console.log('Quantity receipt layout '+width+'px passed');await page.close();
+ }
+ }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
