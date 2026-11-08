@@ -156,6 +156,22 @@ const setup=`
   assert.equal(await page.locator('#uiWorkActionStatus').isHidden(),true);
   assert.equal(await page.locator('.parcel-task').count(),1);
   assert.match(await page.locator('.parcel-task').innerText(),/核對／重試原寄貨/);
+  // A task saved by the old release retains its frozen IDs and quantities,
+  // but a known compatibility rejection is not displayed as an unknown result.
+  const requestCount=requests.length;
+  const storedBefore=await page.evaluate(()=>{
+    const key=Object.keys(localStorage).find(k=>k.startsWith('warehouse-parcels:'));
+    const tasks=JSON.parse(localStorage.getItem(key));
+    tasks[0].error='寄貨結果待核對：預留「YS-20261108-N1-02／test4」含尚未啟用的位置資料，已停止作業。請保留原資料並由管理員核對';
+    delete tasks[0].errorCode;localStorage.setItem(key,JSON.stringify(tasks));
+    return localStorage.getItem(key);
+  });
+  await mount();
+  assert.match(await page.locator('.parcel-task').innerText(),/寄貨已停止：/);
+  assert.match(await page.locator('#warehouseParcelStatus').innerText(),/1 件已停止/);
+  assert.doesNotMatch(await page.locator('#warehouseParcelStatus').innerText(),/處理中／待核對/);
+  assert.equal(requests.length,requestCount,'restoring a stopped task never resubmits');
+  assert.equal(await page.evaluate(()=>localStorage.getItem(Object.keys(localStorage).find(k=>k.startsWith('warehouse-parcels:')))),storedBefore,'display normalization preserves original task');
   // Long recipient details and item names remain whole on continued labels.
   await mount();
   await page.evaluate(()=>{
