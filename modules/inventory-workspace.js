@@ -43,7 +43,7 @@
   if(typeof module==='object'&&module.exports)module.exports=api;
   if(typeof document==='undefined')return;
 
-  let view='stock',receivingKind='purchase',shippingKind='main',shippingLimit=50;
+  let view='stock',receivingKind='purchase',shippingKind='main';
   let returnReady=false,returnError='',loadPromise=null;
   let warehouseError='',workspaceContext='';
   const shipmentPending=new Set();
@@ -66,7 +66,11 @@
       receive.textContent=error?'收貨（—）':!ready?'收貨（…）':`收貨（${purchaseRows(supplyReceivingCache).length+returnRows(customerReturnOrders).length+transferCount}）`;
       receive.title=error?'部分收貨資料讀取失敗':!ready?'收貨資料讀取中':'';
     }
-    if(ship)ship.textContent=orderWorkQueueError?'寄貨（—）':!orderWorkQueueReady?'寄貨（…）':`寄貨（${currentShippingRows().filter(r=>['CUSTOMER_SHIP','SALES_SHIP'].includes(root.YushinWarehouseLogistics.plan(r.item.deliveryPlan||r.order.shippingInstructions||{}).mode)).length}）`;
+    if(ship){
+      const transfers=root.mainTransferParcelEntries?.();
+      const count=currentShippingRows().filter(r=>['CUSTOMER_SHIP','SALES_SHIP'].includes(root.YushinWarehouseLogistics.plan(r.item.deliveryPlan||r.order.shippingInstructions||{}).mode)).length+(transfers?.entries.length||0);
+      ship.textContent=orderWorkQueueError||transfers?.error?'寄貨（—）':!orderWorkQueueReady||transfers&&!transfers.ready?'寄貨（…）':`寄貨（${count}）`;
+    }
     renderWorkCards();
     renderWorkspaceErrors();
     if(!operational&&view!=='stock')switchInventoryWorkView('stock');
@@ -145,7 +149,8 @@
     loadPromise=Promise.allSettled([loadWarehouseMaster(),loadOrderWorkQueue(force),
       force||!returnReady||returnError?loadCustomerReturnQueue():Promise.resolve(),
       force||!activeReceivingSupplyReady||activeReceivingSupplyError?loadActiveReceivingSupplyCache(true):Promise.resolve(),
-      root.loadWarehouseTransferQueue?.(force)||Promise.resolve(),root.loadFreeStockRecovery?.()||Promise.resolve()])
+      root.loadWarehouseTransferQueue?.(force)||Promise.resolve(),root.loadFreeStockRecovery?.()||Promise.resolve(),
+      root.loadMainTransferRequests?.(force)||Promise.resolve()])
       .then(results=>{
         if(role!==currentUserRole||uid!==currentUser?.uid)return;
         warehouseError=results[0].status==='rejected'?'倉庫設定讀取失敗：'+results[0].reason.message:'';
@@ -185,7 +190,7 @@
   root.inventoryShippingActiveKind=()=>shippingKind;
   root.switchInventoryShippingKind=async function(kind){
     if(!canReceiveInventoryCapability())return;
-    shippingKind=kind==='branch'?'branch':'main';shippingLimit=50;
+    shippingKind=kind==='branch'?'branch':'main';
     el('inventoryTransferShippingPanel').style.display=shippingKind==='branch'?'':'none';
     renderInventoryShipping();
     if(shippingKind==='branch'){
@@ -195,58 +200,20 @@
     }
   };
   root.renderInventoryShipping=function(){
-    const body=el('inventoryShippingBody');if(!body)return;
     const all=currentShippingRows().filter(r=>['CUSTOMER_SHIP','SALES_SHIP'].includes(root.YushinWarehouseLogistics.plan(r.item.deliveryPlan||r.order.shippingInstructions||{}).mode));
-    const mainId=defaultWarehouse()?.id||'';
-    const planOf=r=>root.YushinWarehouseLogistics.executionPlan(r,warehouseMasterCache,mainId);
-    const sets={all,main:all.filter(r=>!r.branch),branch:all.filter(r=>r.branch)};
+    const sets={main:all.filter(r=>!r.branch),branch:all.filter(r=>r.branch)};
+    const transfers=root.mainTransferParcelEntries?.();
     const confirmed=orderWorkQueueReady&&!orderWorkQueueError;
     for(const [kind,label] of Object.entries({main:'主倉寄貨',branch:'分倉寄貨'})){
       const button=el('inventoryShipping'+kind[0].toUpperCase()+kind.slice(1)+'Btn');if(!button)continue;
-      button.innerHTML=`<span>${label}</span><strong>${confirmed?sets[kind].length+' 筆':orderWorkQueueError?'—':'…'}</strong>`;
+      const ready=confirmed&&(kind!=='branch'||!transfers||transfers.ready&&!transfers.error);
+      const count=sets[kind].length+(kind==='branch'?(transfers?.entries.length||0):0);
+      button.innerHTML='<span>'+label+'</span><strong>'+(ready?count+' 筆':orderWorkQueueError||kind==='branch'&&transfers?.error?'—':'…')+'</strong>';
       button.classList.toggle('active',shippingKind===kind);button.setAttribute('aria-pressed',String(shippingKind===kind));
     }
-    const select=el('inventoryShippingWarehouse'),selected=select.value;
-    select.innerHTML='<option value="">全部來源分倉庫</option>'+warehouseMasterCache.filter(w=>w.active!==false&&!w.systemCustody&&w.id!==mainId).map(w=>`<option value="${escapeAttr(w.id)}">${escapeHtml(w.warehouseName||w.id)}</option>`).join('');
-    if(warehouseMasterCache.some(w=>w.id===selected))select.value=selected;
-    select.style.display=shippingKind==='branch'?'':'none';
-    const mode=el('inventoryDeliveryModeFilter')?.value||'';
-    const rows=sets[shippingKind].filter(r=>(shippingKind!=='branch'||!select.value||r.warehouseId===select.value)&&(!mode||planOf(r).mode===mode));
-    const summary=el('inventoryShippingSummary');if(summary){
-      const summaryRows=rows;
-      const groups=new Map();for(const r of summaryRows){const p=planOf(r),key=root.YushinWarehouseLogistics.bundleKey(r,p);if(!groups.has(key))groups.set(key,{p,warehouse:r.warehouse,warehouseId:r.warehouseId,rows:[]});groups.get(key).rows.push(r);}
-      summary.innerHTML=groups.size?`<details class="shipping-summary"><summary>本清單貨品加總（${groups.size} 個出貨目的地）</summary>${[...groups.values()].map(g=>`<section><strong>${escapeHtml(g.warehouse?.warehouseName||g.warehouseId)} → ${escapeHtml(g.p.mode==='PICKUP'?'主倉領貨':g.p.contact||'收件資訊待填')} ${escapeHtml(g.p.address)}</strong><div class="table-wrap"><table><thead><tr><th>貨號／品名</th><th>合計需求／可出</th><th>來源訂單</th></tr></thead><tbody>${root.YushinWarehouseLogistics.aggregateRows(g.rows).map(a=>`<tr><td>${escapeHtml(a.item.itemCode)} ${escapeHtml(a.item.itemName)}</td><td><strong>${a.qty}</strong>／${a.rows.reduce((n,r)=>n+Number(r.readyQty??r.qty),0)}</td><td>${a.rows.map(r=>escapeHtml(r.order.orderNo||r.order.quoteNo||r.order.id)+' × '+r.qty).join('；')}</td></tr>`).join('')}</tbody></table></div></section>`).join('')}</details>`:'';
-    }
-    const visible=rows.slice(0,shippingLimit).sort((a,b)=>{
-      const pa=root.YushinWarehouseLogistics?.plan(a.item.deliveryPlan||a.order.shippingInstructions||{})||{},pb=root.YushinWarehouseLogistics?.plan(b.item.deliveryPlan||b.order.shippingInstructions||{})||{};
-      return [a.warehouseId,pa.mode,pa.address,a.order.salesName].join('|').localeCompare([b.warehouseId,pb.mode,pb.address,b.order.salesName].join('|'));
-    });
-    root.setWarehouseShippingVisibleRows?.(visible);
-    body.innerHTML=visible.map(row=>{
-      const p=planOf(row),label=root.YushinWarehouseLogistics?.modes[p.mode]||'業務自取／親送';
-      const complete=p.mode==='PICKUP'||(p.contact&&p.phone&&p.address&&(p.mode!=='TRANSFER'||p.warehouseId));
-      const destination=p.mode==='PICKUP'?`<strong>${escapeHtml(row.warehouse?.warehouseName||row.warehouseId||'倉庫')}領取 → ${escapeHtml(row.order.salesName||'未指定業務')}</strong>`:`<strong>${escapeHtml(p.contact||'未填收件人')}</strong><br>${escapeHtml(p.phone||'')}<br>${escapeHtml(p.address||'')}`;
-      return `<tr class="warehouse-task-row" data-shipping-warehouse="${escapeAttr(row.warehouseId)}">
-        <td class="warehouse-task-check" data-th="選取"><input type="checkbox" aria-label="選取出貨品項" ${root.isWarehouseShippingSelected?.(row.order.id,row.item.itemId,row.key)?'checked':''} onchange="toggleWarehouseShippingSelection(${inlineJsValue(row.order.id)},${inlineJsValue(row.item.itemId)},this.checked,${inlineJsValue(row.key)})"></td>
-        <td class="warehouse-task-item" data-th="品項與來源"><strong>${escapeHtml(row.item.itemCode||'')}</strong><span>${escapeHtml(row.item.itemName||'')}</span><small>${escapeHtml(row.order.customerName||'')} · ${escapeHtml(row.order.salesName||'未指定業務')}</small><small class="record-reference">${row.order.orderNo?'客戶訂單・'+escapeHtml(row.order.orderNo):row.order.quoteNo?'來源估價單・'+escapeHtml(row.order.quoteNo):'客戶訂單'}</small></td>
-        <td class="warehouse-task-info" data-th="寄送資訊"><span>${escapeHtml(row.warehouse?.warehouseName||row.warehouseId||'未指定')} → ${escapeHtml(p.contact||'未填收件人')}</span><small>${escapeHtml(label)}</small>
-          ${complete?'':'<strong class="shipping-missing">收件資訊未完整</strong>'}
-          <details class="warehouse-task-details"><summary>寄送明細</summary><div>${destination}${p.notes?'<p>'+escapeHtml(p.notes)+'</p>':''}</div></details>
-        </td>
-        <td class="warehouse-task-quantity" data-th="待出數量"><small>待寄</small><strong class="shipping-quantity">${row.qty}</strong>${['TRANSFER','PICKUP','SALES_SHIP'].includes(p.mode)&&row.qty!==Number(row.item.qty||row.item.orderedQty||0)-Math.max(0,Number(row.item.deliveredQty||0)-Number(row.item.returnedQty||0))?'<small>待剩餘數量到齊後交付</small>':''}</td>
-        <td class="warehouse-task-action" data-th="操作"><button type="button" class="btn-secondary" onclick="openWarehouseDeliveryPlan(${inlineJsValue(row.order.id)},${inlineJsValue(row.item.itemId)})" ${row.warehouse?'':'disabled'}>編輯寄送</button></td>
-      </tr>`;
-    }).join('');
-    el('inventoryShippingMoreBtn').style.display=rows.length>shippingLimit?'':'none';
-    el('inventoryShippingStatus').textContent=orderWorkQueueError?'寄貨資料尚未確認，請重試；以下若有清單，為上次讀取的資料。':!orderWorkQueueReady?'正在讀取待寄貨品項…':`${rows.length} 筆待寄貨品項。`;
-    const empty=orderWorkQueueReady&&!orderWorkQueueError&&rows.length===0;
-    const table=body.closest?.('.inventory-work-table');if(table)table.hidden=empty;
-    const batch=document.querySelector?.('.inventory-shipping-batch-actions');if(batch)batch.hidden=empty;
-    root.renderMainTransferRequests?.();
     updateBadges();
     root.renderWarehouseParcels?.();
   };
-  root.loadMoreInventoryShipping=function(){shippingLimit+=50;renderInventoryShipping();};
 
   root.openInventoryShipment=async function(orderId,itemId,button){
     if(!canReceiveInventoryCapability()||shipmentPending.has(orderId))return;

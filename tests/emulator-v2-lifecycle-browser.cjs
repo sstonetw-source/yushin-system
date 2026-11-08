@@ -926,33 +926,33 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   const dispatchCalls=calls.filter(row=>row.name==='prepareV2OrderDispatch');assert.equal(dispatchCalls.length,2);assert.deepEqual(dispatchCalls[1].data,dispatchIntent);
   assert.deepEqual(await facts(fixture),prepared);assert.equal((await db.collection('dispatchRecords').where('orderId','==',fixture.sourceId).get()).size,1);
 
-  // Original warehouse selection + batch form, twice for two units. First
-  // shipment commits before its HTTP reply is lost; reload resumes that ID.
+  // Recipient-first card, twice for two units. First shipment commits before
+  // its HTTP reply is lost; reload resumes the original persisted operation.
   await siteLogout(page);await siteLogin(page,fixture.accounts.warehouse,'warehouse');
   async function openShipmentBatch(){
-   await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();await page.locator('#parcelAdvanced').evaluate(node=>{node.open=true;});
+   await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();
    await page.waitForFunction(()=>orderWorkQueueReady&&!orderWorkQueueError&&warehouseMasterCache.length>0,null,{timeout:45000});
    const main=await page.evaluate(()=>defaultWarehouse()?.id||'');
    await page.locator(main===fixture.warehouseIds[0]?'#inventoryShippingMainBtn':'#inventoryShippingBranchBtn').click();
-   const row=page.locator('#inventoryShippingBody tr[data-shipping-warehouse="'+fixture.warehouseIds[0]+'"]').filter({hasText:fixture.sourceId});
-   await row.locator('input[type="checkbox"]').check();await page.locator('#warehouseShippingBatchBtn').click();
-   await page.locator('#warehouseShippingBatchConfirm').waitFor({state:'visible'});
+   const card=page.locator('.parcel-simple-card[data-shipping-warehouse="'+fixture.warehouseIds[0]+'"][data-order-ids*="'+fixture.sourceId+'"]');
+   await card.getByRole('button',{name:'確認寄出'}).click();await page.locator('#warehouseParcelDialog[open]').waitFor({state:'visible'});
   }
-  await openShipmentBatch();await page.locator('[data-batch-qty="0"]').fill('2');
-  await page.locator('#warehouseShippingBatchDate').fill('2026-10-21');await page.locator('#warehouseShippingBatchConfirm').click();
-  await page.waitForFunction(()=>document.getElementById('warehouseShippingBatchConfirm')?.textContent==='重試未完成品項',null,{timeout:45000});
+  await openShipmentBatch();await page.locator('[data-parcel-quantity="0"]').fill('2');
+  await page.locator('#parcelDate').fill('2026-10-21');await page.locator('#warehouseParcelDialog').getByRole('button',{name:'確認寄出'}).click();
+  await page.locator('.parcel-task').getByRole('button',{name:'核對／重試原寄貨'}).waitFor({state:'visible',timeout:45000});
   const firstShipmentIntent=calls.find(row=>row.name==='shipV2WarehouseItem').data;
   const firstShipped=await facts(fixture);assert.equal(firstShipped.source.items[0].warehouseShippedQty,2);
   assert.equal(firstShipped.source.items[0].reservedQty,7);assert.equal(firstShipped.inventory.onHand,prepared.inventory.onHand-2);assert.equal(firstShipped.inventory.reserved,prepared.inventory.reserved-2);
   assert.equal(firstShipped.source.deliveredQty,0);assert.deepEqual(firstShipped.source.deliveryRecords,[]);assert.equal(firstShipped.source.isDelivered,false);
-  await siteOpen(page,'warehouse');await openShipmentBatch();assert.equal(await page.locator('[data-batch-qty="0"]').inputValue(),'2');
-  await page.locator('#warehouseShippingBatchConfirm').click();
-  await page.locator('#warehouseLogisticsOverlay.active').waitFor({state:'hidden'});
+  await siteOpen(page,'warehouse');await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();
+  assert.match(await page.locator('.parcel-task').innerText(),/× 2/);
+  await page.locator('.parcel-task').getByRole('button',{name:'核對／重試原寄貨'}).click();
+  await page.waitForFunction(()=>!hasWarehouseParcelWork(),null,{timeout:45000});
   const shipmentCalls=calls.filter(row=>row.name==='shipV2WarehouseItem');assert.equal(shipmentCalls.length,2);assert.deepEqual(shipmentCalls[1].data,firstShipmentIntent);
   assert.deepEqual(await facts(fixture),firstShipped);
-  await openShipmentBatch();await page.locator('[data-batch-qty="0"]').fill('2');
-  await page.locator('#warehouseShippingBatchDate').fill('2026-10-21');await page.locator('#warehouseShippingBatchConfirm').click();
-  await page.locator('#warehouseLogisticsOverlay.active').waitFor({state:'hidden'});
+  await openShipmentBatch();await page.locator('[data-parcel-quantity="0"]').fill('2');
+  await page.locator('#parcelDate').fill('2026-10-21');await page.locator('#warehouseParcelDialog').getByRole('button',{name:'確認寄出'}).click();
+  await page.waitForFunction(()=>!hasWarehouseParcelWork(),null,{timeout:45000});
   const shipped=await facts(fixture),shipmentRecords=shipped.source.warehouseShipmentRecords;
   assert.equal(shipmentRecords.length,2);assert.equal(shipped.source.items[0].warehouseShippedQty,4);assert.equal(shipped.source.items[0].reservedQty,5);assert.equal(shipped.source.items[0].shortageQty,3);
   assert.equal(shipped.inventory.onHand,prepared.inventory.onHand-4);assert.equal(shipped.inventory.reserved,prepared.inventory.reserved-4);assert.equal(shipped.inventory.incoming,0);
@@ -1406,18 +1406,17 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   // Ship the five ORIGINAL holds from the OTHER warehouse using its actual
   // location row. Original item.warehouseId remains A throughout this action.
   async function openOtherWarehouseBatch(){
-   await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();await page.locator('#parcelAdvanced').evaluate(node=>{node.open=true;});
+   await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();
    await page.waitForFunction(()=>orderWorkQueueReady&&!orderWorkQueueError&&warehouseMasterCache.length>0,null,{timeout:45000});
    const main=await page.evaluate(()=>defaultWarehouse()?.id||'');
    await page.locator(main===fixture.warehouseIds[1]?'#inventoryShippingMainBtn':'#inventoryShippingBranchBtn').click();
-   const row=page.locator('#inventoryShippingBody tr[data-shipping-warehouse="'+fixture.warehouseIds[1]+'"]').filter({hasText:fixture.sourceId});
-   await row.locator('input[type="checkbox"]').check();await page.locator('#warehouseShippingBatchBtn').click();
-   await page.locator('#warehouseShippingBatchConfirm').waitFor({state:'visible'});
+   const card=page.locator('.parcel-simple-card[data-shipping-warehouse="'+fixture.warehouseIds[1]+'"][data-order-ids*="'+fixture.sourceId+'"]');
+   await card.getByRole('button',{name:'確認寄出'}).click();await page.locator('#warehouseParcelDialog[open]').waitFor({state:'visible'});
   }
-  await openOtherWarehouseBatch();assert.equal(await page.locator('[data-batch-qty="0"]').inputValue(),'5');
-  await page.locator('#warehouseShippingBatchDate').fill('2026-10-21');
-  loseShipment=true;await page.locator('#warehouseShippingBatchConfirm').click();
-  await page.waitForFunction(()=>document.getElementById('warehouseShippingBatchConfirm')?.textContent==='重試未完成品項',null,{timeout:45000});
+  await openOtherWarehouseBatch();assert.equal(await page.locator('[data-parcel-quantity="0"]').inputValue(),'5');
+  await page.locator('#parcelDate').fill('2026-10-21');
+  loseShipment=true;await page.locator('#warehouseParcelDialog').getByRole('button',{name:'確認寄出'}).click();
+  await page.locator('.parcel-task').getByRole('button',{name:'核對／重試原寄貨'}).waitFor({state:'visible',timeout:45000});
   const otherShipmentIntent=calls.filter(row=>row.name==='shipV2WarehouseItem').at(-1).data;
   assert.equal(otherShipmentIntent.warehouseId,fixture.warehouseIds[1]);assert.equal(otherShipmentIntent.quantity,5);
   const otherShipped=await facts(fixture),newShipment=otherShipped.source.warehouseShipmentRecords.at(-1);
@@ -1428,9 +1427,9 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   assert.deepEqual(otherShipped.targets,fullyReceived.targets);assert.deepEqual((await demandRef.get()).data(),lastDemand);
   for(const field of ['deliveryRecords','returnRecords','returnRequests','deliveredQty','returnedQty','isDelivered'])assert.deepEqual(otherShipped.source[field],fullyReceived.source[field]);
   require('../modules/fulfillment-core').validateShipmentMovement(newShipment,(await db.collection('inventoryMovements').doc(newShipment.movementId).get()).data(),{orderId:fixture.sourceId,itemId:'S',productKey:fixture.productKey});
-  await siteOpen(page,'warehouse');await openOtherWarehouseBatch();
-  assert.equal(await page.locator('[data-batch-qty="0"]').inputValue(),'5');
-  await page.locator('#warehouseShippingBatchConfirm').click();await page.locator('#warehouseLogisticsOverlay.active').waitFor({state:'hidden'});
+  await siteOpen(page,'warehouse');await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();
+  assert.match(await page.locator('.parcel-task').innerText(),/× 5/);
+  await page.locator('.parcel-task').getByRole('button',{name:'核對／重試原寄貨'}).click();await page.waitForFunction(()=>!hasWarehouseParcelWork(),null,{timeout:45000});
   assert.deepEqual(calls.filter(row=>row.name==='shipV2WarehouseItem').at(-1).data,otherShipmentIntent);
   assert.deepEqual(await facts(fixture),otherShipped);assert.deepEqual((await demandRef.get()).data(),lastDemand);
   assert.equal(otherShipped.source.warehouseShipmentRecords.length,3);
@@ -1535,10 +1534,10 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   assert.equal((await db.collection('dispatchRecords').where('orderId','==',fixture.sourceId).get()).size,2);
 
   await siteLogout(page);await siteLogin(page,fixture.accounts.warehouse,'warehouse');await openShipmentBatch();
-  assert.equal(await page.locator('[data-batch-qty="0"]').inputValue(),'3');
-  await page.locator('#warehouseShippingBatchDate').fill('2026-10-22');
-  loseShipment=true;await page.locator('#warehouseShippingBatchConfirm').click();
-  await page.waitForFunction(()=>document.getElementById('warehouseShippingBatchConfirm')?.textContent==='重試未完成品項',null,{timeout:45000});
+  assert.equal(await page.locator('[data-parcel-quantity="0"]').inputValue(),'3');
+  await page.locator('#parcelDate').fill('2026-10-22');
+  loseShipment=true;await page.locator('#warehouseParcelDialog').getByRole('button',{name:'確認寄出'}).click();
+  await page.locator('.parcel-task').getByRole('button',{name:'核對／重試原寄貨'}).waitFor({state:'visible',timeout:45000});
   const lastShipmentIntent=calls.filter(row=>row.name==='shipV2WarehouseItem').at(-1).data;
   assert.equal(lastShipmentIntent.warehouseId,fixture.warehouseIds[0]);assert.equal(lastShipmentIntent.quantity,3);
   assert.notEqual(lastShipmentIntent.operationId,otherShipmentIntent.operationId);
@@ -1557,9 +1556,9 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   require('../modules/fulfillment-core').validateShipmentMovement(lastShipment,
    (await db.collection('inventoryMovements').doc(lastShipment.movementId).get()).data(),
    {orderId:fixture.sourceId,itemId:'S',productKey:fixture.productKey});
-  await siteOpen(page,'warehouse');await openShipmentBatch();
-  assert.equal(await page.locator('[data-batch-qty="0"]').inputValue(),'3');
-  await page.locator('#warehouseShippingBatchConfirm').click();await page.locator('#warehouseLogisticsOverlay.active').waitFor({state:'hidden'});
+  await siteOpen(page,'warehouse');await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();
+  assert.match(await page.locator('.parcel-task').innerText(),/× 3/);
+  await page.locator('.parcel-task').getByRole('button',{name:'核對／重試原寄貨'}).click();await page.waitForFunction(()=>!hasWarehouseParcelWork(),null,{timeout:45000});
   assert.deepEqual(calls.filter(row=>row.name==='shipV2WarehouseItem').at(-1).data,lastShipmentIntent);
   assert.deepEqual(await facts(fixture),finalShipped);assert.equal(finalShipped.source.warehouseShipmentRecords.length,4);
 
@@ -1817,21 +1816,21 @@ for(const width of [1280,390])test('full site '+width+'px original multi-item pu
 
   await siteLogout(page);await siteLogin(page,x.accounts.warehouse,'warehouse');
   async function openShipment(id,warehouseId){
-   await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();await page.locator('#parcelAdvanced').evaluate(node=>{node.open=true;});
+   await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();
    await page.waitForFunction(()=>orderWorkQueueReady&&!orderWorkQueueError&&warehouseMasterCache.length>0,null,{timeout:45000});
    const main=await page.evaluate(()=>defaultWarehouse()?.id||'');
    await page.locator(main===warehouseId?'#inventoryShippingMainBtn':'#inventoryShippingBranchBtn').click();
-   const rows=page.locator('#inventoryShippingBody tr[data-shipping-warehouse="'+warehouseId+'"]').filter({hasText:x.orderId});
-   await rows.locator('input[onchange*="'+id+'"]').check();await page.locator('#warehouseShippingBatchBtn').click();
-   await page.locator('#warehouseShippingBatchConfirm').waitFor({state:'visible'});
+   const card=page.locator('.parcel-simple-card[data-shipping-warehouse="'+warehouseId+'"][data-order-ids*="'+x.orderId+'"]');
+   await card.getByRole('button',{name:'確認寄出'}).click();await page.locator('#warehouseParcelDialog[open]').waitFor({state:'visible'});
+   if(id==='I1')await page.locator('[data-parcel-quantity="1"]').fill('0');
   }
   dropLogistics.add('shipV2WarehouseItem:I2');
   for(const [index,id] of ids.entries()){
    const warehouseIndex=index===1?1:0,warehouseId=x.warehouses[warehouseIndex],productIndex=index===2?1:0,before=await x.snapshot();
-   await openShipment(id,warehouseId);assert.equal(await page.locator('[data-batch-qty="0"]').inputValue(),String(quantities[index]));
-   await page.locator('#warehouseShippingBatchDate').fill('2026-10-22');await page.locator('#warehouseShippingBatchConfirm').click();
-   if(id==='I2')await page.waitForFunction(()=>document.getElementById('warehouseShippingBatchConfirm')?.textContent==='重試未完成品項',null,{timeout:45000});
-   else await page.locator('#warehouseLogisticsOverlay.active').waitFor({state:'hidden'});
+   await openShipment(id,warehouseId);assert.equal(await page.locator('[data-parcel-quantity="0"]').inputValue(),String(quantities[index]));
+   await page.locator('#parcelDate').fill('2026-10-22');await page.locator('#warehouseParcelDialog').getByRole('button',{name:'確認寄出'}).click();
+   if(id==='I2')await page.locator('.parcel-task').getByRole('button',{name:'核對／重試原寄貨'}).waitFor({state:'visible',timeout:45000});
+   else await page.waitForFunction(()=>!hasWarehouseParcelWork(),null,{timeout:45000});
    const after=await x.snapshot();
    assert.deepEqual(after.order.items.filter(i=>i.itemId!==id),before.order.items.filter(i=>i.itemId!==id));
    assert.equal(after.inventory[productIndex].onHand,before.inventory[productIndex].onHand-quantities[index]);
@@ -1844,9 +1843,9 @@ for(const width of [1280,390])test('full site '+width+'px original multi-item pu
    if(id==='I2'){
     const intent=logisticsCalls.filter(row=>row.name==='shipV2WarehouseItem').at(-1).data;
     assert.equal(intent.warehouseId,warehouseId);assert.equal(intent.itemId,id);
-    await siteOpen(page,'warehouse');await openShipment(id,warehouseId);
-    assert.equal(await page.locator('[data-batch-qty="0"]').inputValue(),'2');
-    await page.locator('#warehouseShippingBatchConfirm').click();await page.locator('#warehouseLogisticsOverlay.active').waitFor({state:'hidden'});
+    await siteOpen(page,'warehouse');await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();
+    assert.match(await page.locator('.parcel-task').innerText(),/× 2/);
+    await page.locator('.parcel-task').getByRole('button',{name:'核對／重試原寄貨'}).click();await page.waitForFunction(()=>!hasWarehouseParcelWork(),null,{timeout:45000});
     assert.deepEqual(logisticsCalls.filter(row=>row.name==='shipV2WarehouseItem').at(-1).data,intent);
     assert.deepEqual(await x.snapshot(),after);
    }
@@ -2495,11 +2494,11 @@ for(const width of [1280,390])test('original order transfer '+width+'px keeps so
  const receiving=async()=>{await siteNav(page,'inventory');await page.locator('#inventoryReceivingTabBtn').click();await page.locator('#inventoryTransferReceivingTab').click();await page.evaluate(()=>loadWarehouseTransferQueue(true));};
  try{
   await siteOpen(page);await siteLogin(page,{uid,email},'warehouse');await shipping();
-  await page.locator('#mainTransferRequestBody').getByRole('button',{name:'確認寄出',exact:true}).click();
+  await page.locator('.parcel-simple-card[data-transfer-kind="order"][data-transfer-id="'+orderId+'"]').getByRole('button',{name:'確認寄出',exact:true}).click();
   await page.waitForFunction(drop=>{const text=document.getElementById('actionFeedback')?.textContent||'';return text.includes(drop?'調撥未完成':'已出貨至主倉');},width===1280);
   if(width===1280){
    await siteOpen(page,'warehouse');await shipping();
-   await page.locator('#mainTransferRequestBody').getByRole('button',{name:'確認原寄出結果',exact:true}).click();
+   await page.locator('.parcel-task').getByRole('button',{name:'核對原操作',exact:true}).click();
    await page.waitForFunction(()=>!pendingOrderTransferOperations().length);
    assert.deepEqual(calls[0],calls[1]);
   }
@@ -2549,7 +2548,7 @@ for(const width of [1280,390])test('original owner handoff '+width+'px keeps sou
  // Scope presentation caches to source documents read from the real server.
  // No transaction, Callable or rendering handler is replaced by a stub.
  const shipping=async()=>{
-  await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();await page.locator('#parcelAdvanced').evaluate(node=>{node.open=true;});await page.locator('#inventoryShippingMainBtn').click();
+  await siteNav(page,'inventory');await page.locator('#inventoryShippingTabBtn').click();await page.locator('#inventoryShippingMainBtn').click();
   await page.evaluate(async({orderId,from,to})=>{
    await loadInventoryWorkspace();
    const order=await db.collection('orders').doc(orderId).get({source:'server'});
@@ -2559,21 +2558,21 @@ for(const width of [1280,390])test('original owner handoff '+width+'px keeps sou
  };
  try{
   await siteOpen(page);await siteLogin(page,{uid,email},'warehouse');await shipping();
-  await page.locator('#inventoryShippingBody tr').filter({hasText:tag}).getByRole('checkbox').check();
-  await page.locator('#warehouseShippingBatchBtn').click();await page.locator('#warehouseShippingBatchConfirm').click();
-  await page.waitForFunction(()=>document.getElementById('actionFeedback')?.textContent?.includes('未完成項目'));
+  await page.locator('.parcel-simple-card[data-order-ids*="'+orderId+'"]').getByRole('button',{name:'確認寄出'}).click();
+  await page.locator('#warehouseParcelDialog[open]').waitFor({state:'visible'});
+  await page.locator('#warehouseParcelDialog').getByRole('button',{name:'確認寄出'}).click();
+  await page.locator('.parcel-task').getByRole('button',{name:'核對／重試原寄貨'}).waitFor({state:'visible',timeout:45000});
   assert.equal(calls.length,1);assert.equal(await page.evaluate(()=>pendingOrderTransferOperations()[0].action),'HANDOFF');
-  await siteOpen(page,'warehouse');await shipping();await page.locator('#inventoryShippingBranchBtn').click();
-  await page.evaluate(()=>renderMainTransferRequests());
+  await siteOpen(page,'warehouse');await shipping();
   if(width===390){
    await page.evaluate(()=>{globalThis.YUSHIN_ORDER_TRANSFER_HANDOFF_EMULATOR=false;});
-   await page.getByRole('button',{name:'確認原交接結果',exact:true}).click();
-   await page.waitForFunction(()=>document.getElementById('actionFeedback')?.textContent?.includes('禁止回退舊交易'));
+   await page.locator('.parcel-task').getByRole('button',{name:'核對／重試原寄貨'}).click();
+   await page.locator('.parcel-task').getByText('禁止回退舊交易',{exact:false}).waitFor({state:'visible'});
    assert.equal(calls.length,1);assert.equal(await page.evaluate(()=>pendingOrderTransferOperations().length),1);
    await page.evaluate(()=>{globalThis.YUSHIN_ORDER_TRANSFER_HANDOFF_EMULATOR=true;});
   }
-  await page.getByRole('button',{name:'確認原交接結果',exact:true}).click();
-  await page.waitForFunction(()=>!pendingOrderTransferOperations().length);
+  await page.locator('.parcel-task').getByRole('button',{name:'核對／重試原寄貨'}).click();
+  await page.waitForFunction(()=>!hasWarehouseParcelWork()&&!pendingOrderTransferOperations().length,null,{timeout:45000});
   assert.equal(calls.length,2);assert.deepEqual(calls[0],calls[1]);
   const target='custody-'+uid,order=(await db.doc('orders/'+orderId).get()).data(),transfer=(await db.doc('stockTransfers/'+calls[0].payload.id).get()).data();
   assert.equal(transfer.kind,'HANDOFF');assert.equal(transfer.status,'RECEIVED');assert.equal(calls[0].payload.toWarehouseId,target);

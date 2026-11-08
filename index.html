@@ -450,21 +450,9 @@
           <button type="button" id="inventoryShippingMainBtn" class="order-work-card active" aria-pressed="true" onclick="switchInventoryShippingKind('main')">主倉寄貨</button>
           <button type="button" id="inventoryShippingBranchBtn" class="order-work-card" aria-pressed="false" onclick="switchInventoryShippingKind('branch')">分倉寄貨</button>
         </div>
-        <div class="parcel-toolbar"><strong>待寄貨</strong><details class="parcel-filter-menu"><summary>篩選</summary>
-          <select id="parcelWarehouseFilter" aria-label="來源分倉" onchange="renderWarehouseParcels()"><option value="">全部來源分倉</option></select>
-          <select id="inventoryDeliveryModeFilter" aria-label="寄送對象" onchange="renderInventoryShipping()"><option value="">全部寄送對象</option><option value="SALES_SHIP">寄給負責業務</option><option value="CUSTOMER_SHIP">直接寄客戶</option></select>
-        </details></div>
-        <div id="inventoryCustomerShippingPanel">
         <div id="inventoryShippingError" class="inventory-work-error" role="status" hidden></div>
         <p id="warehouseParcelStatus" role="status"></p><div id="warehouseParcelCards"></div>
-        <details id="parcelAdvanced"><summary>批次操作／進階篩選</summary>
-        <select id="inventoryShippingWarehouse" aria-label="分倉庫" style="display:none" onchange="renderInventoryShipping()"><option value="">全部分倉庫</option></select>
-        <div class="toolbar no-print inventory-shipping-batch-actions"><span id="warehouseShippingSelectionStatus">尚未勾選品項</span><label><input type="checkbox" id="warehouseShippingSelectAll" onchange="selectVisibleWarehouseShipping(this.checked)"> 全選目前清單</label><button type="button" id="warehouseShippingBatchBtn" onclick="openWarehouseShippingBatch()" disabled>確認寄出</button><details class="order-export-tools warehouse-shipping-tools"><summary>列印／匯出</summary><div class="order-export-panel"><button type="button" class="btn-secondary" onclick="printSelectedWarehouseShipping(this)">列印地址貼紙</button><button type="button" class="btn-secondary" onclick="exportSelectedWarehouseShipping(this)">匯出寄貨清單 CSV</button><button type="button" class="btn-secondary" onclick="selectVisibleWarehouseShipping(false)">取消全部勾選</button></div></details></div>
-        <p id="inventoryShippingStatus" class="inventory-work-status" role="status"></p>
-        <div id="inventoryShippingSummary"></div><div class="table-wrap inventory-work-table"><table><thead><tr><th>選取</th><th>品項與來源</th><th>寄送資訊</th><th>待出數量</th><th>操作</th></tr></thead><tbody id="inventoryShippingBody"></tbody></table></div>
-
-        <button type="button" id="inventoryShippingMoreBtn" class="btn-secondary" style="display:none" onclick="loadMoreInventoryShipping()">載入更多（50）</button>
-        </details></div><div id="inventoryTransferShippingPanel" style="display:none"><section class="panel no-print" id="mainTransferRequestPanel" hidden><div class="section-header"><h3>寄回主倉</h3><button type="button" class="btn-secondary" onclick="exportMainTransferRequests(this)">匯出目前調回清單</button><button type="button" id="mainTransferRetry" class="btn-secondary" onclick="loadMainTransferRequests(true)" hidden>重試讀取</button></div><p id="mainTransferRequestStatus" role="status"></p><div class="table-wrap inventory-work-table"><table><thead><tr><th>來源</th><th>分倉</th><th>品項</th><th>調回數量</th><th>操作</th></tr></thead><tbody id="mainTransferRequestBody"></tbody></table></div></section></div>
+        <div id="inventoryTransferShippingPanel" style="display:none"></div>
       </div>
       <section class="panel no-print" id="freeStockRecoveryPanel" hidden><div class="section-header"><h3>庫存分配待處理</h3><button type="button" class="btn-secondary" onclick="loadFreeStockRecovery()">重新處理</button></div><p id="freeStockRecoveryStatus" role="status"></p><div class="table-wrap inventory-work-table"><table><thead><tr><th>倉庫</th><th>品項</th><th id="freeStockRecoveryQuantityLabel">可用數量</th><th>狀態</th><th>操作</th></tr></thead><tbody id="freeStockRecoveryBody"></tbody></table></div><button type="button" id="freeStockRecoveryMore" class="btn-secondary" onclick="loadFreeStockRecovery(true)" hidden>處理更多（50）</button></section>
       <div id="inventoryStockPanel">

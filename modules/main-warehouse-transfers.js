@@ -70,6 +70,48 @@
     catch(err){if(requested!==identity())return;error=err.code==='permission-denied'?'備貨調回需求需要部署最新版 Firestore 規則。':err.message;}
     finally{loading=null;root.renderMainTransferRequests();}})();return loading;
   };
+  // Read-only projection for the same recipient cards as customer and sales shipments.
+  // Dispatch continues through the existing, distinct order/stock transfer writers.
+  root.mainTransferParcelEntries=function(){
+    if(!operational())return {ready:false,error:'',entries:[],recoveries:[]};
+    const target=defaultWarehouse(),targetId=mainId();
+    const recipient={contact:target?.contact||target?.contactName||target?.warehouseName||'',
+      phone:target?.phone||'',address:target?.address||target?.shippingAddress||'',warehouseId:targetId};
+    const orders=root.YushinWarehouseLogistics.transferRequirements(orderWorkQueueCache,warehouseMasterCache,targetId,
+      {status:normalizedOrderStatus,incomplete:orderInventorySyncIncomplete,items:normalizedOrderItems,dispatch:itemDispatchState});
+    const entries=orders.map(row=>({kind:'order',id:row.order.id,itemId:row.item.itemId,
+      key:'order:'+row.order.id+':'+row.item.itemId,warehouseId:row.warehouseId,
+      itemCode:row.item.itemCode||'',itemName:row.item.itemName||'',qty:row.qty,
+      source:row.order.orderNo||row.order.quoteNo||row.order.id,ready:row.readyQty>=row.qty,
+      recipient}));
+    for(const request of pendingRequests){
+      if(!request.id||request.fromWarehouseId===targetId||request.toWarehouseId!==targetId||!(Number(request.qty)>0))continue;
+      entries.push({kind:'stock',id:request.id,key:'stock:'+request.id,
+        warehouseId:request.fromWarehouseId,itemCode:request.itemCode||'',itemName:request.itemName||'',
+        qty:Number(request.qty),source:'主倉備貨',ready:true,recipient});
+    }
+    const recoveries=[];
+    if(purchasing()&&typeof pendingMainTransferOperations==='function')
+      for(const p of pendingMainTransferOperations())recoveries.push({kind:'request',id:p.id,detail:p.error||'前次備貨需求結果待核對'});
+    if(typeof pendingMainTransferPhysicalOperations==='function')
+      for(const p of pendingMainTransferPhysicalOperations().filter(p=>p.action==='DISPATCH'||p.error))
+        recoveries.push({kind:'physical',id:p.id,detail:p.error||'前次調撥寄出結果待核對'});
+    if(typeof pendingOrderTransferOperations==='function')
+      for(const p of pendingOrderTransferOperations().filter(p=>p.action==='DISPATCH'))
+        recoveries.push({kind:'order-operation',id:p.id,action:p.action,detail:p.error||'前次訂單調撥結果待核對'});
+    return {ready,error,entries,recoveries,hasMore:pendingRequests.length>=50};
+  };
+  root.printMainTransferParcel=function(kind,id,itemId,button){
+    if(!operational())return;
+    const entry=root.mainTransferParcelEntries().entries.find(r=>r.kind===kind&&r.id===id&&(kind!=='order'||r.itemId===itemId));
+    if(!entry)return showActionFeedback('寄貨資料已變更，請重新載入。','warning');
+    const p={mode:'TRANSFER',warehouseId:entry.recipient.warehouseId,...entry.recipient};
+    if(!p.contact||!p.phone||!p.address)return showActionFeedback('主倉收件資料未完整，請由倉庫管理員補齊設定。','warning');
+    const item={itemCode:entry.itemCode,itemName:entry.itemName};
+    try{root.printWarehouseAddressGroups([{warehouseId:entry.warehouseId,plan:p,
+      rows:[{key:entry.key,item,qty:entry.qty}]}]);}
+    catch(err){showActionFeedback('列印未完成：'+err.message,'warning');}
+  };
   root.exportMainTransferRequests=async function(button){
     if(!operational())return;const who=identity(),state=beginActionButton(button,'匯出中…');
     try{
@@ -82,7 +124,10 @@
     }catch(err){showActionFeedback('匯出未完成：'+err.message,'warning');}finally{endActionButton(button,state);}
   };
   root.renderMainTransferRequests=function(){
-    const panel=document.getElementById('mainTransferRequestPanel'),body=document.getElementById('mainTransferRequestBody');if(!panel||!body)return;panel.hidden=!operational();if(panel.hidden||document.getElementById('inventoryTransferShippingPanel')?.style.display==='none')return;
+    const panel=document.getElementById('mainTransferRequestPanel'),body=document.getElementById('mainTransferRequestBody');
+    if(panel)panel.hidden=true;
+    if(!operational()||document.getElementById('inventoryTransferShippingPanel')?.style.display==='none')return;
+    if(!body){root.renderWarehouseParcels?.();root.updateInventoryWorkspaceBadges?.();return;}
     const needs=root.YushinWarehouseLogistics.transferRequirements(orderWorkQueueCache,warehouseMasterCache,mainId(),{status:normalizedOrderStatus,incomplete:orderInventorySyncIncomplete,items:normalizedOrderItems,dispatch:itemDispatchState});
     const retry=document.getElementById('mainTransferRetry');if(retry)retry.hidden=!error;
     const name=id=>warehouseMasterCache.find(w=>w.id===id)?.warehouseName||id;
@@ -97,6 +142,7 @@
     body.innerHTML=orderHtml+recoveryHtml+physicalRecoveryHtml+[...orderRows,...stockRows].map(r=>`<tr><td data-th="來源">${escapeHtml(r.source)}</td><td data-th="分倉">${escapeHtml(name(r.warehouseId))} → ${escapeHtml(name(mainId()))}</td><td data-th="品項">${escapeHtml(r.item.itemCode)}<br>${escapeHtml(r.item.itemName)}</td><td data-th="調回數量">${r.qty}</td><td data-th="操作">${r.action}</td></tr>`).join('');
     const table=body.closest?.('.inventory-work-table');if(table)table.hidden=ready&&!orderRows.length&&!stockRows.length&&!error&&!recovery.length&&!physicalRecovery.length&&!orderRecovery.length;
     document.getElementById('mainTransferRequestStatus').textContent=error||(!ready?'正在讀取寄回主倉工作…':`${orderRows.length} 筆訂單需求、${stockRows.length} 筆主倉備貨${pendingRequests.length>=50?'（備貨先顯示 50 筆）':''}；實際寄出後按確認寄出，主倉收到後在調撥收貨按已收貨。`);
+    root.renderWarehouseParcels?.();root.updateInventoryWorkspaceBadges?.();
   };
   const original=root.renderInventoryList;
   root.renderInventoryList=function(){const result=original?.apply(this,arguments);if(operational()&&document.getElementById('inventoryTransferShippingPanel')?.style.display!=='none'){root.renderMainTransferRequests();root.loadMainTransferRequests();}return result;};
