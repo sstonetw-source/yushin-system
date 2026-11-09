@@ -30,6 +30,12 @@ test('receipt form requires explicit shipment batch quantities and saleable deci
  assert.equal(f.calls.length,1);assert.equal(f.calls[0].requestId,'Q');assert.equal(f.calls[0].shipmentId,'S');
  assert.deepEqual(f.calls[0].selections,[{lotId:'L',qty:1}]);assert.equal(f.calls[0].warehouseId,'A');assert.equal(f.calls[0].settlement,'CLOSE');
 });
+test('location return queue routes to the backend receipt form rather than the legacy browser writer',()=>{
+ const f=fixture();
+ const html=f.c.customerReturnReceiptQueueAction(f.order,f.order.returnRequests[0]);
+ assert.match(html,/onclick="openCustomerReturnReceipt\(/);
+ assert.doesNotMatch(html,/onclick="receiveCustomerReturn\(/);
+});
 test('receipt form freezes unknown operation and double taps cannot start another transport',async()=>{
  const f=fixture();await f.prepare();let reject;f.setSend(()=>new Promise((_,r)=>{reject=r;}));
  const first=f.c.saveCustomerReturnReceipt();await f.c.saveCustomerReturnReceipt();assert.equal(f.calls.length,1);
