@@ -1,8 +1,13 @@
 // Only the trusted Admin SDK Callable may write manual inventory and counts.
-// Keep the exact intent across reloads and tab closure until the backend
-// receipt has been verified. This state must never be evicted as a cache.
+// Full intent lives only in the tab session; durable recovery records omit
+// protected initial-stock acquisition cost. Neither record is a cache.
 function manualStockPendingKey(operationId){
  return 'manual-stock:'+encodeURIComponent(currentUser?.uid||'')+':'+encodeURIComponent(operationId);
+}
+function manualStockCheckpoint({uid,role,project,kind,payload}){
+ const safePayload={...payload};delete safePayload.unitCost;
+ return JSON.stringify({uid,role,project,kind,payload:safePayload,
+  costProtected:Object.prototype.hasOwnProperty.call(payload,'unitCost')});
 }
 function manualStockPendingOperations(){
  if(typeof localStorage==='undefined')return [];
@@ -18,17 +23,42 @@ function manualStockPendingOperations(){
    ||saved.role!==currentUserRole||!saved.payload?.operationId
    ||manualStockPendingKey(saved.payload.operationId)!==key)
    throw Error('庫存待確認紀錄與目前帳號不一致，請聯絡管理員，勿重複提交。');
-  pending.push(saved);
+  const inTab=typeof sessionStorage!=='undefined'?sessionStorage.getItem(key):null;
+  if(inTab!==null){
+   let full;
+   try{full=JSON.parse(inTab);}catch(_){throw Error('此分頁的庫存原始內容無法讀取，請停止新交易並核對原操作 ID。');}
+   if(manualStockCheckpoint(full)!==localStorage.getItem(key))
+    throw Error('庫存原操作內容與待確認紀錄不一致，請停止新交易。');
+   pending.push(full);
+  }else pending.push({...saved,needsReceiptOnly:saved.costProtected===true});
  }
  return pending;
 }
 async function resolveManualStockPendingOperations(){
  const pending=manualStockPendingOperations();
  for(const saved of pending){
-  // Reuse the exact durable intent and operation ID. Backend idempotency ensures
-  // a completed request is verified, never applied for a second time.
-  await commitManualStockBackend(saved.kind,saved.payload,
-   {actorUid:saved.uid,actorRole:saved.role,onStockCommitted:invalidateWarehouseStockCache});
+  if(saved.needsReceiptOnly){
+   // A closed tab has lost the cost-bearing payload. Verify the server receipt
+   // without ever fabricating its protected cost or resubmitting a new intent.
+   const {uid,role,project,check}=manualStockBackendContext(saved.kind);
+   if(uid!==saved.uid||role!==saved.role||project!==saved.project)throw Error('帳號與待確認庫存操作不一致。');
+   const id=saved.payload.operationId,key=manualStockPendingKey(id);
+   const snap=await db.collection('inventoryMovements').doc(id).get({source:'server'});check();
+   const receipt=snap.exists?snap.data():null;
+   if(!receipt||receipt.sourceId!==id||receipt.productKey!==saved.payload.productKey
+    ||receipt.warehouseId!==saved.payload.warehouseId||receipt.actorUid!==uid||receipt.actorRole!==role
+    ||!receipt.intentHash||receipt.type!=='initial'||receipt.qty!==saved.payload.qty
+    ||receipt.adjustmentIntent?.lotNo!==saved.payload.lotNo
+    ||receipt.adjustmentIntent?.expiryDate!==saved.payload.expiryDate
+    ||receipt.operation!=='manual-adjustment')
+    throw Error('原期初庫存憑證尚未確認，操作 ID：'+id+'。請聯絡管理員核對，勿重新建檔。');
+   localStorage.removeItem(key);
+   invalidateWarehouseStockCache(saved.payload.productKey,saved.payload.warehouseId);
+  }else{
+   // Reuse the exact original intent and operation ID; no new stock writer.
+   await commitManualStockBackend(saved.kind,saved.payload,
+    {actorUid:saved.uid,actorRole:saved.role,onStockCommitted:invalidateWarehouseStockCache});
+  }
  }
  return pending.length;
 }
@@ -71,9 +101,14 @@ async function commitManualStockBackend(kind,payload,{actorUid,actorRole,onStock
  if(typeof ensureReservationFunctionsCompat==='function')await ensureReservationFunctionsCompat();
  const {uid,role,project,functions,emulator,check}=manualStockBackendContext(kind);
  if(uid!==actorUid||role!==actorRole)throw Error('庫存操作身分已變更。');
- const key=manualStockPendingKey(id),raw=localStorage.getItem(key),intent=JSON.stringify({uid,role,project,kind,payload});
- if(raw!==null&&raw!==intent)throw Error('同一操作 ID 尚有不同內容待核對，請勿產生新的異動。');
- if(raw===null){localStorage.setItem(key,intent);if(localStorage.getItem(key)!==intent)throw Error('庫存操作暫存失敗，尚未提交。');}
+ const key=manualStockPendingKey(id),intent=JSON.stringify({uid,role,project,kind,payload}),
+  checkpoint=manualStockCheckpoint({uid,role,project,kind,payload}),raw=localStorage.getItem(key),
+  inTab=typeof sessionStorage!=='undefined'?sessionStorage.getItem(key):null;
+ if(raw!==null&&raw!==checkpoint||inTab!==null&&inTab!==intent)
+  throw Error('同一操作 ID 尚有不同內容待核對，請勿產生新的異動。');
+ if(raw===null){localStorage.setItem(key,checkpoint);if(localStorage.getItem(key)!==checkpoint)throw Error('庫存操作暫存失敗，尚未提交。');}
+ if(typeof sessionStorage==='undefined')throw Error('無法保存期初庫存原始內容，請停止操作。');
+ if(inTab===null){sessionStorage.setItem(key,intent);if(sessionStorage.getItem(key)!==intent)throw Error('庫存原始內容暫存失敗，尚未提交。');}
  check();if(emulator)functions.useEmulator('127.0.0.1',5001);
  const callable=kind==='MANUAL_INVENTORY'?'commitV2ManualInventory':'commitV2InventoryCount';
  const response=await functions.httpsCallable(callable)(payload);check();const data=response?.data;
@@ -88,8 +123,9 @@ async function commitManualStockBackend(kind,payload,{actorUid,actorRole,onStock
   ||receipt.qty!==data.delta||!receipt.intentHash
   ||receipt.operation!==(kind==='MANUAL_INVENTORY'?'manual-adjustment':'quantity-editor'))
   throw Error('庫存憑證尚未核對完成，請使用原操作 ID 重試。');
- if(localStorage.getItem(key)!==intent)throw Error('庫存操作暫存已變更，請勿重送。');
+ if(localStorage.getItem(key)!==checkpoint||sessionStorage.getItem(key)!==intent)throw Error('庫存操作暫存已變更，請勿重送。');
  localStorage.removeItem(key);
+ sessionStorage.removeItem(key);
  try{onStockCommitted?.(payload.productKey,payload.warehouseId);}catch(error){
   error.operationId=id;error.manualStockCommitted=true;throw error;
  }

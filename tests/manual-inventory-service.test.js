@@ -86,9 +86,10 @@ test('verified backend commitment is never treated as an unconfirmed row when UI
 });
 
 test('interrupted backend reply retains exact intent across reload and recovers its receipt without a second stock writer',async()=>{
- const values=new Map(),storage={get length(){return values.size;},key:i=>[...values.keys()][i]||null,
-  getItem:key=>values.has(key)?values.get(key):null,setItem:(key,value)=>values.set(key,String(value)),removeItem:key=>values.delete(key)};
- const project='preview-20135',uid='U',role='purchaser';let serverCalls=0,reads=0,failFirst=true;
+ const makeStorage=()=>{const values=new Map();return {get length(){return values.size;},key:i=>[...values.keys()][i]||null,
+  getItem:key=>values.has(key)?values.get(key):null,setItem:(key,value)=>values.set(key,String(value)),removeItem:key=>values.delete(key)};};
+ const storage=makeStorage(),tab=makeStorage();
+ const project='preview-20135',uid='U',role='purchaser';let serverCalls=0,reads=0,failFirst=true,hasReceipt=true;
  const payload={operationId:'op-123456789012',productKey:'P',warehouseId:'W',type:'initial',qty:5,lotNo:'',expiryDate:'',unitCost:0};
  const fn={app:{options:{projectId:project}},httpsCallable:()=>async intent=>{
   serverCalls++;assert.equal(intent.operationId,payload.operationId);
@@ -100,15 +101,27 @@ test('interrupted backend reply retains exact intent across reload and recovers 
   YUSHIN_PREVIEW_MANUAL_STOCK:true,location:{hostname:'preview-20135.web.app',origin:'https://preview-20135.web.app',pathname:'/'},
   firebase:{auth:()=>auth,functions:()=>fn,app:()=>app},db:{app:{options:{projectId:project}},collection:name=>{
    assert.equal(name,'inventoryMovements');return {doc:id=>{assert.equal(id,payload.operationId);return {get:async opts=>{
-    reads++;assert.equal(opts.source,'server');return {exists:true,data:()=>({sourceId:id,productKey:'P',warehouseId:'W',actorUid:uid,
-     actorRole:role,qty:5,intentHash:'from-server',operation:'manual-adjustment'})};}};}};
-  }},localStorage:storage,canEditPage:()=>true,
+    reads++;assert.equal(opts.source,'server');return {exists:hasReceipt,data:()=>({sourceId:id,productKey:'P',warehouseId:'W',actorUid:uid,
+     actorRole:role,type:'initial',qty:5,adjustmentIntent:{lotNo:'',expiryDate:''},intentHash:'from-server',operation:'manual-adjustment'})};}};}};
+  }},localStorage:storage,sessionStorage:tab,canEditPage:()=>true,
   ensureReservationFunctionsCompat:async()=>{},invalidateWarehouseStockCache:()=>{},console});
  vm.runInContext(transport,c);
  await assert.rejects(c.commitManualStockBackend('MANUAL_INVENTORY',payload,{actorUid:uid,actorRole:role}),/timeout/);
  assert.equal(storage.length,1);assert.equal(reads,0);
+ assert.equal(storage.getItem(storage.key(0)).includes('unitCost'),false);
+ assert.equal(tab.getItem(tab.key(0)).includes('unitCost'),true);
  assert.equal(c.manualStockPendingOperations().length,1);
  const restored=await c.resolveManualStockPendingOperations();
- assert.equal(restored,1);assert.equal(serverCalls,2);assert.equal(reads,1);assert.equal(storage.length,0);
+ assert.equal(restored,1);assert.equal(serverCalls,2);assert.equal(reads,1);assert.equal(storage.length,0);assert.equal(tab.length,0);
  assert.equal(c.manualStockPendingOperations().length,0);
+ // A closed tab loses the full cost-bearing intent. Preserve only its cost-free
+ // durable marker: an absent receipt must block, and a present receipt clears it.
+ failFirst=true;
+ await assert.rejects(c.commitManualStockBackend('MANUAL_INVENTORY',payload,{actorUid:uid,actorRole:role}),/timeout/);
+ tab.removeItem(tab.key(0));hasReceipt=false;
+ await assert.rejects(c.resolveManualStockPendingOperations(),/請聯絡管理員核對/);
+ assert.equal(serverCalls,3);assert.equal(storage.length,1);
+ hasReceipt=true;
+ assert.equal(await c.resolveManualStockPendingOperations(),1);
+ assert.equal(serverCalls,3);assert.equal(storage.length,0);
 });
