@@ -21847,7 +21847,9 @@ function customerReturnReceiptQueueAction(order,request){
     try{
         v2CustomerReturnTransport();
         if(pendingV2CustomerReturnReceipt(order.id))return '<span role="status">請先確認上方前次退貨收貨結果。</span>';
-        return `<button type="button" onclick="receiveCustomerReturn(${inlineJsValue(order.id)},${inlineJsValue(request.id)},this)">確認退貨收貨</button>`;
+        // Location-based returns always use the authoritative backend receipt flow.
+        // The legacy browser receiver is reserved for the old non-location contract.
+        return `<button type="button" onclick="openCustomerReturnReceipt(${inlineJsValue(order.id)},${inlineJsValue(request.id)})">確認退貨收貨</button>`;
     }catch(error){return `<span role="alert">${escapeHtml(error.message)}</span>`;}
 }
 window.openCustomerReturnReceipt=async function(orderId,requestId){

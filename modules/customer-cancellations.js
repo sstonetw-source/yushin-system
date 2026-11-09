@@ -119,7 +119,9 @@ window.receiveCustomerReturn=async function(orderId,requestId,button){
     if(!canReceiveInventoryCapability()||customerReturnActionsPending.has(requestId))return;
     const order=customerReturnOrders.find(o=>o.id===orderId),request=order?.returnRequests?.find(r=>r.id===requestId);
     if(!request||!button)return;
-    if(customerReturnNeedsLocationReceipt(order)){if(globalThis.YUSHIN_V2_RETURN_RECEIPT_EMULATOR===true)return openCustomerReturnReceipt(orderId,requestId);alert('此出貨來源的退貨收貨尚未開放，請保留待收申請。');return;}
+    // Compatibility for a stale queued button: location receipts must use the
+    // guarded backend path in production too, never the browser stock writer.
+    if(customerReturnNeedsLocationReceipt(order))return openCustomerReturnReceipt(orderId,requestId);
     // Lock before prompting or awaiting the warehouse list: a second tap must not start another receipt.
     customerReturnActionsPending.add(requestId);button.disabled=true;
     try{

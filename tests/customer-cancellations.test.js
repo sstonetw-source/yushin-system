@@ -113,6 +113,24 @@ test('receive action locks before warehouse loading and cannot double submit on 
  assert.equal(c.customerReturnActionsPending.size,0);
  assert.equal(button.dataset.operationId,undefined);
 });
+test('a location-based return skips the legacy browser writer even outside Emulator',async()=>{
+ const start=code.indexOf('window.receiveCustomerReturn=async function(');
+ const end=code.indexOf('\nwindow.releaseCustomerReturnHold=',start);
+ const order={id:'O1',inventoryReservationStatus:'completed',inventoryReservationAttemptId:'V2',
+  items:[{itemId:'I1',qty:2}],returnRequests:[{id:'Q1',itemId:'I1',status:'PENDING',qty:1}],
+  warehouseShipmentRecords:[{id:'S1',itemId:'I1',qty:2,warehouseId:'W1'}]};
+ const calls=[],c=vm.createContext({window:{},globalThis:null,
+  currentUserRole:'warehouse',canReceiveInventoryCapability:()=>true,customerReturnActionsPending:new Set(),customerReturnOrders:[order],
+  openCustomerReturnReceipt:async (...args)=>calls.push(args),
+  prompt:()=>{throw Error('legacy prompt must not run');},
+  commitCustomerReturnReceipt:()=>{throw Error('legacy writer must not run');},
+  alert:()=>{throw Error('location receipt must not show legacy environment message');}});
+ c.globalThis=c;
+ vm.runInContext(guards+code.slice(start,end),c);
+ await c.window.receiveCustomerReturn('O1','Q1',{disabled:false,dataset:{}});
+ assert.deepEqual(calls,[['O1','Q1']]);
+ assert.equal(c.customerReturnActionsPending.size,0);
+});
 
 test('cancelled direct shipment redirect enforces active physical warehouse in UI, transaction and Rules',()=>{
  const start=code.indexOf('window.keepCancelledPurchaseAsStock=');
