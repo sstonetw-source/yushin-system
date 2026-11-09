@@ -62,7 +62,8 @@
             <div id="changePasswordMessage" class="password-message"></div>
             <div class="password-actions">
                 <button type="button" class="btn-secondary" id="changePasswordCancelBtn" onclick="closeChangePasswordModal()">取消</button>
-                <button type="button" onclick="handleChangePassword()">儲存新密碼</button>
+                <button type="button" class="btn-secondary" id="changePasswordLogoutBtn" onclick="handleForcedPasswordLogout()" style="display:none">登出</button>
+                <button type="button" id="changePasswordSaveBtn" onclick="handleChangePassword()">儲存新密碼</button>
             </div>
         </div>
     </div>
