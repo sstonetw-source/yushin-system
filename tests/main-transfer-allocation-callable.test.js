@@ -36,3 +36,17 @@ test('completed response waits for authority projection and refuses a mismatched
  const bad=fixture({drain:async()=>result,projectCompletion:async()=>({runId:'other',maxQty:3,allocatedQty:3})});
  await assert.rejects(bad.handler({auth:{uid:'U'},data:{transferId:'T'}}),e=>e.code==='failed-precondition');
 });
+test('production main-transfer allocation requires its own server flag, trusted database and scoped coordinator purpose',async()=>{
+ const production={GCLOUD_PROJECT:'yu-shing-company',ENABLE_PRODUCTION_MAIN_TRANSFER_ALLOCATION_BACKEND:'true'};
+ assert.equal(gate(production),'yu-shing-company');
+ for(const patch of [{ENABLE_PRODUCTION_MAIN_TRANSFER_ALLOCATION_BACKEND:'false'},
+  {ENABLE_PRODUCTION_MAIN_TRANSFER_RECEIPT_BACKEND:'true',ENABLE_PRODUCTION_MAIN_TRANSFER_ALLOCATION_BACKEND:'false'},
+  {FUNCTIONS_EMULATOR:'true'},{FIRESTORE_EMULATOR_HOST:'localhost:8080'},
+  {GOOGLE_CLOUD_PROJECT:'preview-20135'}])assert.equal(gate({...production,...patch}),'');
+ const f=fixture({env:production,getDatabase:()=>({projectId:'yu-shing-company'})});
+ await f.handler({auth:{uid:'U'},data:{transferId:'T'}});
+ assert.equal(f.calls.length,1);assert.equal(f.calls[0][3],'MAIN_TRANSFER');
+ const mismatch=fixture({env:production});
+ await assert.rejects(mismatch.handler({auth:{uid:'U'},data:{transferId:'T'}}),e=>e.code==='failed-precondition');
+ assert.equal(mismatch.calls.length,0);
+});

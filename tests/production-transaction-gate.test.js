@@ -80,7 +80,7 @@ test('cancelled supplier purchase production UI is default-off until separate ba
 test('main transfer request, dispatch and receipt have independent default-off server and browser gates',()=>{
  const fs=require('node:fs'),vm=require('node:vm');
  const source=fs.readFileSync('src/infrastructure/production-transaction.js','utf8');
- const kinds=['MAIN_TRANSFER_REQUEST','MAIN_TRANSFER_DISPATCH','MAIN_TRANSFER_RECEIPT'];
+ const kinds=['MAIN_TRANSFER_REQUEST','MAIN_TRANSFER_DISPATCH','MAIN_TRANSFER_RECEIPT','MAIN_TRANSFER_ALLOCATION'];
  const scope={APP_ENVIRONMENT:'production',location:{origin:'https://sstonetw-source.github.io',pathname:'/yushin-system/'}};
  for(const kind of kinds){scope['YUSHIN_PRODUCTION_'+kind+'_BACKEND']=true;scope['YUSHIN_PRODUCTION_'+kind+'_LEGACY_BLOCKED']=true;}
  vm.runInNewContext(fs.readFileSync('transaction-rollout-config.js','utf8'),scope);

@@ -1,9 +1,13 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 function fixture(){const storage=new Map(),calls=[];let transport=async()=>({status:'completed',recoveryPending:false,maxQty:3,allocatedQty:3,affectedOrderIds:['O'],transferId:'T',sourceMovementId:'T-in'});
- function open(preview=false){const options={projectId:preview?'preview-20135':'demo-yushin'},auth={app:{options},currentUser:{uid:'U'},emulatorConfig:preview?undefined:{host:'localhost',port:9099}};
- const functions={app:{options},useEmulator(){if(preview)throw Error('Preview must not connect emulator');},httpsCallable:name=>async payload=>{calls.push({name,payload});return {data:await transport(c)};}};
- const c=vm.createContext({currentUser:{uid:'U'},currentUserRole:'warehouse',APP_ENVIRONMENT:preview?'preview':'',YUSHIN_PREVIEW_MAIN_TRANSFER_ALLOCATION:preview,YUSHIN_MAIN_TRANSFER_ALLOCATION_EMULATOR:!preview,location:{hostname:preview?'preview-20135.web.app':'localhost'},canReceiveInventoryCapability:()=>true,canAccessPage:()=>true,firebase:{functions(){},auth:()=>auth,app:()=>({options,functions:()=>functions})},db:{app:{options}},sessionStorage:{get length(){return storage.size;},key:n=>[...storage.keys()][n],getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)}});
+ function open(mode=false){const preview=mode===true,production=mode==='production',options={projectId:production?'yu-shing-company':preview?'preview-20135':'demo-yushin'},auth={app:{options},currentUser:{uid:'U'},emulatorConfig:preview||production?undefined:{host:'localhost',port:9099}};
+ const functions={app:{options},useEmulator(){if(preview||production)throw Error('Remote must not connect emulator');},httpsCallable:name=>async payload=>{calls.push({name,payload});return {data:await transport(c)};}};
+ const c=vm.createContext({currentUser:{uid:'U'},currentUserRole:'warehouse',APP_ENVIRONMENT:production?'production':preview?'preview':'',YUSHIN_PREVIEW_MAIN_TRANSFER_ALLOCATION:preview,YUSHIN_MAIN_TRANSFER_ALLOCATION_EMULATOR:!preview&&!production,
+  YUSHIN_PRODUCTION_MAIN_TRANSFER_ALLOCATION_BACKEND:production,YUSHIN_PRODUCTION_MAIN_TRANSFER_ALLOCATION_LEGACY_BLOCKED:production,
+  location:production?{hostname:'sstonetw-source.github.io',origin:'https://sstonetw-source.github.io',pathname:'/yushin-system/'}:{hostname:preview?'preview-20135.web.app':'localhost'},
+  canReceiveInventoryCapability:()=>true,canAccessPage:()=>true,firebase:{functions(){},auth:()=>auth,app:()=>({options,functions:()=>functions})},db:{app:{options}},sessionStorage:{get length(){return storage.size;},key:n=>[...storage.keys()][n],getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)}});
+ if(production)vm.runInContext(fs.readFileSync('src/infrastructure/production-transaction.js','utf8'),c);
  for(const name of ['main-transfer-request-transport','main-transfer-allocation-transport'])vm.runInContext(fs.readFileSync('src/services/'+name+'.js','utf8'),c);return c;}
  return {open,storage,calls,setTransport:fn=>transport=fn};}
 test('lost response refresh keeps identical source and clears only confirmed completion',async()=>{const f=fixture();f.setTransport(async()=>{throw Error('reply lost');});await assert.rejects(f.open().resumeMainTransferAllocationBackend('T'),/reply lost/);assert.equal(f.storage.size,1);const c=f.open();assert.equal(c.pendingMainTransferAllocations()[0].id,'T');f.setTransport(async()=>({transferId:'T',sourceMovementId:'T-in',status:'completed',recoveryPending:false,maxQty:3,allocatedQty:3,affectedOrderIds:[]}));await c.resumeMainTransferAllocationBackend('T');assert.deepEqual(structuredClone(f.calls[0]),structuredClone(f.calls[1]));assert.equal(f.storage.size,0);});
@@ -36,4 +40,25 @@ test('explicit Preview list and recovery use matching project without connecting
  f.setTransport(async()=>({transferId:'T',sourceMovementId:'T-in',status:'completed',recoveryPending:false,maxQty:3,allocatedQty:3,affectedOrderIds:[]}));await c.resumeMainTransferAllocationBackend('T');assert.equal(f.storage.size,0);
  f.setTransport(async()=>({rows:[],hasMore:false,afterId:''}));await c.readMainTransferAllocationPage();
  c.YUSHIN_PREVIEW_MAIN_TRANSFER_ALLOCATION=false;await assert.rejects(c.readMainTransferAllocationPage());
+});
+test('production allocation list and recovery use trusted backend and original IDs without browser writes',async()=>{
+ const f=fixture();f.setTransport(async()=>{throw Error('response lost');});
+ await assert.rejects(f.open('production').resumeMainTransferAllocationBackend('T'),/response lost/);
+ const c=f.open('production');assert.equal(c.pendingMainTransferAllocations()[0].id,'T');
+ assert.equal(c.mainTransferAllocationListRequired(),true);
+ f.setTransport(async()=>({transferId:'T',sourceMovementId:'T-in',status:'completed',recoveryPending:false,maxQty:3,allocatedQty:3,affectedOrderIds:[]}));
+ await c.resumeMainTransferAllocationBackend('T');assert.equal(f.storage.size,0);
+ f.setTransport(async()=>({rows:[],hasMore:false,afterId:''}));await c.readMainTransferAllocationPage();
+ assert.equal(f.calls.at(-1).name,'listV2MainTransferAllocations');
+});
+test('production allocation backend-off, legacy-block split or foreign origin fails closed',async()=>{
+ for(const mode of ['backend','block','origin','db']){
+  const f=fixture(),c=f.open('production');
+  if(mode==='backend')c.YUSHIN_PRODUCTION_MAIN_TRANSFER_ALLOCATION_BACKEND=false;
+  if(mode==='block')c.YUSHIN_PRODUCTION_MAIN_TRANSFER_ALLOCATION_LEGACY_BLOCKED=false;
+  if(mode==='origin')c.location.origin='https://other.example';
+  if(mode==='db')c.db.app.options.projectId='preview-20135';
+  await assert.rejects(c.resumeMainTransferAllocationBackend('T'));
+  assert.equal(f.calls.length,0);
+ }
 });
