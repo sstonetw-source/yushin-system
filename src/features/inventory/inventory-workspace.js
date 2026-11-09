@@ -1280,7 +1280,7 @@ window.saveInventoryQuantity=async function(){
         showActionFeedback(result.replayed?'原盤點已完成，已確認結果。':result.delta===0?'庫存數量沒有變更。':`庫存已更新：${result.delta>0?'+':''}${result.delta}`);
     }catch(err){
         if(committedResult&&actorUid===currentUser?.uid&&actorRole===currentUserRole)alert('盤點已完成，但庫存清單更新失敗，請重新整理清單：'+(err?.message||err));
-        else if(sameEditor())alert((err.inventoryCountCommitted?'盤點已提交，但畫面更新未完成；請以原內容重試確認：':'盤點結果尚未確認，請以原內容重試，勿更改數量重送：')+(err?.message||err));
+        else if(sameEditor())alert(((err.inventoryCountCommitted||err.manualStockCommitted)?'盤點已提交，但畫面更新未完成；請重新整理清單：':'盤點結果尚未確認，請以原內容重試，勿更改數量重送：')+(err?.message||err));
     }finally{
         inventoryQuantitySaveInProgress=false;
         if(sameEditor()&&button){button.disabled=false;button.textContent='確認修改';}
@@ -1536,7 +1536,11 @@ window.saveInventoryAdjustmentBatch = async function() {
                     {actorUid,actorRole,actorName,onStockCommitted:invalidateWarehouseStockCache});
                 results.push({row,ok:true});
             }catch(e){
-                results.push({row,ok:false,error:e?.message||String(e)});
+                // The Callable and immutable receipt were already verified;
+                // a presentation-cache failure must not turn this into an
+                // apparently uncommitted row eligible for a new operation.
+                results.push(e?.manualStockCommitted?{row,ok:true,refreshError:e?.message||String(e)}:
+                    {row,ok:false,error:e?.message||String(e)});
             }
         }
         if(!isCurrent())return;

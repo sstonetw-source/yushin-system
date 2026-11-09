@@ -75,6 +75,15 @@ test('batch prevents double submission, validates actor and stops if session cha
  const first=f.c.saveInventoryAdjustmentBatch();await f.c.saveInventoryAdjustmentBatch();assert.equal(f.calls.length,1);
  release();await first;assert.equal(f.calls.length,1);assert.equal(f.c.inventoryAdjustmentSaveInProgress,false);
 });
+test('verified backend commitment is never treated as an unconfirmed row when UI cache refresh fails',async()=>{
+ const f=batchFixture();f.c.commitManualInventoryAdjustment=async req=>{
+  f.calls.push(req);const error=Error('cache refresh failed');error.manualStockCommitted=true;throw error;
+ };
+ await f.c.saveInventoryAdjustmentBatch();
+ assert.equal(f.calls.length,2);
+ assert.match(f.messages.join(' '),/已完成 2 筆/);
+ assert.doesNotMatch(f.messages.join(' '),/待確認/);
+});
 
 test('interrupted backend reply retains exact intent across reload and recovers its receipt without a second stock writer',async()=>{
  const values=new Map(),storage={get length(){return values.size;},key:i=>[...values.keys()][i]||null,

@@ -78,3 +78,11 @@ test('postcommit list refresh error is reported without silently resubmitting st
  await f.c.saveInventoryQuantity();assert.equal(f.calls.length,1);assert.equal(f.messages.length,1);
  assert.match(f.messages[0],/已完成/);
 });
+test('receipt-verified callback failure reports confirmed count, never an unknown result',async()=>{
+ const f=editorFixture();f.c.commitInventoryQuantity=async(...args)=>{
+  f.calls.push(args);const error=Error('畫面快取失效');error.manualStockCommitted=true;throw error;
+ };
+ await f.c.saveInventoryQuantity();
+ assert.equal(f.calls.length,1);assert.match(f.messages[0],/已提交/);
+ assert.doesNotMatch(f.messages[0],/結果尚未確認/);
+});

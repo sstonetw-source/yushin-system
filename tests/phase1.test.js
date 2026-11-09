@@ -1690,7 +1690,8 @@ test('manual inventory changes support batch rows instead of browser prompts', (
     const save = appSource.slice(saveStart, saveEnd);
     assert.match(save, /const results=\[\]/);
     assert.match(save, /results\.push\(\{row,ok:true\}\)/);
-    assert.match(save, /results\.push\(\{row,ok:false,error:/);
+    assert.match(save, /\{row,ok:false,error:/);
+    assert.match(save, /e\?\.manualStockCommitted\?\{row,ok:true/);
     assert.match(save, /inventoryAdjustmentRows=failed\.map\(result=>result\.row\)/);
     assert.match(save, /成功的品項已從表單移除/);
 });
