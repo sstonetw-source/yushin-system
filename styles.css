@@ -5316,6 +5316,20 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
 @media screen {
  #warehouseParcelCards { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr)); gap:12px; align-items:stretch; }
  #warehouseParcelCards > .parcel-empty-state,#warehouseParcelCards > .parcel-guard-note,#warehouseParcelCards > button { grid-column:1/-1; }
+ .parcel-branch-toolbar,.parcel-branch-list,.parcel-branch-confirmations { grid-column:1/-1; }
+ .parcel-branch-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+ .parcel-branch-list { padding:14px; border:1px solid var(--ys-border); border-radius:12px; background:var(--ys-surface); }
+ .parcel-branch-list > header { display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px; margin-bottom:12px; }
+ .parcel-branch-list h3 { margin:0 0 4px; font-size:18px; }
+ .parcel-branch-list header p { margin:0; font-size:13px; color:var(--ys-muted); }
+ .parcel-branch-actions { display:flex; gap:8px; flex-wrap:wrap; }
+ .parcel-branch-list td small { display:block; color:var(--ys-muted); margin-top:4px; }
+ .parcel-branch-list td { vertical-align:top; }
+ .parcel-branch-list .parcel-meta { margin:10px 0 0; }
+ .parcel-branch-confirmations { border:1px solid var(--ys-border); border-radius:12px; padding:10px 14px; }
+ .parcel-branch-confirmations > summary { cursor:pointer; font-weight:600; padding:8px 0; min-height:44px; }
+ .parcel-branch-confirmation-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr)); gap:12px; padding-top:10px; }
+ @media (max-width:600px) { .parcel-branch-list .table-wrap { overflow-x:auto; } .parcel-branch-list table { min-width:590px; } }
  .parcel-toolbar { display:flex; align-items:center; gap:8px; margin:12px 0; }
  .parcel-toolbar > strong { margin-right:auto; font-size:18px; }
  .parcel-filter-menu > summary,#parcelAdvanced > summary,.parcel-card > details > summary { cursor:pointer; min-height:44px; display:flex; align-items:center; color:var(--ys-primary); }

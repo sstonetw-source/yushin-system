@@ -1,7 +1,7 @@
 /* Recipient cards and durable browser jobs call the existing warehouse writers. */
 (function(root){
   'use strict';
-  let groups=[],editing=null,notice='',visibleLimit=50;
+  let groups=[],branchLists=[],branchActorKey='',editing=null,notice='',visibleLimit=50;
   const active=new Set();
   const el=id=>document.getElementById(id);
   const escapeAttr=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
@@ -43,6 +43,69 @@
     }
     return [...map.values()];
   }
+  // A read-only dispatch notice. Reuse the same order/transfer projections as
+  // the existing shipping actions; never create another stock writer.
+  function branchDispatchLists(parcelGroups,transfers){
+    const main=defaultWarehouse()?.id||'',map=new Map();
+    function append(warehouseId,entry){
+      if(!warehouseId||warehouseId===main)return;
+      const warehouse=warehouseMasterCache.find(w=>w.id===warehouseId);
+      if(!warehouse||warehouse.active===false||warehouse.systemCustody)return;
+      if(!map.has(warehouseId))map.set(warehouseId,{warehouseId,warehouseName:warehouse.warehouseName||warehouseId,entries:[]});
+      map.get(warehouseId).entries.push(entry);
+    }
+    for(const group of parcelGroups)for(const row of group.rows){
+      const item=row.item||{},order=row.order||{};
+      append(group.warehouseId,{key:'shipment:'+row.key,kind:group.plan.mode==='CUSTOMER_SHIP'?'寄給客戶':'寄給業務',
+        source:order.orderNo||order.quoteNo||order.id||'訂單',itemCode:item.itemCode||'',itemName:item.itemName||'',qty:Number(row.qty),
+        recipient:{contact:group.plan.contact,phone:group.plan.phone,address:group.plan.address},ready:true});
+    }
+    for(const row of transfers||[])append(row.warehouseId,{key:'transfer:'+row.key,kind:row.kind==='order'?'訂單調回主倉':'備貨調回主倉',
+      source:row.source||row.id,itemCode:row.itemCode||'',itemName:row.itemName||'',qty:Number(row.qty),
+      recipient:row.recipient||{},ready:row.ready===true});
+    return [...map.values()].map(group=>({...group,entries:group.entries.sort((a,b)=>a.key.localeCompare(b.key))}))
+      .sort((a,b)=>a.warehouseName.localeCompare(b.warehouseName,'zh-Hant'));
+  }
+  const branchListSignature=group=>JSON.stringify(group?.entries.map(entry=>[entry.key,entry.kind,entry.source,entry.itemCode,
+    entry.itemName,entry.qty,entry.recipient.contact,entry.recipient.phone,entry.recipient.address,entry.ready])||[]);
+  const branchListComplete=group=>group?.entries.length>0&&group.entries.every(entry=>Number.isFinite(entry.qty)&&entry.qty>0
+    &&entry.recipient.contact&&entry.recipient.phone&&entry.recipient.address);
+  function branchNoticeText(group){
+    return ['【又鑫｜分倉備貨及出貨通知】','分倉：'+group.warehouseName,'日期：'+localDateString(),
+      '以下為備貨／寄貨通知，不代表系統已出庫或客戶已送達。','',...group.entries.flatMap((entry,i)=>[
+        `${i+1}. ${entry.kind}｜${entry.source}`,
+        `${entry.itemCode} ${entry.itemName} × ${entry.qty}`.trim(),
+        `收件：${entry.recipient.contact}｜${entry.recipient.phone}`,
+        `地址：${entry.recipient.address}`,
+        `狀態：${entry.ready?'可核對寄出':'待備妥／打單確認（不可先寄出）'}`,'']),
+      '請依實際寄貨內容回又鑫系統逐筆確認寄出；調回主倉的貨需由主倉另外點收。'].join('\n');
+  }
+  root.shareBranchDispatchList=async function(warehouseId,share=false,button){
+    try{
+      const a=actor(),previous=branchLists.find(g=>g.warehouseId===warehouseId);
+      if(branchActorKey!==storageKey(a))throw Error('登入帳號或角色已變更，請重新載入清單。');
+      if(!previous)throw Error('分倉清單已更新，請重新載入。');
+      // Browser clipboard/share permissions require the user's original click;
+      // do not await a network request before invoking them. This is a notice,
+      // not authorization or confirmation of a stock transaction.
+      if(!same(a)||!orderWorkQueueReady||orderWorkQueueError)throw Error('登入身分或訂單清單已變更，請重新載入。');
+      const transfers=root.mainTransferParcelEntries?.();
+      if(!transfers?.ready||transfers.error||transfers.hasMore)throw Error('主倉調回清單尚未完整讀取，請先核對。');
+      const tasks=read(a),fresh=branchDispatchLists(groupRows(root.warehouseParcelSourceRows?.()||[])
+        .filter(g=>!blocked(g.rows,tasks)),transfers.entries).find(g=>g.warehouseId===warehouseId);
+      if(branchListSignature(fresh)!==branchListSignature(previous))throw Error('清單內容已更新，請檢查後再傳送。');
+      if(!branchListComplete(fresh))throw Error('收件資料不完整，請補齊後再傳送。');
+      if(button)button.disabled=true;
+      const message=branchNoticeText(fresh);
+      if(share&&typeof navigator.share==='function')await navigator.share({title:'分倉出貨通知｜'+fresh.warehouseName,text:message});
+      else{
+        if(!navigator.clipboard?.writeText)throw Error('瀏覽器不支援直接複製，請在 Safari／Chrome 的安全網址開啟。');
+        await navigator.clipboard.writeText(message);
+        showActionFeedback('已複製 '+fresh.warehouseName+' 出貨清單，可貼到 LINE 或 Email。','success');
+      }
+    }catch(error){if(error?.name!=='AbortError')showActionFeedback('清單未傳送：'+error.message,'warning');}
+    finally{if(button)button.disabled=false;}
+  };
   function stoppedTask(task){
     if(active.has(task.id))return false;
     return ['unsupported-reservation-location','production-order-transfer-disabled'].includes(task.errorCode)
@@ -72,6 +135,20 @@
       const scopedTasks=tasks.filter(t=>t.jobs.some(j=>inScope(j.row.warehouseId)));
       const transfers=kind==='branch'?root.mainTransferParcelEntries?.():null;
       const transferRows=(transfers?.entries||[]).filter(r=>inScope(r.warehouseId));
+      branchLists=kind==='branch'?branchDispatchLists(groups,transferRows):[];
+      branchActorKey=storageKey(a);
+      const branchNotices=branchLists.map(group=>{
+        const complete=branchListComplete(group),key=inlineJsValue(group.warehouseId);
+        const pending=group.entries.filter(entry=>!entry.ready).length;
+        return '<section class="parcel-branch-list" data-branch-list="'+escapeAttr(group.warehouseId)+'"><header><div><h3>'+escapeHtml(group.warehouseName)+'｜分倉出貨清單</h3><p>'+group.entries.length+' 筆需求'+(pending?'，'+pending+' 筆待備妥':'')+'</p></div><div class="parcel-branch-actions">'+
+          '<button type="button" class="btn-secondary" onclick="shareBranchDispatchList('+key+',false,this)" '+(complete&&transfers?.ready&&!transfers.error&&!transfers.hasMore?'':'disabled')+'>複製清單</button>'+
+          '<button type="button" onclick="shareBranchDispatchList('+key+',true,this)" '+(complete&&transfers?.ready&&!transfers.error&&!transfers.hasMore?'':'disabled')+'>分享清單</button></div></header>'+
+          '<div class="table-wrap"><table><thead><tr><th>寄送用途／單號</th><th>收件對象</th><th>貨品</th><th>數量</th><th>狀態</th></tr></thead><tbody>'+group.entries.map(entry=>
+            '<tr><td data-th="用途">'+escapeHtml(entry.kind)+'<small>'+escapeHtml(entry.source)+'</small></td><td data-th="收件">'+escapeHtml(entry.recipient.contact||'待補')+'<small>'+escapeHtml(entry.recipient.address||'待補')+'</small></td><td data-th="貨品">'+escapeHtml(entry.itemCode)+'<small>'+escapeHtml(entry.itemName)+'</small></td><td data-th="數量">'+entry.qty+'</td><td data-th="狀態">'+(entry.ready?'待確認寄出':'待備妥／打單')+'</td></tr>').join('')+'</tbody></table></div>'+
+          (!complete?'<p class="parcel-guard-note">請補齊寄往主倉／業務／客戶的收件資訊，再分享清單。</p>':'')+
+          (transfers?.hasMore?'<p class="parcel-guard-note">主倉調回需求超過 50 筆，目前不能分享不完整清單。</p>':'')+
+          '<p class="parcel-meta">發送前請先確認目前清單已更新；清單只供通知，實際寄出後仍須逐筆按「確認寄出」，不會因分享而扣庫存。</p></section>';
+      }).join('');
       const transferCards=transferRows.map(r=>{
         const p=r.recipient,wh=warehouseMasterCache.find(w=>w.id===r.warehouseId);
         const complete=p.contact&&p.phone&&p.address&&p.warehouseId;
@@ -92,7 +169,7 @@
           `resumeOrderTransferOperation(${inlineJsValue(r.action)},${inlineJsValue(r.id)},this)`;
         return '<article class="parcel-card parcel-task"><strong>前次寄貨／調撥操作待核對</strong><p role="status">'+escapeHtml(r.detail)+'</p><button type="button" class="btn-secondary" onclick="'+action+'">核對原操作</button></article>';
       }).join('');
-      host.innerHTML=taskCards(scopedTasks)+recoveryCards+groups.slice(0,visibleLimit).map((g,index)=>{
+      const individualCards=groups.slice(0,visibleLimit).map((g,index)=>{
         const p=g.plan,wh=warehouseMasterCache.find(w=>w.id===g.warehouseId);
         const complete=p.contact&&p.phone&&p.address;
         const items=root.YushinWarehouseLogistics.aggregateRows(g.rows);
@@ -101,12 +178,16 @@
           '<details class="parcel-extra-details"><summary>更多資訊／修改收件資料</summary><p>來源：'+escapeHtml(wh?.warehouseName||g.warehouseId)+'</p><p>寄送方式：'+escapeHtml(root.YushinWarehouseLogistics.modes[p.mode])+'</p><p>電話：'+escapeHtml(p.phone||'待補')+'</p>'+g.rows.map(r=>'<p>'+escapeHtml(r.order.orderNo||r.order.quoteNo||'來源訂單')+' · '+escapeHtml(r.order.customerName||'')+' · '+escapeHtml(r.order.salesName||'')+'</p><button type="button" class="btn-secondary" onclick="openWarehouseDeliveryPlan('+inlineJsValue(r.order.id)+','+inlineJsValue(r.item.itemId)+')">編輯收件資料</button>').join('')+'<p>'+escapeHtml(p.notes)+'</p></details>'+
           '<div class="parcel-actions">'+(complete?'<button type="button" class="btn-secondary" onclick="printWarehouseParcel('+index+',this)">列印貼紙</button><button type="button" onclick="openWarehouseParcel('+index+',this)">確認寄出</button>':
           '<button type="button" onclick="openWarehouseDeliveryPlan('+inlineJsValue(g.rows[0].order.id)+','+inlineJsValue(g.rows[0].item.itemId)+')">補收件資料</button>')+'</div></article>';
-      }).join('')+transferCards+(groups.length>visibleLimit?'<button type="button" class="btn-secondary" onclick="loadMoreWarehouseParcels()">載入更多寄貨</button>':'')+
+      }).join('')+transferCards+(groups.length>visibleLimit?'<button type="button" class="btn-secondary" onclick="loadMoreWarehouseParcels()">載入更多寄貨</button>':'');
+      const confirmCards=branchNotices?'<details class="parcel-branch-confirmations"><summary>逐筆確認寄出（'+(groups.length+transferRows.length)+'）</summary><div class="parcel-branch-confirmation-cards">'+individualCards+'</div></details>':individualCards;
+      host.innerHTML=(branchNotices?'<div class="parcel-branch-toolbar"><strong>各分倉出貨通知</strong><button type="button" class="btn-secondary" onclick="retryInventoryWorkspace(this)">重新整理清單</button></div>':'')+
+        branchNotices+taskCards(scopedTasks)+recoveryCards+confirmCards+
         (transfers?.error?'<p class="parcel-guard-note" role="alert">調撥資料讀取失敗：'+escapeHtml(transfers.error)+' <button type="button" onclick="loadMainTransferRequests(true)">重新載入</button></p>':'')+
         (transfers?.hasMore?'<p class="parcel-guard-note">備貨需求先顯示 50 筆，處理後會載入後續項目。</p>':'')+
         (!groups.length&&!transferRows.length&&!scopedTasks.length&&!recoveryCards&&orderWorkQueueReady&&!orderWorkQueueError&&(!transfers||transfers.ready&&!transfers.error)?'<p class="parcel-empty-state">目前沒有需要寄出的貨品。</p>':'');
       if(status)status.textContent=notice||(orderWorkQueueError?'寄貨清單讀取失敗，請重新載入。':!orderWorkQueueReady||transfers&&!transfers.ready?'正在讀取寄貨資料…':(groups.length+transferRows.length)+' 件待寄貨'+(tasks.some(stoppedTask)?' · '+tasks.filter(stoppedTask).length+' 件已停止':'')+(tasks.some(t=>!stoppedTask(t))?' · '+tasks.filter(t=>!stoppedTask(t)).length+' 件處理中／待核對':'')+(groups.length>visibleLimit?'，已顯示部分品項。':''));
     }catch(error){
+      branchLists=[];branchActorKey='';
       host.innerHTML='<p role="alert">'+escapeHtml(error.message)+'</p>';
     }
   };
