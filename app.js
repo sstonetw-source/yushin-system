@@ -21,23 +21,18 @@ const FIREBASE_CONFIGS = Object.freeze({
         authDomain: 'demo-yushin.firebaseapp.com',
         projectId: 'demo-yushin',
         appId: 'yushin-local-emulator'
-    },
-    preview: {
-        apiKey: "AIzaSyDSbSZiwiHmdgi6146vqpfE84JgWU1KhK8",
-        authDomain: "preview-20135.firebaseapp.com",
-        projectId: "preview-20135",
-        storageBucket: "preview-20135.firebasestorage.app",
-        messagingSenderId: "546566883230",
-        appId: "1:546566883230:web:396c28f1f01ada0a1c788f"
     }
 });
 
 function resolveAppEnvironment() {
     const host = String(window.location.hostname || '').toLowerCase();
+    // Retired Firebase Hosting pages must never bootstrap an authenticated app.
+    // Firebase Auth's production authDomain is still needed by the real app.
+    if (host.endsWith('.web.app') || host.endsWith('.firebaseapp.com')) {
+        throw new Error('Firebase Hosting 舊站台已停用，請改用正式 GitHub Pages 網址。');
+    }
     if (['localhost','127.0.0.1'].includes(host) && window.YUSHIN_LOCAL_EMULATOR === true) return 'emulator';
-    return host === 'preview-20135.web.app' || host === 'preview-20135.firebaseapp.com'
-        ? 'preview'
-        : 'production';
+    return 'production';
 }
 const APP_ENVIRONMENT = resolveAppEnvironment();
 const firebaseConfig = FIREBASE_CONFIGS[APP_ENVIRONMENT];
@@ -66,12 +61,12 @@ if (APP_ENVIRONMENT === 'emulator') {
     db.useEmulator('127.0.0.1',8080);
     if (firebase.functions) firebase.app().functions('asia-east1').useEmulator('127.0.0.1',5001);
 }
-if (APP_ENVIRONMENT === 'preview' || APP_ENVIRONMENT === 'emulator') {
+if (APP_ENVIRONMENT === 'emulator') {
     document.documentElement.dataset.appEnvironment = APP_ENVIRONMENT;
     window.addEventListener('DOMContentLoaded', () => {
         const banner = document.getElementById('previewEnvironmentBanner');
         if (banner) {
-            if (APP_ENVIRONMENT === 'emulator') banner.textContent = '本機 Emulator｜隔離測試資料，未連接正式 Firebase';
+            banner.textContent = '本機 Emulator｜隔離測試資料，未連接正式 Firebase';
             banner.hidden = false;
         }
     });

@@ -242,12 +242,11 @@ test('product management uses explicit code searches or bounded company favourit
 
 });
 
-test('preview host selects isolated Firebase project and exposes a visible environment banner', () => {
-    assert.match(appSource, /preview-20135\.firebaseapp\.com/);
-    assert.match(appSource, /preview-20135\.web\.app/);
-    assert.match(appSource, /projectId: "preview-20135"/);
-    assert.match(appSource, /APP_ENVIRONMENT === 'preview'/);
-    assert.match(indexSource, /PREVIEW／測試環境｜資料與正式系統分離/);
+test('Firebase Hosting startup is refused and the local Emulator remains visibly isolated', () => {
+    assert.match(appSource, /host\.endsWith\('\.web\.app'\) \|\| host\.endsWith\('\.firebaseapp\.com'\)/);
+    assert.doesNotMatch(appSource, /projectId: "preview-20135"/);
+    assert.doesNotMatch(appSource, /return host === 'preview-20135\.web\.app'/);
+    assert.match(indexSource, /本機 Emulator｜隔離測試資料，未連接正式 Firebase/);
 });
 
 test('quote owner selector uses UID, limits engineers to self and includes eligible administrators', () => {
