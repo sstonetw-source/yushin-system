@@ -180,6 +180,26 @@ async function commitManualStock(db,uid,data,kind,env=process.env){
   const allLots=lots.docs.map(doc=>({...doc.data(),id:doc.id}));
   for(const lot of allLots)lotQuantity(lot,key);
   const currentLots=allLots.filter(lot=>lot.warehouseId===warehouseId),balanceId=operationId+'-balance',addedId=operationId+'-added';
+  if(intent.type==='initial'){
+   // Opening rows may span multiple lots, but may not resume after any
+   // operational movement. A new operation ID must not initialize the same
+   // product/warehouse/lot twice. Read inside the stock transaction so a
+   // concurrent receipt also conflicts on the authoritative stock documents.
+   const movements=await tx.get(db.collection('inventoryMovements').where('productKey','==',key).limit(201));
+   if(movements.size>200)fail('庫存異動紀錄超出期初核對上限，請停止初始化並核對');
+   for(const doc of movements.docs){
+    const movement=doc.data();
+    if(movement.operation!=='manual-adjustment'||movement.type!=='initial'||movement.sourceType!=='manual'
+     ||!movement.adjustmentIntent)fail('已有正式庫存異動，禁止再建立期初庫存');
+    if(!movement.warehouseId)fail('舊期初憑證缺少倉庫識別，請先核對');
+    if(movement.warehouseId===warehouseId&&movement.adjustmentIntent.lotNo===intent.lotNo
+     &&movement.adjustmentIntent.expiryDate===intent.expiryDate)
+     fail('此產品倉庫及批次已建立期初庫存，禁止重複初始化','already-exists');
+   }
+   if(currentLots.some(lot=>lot.sourceType!=='INITIAL_STOCK')
+    ||!equal(currentLots.reduce((sum,lot)=>sum+lotQuantity(lot,key),0),wh.onHand))
+    fail('倉庫已有非期初批次或未追溯數量，禁止再建立期初庫存');
+  }
   const balanceRef=ref(db,'inventoryLots',balanceId),addedRef=ref(db,'inventoryLots',addedId),costRef=ref(db,'inventoryLotCosts',addedId);
   const existingBalance=await tx.get(balanceRef),existingAdded=await tx.get(addedRef),existingCost=await tx.get(costRef);
   if(existingBalance.exists||existingAdded.exists||existingCost.exists)fail('批次或成本識別碼已被使用','already-exists');
