@@ -7,7 +7,7 @@ const vm=require('node:vm');
 const root=path.join(__dirname,'..');
 const rollout=fs.readFileSync(path.join(root,'transaction-rollout-config.js'),'utf8');
 const html=fs.readFileSync(path.join(root,'index.html'),'utf8');
-const version='20261109-cutover-3';
+const version='20261110-stock-retirement-4';
 
 test('missing production origin leaves all new transaction flags disabled',()=>{
  const context={YUSHIN_PRODUCTION_QUICK_PURCHASE_LEGACY_BLOCKED:true,YUSHIN_PRODUCTION_QUICK_PURCHASE:true,YUSHIN_PREVIEW_QUICK_PURCHASE:true,
@@ -106,4 +106,16 @@ test('all new backend retirement routes are restricted to the approved origin wi
   }
  }
  assert.doesNotMatch(html,/production-maintenance-redirect|maintenance\.html/);
+});
+test('unreleased stock-changing backend routes fail closed on Pages without silently enabling a Callable',()=>{
+ for(const url of ['https://sstonetw-source.github.io/yushin-system/', 'https://evil.example/yushin-system/']){
+  const c={location:new URL(url)};c.globalThis=c;vm.runInNewContext(rollout,c);
+  const approved=url.startsWith('https://sstonetw-source.github.io/yushin-system');
+  for(const name of ['CANCELLED_PURCHASE','MAIN_TRANSFER_REQUEST','MAIN_TRANSFER_DISPATCH',
+   'MAIN_TRANSFER_RECEIPT','MAIN_TRANSFER_ALLOCATION','ORDER_TRANSFER_DISPATCH',
+   'ORDER_TRANSFER_HANDOFF','ORDER_TRANSFER_RECEIVE','MANUAL_INVENTORY','INVENTORY_COUNT']){
+   assert.equal(c['YUSHIN_PRODUCTION_'+name+'_BACKEND'],false,name);
+   assert.equal(c['YUSHIN_PRODUCTION_'+name+'_LEGACY_BLOCKED'],approved,name);
+  }
+ }
 });

@@ -22510,6 +22510,11 @@ async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toW
     if(typeof commitMainTransferPhysicalBackend!=='function')throw Error('主倉實貨調撥後端尚未載入，禁止舊交易寄出。');
     return commitMainTransferPhysicalBackend('DISPATCH',id,{id,requestId});
   }
+  // There is not yet an authoritative standalone-transfer Callable. A new
+  // production browser must not mutate inventory/warehouseStocks directly.
+  // Keep this lane closed until it is migrated without adding a fallback.
+  if(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='production')
+    throw Error('一般庫存調撥尚無正式後端，已阻止瀏覽器直接異動庫存；請保留原資料等待受控切換。');
   if(!canReceiveInventoryCapability()||!canAccessPage('inventory'))throw Error('無調撥權限。');
   if(!id||!Number.isFinite(qty)||qty<=0)throw Error('調撥資料不正確。');
   const actorUid=currentUser.uid,actorRole=currentUserRole,now=new Date().toISOString(),who=deliveryActor();let saved;
@@ -22624,6 +22629,8 @@ async function commitWarehouseTransferReceipt(id,{onStockCommitted=null}={}){
     if(typeof commitMainTransferPhysicalBackend!=='function')throw Error('主倉實貨調撥後端尚未載入，禁止舊交易收貨。');
     return commitMainTransferPhysicalBackend('RECEIVE',id);
   }
+  if(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='production')
+    throw Error('一般庫存調撥收貨尚無正式後端，已阻止瀏覽器直接入庫；請保留原調撥憑證。');
   if(!canReceiveInventoryCapability()||!canAccessPage('inventory'))throw Error('無調撥收貨權限。');let saved;
   const actorUid=currentUser.uid,actorRole=currentUserRole,actor=deliveryActor(),now=new Date().toISOString();
   const assertActor=()=>{if(actorUid!==currentUser?.uid||actorRole!==currentUserRole)throw Error('登入身分已變更，請重新開啟調撥收貨。');};
