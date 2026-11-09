@@ -18,14 +18,20 @@ test('local emulator boot requires exact opt-in and localhost, with fixed demo p
   assert.deepEqual(f.calls[3],['firestore','127.0.0.1',8080]);assert.deepEqual(f.calls[4],['functions','127.0.0.1',5001]);
  }
 });
-test('production and preview routing ignore local opt-in on remote hosts, and normal localhost is unchanged',()=>{
+test('production routing ignores local opt-in on remote hosts, and normal localhost is unchanged',()=>{
  for(const [host,flag,expected] of [['localhost',false,'production'],['127.0.0.1','true','production'],
-  ['yu-shing-company.web.app',true,'production'],['preview-20135.web.app',true,'preview'],['localhost.example',true,'production']]){
+  ['sstonetw-source.github.io',true,'production'],['localhost.example',true,'production']]){
   const f=setup(host,flag);assert.equal(f.run(),expected);assert.equal(f.calls.some(row=>['auth','firestore','functions'].includes(row[0])),false);
  }
 });
-test('local emulator boot refuses an existing production or preview app before any database SDK use',()=>{
- for(const project of ['yu-shing-company','preview-20135']){
+test('retired Firebase Hosting origins fail before initializing Auth, Firestore, or Functions',()=>{
+ for(const host of ['preview-20135.web.app','preview-20135.firebaseapp.com',
+  'yu-shing-company.web.app','yu-shing-company.firebaseapp.com']){
+  const f=setup(host,true);assert.throws(f.run,/Firebase Hosting 舊站台已停用/);assert.deepEqual(f.calls,[]);
+ }
+});
+test('local emulator boot refuses an existing non-emulator app before any database SDK use',()=>{
+ for(const project of ['yu-shing-company','unrelated-project']){
   const f=setup('localhost',true,project);assert.throws(f.run,/不可沿用/);assert.deepEqual(f.calls,[]);
  }
 });
