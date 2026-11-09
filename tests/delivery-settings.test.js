@@ -28,7 +28,10 @@ test('transfer requirements include unarrived demand but exclude cancelled, ship
  const wh=[{id:'MAIN'},{id:'EXT'}],helpers={status:o=>o.status||'normal',incomplete:o=>!!o.syncing,items:o=>o.items,dispatch:(_o,i)=>({shippable:i.ready||0})};
  const item={itemId:'A',productId:'P',qty:8,deliveredQty:2,warehouseId:'EXT',ready:3,deliveryPlan:{mode:'PICKUP',warehouseId:'MAIN'}};
  const orders=[{id:'O',items:[item]},{id:'C',status:'cancelled',items:[item]},{id:'T',items:[{...item,transferPendingId:'T'}]},{id:'D',items:[{...item,fulfillmentType:'DIRECT_SHIP'}]},{id:'F',items:[{...item,deliveredQty:8}]}];
- const rows=logistics.transferRequirements(orders,wh,'MAIN',helpers);assert.equal(rows.length,1);assert.equal(rows[0].qty,6);assert.equal(rows[0].readyQty,3);
+ const rows=logistics.transferRequirements(orders,wh,'MAIN',helpers);assert.equal(rows.length,1);assert.equal(rows[0].qty,6);
+ assert.equal(rows[0].readyQty,0,'已有部分客戶送達的品項不得再次全數調回');
+ const unprinted={...item,deliveredQty:0,reservedQty:8,dispatchPreparedQty:0};
+ assert.equal(logistics.transferRequirements([{id:'NEW',items:[unprinted]}],wh,'MAIN',helpers)[0].readyQty,8);
 });
 test('shipping aggregation sums cross-order product demand once and separates distinct products with identical codes',()=>{
  const p={mode:'CUSTOMER_SHIP',contact:'收件人',phone:'123',address:'同地址'},item={productId:'P',itemCode:'001',itemName:'試劑'};

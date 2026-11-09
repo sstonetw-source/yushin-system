@@ -96,6 +96,14 @@ async function prepareOrderDispatch(orderId,itemId,attempt) {
         if((item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
             ||String(item.productType||item.type||'').toUpperCase()==='SERVICE')
             throw new Error('此品項不屬於實體倉庫打單。');
+        if(item.transferPendingId)throw new Error('貨品仍在調撥途中，請先完成主倉點收。');
+        if((item.deliveryPlan||order.shippingInstructions||{}).mode==='PICKUP'){
+            const sourceWarehouse=item.warehouseId||order.warehouseId||'';
+            if(!sourceWarehouse)throw new Error('主倉自領品項缺少倉庫位置，不能打單。');
+            const warehouse=await tx.get(db.collection('warehouses').doc(sourceWarehouse));
+            if(!warehouse.exists||warehouse.data().active===false||warehouse.data().isDefault!==true)
+                throw new Error('主倉自領必須先由分倉寄回、主倉實際點收，才能打單。');
+        }
         // Do not route the Emulator-only multi-location contract through scalar UI.
         // The existing stock wrapper rejects ALL unsupported location markers on read.
         await tx.get(db.collection('inventoryReservations').doc(orderId+'__'+itemId));

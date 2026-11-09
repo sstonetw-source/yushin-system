@@ -291,6 +291,39 @@ test('order transfer dispatch and receipt are atomic distinct events with immuta
  assert.equal(f.docs.get('inventoryReservations/ORDER__I').warehouseId,'MAIN');assert.equal(f.docs.get('orders/ORDER').items[0].warehouseId,'MAIN');
  assert.equal(f.docs.get('orders/ORDER').deliveryRecords,undefined);assert.equal(f.docs.get('orders/ORDER').logisticsHistory.length,2);
 });
+test('branch PICKUP must move unprinted reserved goods into main before customer paperwork',async()=>{
+ const f=orderTransferFixture(),item=f.docs.get('orders/ORDER').items[0];
+ item.deliveryPlan={mode:'PICKUP'};item.dispatchPreparedQty=0;
+ f.setRetry(true);assert.equal((await f.dispatch()).status,'applied');
+ assert.equal((await f.dispatch()).status,'already-applied');
+ const during=f.docs.get('orders/ORDER');assert.equal(during.items[0].dispatchPreparedQty,0);
+ assert.equal(during.items[0].warehouseId,'A');assert.equal(during.items[0].transferPendingId,f.send.id);
+ assert.equal(during.deliveryRecords,undefined);assert.equal(during.deliveredQty,undefined);
+ assert.equal(f.docs.get('inventory/P').onHand,10);assert.equal(f.docs.get('inventory/P').transferInTransit,3);
+ assert.equal((await f.receipt()).status,'applied');const after=f.snapshot();
+ assert.equal((await f.receipt()).status,'already-applied');assert.equal(f.snapshot(),after);
+ const order=f.docs.get('orders/ORDER');assert.equal(order.items[0].warehouseId,'MAIN');
+ assert.equal(order.items[0].transferPendingId,'');assert.equal(order.items[0].dispatchPreparedQty,0);
+ assert.equal(f.docs.get('inventoryReservations/ORDER__I').warehouseId,'MAIN');
+ assert.equal(f.docs.get('warehouseStocks/MAIN__P').reserved,3);
+ assert.equal(f.docs.get('inventory/P').reserved,5);assert.equal(f.docs.get('inventory/P').transferInTransit,0);
+});
+test('branch PICKUP rejects premature printing, incomplete reservation, wrong main or late failure without partial writes',async()=>{
+ for(const mutate of [
+  f=>{f.docs.get('orders/ORDER').items[0].dispatchPreparedQty=3;},
+  f=>{f.docs.get('orders/ORDER').items[0].reservedQty=2;},
+  f=>{f.docs.get('orders/ORDER').items[0].shortageQty=1;},
+  f=>{f.docs.get('orders/ORDER').items[0].warehouseShippedQty=1;},
+  f=>{f.docs.get('warehouses/MAIN').isDefault=false;},
+  f=>{f.docs.get('warehouses/A').isDefault=true;},
+  f=>{f.docs.get('users/U').role='sales';},
+  f=>f.setFail(true)
+ ]){
+  const f=orderTransferFixture(),item=f.docs.get('orders/ORDER').items[0];
+  item.deliveryPlan={mode:'PICKUP'};item.dispatchPreparedQty=0;mutate(f);
+  const before=f.snapshot();await assert.rejects(f.dispatch());assert.equal(f.snapshot(),before);
+ }
+});
 test('order transfer rejects v2, wrong roles, incomplete preparation, conflicting IDs and final commit failures without partial writes',async()=>{
  for(const mutate of [f=>f.put('users/U',{role:'sales'}),f=>{f.docs.get('orders/ORDER').items[0].dispatchPreparedQty=2;},f=>{f.docs.get('inventoryReservations/ORDER__I').locationSchemaVersion=2;},f=>f.setFail(true)]){
   const f=orderTransferFixture();mutate(f);const before=f.snapshot();await assert.rejects(f.dispatch());assert.equal(f.snapshot(),before);

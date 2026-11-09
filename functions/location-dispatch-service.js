@@ -3,6 +3,7 @@
 // shipment or a customer delivery. The isolated Auth/UI adapter stays demo-only.
 const {createHash}=require('node:crypto');
 const fulfillment=require('./shared/fulfillment-core');
+const logistics=require('./shared/warehouse-logistics');
 const {readLocationReturnProofs}=require('./location-return-trace-service');
 const {dispatchBackendProject}=require('./dispatch-preparation-gate');
 function fault(message,code='failed-precondition'){const error=new Error(message);error.code=code;throw error;}
@@ -143,6 +144,13 @@ async function commitLocationDispatchPreparation(db,uid,data,env=process.env){
    }
    if(locationTotal!==held||ledger.status!==(held?'active':shortage?'shortage':'fulfilled'))
     fault('v2 預留與倉位合計不一致');
+   if(itemId===intent.itemId&&logistics.plan(row.deliveryPlan||order.shippingInstructions||{}).mode==='PICKUP'){
+    const pickupWarehouse=id(row.warehouseId||order.warehouseId,'主倉自領位置');
+    const main=await tx.get(ref('warehouses',pickupWarehouse));
+    if(!main.exists||main.data().active===false||main.data().isDefault!==true
+      ||ledger.locations.some(loc=>loc.warehouseId!==pickupWarehouse))
+     fault('主倉自領必須先完成所有分倉調回與主倉點收，才能打單');
+   }
    if(multi&&(!Array.isArray(ledger.lifecycleWarehouseIds)||(ledger.lifecycleWarehouseIds.length<1||ledger.lifecycleWarehouseIds.length>2)
     ||new Set(ledger.lifecycleWarehouseIds).size!==ledger.lifecycleWarehouseIds.length||ledger.lifecycleWarehouseIds.some(wh=>id(wh,'原候選倉').startsWith('custody-'))
     ||ledger.locations.some(loc=>!ledger.lifecycleWarehouseIds.includes(loc.warehouseId))

@@ -88,6 +88,20 @@ test('printing stays purchaser/admin only, and reuses the existing transactional
     assert.match(service,/tx\.update\(ref,\{items,\.\.\.orderWorkIndexFields\(nextOrder\),updatedAt:now\}\)/);
     assert.match(app,/\['shipping', '待送貨'\]/);
 });
+test('branch PICKUP hides new paperwork until main receipt while preserving uncertain-operation recovery',()=>{
+    const start=app.indexOf('function dispatchActionHtml('),end=app.indexOf('\n// Frozen UI intents',start);
+    assert.ok(start>0&&end>start);
+    let pending=false;
+    const x=vm.createContext({currentUserRole:'purchaser',globalThis:{YushinWarehouseLogistics:require('../modules/warehouse-logistics')},
+        orderInventorySyncIncomplete:()=>false,normalizedOrderStatus:()=> 'normal',normalizedOrderItems:o=>o.items,
+        itemDispatchState:()=>({pending:2}),pendingDispatchOrderIds:new Set(),pendingDispatchPreparation:()=>pending,
+        defaultWarehouse:()=>({id:'MAIN'}),inlineJsValue:JSON.stringify,escapeHtml:String});
+    vm.runInContext(app.slice(start,end),x);
+    const order={id:'O',items:[{itemId:'I',itemCode:'001',warehouseId:'BRANCH',deliveryPlan:{mode:'PICKUP'}}]};
+    assert.equal(x.dispatchActionHtml(order),'');
+    order.items[0].warehouseId='MAIN';assert.match(x.dispatchActionHtml(order),/待打單/);
+    pending={quantity:2};order.items[0].warehouseId='BRANCH';assert.match(x.dispatchActionHtml(order),/確認打單結果/);
+});
 
 test('business shipping action requires item-level form for multi-item and partial-print orders',()=>{
     const start=app.indexOf('function orderDeliveryRequiresItemForm(');

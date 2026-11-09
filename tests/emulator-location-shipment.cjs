@@ -10,7 +10,7 @@ const A='SHIP-A',B='SHIP-B';
 test.before(()=>{assert.ok(process.env.FIRESTORE_EMULATOR_HOST,'Never use live Firestore');
  app=admin.initializeApp({projectId:'demo-yushin'},'location-shipment');db=getFirestore(app);});
 test.after(async()=>{if(app)await app.delete();});
-async function seed(name,{role='warehouse',prepared=10,initialOrder=false,singleWarehouse=false}={}){
+async function seed(name,{role='warehouse',prepared=10,initialOrder=false,singleWarehouse=false,allFromA=false}={}){
  const uid='ship-user-'+name,orderId='ship-order-'+name,key='ship-product-'+name;
  const order={ownerUid:uid,salesCode:'S',status:'active',orderStatus:'normal',
   inventoryReservationStatus:'pending',inventoryReservationAttemptId:'sync_ship_12345',
@@ -19,12 +19,12 @@ async function seed(name,{role='warehouse',prepared=10,initialOrder=false,single
    deliveryPlan:plan,fulfillmentType:'WAREHOUSE',returnedQty:0}]};
  const batch=db.batch(),set=(n,k,d)=>batch.set(db.collection(n).doc(k),d);
  set('users',uid,{role,active:true});set('products',key,{productType:'Goods',active:true});
- set('orders',orderId,order);set('inventory',key,{productKey:key,onHand:singleWarehouse?6:16,reserved:2,transferFreeInTransit:singleWarehouse?0:1});
- for(const [wh,onHand,reserved,free] of [[A,6,2,0],[B,10,0,1]]){
+ set('orders',orderId,order);set('inventory',key,{productKey:key,onHand:allFromA?22:singleWarehouse?6:16,reserved:2,transferFreeInTransit:singleWarehouse||allFromA?0:1});
+ for(const [wh,onHand,reserved,free] of [[A,allFromA?12:6,2,0],[B,10,0,allFromA?0:1]]){
   set('warehouses',wh,{active:true});if(singleWarehouse&&wh===B)continue;set('warehouseStocks',wh+'__'+key,
    {productKey:key,warehouseId:wh,onHand,reserved,transferFreeInTransit:free});
  }
- for(const [suffix,warehouseId,qty,expiryDate] of [['a-early',A,2,'2027-01-01'],['a-late',A,4,'2028-01-01'],['b',B,10,'2028-02-01']])
+ for(const [suffix,warehouseId,qty,expiryDate] of [['a-early',A,2,'2027-01-01'],['a-late',A,allFromA?10:4,'2028-01-01'],['b',B,10,'2028-02-01']])
   if(!singleWarehouse||warehouseId!==B)set('inventoryLots',key+'-'+suffix,{productKey:key,warehouseId,remainingQty:qty,receivedQty:qty,
    lotNo:suffix,expiryDate,unitCost:98765,receivedAt:'2026-10-01T00:00:00Z'});
  await batch.commit();
@@ -628,6 +628,37 @@ test('v2 dispatch preparation is a separate idempotent event and allows a later 
  const shipment=await x.call(x.request(B,6,'shipment_prepare_B'));
  assert.equal(shipment.grossShippedQty,10);
  assert.equal((await x.read('orders',x.orderId)).deliveredQty,0,'shipping is not customer acknowledgement');
+});
+test('branch PICKUP cannot print until backend transfer is dispatched and main has physically received it',async()=>{
+ const x=await seed('pickup-main-first',{prepared:0,allFromA:true}),original=await x.read('orders',x.orderId);
+ original.items[0].deliveryPlan={mode:'PICKUP'};
+ await Promise.all([
+  db.collection('orders').doc(x.orderId).update({items:original.items}),
+  db.collection('warehouses').doc(B).update({isDefault:true})
+ ]);
+ try{
+ const before=await snapshot(x);
+ await assert.rejects(x.prepare(1,'pickup_preprint_rejected_123456'),/先完成所有分倉調回與主倉點收/);
+ assert.deepEqual(await snapshot(x),before);
+ const {commitOrderTransferPhysical}=require('../functions/order-transfer-physical-service');
+ const env={GCLOUD_PROJECT:'demo-yushin',FUNCTIONS_EMULATOR:'true',FIRESTORE_EMULATOR_HOST:process.env.FIRESTORE_EMULATOR_HOST,
+  FIREBASE_AUTH_EMULATOR_HOST:'localhost:9099',ENABLE_ORDER_TRANSFER_DISPATCH_EMULATOR:'true',
+  ENABLE_ORDER_TRANSFER_RECEIVE_EMULATOR:'true',ENABLE_ORDER_TRANSFER_V2_EMULATOR:'true'};
+ // Only an isolated Emulator may enable the order-transfer backend; no live service is invoked.
+ const send={id:'pickup_transfer_demo_123456',orderId:x.orderId,itemId:'I',fromWarehouseId:A,toWarehouseId:B,qty:10};
+ assert.equal((await commitOrderTransferPhysical(db,x.uid,send,'DISPATCH',env)).status,'applied');
+ await assert.rejects(x.prepare(1,'pickup_in_transit_rejected_12345'),/調撥|不能打單|不是可打單/);
+ assert.equal((await x.read('orders',x.orderId)).items[0].dispatchPreparedQty,0);
+ const receive={id:send.id,operationId:'pickup_receive_demo_123456'};
+ assert.equal((await commitOrderTransferPhysical(db,x.uid,receive,'RECEIVE',env)).status,'applied');
+ assert.equal((await commitOrderTransferPhysical(db,x.uid,receive,'RECEIVE',env)).status,'already-applied');
+ const ledger=await x.read('inventoryReservations',x.orderId+'__I');
+ assert.deepEqual(ledger.locations,[{warehouseId:B,reservedQty:10}]);
+ const order=await x.read('orders',x.orderId);assert.equal(order.items[0].warehouseId,B);
+ assert.equal(order.items[0].dispatchPreparedQty,0);assert.deepEqual(order.deliveryRecords,[]);
+ assert.equal((await x.prepare(1,'pickup_after_receipt_123456')).status,'applied');
+ assert.equal((await x.read('orders',x.orderId)).items[0].dispatchPreparedQty,1);
+ }finally{await db.collection('warehouses').doc(B).update({isDefault:false});}
 });
 
 test('v2 dispatch rejects duplicate, concurrent overprinting, forged access and stale projection',async()=>{

@@ -5,7 +5,7 @@ const logistics=require('../modules/warehouse-logistics');
 function transferFixture(){
  const printed=[],reads=[];
  const warehouses=[{id:'MAIN',warehouseName:'主倉',contact:'主倉收貨',phone:'02-12345678',address:'台北市主倉地址'},{id:'BRANCH',warehouseName:'分倉'}];
- const order={id:'O1',orderNo:'O-001',status:'normal',shippingInstructions:{mode:'PICKUP'},items:[{itemId:'I1',itemCode:'DNA-01',itemName:'DNA Kit',warehouseId:'BRANCH',qty:2}]};
+ const order={id:'O1',orderNo:'O-001',status:'normal',shippingInstructions:{mode:'PICKUP'},items:[{itemId:'I1',itemCode:'DNA-01',itemName:'DNA Kit',warehouseId:'BRANCH',qty:2,reservedQty:2,dispatchPreparedQty:0}]};
  const c=vm.createContext({document:{getElementById:()=>null},currentUser:{uid:'U1'},currentUserRole:'warehouse',
   canReceiveInventoryCapability:()=>true,canAccessPage:()=>true,canManageInventoryStockPolicy:()=>false,canEditPage:()=>false,
   defaultWarehouse:()=>warehouses[0],warehouseMasterCache:warehouses,orderWorkQueueCache:[order],
