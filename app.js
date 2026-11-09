@@ -1141,6 +1141,10 @@ window.openChangePasswordModal = function(forced) {
     overlay.dataset.forced = forced ? '1' : '';
     const cancelBtn = document.getElementById('changePasswordCancelBtn');
     if (cancelBtn) cancelBtn.style.display = forced ? 'none' : '';
+    const logoutBtn = document.getElementById('changePasswordLogoutBtn');
+    if (logoutBtn) logoutBtn.style.display = forced ? '' : 'none';
+    const saveBtn = document.getElementById('changePasswordSaveBtn');
+    if (saveBtn) saveBtn.disabled = false;
     overlay.classList.add('active');
 };
 
@@ -1151,7 +1155,7 @@ window.closeChangePasswordModal = function() {
     if (overlay) overlay.classList.remove('active');
 };
 
-// 密碼修改成功後，不管是不是強制模式，一律真正關閉視窗（跳過強制檢查）
+// 僅在已登出或已取得可信任的後端解除結果時，才可關閉強制修改密碼視窗。
 function forceCloseChangePasswordModal() {
     const overlay = document.getElementById('changePasswordOverlay');
     if (!overlay) return;
@@ -1160,6 +1164,16 @@ function forceCloseChangePasswordModal() {
     if (cancelBtn) cancelBtn.style.display = '';
     overlay.classList.remove('active');
 }
+
+window.handleForcedPasswordLogout = function() {
+    const msg = document.getElementById('changePasswordMessage');
+    Promise.resolve().then(() => window.handleLogout()).then(() => {
+        forceCloseChangePasswordModal();
+    }).catch(err => {
+        console.error('強制修改密碼流程登出失敗：', err);
+        if (msg) msg.innerText = '登出失敗，請稍後再試。';
+    });
+};
 
 window.handleChangePassword = function() {
     const newPassword = document.getElementById('newPassword').value;
@@ -1180,24 +1194,45 @@ window.handleChangePassword = function() {
         return;
     }
 
+    const overlay = document.getElementById('changePasswordOverlay');
+    const wasForced = overlay && overlay.dataset.forced === '1';
+    if (wasForced) {
+        // Trusted backend updates Auth and the protected Firestore requirement.
+        // If it has not been deployed, no local Auth or Firestore fallback runs.
+        const uid = currentUser.uid;
+        const saveBtn = document.getElementById('changePasswordSaveBtn');
+        if (saveBtn?.disabled) return;
+        if (saveBtn) saveBtn.disabled = true;
+        msg.innerText = '正在安全更新密碼與帳號狀態…';
+        Promise.resolve().then(() => firebase.app().functions('asia-east1')
+            .httpsCallable('completeRequiredPasswordChange')({ newPassword }))
+            .then(reply => {
+                if (reply?.data?.completed !== true) throw new Error('後端尚未確認帳號狀態');
+                if (firebase.auth().currentUser?.uid !== uid) throw new Error('登入帳號已變更');
+                document.getElementById('newPassword').value = '';
+                document.getElementById('confirmNewPassword').value = '';
+                return window.handleLogout().then(() => {
+                    mustChangePassword = false;
+                    forceCloseChangePasswordModal();
+                    const loginMessage = document.getElementById('loginError');
+                    if (loginMessage) loginMessage.innerText = '密碼已更新，請使用新密碼重新登入。';
+                });
+            }).catch(err => {
+                console.error('強制修改密碼未完成：', err?.code || err?.message);
+                msg.style.color = '#c00';
+                msg.innerText = '無法完成強制修改密碼：' +
+                    (err?.code === 'functions/not-found' ? '安全後端尚未部署，請聯絡管理員。' :
+                    err?.message || '請重新登入後重試，或聯絡管理員。');
+            }).finally(() => {
+                if (saveBtn) saveBtn.disabled = false;
+            });
+        return;
+    }
+
     currentUser.updatePassword(newPassword).then(() => {
         msg.style.color = '#187a2f';
         msg.innerText = '密碼修改成功。';
-
-        const overlay = document.getElementById('changePasswordOverlay');
-        const wasForced = overlay && overlay.dataset.forced === '1';
-
-        if (wasForced) {
-            // 清掉「強制修改密碼」的記號，這樣下次登入就不會再被擋
-            db.collection('users').doc(currentUser.uid).set({ mustChangePassword: false }, { merge: true })
-                .catch(err => console.error('清除強制改密碼記號失敗：', err))
-                .finally(() => {
-                    mustChangePassword = false;
-                    setTimeout(forceCloseChangePasswordModal, 800);
-                });
-        } else {
-            setTimeout(closeChangePasswordModal, 800);
-        }
+        setTimeout(closeChangePasswordModal, 800);
     }).catch(err => {
         console.error(err);
         if (err && err.code === 'auth/requires-recent-login') {
@@ -1299,7 +1334,7 @@ window.handleLogin = async function() {
 
 window.handleLogout = function() {
     clearAppDataCacheForCurrentUser();
-    firebase.auth().signOut();
+    return firebase.auth().signOut();
 };
 
 /* =========================================================

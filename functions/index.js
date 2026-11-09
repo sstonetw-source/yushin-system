@@ -10,6 +10,14 @@ exports.sendPurchaseOrderEmail=onCall({region:'asia-east1'},()=>{
 const {getApps,initializeApp}=require('firebase-admin/app');
 if(!getApps().length)initializeApp();
 const {getFirestore}=require('firebase-admin/firestore');
+const {getAuth}=require('firebase-admin/auth');
+
+// Forced password changes are completed by a trusted backend. Normal users
+// cannot modify the protected users.mustChangePassword field via Firestore.
+const {createRequiredPasswordCallable}=require('./forced-password-service');
+exports.completeRequiredPasswordChange=createRequiredPasswordCallable({
+  onCall,HttpsError,getDatabase:getFirestore,getAuthentication:getAuth
+});
 
 // Admin-only atomic salesCode handover. No historical commercial records are rewritten.
 const {commitSalesCodeTransfer}=require('./sales-code-transfer-service');
