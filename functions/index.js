@@ -174,3 +174,10 @@ exports.dispatchOrderTransfer=orderTransferPhysical.dispatchOrderTransfer;
 exports.receiveOrderTransfer=orderTransferPhysical.receiveOrderTransfer;
 
 exports.handoffOrderTransfer=orderTransferPhysical.handoffOrderTransfer;
+
+// P0 stock writer retirement: independent default-closed inventory/count
+// callables. Never enable production until Rules, client and role cutover agree.
+const {createManualStockCallables}=require('./manual-stock-service');
+const manualStockCallables=createManualStockCallables({onCall,HttpsError,getDatabase:getFirestore});
+exports.commitV2ManualInventory=manualStockCallables.commitV2ManualInventory;
+exports.commitV2InventoryCount=manualStockCallables.commitV2InventoryCount;
