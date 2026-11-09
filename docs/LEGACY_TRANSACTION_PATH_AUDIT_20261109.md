@@ -1,5 +1,31 @@
 # 2026-11-09｜交易舊路徑與系統說明核對
 
+## 後續核對｜P0 期初庫存及盤點切換缺口
+
+最新遠端基準：`main` `9aa4ccbb9f1ab21d6358afa7bcedb94ccf32eafa`；PR #522 的
+`0bb3d06e600512f3bdeb042b73aeac114d753910` 仍為 Draft，完整 CI 10/10 通過、
+**未合併、未部署、未切換入口**。本段僅比對已存在的程式碼和 GitHub 紀錄，
+不代表已即時讀取正式 Firebase 的部署狀態。
+
+| 原始操作入口 | 目前寫入所有者 | 後端專用 Rules 切換前的缺口 |
+| --- | --- | --- |
+| 期初、人工調整、報廢及批次庫存匯入 | `src/services/manual-inventory.js` 的 `commitManualInventoryAdjustment` 直接以瀏覽器 `runRoleTransaction` 寫入公司／分倉庫存、批次、成本與異動憑證 | `functions/index.js` 尚無對等 Admin SDK Callable；切換 Rules 後不能靠原匯入頁初始化 |
+| 庫存數量盤點 | `src/services/inventory-count.js` 的 `commitInventoryQuantity` 直接以瀏覽器 `runRoleTransaction` 寫入公司／分倉及批次／異動 | `functions/index.js` 尚無對等 Admin SDK Callable，盤點將被後端專用 Rules 阻擋 |
+| 主倉備貨需求的建立、取消、寄出及收貨 | PR #522 將 `requestId` 路徑交給既有後端，並清掉不可到達的舊需求寫入 | 正式旗標預設關閉；PR 不能先合併發布，舊瀏覽器也須由正式 Rules 封鎖 |
+| 一般調撥與訂單調撥 | `src/services/warehouse-transfer.js` 還有非需求型直接瀏覽器 stock writer；訂單調撥後端已有獨立 Callable | 正式三個 ORDER_TRANSFER 前端旗標仍關閉，普通調撥的替代範圍須先界定，不能整段刪除 |
+
+**新阻礙 [Issue #523](https://github.com/sstonetw-source/yushin-system/issues/523)：**
+在部署 PR #521 的後端專用庫存 Rules 之前，必須實作並驗證期初庫存／人工調整／報廢／盤點的可信任後端，
+或經明確商業決策將受影響操作保持停用；**禁止恢復舊瀏覽器 writer 或放寬 Rules**。
+測試至少涵蓋權限、冪等、並行、故障重試、批次成本、不可負庫存、公司及分倉一致性。
+
+另外 [Issue #334](https://github.com/sstonetw-source/yushin-system/issues/334) 記載
+2026-11-03 已執行正式舊交易資料清除與庫存歸零；這是既有核對紀錄，
+本次沒有再次清除，也尚未重新即時驗證正式資料。後續 C 項應先核對此結果，
+不得因缺少最新清理狀態就重複刪除。
+
+---
+
 基準：`main` `5099e397417482a0e35d85feff52df175948068a`（PR #514）。本文件區分**程式碼存在、目前入口路由、正式後端部署、真實角色驗收**，不能以任一項取代其他項。這次核查以版本庫靜態分析與目標測試為主；不等於正式 Firebase 的完整即時證據。
 
 ## 本批移除／修正（合併與正式發布仍須另外確認）
