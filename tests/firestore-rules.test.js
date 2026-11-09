@@ -2469,11 +2469,11 @@ test('stock writer cutover retires stale SDK stock transactions atomically witho
  await assertFails(setDoc(gate,{backendOnly:'true'}));
  await assertFails(setDoc(gate,{backendOnly:false,allowLegacyFallback:true}));
  await assertFails(setDoc(gate,{backendOnly:false}));
- await adminDatabase.doc('settings/stockWriterCutover').set({backendOnly:false});
  await assertSucceeds(updateDoc(inventory,{stockPolicy:'SAFETY_STOCK',safetyStock:2}));
  await assertSucceeds(updateDoc(stock,{onHand:11}));
  await assertSucceeds(updateDoc(checkpoint,{autoAllocatedQty:1}));
  await assertFails(updateDoc(gate,{backendOnly:true}));
+ // The gate is an immutable sentinel, not a mutable browser feature flag.
  await adminDatabase.doc('settings/stockWriterCutover').set({backendOnly:true});
  const previousInventory=(await getDoc(inventory)).data(),previousStock=(await getDoc(stock)).data();
  for(const uid of ['admin','buyer1','wh1']){

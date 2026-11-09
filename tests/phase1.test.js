@@ -3853,7 +3853,7 @@ test('business reservation rules retain scoped writes and block native cross-war
     const reservationStart=rulesSource.indexOf('match /inventoryReservations/{id}');
     const reservationEnd=rulesSource.indexOf('\n\n    match /inventoryLots/{id}',reservationStart);
     const reservationRule=rulesSource.slice(reservationStart,reservationEnd);
-    assert.match(reservationRule,/allow update: if !stockWriterBackendOnly\(\) && reservationUpdateAllowed\(id\)/);
+    assert.match(reservationRule,/allow update: if stockWriterClientWriteEnabled\(\) && reservationUpdateAllowed\(id\)/);
     assert.match(rulesSource,/function operationalReservationStockEvidence\(id\)[\s\S]*?get\('crossWarehouse', false\) != true/);
     assert.match(rulesSource,/function validOperationalMovementEvidence\(id\)[\s\S]*?get\('crossWarehouse', false\) == false/);
     const updateGuard=ruleFunctionSource('reservationUpdateAllowed');
