@@ -185,6 +185,12 @@ test('main transfer request UI delegates stock hold and release exclusively to t
  assert.match(service,/commitMainTransferRequestBackend\(id,'CANCEL'/);
  assert.doesNotMatch(service,/runRoleTransaction|\.collection\(|YushinReservation|document\.|showActionFeedback|confirm\(/);
 });
+test('main transfer dispatch and receipt never write request stock in the legacy browser transaction',()=>{
+ const service=read('src/services/warehouse-transfer.js');
+ assert.match(service,/if\(requestId\)\s*\{[\s\S]*?return commitMainTransferPhysicalBackend\('DISPATCH',id,\{id,requestId\}\)/);
+ assert.match(service,/if\(existing\.exists&&existing\.data\(\)\.requestId\)\s*\{[\s\S]*?return commitMainTransferPhysicalBackend\('RECEIVE',id\)/);
+ assert.doesNotMatch(service,/db\.collection\(['"]stockTransferRequests['"]\)|\brequestRef\b|\btransferRequest\b|\bheldQty\b/);
+});
 test('automatic and manual self-orders share one supplier commitment transaction, with no UI writes',()=>{
  const ui=read('src/features/orders/order-workspace.js');
  const start=ui.indexOf('window.saveSelfOrder ='),end=ui.indexOf('function isDeletableOrderDraft',start);

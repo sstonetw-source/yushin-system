@@ -70,8 +70,6 @@ async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toW
         throw Error('調撥操作識別碼衝突，原操作已提交或內容不同，請核對調撥紀錄。');
       return;
     }
-    let transferRequest=null,requestRef=null;
-    if(requestId){requestRef=db.collection('stockTransferRequests').doc(requestId);const rs=await tx.get(requestRef);if(!rs.exists)throw Error('調回需求不存在。');transferRequest=rs.data();if(transferRequest.status!=='PENDING'||transferRequest.inventoryId!==inventoryId||transferRequest.fromWarehouseId!==fromWarehouseId||transferRequest.toWarehouseId!==toWarehouseId||Number(transferRequest.qty)!==qty||handoff||orderId)throw Error('調回需求已變更。');}
     let order=null,item=null,index=-1,orderRef=null,reservationRef=null,reservation=null;
     if(orderId){
       orderRef=db.collection('orders').doc(orderId);const orderSnap=await tx.get(orderRef);if(!orderSnap.exists)throw Error('訂單不存在。');order=orderSnap.data();
@@ -98,8 +96,8 @@ async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toW
     if(!handoff&&(!destWh.exists||destWh.data().active===false||destWh.data().systemCustody))throw Error('目的倉庫不存在或已停用。');
     const fromRef=db.collection('warehouseStocks').doc(warehouseStockDocId(fromWarehouseId,key)),toRef=db.collection('warehouseStocks').doc(warehouseStockDocId(toWarehouseId,key));
     const fromSnap=await tx.get(fromRef),toSnap=handoff?await tx.get(toRef):null;if(!fromSnap.exists)throw Error('來源倉庫無此庫存。');
-    const from=fromSnap.data(),reservedQty=orderId?qty:0,heldQty=transferRequest?qty:0;
-    const physicalPlan=handoff?null:YushinWarehouseLogistics.planTransferDispatch({aggregateStock:inv,warehouseStock:from,qty,reservedQty,heldQty});
+    const from=fromSnap.data(),reservedQty=orderId?qty:0;
+    const physicalPlan=handoff?null:YushinWarehouseLogistics.planTransferDispatch({aggregateStock:inv,warehouseStock:from,qty,reservedQty});
     if(handoff)YushinWarehouseLogistics.transferable(from,qty,reservedQty);
     const lotQuery=await firestoreReadWithTimeout(db.collection('inventoryLots').where('productKey','==',key).where('warehouseId','==',fromWarehouseId).limit(201).get(),'調撥批次');
     if(lotQuery.size>200)throw Error('批次超過安全處理上限。');
@@ -114,7 +112,7 @@ async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toW
     const allocation=YushinInventory.allocateLots(lots,qty);
     if(actorUid!==currentUser.uid||actorRole!==currentUserRole)throw Error('登入身分已變更。');
     const allocations=allocation.allocations.map((a,n)=>({...a,targetLotId:id+'-'+n,...(lots.find(l=>l.id===a.lotId)?.unbatched?{unbatched:true}:{}),costLotId:lots.find(l=>l.id===a.lotId)?.costLotId||a.lotId}));
-    saved={id,...(requestId?{requestId}:{}),inventoryId,productKey:key,productId:inv.productId||key,itemCode:inv.itemCode||item?.itemCode||'',itemName:inv.itemName||item?.itemName||'',brand:inv.brand||'',brandId:inv.brandId||'',fromWarehouseId,toWarehouseId,fromStockId:fromRef.id,toStockId:toRef.id,qty,reservedQty,status:handoff?'RECEIVED':'IN_TRANSIT',kind:handoff?'HANDOFF':'TRANSFER',orderId,itemId,itemIndex:index,orderNo:order?.orderNo||order?.quoteNo||'',salesName:order?.salesName||'',ownerUid:order?.ownerUid||'',salesCode:order?.salesCode||'',allocations,createdAt:now,createdBy:who,createdByUid:actorUid,...(handoff?{receivedAt:now,receivedByUid:actorUid}:{}),deliveryPlan:order?YushinWarehouseLogistics.plan(item.deliveryPlan||order.shippingInstructions||{}):{}};
+    saved={id,inventoryId,productKey:key,productId:inv.productId||key,itemCode:inv.itemCode||item?.itemCode||'',itemName:inv.itemName||item?.itemName||'',brand:inv.brand||'',brandId:inv.brandId||'',fromWarehouseId,toWarehouseId,fromStockId:fromRef.id,toStockId:toRef.id,qty,reservedQty,status:handoff?'RECEIVED':'IN_TRANSIT',kind:handoff?'HANDOFF':'TRANSFER',orderId,itemId,itemIndex:index,orderNo:order?.orderNo||order?.quoteNo||'',salesName:order?.salesName||'',ownerUid:order?.ownerUid||'',salesCode:order?.salesCode||'',allocations,createdAt:now,createdBy:who,createdByUid:actorUid,...(handoff?{receivedAt:now,receivedByUid:actorUid}:{}),deliveryPlan:order?YushinWarehouseLogistics.plan(item.deliveryPlan||order.shippingInstructions||{}):{}};
     tx.set(transferRef,saved);
     tx.update(fromRef,{...(physicalPlan?physicalPlan.source:{onHand:Number(from.onHand)-qty,reserved:Number(from.reserved||0)-reservedQty}),updatedAt:now});
     if(reconciled.unbatched){
@@ -129,7 +127,6 @@ async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toW
       writeTransferLots(tx,saved,inv,now);
       tx.update(reservationRef,{warehouseId:toWarehouseId,updatedAt:now});
     }else tx.update(invRef,{...physicalPlan.aggregate,updatedAt:now});
-    if(requestRef)tx.update(requestRef,{status:'SHIPPED',transferId:id,shippedAt:now,shippedByUid:actorUid});
     tx.set(db.collection('inventoryMovements').doc(id+'-out'),{type:'warehouse_transfer_out',qty:-qty,productKey:key,warehouseId:fromWarehouseId,fromWarehouseId,toWarehouseId,sourceType:'WAREHOUSE_TRANSFER',sourceId:id,transferId:id,orderId,itemId,createdAt:now,createdBy:who,actorUid});
     if(handoff)tx.set(db.collection('inventoryMovements').doc(id+'-in'),{type:'warehouse_transfer_in',qty,productKey:key,warehouseId:toWarehouseId,fromWarehouseId,toWarehouseId,sourceType:'WAREHOUSE_TRANSFER',sourceId:id,transferId:id,orderId,itemId,createdAt:now,createdBy:who,actorUid});
     if(order){
