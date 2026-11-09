@@ -125,8 +125,8 @@ async function registerFormalPurchaseIncomingBackend(poId,poRecord,{actorUid,act
         && globalThis.YUSHIN_PRODUCTION_FORMAL_PURCHASE===true;
     const pathname=String(globalThis.location?.pathname||'');
     const productionSite=globalThis.location?.origin==='https://sstonetw-source.github.io'
-        && (pathname==='/yushin-system'||pathname.startsWith('/yushin-system/'))
-        || ['https://yu-shing-company.web.app','https://yu-shing-company.firebaseapp.com'].includes(globalThis.location?.origin);
+        && hostname==='sstonetw-source.github.io'
+        && (pathname==='/yushin-system'||pathname.startsWith('/yushin-system/'));
     const emulator=typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='emulator'
         && globalThis.YUSHIN_V2_PO_INCOMING_EMULATOR===true && local(hostname);
     if((!production&&!emulator)||(production&&!productionSite)

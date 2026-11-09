@@ -75,9 +75,9 @@ async function commitFormalPurchaseBackend(poRecord,actorUid,assertActor) {
     const isProduction=APP_ENVIRONMENT==='production'&&globalThis.YUSHIN_PRODUCTION_FORMAL_PURCHASE===true;
     const hostname=String(globalThis.location?.hostname||'').toLowerCase();
     const pathname=String(globalThis.location?.pathname||'');
-    const productionSite=['yu-shing-company.web.app','yu-shing-company.firebaseapp.com'].includes(hostname)
-        || (hostname==='sstonetw-source.github.io'
-            && (pathname==='/yushin-system'||pathname.startsWith('/yushin-system/')));
+    const productionSite=globalThis.location?.origin==='https://sstonetw-source.github.io'
+        && hostname==='sstonetw-source.github.io'
+        && (pathname==='/yushin-system'||pathname.startsWith('/yushin-system/'));
     if(!formalPurchaseBackendPilotEnabled()||typeof firebase==='undefined'||!firebase.auth||!firebase.app
         ||(isEmulator&&!local(hostname))
         ||(isPreview&&!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(hostname))

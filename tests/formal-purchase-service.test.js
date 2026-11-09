@@ -75,7 +75,9 @@ function productionSetup(){
  const x=previewSetup(),options={projectId:'yu-shing-company'};
  x.c.YUSHIN_PREVIEW_FORMAL_PURCHASE=false;
  x.c.YUSHIN_PRODUCTION_FORMAL_PURCHASE=true;
- x.c.APP_ENVIRONMENT='production';x.c.location.hostname='yu-shing-company.web.app';
+ x.c.APP_ENVIRONMENT='production';x.c.location={
+  hostname:'sstonetw-source.github.io',origin:'https://sstonetw-source.github.io',pathname:'/yushin-system/'
+ };
  x.auth.app.options=options;x.auth.emulatorConfig=null;
  x.functions.app.options=options;
  x.c.db.app.options={projectId:'yu-shing-company'};
@@ -178,6 +180,14 @@ test('production without backend opt-in fails closed before any legacy purchase 
   await assert.rejects(x.c.commitFormalPurchaseOrder(x.po),/正式採購後端尚未啟用/);
   assert.equal(x.writes.length,0);
   assert.equal(x.calls.some(call=>call.name==='commitV2FormalPurchase'),false);
+ }
+});
+test('retired Firebase Hosting origins cannot commit a production PO even if a stale flag is enabled',async()=>{
+ for(const origin of ['https://yu-shing-company.web.app','https://yu-shing-company.firebaseapp.com']){
+  const x=productionSetup();x.c.location={hostname:new URL(origin).hostname,origin,pathname:'/'};
+  await assert.rejects(x.c.commitFormalPurchaseOrder(x.po),/僅限已授權的網站/);
+  assert.equal(x.calls.length,0);
+  assert.equal(x.writes.length,0);
  }
 });
 test('preview original confirm action uses the same backend, re-reads records and never uses legacy writer',async()=>{

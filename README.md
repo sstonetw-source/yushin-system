@@ -9,6 +9,7 @@
 - 計算與事件：`docs/BUSINESS_RULES.md`
 - AI / 開發修改守則：`docs/DEVELOPMENT_RULES.md`
 - 歷史需求、發布及驗收：[歷史需求完成度總表](docs/HISTORICAL_REQUIREMENTS.md)。
+- 最新舊交易入口與頁面說明清查：[2026-11-09 交易舊路徑核對](docs/LEGACY_TRANSACTION_PATH_AUDIT_20261109.md)。
 - 交易未完成清單仍請對照 `docs/workflow-consistency-audit-20261014.md`。
 
 ## 網站與 Firebase 發布
