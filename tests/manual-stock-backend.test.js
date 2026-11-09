@@ -111,6 +111,18 @@ test('counts use authoritative warehouse value; zero delta still writes an immut
   if(target===10)assert.equal(f.docs.has('inventoryLots/COUNT_123456789-added'),false);
  }
 });
+test('zero-delta counts refuse corrupt lot identities and missing balances before issuing a receipt',async()=>{
+ for(const mutate of [
+  f=>f.put('inventoryLots/L',{...f.docs.get('inventoryLots/L'),warehouseId:'bad/other'}),
+  f=>f.put('inventoryLots/L',{...f.docs.get('inventoryLots/L'),remainingQty:undefined,qty:undefined}),
+  f=>f.put('inventoryLots/L',{...f.docs.get('inventoryLots/L'),remainingQty:-1})
+ ]){
+  const f=fixture();mutate(f);const before=f.snapshot();
+  await assert.rejects(f.run({...count,target:10},'INVENTORY_COUNT'));
+  assert.equal(f.snapshot(),before);assert.equal(f.writeCount(),0);
+  assert.equal(f.docs.has('inventoryMovements/COUNT_123456789'),false);
+ }
+});
 test('lost reply and same-ID concurrent replay never double count or overwrite a later receipt',async()=>{
  const f=fixture({opening:true});f.setLost(true);await assert.rejects(f.run(),/response lost/);
  f.docs.get('inventory/P').onHand+=5;f.docs.get('warehouseStocks/W__P').onHand+=5;
