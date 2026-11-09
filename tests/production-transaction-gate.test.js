@@ -68,3 +68,12 @@ for(const [kind,flag,project] of [
 test('unknown production feature cannot borrow an unrelated flag',()=>{
  assert.equal(allowProductionTransaction('RECEIVING',{GCLOUD_PROJECT:'yu-shing-company',ENABLE_PRODUCTION_DISPATCH_BACKEND:'true'}),false);
 });
+test('cancelled supplier purchase production UI is default-off until separate backend cutover',()=>{
+ const fs=require('node:fs'),vm=require('node:vm');
+ const scope={location:{origin:'https://sstonetw-source.github.io',pathname:'/yushin-system/'},
+  YUSHIN_PRODUCTION_CANCELLED_PURCHASE_BACKEND:true,YUSHIN_PRODUCTION_CANCELLED_PURCHASE_LEGACY_BLOCKED:true};
+ vm.runInNewContext(fs.readFileSync('transaction-rollout-config.js','utf8'),scope);
+ assert.equal(scope.YUSHIN_PRODUCTION_CANCELLED_PURCHASE_BACKEND,false);
+ assert.equal(scope.YUSHIN_PRODUCTION_CANCELLED_PURCHASE_LEGACY_BLOCKED,false);
+ assert.equal(allowProductionTransaction('CANCELLED_PURCHASE',{GCLOUD_PROJECT:'yu-shing-company'}),false);
+});

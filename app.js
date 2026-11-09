@@ -616,7 +616,7 @@ function productionTransactionBackendRequired(kind){
 }
 function productionTransactionBackendEnabled(kind){
  if(!['DISPATCH','SHIPMENT','ORDER_LIFECYCLE','DELIVERY_CONFIRMATION','DELIVERY_REVERSAL','CUSTOMER_RETURN','CUSTOMER_RETURN_REQUEST',
-  'ORDER_TRANSFER_DISPATCH','ORDER_TRANSFER_HANDOFF','ORDER_TRANSFER_RECEIVE'].includes(kind)||!productionTransactionBackendRequired(kind)
+  'ORDER_TRANSFER_DISPATCH','ORDER_TRANSFER_HANDOFF','ORDER_TRANSFER_RECEIVE','CANCELLED_PURCHASE'].includes(kind)||!productionTransactionBackendRequired(kind)
   ||globalThis['YUSHIN_PRODUCTION_'+kind+'_BACKEND']!==true
   ||globalThis['YUSHIN_PRODUCTION_'+kind+'_LEGACY_BLOCKED']!==true)return false;
  const path=String(globalThis.location?.pathname||'');
@@ -21750,7 +21750,7 @@ function pendingCancelledPurchase(id){
  const raw=sessionStorage.getItem(cancelledPurchasePendingKey(id));if(raw===null)return null;
  try{const p=JSON.parse(raw);
   if(p.uid!==currentUser?.uid||p.role!==currentUserRole||p.intent?.supplyId!==id
-   ||!['demo-yushin','preview-20135'].includes(p.project)||typeof p.intent.expectedDirect!=='boolean'
+   ||!['demo-yushin','preview-20135','yu-shing-company'].includes(p.project)||typeof p.intent.expectedDirect!=='boolean'
    ||typeof p.intent.warehouseId!=='string'||!p.intent.warehouseId
    ||!/^[a-zA-Z0-9_-]{12,96}$/.test(p.intent.operationId))throw Error('invalid');
   return p;
@@ -21759,17 +21759,21 @@ function pendingCancelledPurchase(id){
 function cancelledPurchaseBackendRequired(id){
  return (typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview')
   ||globalThis.YUSHIN_CANCELLED_PURCHASE_EMULATOR===true
+  ||(typeof productionTransactionBackendRequired==='function'&&productionTransactionBackendRequired('CANCELLED_PURCHASE'))
   ||sessionStorage.getItem(cancelledPurchasePendingKey(id))!==null;
 }
 function cancelledPurchaseTransport(){
- const emulator=globalThis.YUSHIN_CANCELLED_PURCHASE_EMULATOR===true,project=emulator?'demo-yushin':'preview-20135';
+ const emulator=globalThis.YUSHIN_CANCELLED_PURCHASE_EMULATOR===true;
+ const production=typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled('CANCELLED_PURCHASE');
+ const project=emulator?'demo-yushin':production?'yu-shing-company':'preview-20135';
  if(typeof firebase==='undefined'||!firebase.auth||!firebase.functions)throw Error('採購後端尚未準備完成，禁止回退舊交易。');
  const auth=firebase.auth(),functions=firebase.app().functions('asia-east1'),uid=currentUser?.uid,role=currentUserRole;
  const local=h=>h==='localhost'||h==='127.0.0.1';
  const check=()=>{
   const preview=typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'&&globalThis.YUSHIN_PREVIEW_CANCELLED_PURCHASE===true;
-  if((!emulator&&!preview)||emulator!==(globalThis.YUSHIN_CANCELLED_PURCHASE_EMULATOR===true)
-   ||(emulator?!local(globalThis.location?.hostname):!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(globalThis.location?.hostname))
+  if((!emulator&&!preview&&!production)||(production&&!productionTransactionBackendEnabled('CANCELLED_PURCHASE'))
+   ||emulator!==(globalThis.YUSHIN_CANCELLED_PURCHASE_EMULATOR===true)
+   ||(emulator?!local(globalThis.location?.hostname):!production&&!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(globalThis.location?.hostname))
    ||firebase.app().options?.projectId!==project||auth.app?.options?.projectId!==project
    ||functions.app?.options?.projectId!==project||db.app?.options?.projectId!==project
    ||(emulator?(!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099):!!auth.emulatorConfig))

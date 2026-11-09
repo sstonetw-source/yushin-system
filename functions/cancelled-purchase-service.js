@@ -1,11 +1,13 @@
 'use strict';
 const {createHash}=require('node:crypto');
 const {projectIdFromEnvironment}=require('./grouped-reservation-gate');
+const {allowProductionTransaction}=require('./production-transaction-gate');
 const {planCancelledPurchaseKeepStock}=require('./shared/supply-core');
 const {sanitizeSupply}=require('./shared/stock-permissions');
 function fault(message,code='failed-precondition'){const e=new Error(message);e.code=code;throw e;}
 function cancelledPurchaseProject(env=process.env){
  const p=projectIdFromEnvironment(env),local=v=>typeof v==='string'&&/^(localhost|127\.0\.0\.1):[0-9]+$/.test(v);
+ if(p==='yu-shing-company'&&allowProductionTransaction('CANCELLED_PURCHASE',env))return p;
  if(p==='preview-20135'&&env.ENABLE_PREVIEW_CANCELLED_PURCHASE==='true'
   &&!env.FUNCTIONS_EMULATOR&&!env.FIRESTORE_EMULATOR_HOST&&!env.FIREBASE_AUTH_EMULATOR_HOST)return p;
  if(p==='demo-yushin'&&env.ENABLE_CANCELLED_PURCHASE_EMULATOR==='true'&&env.FUNCTIONS_EMULATOR==='true'

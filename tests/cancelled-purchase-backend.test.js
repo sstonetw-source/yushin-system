@@ -46,3 +46,19 @@ test('independent gate rejects production/mixed environments and missing Auth be
  const h=createCancelledPurchaseCallable({onCall:(_,fn)=>fn,HttpsError,env,getDatabase:()=>{throw Error('unexpected db access');}});
  await assert.rejects(h({data:intent}),e=>e.code==='unauthenticated');
 });
+test('scoped production cancelled-purchase gate is independent and never accepts Emulator or cross-project settings',async()=>{
+ const production={GCLOUD_PROJECT:'yu-shing-company',ENABLE_PRODUCTION_CANCELLED_PURCHASE_BACKEND:'true'};
+ assert.equal(cancelledPurchaseProject(production),'yu-shing-company');
+ for(const patch of [{ENABLE_PRODUCTION_CANCELLED_PURCHASE_BACKEND:false},
+  {ENABLE_PRODUCTION_CANCELLED_PURCHASE_BACKEND:'false'},
+  {GOOGLE_CLOUD_PROJECT:'preview-20135'},
+  {FIREBASE_CONFIG:JSON.stringify({projectId:'other'})},
+  {FUNCTIONS_EMULATOR:'true'},
+  {FIRESTORE_EMULATOR_HOST:'localhost:8080'},
+  {FIREBASE_AUTH_EMULATOR_HOST:'localhost:9099'}])
+  assert.equal(cancelledPurchaseProject({...production,...patch}),'');
+ const f=fixture();f.db.projectId='yu-shing-company';
+ const result=await commitCancelledPurchaseKeepStock(f.db,'U',intent,production);
+ assert.equal(result.status,'applied');assert.equal(f.docs.get('inventory/P').incoming,7);
+ assert.equal((await commitCancelledPurchaseKeepStock(f.db,'U',intent,production)).status,'already-applied');
+});
