@@ -1,185 +1,88 @@
+'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
-const inventory=require('../modules/inventory-core');
-const app=fs.readFileSync('app.js','utf8');
-const source=app.slice(app.indexOf('window.saveInventoryQuantity=async function()'),app.indexOf("let inventoryTransferEditingId"));
-function fixture({onHand=10,reserved=0,target=15,lots=[],fail=false}={}){
- const item={id:'P',productKey:'P',productId:'P',itemCode:'74104',itemName:'RNA kit',brand:'Qiagen'};
- const docs=new Map([['inventory/P',{...item,onHand,reserved,incoming:0}],['warehouseStocks/MAIN__P',{onHand,reserved,incoming:0}],...lots.map(lot=>['inventoryLots/'+lot.id,{productKey:'P',warehouseId:'MAIN',...lot}])]);
- const ref=(col,id)=>({id,path:col+'/'+id});const button={disabled:false,textContent:'確認修改'};let readAfterWrite=false;
- const state={fail,lost:false,replay:false,afterRead:null,afterCommit:null,querySize:null},writesCommitted=[],reads=[],notifications=[];
- const messages=[];const nodes={inventoryQuantityTarget:{value:String(target)},inventoryQuantityNote:{value:'count'},saveInventoryQuantityBtn:button};
- const c=vm.createContext({window:{},inventoryQuantityEditingId:'P',inventoryQuantityEditingWarehouseId:'MAIN',
-  inventoryQuantitySaveInProgress:false,inventoryQuantityPendingOperation:null,inventoryQuantityEditorGeneration:1,
-  document:{getElementById:id=>nodes[id]},canEditPage:()=>true,inventoryItemById:()=>item,
-  inventoryNumbers:inventory.normalizeStock,warehouseMasterCache:[{id:'MAIN'},{id:'EXT'}],
-  warehouseStockDocId:(w,p)=>w+'__'+p,currentUserName:'Buyer',currentUser:{uid:'BUYER',email:'buyer'},currentUserRole:'purchaser',
-  lifecycleRecordId:()=> 'COUNT',resolveBrandName:b=>b,brandIdForName:()=> 'QIAGEN',buildInventorySearchTokens:()=>[],
-  YushinInventory:inventory,firestoreReadWithTimeout:async p=>p,alert:s=>messages.push(s),
-  invalidateWarehouseStockCache:(...args)=>notifications.push(args),closeInventoryQuantityEditor:()=>{},loadInventory:async()=>{},showActionFeedback:()=>{},
-  db:{collection:col=>({doc:id=>ref(col,id||'movement'),where(field,_op,value){const filters=[[field,value]];
-    const query={where(f,_o,v){filters.push([f,v]);return query;},limit(){return query;},get:async()=>{const result=[...docs].filter(([path,data])=>path.startsWith(col+'/')&&filters.every(([f,v])=>data[f]===v)).map(([path])=>({ref:ref(col,path.split('/')[1])}));return {size:state.querySize??result.length,docs:result};}};return query;}})},
-  runRoleTransaction:async fn=>{let writes=[];const tx={get:async r=>{reads.push(r.path);if(writes.length)readAfterWrite=true;const snapshot={id:r.id,exists:docs.has(r.path),data:()=>structuredClone(docs.get(r.path))};state.afterRead?.(r);return snapshot;},set:(r,d,o)=>writes.push([r,d,!!o?.merge]),update:(r,d)=>writes.push([r,d,true])};if(state.replay){await fn(tx);writes=[];}await fn(tx);if(state.fail)throw Error('network');for(const [r,d,merge] of writes){docs.set(r.path,{...(merge?docs.get(r.path):{}),...JSON.parse(JSON.stringify(d))});writesCommitted.push(r.path);}state.afterCommit?.();if(state.lost){state.lost=false;throw Error('lost reply');}}
- });c.window=c;vm.runInContext(fs.readFileSync('src/services/inventory-count.js','utf8'),c);vm.runInContext(source,c);
- const request={item,warehouseId:'MAIN',target,note:'count',operationId:'COUNT'};
- return {c,docs,messages,button,state,reads,writesCommitted,notifications,nodes,request,run:(data=request,options={})=>c.commitInventoryQuantity(data,options),readAfterWrite:()=>readAfterWrite};
+const service=fs.readFileSync('src/services/inventory-count.js','utf8');
+const feature=fs.readFileSync('src/features/inventory/inventory-workspace.js','utf8');
+const editor=feature.slice(feature.indexOf('window.saveInventoryQuantity=async function()'),feature.indexOf('let inventoryTransferEditingId'));
+function serviceFixture(){
+ const calls=[],c=vm.createContext({currentUser:{uid:'U'},currentUserRole:'purchaser',
+  commitManualStockBackend:async(...args)=>{calls.push(args);return {delta:2,operationId:args[1].operationId};}});
+ vm.runInContext(service,c);return {c,calls};
 }
-test('quantity editor atomically aligns manual count, warehouse, total and unknown-cost lot',async()=>{
- const f=fixture();await f.c.saveInventoryQuantity();
- assert.deepEqual(f.messages,[]);assert.equal(f.docs.get('inventory/P').onHand,15);
- assert.equal(f.docs.get('warehouseStocks/MAIN__P').onHand,15);
- assert.equal(f.docs.get('inventoryLots/COUNT-balance').remainingQty,10);
- assert.equal(f.docs.get('inventoryLots/COUNT-added').remainingQty,5);
- assert.equal(f.docs.get('inventoryLots/COUNT-added').unitCost,undefined);
- assert.equal(f.docs.get('inventoryMovements/COUNT').sourceId,'COUNT');
- assert.equal(f.readAfterWrite(),false);assert.equal(f.button.disabled,false);
- await f.c.saveInventoryQuantity();assert.equal(f.docs.get('inventoryLots/COUNT-added').remainingQty,5);
+test('quantity wrapper sends minimal backend intent; no browser writer or caller-controlled stock calculation',async()=>{
+ assert.doesNotMatch(service,/runRoleTransaction|db\.collection|\btx\.(?:get|set|update|create)\b/);
+ const f=serviceFixture();await f.c.commitInventoryQuantity({
+  item:{id:'P',productKey:'P',itemName:'untrusted',onHand:999},warehouseId:'W',target:12,note:'核對',operationId:'count-123456789',
+  singleWarehouseFallback:true},{actorUid:'U',actorRole:'purchaser'});
+ assert.equal(f.calls[0][0],'INVENTORY_COUNT');
+ assert.deepEqual(Object.keys(f.calls[0][1]).sort(),['operationId','productKey','warehouseId','target','note'].sort());
+ assert.equal(f.calls[0][1].productKey,'P');assert.equal(f.calls[0][1].target,12);
+ assert.equal(f.calls[0][1].singleWarehouseFallback,undefined);
 });
-test('quantity editor reduces actual batches and keeps receipt identity',async()=>{
- const f=fixture({target:5,lots:[{id:'known',remainingQty:10,lotNo:'B'}]});await f.c.saveInventoryQuantity();
- assert.deepEqual(f.messages,[]);assert.equal(f.docs.get('inventoryLots/known').remainingQty,5);
- assert.equal(f.docs.get('inventoryLots/known').lotNo,'B');
- assert.equal(f.docs.get('inventoryMovements/COUNT').lotAllocations[0].qty,5);
- assert.equal(f.readAfterWrite(),false);
+test('quantity editor delegates to service; never writes inventory ledger',()=>{
+ assert.match(editor,/await commitInventoryQuantity\(/);
+ assert.doesNotMatch(editor,/runRoleTransaction|db\.collection|tx\.(?:set|update|create)/);
 });
-test('count rebuilds company lot summary from operational lots across warehouses',async()=>{
- const f=fixture({target:5,lots:[{id:'main',remainingQty:10,lotNo:'A'}]});
- f.docs.get('inventory/P').onHand=14;
- f.docs.get('inventory/P').lots=[{warehouseId:'MAIN',lotNo:'phantom',expiryDate:'',qty:99}];
- f.docs.set('inventoryLots/other',{productKey:'P',warehouseId:'EXT',lotNo:'B',remainingQty:4});
- const other=JSON.stringify(f.docs.get('inventoryLots/other'));
- await f.run();
- const rows=f.docs.get('inventory/P').lots;
- assert.equal(rows.find(x=>x.warehouseId==='MAIN'&&x.lotNo==='A')?.qty,5);
- assert.equal(rows.find(x=>x.warehouseId==='EXT'&&x.lotNo==='B')?.qty,4);
- assert.equal(rows.some(x=>x.lotNo==='phantom'),false);
- assert.equal(rows.reduce((sum,x)=>sum+x.qty,0),f.docs.get('inventory/P').onHand);
- assert.equal(JSON.stringify(f.docs.get('inventoryLots/other')),other);assert.equal(f.readAfterWrite(),false);
+
+function editorFixture({target='12',note='盤點原因'}={}){
+ const item={id:'P',productKey:'P',productId:'P',itemName:'Product',onHand:10};
+ const messages=[],feedback=[],calls=[],button={disabled:false,textContent:'確認修改'};
+ const nodes={inventoryQuantityTarget:{value:target},inventoryQuantityNote:{value:note},saveInventoryQuantityBtn:button};
+ const c=vm.createContext({currentUser:{uid:'U'},currentUserRole:'purchaser',
+  inventoryQuantitySaveInProgress:false,inventoryQuantityEditingId:'P',inventoryQuantityEditingWarehouseId:'W',
+  inventoryQuantityPendingOperation:null,inventoryQuantityEditorGeneration:1,
+  document:{getElementById:id=>nodes[id]},canEditPage:()=>true,inventoryItemById:()=>item,
+  warehouseMasterCache:[{id:'W'}],lifecycleRecordId:()=> 'count-123456789',
+  commitInventoryQuantity:async(...args)=>{calls.push(args);return {delta:2,productKey:'P',warehouseId:'W',operationId:'count-123456789',replayed:false};},
+  closeInventoryQuantityEditor(){c.inventoryQuantityEditorGeneration++;},
+  loadInventory:async()=>{},invalidateWarehouseStockCache(){},alert:message=>messages.push(message),
+  showActionFeedback:message=>feedback.push(message)});
+ c.window=c;vm.runInContext(editor,c);
+ return {c,item,nodes,messages,feedback,calls,button};
+}
+test('editor maintains one immutable operation ID through successful call',async()=>{
+ const f=editorFixture();await f.c.saveInventoryQuantity();
+ assert.equal(f.calls.length,1);assert.equal(f.calls[0][0].operationId,'count-123456789');
+ assert.equal(f.calls[0][0].target,12);assert.equal(f.button.disabled,true); // modal closed
+ assert.match(f.feedback[0],/庫存已更新/);
 });
-test('count rollback consumes only the new FEFO test batch and removes its positive summary quantity',async()=>{
- const f=fixture({onHand:2,reserved:1,target:1,lots:[
-  {id:'original',remainingQty:1,lotNo:'',expiryDate:'',receivedAt:'2026-10-14'},
-  {id:'qa',remainingQty:1,lotNo:'QA311',expiryDate:'2099-12-31',receivedAt:'2026-11-02'}
- ]});
- const inv=f.docs.get('inventory/P');inv.onHand=103;inv.reserved=5;
- inv.lots=[{warehouseId:'MAIN',lotNo:'',expiryDate:'',qty:1},{warehouseId:'MAIN',lotNo:'QA311',expiryDate:'2099-12-31',qty:1},{warehouseId:'EXT',lotNo:'',expiryDate:'',qty:100},{warehouseId:'custody-U',lotNo:'',expiryDate:'',qty:1}];
- f.docs.set('inventoryLots/external',{productKey:'P',warehouseId:'EXT',remainingQty:100});
- f.docs.set('inventoryLots/custody',{productKey:'P',warehouseId:'custody-U',remainingQty:1});
- f.docs.set('inventoryLotCosts/original',{unitCost:1200});
- const preserved=['inventoryLots/original','inventoryLots/external','inventoryLots/custody','inventoryLotCosts/original'].map(k=>[k,JSON.stringify(f.docs.get(k))]);
- await f.run();
- assert.equal(f.docs.get('inventory/P').onHand,102);assert.equal(f.docs.get('inventory/P').reserved,5);
- assert.equal(f.docs.get('warehouseStocks/MAIN__P').onHand,1);assert.equal(f.docs.get('warehouseStocks/MAIN__P').reserved,1);
- assert.equal(f.docs.get('inventoryLots/qa').remainingQty,0);
- assert.equal(f.docs.get('inventory/P').lots.find(x=>x.lotNo==='QA311')?.qty,0);
- assert.equal(f.docs.get('inventory/P').lots.reduce((s,x)=>s+x.qty,0),102);
- for(const [k,before]of preserved)assert.equal(JSON.stringify(f.docs.get(k)),before);
- assert.deepEqual(f.docs.get('inventoryMovements/COUNT').lotAllocations.map(x=>[x.lotId,x.qty]),[['qa',1]]);
+test('uncertain response preserves original payload and rejects modified target or note',async()=>{
+ const f=editorFixture();f.c.commitInventoryQuantity=async(...args)=>{f.calls.push(args);throw Error('回覆未知');};
+ await f.c.saveInventoryQuantity();assert.equal(f.calls.length,1);
+ assert.equal(f.c.inventoryQuantityPendingOperation.request.operationId,'count-123456789');
+ f.nodes.inventoryQuantityTarget.value='13';await f.c.saveInventoryQuantity();
+ assert.equal(f.calls.length,1);assert.match(f.messages.at(-1),/原內容重試/);
+ f.nodes.inventoryQuantityTarget.value='12';f.nodes.inventoryQuantityNote.value='不同原因';await f.c.saveInventoryQuantity();
+ assert.equal(f.calls.length,1);
+ f.nodes.inventoryQuantityNote.value='盤點原因';
+ f.c.commitInventoryQuantity=async(...args)=>{f.calls.push(args);return {delta:2,replayed:true};};
+ await f.c.saveInventoryQuantity();assert.equal(f.calls.length,2);
+ assert.equal(f.calls[0][0].operationId,f.calls[1][0].operationId);
 });
-test('count refuses corrupt lot identities in another warehouse before writing company summary',async()=>{
- for(const patch of [{warehouseId:''},{warehouseId:'bad/id'},{productId:'OTHER'},{remainingQty:-1}]){
-  const f=fixture({lots:[{id:'main',remainingQty:10}]});
-  f.docs.set('inventoryLots/other',{productKey:'P',warehouseId:'EXT',remainingQty:1,...patch});
-  const before=JSON.stringify([...f.docs]);await assert.rejects(f.run());assert.equal(JSON.stringify([...f.docs]),before);assert.equal(f.writesCommitted.length,0);
+test('duplicate click shares one in-flight count; session switch avoids stale refresh',async()=>{
+ const f=editorFixture();let release;const pending=new Promise(resolve=>release=resolve);
+ f.c.commitInventoryQuantity=async(...args)=>{f.calls.push(args);await pending;return {delta:2};};
+ const first=f.c.saveInventoryQuantity();await f.c.saveInventoryQuantity();assert.equal(f.calls.length,1);
+ f.c.currentUser={uid:'OTHER'};release();await first;
+ assert.equal(f.feedback.length,0);assert.equal(f.c.inventoryQuantitySaveInProgress,false);
+});
+test('invalid target, empty note, missing warehouse or read-only role prevents backend call',async()=>{
+ for(const mutate of [f=>f.nodes.inventoryQuantityTarget.value='',f=>f.nodes.inventoryQuantityTarget.value='-1',
+  f=>f.nodes.inventoryQuantityTarget.value='not-number',f=>f.nodes.inventoryQuantityNote.value='',
+  f=>f.c.inventoryQuantityEditingWarehouseId='']){
+  const f=editorFixture();mutate(f);await f.c.saveInventoryQuantity();assert.equal(f.calls.length,0);
  }
+ const readonly=editorFixture();readonly.c.canEditPage=()=>false;await readonly.c.saveInventoryQuantity();assert.equal(readonly.calls.length,0);
 });
-test('quantity editor reservation violation and failed commit leave all records unchanged',async()=>{
- for(const options of [{target:3,reserved:4},{target:15,fail:true}]){
-  const f=fixture(options),before=structuredClone([...f.docs]);await f.c.saveInventoryQuantity();
-  assert.equal(f.messages.length,1);assert.deepEqual([...f.docs],before);assert.equal(f.button.disabled,false);
- }
+test('postcommit list refresh error is reported without silently resubmitting stock',async()=>{
+ const f=editorFixture();f.c.loadInventory=async()=>{throw Error('清單暫時無法更新');};
+ await f.c.saveInventoryQuantity();assert.equal(f.calls.length,1);assert.equal(f.messages.length,1);
+ assert.match(f.messages[0],/已完成/);
 });
-test('count service has no form storage or cache dependency and Feature delegates the transaction',()=>{
- const service=fs.readFileSync('src/services/inventory-count.js','utf8');
- assert.doesNotMatch(service,/\b(?:window|document|localStorage|sessionStorage|warehouseMasterCache|warehouseStockCache|invalidateWarehouseStockCache)\b/);
- assert.match(source,/await commitInventoryQuantity\(/);assert.doesNotMatch(source,/runRoleTransaction|tx\.(?:set|update)|db\.collection/);
-});
-test('count operation replay after lost reply preserves subsequent receipts and reads only its immutable movement',async()=>{
- const f=fixture();f.state.lost=true;await assert.rejects(f.run(),/lost reply/);
- f.docs.get('inventory/P').onHand=20;f.docs.get('warehouseStocks/MAIN__P').onHand=20;
- const before=JSON.stringify([...f.docs]),writeCount=f.writesCommitted.length;f.reads.length=0;
- const result=await f.run();assert.equal(result.replayed,true);assert.equal(result.delta,5);
- assert.equal(JSON.stringify([...f.docs]),before);assert.equal(f.writesCommitted.length,writeCount);
- assert.deepEqual(f.reads,['inventoryMovements/COUNT']);
-});
-test('count callback replay commits one movement, fixed timestamp and one postcommit notification',async()=>{
- const f=fixture();f.state.replay=true;const notifications=[];
- await f.run(f.request,{onStockCommitted:(...args)=>notifications.push(args)});
- assert.equal(f.writesCommitted.filter(p=>p.startsWith('inventoryMovements/')).length,1);
- assert.deepEqual(notifications,[['P','MAIN']]);assert.equal(f.readAfterWrite(),false);
- assert.equal(f.docs.get('inventory/P').updatedAt,f.docs.get('inventoryMovements/COUNT').createdAt);
-});
-test('count service captures caller payload before asynchronous reads',async()=>{
- const f=fixture();f.state.afterRead=()=>{f.request.item.productId='OTHER';f.request.target=100;};
- await f.run();assert.equal(f.docs.get('inventory/P').onHand,15);assert.equal(f.docs.get('inventoryMovements/COUNT').countTarget,15);
-});
-test('existing operation rejects different target warehouse note product actor or role without writes',async()=>{
- for(const change of [f=>f.request.target=16,f=>f.request.warehouseId='EXT',f=>f.request.note='changed',
-  f=>f.request.item.productKey='OTHER',f=>f.c.currentUser={uid:'OTHER'},f=>f.c.currentUserRole='admin']){
-  const f=fixture();await f.run();const before=JSON.stringify([...f.docs]);change(f);
-  await assert.rejects(f.run(),/不同內容或身分/);assert.equal(JSON.stringify([...f.docs]),before);
- }
-});
-test('count rejects invalid persisted quantities, identity, reservations and lot overflow atomically',async()=>{
- for(const change of [
-  f=>f.docs.get('inventory/P').onHand=-1,f=>f.docs.get('inventory/P').reserved='invalid',
-  f=>f.docs.get('warehouseStocks/MAIN__P').incoming='',f=>f.docs.get('warehouseStocks/MAIN__P').reserved=11,
-  f=>f.docs.get('inventory/P').productKey='OTHER',f=>f.docs.get('warehouseStocks/MAIN__P').warehouseId='EXT',
-  f=>f.docs.set('inventoryLots/bad',{productKey:'P',warehouseId:'MAIN',remainingQty:-1}),
-  f=>f.docs.set('inventoryLots/excess',{productKey:'P',warehouseId:'MAIN',remainingQty:11}),
-  f=>f.docs.set('inventoryLots/COUNT-added',{productKey:'OTHER',warehouseId:'MAIN',remainingQty:1}),
-  f=>f.state.querySize=201,f=>f.docs.get('inventory/P').reserved=9
- ]){
-  const f=fixture({target:5});change(f);const before=JSON.stringify([...f.docs]);await assert.rejects(f.run());
-  assert.equal(JSON.stringify([...f.docs]),before);assert.equal(f.writesCommitted.length,0);
- }
-});
-test('count rejects invalid target and operation identifiers before a transaction',async()=>{
- for(const patch of [{target:NaN},{target:Infinity},{target:-1},{target:''},{target:null},{target:true},{operationId:''},{operationId:'a/b'},{warehouseId:''}]){
-  const f=fixture();await assert.rejects(f.run({...f.request,...patch}));assert.equal(f.reads.length,0);
- }
-});
-test('count retains explicit single-warehouse migration fallback without requiring UI cache in service',async()=>{
- const f=fixture();f.docs.delete('warehouseStocks/MAIN__P');await f.run({...f.request,singleWarehouseFallback:true});
- assert.equal(f.docs.get('inventory/P').onHand,15);assert.equal(f.docs.get('warehouseStocks/MAIN__P').onHand,15);
- const noFallback=fixture();noFallback.docs.delete('warehouseStocks/MAIN__P');await noFallback.run();
- assert.equal(noFallback.docs.get('inventory/P').onHand,25);assert.equal(noFallback.docs.get('warehouseStocks/MAIN__P').onHand,15);
-});
-test('unchanged count records a zero audit receipt so uncertain replay cannot overwrite later arrivals',async()=>{
- const f=fixture({target:10}),before=JSON.stringify(f.docs.get('inventory/P'));f.state.lost=true;await assert.rejects(f.run(),/lost reply/);
- assert.equal(JSON.stringify(f.docs.get('inventory/P')),before);assert.deepEqual(f.writesCommitted,['inventoryMovements/COUNT']);
- f.docs.get('inventory/P').onHand=12;f.docs.get('warehouseStocks/MAIN__P').onHand=12;
- const result=await f.run();assert.equal(result.delta,0);assert.equal(result.replayed,true);assert.equal(f.docs.get('inventory/P').onHand,12);
-});
-test('count refuses sales engineer missing actor and midread actor switches',async()=>{
- for(const change of [f=>f.c.currentUserRole='sales',f=>f.c.currentUserRole='engineer',f=>f.c.currentUser=null,
-  f=>f.state.afterRead=()=>{f.c.currentUser={uid:'OTHER'};},f=>f.state.afterRead=()=>{f.c.currentUserRole='admin';}]){
-  const f=fixture();change(f);const before=JSON.stringify([...f.docs]);await assert.rejects(f.run());assert.equal(JSON.stringify([...f.docs]),before);
- }
-});
-test('count postcommit session or notification error preserves committed marker and safely resumes',async()=>{
- for(const mode of ['session','notification']){
-  const f=fixture();if(mode==='session')f.state.afterCommit=()=>{f.c.currentUserRole='admin';};
-  await assert.rejects(f.run(f.request,{onStockCommitted:()=>{throw Error('cache unavailable');}}),e=>e.inventoryCountCommitted===true&&e.operationId==='COUNT');
-  const before=JSON.stringify([...f.docs]);f.state.afterCommit=null;f.c.currentUserRole='purchaser';
-  assert.equal((await f.run()).replayed,true);assert.equal(JSON.stringify([...f.docs]),before);
- }
-});
-test('Feature retains original operation after uncertain response and refuses edited retry payload',async()=>{
- const f=fixture();f.state.lost=true;await f.c.saveInventoryQuantity();assert.equal(f.messages.length,1);
- f.nodes.inventoryQuantityTarget.value='16';await f.c.saveInventoryQuantity();assert.match(f.messages.at(-1),/原內容重試/);
- assert.equal(f.docs.get('inventory/P').onHand,15);
- f.nodes.inventoryQuantityTarget.value='15';f.docs.get('inventory/P').onHand=20;f.docs.get('warehouseStocks/MAIN__P').onHand=20;
- await f.c.saveInventoryQuantity();assert.equal(f.docs.get('inventory/P').onHand,20);assert.equal(f.c.inventoryQuantitySaveInProgress,false);
-});
-test('Feature duplicate save shares a single in-flight operation and session switch prevents cache effects',async()=>{
- const f=fixture();let release;const gate=new Promise(r=>release=r),original=f.c.commitInventoryQuantity;let calls=0;
- f.c.commitInventoryQuantity=async(...args)=>{calls++;await gate;return original(...args);};
- const first=f.c.saveInventoryQuantity();await f.c.saveInventoryQuantity();assert.equal(calls,1);release();await first;
- const switched=fixture();switched.state.afterCommit=()=>{switched.c.currentUserRole='admin';};await switched.c.saveInventoryQuantity();
- assert.equal(switched.notifications.length,0);assert.equal(switched.messages.length,0);assert.ok(switched.c.inventoryQuantityPendingOperation);
-});
-test('Feature empty count is not implicitly treated as zero and postcommit refresh failure is explicit',async()=>{
- const empty=fixture();empty.nodes.inventoryQuantityTarget.value='';await empty.c.saveInventoryQuantity();assert.equal(empty.reads.length,0);
- const failed=fixture();failed.c.loadInventory=async()=>{throw Error('refresh offline');};await failed.c.saveInventoryQuantity();
- assert.match(failed.messages[0],/盤點已完成.*清單更新失敗/);assert.equal(failed.docs.get('inventory/P').onHand,15);
+test('receipt-verified callback failure reports confirmed count, never an unknown result',async()=>{
+ const f=editorFixture();f.c.commitInventoryQuantity=async(...args)=>{
+  f.calls.push(args);const error=Error('畫面快取失效');error.manualStockCommitted=true;throw error;
+ };
+ await f.c.saveInventoryQuantity();
+ assert.equal(f.calls.length,1);assert.match(f.messages[0],/已提交/);
+ assert.doesNotMatch(f.messages[0],/結果尚未確認/);
 });

@@ -218,9 +218,10 @@ test('canonical brand identity continues through purchasing supply and inventory
     assert.match(appSource, /brandId:item\.brandId\|\|brandIdForName\(item\.brand\|\|'\'\)/);
     assert.match(appSource, /brandId:supply\.brandId\|\|brandIdForName\(supply\.brand\|\|'\'\)/);
     assert.match(appSource, /findPriceItemByCodeValue\(row\.itemCode, row\.brand\)/);
-    const manualService=fs.readFileSync(path.join(__dirname,'../src/services/manual-inventory.js'),'utf8');
-    assert.match(manualService, /productKey:key,productId:key,itemCode:product\.manufacturerPartNo/);
-    assert.match(manualService, /brandId:product\.brandId\|\|brandIdForName\(brand\)/);
+    const manualService=fs.readFileSync(path.join(__dirname,'../functions/manual-stock-service.js'),'utf8');
+    assert.match(manualService, /productKey:key,productId:key/);
+    assert.match(manualService, /itemCode:String\(product\.manufacturerPartNo/);
+    assert.match(manualService, /brandId:String\(product\.brandId/);
     assert.match(appSource, /findProductByCode\(requestedCode, preferredBrand\)/);
 });
 
@@ -1689,7 +1690,8 @@ test('manual inventory changes support batch rows instead of browser prompts', (
     const save = appSource.slice(saveStart, saveEnd);
     assert.match(save, /const results=\[\]/);
     assert.match(save, /results\.push\(\{row,ok:true\}\)/);
-    assert.match(save, /results\.push\(\{row,ok:false,error:/);
+    assert.match(save, /\{row,ok:false,error:/);
+    assert.match(save, /e\?\.manualStockCommitted\?\{row,ok:true/);
     assert.match(save, /inventoryAdjustmentRows=failed\.map\(result=>result\.row\)/);
     assert.match(save, /成功的品項已從表單移除/);
 });
@@ -1860,12 +1862,13 @@ test('V2 formal purchase documents create authoritative supply lines', () => {
 
 test('V2 initial stock separates operational lot from protected cost', () => {
     assert.match(indexSource, /實際單位成本/);
-    assert.match(appSource, /sourceType:'INITIAL_STOCK'/);
-    const manualService=fs.readFileSync(path.join(__dirname,'../src/services/manual-inventory.js'),'utf8');
+    const manualService=fs.readFileSync(path.join(__dirname,'../functions/manual-stock-service.js'),'utf8');
     assert.match(manualService, /remainingQty:lot\.remainingQty/);
-    assert.match(manualService, /type==='initial'\?'INITIAL_STOCK':'MANUAL_ADJUSTMENT'/);
-    assert.match(appSource, /inventoryLotCosts/);
-    assert.match(appSource, /unitCost:Number\(row\.unitCost/);
+    assert.match(manualService, /intent\.type==='initial'\?'INITIAL_STOCK':'MANUAL_ADJUSTMENT'/);
+    assert.match(manualService, /inventoryLotCosts/);
+    assert.match(manualService, /unitCost:intent\.unitCost/);
+    assert.match(appSource, /commitManualStockBackend\('MANUAL_INVENTORY'/);
+    assert.doesNotMatch(fs.readFileSync('src/services/manual-inventory.js','utf8'),/\.runTransaction\(/);
 });
 
 test('V2 returns restore and reverse exact delivery lots', () => {
@@ -5175,7 +5178,8 @@ test('inventory actions use one adjustment entry point and returns keep their or
     assert.doesNotMatch(renderSource,/>分倉</);
     assert.doesNotMatch(renderSource,/建立補庫採購/);
     assert.match(appSource,/window\.openInventoryQuantityEditor=async function/);
-    assert.match(appSource,/const delta=target-current/);
+    assert.match(appSource,/commitManualStockBackend\('INVENTORY_COUNT'/);
+    assert.doesNotMatch(fs.readFileSync('src/services/inventory-count.js','utf8'),/\.runTransaction\(/);
     assert.match(indexSource,/id="inventorySetQuantityOverlay"/);
     assert.doesNotMatch(indexSource,/value="decrease"/);
     assert.doesNotMatch(indexSource,/value="warehouse_allocation"/);

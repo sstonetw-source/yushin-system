@@ -1059,6 +1059,18 @@ window.openInventoryAdjustment = async function(type = 'initial', item = null) {
     if (!canEditPage('inventory')) return;
     const generation=++inventoryAdjustmentGeneration;
     const editorUid=currentUser?.uid,editorRole=currentUserRole;
+    try{
+        if(manualStockPendingOperations().length){
+            const recovered=await resolveManualStockPendingOperations();
+            if(generation!==inventoryAdjustmentGeneration||editorUid!==currentUser?.uid||editorRole!==currentUserRole)return;
+            showActionFeedback(`已核對先前 ${recovered} 筆庫存作業，請先確認清單數量。`);
+            await loadInventory(true);
+        }
+    }catch(error){
+        if(generation===inventoryAdjustmentGeneration)alert('仍有尚未確認的庫存作業，已停止建立新操作。請勿重複入庫或扣庫，使用原操作 ID 核對：'+(error?.message||error));
+        return;
+    }
+    if(generation!==inventoryAdjustmentGeneration||editorUid!==currentUser?.uid||editorRole!==currentUserRole)return;
     const saveButton=document.getElementById('saveInventoryAdjustmentBatchBtn');
     if(saveButton){saveButton.disabled=false;saveButton.textContent='確認儲存';}
     const selectedType = type || 'initial';
@@ -1145,6 +1157,16 @@ function refreshInventoryQuantityEditorValue() {
 window.openInventoryQuantityEditor=async function(inventoryId){
     if(inventoryQuantitySaveInProgress)return;
     if(!canEditPage('inventory'))return;
+    try{
+        if(manualStockPendingOperations().length){
+            const recovered=await resolveManualStockPendingOperations();
+            showActionFeedback(`已核對先前 ${recovered} 筆庫存作業，請重新開啟盤點確認數量。`);
+            await loadInventory(true);
+            return;
+        }
+    }catch(error){
+        alert('仍有尚未確認的庫存作業，已停止新的盤點。請以原操作 ID 核對：'+(error?.message||error));return;
+    }
     const item=inventoryItemById(inventoryId);
     if(!item){alert('找不到這個庫存品項，請重新整理後再試。');return;}
     const productMaster=productMasterForRecord({productId:item.productId||item.productKey||'',itemCode:item.itemCode||'',brand:item.brand||''});
@@ -1258,7 +1280,7 @@ window.saveInventoryQuantity=async function(){
         showActionFeedback(result.replayed?'原盤點已完成，已確認結果。':result.delta===0?'庫存數量沒有變更。':`庫存已更新：${result.delta>0?'+':''}${result.delta}`);
     }catch(err){
         if(committedResult&&actorUid===currentUser?.uid&&actorRole===currentUserRole)alert('盤點已完成，但庫存清單更新失敗，請重新整理清單：'+(err?.message||err));
-        else if(sameEditor())alert((err.inventoryCountCommitted?'盤點已提交，但畫面更新未完成；請以原內容重試確認：':'盤點結果尚未確認，請以原內容重試，勿更改數量重送：')+(err?.message||err));
+        else if(sameEditor())alert(((err.inventoryCountCommitted||err.manualStockCommitted)?'盤點已提交，但畫面更新未完成；請重新整理清單：':'盤點結果尚未確認，請以原內容重試，勿更改數量重送：')+(err?.message||err));
     }finally{
         inventoryQuantitySaveInProgress=false;
         if(sameEditor()&&button){button.disabled=false;button.textContent='確認修改';}
@@ -1514,7 +1536,11 @@ window.saveInventoryAdjustmentBatch = async function() {
                     {actorUid,actorRole,actorName,onStockCommitted:invalidateWarehouseStockCache});
                 results.push({row,ok:true});
             }catch(e){
-                results.push({row,ok:false,error:e?.message||String(e)});
+                // The Callable and immutable receipt were already verified;
+                // a presentation-cache failure must not turn this into an
+                // apparently uncommitted row eligible for a new operation.
+                results.push(e?.manualStockCommitted?{row,ok:true,refreshError:e?.message||String(e)}:
+                    {row,ok:false,error:e?.message||String(e)});
             }
         }
         if(!isCurrent())return;
