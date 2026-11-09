@@ -10,6 +10,7 @@ const { arrayUnion, collection, deleteDoc, deleteField, doc, getDoc, getDocs, li
 const { initializeApp: initializeAdminApp, deleteApp: deleteAdminApp } = require('firebase-admin/app');
 const { getFirestore: getAdminFirestore } = require('firebase-admin/firestore');
 const { commitOrderReservation } = require('../functions/order-reservation-service');
+const { buildStockCutoverRules } = require('../tools/build-stock-cutover-rules.cjs');
 
 let env;
 let adminApp,adminDatabase;
@@ -120,6 +121,29 @@ test.before(async () => {
 test.after(async () => {
   await env.cleanup();
   if(adminApp)await deleteAdminApp(adminApp);
+});
+
+test('generated production cutover rules reject browser stock writers without changing current rules',async()=>{
+ const cutoverEnv=await initializeTestEnvironment({
+  projectId:'demo-yushin-backend-stock-cutover',
+  firestore:{rules:buildStockCutoverRules(fs.readFileSync('firestore.rules','utf8'))}
+ });
+ try{
+  await cutoverEnv.withSecurityRulesDisabled(async ctx=>{
+   const database=ctx.firestore();
+   await setDoc(doc(database,'users/admin'),{role:'admin',active:true,salesCode:'ADM'});
+   await setDoc(doc(database,'inventory/p-order'),{productKey:'p-order',onHand:5,reserved:0,incoming:0,stockPolicy:'ORDER_ONLY',safetyStock:0});
+   await setDoc(doc(database,'warehouseStocks/W1__p-order'),{productKey:'p-order',warehouseId:'W1',onHand:5,reserved:0,incoming:0});
+  });
+  const client=cutoverEnv.authenticatedContext('admin').firestore();
+  await assertFails(updateDoc(doc(client,'inventory/p-order'),{onHand:6}));
+  await assertFails(updateDoc(doc(client,'warehouseStocks/W1__p-order'),{onHand:6}));
+  await assertFails(setDoc(doc(client,'inventoryMovements/cutover-old'),{productKey:'p-order',warehouseId:'W1',type:'adjust',qty:1}));
+  await assertFails(setDoc(doc(client,'inventoryReservations/cutover-old'),{orderId:'O1',quantity:1}));
+  await assertSucceeds(updateDoc(doc(client,'inventory/p-order'),{stockPolicy:'SAFETY_STOCK',safetyStock:1}));
+ }finally{
+  await cutoverEnv.cleanup();
+ }
 });
 
 test.beforeEach(async () => {
