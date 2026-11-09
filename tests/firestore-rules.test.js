@@ -2455,6 +2455,56 @@ function holdMainRequest(uid,patch={}){
  batch.update(doc(firestore,'warehouseStocks/EXT_P'),{reserved:5,transferReserved:3});
  batch.update(doc(firestore,'inventory/P'),{reserved:8,transferReserved:3});return batch.commit();
 }
+test('stock writer cutover retires stale SDK stock transactions atomically without blocking inventory planning',async()=>{
+ await seedMainRequestStock();
+ const administrator=db('admin'),purchaser=db('buyer1'),receiver=db('wh1');
+ const gate=doc(administrator,'settings/stockWriterCutover');
+ const inventory=doc(purchaser,'inventory/P'),stock=doc(receiver,'warehouseStocks/EXT_P');
+ const checkpoint=doc(receiver,'stockTransfers/cutover-checkpoint');
+ await seed('stockTransfers/cutover-checkpoint',{status:'RECEIVED',orderId:'',qty:4,reservedQty:0,
+  autoAllocationQty:4,autoAllocatedQty:0,allocationCompleted:false});
+ await seed('inventoryReservations/old-reservation',{orderId:'OLD',itemId:'I',quantity:1});
+ await seed('inventoryLots/old-lot',{productKey:'P',warehouseId:'EXT',remainingQty:2,receivedQty:2,qty:2});
+ // Existing operations stay valid until an explicitly authorized one-way switch.
+ await assertFails(setDoc(gate,{backendOnly:'true'}));
+ await assertFails(setDoc(gate,{backendOnly:false,allowLegacyFallback:true}));
+ await assertSucceeds(setDoc(gate,{backendOnly:false}));
+ await assertSucceeds(updateDoc(inventory,{stockPolicy:'SAFETY_STOCK',safetyStock:2}));
+ await assertSucceeds(updateDoc(stock,{onHand:11}));
+ await assertSucceeds(updateDoc(checkpoint,{autoAllocatedQty:1}));
+ await assertSucceeds(updateDoc(gate,{backendOnly:true}));
+ const previousInventory=(await getDoc(inventory)).data(),previousStock=(await getDoc(stock)).data();
+ for(const uid of ['admin','buyer1','wh1']){
+  await assertFails(updateDoc(doc(db(uid),'inventory/P'),{onHand:100}));
+  await assertFails(updateDoc(doc(db(uid),'inventory/P'),{productKey:'WRONG'}));
+  await assertFails(updateDoc(doc(db(uid),'warehouseStocks/EXT_P'),{reserved:0}));
+  await assertFails(setDoc(doc(db(uid),'warehouseStocks/new-'+uid),{
+   productKey:'P',productId:'P',warehouseId:'EXT',onHand:2,reserved:0,incoming:0}));
+  await assertFails(setDoc(doc(db(uid),'inventoryMovements/new-'+uid),{productKey:'P',type:'adjust',qty:1}));
+  await assertFails(setDoc(doc(db(uid),'inventoryLots/new-'+uid),{
+   productKey:'P',warehouseId:'EXT',remainingQty:1,receivedQty:1,qty:1}));
+ }
+ await assertFails(holdMainRequest('buyer1'));
+ await assertFails(updateDoc(checkpoint,{autoAllocatedQty:2}));
+ await assertFails(updateDoc(doc(administrator,'inventoryLots/old-lot'),{remainingQty:1}));
+ await assertFails(deleteDoc(doc(administrator,'inventoryReservations/old-reservation')));
+ await assertFails(setDoc(doc(administrator,'inventoryLotCosts/forged'),{unitCost:9}));
+ await assertFails(setDoc(doc(administrator,'stockOperations/forged'),{qtyDelta:1}));
+ await assertFails(setDoc(doc(administrator,'inventory/P-new'),{
+  productKey:'P-new',productId:'P-new',onHand:0,reserved:0,incoming:0}));
+ assert.deepEqual((await getDoc(inventory)).data(),previousInventory);
+ assert.deepEqual((await getDoc(stock)).data(),previousStock);
+ assert.equal((await getDoc(doc(administrator,'stockTransferRequests/REQ'))).exists(),false);
+ // Stock policy changes remain a separately validated, non-quantity operation.
+ await assertSucceeds(updateDoc(inventory,{stockPolicy:'ORDER_ONLY',safetyStock:0}));
+ assert.equal((await getDoc(inventory)).data().onHand,previousInventory.onHand);
+ await assertFails(updateDoc(gate,{backendOnly:false}));
+ await assertFails(updateDoc(gate,{backendOnly:true,allowLegacyFallback:true}));
+ await assertFails(deleteDoc(gate));
+ // Only trusted Admin SDK writes bypass the client-side cutover gate.
+ await adminDatabase.doc('inventoryMovements/backend-only-checkpoint').set({productKey:'P',type:'adjust',qty:1});
+ assert.equal((await getDoc(doc(administrator,'inventoryMovements/backend-only-checkpoint'))).exists(),true);
+});
 test('main replenishment requests require purchasing, main destination and atomic stock holds; read and schema boundaries stay restricted',async()=>{
  await seedMainRequestStock();
  for(const uid of ['sales1','wh1'])await assertFails(holdMainRequest(uid,{createdByUid:uid}));
