@@ -179,7 +179,7 @@
           '<div class="parcel-actions">'+(complete?'<button type="button" class="btn-secondary" onclick="printWarehouseParcel('+index+',this)">列印貼紙</button><button type="button" onclick="openWarehouseParcel('+index+',this)">確認寄出</button>':
           '<button type="button" onclick="openWarehouseDeliveryPlan('+inlineJsValue(g.rows[0].order.id)+','+inlineJsValue(g.rows[0].item.itemId)+')">補收件資料</button>')+'</div></article>';
       }).join('')+transferCards+(groups.length>visibleLimit?'<button type="button" class="btn-secondary" onclick="loadMoreWarehouseParcels()">載入更多寄貨</button>':'');
-      const confirmCards=branchNotices?'<details class="parcel-branch-confirmations"><summary>逐筆確認寄出（'+(groups.length+transferRows.length)+'）</summary><div class="parcel-branch-confirmation-cards">'+individualCards+'</div></details>':individualCards;
+      const confirmCards=branchNotices?'<h3 class="parcel-branch-confirm-label">逐筆確認寄出（'+(groups.length+transferRows.length)+'）</h3>'+individualCards:individualCards;
       host.innerHTML=(branchNotices?'<div class="parcel-branch-toolbar"><strong>各分倉出貨通知</strong><button type="button" class="btn-secondary" onclick="retryInventoryWorkspace(this)">重新整理清單</button></div>':'')+
         branchNotices+taskCards(scopedTasks)+recoveryCards+confirmCards+
         (transfers?.error?'<p class="parcel-guard-note" role="alert">調撥資料讀取失敗：'+escapeHtml(transfers.error)+' <button type="button" onclick="loadMainTransferRequests(true)">重新載入</button></p>':'')+

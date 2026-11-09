@@ -57,6 +57,8 @@ test('both transfer sources appear as ordinary shipping cards with their origina
  const {c,nodes}=cardsFixture();c.renderWarehouseParcels();
  const html=nodes.warehouseParcelCards.innerHTML;
  assert.equal((html.match(/parcel-simple-card/g)||[]).length,2);
+ assert.doesNotMatch(html,/parcel-branch-confirmations/);
+ assert.match(html,/逐筆確認寄出/);
  assert.match(html,/主倉收貨/);assert.match(html,/台北市主倉地址/);
  assert.match(html,/DNA-01/);assert.match(html,/PCR-01/);
  assert.match(html,/startOrderWarehouseTransfer/);assert.match(html,/dispatchMainTransferRequest/);
