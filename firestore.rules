@@ -2087,14 +2087,14 @@ service cloud.firestore {
           ((canPurchase()) && validInventoryStockPolicy(request.resource.data))
           || (warehouse() && warehouseInventoryPlanningDefaults(request.resource.data))
         )
-        && stockWriterClientWriteEnabled()
+        && !exists(/databases/$(database)/documents/settings/stockWriterCutover)
         && nonNegativeInventory(request.resource.data)
         // Administrators can restore archived records from an existing backup.
         && (!request.resource.data.keys().hasAny(inventoryArchiveKeys())
           || (admin() && request.resource.data.get('listArchived', false) is bool))
         && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
       allow update: if inventoryUpdateWriter(id)
-        && (stockWriterClientWriteEnabled() || stockWriterAllowsPlanningOnly())
+        && (!exists(/databases/$(database)/documents/settings/stockWriterCutover) || stockWriterAllowsPlanningOnly())
         && validInventoryArchiveChange(id)
         && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
       allow delete: if false;
@@ -2152,11 +2152,11 @@ service cloud.firestore {
 
       allow get: if safeStockReader(resource == null ? {} : resource.data);
       allow list: if safeStockReader(resource.data);
-      allow create: if stockWriterClientWriteEnabled() && canReceiveInventory() && validWarehouseStock(request.resource.data)
+      allow create: if !exists(/databases/$(database)/documents/settings/stockWriterCutover) && canReceiveInventory() && validWarehouseStock(request.resource.data)
         && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
       // Receiver validation already includes recovery metadata; business updates
       // validate it in their own branch, so neither path evaluates it twice.
-      allow update: if stockWriterClientWriteEnabled()
+      allow update: if !exists(/databases/$(database)/documents/settings/stockWriterCutover)
         && ((canReceiveInventory() && validWarehouseStock(request.resource.data))
           || (businessWarehouseStockOperationalUpdate(id) && validStockRecoveryMetadata(request.resource.data)))
         && warehouseStockIdentityUnchanged()
@@ -2300,9 +2300,9 @@ service cloud.firestore {
       // A missing document contains no business data; existing documents stay owner-scoped.
       allow get: if (resource == null ? role() in ['admin','purchaser','warehouse','sales','engineer'] : operationalOrOwnedReader(resource.data));
       allow list: if operationalOrOwnedReader(resource.data);
-      allow create: if stockWriterClientWriteEnabled() && reservationCreateAllowed(id);
-      allow update: if stockWriterClientWriteEnabled() && reservationUpdateAllowed(id);
-      allow delete: if stockWriterClientWriteEnabled() && admin();
+      allow create: if !exists(/databases/$(database)/documents/settings/stockWriterCutover) && reservationCreateAllowed(id);
+      allow update: if !exists(/databases/$(database)/documents/settings/stockWriterCutover) && reservationUpdateAllowed(id);
+      allow delete: if !exists(/databases/$(database)/documents/settings/stockWriterCutover) && admin();
     }
 
     match /inventoryLots/{id} {
@@ -2572,79 +2572,6 @@ service cloud.firestore {
           && afterWh.reserved - beforeWh.get('reserved', 0) == delta.quantity;
       }
 
-      // Only one fresh warehouse movement evaluates the full company delta.
-      // All other warehouse movements must link that validated primary movement.
-      function linkedCompanyReservationProof(e, productKey, warehouseId) {
-        let path = /databases/$(database)/documents/inventoryMovements/$(e.companyMovementId);
-        let primary = getAfter(path).data;
-        let proof = primary.get('reservationStockEvidence', {});
-        return !exists(path)
-          && primary.get('productKey', '') == productKey
-          && primary.get('sourceId', '') == request.resource.data.get('sourceId', '')
-          && primary.get('warehouseId', '') != warehouseId
-          && proof.get('crossWarehouse', false) == true
-          && proof.get('movementId', '') == e.companyMovementId
-          && proof.get('companyMovementId', '') == e.companyMovementId
-          && proof.get('inventoryId', '') == e.inventoryId
-          && proof.get('reservationIds', []).size() == e.reservationIds.size()
-          && proof.get('reservationIds', []).hasAll(e.reservationIds);
-      }
-
-      // Evaluate each primary reservation snapshot once for both stock totals.
-      // A local contribution must keep its warehouse; each changed reservation's
-      // own movement witness also requires membership in this local ID set.
-      function primaryReservationDeltaAt(id, productKey, warehouseId, localIds) {
-        let path = /databases/$(database)/documents/inventoryReservations/$(id);
-        let previous = get(path);
-        let before = previous == null ? {} : previous.data;
-        let after = getAfter(path).data;
-        let oldQty = before.get('quantity', 0);
-        let qty = after.get('quantity', 0);
-        let local = id in localIds;
-        let delta = qty - oldQty;
-        return {
-          'valid': after.productKey == productKey && before.get('productKey', productKey) == productKey
-            && (!local || (qty == 0 && oldQty == 0) || (after.warehouseId == warehouseId
-              && (oldQty == 0 || before.get('warehouseId', warehouseId) == warehouseId))),
-          'company': delta, 'warehouse': local ? delta : 0
-        };
-      }
-
-      function combinedPrimaryReservationDelta(a, b, c, d, e) {
-        return {'valid': a.valid && b.valid && c.valid && d.valid && e.valid,
-          'company': a.company + b.company + c.company + d.company + e.company,
-          'warehouse': a.warehouse + b.warehouse + c.warehouse + d.warehouse + e.warehouse};
-      }
-
-      function primaryReservationStocks(e, productKey, warehouseId) {
-        let ids = e.reservationIds;
-        let localIds = e.warehouseReservationIds;
-        let zero = {'valid': true, 'company': 0, 'warehouse': 0};
-        let delta = combinedPrimaryReservationDelta(
-          primaryReservationDeltaAt(ids[0], productKey, warehouseId, localIds),
-          ids.size() > 1 ? primaryReservationDeltaAt(ids[1], productKey, warehouseId, localIds) : zero,
-          ids.size() > 2 ? primaryReservationDeltaAt(ids[2], productKey, warehouseId, localIds) : zero,
-          ids.size() > 3 ? primaryReservationDeltaAt(ids[3], productKey, warehouseId, localIds) : zero,
-          ids.size() > 4 ? primaryReservationDeltaAt(ids[4], productKey, warehouseId, localIds) : zero);
-        return operationalReservedStockMatches(/databases/$(database)/documents/inventory/$(e.inventoryId),
-            {'valid': delta.valid, 'quantity': delta.company}, productKey, '')
-          && operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId),
-            {'valid': delta.valid, 'quantity': delta.warehouse}, productKey, warehouseId);
-      }
-
-      function crossWarehouseReservationStocks(e, productKey, warehouseId) {
-        return e.get('companyMovementId', '') is string && e.get('companyMovementId', '') != ''
-          && e.warehouseReservationIds is list && e.warehouseReservationIds.size() > 0
-          && e.warehouseReservationIds.size() <= e.reservationIds.size()
-          && e.warehouseReservationIds.toSet().size() == e.warehouseReservationIds.size()
-          && e.reservationIds.hasAll(e.warehouseReservationIds)
-          && (e.companyMovementId == e.movementId
-            ? primaryReservationStocks(e, productKey, warehouseId)
-            : linkedCompanyReservationProof(e, productKey, warehouseId)
-              && operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId),
-                sameWarehouseReservationTotal(e.warehouseReservationIds, productKey, warehouseId), productKey, warehouseId));
-      }
-
       // Validate the group once on its immutable movement rather than repeating
       // the five-reservation sums on every reservation in the batch.
       function validOperationalMovementEvidence(id) {
@@ -2661,9 +2588,9 @@ service cloud.firestore {
           && e.reservationIds.toSet().size() == e.reservationIds.size()
           && e.get('crossWarehouse', false) == false
           && request.resource.data.productKey == data.productKey
-          && (e.get('crossWarehouse', false)
-            ? crossWarehouseReservationStocks(e, data.productKey, data.warehouseId)
-            : (before.get('quantity', 0) == 0 || before.get('warehouseId', data.warehouseId) == data.warehouseId)
+          // The crossWarehouse=true branch is unreachable after the explicit
+          // rejection above; avoid charging repeated rule expressions for it.
+          && ((before.get('quantity', 0) == 0 || before.get('warehouseId', data.warehouseId) == data.warehouseId)
               ? sameWarehouseReservationStocks(e, data.productKey, data.warehouseId)
               : operationalReservedStockMatches(/databases/$(database)/documents/inventory/$(e.inventoryId), operationalStockDelta(e, data.productKey, ''), data.productKey, '')
                 && operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId), operationalStockDelta(e, data.productKey, data.warehouseId), data.productKey, data.warehouseId)
@@ -2698,12 +2625,12 @@ service cloud.firestore {
 
       allow read: if canReceiveInventory()
         || (businessOwner() && owns(resource.data));
-      allow create: if stockWriterClientWriteEnabled() && inventoryMovementWriter(id)
+      allow create: if !exists(/databases/$(database)/documents/settings/stockWriterCutover) && inventoryMovementWriter(id)
         && !('unitCost' in request.resource.data)
         && !('purchaseNetAmount' in request.resource.data)
         && !('cogs' in request.resource.data);
       allow update: if false;
-      allow delete: if stockWriterClientWriteEnabled() && admin();
+      allow delete: if !exists(/databases/$(database)/documents/settings/stockWriterCutover) && admin();
     }
 
     // Immutable operational audit trail.
