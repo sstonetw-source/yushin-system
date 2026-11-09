@@ -2465,14 +2465,16 @@ test('stock writer cutover retires stale SDK stock transactions atomically witho
   autoAllocationQty:4,autoAllocatedQty:0,allocationCompleted:false});
  await seed('inventoryReservations/old-reservation',{orderId:'OLD',itemId:'I',quantity:1});
  await seed('inventoryLots/old-lot',{productKey:'P',warehouseId:'EXT',remainingQty:2,receivedQty:2,qty:2});
- // Existing operations stay valid until an explicitly authorized one-way switch.
+ // The infrastructure gate cannot be created or modified by any browser role.
  await assertFails(setDoc(gate,{backendOnly:'true'}));
  await assertFails(setDoc(gate,{backendOnly:false,allowLegacyFallback:true}));
- await assertSucceeds(setDoc(gate,{backendOnly:false}));
+ await assertFails(setDoc(gate,{backendOnly:false}));
+ await adminDatabase.doc('settings/stockWriterCutover').set({backendOnly:false});
  await assertSucceeds(updateDoc(inventory,{stockPolicy:'SAFETY_STOCK',safetyStock:2}));
  await assertSucceeds(updateDoc(stock,{onHand:11}));
  await assertSucceeds(updateDoc(checkpoint,{autoAllocatedQty:1}));
- await assertSucceeds(updateDoc(gate,{backendOnly:true}));
+ await assertFails(updateDoc(gate,{backendOnly:true}));
+ await adminDatabase.doc('settings/stockWriterCutover').set({backendOnly:true});
  const previousInventory=(await getDoc(inventory)).data(),previousStock=(await getDoc(stock)).data();
  for(const uid of ['admin','buyer1','wh1']){
   await assertFails(updateDoc(doc(db(uid),'inventory/P'),{onHand:100}));

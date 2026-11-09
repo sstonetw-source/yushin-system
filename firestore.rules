@@ -234,22 +234,14 @@ service cloud.firestore {
       ]);
     }
 
-    function validStockWriterCutoverConfig(id) {
-      return id != 'stockWriterCutover'
-        || (request.resource.data.keys().hasOnly(['backendOnly'])
-          && request.resource.data.keys().hasAll(['backendOnly'])
-          && request.resource.data.backendOnly is bool);
-    }
-
     match /settings/{id} {
       allow read: if active();
       // Approved cutover gates are one-way: a cached client or routine admin
       // edit must never reactivate a retired transaction writer.
-      allow create: if admin() && validStockWriterCutoverConfig(id);
-      allow update: if admin() && validStockWriterCutoverConfig(id)
-        && (id != 'stockWriterCutover'
-          || resource.data.get('backendOnly', false) != true
-          || request.resource.data.get('backendOnly', false) == true)
+      // Stock writer retirement is infrastructure-only. Even a signed-in
+      // administrator cannot turn the switch on/off via a browser SDK.
+      allow create: if admin() && id != 'stockWriterCutover';
+      allow update: if admin() && id != 'stockWriterCutover'
         && (id != 'receivingCutover'
           || resource.data.get('backendOnly', false) != true
           || request.resource.data.get('backendOnly', false) == true)
