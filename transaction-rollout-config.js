@@ -10,7 +10,7 @@
         && (path === '/yushin-system' || path.startsWith('/yushin-system/'));
     // The service workflow release requires Rules and Functions to be published first.
     scope.YUSHIN_PRODUCTION_SERVICE_CASE_BACKEND = orderReservationProductionSite;
-    scope.YUSHIN_PRODUCTION_QUICK_PURCHASE_CONFIG_VERSION = '20261109-cutover-3';
+    scope.YUSHIN_PRODUCTION_QUICK_PURCHASE_CONFIG_VERSION = '20261110-stock-retirement-4';
     // Authorized activation: match the deployed production backend and database retirement gates.
     // Overwrite stale global values; the caller must never inherit an unintended true gate.
     scope.YUSHIN_PRODUCTION_RECEIVING_BACKEND = orderReservationProductionSite;
@@ -20,27 +20,27 @@
     scope.YUSHIN_PRODUCTION_CUSTOMER_RETURN_LEGACY_BLOCKED = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_CUSTOMER_RETURN_REQUEST_BACKEND = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_CUSTOMER_RETURN_REQUEST_LEGACY_BLOCKED = orderReservationProductionSite;
-    // Cancelled supplier purchases are NOT activated by this code release.
-    // Backend + irreversible old-writer retirement require a separate cutover.
+    // No cancelled-purchase backend activation. Retire its browser writer now:
+    // an unavailable backend must visibly refuse this stock-changing action.
     scope.YUSHIN_PRODUCTION_CANCELLED_PURCHASE_BACKEND = false;
-    scope.YUSHIN_PRODUCTION_CANCELLED_PURCHASE_LEGACY_BLOCKED = false;
+    scope.YUSHIN_PRODUCTION_CANCELLED_PURCHASE_LEGACY_BLOCKED = orderReservationProductionSite;
     // Main-warehouse stock return has separate request/dispatch/receipt
-    // approvals. Leave every entry and legacy-retirement switch disabled until
-    // the allocation coordinator, Rules and deployed Functions are verified.
+    // approvals. No new backend route is activated by this release; formerly
+    // available browser transactions are blocked until the backend cutover.
     scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_REQUEST_BACKEND = false;
-    scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_REQUEST_LEGACY_BLOCKED = false;
+    scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_REQUEST_LEGACY_BLOCKED = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_DISPATCH_BACKEND = false;
-    scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_DISPATCH_LEGACY_BLOCKED = false;
+    scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_DISPATCH_LEGACY_BLOCKED = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_RECEIPT_BACKEND = false;
-    scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_RECEIPT_LEGACY_BLOCKED = false;
+    scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_RECEIPT_LEGACY_BLOCKED = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_ALLOCATION_BACKEND = false;
-    scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_ALLOCATION_LEGACY_BLOCKED = false;
+    scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_ALLOCATION_LEGACY_BLOCKED = orderReservationProductionSite;
     // P0 #523: registered backend only, no production switch approval.
     // The browser must never revive the retired direct stock writer.
     scope.YUSHIN_PRODUCTION_MANUAL_INVENTORY_BACKEND = false;
-    scope.YUSHIN_PRODUCTION_MANUAL_INVENTORY_LEGACY_BLOCKED = false;
+    scope.YUSHIN_PRODUCTION_MANUAL_INVENTORY_LEGACY_BLOCKED = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_INVENTORY_COUNT_BACKEND = false;
-    scope.YUSHIN_PRODUCTION_INVENTORY_COUNT_LEGACY_BLOCKED = false;
+    scope.YUSHIN_PRODUCTION_INVENTORY_COUNT_LEGACY_BLOCKED = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_DELIVERY_CONFIRMATION_BACKEND = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_DELIVERY_CONFIRMATION_LEGACY_BLOCKED = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_DELIVERY_REVERSAL_BACKEND = orderReservationProductionSite;
@@ -50,14 +50,14 @@
     scope.YUSHIN_PRODUCTION_SHIPMENT_BACKEND = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_SHIPMENT_LEGACY_BLOCKED = orderReservationProductionSite;
     // Order transfer and Custody HANDOFF still require separate production
-    // Functions, V2 source and real-role acceptance. Keep both entry and
-    // legacy cutover disabled until the explicit release is approved.
+    // Functions, V2 source and real-role acceptance. Keep the backend disabled
+    // and the old browser writer permanently blocked until approved cutover.
     scope.YUSHIN_PRODUCTION_ORDER_TRANSFER_DISPATCH_BACKEND = false;
-    scope.YUSHIN_PRODUCTION_ORDER_TRANSFER_DISPATCH_LEGACY_BLOCKED = false;
+    scope.YUSHIN_PRODUCTION_ORDER_TRANSFER_DISPATCH_LEGACY_BLOCKED = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_ORDER_TRANSFER_HANDOFF_BACKEND = false;
-    scope.YUSHIN_PRODUCTION_ORDER_TRANSFER_HANDOFF_LEGACY_BLOCKED = false;
+    scope.YUSHIN_PRODUCTION_ORDER_TRANSFER_HANDOFF_LEGACY_BLOCKED = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_ORDER_TRANSFER_RECEIVE_BACKEND = false;
-    scope.YUSHIN_PRODUCTION_ORDER_TRANSFER_RECEIVE_LEGACY_BLOCKED = false;
+    scope.YUSHIN_PRODUCTION_ORDER_TRANSFER_RECEIVE_LEGACY_BLOCKED = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_ORDER_LIFECYCLE_BACKEND = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_ORDER_LIFECYCLE_LEGACY_BLOCKED = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_FORMAL_PURCHASE = orderReservationProductionSite;

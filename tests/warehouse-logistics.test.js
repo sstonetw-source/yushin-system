@@ -67,6 +67,17 @@ function fixture({retry=false}={}){
  });
  vm.runInContext(src+'\n'+fs.readFileSync('src/services/warehouse-transfer.js','utf8'),c);return {c,docs,ref,fail:()=>{failCommit=true;},commits:()=>commits};
 }
+test('production standalone warehouse transfer refuses the legacy stock writer before any mutation',async()=>{
+ const f=fixture(),before=JSON.stringify([...f.docs]);f.c.APP_ENVIRONMENT='production';
+ await assert.rejects(f.c.commitWarehouseTransfer({id:'PROD-BLOCK',inventoryId:'P',fromWarehouseId:'MAIN',toWarehouseId:'EXT',qty:3}),/尚無正式後端/);
+ assert.equal(f.commits(),0);assert.equal(JSON.stringify([...f.docs]),before);
+});
+test('production standalone receipt cannot apply an old browser transfer',async()=>{
+ const f=fixture();await f.c.commitWarehouseTransfer({id:'LEGACY-RECEIPT',inventoryId:'P',fromWarehouseId:'MAIN',toWarehouseId:'EXT',qty:3});
+ const before=JSON.stringify([...f.docs]),commits=f.commits();f.c.APP_ENVIRONMENT='production';
+ await assert.rejects(f.c.commitWarehouseTransferReceipt('LEGACY-RECEIPT'),/收貨尚無正式後端/);
+ assert.equal(f.commits(),commits);assert.equal(JSON.stringify([...f.docs]),before);
+});
 test('free transfer receipt persists pending allocation and retries without receiving stock or lots twice',async()=>{
  const f=fixture();const args={id:'FREE-RETRY',inventoryId:'P',fromWarehouseId:'MAIN',toWarehouseId:'EXT',qty:3};
  await f.c.commitWarehouseTransfer(args);
