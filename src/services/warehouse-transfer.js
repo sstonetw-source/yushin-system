@@ -41,8 +41,12 @@ async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toW
   }
   if(requestId&&typeof pendingMainTransferOperation==='function'&&pendingMainTransferOperation(requestId))
     throw Error('原主倉需求結果尚未確認，請先確認原操作再寄出。');
-  if(requestId&&typeof mainTransferPhysicalRequired==='function'&&mainTransferPhysicalRequired('DISPATCH',id,requestId))
+  // A main-warehouse request must never dispatch through the browser writer,
+  // even while its production backend switch is deliberately still disabled.
+  if(requestId){
+    if(typeof commitMainTransferPhysicalBackend!=='function')throw Error('主倉實貨調撥後端尚未載入，禁止舊交易寄出。');
     return commitMainTransferPhysicalBackend('DISPATCH',id,{id,requestId});
+  }
   if(!canReceiveInventoryCapability()||!canAccessPage('inventory'))throw Error('無調撥權限。');
   if(!id||!Number.isFinite(qty)||qty<=0)throw Error('調撥資料不正確。');
   const actorUid=currentUser.uid,actorRole=currentUserRole,now=new Date().toISOString(),who=deliveryActor();let saved;
@@ -150,6 +154,16 @@ async function commitWarehouseTransferReceipt(id,{onStockCommitted=null}={}){
   }
   if(typeof mainTransferPhysicalRequired==='function'&&mainTransferPhysicalRequired('RECEIVE',id))
     return commitMainTransferPhysicalBackend('RECEIVE',id);
+  // Older browsers can retain a main-return receipt while the release flag
+  // is off. Resolve its existing identity before any legacy stock mutation.
+  const receiptActorUid=currentUser?.uid,receiptActorRole=currentUserRole;
+  const existing=await db.collection('stockTransfers').doc(id).get({source:'server'});
+  if(currentUser?.uid!==receiptActorUid||currentUserRole!==receiptActorRole)
+    throw Error('核對主倉調回期間登入身分已變更。');
+  if(existing.exists&&existing.data().requestId){
+    if(typeof commitMainTransferPhysicalBackend!=='function')throw Error('主倉實貨調撥後端尚未載入，禁止舊交易收貨。');
+    return commitMainTransferPhysicalBackend('RECEIVE',id);
+  }
   if(!canReceiveInventoryCapability()||!canAccessPage('inventory'))throw Error('無調撥收貨權限。');let saved;
   const actorUid=currentUser.uid,actorRole=currentUserRole,actor=deliveryActor(),now=new Date().toISOString();
   const assertActor=()=>{if(actorUid!==currentUser?.uid||actorRole!==currentUserRole)throw Error('登入身分已變更，請重新開啟調撥收貨。');};

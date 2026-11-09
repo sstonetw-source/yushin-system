@@ -174,15 +174,16 @@ test('warehouse transfer dispatch and receipt are owned by one service, not the 
  assert.match(service,/YushinFulfillment\.deliveryQuantities\(item\)/);
  assert.match(ui,/handoff:true,expectedWarehouseId:row.warehouseId,expectedPlan:savedRowPlan\(row\)/);
 });
-test('main transfer request UI delegates writes and both stock hold transitions use the same core',()=>{
+test('main transfer request UI delegates stock hold and release exclusively to trusted backend',()=>{
  const ui=read('modules/main-warehouse-transfers.js');
  assert.doesNotMatch(ui,/runRoleTransaction|root\.createMainTransferRequest\s*=/);
  assert.match(ui,/await cancelMainTransferRequestRecord\(id\)/);
  const service=read('src/services/main-transfer-request.js');
  assert.match(service,/async function createMainTransferRequest\(/);
  assert.match(service,/async function cancelMainTransferRequestRecord\(/);
- assert.equal((service.match(/YushinReservation\.planMainTransferHold\(/g)||[]).length,2);
- assert.doesNotMatch(service,/document\.|showActionFeedback|confirm\(/);
+ assert.match(service,/commitMainTransferRequestBackend\(id,'CREATE'/);
+ assert.match(service,/commitMainTransferRequestBackend\(id,'CANCEL'/);
+ assert.doesNotMatch(service,/runRoleTransaction|\.collection\(|YushinReservation|document\.|showActionFeedback|confirm\(/);
 });
 test('automatic and manual self-orders share one supplier commitment transaction, with no UI writes',()=>{
  const ui=read('src/features/orders/order-workspace.js');

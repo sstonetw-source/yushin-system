@@ -22492,8 +22492,12 @@ async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toW
   }
   if(requestId&&typeof pendingMainTransferOperation==='function'&&pendingMainTransferOperation(requestId))
     throw Error('原主倉需求結果尚未確認，請先確認原操作再寄出。');
-  if(requestId&&typeof mainTransferPhysicalRequired==='function'&&mainTransferPhysicalRequired('DISPATCH',id,requestId))
+  // A main-warehouse request must never dispatch through the browser writer,
+  // even while its production backend switch is deliberately still disabled.
+  if(requestId){
+    if(typeof commitMainTransferPhysicalBackend!=='function')throw Error('主倉實貨調撥後端尚未載入，禁止舊交易寄出。');
     return commitMainTransferPhysicalBackend('DISPATCH',id,{id,requestId});
+  }
   if(!canReceiveInventoryCapability()||!canAccessPage('inventory'))throw Error('無調撥權限。');
   if(!id||!Number.isFinite(qty)||qty<=0)throw Error('調撥資料不正確。');
   const actorUid=currentUser.uid,actorRole=currentUserRole,now=new Date().toISOString(),who=deliveryActor();let saved;
@@ -22601,6 +22605,16 @@ async function commitWarehouseTransferReceipt(id,{onStockCommitted=null}={}){
   }
   if(typeof mainTransferPhysicalRequired==='function'&&mainTransferPhysicalRequired('RECEIVE',id))
     return commitMainTransferPhysicalBackend('RECEIVE',id);
+  // Older browsers can retain a main-return receipt while the release flag
+  // is off. Resolve its existing identity before any legacy stock mutation.
+  const receiptActorUid=currentUser?.uid,receiptActorRole=currentUserRole;
+  const existing=await db.collection('stockTransfers').doc(id).get({source:'server'});
+  if(currentUser?.uid!==receiptActorUid||currentUserRole!==receiptActorRole)
+    throw Error('核對主倉調回期間登入身分已變更。');
+  if(existing.exists&&existing.data().requestId){
+    if(typeof commitMainTransferPhysicalBackend!=='function')throw Error('主倉實貨調撥後端尚未載入，禁止舊交易收貨。');
+    return commitMainTransferPhysicalBackend('RECEIVE',id);
+  }
   if(!canReceiveInventoryCapability()||!canAccessPage('inventory'))throw Error('無調撥收貨權限。');let saved;
   const actorUid=currentUser.uid,actorRole=currentUserRole,actor=deliveryActor(),now=new Date().toISOString();
   const assertActor=()=>{if(actorUid!==currentUser?.uid||actorRole!==currentUserRole)throw Error('登入身分已變更，請重新開啟調撥收貨。');};
@@ -22634,58 +22648,22 @@ async function commitWarehouseTransferReceipt(id,{onStockCommitted=null}={}){
 }
 if(typeof globalThis!=='undefined'){globalThis.commitWarehouseTransfer=commitWarehouseTransfer;globalThis.commitWarehouseTransferReceipt=commitWarehouseTransferReceipt;}
 
-// Main-warehouse replenishment requests hold free stock; dispatch/receipt are separate.
+// Main-warehouse requests reserve real stock exclusively in the trusted Callable.
+// The browser never writes stockTransferRequests, warehouseStocks or inventory.
 async function createMainTransferRequest({id,inventoryId,fromWarehouseId,qty}) {
-    if(typeof mainTransferBackendRequired==='function'&&mainTransferBackendRequired(id))
-        return commitMainTransferRequestBackend(id,'CREATE',{id,inventoryId,fromWarehouseId,toWarehouseId:defaultWarehouse()?.id||'',qty});
-    if(!canManageInventoryStockPolicy()||!canEditPage('inventory'))throw Error('只有採購或管理員可發起主倉備貨調撥。');
-    if(typeof id!=='string'||!id.trim()||id.length>128||!Number.isFinite(qty)||qty<=0||qty>1000000)throw Error('調回數量或識別碼不正確。');
-    const toWarehouseId=defaultWarehouse()?.id||'',actorUid=currentUser.uid,actorRole=currentUserRole,now=new Date().toISOString();
-    if(!toWarehouseId||!fromWarehouseId||fromWarehouseId===toWarehouseId)throw Error('請選擇分倉作為來源，目的地固定為主倉。');
-    let saved;
-    await runRoleTransaction(async tx=>{
-        const ref=db.collection('stockTransferRequests').doc(id),prior=await tx.get(ref);
-        if(prior.exists){saved=prior.data();if(saved.inventoryId!==inventoryId||saved.fromWarehouseId!==fromWarehouseId||saved.toWarehouseId!==toWarehouseId||Number(saved.qty)!==qty)throw Error('調回操作識別碼衝突。');return;}
-        const invRef=db.collection('inventory').doc(inventoryId),invSnap=await tx.get(invRef);
-        if(!invSnap.exists)throw Error('找不到庫存。');const inv=invSnap.data(),key=inv.productKey||inv.productId;
-        if(!key)throw Error('庫存缺少產品識別。');
-        const stockRef=db.collection('warehouseStocks').doc(warehouseStockDocId(fromWarehouseId,key));
-        const stockSnap=await tx.get(stockRef),source=await tx.get(db.collection('warehouses').doc(fromWarehouseId)),target=await tx.get(db.collection('warehouses').doc(toWarehouseId));
-        if(!stockSnap.exists||!source.exists||source.data().active===false||source.data().systemCustody||!target.exists||target.data().active===false||!target.data().isDefault||target.data().systemCustody)throw Error('主倉或來源分倉設定不正確。');
-        const hold=globalThis.YushinReservation.planMainTransferHold({qty,aggregateStock:inv,warehouseStock:stockSnap.data()});
-        if(actorUid!==currentUser.uid||actorRole!==currentUserRole||!canManageInventoryStockPolicy()||!canEditPage('inventory'))throw Error('登入身分已變更。');
-        saved={id,inventoryId,productKey:key,productId:inv.productId||key,itemCode:inv.itemCode||'',itemName:inv.itemName||'',brand:inv.brand||'',fromWarehouseId,toWarehouseId,fromStockId:stockRef.id,qty,status:'PENDING',createdByUid:actorUid,createdAt:now};
-        tx.set(ref,saved);
-        tx.update(stockRef,{...hold.warehouse,updatedAt:now});
-        tx.update(invRef,{...hold.aggregate,updatedAt:now});
+    if(typeof commitMainTransferRequestBackend!=='function')
+        throw Error('主倉調回後端尚未載入，禁止使用舊庫存寫入。');
+    return commitMainTransferRequestBackend(id,'CREATE',{
+        id,inventoryId,fromWarehouseId,toWarehouseId:defaultWarehouse()?.id||'',qty
     });
-    return saved;
 }
 
 async function cancelMainTransferRequestRecord(id) {
-    if(typeof pendingMainTransferDispatch==='function'&&pendingMainTransferDispatch(id))throw Error('原實貨寄出結果未確認，請先確認原寄出操作再處理需求。');
-    if(typeof mainTransferBackendRequired==='function'&&mainTransferBackendRequired(id))
-        return commitMainTransferRequestBackend(id,'CANCEL',{id});
-    if(!canManageInventoryStockPolicy()||!canEditPage('inventory'))throw Error('只有採購或管理員可取消主倉備貨需求。');
-    const actorUid=currentUser.uid,actorRole=currentUserRole,now=new Date().toISOString();
-    let saved;
-    await runRoleTransaction(async tx=>{
-        const ref=db.collection('stockTransferRequests').doc(id),snapshot=await tx.get(ref);
-        if(!snapshot.exists)throw Error('調回需求不存在。');const request=snapshot.data();
-        if(request.status==='CANCELLED'){saved=request;return;}
-        if(request.status!=='PENDING')throw Error('已寄出的調撥不能取消需求。');
-        const stockRef=db.collection('warehouseStocks').doc(request.fromStockId),invRef=db.collection('inventory').doc(request.inventoryId);
-        const stock=await tx.get(stockRef),inventory=await tx.get(invRef);
-        if(!stock.exists||!inventory.exists)throw Error('庫存不存在。');
-        const release=globalThis.YushinReservation.planMainTransferHold({qty:request.qty,release:true,aggregateStock:inventory.data(),warehouseStock:stock.data()});
-        if(actorUid!==currentUser.uid||actorRole!==currentUserRole||!canManageInventoryStockPolicy()||!canEditPage('inventory'))throw Error('登入身分已變更。');
-        const updates={status:'CANCELLED',cancelledAt:now,cancelledByUid:actorUid};
-        tx.update(ref,updates);
-        tx.update(stockRef,{...release.warehouse,updatedAt:now});
-        tx.update(invRef,{...release.aggregate,updatedAt:now});
-        saved={...request,...updates};
-    });
-    return saved;
+    if(typeof pendingMainTransferDispatch==='function'&&pendingMainTransferDispatch(id))
+        throw Error('原實貨寄出結果未確認，請先確認原寄出操作再處理需求。');
+    if(typeof commitMainTransferRequestBackend!=='function')
+        throw Error('主倉調回後端尚未載入，禁止使用舊庫存寫入。');
+    return commitMainTransferRequestBackend(id,'CANCEL',{id});
 }
 function mainTransferPendingKey(id){return 'main-transfer:'+encodeURIComponent(currentUser?.uid||'')+':'+encodeURIComponent(id);}
 function pendingMainTransferOperation(id){

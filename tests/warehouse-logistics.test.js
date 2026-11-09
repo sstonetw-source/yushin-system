@@ -47,7 +47,9 @@ function fixture({retry=false}={}){
   ['orders/O',{ownerUid:'S',salesCode:'01',salesName:'Luke',customerName:'Customer',status:'active',deliveryRecords:[],returnRecords:[],items:[{itemId:'A',productId:'P',itemCode:'001',itemName:'Product',qty:4,reservedQty:4,warehouseId:'MAIN',dispatchPreparedQty:4,deliveryPlan:{mode:'TRANSFER',warehouseId:'EXT',contact:'Wh',phone:'123',address:'台北'}}]}],
   ['inventoryReservations/O__A',{orderId:'O',itemId:'A',warehouseId:'MAIN',productKey:'P',quantity:4,status:'active'}]
  ]);
- const ref=(col,id)=>({id,path:col+'/'+id});let failCommit=false,commits=0;
+ const ref=(col,id)=>({id,path:col+'/'+id,get:async()=>({
+  exists:docs.has(col+'/'+id),data:()=>structuredClone(docs.get(col+'/'+id))
+ })});let failCommit=false,commits=0;
  const c=vm.createContext({YushinReservation:require('../modules/reservation-core'),currentUser:{uid:'buyer'},currentUserRole:'purchaser',currentUserName:'Buyer',currentUserCode:'P01',warehouseMasterCache:[{id:'MAIN',active:true},{id:'EXT',active:true}],
    canReceiveInventoryCapability:()=>true,canAccessPage:()=>true,deliveryActor:()=> 'Buyer',defaultWarehouse:()=>({id:'MAIN'}),allocateFreeReceiptStockToShortages:async()=>({affectedOrderIds:[]}),
    inventoryRefFor:i=>ref('inventory',i.productId),warehouseStockDocId:(w,p)=>w+'__'+p,
@@ -135,21 +137,6 @@ test('transfer retry cannot turn a previous order transfer into a different dest
   await assert.rejects(f.c.commitWarehouseTransfer({...args,...patch}),/識別碼衝突/);
   assert.equal(JSON.stringify([...f.docs]),before);
  }
-});
-test('one replenishment transfer ID cannot confirm a second pending request',async()=>{
- const f=mainRequestFixture(),base={inventoryId:'P',fromWarehouseId:'EXT',qty:3};
- await f.c.createMainTransferRequest({id:'REQ1',...base});
- const first={id:'SEND-ONCE',requestId:'REQ1',...base,toWarehouseId:'MAIN'};
- await f.c.commitWarehouseTransfer(first);
- await f.c.createMainTransferRequest({id:'REQ2',...base});
- const before=JSON.stringify([...f.docs]);
- for(const patch of [{requestId:'REQ2'},{requestId:''}]){
-  await assert.rejects(f.c.commitWarehouseTransfer({...first,...patch}),/識別碼衝突/);
-  assert.equal(JSON.stringify([...f.docs]),before);
-  assert.equal(f.docs.get('stockTransferRequests/REQ2').status,'PENDING');
- }
- await f.c.commitWarehouseTransfer(first);
- assert.equal(JSON.stringify([...f.docs]),before);
 });
 test('free transfer is atomic, retains company total and lot identity, and hides transit stock from availability until received',async()=>{
  const f=fixture();await f.c.commitWarehouseTransfer({id:'T',inventoryId:'P',fromWarehouseId:'MAIN',toWarehouseId:'EXT',qty:3});
@@ -337,84 +324,6 @@ test('branch-to-main transfer preserves final pickup plan through receipt and al
 test('partial transfer batch preflight blocks all mutations before a customer shipment can be committed',async()=>{
  const f=batchUiFixture();f.list[1].item.qty=5;await f.c.openWarehouseShippingBatch();await f.c.confirmWarehouseShippingBatch(f.node('confirm'));
  assert.equal(f.calls.length,0);assert.ok(f.feedback.some(([message])=>/全部到貨/.test(message)));
-});
-function mainRequestFixture(options={}){
- const f=fixture(options);f.docs.get('warehouses/MAIN').isDefault=true;
- f.docs.set('warehouseStocks/EXT__P',{productKey:'P',warehouseId:'EXT',onHand:6,reserved:0,incoming:0});
- f.docs.set('inventoryLots/EXTLOT',{productKey:'P',warehouseId:'EXT',remainingQty:6,qty:6,lotNo:'EXTLOT',expiryDate:'2027-01-01'});
- f.docs.get('inventory/P').onHand=16;
- Object.assign(f.c,{canManageInventoryStockPolicy:()=>['admin','purchaser'].includes(f.c.currentUserRole),canEditPage:()=>true,confirm:()=>true,beginActionButton:()=>({}),endActionButton:()=>{},showActionFeedback:()=>{},loadInventory:async()=>{}});
- f.c.YushinReservation=require('../modules/reservation-core');
- vm.runInContext(fs.readFileSync('src/services/main-transfer-request.js','utf8'),f.c);
- vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'../modules/main-warehouse-transfers.js'),'utf8'),f.c);
- f.c.loadMainTransferRequests=async()=>{};f.c.loadWarehouseTransferQueue=async()=>{};
- return f;
-}
-test('main replenishment reserves free branch stock once; dispatch and receipt preserve company quantity without a customer reservation',async()=>{
- const f=mainRequestFixture(),args={id:'REQ',inventoryId:'P',fromWarehouseId:'EXT',qty:3};
- await f.c.createMainTransferRequest(args);await f.c.createMainTransferRequest(args);
- assert.equal(f.docs.get('warehouseStocks/EXT__P').onHand,6);assert.equal(f.docs.get('warehouseStocks/EXT__P').reserved,3);
- assert.equal(f.docs.get('inventory/P').reserved,7);assert.equal(f.docs.get('inventoryLots/EXTLOT').remainingQty,6);
- assert.equal(f.docs.get('stockTransferRequests/REQ').status,'PENDING');assert.equal(f.docs.has('stockTransfers/SEND'),false);
- await assert.rejects(f.c.createMainTransferRequest({...args,id:'OVER',qty:4}),/不足/);
- await f.c.commitWarehouseTransfer({id:'SEND',requestId:'REQ',inventoryId:'P',fromWarehouseId:'EXT',toWarehouseId:'MAIN',qty:3});
- await f.c.commitWarehouseTransfer({id:'SEND',requestId:'REQ',inventoryId:'P',fromWarehouseId:'EXT',toWarehouseId:'MAIN',qty:3});
- assert.equal(f.docs.get('stockTransferRequests/REQ').status,'SHIPPED');assert.equal(f.docs.get('warehouseStocks/EXT__P').onHand,3);
- assert.equal(f.docs.get('warehouseStocks/EXT__P').reserved,0);assert.equal(f.docs.get('inventory/P').reserved,4);
- assert.equal(f.docs.get('inventory/P').transferReserved,0);assert.equal(inventory.normalizeStock(f.docs.get('inventory/P')).available,9);
- await assert.rejects(f.c.commitWarehouseTransfer({id:'OTHER',requestId:'REQ',inventoryId:'P',fromWarehouseId:'EXT',toWarehouseId:'MAIN',qty:3}),/已變更/);
- await f.c.commitWarehouseTransferReceipt('SEND');await f.c.commitWarehouseTransferReceipt('SEND');
- assert.equal(f.docs.get('warehouseStocks/MAIN__P').onHand,13);assert.equal(f.docs.get('warehouseStocks/MAIN__P').reserved,4);
- assert.equal(f.docs.get('inventory/P').onHand,16);assert.equal(inventory.normalizeStock(f.docs.get('inventory/P')).available,12);
- assert.equal(f.docs.get('inventoryReservations/O__A').quantity,4);assert.equal(f.docs.get('orders/O').items[0].warehouseId,'MAIN');
-});
-test('cancelling a pending replenishment releases its hold once, preserves order stock and rejects warehouse request creation',async()=>{
- const f=mainRequestFixture();await f.c.createMainTransferRequest({id:'REQ',inventoryId:'P',fromWarehouseId:'EXT',qty:2});
- await f.c.cancelMainTransferRequest('REQ',{});await f.c.cancelMainTransferRequest('REQ',{});
- assert.equal(f.docs.get('stockTransferRequests/REQ').status,'CANCELLED');assert.equal(f.docs.get('warehouseStocks/EXT__P').reserved,0);
- assert.equal(f.docs.get('inventory/P').reserved,4);assert.equal(f.docs.get('inventory/P').transferReserved,0);
- await assert.rejects(f.c.commitWarehouseTransfer({id:'SEND',requestId:'REQ',inventoryId:'P',fromWarehouseId:'EXT',toWarehouseId:'MAIN',qty:2}),/已變更/);
- f.c.currentUserRole='warehouse';await assert.rejects(f.c.createMainTransferRequest({id:'BAD',inventoryId:'P',fromWarehouseId:'EXT',qty:1}),/採購/);
-});
-test('main replenishment cannot reserve company free stock already in transit even when the branch appears sufficient',async()=>{
- const f=mainRequestFixture();f.docs.get('inventory/P').transferFreeInTransit=10;
- const before=structuredClone([...f.docs]);
- await assert.rejects(f.c.createMainTransferRequest({id:'OVER',inventoryId:'P',fromWarehouseId:'EXT',qty:3}),/可用庫存不足/);
- assert.deepEqual([...f.docs],before);
-});
-test('main request service retries reserve and release once; cancelled request IDs never reopen',async()=>{
- const f=mainRequestFixture({retry:true}),args={id:'REQ',inventoryId:'P',fromWarehouseId:'EXT',qty:2};
- await f.c.createMainTransferRequest(args);await f.c.createMainTransferRequest(args);
- assert.equal(f.docs.get('inventory/P').reserved,6);
- await f.c.cancelMainTransferRequestRecord('REQ');await f.c.cancelMainTransferRequestRecord('REQ');
- const replay=await f.c.createMainTransferRequest(args);
- assert.equal(replay.status,'CANCELLED');assert.equal(f.docs.get('inventory/P').reserved,4);
- assert.equal(f.docs.get('warehouseStocks/EXT__P').transferReserved,0);
-});
-test('inconsistent cancellation or a failed commit leaves both stock holds and request status unchanged',async()=>{
- for(const kind of ['short-hold','commit']){
-  const f=mainRequestFixture();await f.c.createMainTransferRequest({id:'REQ',inventoryId:'P',fromWarehouseId:'EXT',qty:2});
-  if(kind==='short-hold')f.docs.get('warehouseStocks/EXT__P').transferReserved=1;else f.fail();
-  const before=structuredClone([...f.docs]);
-  await assert.rejects(f.c.cancelMainTransferRequestRecord('REQ'));
-  assert.deepEqual([...f.docs],before);assert.equal(f.docs.get('stockTransferRequests/REQ').status,'PENDING');
- }
-});
-test('shipped requests and non-purchasing roles cannot release main replenishment holds',async()=>{
- const f=mainRequestFixture();await f.c.createMainTransferRequest({id:'REQ',inventoryId:'P',fromWarehouseId:'EXT',qty:2});
- await f.c.commitWarehouseTransfer({id:'SEND',requestId:'REQ',inventoryId:'P',fromWarehouseId:'EXT',toWarehouseId:'MAIN',qty:2});
- const before=JSON.stringify([...f.docs]);
- await assert.rejects(f.c.cancelMainTransferRequestRecord('REQ'),/已寄出/);
- f.c.currentUserRole='warehouse';await assert.rejects(f.c.cancelMainTransferRequestRecord('REQ'),/採購/);
- assert.equal(JSON.stringify([...f.docs]),before);
-});
-test('cancelled request stays successfully cancelled when refreshing the UI fails',async()=>{
- const f=mainRequestFixture(),messages=[];await f.c.createMainTransferRequest({id:'REQ',inventoryId:'P',fromWarehouseId:'EXT',qty:2});
- f.c.loadMainTransferRequests=async()=>{throw Error('offline');};f.c.showActionFeedback=message=>messages.push(message);
- await f.c.cancelMainTransferRequest('REQ',{});
- assert.equal(f.docs.get('stockTransferRequests/REQ').status,'CANCELLED');
- assert.equal(f.docs.get('inventory/P').reserved,4);
- assert.match(messages[0],/已取消.*清單更新失敗/);assert.doesNotMatch(messages[0],/取消未完成/);
 });
 test('only explicit main pickup generates an order return-to-main requirement; recipient warehouse hints and missing mode do not reroute shipments',()=>{
  const warehouses=[{id:'MAIN'},{id:'EXT'}],helpers={status:()=> 'normal',incomplete:()=>false,items:o=>o.items,dispatch:(_o,i)=>({shippable:i.qty})};
