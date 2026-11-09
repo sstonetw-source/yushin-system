@@ -1,10 +1,10 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
-function fixture(){
+function fixture(production=false){
  const storage=new Map(),calls=[];let request,lose=false,after=()=>{},bad=false;
  const input={id:'request_123456789',inventoryId:'P',fromWarehouseId:'A',qty:2};
  const open=()=>{
-  const options={projectId:'preview-20135'},auth={app:{options},currentUser:{uid:'U'}};
+  const options={projectId:production?'yu-shing-company':'preview-20135'},auth={app:{options},currentUser:{uid:'U'}};
   const functions={app:{options},useEmulator:()=>{throw Error('Preview emulator');},httpsCallable:name=>async p=>{
    calls.push({name,p:structuredClone(p)});const action=name==='createV2MainTransferRequest'?'CREATE':'CANCEL';
    if(action==='CREATE')request??={...p,status:'PENDING',createdByUid:'U',createdByRole:'purchaser',requestIntentHash:'hash'};
@@ -12,10 +12,13 @@ function fixture(){
    if(lose){lose=false;throw Error('reply lost');}after(c);
    return {data:{status:'already-applied',action,id:p.id,operationId:bad?'wrong':action==='CREATE'?p.id:p.operationId,actorUid:'U',actorRole:'purchaser'}};
   }};
-  const c=vm.createContext({APP_ENVIRONMENT:'preview',YUSHIN_PREVIEW_MAIN_TRANSFER_REQUEST:true,currentUser:{uid:'U'},currentUserRole:'purchaser',location:{hostname:'preview-20135.web.app'},
-   firebase:{auth:()=>auth,functions:()=>{},app:()=>({options,functions:()=>functions})},db:{app:{options:{projectId:'preview-20135'}},collection:()=>({doc:()=>({get:async()=>({exists:!!request,data:()=>structuredClone(request)})})})},
+  const c=vm.createContext({APP_ENVIRONMENT:production?'production':'preview',YUSHIN_PREVIEW_MAIN_TRANSFER_REQUEST:!production,
+   YUSHIN_PRODUCTION_MAIN_TRANSFER_REQUEST_BACKEND:production,YUSHIN_PRODUCTION_MAIN_TRANSFER_REQUEST_LEGACY_BLOCKED:production,
+   currentUser:{uid:'U'},currentUserRole:'purchaser',location:production?{hostname:'sstonetw-source.github.io',origin:'https://sstonetw-source.github.io',pathname:'/yushin-system/'}:{hostname:'preview-20135.web.app'},
+   firebase:{auth:()=>auth,functions:()=>{},app:()=>({options,functions:()=>functions})},db:{app:{options:{projectId:options.projectId}},collection:()=>({doc:()=>({get:async()=>({exists:!!request,data:()=>structuredClone(request)})})})},
    canManageInventoryStockPolicy:()=>true,canEditPage:()=>true,defaultWarehouse:()=>({id:'MAIN'}),lifecycleRecordId:()=> 'cancel_123456789',
    sessionStorage:{get length(){return storage.size;},key:i=>[...storage.keys()][i],getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)}});
+  if(production)vm.runInContext(fs.readFileSync('src/infrastructure/production-transaction.js','utf8'),c);
   vm.runInContext(fs.readFileSync('src/services/main-transfer-request-transport.js','utf8'),c);vm.runInContext(fs.readFileSync('src/services/main-transfer-request.js','utf8'),c);return c;
  };
  return {input,storage,calls,open,setLose:v=>lose=v,setAfter:f=>after=f,setBad:v=>bad=v};
@@ -57,4 +60,22 @@ test('Functions SDK loader cannot submit a stale form under a changed account',a
  const f=fixture(),c=f.open();c.ensureReservationFunctionsCompat=async()=>{c.currentUser={uid:'other'};};
  await assert.rejects(c.createMainTransferRequest(f.input),/載入後端期間/);
  assert.equal(f.calls.length,0);assert.equal(f.storage.size,0);
+});
+test('production main transfer request uses the trusted callable and resumes the same intent without browser stock writes',async()=>{
+ const f=fixture(true),c=f.open();f.setLose(true);
+ await assert.rejects(c.createMainTransferRequest(f.input),/reply lost/);assert.equal(f.storage.size,1);
+ const reloaded=f.open();await reloaded.commitMainTransferRequestBackend(f.input.id);
+ assert.deepEqual(f.calls[0],f.calls[1]);assert.equal(f.storage.size,0);
+ assert.equal(reloaded.mainTransferBackendRequired(f.input.id),true);
+});
+test('production main transfer request fails closed on disabled switch, changed location or backend project',async()=>{
+ for(const mode of ['switch','legacy-block','origin','project']){
+  const f=fixture(true),c=f.open();
+  if(mode==='switch')c.YUSHIN_PRODUCTION_MAIN_TRANSFER_REQUEST_BACKEND=false;
+  if(mode==='legacy-block')c.YUSHIN_PRODUCTION_MAIN_TRANSFER_REQUEST_LEGACY_BLOCKED=false;
+  if(mode==='origin')c.location.origin='https://another.example';
+  if(mode==='project')c.db.app.options.projectId='preview-20135';
+  await assert.rejects(c.createMainTransferRequest(f.input));
+  assert.equal(f.calls.length,0);assert.equal(f.storage.size,0);
+ }
 });

@@ -611,7 +611,8 @@ function productionTransactionBackendRequired(kind){
 }
 function productionTransactionBackendEnabled(kind){
  if(!['DISPATCH','SHIPMENT','ORDER_LIFECYCLE','DELIVERY_CONFIRMATION','DELIVERY_REVERSAL','CUSTOMER_RETURN','CUSTOMER_RETURN_REQUEST',
-  'ORDER_TRANSFER_DISPATCH','ORDER_TRANSFER_HANDOFF','ORDER_TRANSFER_RECEIVE','CANCELLED_PURCHASE'].includes(kind)||!productionTransactionBackendRequired(kind)
+  'ORDER_TRANSFER_DISPATCH','ORDER_TRANSFER_HANDOFF','ORDER_TRANSFER_RECEIVE','CANCELLED_PURCHASE',
+  'MAIN_TRANSFER_REQUEST','MAIN_TRANSFER_DISPATCH','MAIN_TRANSFER_RECEIPT'].includes(kind)||!productionTransactionBackendRequired(kind)
   ||globalThis['YUSHIN_PRODUCTION_'+kind+'_BACKEND']!==true
   ||globalThis['YUSHIN_PRODUCTION_'+kind+'_LEGACY_BLOCKED']!==true)return false;
  const path=String(globalThis.location?.pathname||'');
@@ -22691,25 +22692,34 @@ function pendingMainTransferOperation(id){
  const raw=sessionStorage.getItem(mainTransferPendingKey(id));if(raw===null)return null;
  try{const p=JSON.parse(raw);
   if(p.uid!==currentUser?.uid||p.role!==currentUserRole||p.payload?.id!==id
-   ||!['CREATE','CANCEL'].includes(p.action)||!['demo-yushin','preview-20135'].includes(p.project)
+   ||!['CREATE','CANCEL'].includes(p.action)||!['demo-yushin','preview-20135','yu-shing-company'].includes(p.project)
    ||(p.action==='CANCEL'&&!/^[a-zA-Z0-9_-]{12,96}$/.test(p.payload.operationId)))throw Error('invalid');
   return p;
  }catch(_){throw Error('前次主倉調撥需求結果未確認，請保留暫存並使用原帳號與角色。');}
 }
 function mainTransferBackendRequired(id){
  return (typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview')||globalThis.YUSHIN_MAIN_TRANSFER_REQUEST_EMULATOR===true
+  ||(typeof productionTransactionBackendRequired==='function'&&productionTransactionBackendRequired('MAIN_TRANSFER_REQUEST'))
   ||sessionStorage.getItem(mainTransferPendingKey(id))!==null;
 }
 // Shared SDK/session boundary for main-demand and physical-transfer operations.
-function mainTransferBackendContext({emulatorFlag,previewFlag,roles,authorized}){
- const emulator=globalThis[emulatorFlag]===true,project=emulator?'demo-yushin':'preview-20135';
+function mainTransferBackendContext({emulatorFlag,previewFlag,productionKind,roles,authorized}){
+ const emulator=globalThis[emulatorFlag]===true;
+ const production=typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled(productionKind);
+ const required=typeof productionTransactionBackendRequired==='function'&&productionTransactionBackendRequired(productionKind);
+ const project=emulator?'demo-yushin':production?'yu-shing-company':'preview-20135';
  if(typeof firebase==='undefined'||!firebase.auth||!firebase.functions)throw Error('調撥後端尚未準備完成，禁止回退舊交易。');
  const auth=firebase.auth(),functions=firebase.app().functions('asia-east1'),uid=currentUser?.uid,role=currentUserRole;
  const local=h=>h==='localhost'||h==='127.0.0.1';
  const check=()=>{
   const preview=typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'&&globalThis[previewFlag]===true;
-  if((!emulator&&!preview)||emulator!==(globalThis[emulatorFlag]===true)
-   ||(emulator?!local(globalThis.location?.hostname):!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(globalThis.location?.hostname))
+  if((!emulator&&!preview&&!production)||(required&&!production&&!emulator&&!preview)
+   ||emulator!==(globalThis[emulatorFlag]===true)
+   ||(production&&!(typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled(productionKind)))
+   ||(emulator?!local(globalThis.location?.hostname):production?
+    !(globalThis.location?.origin==='https://sstonetw-source.github.io'
+     &&(globalThis.location?.pathname==='/yushin-system'||String(globalThis.location?.pathname||'').startsWith('/yushin-system/'))):
+    !['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(globalThis.location?.hostname))
    ||firebase.app().options?.projectId!==project||auth.app?.options?.projectId!==project
    ||functions.app?.options?.projectId!==project||db.app?.options?.projectId!==project
    ||(emulator?(!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099):!!auth.emulatorConfig))
@@ -22721,6 +22731,7 @@ function mainTransferBackendContext({emulatorFlag,previewFlag,roles,authorized})
 }
 function mainTransferRequestTransport(){
  return mainTransferBackendContext({emulatorFlag:'YUSHIN_MAIN_TRANSFER_REQUEST_EMULATOR',previewFlag:'YUSHIN_PREVIEW_MAIN_TRANSFER_REQUEST',
+  productionKind:'MAIN_TRANSFER_REQUEST',
   roles:['admin','purchaser'],authorized:()=>canManageInventoryStockPolicy()&&canEditPage('inventory')});
 }
 async function commitMainTransferRequestBackend(id,action,input){
@@ -22775,7 +22786,7 @@ function pendingMainTransferPhysical(action,id){
  const raw=sessionStorage.getItem(mainTransferPhysicalKey(action,id));if(raw===null)return null;
  try{const p=JSON.parse(raw);
   if(!['DISPATCH','RECEIVE'].includes(action)||p.uid!==currentUser?.uid||p.role!==currentUserRole||p.action!==action||p.payload?.id!==id
-   ||!['preview-20135','demo-yushin'].includes(p.project)||Object.keys(p.payload).sort().join(',')!==(action==='DISPATCH'?'id,requestId':'id,operationId')
+   ||!['preview-20135','demo-yushin','yu-shing-company'].includes(p.project)||Object.keys(p.payload).sort().join(',')!==(action==='DISPATCH'?'id,requestId':'id,operationId')
    ||typeof id!=='string'||!id||id.length>96||id!==id.trim()||id.includes('/')
    ||(action==='DISPATCH'?(typeof p.payload.requestId!=='string'||!p.payload.requestId||p.payload.requestId.includes('/')):!/^[A-Za-z0-9_-]{12,96}$/.test(p.payload.operationId)))throw Error('invalid');
   return p;
@@ -22802,6 +22813,7 @@ function pendingMainTransferDispatch(requestId){
 function mainTransferPhysicalRequired(action,id,requestId=''){
  const flag=action==='DISPATCH'?'YUSHIN_MAIN_TRANSFER_DISPATCH_EMULATOR':'YUSHIN_MAIN_TRANSFER_RECEIPT_EMULATOR';
  return (typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview')||globalThis[flag]===true
+  ||(typeof productionTransactionBackendRequired==='function'&&productionTransactionBackendRequired('MAIN_TRANSFER_'+(action==='DISPATCH'?'DISPATCH':'RECEIPT')))
   ||sessionStorage.getItem(mainTransferPhysicalKey(action,id))!==null
   ||(action==='DISPATCH'&&!!pendingMainTransferDispatch(requestId));
 }
@@ -22820,6 +22832,7 @@ async function submitMainTransferPhysicalBackend(action,id,input){
  if(!['DISPATCH','RECEIVE'].includes(action))throw Error('調撥動作不正確。');
  const suffix=action==='DISPATCH'?'DISPATCH':'RECEIPT';
  const {uid,role,project,functions,emulator,check}=mainTransferBackendContext({emulatorFlag:'YUSHIN_MAIN_TRANSFER_'+suffix+'_EMULATOR',previewFlag:'YUSHIN_PREVIEW_MAIN_TRANSFER_'+suffix,
+  productionKind:'MAIN_TRANSFER_'+suffix,
   roles:['admin','purchaser','warehouse'],authorized:()=>canReceiveInventoryCapability()&&canAccessPage('inventory')});
  if(action==='DISPATCH'&&input){const original=pendingMainTransferDispatch(input.requestId);if(original&&original.id!==id)throw Error('此需求已有未確認寄出，必須沿用原操作識別碼。');}
  if(action==='RECEIVE'&&pendingMainTransferPhysical('DISPATCH',id))throw Error('原寄出結果尚未確認，請先確認原寄出操作。');

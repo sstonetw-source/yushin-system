@@ -10,7 +10,7 @@
         && (path === '/yushin-system' || path.startsWith('/yushin-system/'));
     // The service workflow release requires Rules and Functions to be published first.
     scope.YUSHIN_PRODUCTION_SERVICE_CASE_BACKEND = orderReservationProductionSite;
-    scope.YUSHIN_PRODUCTION_QUICK_PURCHASE_CONFIG_VERSION = '20261109-cutover-1';
+    scope.YUSHIN_PRODUCTION_QUICK_PURCHASE_CONFIG_VERSION = '20261109-cutover-2';
     // Authorized activation: match the deployed production backend and database retirement gates.
     // Overwrite stale global values; the caller must never inherit an unintended true gate.
     scope.YUSHIN_PRODUCTION_RECEIVING_BACKEND = orderReservationProductionSite;
@@ -24,6 +24,15 @@
     // Backend + irreversible old-writer retirement require a separate cutover.
     scope.YUSHIN_PRODUCTION_CANCELLED_PURCHASE_BACKEND = false;
     scope.YUSHIN_PRODUCTION_CANCELLED_PURCHASE_LEGACY_BLOCKED = false;
+    // Main-warehouse stock return has separate request/dispatch/receipt
+    // approvals. Leave every entry and legacy-retirement switch disabled until
+    // the allocation coordinator, Rules and deployed Functions are verified.
+    scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_REQUEST_BACKEND = false;
+    scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_REQUEST_LEGACY_BLOCKED = false;
+    scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_DISPATCH_BACKEND = false;
+    scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_DISPATCH_LEGACY_BLOCKED = false;
+    scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_RECEIPT_BACKEND = false;
+    scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_RECEIPT_LEGACY_BLOCKED = false;
     scope.YUSHIN_PRODUCTION_DELIVERY_CONFIRMATION_BACKEND = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_DELIVERY_CONFIRMATION_LEGACY_BLOCKED = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_DELIVERY_REVERSAL_BACKEND = orderReservationProductionSite;

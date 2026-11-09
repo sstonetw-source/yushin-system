@@ -1,11 +1,13 @@
 'use strict';
 const {createHash}=require('node:crypto');
 const {projectIdFromEnvironment}=require('./grouped-reservation-gate');
+const {allowProductionTransaction}=require('./production-transaction-gate');
 const {planMainTransferHold}=require('./shared/reservation-core');
 function fault(message,code='failed-precondition'){const e=new Error(message);e.code=code;throw e;}
 function id(v){if(typeof v!=='string'||!v||v!==v.trim()||v.length>160||v.includes('/'))fault('調撥識別碼不正確','invalid-argument');return v;}
 function mainTransferRequestProject(env=process.env){
  const p=projectIdFromEnvironment(env),local=v=>typeof v==='string'&&/^(localhost|127\.0\.0\.1):[0-9]+$/.test(v);
+ if(p==='yu-shing-company'&&allowProductionTransaction('MAIN_TRANSFER_REQUEST',env))return p;
  if(p==='preview-20135'&&env.ENABLE_PREVIEW_MAIN_TRANSFER_REQUEST==='true'
   &&!env.FUNCTIONS_EMULATOR&&!env.FIRESTORE_EMULATOR_HOST&&!env.FIREBASE_AUTH_EMULATOR_HOST)return p;
  if(p==='demo-yushin'&&env.ENABLE_MAIN_TRANSFER_REQUEST_EMULATOR==='true'&&env.FUNCTIONS_EMULATOR==='true'

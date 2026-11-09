@@ -77,3 +77,31 @@ test('cancelled supplier purchase production UI is default-off until separate ba
  assert.equal(scope.YUSHIN_PRODUCTION_CANCELLED_PURCHASE_LEGACY_BLOCKED,false);
  assert.equal(allowProductionTransaction('CANCELLED_PURCHASE',{GCLOUD_PROJECT:'yu-shing-company'}),false);
 });
+test('main transfer request, dispatch and receipt have independent default-off server and browser gates',()=>{
+ const fs=require('node:fs'),vm=require('node:vm');
+ const source=fs.readFileSync('src/infrastructure/production-transaction.js','utf8');
+ const kinds=['MAIN_TRANSFER_REQUEST','MAIN_TRANSFER_DISPATCH','MAIN_TRANSFER_RECEIPT'];
+ const scope={APP_ENVIRONMENT:'production',location:{origin:'https://sstonetw-source.github.io',pathname:'/yushin-system/'}};
+ for(const kind of kinds){scope['YUSHIN_PRODUCTION_'+kind+'_BACKEND']=true;scope['YUSHIN_PRODUCTION_'+kind+'_LEGACY_BLOCKED']=true;}
+ vm.runInNewContext(fs.readFileSync('transaction-rollout-config.js','utf8'),scope);
+ vm.runInNewContext(source,scope);
+ for(const kind of kinds){
+  assert.equal(scope.productionTransactionBackendRequired(kind),false);
+  assert.equal(scope.productionTransactionBackendEnabled(kind),false);
+  assert.equal(allowProductionTransaction(kind,{GCLOUD_PROJECT:'yu-shing-company'}),false);
+ }
+ for(const kind of kinds){
+  scope['YUSHIN_PRODUCTION_'+kind+'_BACKEND']=true;
+  scope['YUSHIN_PRODUCTION_'+kind+'_LEGACY_BLOCKED']=true;
+  assert.equal(scope.productionTransactionBackendEnabled(kind),true);
+  const env={GCLOUD_PROJECT:'yu-shing-company',['ENABLE_PRODUCTION_'+kind+'_BACKEND']:'true'};
+  assert.equal(allowProductionTransaction(kind,env),true);
+  for(const patch of [{FUNCTIONS_EMULATOR:'true'},{FIRESTORE_EMULATOR_HOST:'localhost:8080'},
+   {GOOGLE_CLOUD_PROJECT:'different'},{GCP_PROJECT:'different'},{GCLOUD_PROJECT:'preview-20135'}])
+   assert.equal(allowProductionTransaction(kind,{...env,...patch}),false);
+  for(const other of kinds.filter(other=>other!==kind))assert.equal(allowProductionTransaction(other,env),false);
+  scope['YUSHIN_PRODUCTION_'+kind+'_BACKEND']=false;
+  assert.equal(scope.productionTransactionBackendRequired(kind),true);
+  assert.equal(scope.productionTransactionBackendEnabled(kind),false);
+ }
+});

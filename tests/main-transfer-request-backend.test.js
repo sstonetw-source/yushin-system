@@ -52,3 +52,17 @@ test('independent gate and strict input reject production, mixed SDKs and inject
  for(const h of Object.values(handlers))await assert.rejects(h({data:create}),e=>e.code==='unauthenticated');assert.equal(reads,0);
  await assert.rejects(handlers.createV2MainTransferRequest({auth:{uid:'U'},data:create}),e=>e.code==='failed-precondition');
 });
+test('production request requires an explicit independent flag and the matching trusted Firestore project',async()=>{
+ const allowed={GCLOUD_PROJECT:'yu-shing-company',ENABLE_PRODUCTION_MAIN_TRANSFER_REQUEST_BACKEND:'true'};
+ assert.equal(mainTransferRequestProject(allowed),'yu-shing-company');
+ for(const patch of [{ENABLE_PRODUCTION_MAIN_TRANSFER_REQUEST_BACKEND:'false'},
+  {GOOGLE_CLOUD_PROJECT:'preview-20135'},{FIREBASE_AUTH_EMULATOR_HOST:'localhost:9099'},
+  {FIRESTORE_EMULATOR_HOST:'localhost:8080'},{FUNCTIONS_EMULATOR:'true'}])
+  assert.equal(mainTransferRequestProject({...allowed,...patch}),'');
+ assert.equal(mainTransferRequestProject({GCLOUD_PROJECT:'yu-shing-company',ENABLE_PRODUCTION_MAIN_TRANSFER_DISPATCH_BACKEND:'true'}),'');
+ const f=fixture();f.db.projectId='yu-shing-company';
+ assert.equal((await commitMainTransferRequest(f.db,'U',create,'CREATE',allowed)).status,'applied');
+ const previous=f.snapshot();
+ await assert.rejects(commitMainTransferRequest(f.db,'U',create,'CREATE',{...allowed,ENABLE_PRODUCTION_MAIN_TRANSFER_REQUEST_BACKEND:'false'}));
+ assert.equal(f.snapshot(),previous);
+});

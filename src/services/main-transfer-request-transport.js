@@ -3,25 +3,34 @@ function pendingMainTransferOperation(id){
  const raw=sessionStorage.getItem(mainTransferPendingKey(id));if(raw===null)return null;
  try{const p=JSON.parse(raw);
   if(p.uid!==currentUser?.uid||p.role!==currentUserRole||p.payload?.id!==id
-   ||!['CREATE','CANCEL'].includes(p.action)||!['demo-yushin','preview-20135'].includes(p.project)
+   ||!['CREATE','CANCEL'].includes(p.action)||!['demo-yushin','preview-20135','yu-shing-company'].includes(p.project)
    ||(p.action==='CANCEL'&&!/^[a-zA-Z0-9_-]{12,96}$/.test(p.payload.operationId)))throw Error('invalid');
   return p;
  }catch(_){throw Error('前次主倉調撥需求結果未確認，請保留暫存並使用原帳號與角色。');}
 }
 function mainTransferBackendRequired(id){
  return (typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview')||globalThis.YUSHIN_MAIN_TRANSFER_REQUEST_EMULATOR===true
+  ||(typeof productionTransactionBackendRequired==='function'&&productionTransactionBackendRequired('MAIN_TRANSFER_REQUEST'))
   ||sessionStorage.getItem(mainTransferPendingKey(id))!==null;
 }
 // Shared SDK/session boundary for main-demand and physical-transfer operations.
-function mainTransferBackendContext({emulatorFlag,previewFlag,roles,authorized}){
- const emulator=globalThis[emulatorFlag]===true,project=emulator?'demo-yushin':'preview-20135';
+function mainTransferBackendContext({emulatorFlag,previewFlag,productionKind,roles,authorized}){
+ const emulator=globalThis[emulatorFlag]===true;
+ const production=typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled(productionKind);
+ const required=typeof productionTransactionBackendRequired==='function'&&productionTransactionBackendRequired(productionKind);
+ const project=emulator?'demo-yushin':production?'yu-shing-company':'preview-20135';
  if(typeof firebase==='undefined'||!firebase.auth||!firebase.functions)throw Error('調撥後端尚未準備完成，禁止回退舊交易。');
  const auth=firebase.auth(),functions=firebase.app().functions('asia-east1'),uid=currentUser?.uid,role=currentUserRole;
  const local=h=>h==='localhost'||h==='127.0.0.1';
  const check=()=>{
   const preview=typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'&&globalThis[previewFlag]===true;
-  if((!emulator&&!preview)||emulator!==(globalThis[emulatorFlag]===true)
-   ||(emulator?!local(globalThis.location?.hostname):!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(globalThis.location?.hostname))
+  if((!emulator&&!preview&&!production)||(required&&!production&&!emulator&&!preview)
+   ||emulator!==(globalThis[emulatorFlag]===true)
+   ||(production&&!(typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled(productionKind)))
+   ||(emulator?!local(globalThis.location?.hostname):production?
+    !(globalThis.location?.origin==='https://sstonetw-source.github.io'
+     &&(globalThis.location?.pathname==='/yushin-system'||String(globalThis.location?.pathname||'').startsWith('/yushin-system/'))):
+    !['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(globalThis.location?.hostname))
    ||firebase.app().options?.projectId!==project||auth.app?.options?.projectId!==project
    ||functions.app?.options?.projectId!==project||db.app?.options?.projectId!==project
    ||(emulator?(!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099):!!auth.emulatorConfig))
@@ -33,6 +42,7 @@ function mainTransferBackendContext({emulatorFlag,previewFlag,roles,authorized})
 }
 function mainTransferRequestTransport(){
  return mainTransferBackendContext({emulatorFlag:'YUSHIN_MAIN_TRANSFER_REQUEST_EMULATOR',previewFlag:'YUSHIN_PREVIEW_MAIN_TRANSFER_REQUEST',
+  productionKind:'MAIN_TRANSFER_REQUEST',
   roles:['admin','purchaser'],authorized:()=>canManageInventoryStockPolicy()&&canEditPage('inventory')});
 }
 async function commitMainTransferRequestBackend(id,action,input){
