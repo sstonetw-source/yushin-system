@@ -316,7 +316,13 @@ function dispatchActionHtml(order, normalizedItems = null, dispatchStateByItem =
     return (normalizedItems || normalizedOrderItems(order))
         .filter(item=>(item.fulfillmentType||'WAREHOUSE')!=='DIRECT_SHIP')
         .map(item=>({item,state:dispatchStateByItem?.get(item) || itemDispatchState(order,item)}))
-        .filter(x=>x.state.pending>0||pendingDispatchPreparation(order.id,x.item.itemId))
+        .filter(x=>{
+            if(pendingDispatchPreparation(order.id,x.item.itemId))return true; // uncertain paperwork must remain recoverable
+            const mode=globalThis.YushinWarehouseLogistics?.plan(x.item.deliveryPlan||order.shippingInstructions||{}).mode;
+            const mainId=typeof defaultWarehouse==='function'?defaultWarehouse()?.id||'':'';
+            const location=x.item.warehouseId||order.warehouseId||'';
+            return x.state.pending>0&&!(mode==='PICKUP'&&(!mainId||location!==mainId));
+        })
         .map(({item,state})=>`<button type="button" onclick="markOrderItemDispatchPrepared(${inlineJsValue(order.id)},${inlineJsValue(item.itemId)})" ${pendingDispatchOrderIds.has(order.id+'__'+item.itemId)?'disabled':''}>${pendingDispatchPreparation(order.id,item.itemId)?'確認打單結果':'待打單'}：${escapeHtml(item.itemCode||item.itemName||item.itemId)} × ${pendingDispatchPreparation(order.id,item.itemId)?.quantity||state.pending}</button>`)
         .join('');
 }

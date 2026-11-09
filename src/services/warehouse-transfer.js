@@ -1,7 +1,10 @@
 // Transfer dispatch and receipt are separate physical events, not customer deliveries.
 async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toWarehouseId='',qty,orderId='',itemId='',handoff=false,expectedWarehouseId='',expectedPlan=null,requestId=''}){
-  if(orderId&&typeof orderTransferBackendRequired==='function'&&orderTransferBackendRequired(handoff?'HANDOFF':'DISPATCH',id,orderId,itemId)){
+  if(orderId&&(!handoff&&expectedPlan?.mode==='PICKUP'
+    ||typeof orderTransferBackendRequired==='function'&&orderTransferBackendRequired(handoff?'HANDOFF':'DISPATCH',id,orderId,itemId))){
     const action=handoff?'HANDOFF':'DISPATCH';
+    if(typeof pendingOrderTransferOperations!=='function'||typeof commitOrderTransferBackend!=='function')
+      throw Error('訂單調回主倉後端未載入，禁止改用舊交易。');
     if(pendingOrderTransferOperations().some(p=>p.action===action&&p.id===id))
       return commitOrderTransferBackend(action,id);
     let physicalSource=expectedWarehouseId||fromWarehouseId;
@@ -81,7 +84,7 @@ async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toW
       if(qty!==remaining||qty!==Number(item.reservedQty)||qty>itemDispatchState(order,item).shippable)throw Error('轉倉或交付負責業務須等此品項剩餘數量全部到貨、預留並完成打單，再一次交付，避免後續到貨混到不同倉庫。');
       fromWarehouseId=item.warehouseId||order.warehouseId||defaultWarehouse()?.id||'';inventoryId=inventoryRefFor(item)?.id||'';
       if(handoff){const p=YushinWarehouseLogistics.validatePlan(item.deliveryPlan||order.shippingInstructions||{},false);if(!['PICKUP','SALES_SHIP'].includes(p.mode))throw Error('請先設定交付負責業務的方式。');if(p.mode==='SALES_SHIP')YushinWarehouseLogistics.validatePlan(p,true);if(!order.ownerUid)throw Error('訂單缺少負責業務。');toWarehouseId='custody-'+order.ownerUid;}
-      else{const p=YushinWarehouseLogistics.plan(item.deliveryPlan||order.shippingInstructions||{}),target=p.warehouseId||(p.mode==='PICKUP'?defaultWarehouse()?.id:'');if(!target||target!==toWarehouseId)throw Error('請先儲存正確的轉倉設定。');if(p.mode==='TRANSFER')YushinWarehouseLogistics.validatePlan(p,true);}
+      else{const p=YushinWarehouseLogistics.plan(item.deliveryPlan||order.shippingInstructions||{}),target=p.warehouseId||(p.mode==='PICKUP'?defaultWarehouse()?.id:'');if(p.mode==='PICKUP')throw Error('主倉自領調回必須使用受控後端，禁止舊版庫存交易。');if(!target||target!==toWarehouseId)throw Error('請先儲存正確的轉倉設定。');if(p.mode==='TRANSFER')YushinWarehouseLogistics.validatePlan(p,true);}
       if(expectedWarehouseId&&fromWarehouseId!==expectedWarehouseId)throw Error('出貨倉庫已變更，請重新核對。');
       if(expectedPlan&&JSON.stringify(YushinWarehouseLogistics.plan(item.deliveryPlan||order.shippingInstructions||{}))!==JSON.stringify(expectedPlan))throw Error('寄送資訊已變更，請重新核對。');
       reservationRef=db.collection('inventoryReservations').doc(orderId+'__'+itemId);const rs=await tx.get(reservationRef);if(!rs.exists)throw Error('找不到訂單預留。');reservation=rs.data();

@@ -112,14 +112,20 @@ async function commitOrderTransferPhysical(db,uid,data,action,env=process.env){
    if(action==='RECEIVE'&&(t.reservationLocationSchemaVersion!==2
     ||JSON.stringify(t.lifecycleWarehouseIds)!==JSON.stringify(ledger.lifecycleWarehouseIds)))fail('原多倉預留版本或候選位置已變更');
   }else if(action==='RECEIVE'&&t.reservationLocationSchemaVersion===2)fail('原多倉預留不可退回單倉格式');
-  if(Number(item.qty??item.orderedQty)!==qty||Number(item.reservedQty)!==qty||qty>fulfillment.dispatchState(item).shippable)fail('品項須全數到貨預留並完成打單');
   const plan=logistics.plan(item.deliveryPlan||order.shippingInstructions||{});
+  const pickupReturn=!handoff&&plan.mode==='PICKUP';
+  if(Number(item.qty??item.orderedQty)!==qty||Number(item.reservedQty)!==qty)fail('品項須全數到貨預留才能調撥');
+  if(pickupReturn){
+   if(dispatching&&!logistics.pickupTransferReady(item,qty))fail('主倉自領應先由分倉調回並點收，不能在分倉先打單或出貨');
+  }else if(qty>fulfillment.dispatchState(item).shippable)fail('一般調撥或業務交接須全數完成打單');
+  if(action==='RECEIVE'&&JSON.stringify(t.deliveryPlan)!==JSON.stringify(plan))fail('原調撥交付方式在途中已變更');
   const whFrom=await tx.get(ref('warehouses',from)),whTo=await tx.get(ref('warehouses',to));
   if(!whFrom.exists||whFrom.data().active===false||whFrom.data().systemCustody||whFrom.data().warehouseType==='CUSTODY')fail('來源不是啟用實體倉');
   if(handoff){
    if(to!=='custody-'+order.ownerUid)fail('只能交付目前負責業務');
    if(whTo.exists&&(whTo.data().active===false||whTo.data().systemCustody!==true||whTo.data().ownerUid!==order.ownerUid))fail('業務保管位置不一致');
   }else if(!whTo.exists||whTo.data().active===false||whTo.data().systemCustody||whTo.data().warehouseType==='CUSTODY')fail('目的不是啟用實體倉');
+  if(pickupReturn&&(whFrom.data().isDefault===true||whTo.data().isDefault!==true))fail('主倉自領調回必須由分倉寄往啟用中的主倉');
   if(dispatching){
    if(intent.expectedPlan&&JSON.stringify(intent.expectedPlan)!==JSON.stringify(plan))fail('原轉倉設定已變更');
    if(handoff){

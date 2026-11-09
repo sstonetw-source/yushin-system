@@ -131,12 +131,13 @@ test('transfer retry cannot turn a previous order transfer into a different dest
  for(const patch of [
   {toWarehouseId:'MAIN'},
   {handoff:true,toWarehouseId:''},
-  {expectedWarehouseId:'OTHER'},
-  {expectedPlan:{mode:'PICKUP'}}
+  {expectedWarehouseId:'OTHER'}
  ]){
   await assert.rejects(f.c.commitWarehouseTransfer({...args,...patch}),/識別碼衝突/);
   assert.equal(JSON.stringify([...f.docs]),before);
  }
+ await assert.rejects(f.c.commitWarehouseTransfer({...args,expectedPlan:{mode:'PICKUP'}}),/後端未載入/);
+ assert.equal(JSON.stringify([...f.docs]),before);
 });
 test('free transfer is atomic, retains company total and lot identity, and hides transit stock from availability until received',async()=>{
  const f=fixture();await f.c.commitWarehouseTransfer({id:'T',inventoryId:'P',fromWarehouseId:'MAIN',toWarehouseId:'EXT',qty:3});
@@ -221,8 +222,8 @@ test('partial arrival cannot relocate a commercial item while later receipts sti
  assert.equal(f.docs.has('stockTransfers/T'),false);assert.equal(f.docs.get('warehouseStocks/MAIN__P').onHand,10);
 });
 test('batch transfer rejects changed destination snapshots and operation-ID collisions',async()=>{
- for(const patch of [{expectedWarehouseId:'OTHER'},{expectedPlan:core.plan({mode:'PICKUP'})}]){
-  const f=fixture();await assert.rejects(f.c.commitWarehouseTransfer({id:'T',orderId:'O',itemId:'A',qty:4,toWarehouseId:'EXT',...patch}),/已變更/);
+ for(const [patch,message] of [[{expectedWarehouseId:'OTHER'},/已變更/],[{expectedPlan:core.plan({mode:'PICKUP'})},/後端未載入/]]){
+  const f=fixture();await assert.rejects(f.c.commitWarehouseTransfer({id:'T',orderId:'O',itemId:'A',qty:4,toWarehouseId:'EXT',...patch}),message);
   assert.equal(f.docs.has('stockTransfers/T'),false);assert.equal(f.docs.get('warehouseStocks/MAIN__P').onHand,10);
  }
  const f=fixture();await f.c.commitWarehouseTransfer({id:'T',orderId:'O',itemId:'A',qty:4,toWarehouseId:'EXT'});
@@ -313,13 +314,13 @@ test('manual transfer retry cannot reuse an operation ID for another stock or wa
  for(const patch of [{inventoryId:'OTHER'},{fromWarehouseId:'EXT'},{toWarehouseId:'OTHER'}])await assert.rejects(f.c.commitWarehouseTransfer({...args,...patch}),/識別碼衝突/);
  assert.equal(f.docs.get('warehouseStocks/MAIN__P').onHand,7);
 });
-test('branch-to-main transfer preserves final pickup plan through receipt and allows exactly one subsequent handoff',async()=>{
- const f=fixture();const order=f.docs.get('orders/O');order.items[0].deliveryPlan={mode:'PICKUP',warehouseId:'EXT',contact:'Sales'};
- await f.c.commitWarehouseTransfer({id:'MOVE',orderId:'O',itemId:'A',qty:4,toWarehouseId:'EXT',expectedPlan:core.plan(order.items[0].deliveryPlan)});
- assert.equal(f.docs.get('orders/O').items[0].deliveryPlan.mode,'PICKUP');await f.c.commitWarehouseTransferReceipt('MOVE');
- assert.equal(f.docs.get('orders/O').items[0].warehouseId,'EXT');assert.equal(f.docs.get('inventory/P').onHand,10);
- await f.c.commitWarehouseTransfer({id:'HAND',orderId:'O',itemId:'A',qty:4,handoff:true});await f.c.commitWarehouseTransfer({id:'HAND',orderId:'O',itemId:'A',qty:4,handoff:true});
- assert.equal(f.docs.get('warehouseStocks/EXT__P').onHand,0);assert.equal(f.docs.get('warehouseStocks/custody-S__P').onHand,4);assert.equal(f.docs.get('orders/O').deliveryRecords.length,0);
+test('PICKUP branch transfer refuses the legacy writer even when expectedPlan is omitted',async()=>{
+ const f=fixture(),order=f.docs.get('orders/O');order.items[0].deliveryPlan={mode:'PICKUP'};
+ const baseline=structuredClone([...f.docs]);
+ await assert.rejects(f.c.commitWarehouseTransfer({id:'MOVE',orderId:'O',itemId:'A',qty:4,toWarehouseId:'EXT'}),/受控後端/);
+ assert.deepEqual([...f.docs],baseline);assert.equal(f.docs.has('stockTransfers/MOVE'),false);
+ await assert.rejects(f.c.commitWarehouseTransfer({id:'MOVE',orderId:'O',itemId:'A',qty:4,toWarehouseId:'EXT',expectedPlan:core.plan({mode:'PICKUP'})}),/後端未載入/);
+ assert.deepEqual([...f.docs],baseline);
 });
 test('partial transfer batch preflight blocks all mutations before a customer shipment can be committed',async()=>{
  const f=batchUiFixture();f.list[1].item.qty=5;await f.c.openWarehouseShippingBatch();await f.c.confirmWarehouseShippingBatch(f.node('confirm'));
@@ -334,6 +335,13 @@ test('only explicit main pickup generates an order return-to-main requirement; r
   assert.equal(core.transferRequirements([{id:mode||'missing',items:[{itemId:'A',warehouseId:'EXT',qty:2,deliveryPlan:value}]}],warehouses,'MAIN',helpers).length,0);
  }
  assert.equal(core.transferRequirements([{id:'pickup',items:[{itemId:'A',warehouseId:'EXT',qty:2,reservedQty:2,deliveryPlan:{mode:'PICKUP'}}]}],warehouses,'MAIN',helpers).length,1);
+ const item={itemId:'A',warehouseId:'EXT',qty:2,reservedQty:2,dispatchPreparedQty:0,deliveryPlan:{mode:'PICKUP'}};
+ const requirement=()=>core.transferRequirements([{id:'pickup',items:[item]}],warehouses,'MAIN',helpers)[0];
+ assert.equal(requirement().readyQty,2,'未打單但已有完整保留即可通知分倉寄回');
+ item.dispatchPreparedQty=2;assert.equal(requirement().readyQty,0,'分倉不可先打單再調回');
+ item.dispatchPreparedQty=0;item.reservedQty=1;assert.equal(requirement().readyQty,0,'部分預留不能假裝可全數調回');
+ item.reservedQty=2;item.shortageQty=1;assert.equal(requirement().readyQty,0,'缺貨紀錄不能繞過原訂單預留');
+ item.shortageQty=0;item.warehouseShippedQty=1;assert.equal(requirement().readyQty,0,'既有實際出貨不能再走主倉調回');
  assert.throws(()=>core.validatePlan({}),/交付|主倉/);
 });
 test('warehouse shipping batch refuses main pickup even when a stale selection includes it',async()=>{

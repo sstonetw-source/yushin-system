@@ -32,6 +32,16 @@
     const deliveryWait=p.mode==='PICKUP'?'待調回主倉':p.mode?'待倉管寄貨':'待設定交付方式';
     return {...state,shippable:0,deliveryWait};
   }
+  // A branch-to-main pickup transfer is a reserved-stock movement, not a
+  // customer dispatch. Paperwork must be prepared only after main receipt.
+  function pickupTransferReady(item,qty){
+    const ordered=Number(item.qty??item.orderedQty);
+    return Number.isFinite(ordered)&&ordered>0&&qty===ordered
+      &&Number(item.reservedQty)===ordered&&Number(item.shortageQty??0)===0
+      &&Number(item.dispatchPreparedQty??0)===0&&Number(item.warehouseShippedQty??0)===0
+      &&Number(item.deliveredQty??0)===0&&Number(item.returnedQty??0)===0
+      &&!item.transferPendingId&&!item.custodyTransferId;
+  }
   function transferRequirements(orders,warehouses,mainId,helpers){
     const result=[],seen=new Set();
     for(const order of orders||[]){
@@ -41,7 +51,7 @@
         if(!warehouse||source===mainId||item.transferPendingId||(item.fulfillmentType||'WAREHOUSE')==='DIRECT_SHIP')continue;
         const qty=Math.max(0,Number(item.qty||item.orderedQty||0)-Math.max(0,Number(item.deliveredQty||0)-Number(item.returnedQty||0)));
         const row={order,item,qty,warehouseId:source,warehouse,branch:true,key:order.id+'__'+item.itemId};
-        if(qty>0&&plan(item.deliveryPlan||order.shippingInstructions||{}).mode==='PICKUP'&&executionPlan(row,warehouses,mainId).mode==='TRANSFER'){row.readyQty=Math.min(qty,Math.max(0,Number(helpers.dispatch(order,item).shippable||0)));result.push(row);}
+        if(qty>0&&plan(item.deliveryPlan||order.shippingInstructions||{}).mode==='PICKUP'&&executionPlan(row,warehouses,mainId).mode==='TRANSFER'){row.readyQty=pickupTransferReady(item,qty)?qty:0;result.push(row);}
       }
     }
     return result;
@@ -160,7 +170,7 @@
     if((order.logisticsHistory||[]).some(h=>h.itemId===item.itemId&&h.action==='倉庫調撥收貨'))return '已轉倉・待送客戶';
     return '';
   }
-  const api={planTransferHandoff,transferDestinationLots,transferBalances,planTransferDispatch,planTransferReceipt,modes,plan,executionPlan,transferRequirements,businessDeliveryState,aggregateRows,validatePlan,bundleKey,partition,transferable,batchJobs,processBatch,csvDocument,shippingStatus};root.YushinWarehouseLogistics=api;
+  const api={planTransferHandoff,transferDestinationLots,transferBalances,planTransferDispatch,planTransferReceipt,modes,plan,executionPlan,transferRequirements,pickupTransferReady,businessDeliveryState,aggregateRows,validatePlan,bundleKey,partition,transferable,batchJobs,processBatch,csvDocument,shippingStatus};root.YushinWarehouseLogistics=api;
   if(typeof module==='object'&&module.exports)module.exports=api;
   if(typeof document==='undefined')return;
   const $=id=>document.getElementById(id);
@@ -450,7 +460,7 @@
   };
   root.startOrderWarehouseTransfer=async function(orderId,itemId,button){
     const row=transferRequirements(orderWorkQueueCache,warehouseMasterCache,defaultWarehouse()?.id||'',{status:normalizedOrderStatus,incomplete:orderInventorySyncIncomplete,items:normalizedOrderItems,dispatch:itemDispatchState}).find(r=>r.order.id===orderId&&r.item.itemId===itemId);if(!allowed()||!row)return;const p=rowPlan(row);
-    if(row.readyQty<row.qty)return alert('此品項尚未全部到貨並打單，暫時不能寄出。');
+    if(row.readyQty<row.qty)return alert('此品項尚未全部到貨預留，或已有打單／出貨紀錄，暫時不能調回主倉。');
     try{validatePlan(p,true);}catch(err){return alert(err.message);}
     if(!confirm(`將 ${row.item.itemCode} × ${row.qty} 寄往 ${warehouseName(p.warehouseId)}？\n目的倉確認收貨前，這批貨無法送貨；不會完成客戶訂單。`))return;
     const id=button.dataset.operationId||(button.dataset.operationId=lifecycleRecordId());const bs=beginActionButton(button,'調撥中…');

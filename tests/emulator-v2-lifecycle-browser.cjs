@@ -2476,7 +2476,7 @@ for(const width of [1280,390])test('original order transfer '+width+'px keeps so
  put('inventory',key,{productKey:key,productId:key,onHand:3,reserved:3});put('warehouseStocks',from+'__'+key,{productKey:key,productId:key,warehouseId:from,onHand:3,reserved:3});
  put('inventoryLots',tag+'-L',{productKey:key,productId:key,warehouseId:from,remainingQty:3,qty:3,lotNo:'SITE',expiryDate:'2027-01-01'});
   put('inventoryLotCosts',tag+'-L',{lotId:tag+'-L',productKey:key,warehouseId:from,unitCost:42,sourceType:'TEST_RECEIPT',sourceId:tag+'-origin'});
- put('orders',orderId,{orderNo:'YS-'+tag,customerName:'調撥測試客戶',status:'active',orderStatus:'normal',ownerUid:uid,salesCode:uid,salesName:'Warehouse',inventoryReservationStatus:'completed',inventoryReservationAttemptId:tag+'-sync',orderDate:'2026-10-29',workCategories:['delivery'],deliveryRecords:[],returnRecords:[],items:[{itemId:'I',productId:key,productType:'Goods',itemCode:tag,itemName:'調撥驗證商品',qty:3,orderedQty:3,reservedQty:3,shortageQty:0,warehouseId:from,dispatchPreparedQty:3,deliveredQty:0,returnedQty:0,deliveryPlan:{mode:'PICKUP',warehouseId:to}}]});
+ put('orders',orderId,{orderNo:'YS-'+tag,customerName:'調撥測試客戶',status:'active',orderStatus:'normal',ownerUid:uid,salesCode:uid,salesName:'Warehouse',inventoryReservationStatus:'completed',inventoryReservationAttemptId:tag+'-sync',orderDate:'2026-10-29',workCategories:['delivery'],deliveryRecords:[],returnRecords:[],items:[{itemId:'I',productId:key,productType:'Goods',itemCode:tag,itemName:'調撥驗證商品',qty:3,orderedQty:3,reservedQty:3,shortageQty:0,warehouseId:from,dispatchPreparedQty:0,deliveredQty:0,returnedQty:0,deliveryPlan:{mode:'PICKUP',warehouseId:to}}]});
  put('inventoryReservations',orderId+'__I',{orderId,itemId:'I',productKey:key,warehouseId:from,quantity:3,shortageQty:0,status:'active'});await setup.commit();
  const context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage(),calls=[],errors=[];
  let dropped=false;const dropAction=width===1280?'dispatchOrderTransfer':'receiveOrderTransfer';
@@ -2526,7 +2526,8 @@ for(const width of [1280,390])test('original order transfer '+width+'px keeps so
    const receipts=calls.filter(c=>c.action==='receiveOrderTransfer');assert.equal(receipts.length,2);assert.deepEqual(receipts[0],receipts[1]);
   }
   const order=(await db.doc('orders/'+orderId).get()).data(),stock=(await db.doc('warehouseStocks/'+to+'__'+key).get()).data();
-  assert.equal(order.items[0].warehouseId,to);assert.equal(order.logisticsTransfersPending,0);assert.deepEqual(order.deliveryRecords,[]);assert.equal(stock.onHand,3);assert.equal(stock.reserved,3);
+  assert.equal(order.items[0].warehouseId,to);assert.equal(order.items[0].dispatchPreparedQty,0,'主倉點收前不應已有客戶打單');
+  assert.equal(order.logisticsTransfersPending,0);assert.deepEqual(order.deliveryRecords,[]);assert.equal(stock.onHand,3);assert.equal(stock.reserved,3);
   assert.equal((await db.doc('inventory/'+key).get()).data().onHand,3);assert.equal((await db.doc('inventory/'+key).get()).data().reserved,3);
   await assertOriginalTransferStockAndCostProof({tag,key,orderId,from,to,transferId,kind:'TRANSFER'});
   assert.equal(await page.evaluate(()=>pendingOrderTransferOperations().length),0);assert.deepEqual(errors,[]);

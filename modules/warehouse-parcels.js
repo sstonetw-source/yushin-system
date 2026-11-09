@@ -77,7 +77,7 @@
         `${entry.itemCode} ${entry.itemName} × ${entry.qty}`.trim(),
         `收件：${entry.recipient.contact}｜${entry.recipient.phone}`,
         `地址：${entry.recipient.address}`,
-        `狀態：${entry.ready?'可核對寄出':'待備妥／打單確認（不可先寄出）'}`,'']),
+        `狀態：${entry.ready?'可核對寄出':entry.kind==='訂單調回主倉'?'待全數到貨預留／核對未打單（不可先寄出）':'待備妥／打單確認（不可先寄出）'}`,'']),
       '請依實際寄貨內容回又鑫系統逐筆確認寄出；調回主倉的貨需由主倉另外點收。'].join('\n');
   }
   root.shareBranchDispatchList=async function(warehouseId,share=false,button){

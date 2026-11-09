@@ -66,6 +66,16 @@ test('stale quantities, pending sync, cancelled, service/direct all reject witho
   const f=fixture();patch(f.order());await assert.rejects(f.run());assert.equal(f.records().length,0);
  }
 });
+test('legacy paperwork cannot be prepared for branch PICKUP until the actual main receipt',async()=>{
+ const f=fixture(),item=f.order().items[0];item.deliveryPlan={mode:'PICKUP'};
+ f.docs.set('warehouses/A',{isDefault:false,active:true});
+ const before=structuredClone([...f.docs]);
+ await assert.rejects(f.run(),/先由分倉寄回.*點收/);assert.deepEqual([...f.docs],before);
+ item.warehouseId='MAIN';f.docs.set('warehouses/MAIN',{isDefault:true,active:true});
+ await f.run();assert.equal(f.order().items[0].dispatchPreparedQty,3);
+ const transit=fixture();transit.order().items[0].transferPendingId='T';
+ await assert.rejects(transit.run(),/調撥途中/);assert.equal(transit.records().length,0);
+});
 test('session change while reading stops transaction and retains no receipt',async()=>{
  const f=fixture(),original=f.c.db.collection;
  f.c.db.collection=n=>{const r=original(n);if(n==='inventoryReservations')f.c.currentUserRole='sales';return r;};
