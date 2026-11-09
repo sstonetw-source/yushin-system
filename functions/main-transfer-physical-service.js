@@ -2,6 +2,7 @@
 const {createHash}=require('node:crypto');
 const {mainTransferRequestProject}=require('./main-transfer-request-service');
 const {projectIdFromEnvironment}=require('./grouped-reservation-gate');
+const {allowProductionTransaction}=require('./production-transaction-gate');
 const {planTransferDispatch,planTransferReceipt,transferDestinationLots}=require('./shared/warehouse-logistics');
 const {reconcileStockLots,allocateLots}=require('./shared/inventory-core');
 function fault(message,code='failed-precondition'){throw Object.assign(Error(message),{code});}
@@ -11,6 +12,9 @@ function physicalProject(action,env=process.env){
  const flag=action==='DISPATCH'?'MAIN_TRANSFER_DISPATCH':action==='RECEIVE'?'MAIN_TRANSFER_RECEIPT':'';
  if(!flag)return '';
  const project=projectIdFromEnvironment(env);
+ // Dispatch and receipt are separately authorized. Neither borrows the
+ // request gate or a shared production-wide switch.
+ if(project==='yu-shing-company')return allowProductionTransaction(flag,env)?project:'';
  if(project==='preview-20135'&&env['ENABLE_PREVIEW_'+flag]!=='true')return '';
  if(project==='demo-yushin'&&env['ENABLE_'+flag+'_EMULATOR']!=='true')return '';
  return mainTransferRequestProject({...env,ENABLE_PREVIEW_MAIN_TRANSFER_REQUEST:'true',ENABLE_MAIN_TRANSFER_REQUEST_EMULATOR:'true'});

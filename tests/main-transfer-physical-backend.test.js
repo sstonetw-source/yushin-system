@@ -87,6 +87,25 @@ test('separate gates remain closed for production, missing flags and mixed emula
  let reads=0;const callables=createMainTransferPhysicalCallables({onCall:(_,fn)=>fn,HttpsError,env,getDatabase:()=>{reads++;return {};}});
  for(const h of Object.values(callables))await assert.rejects(h({data:dispatch}),e=>e.code==='unauthenticated');assert.equal(reads,0);
 });
+test('production physical dispatch and receipt each require their own flag, project and trusted backend',async()=>{
+ const base={GCLOUD_PROJECT:'yu-shing-company'};
+ const send={...base,ENABLE_PRODUCTION_MAIN_TRANSFER_DISPATCH_BACKEND:'true'};
+ const take={...base,ENABLE_PRODUCTION_MAIN_TRANSFER_RECEIPT_BACKEND:'true'};
+ assert.equal(physicalProject('DISPATCH',send),'yu-shing-company');
+ assert.equal(physicalProject('RECEIVE',send),'');
+ assert.equal(physicalProject('RECEIVE',take),'yu-shing-company');
+ assert.equal(physicalProject('DISPATCH',take),'');
+ assert.equal(physicalProject('DISPATCH',{...base,ENABLE_PRODUCTION_MAIN_TRANSFER_REQUEST_BACKEND:'true'}),'');
+ for(const patch of [{GCLOUD_PROJECT:'preview-20135'},{FIRESTORE_EMULATOR_HOST:'localhost:8080'},
+  {GOOGLE_CLOUD_PROJECT:'preview-20135'},{FUNCTIONS_EMULATOR:'true'}])
+  assert.equal(physicalProject('DISPATCH',{...send,...patch}),'');
+ const f=fixture();f.db.projectId='yu-shing-company';
+ assert.equal((await commitMainTransferPhysical(f.db,'U',dispatch,'DISPATCH',send)).status,'applied');
+ const afterSend=f.snapshot();
+ await assert.rejects(commitMainTransferPhysical(f.db,'U',receive,'RECEIVE',send));
+ assert.equal(f.snapshot(),afterSend);
+ assert.equal((await commitMainTransferPhysical(f.db,'U',receive,'RECEIVE',take)).status,'applied');
+});
 
 async function allocationFixture(){
  const f=fixture();await f.run();await f.run(receive,'RECEIVE');f.db.projectId='demo-yushin';

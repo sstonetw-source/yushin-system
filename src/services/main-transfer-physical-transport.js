@@ -3,7 +3,7 @@ function pendingMainTransferPhysical(action,id){
  const raw=sessionStorage.getItem(mainTransferPhysicalKey(action,id));if(raw===null)return null;
  try{const p=JSON.parse(raw);
   if(!['DISPATCH','RECEIVE'].includes(action)||p.uid!==currentUser?.uid||p.role!==currentUserRole||p.action!==action||p.payload?.id!==id
-   ||!['preview-20135','demo-yushin'].includes(p.project)||Object.keys(p.payload).sort().join(',')!==(action==='DISPATCH'?'id,requestId':'id,operationId')
+   ||!['preview-20135','demo-yushin','yu-shing-company'].includes(p.project)||Object.keys(p.payload).sort().join(',')!==(action==='DISPATCH'?'id,requestId':'id,operationId')
    ||typeof id!=='string'||!id||id.length>96||id!==id.trim()||id.includes('/')
    ||(action==='DISPATCH'?(typeof p.payload.requestId!=='string'||!p.payload.requestId||p.payload.requestId.includes('/')):!/^[A-Za-z0-9_-]{12,96}$/.test(p.payload.operationId)))throw Error('invalid');
   return p;
@@ -30,6 +30,7 @@ function pendingMainTransferDispatch(requestId){
 function mainTransferPhysicalRequired(action,id,requestId=''){
  const flag=action==='DISPATCH'?'YUSHIN_MAIN_TRANSFER_DISPATCH_EMULATOR':'YUSHIN_MAIN_TRANSFER_RECEIPT_EMULATOR';
  return (typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview')||globalThis[flag]===true
+  ||(typeof productionTransactionBackendRequired==='function'&&productionTransactionBackendRequired('MAIN_TRANSFER_'+(action==='DISPATCH'?'DISPATCH':'RECEIPT')))
   ||sessionStorage.getItem(mainTransferPhysicalKey(action,id))!==null
   ||(action==='DISPATCH'&&!!pendingMainTransferDispatch(requestId));
 }
@@ -48,6 +49,7 @@ async function submitMainTransferPhysicalBackend(action,id,input){
  if(!['DISPATCH','RECEIVE'].includes(action))throw Error('調撥動作不正確。');
  const suffix=action==='DISPATCH'?'DISPATCH':'RECEIPT';
  const {uid,role,project,functions,emulator,check}=mainTransferBackendContext({emulatorFlag:'YUSHIN_MAIN_TRANSFER_'+suffix+'_EMULATOR',previewFlag:'YUSHIN_PREVIEW_MAIN_TRANSFER_'+suffix,
+  productionKind:'MAIN_TRANSFER_'+suffix,
   roles:['admin','purchaser','warehouse'],authorized:()=>canReceiveInventoryCapability()&&canAccessPage('inventory')});
  if(action==='DISPATCH'&&input){const original=pendingMainTransferDispatch(input.requestId);if(original&&original.id!==id)throw Error('此需求已有未確認寄出，必須沿用原操作識別碼。');}
  if(action==='RECEIVE'&&pendingMainTransferPhysical('DISPATCH',id))throw Error('原寄出結果尚未確認，請先確認原寄出操作。');

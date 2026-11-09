@@ -6,7 +6,8 @@ function productionTransactionBackendRequired(kind){
 }
 function productionTransactionBackendEnabled(kind){
  if(!['DISPATCH','SHIPMENT','ORDER_LIFECYCLE','DELIVERY_CONFIRMATION','DELIVERY_REVERSAL','CUSTOMER_RETURN','CUSTOMER_RETURN_REQUEST',
-  'ORDER_TRANSFER_DISPATCH','ORDER_TRANSFER_HANDOFF','ORDER_TRANSFER_RECEIVE','CANCELLED_PURCHASE'].includes(kind)||!productionTransactionBackendRequired(kind)
+  'ORDER_TRANSFER_DISPATCH','ORDER_TRANSFER_HANDOFF','ORDER_TRANSFER_RECEIVE','CANCELLED_PURCHASE',
+  'MAIN_TRANSFER_REQUEST','MAIN_TRANSFER_DISPATCH','MAIN_TRANSFER_RECEIPT'].includes(kind)||!productionTransactionBackendRequired(kind)
   ||globalThis['YUSHIN_PRODUCTION_'+kind+'_BACKEND']!==true
   ||globalThis['YUSHIN_PRODUCTION_'+kind+'_LEGACY_BLOCKED']!==true)return false;
  const path=String(globalThis.location?.pathname||'');

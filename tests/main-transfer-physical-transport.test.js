@@ -1,10 +1,10 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
-function fixture(){
+function fixture(production=false){
  const storage=new Map(),calls=[];let transfer=null,lose=false,after=()=>{},bad=false,failRead=false;
  const id='transfer_12345678',requestId='request_12345678';
  const open=()=>{
-  const options={projectId:'preview-20135'},auth={app:{options},currentUser:{uid:'U'}};
+  const options={projectId:production?'yu-shing-company':'preview-20135'},auth={app:{options},currentUser:{uid:'U'}};
   const functions={app:{options},useEmulator:()=>{throw Error('Preview emulator');},httpsCallable:name=>async payload=>{
    calls.push({name,payload:structuredClone(payload)});const action=name==='dispatchV2MainTransfer'?'DISPATCH':'RECEIVE';
    if(action==='DISPATCH')transfer??={id:payload.id,requestId:payload.requestId,kind:'TRANSFER',orderId:'',dispatchIntentHash:'hash',status:'IN_TRANSIT',qty:3,createdByUid:'U',createdByRole:'warehouse'};
@@ -12,13 +12,16 @@ function fixture(){
    if(lose){lose=false;throw Error('reply lost');}after(c);
    return {data:{action,id:payload.id,operationId:bad?'wrong':action==='DISPATCH'?payload.id:payload.operationId,status:'already-applied',actorUid:'U',actorRole:'warehouse'}};
   }};
-  const c=vm.createContext({APP_ENVIRONMENT:'preview',YUSHIN_PREVIEW_MAIN_TRANSFER_DISPATCH:true,YUSHIN_PREVIEW_MAIN_TRANSFER_RECEIPT:true,
-   currentUser:{uid:'U'},currentUserRole:'warehouse',location:{hostname:'preview-20135.web.app'},lifecycleRecordId:()=> 'receipt_12345678',
+  const c=vm.createContext({APP_ENVIRONMENT:production?'production':'preview',YUSHIN_PREVIEW_MAIN_TRANSFER_DISPATCH:!production,YUSHIN_PREVIEW_MAIN_TRANSFER_RECEIPT:!production,
+   YUSHIN_PRODUCTION_MAIN_TRANSFER_DISPATCH_BACKEND:production,YUSHIN_PRODUCTION_MAIN_TRANSFER_DISPATCH_LEGACY_BLOCKED:production,
+   YUSHIN_PRODUCTION_MAIN_TRANSFER_RECEIPT_BACKEND:production,YUSHIN_PRODUCTION_MAIN_TRANSFER_RECEIPT_LEGACY_BLOCKED:production,
+   currentUser:{uid:'U'},currentUserRole:'warehouse',location:production?{hostname:'sstonetw-source.github.io',origin:'https://sstonetw-source.github.io',pathname:'/yushin-system/'}:{hostname:'preview-20135.web.app'},lifecycleRecordId:()=> 'receipt_12345678',
    firebase:{auth:()=>auth,functions:()=>{},app:()=>({options,functions:()=>functions})},
-   db:{app:{options:{projectId:'preview-20135'}},collection:()=>({doc:()=>({get:async()=>{if(failRead)throw Error('read failed');return {exists:!!transfer,data:()=>structuredClone(transfer)};}})})},
+   db:{app:{options:{projectId:options.projectId}},collection:()=>({doc:()=>({get:async()=>{if(failRead)throw Error('read failed');return {exists:!!transfer,data:()=>structuredClone(transfer)};}})})},
    canReceiveInventoryCapability:()=>true,canAccessPage:()=>true,runRoleTransaction:()=>{throw Error('legacy writer called');},
    pendingMainTransferOperation:()=>null,
    sessionStorage:{get length(){return storage.size;},key:n=>[...storage.keys()][n],getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)}});
+  if(production)vm.runInContext(fs.readFileSync('src/infrastructure/production-transaction.js','utf8'),c);
   for(const file of ['main-transfer-request-transport','main-transfer-physical-transport','warehouse-transfer'])vm.runInContext(fs.readFileSync('src/services/'+file+'.js','utf8'),c);
   return c;
  };
@@ -94,4 +97,27 @@ test('recovery rows remain visible after source leaves operational queries and f
  assert.match(elements.mainTransferRequestBody.innerHTML,/確認前次寄出結果/);assert.match(elements.mainTransferRequestBody.innerHTML,/transfer_12345678/);
  assert.match(elements.inventoryTransferReceivingBody.innerHTML,/確認前次入庫結果/);assert.match(elements.inventoryTransferReceivingBody.innerHTML,/transfer_87654321/);
  assert.equal(table.hidden,false);
+});
+test('production physical dispatch and receipt use separate backend operations and preserve original IDs',async()=>{
+ const f=fixture(true),c=f.open();f.setLose(true);
+ await assert.rejects(c.commitWarehouseTransfer({id:f.id,requestId:f.requestId,qty:3}),/reply lost/);
+ const reloaded=f.open();await reloaded.commitMainTransferPhysicalBackend('DISPATCH',f.id);
+ assert.deepEqual(f.calls[0],f.calls[1]);assert.equal(f.storage.size,0);
+ f.setLose(true);await assert.rejects(reloaded.commitWarehouseTransferReceipt(f.id),/reply lost/);
+ await f.open().commitMainTransferPhysicalBackend('RECEIVE',f.id);
+ assert.deepEqual(f.calls[2],f.calls[3]);assert.equal(f.storage.size,0);
+});
+test('production physical operations fail closed when one switch, identity or origin changes',async()=>{
+ for(const mode of ['dispatch-backend','dispatch-block','origin','db']){
+  const f=fixture(true),c=f.open();
+  if(mode==='dispatch-backend')c.YUSHIN_PRODUCTION_MAIN_TRANSFER_DISPATCH_BACKEND=false;
+  if(mode==='dispatch-block')c.YUSHIN_PRODUCTION_MAIN_TRANSFER_DISPATCH_LEGACY_BLOCKED=false;
+  if(mode==='origin')c.location.origin='https://other.example';
+  if(mode==='db')c.db.app.options.projectId='preview-20135';
+  await assert.rejects(c.commitWarehouseTransfer({id:f.id,requestId:f.requestId,qty:3}));
+  assert.equal(f.calls.length,0);
+ }
+ const f=fixture(true),c=f.open();await c.commitWarehouseTransfer({id:f.id,requestId:f.requestId,qty:3});
+ c.YUSHIN_PRODUCTION_MAIN_TRANSFER_RECEIPT_BACKEND=false;
+ await assert.rejects(c.commitWarehouseTransferReceipt(f.id));assert.equal(f.calls.length,1);
 });
