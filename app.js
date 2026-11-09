@@ -612,7 +612,8 @@ function productionTransactionBackendRequired(kind){
 function productionTransactionBackendEnabled(kind){
  if(!['DISPATCH','SHIPMENT','ORDER_LIFECYCLE','DELIVERY_CONFIRMATION','DELIVERY_REVERSAL','CUSTOMER_RETURN','CUSTOMER_RETURN_REQUEST',
   'ORDER_TRANSFER_DISPATCH','ORDER_TRANSFER_HANDOFF','ORDER_TRANSFER_RECEIVE','CANCELLED_PURCHASE',
-  'MAIN_TRANSFER_REQUEST','MAIN_TRANSFER_DISPATCH','MAIN_TRANSFER_RECEIPT','MAIN_TRANSFER_ALLOCATION'].includes(kind)||!productionTransactionBackendRequired(kind)
+  'MAIN_TRANSFER_REQUEST','MAIN_TRANSFER_DISPATCH','MAIN_TRANSFER_RECEIPT','MAIN_TRANSFER_ALLOCATION',
+  'MANUAL_INVENTORY','INVENTORY_COUNT'].includes(kind)||!productionTransactionBackendRequired(kind)
   ||globalThis['YUSHIN_PRODUCTION_'+kind+'_BACKEND']!==true
   ||globalThis['YUSHIN_PRODUCTION_'+kind+'_LEGACY_BLOCKED']!==true)return false;
  const path=String(globalThis.location?.pathname||'');
@@ -9859,6 +9860,18 @@ window.openInventoryAdjustment = async function(type = 'initial', item = null) {
     if (!canEditPage('inventory')) return;
     const generation=++inventoryAdjustmentGeneration;
     const editorUid=currentUser?.uid,editorRole=currentUserRole;
+    try{
+        if(manualStockPendingOperations().length){
+            const recovered=await resolveManualStockPendingOperations();
+            if(generation!==inventoryAdjustmentGeneration||editorUid!==currentUser?.uid||editorRole!==currentUserRole)return;
+            showActionFeedback(`已核對先前 ${recovered} 筆庫存作業，請先確認清單數量。`);
+            await loadInventory(true);
+        }
+    }catch(error){
+        if(generation===inventoryAdjustmentGeneration)alert('仍有尚未確認的庫存作業，已停止建立新操作。請勿重複入庫或扣庫，使用原操作 ID 核對：'+(error?.message||error));
+        return;
+    }
+    if(generation!==inventoryAdjustmentGeneration||editorUid!==currentUser?.uid||editorRole!==currentUserRole)return;
     const saveButton=document.getElementById('saveInventoryAdjustmentBatchBtn');
     if(saveButton){saveButton.disabled=false;saveButton.textContent='確認儲存';}
     const selectedType = type || 'initial';
@@ -9945,6 +9958,16 @@ function refreshInventoryQuantityEditorValue() {
 window.openInventoryQuantityEditor=async function(inventoryId){
     if(inventoryQuantitySaveInProgress)return;
     if(!canEditPage('inventory'))return;
+    try{
+        if(manualStockPendingOperations().length){
+            const recovered=await resolveManualStockPendingOperations();
+            showActionFeedback(`已核對先前 ${recovered} 筆庫存作業，請重新開啟盤點確認數量。`);
+            await loadInventory(true);
+            return;
+        }
+    }catch(error){
+        alert('仍有尚未確認的庫存作業，已停止新的盤點。請以原操作 ID 核對：'+(error?.message||error));return;
+    }
     const item=inventoryItemById(inventoryId);
     if(!item){alert('找不到這個庫存品項，請重新整理後再試。');return;}
     const productMaster=productMasterForRecord({productId:item.productId||item.productKey||'',itemCode:item.itemCode||'',brand:item.brand||''});
@@ -10498,191 +10521,122 @@ window.loadMoreInventoryLotSearch=async function(){
     }catch(err){if(inventoryLotSearchIsCurrent(state)&&status)status.textContent='部分搜尋失敗，請重試批號結果';}
     finally{state.loading=false;if(inventoryLotSearchIsCurrent(state)){renderInventoryList();renderInventoryLotSearchControls();}}
 };
-// Quantity counting owns stock/lot/movement writes; the Feature owns the form
-// and retains the operation ID while a commit response is uncertain.
-async function commitInventoryQuantity(input,{actorUid=currentUser?.uid,actorRole=currentUserRole,actorName=currentUserName||currentUser?.email||'',onStockCommitted=null}={}) {
-    const assertActor=()=>{
-        if(!actorUid||actorUid!==currentUser?.uid||actorRole!==currentUserRole)throw new Error('登入帳號或角色已變更，請以原身分確認盤點結果。');
-        if(!['admin','purchaser','warehouse'].includes(actorRole))throw new Error('目前沒有庫存盤點權限。');
-    };
-    assertActor();
-    const request=JSON.parse(JSON.stringify(input||{}));
-    const {item={},warehouseId,target,operationId,singleWarehouseFallback=false}=request;
-    const key=String(item.productKey||item.productId||'').trim();
-    const inventoryId=item.id||encodeURIComponent(key),note=String(request.note||'').trim();
-    const validId=value=>typeof value==='string'&&value.trim()!==''&&!value.includes('/');
-    if(!key||!validId(inventoryId)||!validId(warehouseId)||!validId(operationId))throw new Error('缺少有效的產品、倉庫或盤點操作識別碼。');
-    if(typeof target!=='number'||!Number.isFinite(target)||target<0)throw new Error('盤點後現有數量必須是 0 或正數。');
-    const number=(value,label)=>{
-        if(value===undefined)return 0;
-        if(!['number','string'].includes(typeof value)||String(value).trim()===''||!Number.isFinite(Number(value))||Number(value)<0)throw new Error(label+'數量不正確，請先核對庫存。');
-        return Number(value);
-    };
-    const stock=(data,label)=>{
-        const result=Object.fromEntries(['onHand','reserved','incoming'].map(field=>[field,number(data[field],label+field)]));
-        if(result.reserved>result.onHand)throw new Error(label+'已預留超過現有數量，請先核對庫存。');
-        return result;
-    };
-    const assertIdentity=(data,warehouse='')=>{
-        if((data.productKey&&data.productKey!==key)||(data.productId&&data.productId!==key)||(warehouse&&data.warehouseId&&data.warehouseId!==warehouse))throw new Error('庫存產品或倉庫識別不符，請先核對資料。');
-    };
-    const now=new Date().toISOString();
-    const ref=db.collection('inventory').doc(inventoryId);
-    const whRef=db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,key));
-    const movementRef=db.collection('inventoryMovements').doc(operationId);
-    const balanceRef=db.collection('inventoryLots').doc(operationId+'-balance');
-    const addedRef=db.collection('inventoryLots').doc(operationId+'-added');
-    let result;
-    await runRoleTransaction(async tx=>{
-        assertActor();result=undefined;
-        const movementSnap=await tx.get(movementRef);assertActor();
-        if(movementSnap.exists){
-            const saved=movementSnap.data();
-            if(saved.operation!=='quantity-editor'||saved.sourceId!==operationId||saved.productKey!==key||saved.warehouseId!==warehouseId
-                ||saved.countInventoryId!==inventoryId||saved.countTarget!==target||saved.note!==note||saved.actorUid!==actorUid||saved.actorRole!==actorRole
-                ||typeof saved.qty!=='number'||!Number.isFinite(saved.qty))throw new Error('盤點操作識別碼已用於不同內容或身分，請先確認原作業。');
-            result={delta:saved.qty,productKey:key,warehouseId,operationId,replayed:true};return;
-        }
-        const invSnap=await tx.get(ref),whSnap=await tx.get(whRef);assertActor();
-        if(!invSnap.exists)throw new Error('庫存資料已不存在，請重新整理。');
-        const old=invSnap.data()||{},whData=whSnap.exists?whSnap.data():{};
-        assertIdentity(old);assertIdentity(whData,warehouseId);
-        const n=stock(old,'公司'),wh=stock(whData,'分倉');
-        const effectiveWarehouse=!whSnap.exists&&singleWarehouseFallback===true?n:wh;
-        const current=effectiveWarehouse.onHand;
-        const delta=target-current;
-        if(current>n.onHand)throw new Error('分倉數量超過公司總量，請先核對庫存。');
-        if(target<effectiveWarehouse.reserved||n.onHand+delta<n.reserved)throw new Error('盤點數量不可小於已預留數量。');
-        result={delta,productKey:key,warehouseId,operationId,replayed:false};
-        const audit={type:'adjustment',qty:delta,productKey:key,productId:old.productId||item.productId||key,warehouseId,sourceType:'manual',sourceId:operationId,operation:'quantity-editor',countInventoryId:inventoryId,countTarget:target,actorUid,actorRole,note,createdAt:now,createdBy:actorName};
-        // Even an unchanged count needs a receipt: an uncertain reply must not let
-        // the same operation overwrite a later arrival on its next attempt.
-        if(delta===0){tx.set(movementRef,{...audit,lotAllocations:[],lotIds:[]});return;}
-        // The company summary spans every location. Read its operational source
-        // inside the same transaction; only the counted warehouse's lots change.
-        const lotQuery=await firestoreReadWithTimeout(db.collection('inventoryLots').where('productKey','==',key).limit(201).get(),'盤點批次');
-        assertActor();
-        if(lotQuery.size>200)throw new Error('批次超過安全處理上限。');
-        const lotSnaps=await Promise.all(lotQuery.docs.map(doc=>tx.get(doc.ref)));
-        const allLots=lotSnaps.filter(doc=>doc.exists).map(doc=>({...doc.data(),id:doc.id}));
-        for(const lot of allLots){
-            assertIdentity(lot);if(!validId(lot.warehouseId))throw new Error('批次缺少有效的倉庫識別。');
-            number(lot.remainingQty??lot.qty,'批次');
-        }
-        const currentLots=allLots.filter(lot=>lot.warehouseId===warehouseId);
-        const balanceSnap=await tx.get(balanceRef),addedSnap=await tx.get(addedRef);assertActor();
-        if(balanceSnap.exists||addedSnap.exists)throw new Error('盤點操作識別碼衝突，請先確認原作業。');
-        const lotPlan=YushinInventory.quantityAdjustmentLots(currentLots,current,target,effectiveWarehouse.reserved,balanceRef.id,addedRef.id);
-        const canonicalBrand=resolveBrandName(old.brand||item.brand||'');
-        const metadata={productKey:key,productId:old.productId||item.productId||key,itemCode:old.itemCode||item.itemCode||'',itemName:old.itemName||item.itemName||'',brand:canonicalBrand,brandId:old.brandId||item.brandId||brandIdForName(canonicalBrand)};
-        const lots=[...allLots.filter(lot=>lot.warehouseId!==warehouseId),...lotPlan.lots.map(lot=>({...lot,warehouseId}))]
-            .map(lot=>({warehouseId:lot.warehouseId,lotNo:lot.lotNo||'',expiryDate:lot.expiryDate||'',qty:Number(lot.remainingQty??lot.qty??0)}));
-        const nextInventory={...old,...metadata,onHand:n.onHand+delta,reserved:n.reserved,incoming:n.incoming,lots,updatedAt:now};
-        nextInventory.searchTokens=buildInventorySearchTokens(nextInventory);
-        assertActor();
-        for(const lot of lotPlan.lots){
-            const oldLot=currentLots.find(row=>row.id===lot.id),lotRef=db.collection('inventoryLots').doc(lot.id);
-            if(oldLot){
-                if(Number(oldLot.remainingQty??oldLot.qty)!==lot.remainingQty)tx.update(lotRef,{remainingQty:lot.remainingQty,updatedAt:now});
-            }else tx.set(lotRef,{productKey:key,productId:metadata.productId,warehouseId,lotNo:'',expiryDate:'',receivedQty:lot.receivedQty,remainingQty:lot.remainingQty,unbatched:true,sourceType:lot.id===balanceRef.id?'MANUAL_STOCK_BALANCE':'MANUAL_ADJUSTMENT',sourceId:operationId,receivedAt:now,createdBy:actorName});
-        }
-        tx.set(ref,nextInventory,{merge:true});
-        tx.set(whRef,{...metadata,warehouseId,onHand:target,reserved:effectiveWarehouse.reserved,incoming:effectiveWarehouse.incoming,updatedAt:now},{merge:true});
-        tx.set(movementRef,{...audit,...metadata,lotAllocations:lotPlan.allocations,lotIds:lotPlan.lots.filter(lot=>!currentLots.some(row=>row.id===lot.id)).map(lot=>lot.id)});
-    });
-    try{
-        assertActor();
-        if(result.delta!==0)onStockCommitted?.(key,warehouseId);
-    }catch(err){err.inventoryCountCommitted=true;err.operationId=operationId;throw err;}
-    return result;
+// An uncertain count must retain its operation ID; no browser transaction is
+// allowed to adjust the inventory or stock ledger.
+async function commitInventoryQuantity(input,{actorUid=currentUser?.uid,actorRole=currentUserRole,onStockCommitted=null}={}){
+ const {item={},warehouseId,target,note,operationId}=input||{};
+ const productKey=String(item.productKey||item.productId||'').trim();
+ return commitManualStockBackend('INVENTORY_COUNT',{operationId,productKey,warehouseId,target,note},
+  {actorUid,actorRole,onStockCommitted});
 }
-// One row is an atomic checkpoint; batch presentation and recovery IDs belong to the Feature.
-async function commitManualInventoryAdjustment(input,{actorUid=currentUser?.uid,actorRole=currentUserRole,actorName=currentUserName||currentUser?.email||'',onStockCommitted=null}={}) {
-    const assertActor=()=>{
-        if(!actorUid||actorUid!==currentUser?.uid||actorRole!==currentUserRole)throw new Error('登入帳號或角色已變更，請以原身分確認庫存異動結果。');
-        if(!['admin','purchaser','warehouse'].includes(actorRole))throw new Error('目前沒有人工庫存異動權限。');
-    };
-    assertActor();
-    const request=JSON.parse(JSON.stringify(input||{})),{type,productKey:key,warehouseId,operationId}=request;
-    const row=request.row||{},validId=value=>typeof value==='string'&&value.trim()!==''&&!value.includes('/');
-    if(!['initial','adjustment','scrap'].includes(type)||!validId(key)||!validId(warehouseId)||!validId(operationId))throw new Error('缺少有效的異動類型、產品、倉庫或操作識別碼。');
-    if(typeof row.qty!=='number'||!Number.isFinite(row.qty)||row.qty===0||(type==='initial'&&row.qty<0))throw new Error('庫存異動數量不正確；新增庫存必須是正數。');
-    const delta=type==='scrap'?-Math.abs(row.qty):row.qty,lotNo=String(row.lotNo||'').trim(),expiryDate=String(row.expiryDate||'').trim();
-    if(expiryDate&&(!/^\d{4}-\d{2}-\d{2}$/.test(expiryDate)||!Number.isFinite(Date.parse(expiryDate))||new Date(expiryDate).toISOString().slice(0,10)!==expiryDate))throw new Error('效期格式不正確。');
-    const writesCost=type==='initial'&&['admin','purchaser'].includes(actorRole);
-    if(writesCost&&(String(row.unitCost??'').trim()===''||!['number','string'].includes(typeof row.unitCost)||!Number.isFinite(Number(row.unitCost))||Number(row.unitCost)<0))throw new Error('手動新增庫存請填寫實際單位成本，零成本請明確填 0。');
-    const intent={type,productKey:key,warehouseId,delta,lotNo,expiryDate};
-    const stock=data=>{
-        const result={};
-        for(const field of ['onHand','reserved','incoming']){
-            const value=data[field]===undefined?0:data[field];
-            if(!['number','string'].includes(typeof value)||String(value).trim()===''||!Number.isFinite(Number(value))||Number(value)<0)throw new Error('原庫存數量不正確，請先核對資料。');
-            result[field]=Number(value);
-        }
-        if(result.reserved>result.onHand)throw new Error('已預留超過現有數量，請先核對庫存。');
-        return result;
-    };
-    const identity=(data,warehouse='')=>{
-        if((data.productKey&&data.productKey!==key)||(data.productId&&data.productId!==key)||(warehouse&&data.warehouseId&&data.warehouseId!==warehouse))throw new Error('產品或倉庫識別不符，請先核對資料。');
-    };
-    const ref=db.collection('inventory').doc(encodeURIComponent(key)),whRef=db.collection('warehouseStocks').doc(warehouseStockDocId(warehouseId,key));
-    const movementRef=db.collection('inventoryMovements').doc(operationId),balanceRef=db.collection('inventoryLots').doc(operationId+'-balance'),addedRef=db.collection('inventoryLots').doc(operationId+'-added');
-    const costRef=db.collection('inventoryLotCosts').doc(addedRef.id),now=new Date().toISOString();
-    let result;
-    await runRoleTransaction(async tx=>{
-        assertActor();result=undefined;
-        const prior=await tx.get(movementRef);assertActor();
-        if(prior.exists){
-            const saved=prior.data();
-            if(saved.operation!=='manual-adjustment'||saved.sourceId!==operationId||saved.actorUid!==actorUid||saved.actorRole!==actorRole
-                ||saved.type!==type||saved.qty!==delta||saved.productKey!==key||saved.warehouseId!==warehouseId
-                ||!Object.keys(intent).every(field=>saved.adjustmentIntent?.[field]===intent[field]))throw new Error('此操作識別碼已用於不同內容或身分，請先確認原異動。');
-            if(writesCost){
-                const cost=await tx.get(costRef);assertActor();
-                if(!cost.exists||cost.data().unitCost!==Number(row.unitCost)||cost.data().lotId!==addedRef.id||cost.data().productKey!==key)throw new Error('原新增庫存成本已變更或不符，請先確認原異動。');
-            }
-            result={operationId,productKey:key,warehouseId,delta,replayed:true};return;
-        }
-        const productSnap=await tx.get(db.collection('products').doc(key)),warehouseSnap=await tx.get(db.collection('warehouses').doc(warehouseId));
-        const invSnap=await tx.get(ref),whSnap=await tx.get(whRef);assertActor();
-        if(!productSnap.exists||productSnap.data().active===false||productSnap.data().status==='INACTIVE')throw new Error('產品主檔不存在或已停用。');
-        if(!warehouseSnap.exists||warehouseSnap.data().active===false||warehouseSnap.data().systemCustody||warehouseSnap.data().warehouseType==='CUSTODY'||warehouseId.startsWith('custody-'))throw new Error('請選擇有效的實體倉庫，不可直接異動保管庫存。');
-        const product=productSnap.data();
-        if(['service','services','服務'].includes(String(product.productType||'').trim().toLowerCase()))throw new Error('服務品項不可建立實體庫存異動。');
-        if((product.productId&&product.productId!==key)||(product.lotTracked&&!lotNo)||(product.expiryTracked&&!expiryDate))throw new Error('產品識別或必填批號／效期不符。');
-        const old=invSnap.exists?invSnap.data():{},oldWh=whSnap.exists?whSnap.data():{};identity(old);identity(oldWh,warehouseId);
-        const n=stock(old),wh=stock(oldWh);
-        if(wh.onHand>n.onHand||n.onHand+delta<n.reserved||wh.onHand+delta<wh.reserved)throw new Error('異動後庫存不足以支撐已預留數量，或公司與分倉數量不符。');
-        const query=await firestoreReadWithTimeout(db.collection('inventoryLots').where('productKey','==',key).limit(201).get(),'人工異動批次');assertActor();
-        if(query.size>200)throw new Error('此產品批次超過安全處理上限。');
-        const snaps=await Promise.all(query.docs.map(doc=>tx.get(doc.ref)));
-        const allLots=snaps.filter(doc=>doc.exists).map(doc=>({...doc.data(),id:doc.id}));
-        for(const lot of allLots){identity(lot);if(!validId(lot.warehouseId))throw new Error('批次缺少有效的倉庫識別。');const qty=lot.remainingQty??lot.qty??0;if(!['number','string'].includes(typeof qty)||String(qty).trim()===''||!Number.isFinite(Number(qty))||Number(qty)<0)throw new Error('批次數量不正確。');}
-        const balance=await tx.get(balanceRef),added=await tx.get(addedRef),cost=writesCost?await tx.get(costRef):null;assertActor();
-        if(balance.exists||added.exists||cost?.exists)throw new Error('庫存異動的批次或成本識別碼衝突。');
-        const currentLots=allLots.filter(lot=>lot.warehouseId===warehouseId);
-        const plan=YushinInventory.manualAdjustmentLots(currentLots,wh.onHand,delta,wh.reserved,{lotNo,expiryDate,balanceId:balanceRef.id,addedId:addedRef.id});
-        const brand=resolveBrandName(product.brandName||product.brand||row.brand||'');
-        const metadata={productKey:key,productId:key,itemCode:product.manufacturerPartNo||product.model||row.itemCode||'',itemName:product.productName||product.nameCn||product.nameEn||row.itemName||'',brand,brandId:product.brandId||brandIdForName(brand)};
-        // Legacy list/search mirror is a projection of operational lots, never an independent delta ledger.
-        const lots=[...allLots.filter(lot=>lot.warehouseId!==warehouseId),...plan.lots.map(lot=>({...lot,warehouseId}))].map(lot=>({warehouseId:lot.warehouseId,lotNo:lot.lotNo||'',expiryDate:lot.expiryDate||'',qty:Number(lot.remainingQty??lot.qty??0)}));
-        const nextInventory={...old,...metadata,onHand:n.onHand+delta,reserved:n.reserved,incoming:n.incoming,lots,updatedAt:now};
-        nextInventory.searchTokens=buildInventorySearchTokens(nextInventory);assertActor();
-        for(const lot of plan.lots){
-            const existing=currentLots.find(row=>row.id===lot.id),lotRef=db.collection('inventoryLots').doc(lot.id);
-            if(existing){if(Number(existing.remainingQty??existing.qty??0)!==lot.remainingQty)tx.update(lotRef,{remainingQty:lot.remainingQty,updatedAt:now});}
-            else tx.set(lotRef,{productKey:key,productId:key,warehouseId,lotNo:lot.lotNo||'',expiryDate:lot.expiryDate||'',receivedQty:lot.receivedQty,remainingQty:lot.remainingQty,unbatched:lot.unbatched===true,
-                sourceType:lot.id===balanceRef.id?'MANUAL_STOCK_BALANCE':type==='initial'?'INITIAL_STOCK':'MANUAL_ADJUSTMENT',sourceId:operationId,receivedAt:now,createdBy:actorName});
-        }
-        if(type==='initial')tx.set(costRef,{lotId:addedRef.id,productKey:key,productId:key,warehouseId,...(writesCost?{unitCost:Number(row.unitCost)}:{costPending:true}),sourceType:'INITIAL_STOCK',sourceId:operationId,createdAt:now,createdBy:actorName});
-        tx.set(ref,nextInventory,{merge:true});
-        tx.set(whRef,{...metadata,warehouseId,onHand:wh.onHand+delta,reserved:wh.reserved,incoming:wh.incoming,updatedAt:now},{merge:true});
-        tx.set(movementRef,{type,qty:delta,...metadata,warehouseId,lotNo,expiryDate,lotId:delta>0?addedRef.id:'',lotAllocations:plan.allocations,operation:'manual-adjustment',adjustmentIntent:intent,
-            actorUid,actorRole,sourceType:'manual',sourceId:operationId,createdAt:now,createdBy:actorName});
-        result={operationId,productKey:key,warehouseId,delta,replayed:false};
-    });
-    try{assertActor();onStockCommitted?.(key,warehouseId);}catch(err){err.manualAdjustmentCommitted=true;err.operationId=operationId;throw err;}
-    return result;
+// The browser only submits intent; stock and lot ledger mutations belong to
+// commitV2ManualInventory on the trusted Admin SDK backend.
+async function commitManualInventoryAdjustment(input,{actorUid=currentUser?.uid,actorRole=currentUserRole,onStockCommitted=null}={}){
+ const {type,productKey,warehouseId,operationId,row={}}=input||{};
+ const payload={type,productKey,warehouseId,operationId,qty:row.qty,
+  lotNo:String(row.lotNo||'').trim(),expiryDate:String(row.expiryDate||'').trim()};
+ if(type==='initial'&&['admin','purchaser'].includes(actorRole)){
+  if(String(row.unitCost??'').trim()==='')throw Error('期初庫存必須填寫實際單位成本。');
+  payload.unitCost=Number(row.unitCost);
+ }
+ return commitManualStockBackend('MANUAL_INVENTORY',payload,{actorUid,actorRole,onStockCommitted});
+}
+// Only the trusted Admin SDK Callable may write manual inventory and counts.
+// Keep the exact intent locally until the backend receipt has been verified.
+function manualStockPendingKey(operationId){
+ return 'manual-stock:'+encodeURIComponent(currentUser?.uid||'')+':'+encodeURIComponent(operationId);
+}
+function manualStockPendingOperations(){
+ if(typeof sessionStorage==='undefined')return [];
+ const uid=currentUser?.uid;
+ if(!uid)return [];
+ const prefix='manual-stock:'+encodeURIComponent(uid)+':',pending=[];
+ for(let i=0;i<sessionStorage.length;i++){
+  const key=sessionStorage.key(i);
+  if(!key?.startsWith(prefix))continue;
+  let saved;
+  try{saved=JSON.parse(sessionStorage.getItem(key));}catch(_){throw Error('有無法讀取的庫存待確認紀錄，請聯絡管理員，勿重複提交。');}
+  if(!saved||saved.uid!==uid||!['MANUAL_INVENTORY','INVENTORY_COUNT'].includes(saved.kind)
+   ||saved.role!==currentUserRole||!saved.payload?.operationId
+   ||manualStockPendingKey(saved.payload.operationId)!==key)
+   throw Error('庫存待確認紀錄與目前帳號不一致，請聯絡管理員，勿重複提交。');
+  pending.push(saved);
+ }
+ return pending;
+}
+async function resolveManualStockPendingOperations(){
+ const pending=manualStockPendingOperations();
+ for(const saved of pending){
+  // Reuse the exact durable intent and operation ID. Backend idempotency ensures
+  // a completed request is verified, never applied for a second time.
+  await commitManualStockBackend(saved.kind,saved.payload,
+   {actorUid:saved.uid,actorRole:saved.role,onStockCommitted:invalidateWarehouseStockCache});
+ }
+ return pending.length;
+}
+function manualStockBackendContext(kind){
+ const emulator=globalThis.YUSHIN_MANUAL_STOCK_EMULATOR===true;
+ const preview=typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'
+  &&globalThis.YUSHIN_PREVIEW_MANUAL_STOCK===true;
+ const production=typeof productionTransactionBackendEnabled==='function'
+  &&productionTransactionBackendEnabled(kind);
+ const required=typeof productionTransactionBackendRequired==='function'
+  &&productionTransactionBackendRequired(kind);
+ if(!emulator&&!preview&&!production)throw Error('人工庫存／盤點後端尚未啟用，禁止瀏覽器直接修改庫存。');
+ if(required&&!production&&!emulator&&!preview)throw Error('庫存新舊版切換尚未完成，請保留原操作。');
+ if(typeof firebase==='undefined'||!firebase.auth||!firebase.functions||typeof db==='undefined')
+  throw Error('可信任庫存後端未載入。');
+ const uid=currentUser?.uid,role=currentUserRole,auth=firebase.auth(),functions=firebase.app().functions('asia-east1');
+ const project=emulator?'demo-yushin':production?'yu-shing-company':'preview-20135';
+ const local=host=>host==='localhost'||host==='127.0.0.1';
+ const check=()=>{
+  const path=String(globalThis.location?.pathname||'');
+  if(!uid||currentUser?.uid!==uid||currentUserRole!==role||auth.currentUser?.uid!==uid
+   ||!['admin','purchaser','warehouse'].includes(role)||!canEditPage('inventory')
+   ||firebase.app().options?.projectId!==project||auth.app?.options?.projectId!==project
+   ||functions.app?.options?.projectId!==project||db.app?.options?.projectId!==project
+   ||(emulator?(!local(globalThis.location?.hostname)||!local(auth.emulatorConfig?.host)
+     ||auth.emulatorConfig?.port!==9099):!!auth.emulatorConfig)
+   ||(production&&!(globalThis.location?.origin==='https://sstonetw-source.github.io'
+      &&(path==='/yushin-system'||path.startsWith('/yushin-system/'))))
+   ||(preview&&!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(globalThis.location?.hostname))
+   ||(!emulator&&!preview&&!(typeof productionTransactionBackendEnabled==='function'
+       &&productionTransactionBackendEnabled(kind))))
+   throw Error('庫存操作環境、帳號或權限已變更，請以原操作 ID 核對。');
+ };
+ check();return {uid,role,project,functions,emulator,check};
+}
+async function commitManualStockBackend(kind,payload,{actorUid,actorRole,onStockCommitted=null}={}){
+ if(!['MANUAL_INVENTORY','INVENTORY_COUNT'].includes(kind)||!payload||typeof payload!=='object')throw Error('庫存操作內容不正確。');
+ const id=payload.operationId;
+ if(typeof id!=='string'||!/^[a-zA-Z0-9_-]{12,96}$/.test(id))throw Error('庫存操作 ID 不正確。');
+ if(typeof ensureReservationFunctionsCompat==='function')await ensureReservationFunctionsCompat();
+ const {uid,role,project,functions,emulator,check}=manualStockBackendContext(kind);
+ if(uid!==actorUid||role!==actorRole)throw Error('庫存操作身分已變更。');
+ const key=manualStockPendingKey(id),raw=sessionStorage.getItem(key),intent=JSON.stringify({uid,role,project,kind,payload});
+ if(raw!==null&&raw!==intent)throw Error('同一操作 ID 尚有不同內容待核對，請勿產生新的異動。');
+ if(raw===null){sessionStorage.setItem(key,intent);if(sessionStorage.getItem(key)!==intent)throw Error('庫存操作暫存失敗，尚未提交。');}
+ check();if(emulator)functions.useEmulator('127.0.0.1',5001);
+ const callable=kind==='MANUAL_INVENTORY'?'commitV2ManualInventory':'commitV2InventoryCount';
+ const response=await functions.httpsCallable(callable)(payload);check();const data=response?.data;
+ if(!['applied','already-applied'].includes(data?.status)||data.operationId!==id||data.productKey!==payload.productKey
+  ||data.warehouseId!==payload.warehouseId||data.actorUid!==uid||data.actorRole!==role
+  ||typeof data.delta!=='number'||!Number.isFinite(data.delta))
+  throw Error('後端庫存結果無法確認，請保留原操作 ID。');
+ const snap=await db.collection('inventoryMovements').doc(id).get({source:'server'});check();
+ const receipt=snap.exists?snap.data():null;
+ if(!receipt||receipt.sourceId!==id||receipt.productKey!==payload.productKey
+  ||receipt.warehouseId!==payload.warehouseId||receipt.actorUid!==uid||receipt.actorRole!==role
+  ||receipt.qty!==data.delta||!receipt.intentHash
+  ||receipt.operation!==(kind==='MANUAL_INVENTORY'?'manual-adjustment':'quantity-editor'))
+  throw Error('庫存憑證尚未核對完成，請使用原操作 ID 重試。');
+ if(sessionStorage.getItem(key)!==intent)throw Error('庫存操作暫存已變更，請勿重送。');
+ sessionStorage.removeItem(key);
+ try{onStockCommitted?.(payload.productKey,payload.warehouseId);}catch(error){
+  error.operationId=id;error.manualStockCommitted=true;throw error;
+ }
+ return {operationId:id,productKey:payload.productKey,warehouseId:payload.warehouseId,delta:data.delta,
+  replayed:data.status==='already-applied'};
 }
 // Planning/list flags never mutate physical stock. Audit IDs are operation receipts.
 async function commitInventoryPlanningSettings(inventoryId,policy,safetyStock=0,{operationId,actorUid=currentUser?.uid,actorRole=currentUserRole}={}) {

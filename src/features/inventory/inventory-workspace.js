@@ -1059,6 +1059,18 @@ window.openInventoryAdjustment = async function(type = 'initial', item = null) {
     if (!canEditPage('inventory')) return;
     const generation=++inventoryAdjustmentGeneration;
     const editorUid=currentUser?.uid,editorRole=currentUserRole;
+    try{
+        if(manualStockPendingOperations().length){
+            const recovered=await resolveManualStockPendingOperations();
+            if(generation!==inventoryAdjustmentGeneration||editorUid!==currentUser?.uid||editorRole!==currentUserRole)return;
+            showActionFeedback(`已核對先前 ${recovered} 筆庫存作業，請先確認清單數量。`);
+            await loadInventory(true);
+        }
+    }catch(error){
+        if(generation===inventoryAdjustmentGeneration)alert('仍有尚未確認的庫存作業，已停止建立新操作。請勿重複入庫或扣庫，使用原操作 ID 核對：'+(error?.message||error));
+        return;
+    }
+    if(generation!==inventoryAdjustmentGeneration||editorUid!==currentUser?.uid||editorRole!==currentUserRole)return;
     const saveButton=document.getElementById('saveInventoryAdjustmentBatchBtn');
     if(saveButton){saveButton.disabled=false;saveButton.textContent='確認儲存';}
     const selectedType = type || 'initial';
@@ -1145,6 +1157,16 @@ function refreshInventoryQuantityEditorValue() {
 window.openInventoryQuantityEditor=async function(inventoryId){
     if(inventoryQuantitySaveInProgress)return;
     if(!canEditPage('inventory'))return;
+    try{
+        if(manualStockPendingOperations().length){
+            const recovered=await resolveManualStockPendingOperations();
+            showActionFeedback(`已核對先前 ${recovered} 筆庫存作業，請重新開啟盤點確認數量。`);
+            await loadInventory(true);
+            return;
+        }
+    }catch(error){
+        alert('仍有尚未確認的庫存作業，已停止新的盤點。請以原操作 ID 核對：'+(error?.message||error));return;
+    }
     const item=inventoryItemById(inventoryId);
     if(!item){alert('找不到這個庫存品項，請重新整理後再試。');return;}
     const productMaster=productMasterForRecord({productId:item.productId||item.productKey||'',itemCode:item.itemCode||'',brand:item.brand||''});

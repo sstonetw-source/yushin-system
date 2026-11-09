@@ -35,6 +35,12 @@
     scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_RECEIPT_LEGACY_BLOCKED = false;
     scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_ALLOCATION_BACKEND = false;
     scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_ALLOCATION_LEGACY_BLOCKED = false;
+    // P0 #523: registered backend only, no production switch approval.
+    // The browser must never revive the retired direct stock writer.
+    scope.YUSHIN_PRODUCTION_MANUAL_INVENTORY_BACKEND = false;
+    scope.YUSHIN_PRODUCTION_MANUAL_INVENTORY_LEGACY_BLOCKED = false;
+    scope.YUSHIN_PRODUCTION_INVENTORY_COUNT_BACKEND = false;
+    scope.YUSHIN_PRODUCTION_INVENTORY_COUNT_LEGACY_BLOCKED = false;
     scope.YUSHIN_PRODUCTION_DELIVERY_CONFIRMATION_BACKEND = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_DELIVERY_CONFIRMATION_LEGACY_BLOCKED = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_DELIVERY_REVERSAL_BACKEND = orderReservationProductionSite;

@@ -10,6 +10,7 @@ const { arrayUnion, collection, deleteDoc, deleteField, doc, getDoc, getDocs, li
 const { initializeApp: initializeAdminApp, deleteApp: deleteAdminApp } = require('firebase-admin/app');
 const { getFirestore: getAdminFirestore } = require('firebase-admin/firestore');
 const { commitOrderReservation } = require('../functions/order-reservation-service');
+const { commitManualStock } = require('../functions/manual-stock-service');
 const { buildStockCutoverRules } = require('../tools/build-stock-cutover-rules.cjs');
 
 let env;
@@ -1502,51 +1503,54 @@ test('actual bounded lot readers expose operational batches and exact search for
   if(['warehouse','sales','engineer'].includes(role))await assertFails(getDoc(doc(db(uid),'inventoryLotCosts/read-A')));
  }
 });
-test('actual manual inventory service commits initial stock protected cost and targeted scrap for three operational roles',async()=>{
+const manualStockTestEnv={GCLOUD_PROJECT:'demo-yushin',FUNCTIONS_EMULATOR:'true',
+ FIRESTORE_EMULATOR_HOST:'127.0.0.1:8080',FIREBASE_AUTH_EMULATOR_HOST:'127.0.0.1:9099',
+ ENABLE_MANUAL_INVENTORY_EMULATOR:'true',ENABLE_INVENTORY_COUNT_EMULATOR:'true'};
+test('actual Admin SDK manual inventory is atomic, replay-safe, cost-protected and rejects untrusted browser stock changes',async()=>{
+ await seed('warehouses/W1',{active:true,warehouseType:'PHYSICAL'});
  for(const [uid,role] of [['admin','admin'],['buyer1','purchaser'],['wh1','warehouse']]){
-  const key='manual-'+uid,operationId='manual-op-'+uid,client=compatDb(uid),nativeRun=client.runTransaction,plain=x=>JSON.parse(JSON.stringify(x));
-  client.runTransaction=fn=>nativeRun(tx=>fn({...tx,set:(r,d,o)=>o?tx.set(r,plain(d),o):tx.set(r,plain(d)),update:(r,d)=>tx.update(r,plain(d))}));
+  const key='manual-'+uid,operationId='manual-op-'+uid+'-2026';
   await seed('products/'+key,{productId:key,productName:'Manual product',manufacturerPartNo:'MANUAL',active:true});
-  await seed('warehouses/W1',{active:true,warehouseType:'PHYSICAL'});
-  const c=vm.createContext({db:client,currentUser:{uid},currentUserRole:role,currentUserName:uid,YushinInventory:require('../modules/inventory-core'),
-   warehouseStockDocId:(w,p)=>w+'__'+p,firestoreReadWithTimeout:p=>p,resolveBrandName:b=>b,brandIdForName:()=>'',buildInventorySearchTokens:()=>[],
-   runRoleTransaction:fn=>stockPermissions.run(client,fn,uid,false,role)});
-  vm.runInContext(fs.readFileSync('src/services/manual-inventory.js','utf8'),c);
-  const request={type:'initial',productKey:key,warehouseId:'W1',operationId,row:{qty:5,unitCost:role==='warehouse'?'':0,lotNo:'B',expiryDate:'2027-01-01'}};
-  await assertSucceeds(c.commitManualInventoryAdjustment(request));await assertSucceeds(c.commitManualInventoryAdjustment(request));
-  const lot=(await getDoc(doc(db('admin'),'inventoryLots/'+operationId+'-added'))).data(),cost=(await getDoc(doc(db('admin'),'inventoryLotCosts/'+operationId+'-added'))).data();
+  const request={type:'initial',productKey:key,warehouseId:'W1',operationId,qty:5,lotNo:'B',expiryDate:'2027-01-01'};
+  if(role!=='warehouse')request.unitCost=0;
+  const first=await commitManualStock(adminDatabase,uid,request,'MANUAL_INVENTORY',manualStockTestEnv);
+  const replay=await commitManualStock(adminDatabase,uid,request,'MANUAL_INVENTORY',manualStockTestEnv);
+  assert.equal(first.status,'applied');assert.equal(replay.status,'already-applied');
+  const lot=(await getDoc(doc(db('admin'),'inventoryLots/'+operationId+'-added'))).data();
+  const cost=(await adminDatabase.doc('inventoryLotCosts/'+operationId+'-added').get()).data();
   assert.equal(lot.remainingQty,5);assert.equal(lot.unitCost,undefined);assert.equal(cost.unitCost,role==='warehouse'?undefined:0);
   assert.equal(cost.costPending,role==='warehouse'?true:undefined);
   if(role==='warehouse')await assertFails(getDoc(doc(db(uid),'inventoryLotCosts/'+operationId+'-added')));
-  const scrap={...request,type:'scrap',operationId:'manual-scrap-'+uid,row:{...request.row,qty:2}};
-  await assertSucceeds(c.commitManualInventoryAdjustment(scrap));await assertSucceeds(c.commitManualInventoryAdjustment(scrap));
+  await assert.rejects(commitManualStock(adminDatabase,uid,{...request,qty:6},'MANUAL_INVENTORY',manualStockTestEnv),/操作 ID/);
+  const scrap={...request,type:'scrap',operationId:'manual-scrap-'+uid+'-2026',qty:2};delete scrap.unitCost;
+  await commitManualStock(adminDatabase,uid,scrap,'MANUAL_INVENTORY',manualStockTestEnv);
+  await commitManualStock(adminDatabase,uid,scrap,'MANUAL_INVENTORY',manualStockTestEnv);
   assert.equal((await getDoc(doc(db('admin'),'inventoryLots/'+operationId+'-added'))).data().remainingQty,3);
   assert.equal((await getDoc(doc(db('admin'),'inventory/'+key))).data().onHand,3);
-  const adjust={...request,type:'adjustment',operationId:'manual-adjust-'+uid,row:{...request.row,qty:1}};
-  await assertSucceeds(c.commitManualInventoryAdjustment(adjust));
+  const adjust={...scrap,type:'adjustment',operationId:'manual-adjust-'+uid+'-2026',qty:1};
+  await commitManualStock(adminDatabase,uid,adjust,'MANUAL_INVENTORY',manualStockTestEnv);
   assert.equal((await getDoc(doc(db('admin'),'warehouseStocks/W1__'+key))).data().onHand,4);
-  assert.equal((await getDoc(doc(db('admin'),'inventoryLotCosts/'+adjust.operationId+'-added'))).exists(),false);
+  assert.equal((await adminDatabase.doc('inventoryLotCosts/'+adjust.operationId+'-added').get()).exists,false);
+  await assertFails(updateDoc(doc(db(uid),'inventoryMovements/'+operationId),{qty:100}));
  }
 });
-test('actual count service keeps stock lots and immutable operation aligned for admin purchaser and warehouse',async()=>{
- for(const [uid,role] of [['admin','admin'],['buyer1','purchaser'],['wh1','warehouse']]){
-  const key='count-'+uid,client=compatDb(uid),nativeRun=client.runTransaction,plain=x=>JSON.parse(JSON.stringify(x));
-  client.runTransaction=fn=>nativeRun(tx=>fn({...tx,set:(r,d,o)=>o?tx.set(r,plain(d),o):tx.set(r,plain(d)),update:(r,d)=>tx.update(r,plain(d))}));
+test('actual Admin SDK count uses immutable receipts and keeps company, warehouse and lots aligned',async()=>{
+ await seed('warehouses/W1',{active:true,warehouseType:'PHYSICAL'});
+ for(const uid of ['admin','buyer1','wh1']){
+  const key='count-'+uid;
+  await seed('products/'+key,{productId:key,productName:'Count product',active:true});
   await seed('inventory/'+key,{productKey:key,productId:key,onHand:10,reserved:2,incoming:0});
   await seed('warehouseStocks/W1__'+key,{productKey:key,productId:key,warehouseId:'W1',onHand:10,reserved:2,incoming:0});
-  const c=vm.createContext({db:client,currentUser:{uid},currentUserRole:role,currentUserName:uid,YushinInventory:require('../modules/inventory-core'),
-   warehouseStockDocId:(w,p)=>w+'__'+p,firestoreReadWithTimeout:p=>p,resolveBrandName:b=>b,brandIdForName:()=>'',buildInventorySearchTokens:()=>[],
-   runRoleTransaction:fn=>stockPermissions.run(client,fn,uid,false,role)});
-  vm.runInContext(fs.readFileSync('src/services/inventory-count.js','utf8'),c);
-  const request={item:{id:key,productKey:key,productId:key},warehouseId:'W1',target:15,note:'actual Rules',operationId:'count-op-'+uid};
-  await assertSucceeds(c.commitInventoryQuantity(request));
+  const request={productKey:key,warehouseId:'W1',target:15,note:'actual Rules',operationId:'count-op-'+uid+'-2026'};
+  await commitManualStock(adminDatabase,uid,request,'INVENTORY_COUNT',manualStockTestEnv);
+  await commitManualStock(adminDatabase,uid,request,'INVENTORY_COUNT',manualStockTestEnv);
   assert.equal((await getDoc(doc(db(uid),'inventory/'+key))).data().onHand,15);
   assert.equal((await getDoc(doc(db(uid),'inventoryLots/'+request.operationId+'-added'))).data().remainingQty,5);
-  assert.equal((await getDoc(doc(db('admin'),'inventoryLotCosts/'+request.operationId+'-added'))).exists(),false);
-  await assertSucceeds(c.commitInventoryQuantity(request));
-  const movement=(await getDoc(doc(db(uid),'inventoryMovements/'+request.operationId))).data();assert.equal(movement.countTarget,15);assert.equal(movement.actorUid,uid);
+  assert.equal((await adminDatabase.doc('inventoryLotCosts/'+request.operationId+'-added').get()).exists,false);
+  const movement=(await getDoc(doc(db(uid),'inventoryMovements/'+request.operationId))).data();
+  assert.equal(movement.countTarget,15);assert.equal(movement.actorUid,uid);
   await assertFails(updateDoc(doc(db(uid),'inventoryMovements/'+request.operationId),{countTarget:100}));
-  const reduced={...request,target:7,operationId:'count-reduce-'+uid};await assertSucceeds(c.commitInventoryQuantity(reduced));
+  await commitManualStock(adminDatabase,uid,{...request,target:7,operationId:'count-reduce-'+uid+'-2026'},'INVENTORY_COUNT',manualStockTestEnv);
   assert.equal((await getDoc(doc(db(uid),'warehouseStocks/W1__'+key))).data().onHand,7);
  }
 });
