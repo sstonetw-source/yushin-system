@@ -1,13 +1,6 @@
 // Cutover model: settings/orderTransferCutover.backendOnly (bool, optional,
 // irreversible once true) retires client writes for stockTransfers with a
 // nonempty orderId and their order/reservation witnesses; free transfers stay unchanged.
-// Backend-only stock ledger cutover (dormant until separately authorized):
-// The existence of settings/stockWriterCutover (created by trusted backend)
-// retires ALL client writes to
-// inventory quantities, warehouse stock rows, reservations, stock transfers,
-// physical lots, stock movements and operation witnesses. Master planning
-// updates in inventory remain role-checked and cannot alter stock quantities.
-// Trusted Cloud Functions Admin SDK bypasses these client Rules.
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -222,27 +215,12 @@ service cloud.firestore {
       return exists(gate) && get(gate).data.get('backendOnly', false) == true;
     }
 
-    function stockWriterClientWriteEnabled() {
-      let gate = /databases/$(database)/documents/settings/stockWriterCutover;
-      return !exists(gate);
-    }
-
-    function stockWriterAllowsPlanningOnly() {
-      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-        'stockPolicy', 'safetyStock', 'updatedAt',
-        'listArchived', 'listArchiveChangedAt',
-        'listArchiveChangedByUid', 'listArchiveAuditId'
-      ]);
-    }
-
     match /settings/{id} {
       allow read: if active();
       // Approved cutover gates are one-way: a cached client or routine admin
       // edit must never reactivate a retired transaction writer.
-      // Stock writer retirement is infrastructure-only. Even a signed-in
-      // administrator cannot turn the switch on/off via a browser SDK.
-      allow create: if admin() && id != 'stockWriterCutover';
-      allow update: if admin() && id != 'stockWriterCutover'
+      allow create: if admin();
+      allow update: if admin()
         && (id != 'receivingCutover'
           || resource.data.get('backendOnly', false) != true
           || request.resource.data.get('backendOnly', false) == true)
@@ -1884,7 +1862,7 @@ service cloud.firestore {
       }
 
       allow read: if canReceiveInventory();
-      allow create: if stockWriterClientWriteEnabled() && (canPurchase()) && validMainTransferRequest(request.resource.data)
+      allow create: if (canPurchase()) && validMainTransferRequest(request.resource.data)
         && request.resource.data.id == id && request.resource.data.status == 'PENDING'
         && request.resource.data.createdByUid == request.auth.uid
         && !request.resource.data.keys().hasAny(['transferId','shippedAt','shippedByUid','cancelledAt','cancelledByUid'])
@@ -1894,7 +1872,7 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/warehouses/$(request.resource.data.fromWarehouseId)).data.get('active', true)
         && !get(/databases/$(database)/documents/warehouses/$(request.resource.data.fromWarehouseId)).data.get('systemCustody', false)
         && mainTransferHold(request.resource.data, 1);
-      allow update: if stockWriterClientWriteEnabled() && validMainTransferRequest(request.resource.data) && resource.data.status == 'PENDING'
+      allow update: if validMainTransferRequest(request.resource.data) && resource.data.status == 'PENDING'
         && ((canReceiveInventory() && request.resource.data.status == 'SHIPPED'
           && request.resource.data.shippedByUid == request.auth.uid
           && request.resource.data.shippedAt is string && request.resource.data.shippedAt.size() <= 40
@@ -1972,7 +1950,7 @@ service cloud.firestore {
       }
 
       allow get, list: if canReceiveInventory();
-      allow create: if stockWriterClientWriteEnabled() && canReceiveInventory()
+      allow create: if canReceiveInventory()
         && (request.resource.data.get('orderId', '') == '' || !orderTransferBackendOnly())
         && request.resource.data.id == id
         && request.resource.data.createdByUid == request.auth.uid
@@ -1986,7 +1964,7 @@ service cloud.firestore {
         && transferOrderEvidence(request.resource.data) && transferSourceStock(request.resource.data)
         && transferAggregate(request.resource.data, false)
         && (request.resource.data.kind != 'HANDOFF' || transferTargetStock(request.resource.data));
-      allow update: if stockWriterClientWriteEnabled() && canReceiveInventory()
+      allow update: if canReceiveInventory()
         && (resource.data.get('orderId', '') == '' || !orderTransferBackendOnly())
         && ((resource.data.status == 'IN_TRANSIT'
         && request.resource.data.status == 'RECEIVED' && request.resource.data.receivedByUid == request.auth.uid
@@ -2087,14 +2065,12 @@ service cloud.firestore {
           ((canPurchase()) && validInventoryStockPolicy(request.resource.data))
           || (warehouse() && warehouseInventoryPlanningDefaults(request.resource.data))
         )
-        && !exists(/databases/$(database)/documents/settings/stockWriterCutover)
         && nonNegativeInventory(request.resource.data)
         // Administrators can restore archived records from an existing backup.
         && (!request.resource.data.keys().hasAny(inventoryArchiveKeys())
           || (admin() && request.resource.data.get('listArchived', false) is bool))
         && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
       allow update: if inventoryUpdateWriter(id)
-        && (!exists(/databases/$(database)/documents/settings/stockWriterCutover) || stockWriterAllowsPlanningOnly())
         && validInventoryArchiveChange(id)
         && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
       allow delete: if false;
@@ -2152,12 +2128,11 @@ service cloud.firestore {
 
       allow get: if safeStockReader(resource == null ? {} : resource.data);
       allow list: if safeStockReader(resource.data);
-      allow create: if !exists(/databases/$(database)/documents/settings/stockWriterCutover) && canReceiveInventory() && validWarehouseStock(request.resource.data)
+      allow create: if canReceiveInventory() && validWarehouseStock(request.resource.data)
         && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
       // Receiver validation already includes recovery metadata; business updates
       // validate it in their own branch, so neither path evaluates it twice.
-      allow update: if !exists(/databases/$(database)/documents/settings/stockWriterCutover)
-        && ((canReceiveInventory() && validWarehouseStock(request.resource.data))
+      allow update: if ((canReceiveInventory() && validWarehouseStock(request.resource.data))
           || (businessWarehouseStockOperationalUpdate(id) && validStockRecoveryMetadata(request.resource.data)))
         && warehouseStockIdentityUnchanged()
         && validStockRecoveryUpdate()
@@ -2300,9 +2275,9 @@ service cloud.firestore {
       // A missing document contains no business data; existing documents stay owner-scoped.
       allow get: if (resource == null ? role() in ['admin','purchaser','warehouse','sales','engineer'] : operationalOrOwnedReader(resource.data));
       allow list: if operationalOrOwnedReader(resource.data);
-      allow create: if !exists(/databases/$(database)/documents/settings/stockWriterCutover) && reservationCreateAllowed(id);
-      allow update: if !exists(/databases/$(database)/documents/settings/stockWriterCutover) && reservationUpdateAllowed(id);
-      allow delete: if !exists(/databases/$(database)/documents/settings/stockWriterCutover) && admin();
+      allow create: if reservationCreateAllowed(id);
+      allow update: if reservationUpdateAllowed(id);
+      allow delete: if admin();
     }
 
     match /inventoryLots/{id} {
@@ -2333,17 +2308,17 @@ service cloud.firestore {
 
       // Operational lot data is readable for fulfillment, but cost must never live here.
       allow read: if canReceiveInventory() || (businessOwner() && !('unitCost' in resource.data));
-      allow create: if stockWriterClientWriteEnabled() && canReceiveInventory() && validInventoryLot(request.resource.data);
-      allow update: if stockWriterClientWriteEnabled() && (canReceiveInventory() || businessInventoryLotOperationalUpdate(id))
+      allow create: if canReceiveInventory() && validInventoryLot(request.resource.data);
+      allow update: if (canReceiveInventory() || businessInventoryLotOperationalUpdate(id))
         && validInventoryLot(request.resource.data) && inventoryLotIdentityUnchanged();
-      allow delete: if stockWriterClientWriteEnabled() && admin();
+      allow delete: if admin();
     }
 
     // Actual receipt/lot cost is physically separated from operational lot data.
     // Client-side fulfillment never requires this collection.
     match /inventoryLotCosts/{id} {
       allow read: if canPurchase();
-      allow create: if stockWriterClientWriteEnabled() && (canPurchase() || (warehouse() && (
+      allow create: if canPurchase() || (warehouse() && (
         (request.resource.data.get('sourceType', '') == 'SUPPLY_ORDER'
           && !request.resource.data.keys().hasAny(['unitCost', 'cost', 'costPrice'])
           && request.resource.data.get('costSourceSupplyId', '') == request.resource.data.get('sourceId', '')
@@ -2358,9 +2333,9 @@ service cloud.firestore {
           && !request.resource.data.keys().hasAny(['unitCost', 'cost', 'costPrice'])
           && request.resource.data.lotId == id
           && getAfter(/databases/$(database)/documents/inventoryLots/$(id)).data.get('sourceType', '') == 'INITIAL_STOCK')
-      )));
-      allow update: if stockWriterClientWriteEnabled() && canPurchase();
-      allow delete: if stockWriterClientWriteEnabled() && admin();
+      ));
+      allow update: if canPurchase();
+      allow delete: if admin();
     }
 
     function validActiveReturnWarehouse(warehouseId) {
@@ -2572,6 +2547,79 @@ service cloud.firestore {
           && afterWh.reserved - beforeWh.get('reserved', 0) == delta.quantity;
       }
 
+      // Only one fresh warehouse movement evaluates the full company delta.
+      // All other warehouse movements must link that validated primary movement.
+      function linkedCompanyReservationProof(e, productKey, warehouseId) {
+        let path = /databases/$(database)/documents/inventoryMovements/$(e.companyMovementId);
+        let primary = getAfter(path).data;
+        let proof = primary.get('reservationStockEvidence', {});
+        return !exists(path)
+          && primary.get('productKey', '') == productKey
+          && primary.get('sourceId', '') == request.resource.data.get('sourceId', '')
+          && primary.get('warehouseId', '') != warehouseId
+          && proof.get('crossWarehouse', false) == true
+          && proof.get('movementId', '') == e.companyMovementId
+          && proof.get('companyMovementId', '') == e.companyMovementId
+          && proof.get('inventoryId', '') == e.inventoryId
+          && proof.get('reservationIds', []).size() == e.reservationIds.size()
+          && proof.get('reservationIds', []).hasAll(e.reservationIds);
+      }
+
+      // Evaluate each primary reservation snapshot once for both stock totals.
+      // A local contribution must keep its warehouse; each changed reservation's
+      // own movement witness also requires membership in this local ID set.
+      function primaryReservationDeltaAt(id, productKey, warehouseId, localIds) {
+        let path = /databases/$(database)/documents/inventoryReservations/$(id);
+        let previous = get(path);
+        let before = previous == null ? {} : previous.data;
+        let after = getAfter(path).data;
+        let oldQty = before.get('quantity', 0);
+        let qty = after.get('quantity', 0);
+        let local = id in localIds;
+        let delta = qty - oldQty;
+        return {
+          'valid': after.productKey == productKey && before.get('productKey', productKey) == productKey
+            && (!local || (qty == 0 && oldQty == 0) || (after.warehouseId == warehouseId
+              && (oldQty == 0 || before.get('warehouseId', warehouseId) == warehouseId))),
+          'company': delta, 'warehouse': local ? delta : 0
+        };
+      }
+
+      function combinedPrimaryReservationDelta(a, b, c, d, e) {
+        return {'valid': a.valid && b.valid && c.valid && d.valid && e.valid,
+          'company': a.company + b.company + c.company + d.company + e.company,
+          'warehouse': a.warehouse + b.warehouse + c.warehouse + d.warehouse + e.warehouse};
+      }
+
+      function primaryReservationStocks(e, productKey, warehouseId) {
+        let ids = e.reservationIds;
+        let localIds = e.warehouseReservationIds;
+        let zero = {'valid': true, 'company': 0, 'warehouse': 0};
+        let delta = combinedPrimaryReservationDelta(
+          primaryReservationDeltaAt(ids[0], productKey, warehouseId, localIds),
+          ids.size() > 1 ? primaryReservationDeltaAt(ids[1], productKey, warehouseId, localIds) : zero,
+          ids.size() > 2 ? primaryReservationDeltaAt(ids[2], productKey, warehouseId, localIds) : zero,
+          ids.size() > 3 ? primaryReservationDeltaAt(ids[3], productKey, warehouseId, localIds) : zero,
+          ids.size() > 4 ? primaryReservationDeltaAt(ids[4], productKey, warehouseId, localIds) : zero);
+        return operationalReservedStockMatches(/databases/$(database)/documents/inventory/$(e.inventoryId),
+            {'valid': delta.valid, 'quantity': delta.company}, productKey, '')
+          && operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId),
+            {'valid': delta.valid, 'quantity': delta.warehouse}, productKey, warehouseId);
+      }
+
+      function crossWarehouseReservationStocks(e, productKey, warehouseId) {
+        return e.get('companyMovementId', '') is string && e.get('companyMovementId', '') != ''
+          && e.warehouseReservationIds is list && e.warehouseReservationIds.size() > 0
+          && e.warehouseReservationIds.size() <= e.reservationIds.size()
+          && e.warehouseReservationIds.toSet().size() == e.warehouseReservationIds.size()
+          && e.reservationIds.hasAll(e.warehouseReservationIds)
+          && (e.companyMovementId == e.movementId
+            ? primaryReservationStocks(e, productKey, warehouseId)
+            : linkedCompanyReservationProof(e, productKey, warehouseId)
+              && operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId),
+                sameWarehouseReservationTotal(e.warehouseReservationIds, productKey, warehouseId), productKey, warehouseId));
+      }
+
       // Validate the group once on its immutable movement rather than repeating
       // the five-reservation sums on every reservation in the batch.
       function validOperationalMovementEvidence(id) {
@@ -2588,9 +2636,9 @@ service cloud.firestore {
           && e.reservationIds.toSet().size() == e.reservationIds.size()
           && e.get('crossWarehouse', false) == false
           && request.resource.data.productKey == data.productKey
-          // The crossWarehouse=true branch is unreachable after the explicit
-          // rejection above; avoid charging repeated rule expressions for it.
-          && ((before.get('quantity', 0) == 0 || before.get('warehouseId', data.warehouseId) == data.warehouseId)
+          && (e.get('crossWarehouse', false)
+            ? crossWarehouseReservationStocks(e, data.productKey, data.warehouseId)
+            : (before.get('quantity', 0) == 0 || before.get('warehouseId', data.warehouseId) == data.warehouseId)
               ? sameWarehouseReservationStocks(e, data.productKey, data.warehouseId)
               : operationalReservedStockMatches(/databases/$(database)/documents/inventory/$(e.inventoryId), operationalStockDelta(e, data.productKey, ''), data.productKey, '')
                 && operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId), operationalStockDelta(e, data.productKey, data.warehouseId), data.productKey, data.warehouseId)
@@ -2625,12 +2673,12 @@ service cloud.firestore {
 
       allow read: if canReceiveInventory()
         || (businessOwner() && owns(resource.data));
-      allow create: if !exists(/databases/$(database)/documents/settings/stockWriterCutover) && inventoryMovementWriter(id)
+      allow create: if inventoryMovementWriter(id)
         && !('unitCost' in request.resource.data)
         && !('purchaseNetAmount' in request.resource.data)
         && !('cogs' in request.resource.data);
       allow update: if false;
-      allow delete: if !exists(/databases/$(database)/documents/settings/stockWriterCutover) && admin();
+      allow delete: if admin();
     }
 
     // Immutable operational audit trail.
@@ -2682,7 +2730,7 @@ service cloud.firestore {
 
       allow get: if active() && (resource == null || canReceiveInventory() || resource.data.actorUid == request.auth.uid);
       allow list: if canReceiveInventory() || (active() && resource.data.actorUid == request.auth.uid);
-      allow create: if stockWriterClientWriteEnabled() && (admin() || validStockOperation(request.resource.data));
+      allow create: if admin() || validStockOperation(request.resource.data);
       allow update, delete: if false;
     }
 
