@@ -1,21 +1,28 @@
-name: Manual GitHub Pages release
+name: GitHub Pages automatic frontend release
 
-# Publishing is a separate, explicitly authorized operation. Merging main must
-# never publish the frontend automatically.
+# Prelaunch frontend only: publish the tested main commit after its full CI
+# succeeds. Never deploy Firebase Hosting, Functions, Rules or data here.
 on:
-  workflow_dispatch:
+  workflow_run:
+    workflows: ["System regression tests"]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
 
 concurrency:
-  group: github-pages-manual-release
+  group: github-pages-main-release
   cancel-in-progress: false
 
 jobs:
   release:
-    name: Release frontend from main
-    if: github.ref == 'refs/heads/main'
+    name: Publish successfully tested main frontend
+    if: >-
+      github.event.workflow_run.conclusion == 'success'
+      && github.event.workflow_run.event == 'push'
+      && github.event.workflow_run.head_branch == 'main'
+      && github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -25,11 +32,22 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Checkout main
+      - name: Checkout the exact tested commit
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.event.workflow_run.head_sha }}
           persist-credentials: false
+
+      - name: Reject obsolete or untested main versions
+        shell: bash
+        env:
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$TESTED_SHA"
+          CURRENT_MAIN="$(git ls-remote origin refs/heads/main | cut -f1)"
+          test -n "$CURRENT_MAIN"
+          test "$CURRENT_MAIN" = "$TESTED_SHA"
 
       - name: Package frontend files only
         shell: bash
@@ -42,6 +60,15 @@ jobs:
           test -s site/index.html
           test -s site/app.js
 
+      - name: Reject stale release before upload
+        shell: bash
+        env:
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          CURRENT_MAIN="$(git ls-remote origin refs/heads/main | cut -f1)"
+          test "$CURRENT_MAIN" = "$TESTED_SHA"
+
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 
@@ -50,6 +77,6 @@ jobs:
         with:
           path: site
 
-      - name: Publish only when manually dispatched
+      - name: Publish CI-verified frontend on GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
