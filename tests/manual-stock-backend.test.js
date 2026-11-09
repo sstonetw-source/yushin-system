@@ -8,14 +8,14 @@ const manual={operationId:'MANUAL_123456789',type:'initial',productKey:'P',wareh
  lotNo:'B',expiryDate:'2027-12-31',unitCost:0};
 const count={operationId:'COUNT_123456789',productKey:'P',warehouseId:'W',target:13,note:'年度盤點'};
 
-function fixture({role='purchaser'}={}){
+function fixture({role='purchaser',opening=false}={}){
  const docs=new Map(),clone=x=>structuredClone(x),put=(path,data)=>docs.set(path,clone(data));
  put('users/U',{uid:'U',role,active:true,name:'User'});
  put('products/P',{productId:'P',productName:'正確產品名',manufacturerPartNo:'CODE',brandName:'Qiagen',active:true});
  put('warehouses/W',{active:true});
- put('inventory/P',{productId:'P',productKey:'P',onHand:10,reserved:2,incoming:0});
- put('warehouseStocks/W__P',{productKey:'P',productId:'P',warehouseId:'W',onHand:10,reserved:2,incoming:0});
- put('inventoryLots/L',{productKey:'P',productId:'P',warehouseId:'W',lotNo:'B',expiryDate:'2027-12-31',receivedQty:10,remainingQty:10,
+ put('inventory/P',{productId:'P',productKey:'P',onHand:opening?0:10,reserved:opening?0:2,incoming:0});
+ put('warehouseStocks/W__P',{productKey:'P',productId:'P',warehouseId:'W',onHand:opening?0:10,reserved:opening?0:2,incoming:0});
+ if(!opening)put('inventoryLots/L',{productKey:'P',productId:'P',warehouseId:'W',lotNo:'B',expiryDate:'2027-12-31',receivedQty:10,remainingQty:10,
   sourceType:'SUPPLY_ORDER',sourceId:'S',receivedAt:'2026-11-01'});
  let afterCommit=false,abort=false,transactionCount=0,queryCount=0,writeCount=0;
  const ref=(collection,id)=>({path:collection+'/'+id,id});
@@ -75,9 +75,9 @@ test('backend rejects injected identities and invalid IDs, dates, quantities and
  assert.equal(normalizeManualStock({...manual,type:'scrap',qty:3,unitCost:undefined},'MANUAL_INVENTORY').delta,-3);
 });
 test('initial stock adds company, warehouse, lot and protected explicit zero cost atomically',async()=>{
- const f=fixture(),result=await f.run();assert.equal(result.status,'applied');assert.equal(result.delta,3);
- assert.equal(f.docs.get('inventory/P').onHand,13);assert.equal(f.docs.get('warehouseStocks/W__P').onHand,13);
- assert.equal(f.docs.get('inventory/P').itemName,'正確產品名');assert.equal(f.docs.get('inventory/P').lots.reduce((s,x)=>s+x.qty,0),13);
+ const f=fixture({opening:true}),result=await f.run();assert.equal(result.status,'applied');assert.equal(result.delta,3);
+ assert.equal(f.docs.get('inventory/P').onHand,3);assert.equal(f.docs.get('warehouseStocks/W__P').onHand,3);
+ assert.equal(f.docs.get('inventory/P').itemName,'正確產品名');assert.equal(f.docs.get('inventory/P').lots.reduce((s,x)=>s+x.qty,0),3);
  assert.equal(f.docs.get('inventoryLots/MANUAL_123456789-added').remainingQty,3);
  assert.equal(f.docs.get('inventoryLots/MANUAL_123456789-added').sourceType,'INITIAL_STOCK');
  assert.equal(f.docs.get('inventoryLotCosts/MANUAL_123456789-added').unitCost,0);
@@ -85,7 +85,7 @@ test('initial stock adds company, warehouse, lot and protected explicit zero cos
  assert.ok(f.queryCount()>=2);
 });
 test('warehouse role can create pending-cost stock but cannot submit or read protected cost',async()=>{
- const f=fixture({role:'warehouse'}),{unitCost,...request}=manual;
+ const f=fixture({role:'warehouse',opening:true}),{unitCost,...request}=manual;
  await f.run(request);assert.equal(f.docs.get('inventoryLotCosts/MANUAL_123456789-added').costPending,true);
  assert.equal((await f.run(request)).status,'already-applied');
  const before=f.snapshot();await assert.rejects(f.run(manual),e=>e.code==='permission-denied');assert.equal(f.snapshot(),before);
@@ -112,13 +112,37 @@ test('counts use authoritative warehouse value; zero delta still writes an immut
  }
 });
 test('lost reply and same-ID concurrent replay never double count or overwrite a later receipt',async()=>{
- const f=fixture();f.setLost(true);await assert.rejects(f.run(),/response lost/);
+ const f=fixture({opening:true});f.setLost(true);await assert.rejects(f.run(),/response lost/);
  f.docs.get('inventory/P').onHand+=5;f.docs.get('warehouseStocks/W__P').onHand+=5;
  const before=f.snapshot(),writes=f.writeCount();const replay=await Promise.all([f.run(),f.run()]);
  assert.ok(replay.every(r=>r.status==='already-applied'));
  assert.equal(f.writeCount(),writes);assert.equal(f.snapshot(),before);
  const conflict={...manual,qty:4};await assert.rejects(f.run(conflict),e=>e.code==='already-exists');
  assert.equal(f.snapshot(),before);
+});
+test('opening inventory allows separate batches but rejects repeated initialization and transactions after opening',async()=>{
+ const f=fixture({opening:true});await f.run();
+ const second={...manual,operationId:'MANUAL_987654321',lotNo:'C'};
+ await f.run(second);assert.equal(f.docs.get('inventory/P').onHand,6);
+ const before=f.snapshot();
+ await assert.rejects(f.run({...manual,operationId:'MANUAL_DUPLICATE_123'}),e=>e.code==='already-exists');
+ assert.equal(f.snapshot(),before);
+ f.put('inventoryMovements/FORMAL_RECEIPT',{productKey:'P',warehouseId:'W',type:'receipt',sourceType:'SUPPLY_ORDER',qty:1});
+ const afterReceipt=f.snapshot();
+ await assert.rejects(f.run({...second,operationId:'MANUAL_AFTER_123456',lotNo:'D'}),/已有正式庫存異動/);
+ assert.equal(f.snapshot(),afterReceipt);
+});
+test('opening inventory rejects existing operational lots, untracked stock and unknown-warehouse movements',async()=>{
+ for(const mutate of [
+  f=>f.put('inventoryMovements/UNKNOWN',{productKey:'P',type:'reserve',qty:1}),
+  f=>f.put('inventoryMovements/OTHER_WAREHOUSE',{productKey:'P',warehouseId:'OTHER',type:'receipt',qty:1}),
+  f=>f.put('inventoryLots/RECEIPT',{productKey:'P',warehouseId:'W',remainingQty:0,sourceType:'SUPPLY_ORDER'}),
+  f=>{f.put('inventory/P',{...f.docs.get('inventory/P'),onHand:2});f.put('warehouseStocks/W__P',{
+   ...f.docs.get('warehouseStocks/W__P'),onHand:2});}
+ ]){
+  const f=fixture({opening:true});mutate(f);const before=f.snapshot();
+  await assert.rejects(f.run());assert.equal(f.snapshot(),before);assert.equal(f.writeCount(),0);
+ }
 });
 test('invalid old stock, reserved, product, warehouse, lot and company-warehouse mismatch fail closed',async()=>{
  for(const mutate of [f=>f.put('inventory/P',{...f.docs.get('inventory/P'),onHand:-1}),
