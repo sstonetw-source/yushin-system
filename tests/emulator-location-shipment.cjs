@@ -647,7 +647,7 @@ test('branch PICKUP cannot print until backend transfer is dispatched and main h
  // Only an isolated Emulator may enable the order-transfer backend; no live service is invoked.
  const send={id:'pickup_transfer_demo_123456',orderId:x.orderId,itemId:'I',fromWarehouseId:A,toWarehouseId:B,qty:10};
  assert.equal((await commitOrderTransferPhysical(db,x.uid,send,'DISPATCH',env)).status,'applied');
- await assert.rejects(x.prepare(1,'pickup_in_transit_rejected_12345'),/調撥|不能打單/);
+ await assert.rejects(x.prepare(1,'pickup_in_transit_rejected_12345'),/調撥|不能打單|不是可打單/);
  assert.equal((await x.read('orders',x.orderId)).items[0].dispatchPreparedQty,0);
  const receive={id:send.id,operationId:'pickup_receive_demo_123456'};
  assert.equal((await commitOrderTransferPhysical(db,x.uid,receive,'RECEIVE',env)).status,'applied');
