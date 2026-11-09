@@ -1,7 +1,6 @@
 // 採購主頁資料
 let poListCache = [];
 let poListCursor = null;
-let poListLegacy = false;
 let poListHasMore = false;
 let poListPageLoading = false;
 let poHistorySearchResults = [];
@@ -1804,7 +1803,6 @@ async function loadPurchaseOrderPage(reset, options = {}) {
             receivingSourceOrderCache = new Map();
         } else {
             poListCursor = null;
-            poListLegacy = false;
             poListHasMore = true;
             if (!poListCache.length) {
                 const cached = readAppDataCache('purchase-history');
@@ -1819,7 +1817,7 @@ async function loadPurchaseOrderPage(reset, options = {}) {
     updatePoLoadMoreButton();
     try {
         let query = poListHasMore && purchasingView !== 'receiving'
-            ? db.collection('purchaseOrders').orderBy(poListLegacy ? 'poNo' : 'createdAt', 'desc').limit(DEFAULT_LIST_LIMIT)
+            ? db.collection('purchaseOrders').orderBy('createdAt', 'desc').limit(DEFAULT_LIST_LIMIT)
             : null;
         if (query && poListCursor) query = query.startAfter(poListCursor);
         let supplyQuery = purchasingView === 'receiving' && supplyReceivingHasMore
@@ -1833,12 +1831,6 @@ async function loadPurchaseOrderPage(reset, options = {}) {
             supplyQuery ? firestoreReadWithTimeout(supplyQuery.get(), '待到貨供應') : Promise.resolve({docs:[],size:0,empty:true})
         ]);
         if (requestedRole !== currentUserRole || requestedUid !== currentUser?.uid || requestedView !== purchasingView || !canAccessPage('orders.po')) return;
-        if (reset && query && snapshot.empty && !poListLegacy) {
-            const legacyQuery = db.collection('purchaseOrders').orderBy('poNo', 'desc').limit(DEFAULT_LIST_LIMIT);
-            snapshot = await firestoreReadWithTimeout(legacyQuery.get(), '舊採購單清單');
-            if (requestedRole !== currentUserRole || requestedUid !== currentUser?.uid || requestedView !== purchasingView || !canAccessPage('orders.po')) return;
-            poListLegacy = true;
-        }
         const freshSupply=supplySnapshot.docs.map(doc=>({id:doc.id,...doc.data()}));
         const supplyRecords=new Map((reset?[]:supplyReceivingCache).map(row=>[row.id,row]));
         freshSupply.forEach(row=>supplyRecords.set(row.id,row));
@@ -1885,18 +1877,12 @@ async function loadPurchaseOrderPage(reset, options = {}) {
         if (purchasingView === 'receiving') supplyReceivingHasMore = supplySnapshot.size === DEFAULT_LIST_LIMIT;
         if (query) {
             if (!snapshot.empty) poListCursor = snapshot.docs[snapshot.docs.length - 1];
-            const freshRecords = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-                .filter(po => poListLegacy ? !po.createdAt : !!po.createdAt);
+            const freshRecords = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             const records = new Map((reset ? [] : poListCache).map(po => [po.id, po]));
             freshRecords.forEach(po => records.set(po.id, po));
             // reset 時雲端結果完整取代 stale cache；Load More 才追加。
             poListCache = [...records.values()];
             poListHasMore = snapshot.size === DEFAULT_LIST_LIMIT;
-            if (!poListHasMore && !poListLegacy) {
-                poListLegacy = true;
-                poListCursor = null;
-                poListHasMore = true;
-            }
             await loadPurchaseHistorySupplyProjection(freshRecords, reset);
             if (requestedRole !== currentUserRole || requestedUid !== currentUser?.uid || requestedView !== purchasingView || !canAccessPage('orders.po')) return;
             writeAppDataCache('purchase-history', poListCache);

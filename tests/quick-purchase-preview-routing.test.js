@@ -38,7 +38,9 @@ function boundContext(environment,{pending=false,changeDatabaseDuringLoad=false}
   calls.push(payload);throw Error('RPC_REACHED');
  }};
  const ctx={APP_ENVIRONMENT:environment,currentUser:{uid:'buyer'},currentUserRole:'purchaser',
-  location:{hostname:{emulator:'localhost',preview:'preview-20135.web.app',production:'yu-shing-company.web.app'}[environment]},
+  location:environment==='production'
+   ? {hostname:'sstonetw-source.github.io',origin:'https://sstonetw-source.github.io',pathname:'/yushin-system/'}
+   : {hostname:{emulator:'localhost',preview:'preview-20135.web.app'}[environment]},
   firebase:{app:()=>({...app,functions:()=>functions}),auth:()=>auth},
   db:{app,collection:()=>({doc:()=>({id:'12345678'})})},
   sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},
@@ -52,6 +54,13 @@ function boundContext(environment,{pending=false,changeDatabaseDuringLoad=false}
  ctx.globalThis=ctx;vm.createContext(ctx);vm.runInContext(source,ctx);
  return {ctx,auth,functions,calls,storage,key,checkpoint,data,legacyCalls:()=>legacyCalls};
 }
+test('old Firebase Hosting origins cannot invoke production quick purchasing',async()=>{
+ for(const origin of ['https://yu-shing-company.web.app','https://yu-shing-company.firebaseapp.com']){
+  const x=boundContext('production');x.ctx.location={hostname:new URL(origin).hostname,origin,pathname:'/'};
+  await assert.rejects(x.ctx.commitQuickPurchase('O','I',x.data,'buyer','purchaser'),/授權專案及網站/);
+  assert.equal(x.calls.length,0);assert.equal(x.legacyCalls(),0);
+ }
+});
 for(const environment of ['emulator','preview','production']){
  test(environment+' project binding rejects missing/mismatched transports before RPC and retains pending intent',async()=>{
   for(const pending of [false,true])for(const transport of ['default','auth','firestore','functions']){

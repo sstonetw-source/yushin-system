@@ -4558,7 +4558,8 @@ test('primary work lists keep the default 50-row pagination guard', () => {
     const purchaseStart=appSource.indexOf('async function loadPurchaseOrderPage');
     const purchaseEnd=appSource.indexOf('window.loadMyPurchaseOrders',purchaseStart);
     const purchaseSource=appSource.slice(purchaseStart,purchaseEnd);
-    assert.match(purchaseSource,/orderBy\(poListLegacy \? 'poNo' : 'createdAt', 'desc'\)\.limit\(DEFAULT_LIST_LIMIT\)/);
+    assert.match(purchaseSource,/orderBy\('createdAt', 'desc'\)\.limit\(DEFAULT_LIST_LIMIT\)/);
+    assert.doesNotMatch(purchaseSource,/poListLegacy|舊採購單清單/);
     assert.match(purchaseSource,/where\('status','in',\['ORDERED','PARTIAL_RECEIPT'\]\)\.limit\(DEFAULT_LIST_LIMIT\)/);
 
     const equipmentStart=appSource.indexOf('window.loadEquipmentFromCloud = function');

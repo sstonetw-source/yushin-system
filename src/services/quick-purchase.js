@@ -19,9 +19,9 @@ async function commitQuickPurchaseBackendPilot(orderId,itemId,details,actorUid,a
         && globalThis.YUSHIN_PREVIEW_QUICK_PURCHASE===true;
     const isProduction=typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='production'
         && globalThis.YUSHIN_PRODUCTION_QUICK_PURCHASE===true;
-    const productionSite=['yu-shing-company.web.app','yu-shing-company.firebaseapp.com'].includes(host)
-        || (host==='sstonetw-source.github.io'
-            && (pathname==='/yushin-system'||pathname.startsWith('/yushin-system/')));
+    const productionSite=globalThis.location?.origin==='https://sstonetw-source.github.io'
+        && host==='sstonetw-source.github.io'
+        && (pathname==='/yushin-system'||pathname.startsWith('/yushin-system/'));
     const project=isDemo?'demo-yushin':isPreview?'preview-20135':'yu-shing-company';
     if(!quickPurchaseBackendPilotEnabled()
         || typeof firebase==='undefined' || !firebase.auth || !firebase.app

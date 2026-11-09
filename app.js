@@ -12864,7 +12864,6 @@ window.retryOrderInventoryReservation = async function(orderId) {
 // 採購主頁資料
 let poListCache = [];
 let poListCursor = null;
-let poListLegacy = false;
 let poListHasMore = false;
 let poListPageLoading = false;
 let poHistorySearchResults = [];
@@ -14667,7 +14666,6 @@ async function loadPurchaseOrderPage(reset, options = {}) {
             receivingSourceOrderCache = new Map();
         } else {
             poListCursor = null;
-            poListLegacy = false;
             poListHasMore = true;
             if (!poListCache.length) {
                 const cached = readAppDataCache('purchase-history');
@@ -14682,7 +14680,7 @@ async function loadPurchaseOrderPage(reset, options = {}) {
     updatePoLoadMoreButton();
     try {
         let query = poListHasMore && purchasingView !== 'receiving'
-            ? db.collection('purchaseOrders').orderBy(poListLegacy ? 'poNo' : 'createdAt', 'desc').limit(DEFAULT_LIST_LIMIT)
+            ? db.collection('purchaseOrders').orderBy('createdAt', 'desc').limit(DEFAULT_LIST_LIMIT)
             : null;
         if (query && poListCursor) query = query.startAfter(poListCursor);
         let supplyQuery = purchasingView === 'receiving' && supplyReceivingHasMore
@@ -14696,12 +14694,6 @@ async function loadPurchaseOrderPage(reset, options = {}) {
             supplyQuery ? firestoreReadWithTimeout(supplyQuery.get(), '待到貨供應') : Promise.resolve({docs:[],size:0,empty:true})
         ]);
         if (requestedRole !== currentUserRole || requestedUid !== currentUser?.uid || requestedView !== purchasingView || !canAccessPage('orders.po')) return;
-        if (reset && query && snapshot.empty && !poListLegacy) {
-            const legacyQuery = db.collection('purchaseOrders').orderBy('poNo', 'desc').limit(DEFAULT_LIST_LIMIT);
-            snapshot = await firestoreReadWithTimeout(legacyQuery.get(), '舊採購單清單');
-            if (requestedRole !== currentUserRole || requestedUid !== currentUser?.uid || requestedView !== purchasingView || !canAccessPage('orders.po')) return;
-            poListLegacy = true;
-        }
         const freshSupply=supplySnapshot.docs.map(doc=>({id:doc.id,...doc.data()}));
         const supplyRecords=new Map((reset?[]:supplyReceivingCache).map(row=>[row.id,row]));
         freshSupply.forEach(row=>supplyRecords.set(row.id,row));
@@ -14748,18 +14740,12 @@ async function loadPurchaseOrderPage(reset, options = {}) {
         if (purchasingView === 'receiving') supplyReceivingHasMore = supplySnapshot.size === DEFAULT_LIST_LIMIT;
         if (query) {
             if (!snapshot.empty) poListCursor = snapshot.docs[snapshot.docs.length - 1];
-            const freshRecords = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-                .filter(po => poListLegacy ? !po.createdAt : !!po.createdAt);
+            const freshRecords = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             const records = new Map((reset ? [] : poListCache).map(po => [po.id, po]));
             freshRecords.forEach(po => records.set(po.id, po));
             // reset 時雲端結果完整取代 stale cache；Load More 才追加。
             poListCache = [...records.values()];
             poListHasMore = snapshot.size === DEFAULT_LIST_LIMIT;
-            if (!poListHasMore && !poListLegacy) {
-                poListLegacy = true;
-                poListCursor = null;
-                poListHasMore = true;
-            }
             await loadPurchaseHistorySupplyProjection(freshRecords, reset);
             if (requestedRole !== currentUserRole || requestedUid !== currentUser?.uid || requestedView !== purchasingView || !canAccessPage('orders.po')) return;
             writeAppDataCache('purchase-history', poListCache);
@@ -15659,9 +15645,9 @@ async function commitQuickPurchaseBackendPilot(orderId,itemId,details,actorUid,a
         && globalThis.YUSHIN_PREVIEW_QUICK_PURCHASE===true;
     const isProduction=typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='production'
         && globalThis.YUSHIN_PRODUCTION_QUICK_PURCHASE===true;
-    const productionSite=['yu-shing-company.web.app','yu-shing-company.firebaseapp.com'].includes(host)
-        || (host==='sstonetw-source.github.io'
-            && (pathname==='/yushin-system'||pathname.startsWith('/yushin-system/')));
+    const productionSite=globalThis.location?.origin==='https://sstonetw-source.github.io'
+        && host==='sstonetw-source.github.io'
+        && (pathname==='/yushin-system'||pathname.startsWith('/yushin-system/'));
     const project=isDemo?'demo-yushin':isPreview?'preview-20135':'yu-shing-company';
     if(!quickPurchaseBackendPilotEnabled()
         || typeof firebase==='undefined' || !firebase.auth || !firebase.app
@@ -16127,8 +16113,8 @@ async function registerFormalPurchaseIncomingBackend(poId,poRecord,{actorUid,act
         && globalThis.YUSHIN_PRODUCTION_FORMAL_PURCHASE===true;
     const pathname=String(globalThis.location?.pathname||'');
     const productionSite=globalThis.location?.origin==='https://sstonetw-source.github.io'
-        && (pathname==='/yushin-system'||pathname.startsWith('/yushin-system/'))
-        || ['https://yu-shing-company.web.app','https://yu-shing-company.firebaseapp.com'].includes(globalThis.location?.origin);
+        && hostname==='sstonetw-source.github.io'
+        && (pathname==='/yushin-system'||pathname.startsWith('/yushin-system/'));
     const emulator=typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='emulator'
         && globalThis.YUSHIN_V2_PO_INCOMING_EMULATOR===true && local(hostname);
     if((!production&&!emulator)||(production&&!productionSite)
@@ -16638,9 +16624,9 @@ async function commitFormalPurchaseBackend(poRecord,actorUid,assertActor) {
     const isProduction=APP_ENVIRONMENT==='production'&&globalThis.YUSHIN_PRODUCTION_FORMAL_PURCHASE===true;
     const hostname=String(globalThis.location?.hostname||'').toLowerCase();
     const pathname=String(globalThis.location?.pathname||'');
-    const productionSite=['yu-shing-company.web.app','yu-shing-company.firebaseapp.com'].includes(hostname)
-        || (hostname==='sstonetw-source.github.io'
-            && (pathname==='/yushin-system'||pathname.startsWith('/yushin-system/')));
+    const productionSite=globalThis.location?.origin==='https://sstonetw-source.github.io'
+        && hostname==='sstonetw-source.github.io'
+        && (pathname==='/yushin-system'||pathname.startsWith('/yushin-system/'));
     if(!formalPurchaseBackendPilotEnabled()||typeof firebase==='undefined'||!firebase.auth||!firebase.app
         ||(isEmulator&&!local(hostname))
         ||(isPreview&&!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(hostname))

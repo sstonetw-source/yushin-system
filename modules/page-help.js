@@ -5,9 +5,9 @@
         'quote-system': { title: '估價單', permission: 'quote', purpose: '製作估價單、三家比價與決標單價分析，查詢既有報價。', notes: ['儲存或匯出前，核對報價公司、品項與金額。', '成交後建立訂單；估價單本身不會扣庫存。', '搜尋涵蓋授權的歷史資料，清單預設先顯示近期紀錄。'] },
         'forecast-system': { title: 'Forecast', permission: 'forecast', purpose: '追蹤客戶案件、預估金額與成交進度。', notes: ['有新進展時更新進度，成交或未成交時結案。', 'Stage 1～5：需求確認、報價方案、預算申請、採購議價、成交交機。', '進行中持續追蹤；Win 為成交，Lost 為未成交。'] },
         'product-system': { title: '產品', permission: 'products', purpose: '搜尋產品、查看庫存，選品後帶入估價單、訂單或採購單。', notes: ['先選廠牌，再輸入完整貨號按搜尋；開頭的 0 必須保留。', '可跨搜尋選品，再一次帶入同一張單據。', '選擇廠牌不會載入產品；需要清單時按「瀏覽此廠牌產品」。'] },
-        'order-system': { title: '訂單', permission: 'orders.list', purpose: '管理客戶訂單，追蹤採購、到貨、打單、送貨與核銷。', notes: ['可依品項分批處理；完成打單的品項可先送貨。', '核銷代表完成單據核銷，核銷日期不代表開票或收款日；可先核銷，不必等待全部送貨。', '取消或退貨前，確認畫面列出的採購與庫存影響。', '調撥途中須先確認收貨；取消或恢復若提示預留異常，請由管理員核對。'] },
+        'order-system': { title: '訂單', permission: 'orders.list', purpose: '管理客戶訂單，追蹤採購、到貨、打單、實際出貨、送達與核銷。', notes: ['可依品項分批處理；打單只準備單據，不代表實際出貨、扣庫存或送達。', '實際出貨才扣庫存；送達確認與核銷是不同的後續步驟，撤銷送達也不等於退貨入庫。', '核銷日期不代表開票或收款日；依畫面顯示的核銷條件操作。', '取消訂單不代表取消供應商採購；退貨須完成實際點收才會回補庫存。', '調撥途中須先確認收貨；取消或恢復若提示預留異常，請由管理員核對。'] },
         'purchasing-system': { title: '採購', permission: 'orders.po', purpose: '處理訂單採購、備貨及安全庫存補貨，追蹤採購單與到貨。', notes: ['建立採購前核對供應商、數量與成本；建立後列入待到貨。', '客戶取消訂單，不代表供應商採購也已取消；無法取消的貨到貨後成為庫存。', '完成打單後，客戶訂單仍須繼續送貨與核銷。'] },
-        'inventory-system': { title: '倉庫', permission: 'inventory', purpose: '查看各倉庫庫存，辦理收貨、出貨、調撥與領貨。', notes: ['退貨申請不增加庫存，實際點收後才入庫。', '主倉自領由訂單負責業務按已送貨才扣帳；寄給負責業務後仍待送客戶；直接寄客戶的出貨會登錄已送貨，不代表客戶已簽收。', '主倉自領配到分倉庫存，才產生訂單調回需求；採購也可主動發起主倉備貨。'] },
+        'inventory-system': { title: '倉庫', permission: 'inventory', purpose: '查看各倉庫庫存，辦理收貨、實際出貨、調撥與領貨。', notes: ['退貨申請不增加庫存，實際點收後才入庫。', '主倉自領由訂單負責業務按已送貨才扣帳；寄給負責業務後仍待送客戶；直接寄客戶的出貨會登錄已送貨，不代表客戶已簽收。', '主倉自領配到分倉庫存，才產生訂單調回需求；採購也可主動發起主倉備貨。'] },
         'equipment-system': { title: '儀器', permission: 'equipment', purpose: '管理客戶儀器與維修、保養、校正紀錄，追蹤下次到期日。', notes: ['批次匯入依儀器編號新增或更新，保留既有維修保養紀錄。', '匯出只包含目前已載入的篩選結果。', '儀器資料依歸屬維護；維修保養紀錄由工程師或管理員處理。'] },
         'admin-system': { title: '管理員後台', permission: 'admin', purpose: '管理人員、廠牌、價目表與倉庫設定，查看分析與執行資料維護。', notes: ['單一產品的日常操作請到「產品」頁面。', '資料健康的檢查會讀取多個集合，請按需手動執行。', '刪除價目表或交接前，先核對預覽與確認訊息。'] }
     };
@@ -21,6 +21,15 @@
         'admin-transfer': { purpose: '將業務代號交接給接手同仁。', notes: ['先檢查交接內容，再確認執行。', '交接依業務代號處理，保留歷史姓名與操作紀錄。'] },
     };
     const visible = node => !!node && !node.hidden && node.getClientRects().length > 0;
+    function effectiveNotes(key, content) {
+        const notes = [...content.notes];
+        if (key === 'inventory-system' && typeof APP_ENVIRONMENT !== 'undefined' && APP_ENVIRONMENT === 'production' &&
+            !['DISPATCH', 'HANDOFF', 'RECEIVE'].every(action =>
+                typeof productionTransactionBackendEnabled === 'function' && productionTransactionBackendEnabled('ORDER_TRANSFER_' + action))) {
+            notes.push('訂單關聯的倉庫調撥（寄出／交接／收貨）目前未完成正式後端切換，暫停操作；不得改用舊版瀏覽器提交。一般備貨調撥請依現有核准流程處理。');
+        }
+        return notes;
+    }
     function section(body, title, lines) {
         const group = document.createElement('section');
         const heading = document.createElement('h4'); heading.textContent = title;
@@ -53,7 +62,8 @@
             const content = adminContext ? adminPages[adminContext] : page;
             section(body, '頁面功能', [content.purpose]);
             const restriction = roleNote(page);
-            section(body, '注意事項', restriction ? [...content.notes, restriction] : content.notes);
+            const notes = effectiveNotes(key, content);
+            section(body, '注意事項', restriction ? [...notes, restriction] : notes);
             if (key === 'admin-system' && adminContext !== 'admin-health' && typeof getPagePermission === 'function' && getPagePermission('admin') === 'edit') {
                 const diagnostics = document.createElement('button');
                 diagnostics.type = 'button';
