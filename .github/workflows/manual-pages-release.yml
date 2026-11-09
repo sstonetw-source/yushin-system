@@ -1,0 +1,55 @@
+name: Manual GitHub Pages release
+
+# Publishing is a separate, explicitly authorized operation. Merging main must
+# never publish the frontend automatically.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages-manual-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release frontend from main
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Package frontend files only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p site
+          cp index.html app.js styles.css manifest.webmanifest transaction-rollout-config.js site/
+          cp -R assets modules site/
+          touch site/.nojekyll
+          test -s site/index.html
+          test -s site/app.js
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload frontend artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Publish only when manually dispatched
+        id: deployment
+        uses: actions/deploy-pages@v4

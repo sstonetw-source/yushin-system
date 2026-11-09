@@ -79,3 +79,15 @@ test('production main transfer request fails closed on disabled switch, changed 
   assert.equal(f.calls.length,0);assert.equal(f.storage.size,0);
  }
 });
+test('main transfer request and cancellation never fall back to direct browser stock writes',async()=>{
+ const f=fixture(true),c=f.open();
+ c.YUSHIN_PRODUCTION_MAIN_TRANSFER_REQUEST_BACKEND=false;
+ c.YUSHIN_PRODUCTION_MAIN_TRANSFER_REQUEST_LEGACY_BLOCKED=false;
+ c.runRoleTransaction=async()=>{throw Error('unsafe legacy stock writer executed');};
+ await assert.rejects(c.createMainTransferRequest(f.input),/調撥環境或旗標已變更/);
+ await assert.rejects(c.cancelMainTransferRequestRecord(f.input.id),/調撥環境或旗標已變更/);
+ assert.equal(f.calls.length,0);
+ assert.equal(f.storage.size,0);
+ const source=fs.readFileSync('src/services/main-transfer-request.js','utf8');
+ assert.doesNotMatch(source,/runRoleTransaction|\.collection\(['"](?:stockTransferRequests|inventory|warehouseStocks)['"]\)/);
+});

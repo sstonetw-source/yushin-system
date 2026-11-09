@@ -72,8 +72,23 @@ test('changed source, malformed storage and corrupted receipt witness cannot cle
 test('legacy receipt refuses backend-owned transfers even outside Preview when all flags are off',async()=>{
  const source=fs.readFileSync('src/services/warehouse-transfer.js','utf8');
  const c=vm.createContext({currentUser:{uid:'U'},currentUserRole:'warehouse',canReceiveInventoryCapability:()=>true,canAccessPage:()=>true,deliveryActor:()=> 'U',
-  db:{collection:n=>({doc:id=>({path:n+'/'+id})})},runRoleTransaction:async fn=>fn({get:async()=>({exists:true,data:()=>({dispatchIntentHash:'hash',status:'RECEIVED'})})})});
- vm.runInContext(source,c);await assert.rejects(c.commitWarehouseTransferReceipt('transfer_12345678'),/禁止使用舊收貨/);
+  db:{collection:n=>({doc:id=>({path:n+'/'+id,get:async()=>({exists:true,data:()=>({requestId:'request_12345678',dispatchIntentHash:'hash',status:'RECEIVED'})})})})},runRoleTransaction:async fn=>fn({get:async()=>({exists:true,data:()=>({dispatchIntentHash:'hash',status:'RECEIVED'})})})});
+ vm.runInContext(source,c);await assert.rejects(c.commitWarehouseTransferReceipt('transfer_12345678'),/禁止舊交易收貨/);
+});
+test('main-warehouse dispatch and receipt reject disabled production backend without browser stock mutations',async()=>{
+ const f=fixture(true),c=f.open();
+ c.YUSHIN_PRODUCTION_MAIN_TRANSFER_DISPATCH_BACKEND=false;
+ c.YUSHIN_PRODUCTION_MAIN_TRANSFER_DISPATCH_LEGACY_BLOCKED=false;
+ await assert.rejects(c.commitWarehouseTransfer({id:f.id,requestId:f.requestId,qty:3}),/環境或旗標已變更/);
+ assert.equal(f.calls.length,0);
+ c.YUSHIN_PRODUCTION_MAIN_TRANSFER_DISPATCH_BACKEND=true;
+ c.YUSHIN_PRODUCTION_MAIN_TRANSFER_DISPATCH_LEGACY_BLOCKED=true;
+ await c.commitWarehouseTransfer({id:f.id,requestId:f.requestId,qty:3});
+ c.YUSHIN_PRODUCTION_MAIN_TRANSFER_RECEIPT_BACKEND=false;
+ c.YUSHIN_PRODUCTION_MAIN_TRANSFER_RECEIPT_LEGACY_BLOCKED=false;
+ await assert.rejects(c.commitWarehouseTransferReceipt(f.id),/環境或旗標已變更/);
+ assert.equal(f.getTransfer().status,'IN_TRANSIT');
+ assert.equal(f.calls.length,1);
 });
 
 test('concurrent receipt preflights reuse the first frozen operation instead of overwriting it',async()=>{
