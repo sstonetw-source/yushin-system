@@ -1,8 +1,10 @@
 'use strict';
 const {projectIdFromEnvironment}=require('./grouped-reservation-gate');
 const {previewFreeStockAllocationProject}=require('./free-stock-allocation-gate');
+const {allowProductionTransaction}=require('./production-transaction-gate');
 // Both the source entry and shared coordinator require independent gates.
 function mainTransferAllocationProject(env=process.env){
+ if(allowProductionTransaction('MAIN_TRANSFER_ALLOCATION',env))return 'yu-shing-company';
  if(env.ENABLE_PREVIEW_MAIN_TRANSFER_ALLOCATION==='true'&&previewFreeStockAllocationProject(env))return 'preview-20135';
  const local=value=>typeof value==='string'&&/^(localhost|127\.0\.0\.1):[0-9]+$/.test(value);
  return projectIdFromEnvironment(env)==='demo-yushin'

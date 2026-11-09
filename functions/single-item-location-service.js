@@ -318,8 +318,8 @@ function freeStockTargetItem(order,itemId){
  if(itemIndex<0)reject('找不到原分配品項');
  return {item:order.items[itemIndex],itemIndex};
 }
-async function commitSingleItemFreeStockAllocation(db,uid,input,batchContext=null){
- if(!allowFreeStockAllocationDatabase(db))
+async function commitSingleItemFreeStockAllocation(db,uid,input,batchContext=null,productionPurpose=''){
+ if(!allowFreeStockAllocationDatabase(db,process.env,productionPurpose))
   reject('跨 v2 訂單自由庫存分配僅允許 demo-yushin Emulator');
  ident(uid,'登入者');
  const intent=normalizeFreeStockIntent(input),{orderId,itemId,warehouseId,operationId}=intent;
@@ -594,8 +594,8 @@ function verifyAutomaticFreeStockMovement(proof,job,intent){
   reject('接手配貨前的原操作扣帳憑證不一致');
  return {...proof.result,status:'already-applied'};
 }
-async function advanceAutomaticFreeStockAllocation(db,uid,input){
- if(!allowFreeStockAllocationDatabase(db))
+async function advanceAutomaticFreeStockAllocation(db,uid,input,productionPurpose=''){
+ if(!allowFreeStockAllocationDatabase(db,process.env,productionPurpose))
   reject('自動自由庫存分配僅允許 demo-yushin Emulator');
  ident(uid,'登入者');
  const intent=normalizeAutomaticFreeStockIntent(input);
@@ -775,7 +775,7 @@ async function advanceAutomaticFreeStockAllocation(db,uid,input){
  const pending=state.pending;
  const applied=await commitSingleItemFreeStockAllocation(db,uid,{
   orderId:pending.orderId,itemId:pending.itemId,warehouseId,
-  syncAttemptId:pending.syncAttemptId,quantity:pending.quantity,operationId:pending.operationId},{runId});
+  syncAttemptId:pending.syncAttemptId,quantity:pending.quantity,operationId:pending.operationId},{runId},productionPurpose);
  // If the movement was committed but checkpoint update failed, this replay
  // returns its ORIGINAL quantity, which is counted exactly once below.
  state=await db.runTransaction(async tx=>{
@@ -790,8 +790,8 @@ async function advanceAutomaticFreeStockAllocation(db,uid,input){
 
 // Existing movement acts as a durable source event; this only delegates to
 // the current free-stock allocation coordinator after verifying its proof.
-async function advanceReleasedV2FreeStock(db,uid,input){
- if(!allowFreeStockAllocationDatabase(db))
+async function advanceReleasedV2FreeStock(db,uid,input,productionPurpose=''){
+ if(!allowFreeStockAllocationDatabase(db,process.env,productionPurpose))
   reject('來源庫存釋放續傳僅允許 demo-yushin Emulator');
  ident(uid,'登入者');
  if(!input||typeof input!=='object'||Array.isArray(input)
@@ -812,6 +812,8 @@ async function advanceReleasedV2FreeStock(db,uid,input){
   const isV2Receipt=event.type==='receipt'&&event.sourceType==='SUPPLY_ORDER'
    &&typeof event.receiptId==='string'&&event.receiptId.length>0;
   const isMainTransfer=event.type==='warehouse_transfer_in'&&event.sourceType==='WAREHOUSE_TRANSFER';
+  if(db.projectId==='yu-shing-company'&&(productionPurpose!=='MAIN_TRANSFER'||!isMainTransfer))
+   reject('正式主倉調撥分配不可接手其他庫存釋放來源');
   if(!isV2Receipt&&!isMainTransfer&&!['CANCELLED_ORDER_RELEASE','CLOSED_CUSTOMER_RETURN'].includes(event.v2FreeStockSource))
    reject('這筆 movement 不會釋放可分配的 v2 自由實貨');
   let amount=event.freeAllocationQty;
@@ -898,7 +900,7 @@ async function advanceReleasedV2FreeStock(db,uid,input){
   return {productKey:event.productKey,warehouseId:event.warehouseId,maxQty:amount};
  });
  const runId=releasedV2FreeStockRunId(movementId);
- const result=await advanceAutomaticFreeStockAllocation(db,uid,{...source,runId});
+ const result=await advanceAutomaticFreeStockAllocation(db,uid,{...source,runId},productionPurpose);
  return {...result,sourceMovementId:movementId};
 }
 
@@ -963,7 +965,7 @@ async function resumeReleasedV2FreeStock(db,uid,input){
 // Post-commit only. A caller may hand off its committed source movement to
 // this bounded worker; each iteration revalidates source proof and current
 // role, and continues the SAME durable coordinator run ID.
-async function drainReleasedV2FreeStock(db,uid,input){
+async function drainReleasedV2FreeStock(db,uid,input,productionPurpose=''){
  if(!input||typeof input!=='object'||Array.isArray(input)
   ||Object.keys(input).some(k=>!['movementId','maxSteps'].includes(k)))
   reject('釋放來源執行請求含未授權欄位','invalid-argument');
@@ -973,7 +975,7 @@ async function drainReleasedV2FreeStock(db,uid,input){
   reject('每次執行最多十個步驟','invalid-argument');
  let result=null,calls=0;const affectedOrderIds=new Set();
  while(calls<maxSteps){
-  result=await advanceReleasedV2FreeStock(db,uid,{movementId});
+  result=await advanceReleasedV2FreeStock(db,uid,{movementId},productionPurpose);
   if(result.lastOrderId)affectedOrderIds.add(result.lastOrderId);
   calls++;
   if(result.status==='completed'||result.status==='retry')break;

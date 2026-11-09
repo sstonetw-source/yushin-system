@@ -19,7 +19,7 @@ function createMainTransferAllocationCallable({onCall,HttpsError,getDatabase,env
    if(db.projectId!==project)throw new HttpsError('failed-precondition','分配資料庫與授權專案不一致');
    // The coordinator validates current role, source proofs and original job on
    // every step. Never write stockTransfers display completion as authority.
-   const result=await drain(db,request.auth.uid,source);
+   const result=await drain(db,request.auth.uid,source,project==='yu-shing-company'?'MAIN_TRANSFER':'');
    if(result.status==='completed'){
     const authority=await projectCompletion(db,request.auth.uid,request.data.transferId);
     if(authority.runId!==result.runId||authority.maxQty!==result.maxQty||authority.allocatedQty!==result.allocatedQty)

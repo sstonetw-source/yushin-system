@@ -127,7 +127,32 @@ async function allocationEnvironment(fn){
   if(value===undefined)delete process.env[key];else process.env[key]=value;
  }}
 }
+async function productionMainTransferAllocationEnvironment(fn){
+ const patch={GCLOUD_PROJECT:'yu-shing-company',FUNCTIONS_EMULATOR:undefined,FIRESTORE_EMULATOR_HOST:undefined,
+  FIREBASE_AUTH_EMULATOR_HOST:undefined,ENABLE_MAIN_TRANSFER_ALLOCATION_EMULATOR:undefined,
+  ENABLE_PRODUCTION_MAIN_TRANSFER_ALLOCATION_BACKEND:'true'};
+ const previous=Object.fromEntries(Object.keys(patch).map(key=>[key,process.env[key]]));
+ for(const [key,value] of Object.entries(patch)){if(value===undefined)delete process.env[key];else process.env[key]=value;}
+ try{return await fn();}finally{for(const [key,value] of Object.entries(previous)){
+  if(value===undefined)delete process.env[key];else process.env[key]=value;
+ }}
+}
 const {drainReleasedV2FreeStock}=require('../functions/single-item-location-service');
+test('production coordinator accepts only a verified main-transfer receipt and reuses original stock allocations',()=>productionMainTransferAllocationEnvironment(async()=>{
+ const f=await allocationFixture();f.db.projectId='yu-shing-company';
+ const source={movementId:dispatch.id+'-in',maxSteps:5},before=f.snapshot();
+ await assert.rejects(drainReleasedV2FreeStock(f.db,'U',source));assert.equal(f.snapshot(),before);
+ const result=await drainReleasedV2FreeStock(f.db,'U',source,'MAIN_TRANSFER');
+ assert.equal(result.status,'completed');assert.equal(result.allocatedQty,3);
+ assert.equal(f.docs.get('warehouseStocks/MAIN__P').reserved,3);
+ const done=f.snapshot();
+ const retry=await drainReleasedV2FreeStock(f.db,'U',source,'MAIN_TRANSFER');
+ assert.equal(retry.runId,result.runId);assert.equal(f.snapshot(),done);
+ f.put('inventoryMovements/other-source',{type:'receipt',sourceType:'SUPPLY_ORDER',sourceId:'PO',productKey:'P',warehouseId:'MAIN',qty:1});
+ const other=f.snapshot();
+ await assert.rejects(drainReleasedV2FreeStock(f.db,'U',{movementId:'other-source',maxSteps:5},'MAIN_TRANSFER'),/不可接手其他/);
+ assert.equal(f.snapshot(),other);
+}));
 test('committed main transfer feeds the existing coordinator and preserves multi-item siblings on lost-reply replay',()=>allocationEnvironment(async()=>{
  const f=await allocationFixture(),source={movementId:dispatch.id+'-in',maxSteps:5};
  // Mutable UI completion cannot grant or consume allocation credit.
