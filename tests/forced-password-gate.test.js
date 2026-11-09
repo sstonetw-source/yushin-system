@@ -5,6 +5,12 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
+test('GitHub Pages includes a fresh app cache key for the backend-only password flow', () => {
+    const html = fs.readFileSync(require.resolve('../index.html'), 'utf8');
+    assert.match(html, /app\.js\?v=20261110-password-boundary-8/);
+    assert.match(html, /id="changePasswordSaveBtn"/);
+});
+
 function fixture({forced, updatePassword = async () => {}, callable = async () => ({data:{completed:true}})} = {}) {
     const nodes = Object.fromEntries([
         'changePasswordOverlay', 'newPassword', 'confirmNewPassword',
