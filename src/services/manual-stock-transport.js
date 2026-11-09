@@ -1,18 +1,19 @@
 // Only the trusted Admin SDK Callable may write manual inventory and counts.
-// Keep the exact intent locally until the backend receipt has been verified.
+// Keep the exact intent across reloads and tab closure until the backend
+// receipt has been verified. This state must never be evicted as a cache.
 function manualStockPendingKey(operationId){
  return 'manual-stock:'+encodeURIComponent(currentUser?.uid||'')+':'+encodeURIComponent(operationId);
 }
 function manualStockPendingOperations(){
- if(typeof sessionStorage==='undefined')return [];
+ if(typeof localStorage==='undefined')return [];
  const uid=currentUser?.uid;
  if(!uid)return [];
  const prefix='manual-stock:'+encodeURIComponent(uid)+':',pending=[];
- for(let i=0;i<sessionStorage.length;i++){
-  const key=sessionStorage.key(i);
+ for(let i=0;i<localStorage.length;i++){
+  const key=localStorage.key(i);
   if(!key?.startsWith(prefix))continue;
   let saved;
-  try{saved=JSON.parse(sessionStorage.getItem(key));}catch(_){throw Error('有無法讀取的庫存待確認紀錄，請聯絡管理員，勿重複提交。');}
+  try{saved=JSON.parse(localStorage.getItem(key));}catch(_){throw Error('有無法讀取的庫存待確認紀錄，請聯絡管理員，勿重複提交。');}
   if(!saved||saved.uid!==uid||!['MANUAL_INVENTORY','INVENTORY_COUNT'].includes(saved.kind)
    ||saved.role!==currentUserRole||!saved.payload?.operationId
    ||manualStockPendingKey(saved.payload.operationId)!==key)
@@ -70,9 +71,9 @@ async function commitManualStockBackend(kind,payload,{actorUid,actorRole,onStock
  if(typeof ensureReservationFunctionsCompat==='function')await ensureReservationFunctionsCompat();
  const {uid,role,project,functions,emulator,check}=manualStockBackendContext(kind);
  if(uid!==actorUid||role!==actorRole)throw Error('庫存操作身分已變更。');
- const key=manualStockPendingKey(id),raw=sessionStorage.getItem(key),intent=JSON.stringify({uid,role,project,kind,payload});
+ const key=manualStockPendingKey(id),raw=localStorage.getItem(key),intent=JSON.stringify({uid,role,project,kind,payload});
  if(raw!==null&&raw!==intent)throw Error('同一操作 ID 尚有不同內容待核對，請勿產生新的異動。');
- if(raw===null){sessionStorage.setItem(key,intent);if(sessionStorage.getItem(key)!==intent)throw Error('庫存操作暫存失敗，尚未提交。');}
+ if(raw===null){localStorage.setItem(key,intent);if(localStorage.getItem(key)!==intent)throw Error('庫存操作暫存失敗，尚未提交。');}
  check();if(emulator)functions.useEmulator('127.0.0.1',5001);
  const callable=kind==='MANUAL_INVENTORY'?'commitV2ManualInventory':'commitV2InventoryCount';
  const response=await functions.httpsCallable(callable)(payload);check();const data=response?.data;
@@ -87,8 +88,8 @@ async function commitManualStockBackend(kind,payload,{actorUid,actorRole,onStock
   ||receipt.qty!==data.delta||!receipt.intentHash
   ||receipt.operation!==(kind==='MANUAL_INVENTORY'?'manual-adjustment':'quantity-editor'))
   throw Error('庫存憑證尚未核對完成，請使用原操作 ID 重試。');
- if(sessionStorage.getItem(key)!==intent)throw Error('庫存操作暫存已變更，請勿重送。');
- sessionStorage.removeItem(key);
+ if(localStorage.getItem(key)!==intent)throw Error('庫存操作暫存已變更，請勿重送。');
+ localStorage.removeItem(key);
  try{onStockCommitted?.(payload.productKey,payload.warehouseId);}catch(error){
   error.operationId=id;error.manualStockCommitted=true;throw error;
  }

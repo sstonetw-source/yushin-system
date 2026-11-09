@@ -93,7 +93,7 @@ test('interrupted backend reply retains exact intent across reload and recovers 
    assert.equal(name,'inventoryMovements');return {doc:id=>{assert.equal(id,payload.operationId);return {get:async opts=>{
     reads++;assert.equal(opts.source,'server');return {exists:true,data:()=>({sourceId:id,productKey:'P',warehouseId:'W',actorUid:uid,
      actorRole:role,qty:5,intentHash:'from-server',operation:'manual-adjustment'})};}};}};
-  }},sessionStorage:storage,canEditPage:()=>true,
+  }},localStorage:storage,canEditPage:()=>true,
   ensureReservationFunctionsCompat:async()=>{},invalidateWarehouseStockCache:()=>{},console});
  vm.runInContext(transport,c);
  await assert.rejects(c.commitManualStockBackend('MANUAL_INVENTORY',payload,{actorUid:uid,actorRole:role}),/timeout/);
