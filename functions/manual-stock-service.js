@@ -103,6 +103,8 @@ function searchTokens(record){
 function lotQuantity(lot,key){
  if(lot.productKey!==key||typeof lot.warehouseId!=='string'||!lot.warehouseId||lot.warehouseId.includes('/'))
   fail('批次產品或倉庫識別不一致');
+ if(lot.remainingQty===undefined&&lot.qty===undefined)
+  fail('批次缺少可核對的剩餘數量');
  return numeric(lot.remainingQty??lot.qty,'批次');
 }
 
@@ -174,11 +176,13 @@ async function commitManualStock(db,uid,data,kind,env=process.env){
   if(kind==='INVENTORY_COUNT')Object.assign(audit,{countInventoryId:encodeURIComponent(key),countTarget:intent.target,note:intent.note});
   else Object.assign(audit,{lotNo:intent.lotNo,expiryDate:intent.expiryDate,
    adjustmentIntent:{type:intent.type,productKey:key,warehouseId,delta,lotNo:intent.lotNo,expiryDate:intent.expiryDate}});
-  if(delta===0){tx.create(movementRef,{...audit,lotAllocations:[],lotIds:[]});return result('applied',0);}
   const lots=await tx.get(db.collection('inventoryLots').where('productKey','==',key).limit(201));
   if(lots.size>200)fail('批次紀錄超出安全處理上限');
   const allLots=lots.docs.map(doc=>({...doc.data(),id:doc.id}));
   for(const lot of allLots)lotQuantity(lot,key);
+  // A zero-delta count is still an attestation of the stock ledger. Do not
+  // issue a successful count receipt while existing lot records are malformed.
+  if(delta===0){tx.create(movementRef,{...audit,lotAllocations:[],lotIds:[]});return result('applied',0);}
   const currentLots=allLots.filter(lot=>lot.warehouseId===warehouseId),balanceId=operationId+'-balance',addedId=operationId+'-added';
   if(intent.type==='initial'){
    // Opening rows may span multiple lots, but may not resume after any
