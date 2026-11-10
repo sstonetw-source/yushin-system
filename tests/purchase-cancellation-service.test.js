@@ -3,7 +3,7 @@ const all=fs.readFileSync(path.join(__dirname,'../src/services/supply-order.js')
 const source=all;
 const ui=fs.readFileSync(path.join(__dirname,'../src/features/purchasing/purchase-cancellation-workspace.js'),'utf8');
 const demand=require('../modules/procurement-demand-core.js');
-function setup({retry=false,failSupply='',changeAt='',manual=false,direct=false,failFinalize=false,changeLinks=false}={}){
+function setup({retry=false,failSupply='',changeAt='',manual=false,direct=false,failFinalize=false,changeLinks=false,environment}={}){
     const records=new Map(),movements=[],invalidated=[],writes=[];let seq=0,failed=false;
     records.set('purchaseOrders/PO',{supplyOrderIds:['S1','S2']});
     for(const id of ['S1','S2']){
@@ -15,7 +15,7 @@ function setup({retry=false,failSupply='',changeAt='',manual=false,direct=false,
         records.set(`inventory/${id}`,{productKey:id,onHand:10,reserved:4,incoming:3});
         records.set(`warehouseStocks/W__${id}`,{productKey:id,warehouseId:'W',onHand:6,reserved:2,incoming:3});
     }
-    const c=vm.createContext({currentUser:{uid:'buyer'},currentUserRole:'purchaser',currentUserName:'Buyer',
+    const c=vm.createContext({APP_ENVIRONMENT:environment,currentUser:{uid:'buyer'},currentUserRole:'purchaser',currentUserName:'Buyer',
         canCreatePurchaseOrderCapability:()=>true,db:{collection:name=>({doc:id=>({key:`${name}/${id||++seq}`})})},
         supplyOrdersCollection:()=>c.db.collection('supplyOrders'),procurementDemandRef:id=>c.db.collection('procurementDemands').doc(id),
         procurementDemandDocument:d=>d,YushinProcurementDemand:demand,YushinReceiving:require('../modules/receiving-core.js'),
@@ -41,6 +41,27 @@ function setup({retry=false,failSupply='',changeAt='',manual=false,direct=false,
         }
     });vm.runInContext(source,c);return {c,records,movements,invalidated,writes};
 }
+test('production refuses single-supply and whole-PO legacy browser cancellations before any write',async()=>{
+    for(const manual of [false,true]){
+        const x=setup({environment:'production',manual});
+        const initialSupply=structuredClone(x.records.get('supplyOrders/S1'));
+        const initialStock=structuredClone(x.records.get('inventory/S1'));
+        await assert.rejects(x.c.cancelOutstandingSupplyRecord('PO','S1','Stopped'),/可信任後端/);
+        await assert.rejects(x.c.stopPurchaseOrderOutstanding('PO','Stopped'),/可信任後端/);
+        assert.equal(x.writes.length,0);
+        assert.equal(x.movements.length,0);
+        assert.deepEqual(x.records.get('supplyOrders/S1'),initialSupply);
+        assert.deepEqual(x.records.get('inventory/S1'),initialStock);
+    }
+});
+test('preview and isolated test modes keep existing cancellation behavior for backend migration validation',async()=>{
+    for(const environment of ['preview','emulator']){
+        const x=setup({environment});
+        const result=await x.c.cancelOutstandingSupplyRecord('PO','S1','Stopped');
+        assert.equal(result.cancelledQty,3);
+        assert.equal(x.records.get('inventory/S1').incoming,0);
+    }
+});
 test('common cancellation atomically closes partial supply and releases exact linked quantities',async()=>{
     for(const manual of [false,true]){
         const x=setup({manual,retry:true});const result=await x.c.cancelOutstandingSupplyRecord('PO','S1','Supplier stopped');
