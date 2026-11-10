@@ -93,6 +93,10 @@ exports.commitOrderServiceAction=serviceCaseCallable(commitOrderServiceAction,'æ
 // Manual purchasing has independent, default-closed Emulator/Preview/production gates.
 const {createQuickPurchaseCallable}=require('./quick-purchase-callable');
 exports.commitV2QuickPurchase=createQuickPurchaseCallable({onCall,HttpsError,getDatabase:getFirestore});
+// Sales self-order uses the same supplier/incoming writer but a different
+// owner-only authority boundary. No production activation without B approval.
+const {createSelfOrderCallable}=require('./self-order-callable');
+exports.commitV2SelfOrder=createSelfOrderCallable({onCall,HttpsError,getDatabase:getFirestore});
 
 // Isolated receiving migration candidate: only demo Emulator or separately
 // authorized Preview can call this, never the production project.

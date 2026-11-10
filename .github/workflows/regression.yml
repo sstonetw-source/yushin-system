@@ -155,6 +155,7 @@ jobs:
           ENABLE_GROUPED_RESERVATION: "true"
           ENABLE_SERVICE_CASE_EMULATOR: "true"
           ENABLE_QUICK_PURCHASE_EMULATOR: "true"
+          ENABLE_SELF_ORDER_EMULATOR: "true"
         run: npx --yes firebase-tools@15 emulators:exec --only firestore,auth,functions --project demo-yushin "node --test --test-concurrency=1 tests/emulator-grouped-reservation-callable.cjs tests/emulator-service-case-callable.cjs tests/emulator-quick-purchase-callable.cjs"
       - name: Explicit same-warehouse reservation Callable in isolated Auth Emulator
         if: matrix.suite == 'callables'

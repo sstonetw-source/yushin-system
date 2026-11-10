@@ -34,7 +34,7 @@ function stockNumber(value,label){
 }
 // Shared read-only validation inside the final transaction, not an earlier
 // preflight authorization that could become stale before commit.
-async function validateV2FormalPurchaseTx(tx,db,uid,intent,{allowExistingPo=false}={}){
+async function validateV2FormalPurchaseTx(tx,db,uid,intent,{allowExistingPo=false,actorScope='purchaser'}={}){
  identifier(uid,'登入使用者',200);
  const ref=(collection,id)=>db.collection(collection).doc(id);
  const demandId=demandCore.demandIdForSource({
@@ -43,8 +43,10 @@ async function validateV2FormalPurchaseTx(tx,db,uid,intent,{allowExistingPo=fals
   // Do not trust client role or UI hidden buttons. Read live user and business
   // facts under the same transaction snapshot that a future commit must use.
   const user=await tx.get(ref('users',uid));
-  if(!user.exists||user.data().active===false||user.data().disabled===true
-    ||!['admin','purchaser'].includes(user.data().role))
+  const selfOrder=actorScope==='self-order';
+  if(!['purchaser','self-order'].includes(actorScope)||!user.exists
+    ||user.data().active===false||user.data().disabled===true
+    ||!(selfOrder?['sales','engineer']:['admin','purchaser']).includes(user.data().role))
    reject('permission-denied','登入使用者沒有正式採購權限');
   const po=await tx.get(ref('purchaseOrders',intent.poNo));
   if(po.exists && !(allowExistingPo && po.data().status==='DRAFT' && po.data().documentOnly===true)){
@@ -56,6 +58,8 @@ async function validateV2FormalPurchaseTx(tx,db,uid,intent,{allowExistingPo=fals
   const source=order.data();
   if(!await hasCommercialOwnerIdentity(tx,db,uid,user.data(),source))
    reject('failed-precondition','來源訂單缺少業務歸屬資料，請先核對負責人與業務代碼');
+  if(selfOrder&&(source.ownerUid!==uid||!source.salesCode))
+   reject('permission-denied','只有此訂單的負責業務可以自行訂貨');
   if(source.status==='cancelled'||source.orderStatus==='cancelled'
     ||source.status==='voided'||source.orderStatus==='voided'
     ||source.returnPending===true)

@@ -10,6 +10,7 @@ const {getAuth,connectAuthEmulator,signInWithEmailAndPassword}=require('firebase
 const {getFunctions,connectFunctionsEmulator,httpsCallable}=require('firebase/functions');
 const demandCore=require('../functions/shared/procurement-demand-core');
 const {auditQuickPurchase}=require('../functions/quick-purchase-audit');
+const {verifyQuickPurchaseReceipt}=require('../functions/supply-receipt-service');
 const project='demo-yushin';
 let server,db,users;
 const clients=[];
@@ -24,7 +25,7 @@ test.after(async()=>{
  await Promise.all(clients.map(deleteApp));
  if(server)await server.delete();
 });
-async function seeded(tag,{role='purchaser',directShip=false,active=true}={}){
+async function seeded(tag,{role='purchaser',directShip=false,active=true,selfOrder=false}={}){
  const uid='quick-buyer-'+tag,email=uid+'@example.test';
  await users.createUser({uid,email,password:'EmulatorOnly!123456'});
  const client=clientApp({apiKey:'fake-api-key',authDomain:project+'.firebaseapp.com',
@@ -35,24 +36,28 @@ async function seeded(tag,{role='purchaser',directShip=false,active=true}={}){
  await signInWithEmailAndPassword(auth,email,'EmulatorOnly!123456');
  const functions=getFunctions(client,'asia-east1');
  connectFunctionsEmulator(functions,'127.0.0.1',5001);
- const call=httpsCallable(functions,'commitV2QuickPurchase');
+ const call=httpsCallable(functions,selfOrder?'commitV2SelfOrder':'commitV2QuickPurchase');
  const orderId='quick-order-'+tag,itemId='I1',productId='quick-product-'+tag,warehouseId=directShip?'':'quick-warehouse-'+tag;
  const item={itemId,productId,warehouseId,fulfillmentType:directShip?'DIRECT_SHIP':'WAREHOUSE',
+  ...(selfOrder?{procurementType:'SALES_SELF_ORDER'}:{}),
   qty:directShip?7:12,reservedQty:directShip?0:5,shortageQty:directShip?0:7,
   supplyOrderedQty:0,receivedQty:0};
  const demandId=demandCore.demandIdForSource({sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId});
  const demand=demandCore.demandDocument(demandCore.fromSalesOrder({...item,
   requiredSupplyQty:directShip?7:undefined,sourceType:'SALES_ORDER',
   sourceId:orderId,sourceItemId:itemId,sourceItemIndex:0,
-  ownerUid:'seller-'+tag,salesCode:'S01',productKey:productId}));
+  ownerUid:selfOrder?uid:'seller-'+tag,salesCode:'S01',productKey:productId}));
  const batch=db.batch(),set=(path,data)=>batch.set(db.doc(path),data);
  set('users/'+uid,{role,active,name:'Buyer'});
- set('orders/'+orderId,{ownerUid:'seller-'+tag,salesCode:'S01',
+ set('orders/'+orderId,{ownerUid:selfOrder?uid:'seller-'+tag,salesCode:'S01',
+  ...(selfOrder?{inventoryReservationAttemptId:'self-order-attempt-'+tag}:{}),
   status:'active',orderStatus:'normal',inventoryReservationStatus:'completed',
   workCategories:['ordering'],items:[item]});
  set('products/'+productId,{productType:'Goods',active:true});
  set('procurementDemands/'+encodeURIComponent(demandId),demand);
  if(!directShip){
+  if(selfOrder)set('inventoryReservations/'+orderId+'__'+itemId,{orderId,itemId,
+   productKey:productId,warehouseId,ownerUid:uid,salesCode:'S01',quantity:5,shortageQty:7,status:'active'});
   set('warehouses/'+warehouseId,{active:true});
   set('inventory/'+encodeURIComponent(productId),{productId,productKey:productId,
    onHand:5,reserved:2,incoming:0});
@@ -61,7 +66,8 @@ async function seeded(tag,{role='purchaser',directShip=false,active=true}={}){
  }
  await batch.commit();
  const intent=(operationId='operation-'+tag+'-001',qty=4,extra={})=>({
-  operationId,orderId,itemId,qty,supplier:'Vendor',unitCost:19.99,...extra
+  operationId,orderId,itemId,qty,supplier:'Vendor',unitCost:19.99,
+  ...(selfOrder?{orderDate:'2026-11-10',notes:''}:{}),...extra
  });
  const data=async path=>(await db.doc(path).get()).data();
  return {uid,call,intent,data,orderId,itemId,productId,warehouseId,demandId};
@@ -202,6 +208,43 @@ test('real purchaser cannot order a sales-self-order item through privileged Cal
  assert.equal(await f.data('purchaseOperations/quick-'+f.intent().operationId),undefined);
  assert.equal((await f.data('inventory/'+f.productId)).incoming,0);
  assert.equal((await f.data('procurementDemands/'+encodeURIComponent(f.demandId))).orderedQty,0);
+});
+
+test('real sales owner self-order commits one atomic supply, demand, source and incoming ledger',async()=>{
+ const f=await seeded('sales-self-order',{role:'sales',selfOrder:true}),intent=f.intent();
+ const first=(await f.call(intent)).data;
+ assert.equal(first.status,'committed');
+ assert.equal(first.supplyId,'self-'+encodeURIComponent(f.orderId)+'-'+encodeURIComponent(f.itemId));
+ const supply=await f.data('supplyOrders/'+first.supplyId);
+ assert.equal(supply.type,'SALES_SELF_ORDER');assert.equal(supply.createdByUid,f.uid);
+ assert.equal(supply.incomingRegisteredQty,4);
+ assert.equal((await f.data('orders/'+f.orderId)).items[0].supplyOrderedQty,4);
+ assert.equal((await f.data('procurementDemands/'+encodeURIComponent(f.demandId))).orderedQty,4);
+ assert.equal((await f.data('inventory/'+f.productId)).incoming,4);
+ assert.equal((await f.data('warehouseStocks/'+f.warehouseId+'__'+f.productId)).incoming,4);
+ assert.equal((await f.data('inventoryMovements/self-'+intent.operationId)).qty,4);
+ const mirror=await f.data('receivingSupplyOrders/'+first.supplyId);
+ assert.equal(Object.hasOwn(mirror,'unitCost'),false);
+ await verifyQuickPurchaseReceipt(ref=>db.doc(ref.path).get(),db,supply,
+  await f.data('orders/'+f.orderId),first.supplyId);
+ assert.equal((await f.call(intent)).data.status,'already-applied');
+ assert.equal((await f.data('inventory/'+f.productId)).incoming,4);
+ await assert.rejects(f.call({...intent,qty:3}),e=>e.code==='functions/already-exists');
+});
+test('real self-order rejects other buyers, tampered ownership and concurrent overorders',async()=>{
+ const buyer=await seeded('self-buyer',{role:'purchaser',selfOrder:true});
+ await assert.rejects(buyer.call(buyer.intent()),e=>e.code==='functions/permission-denied');
+ assert.equal((await buyer.data('inventory/'+buyer.productId)).incoming,0);
+ const wrong=await seeded('self-wrong-owner',{role:'sales',selfOrder:true});
+ await db.doc('orders/'+wrong.orderId).update({ownerUid:'another-person'});
+ await assert.rejects(wrong.call(wrong.intent()),e=>e.code==='functions/permission-denied');
+ const f=await seeded('self-concurrent',{role:'sales',selfOrder:true});
+ const a=f.intent('self-concurrent-A',5),b=f.intent('self-concurrent-B',5);
+ const results=await Promise.allSettled([f.call(a),f.call(b)]);
+ assert.equal(results.filter(row=>row.status==='fulfilled').length,1);
+ assert.equal(results.find(row=>row.status==='rejected').reason.code,'functions/failed-precondition');
+ assert.equal((await f.data('inventory/'+f.productId)).incoming,5);
+ assert.equal((await f.data('warehouseStocks/'+f.warehouseId+'__'+f.productId)).incoming,5);
 });
 
 test('lost HTTP response after committed write: refreshed client retries same operation without a second purchase',async()=>{
