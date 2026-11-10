@@ -50,11 +50,14 @@ async function seeded(tag,{role='purchaser',directShip=false,active=true,selfOrd
  const batch=db.batch(),set=(path,data)=>batch.set(db.doc(path),data);
  set('users/'+uid,{role,active,name:'Buyer'});
  set('orders/'+orderId,{ownerUid:selfOrder?uid:'seller-'+tag,salesCode:'S01',
+  ...(selfOrder?{inventoryReservationAttemptId:'self-order-attempt-'+tag}:{}),
   status:'active',orderStatus:'normal',inventoryReservationStatus:'completed',
   workCategories:['ordering'],items:[item]});
  set('products/'+productId,{productType:'Goods',active:true});
  set('procurementDemands/'+encodeURIComponent(demandId),demand);
  if(!directShip){
+  if(selfOrder)set('inventoryReservations/'+orderId+'__'+itemId,{orderId,itemId,
+   productKey:productId,warehouseId,ownerUid:uid,salesCode:'S01',quantity:5,shortageQty:7,status:'active'});
   set('warehouses/'+warehouseId,{active:true});
   set('inventory/'+encodeURIComponent(productId),{productId,productKey:productId,
    onHand:5,reserved:2,incoming:0});

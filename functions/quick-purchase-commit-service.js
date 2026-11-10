@@ -149,6 +149,25 @@ async function commitPurchase(db,uid,data,{selfOrder=false}={}){
   // that the receiving backend cannot later accept.
   if((selfOrder&&source.items.length>5)||source.items.some(i=>String(i.productType||i.type||'').toUpperCase()==='SERVICE'))
    fail('failed-precondition','混合服務訂單或超過五品項來源尚未完成收貨驗證，禁止提交供應');
+  if(selfOrder){
+   // A supplier commitment is irreversible business evidence. Verify that
+   // its receipt source exists before accepting the promise; otherwise the
+   // downstream canonical Receiving Service would be unable to post arrival.
+   if(source.status!=='active'||typeof source.inventoryReservationAttemptId!=='string'
+     ||!source.inventoryReservationAttemptId)
+    fail('failed-precondition','來源訂單尚缺正式庫存同步憑證，不能自行訂貨');
+   if(sourceItem.fulfillmentType!=='DIRECT_SHIP'){
+    const reservation=await tx.get(ref('inventoryReservations',intent.orderId+'__'+intent.itemId));
+    const r=reservation.exists?reservation.data():null;
+    if(!r||r.orderId!==intent.orderId||r.itemId!==intent.itemId
+      ||r.ownerUid!==source.ownerUid||r.salesCode!==source.salesCode
+      ||r.productKey!==String(sourceItem.inventoryProductKey||sourceItem.productId)
+      ||r.warehouseId!==plan.warehouseId
+      ||r.quantity!==(sourceItem.reservedQty??0)
+      ||r.shortageQty!==(sourceItem.shortageQty??0))
+     fail('failed-precondition','來源缺少可收貨的權威預留憑證');
+   }
+  }
   const prior=await tx.get(supplyRef),old=prior.exists?prior.data():null;
   const productKey=String(sourceItem.inventoryProductKey||sourceItem.productId);
   const fulfillmentType=sourceItem.fulfillmentType||'WAREHOUSE';

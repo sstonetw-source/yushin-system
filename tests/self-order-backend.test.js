@@ -13,6 +13,7 @@ function fixture({directShip=false,mixed=false}={}){
   qty:directShip?7:12,reservedQty:directShip?0:5,shortageQty:directShip?0:7,
   supplyOrderedQty:0,receivedQty:0};
  const order={ownerUid:'seller',salesCode:'B',status:'active',orderStatus:'normal',
+  inventoryReservationAttemptId:'attempt-self-order-001',
   inventoryReservationStatus:'completed',workCategories:['ordering'],
   items:[item,...(mixed?[{itemId:'SERV',productType:'SERVICE',fulfillmentType:'SERVICE',qty:1}]:[])]};
  const demandId=demandCore.demandIdForSource({sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId});
@@ -30,6 +31,8 @@ function fixture({directShip=false,mixed=false}={}){
   ['procurementDemands/'+encodeURIComponent(demandId),demand]
  ]);
  if(!directShip){
+  records.set('inventoryReservations/'+orderId+'__'+itemId,{orderId,itemId,productKey:productId,
+   warehouseId,ownerUid:'seller',salesCode:'B',quantity:5,shortageQty:7,status:'active'});
   records.set('warehouses/W',{active:true});
   records.set('inventory/P',{productId:'P',productKey:'P',onHand:5,reserved:2,incoming:0});
   records.set('warehouseStocks/W__P',{productId:'P',productKey:'P',warehouseId:'W',onHand:5,reserved:2,incoming:0});
@@ -104,6 +107,8 @@ test('stale demand, invalid stock, overorder and mismatched source are rejected 
   f=>{f.records.get('orders/ORDER-1').status='cancelled';},
   f=>{f.records.get('orders/ORDER-1').inventoryReservationStatus='pending';},
   f=>{f.records.get('procurementDemands/'+encodeURIComponent(f.demandId)).orderedQty=1;},
+  f=>{f.records.delete('inventoryReservations/ORDER-1__I1');},
+  f=>{f.records.get('orders/ORDER-1').inventoryReservationAttemptId='';},
   f=>{f.records.delete('warehouseStocks/W__P');},
   f=>{f.records.get('inventory/P').incoming=-1;},
   f=>{f.records.get('warehouseStocks/W__P').productKey='wrong';}
