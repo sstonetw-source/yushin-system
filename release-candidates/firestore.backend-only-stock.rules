@@ -1,0 +1,2736 @@
+// BACKEND-ONLY STOCK WRITER CUTOVER: requires separate production authorization.
+// Generated from firestore.rules; never use as an implicit fallback.
+// Cutover model: settings/orderTransferCutover.backendOnly (bool, optional,
+// irreversible once true) retires client writes for stockTransfers with a
+// nonempty orderId and their order/reservation witnesses; free transfers stay unchanged.
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+
+    function userDoc() {
+      return get(userPath());
+    }
+
+    function profileEnabled(data) {
+      return data.get('active', true) == true && data.get('disabled', false) != true;
+    }
+    function active() {
+      return signedIn() && profileEnabled(userDoc().data);
+    }
+    function role() {
+      return signedIn() ? enabledRole(userDoc().data) : null;
+    }
+    function enabledRole(data) {
+      return profileEnabled(data) ? data.get('role', null) : null;
+    }
+
+    function admin() { return role() == 'admin'; }
+    function sales() { return role() == 'sales'; }
+    function purchaser() { return role() == 'purchaser'; }
+    function warehouse() { return role() == 'warehouse'; }
+
+    // Sales and engineers own their own commercial and fulfillment records.
+    function businessOwner() {
+      return role() in ['sales', 'engineer'];
+    }
+
+    function commercialDocumentOwner() {
+      return businessOwner();
+    }
+
+    function businessAssistant() {
+      return purchaser();
+    }
+
+    function canCreateCommercialDoc() {
+      return role() in ['admin','sales','engineer','purchaser'];
+    }
+
+    function canPurchase() {
+      return role() in ['admin','purchaser'];
+    }
+
+    function canReceiveInventory() {
+      return role() in ['admin', 'purchaser', 'warehouse'];
+    }
+
+
+    function businessCode(data) {
+      let assigned = data.get('salesCode', '');
+      return assigned is string && assigned.size() > 0 ? assigned : data.get('code', null);
+    }
+
+    function salesCode() {
+      let data = userDoc().data;
+      // Keep this hot path inexpensive for 30-line transaction Rules budgets.
+      return profileEnabled(data) ? data.get('salesCode', data.get('code', null)) : null;
+    }
+
+    function owns(data) {
+      let profile = signedIn() ? userDoc().data : {};
+      let code = profile.get('salesCode', profile.get('code', null));
+      let ownerUid = data.get('ownerUid', '');
+      let ownerSalesCode = data.get('salesCode', '');
+      return signedIn() && profileEnabled(profile) && (
+        (ownerUid != '' && ownerUid == request.auth.uid) ||
+        (code != null && ownerSalesCode != '' && ownerSalesCode == code)
+      );
+    }
+
+    // Evaluate the fixed role once per document read; nested role predicates
+    // consumed the transaction expression budget when discovering another warehouse.
+    function operationalOrOwnedReader(data) {
+      let userRole = role();
+      return userRole in ['admin','purchaser','warehouse']
+        || (userRole in ['sales','engineer'] && owns(data));
+    }
+    function safeStockReader(data) {
+      let profile = signedIn() ? userDoc().data : {};
+      return signedIn() && profileEnabled(profile)
+        && (profile.get('role', '') == 'admin' || !data.keys().hasAny(['unitCost','cost']));
+    }
+
+    // Commercial owners retain their identity when promoted to administrator.
+    // The live profile, UID and matching nonempty code remain authoritative.
+    function validQuoteOwner(data) {
+      let ownerUid = data.get('ownerUid', '');
+      let ownerCode = data.get('salesCode', '');
+      let owner = ownerUid is string && ownerUid.size() > 0
+        ? get(/databases/$(database)/documents/users/$(ownerUid)).data : {};
+      return ownerUid is string && ownerUid.size() > 0
+        && ownerCode is string && ownerCode.size() > 0
+        && profileEnabled(owner)
+        && owner.get('role', '') in ['admin', 'sales', 'engineer']
+        && (owner.get('role', '') != 'admin' || (owner.get('name', '') is string && owner.get('name', '').size() > 0))
+        && businessCode(owner) == ownerCode;
+    }
+
+    function validOwnedCommercialCreate(data) {
+      return (admin() && validQuoteOwner(data)) ||
+        (commercialDocumentOwner() &&
+          data.ownerUid == request.auth.uid &&
+          data.salesCode != null &&
+          data.salesCode == salesCode()) ||
+        (businessAssistant() &&
+          validQuoteOwner(data) &&
+          data.ownerUid != request.auth.uid);
+    }
+
+    function sameCommercialOwner() {
+      return request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.salesCode == resource.data.salesCode;
+    }
+
+
+    // Current orders use status=active. Match normalizedOrderStatus: either
+    // cancellation field blocks receipt until purchasing explicitly keeps stock.
+    function orderIsCancelled(data) {
+      return data.get('status', '') in ['cancelled', 'voided']
+        || data.get('orderStatus', '') in ['cancelled', 'voided'];
+    }
+
+
+    // Creator identity is an audit field. Legacy documents without creator metadata
+    // remain editable; once present, normal workflow edits cannot rewrite it.
+    function preservesCreator() {
+      return resource.data.get('createdByUid', '') == ''
+        ? (
+          request.resource.data.get('createdByUid', '') == ''
+          && request.resource.data.get('createdByName', '') == ''
+          && request.resource.data.get('createdByRole', '') == ''
+        )
+        : (
+          request.resource.data.get('createdByUid', '') == resource.data.get('createdByUid', '')
+          && request.resource.data.get('createdByName', '') == resource.data.get('createdByName', '')
+          && request.resource.data.get('createdByRole', '') == resource.data.get('createdByRole', '')
+        );
+    }
+
+
+    function nonNegativeInventory(data) {
+      return data.onHand is number && data.reserved is number
+        && data.onHand >= 0 && data.reserved >= 0 && data.reserved <= data.onHand
+        && data.get('incoming', 0) is number && data.get('incoming', 0) >= 0;
+    }
+
+
+    function hasStockOperation(targetPath, quantityField, reservedField) {
+      let operationId = request.resource.data.get('stockOperationId', '');
+      let path = /databases/$(database)/documents/stockOperations/$(operationId);
+      let op = getAfter(path).data;
+      return operationId != '' && !exists(path)
+        && op.actorUid == request.auth.uid && op.targetPath == targetPath
+        && op.productKey == resource.data.get('productKey', resource.data.get('productId', ''))
+        && op.warehouseId == (targetPath.matches('inventory/.*') ? '' : resource.data.get('warehouseId', ''))
+        && op.qtyDelta == request.resource.data.get(quantityField, 0) - resource.data.get(quantityField, 0)
+        && (reservedField == '' || op.reservedDelta == request.resource.data.get(reservedField, 0) - resource.data.get(reservedField, 0));
+      // The fresh immutable stockOperations document is independently validated on create.
+      // Do not repeat its full source/reservation proof for every target in the same transaction.
+    }
+
+
+    match /users/{id} {
+      // Collection-specific security validators (moved from document root scope).
+      // Personal defaults: only the authenticated active member's future-order defaults.
+      function validPersonalDefaults(p) {
+        return p is map && p.keys().hasOnly(['mode','warehouseId','contact','phone','address','packages','notes'])
+          && p.keys().hasAll(['mode','warehouseId','contact','phone','address','packages','notes'])
+          && p.mode in ['PICKUP','SALES_SHIP'] && p.warehouseId == '' && p.packages == 1
+          && p.contact is string && p.contact.size() <= 1000
+          && p.phone is string && p.phone.size() <= 1000
+          && p.address is string && p.address.size() <= 1000
+          && p.notes is string && p.notes.size() <= 1000
+          && (p.mode == 'PICKUP' || (p.contact.size() > 0 && p.phone.size() > 0 && p.address.size() > 0));
+      }
+
+      function validPersonalSettingsUpdate(id) {
+        return active() && id == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['phone','deliveryDefaults','updatedAt'])
+          && request.resource.data.phone is string && request.resource.data.phone.size() <= 100
+          && validPersonalDefaults(request.resource.data.deliveryDefaults)
+          && request.resource.data.updatedAt == request.time;
+      }
+
+      allow read: if signedIn() && (id == request.auth.uid || active());
+      allow create: if admin();
+      // A signed-in member may sync only their own token email, never role,
+      // ownership code, activation or delivery preferences.
+      allow update: if admin() || validPersonalSettingsUpdate(id) || (active() && id == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['email'])
+        && request.resource.data.get('email', '') is string
+        && request.resource.data.email.size() > 0 && request.resource.data.email.size() <= 320
+        && request.resource.data.email == request.auth.token.get('email', ''));
+      allow delete: if false;
+    }
+
+    // settings/orderTransferCutover.backendOnly is an irreversible bool gate.
+    // It retires only order-linked browser transfer writers, not free-stock transfers.
+    function orderTransferBackendOnly() {
+      let gate = /databases/$(database)/documents/settings/orderTransferCutover;
+      return exists(gate) && get(gate).data.get('backendOnly', false) == true;
+    }
+
+    match /settings/{id} {
+      allow read: if active();
+      // Approved cutover gates are one-way: a cached client or routine admin
+      // edit must never reactivate a retired transaction writer.
+      allow create: if admin();
+      allow update: if admin()
+        && (id != 'receivingCutover'
+          || resource.data.get('backendOnly', false) != true
+          || request.resource.data.get('backendOnly', false) == true)
+        && (id != 'dispatchCutover'
+          || resource.data.get('backendOnly', false) != true
+          || request.resource.data.get('backendOnly', false) == true)
+        && (id != 'shipmentCutover'
+          || resource.data.get('backendOnly', false) != true
+          || request.resource.data.get('backendOnly', false) == true)
+        && (id != 'purchasingCutover'
+          || resource.data.get('backendOnly', false) != true
+          || request.resource.data.get('backendOnly', false) == true)
+        && (id != 'returnCutover'
+          || resource.data.get('backendOnly', false) != true
+          || request.resource.data.get('backendOnly', false) == true)
+        && (id != 'deliveryCutover'
+          || resource.data.get('backendOnly', false) != true
+          || request.resource.data.get('backendOnly', false) == true)
+        && (id != 'orderTransferCutover'
+          || resource.data.get('backendOnly', false) != true
+          || request.resource.data.get('backendOnly', false) == true)
+        && (id != 'lifecycleCutover'
+          || resource.data.get('backendOnly', false) != true
+          || request.resource.data.get('backendOnly', false) == true);
+      allow delete: if false;
+    }
+
+    match /brands/{id} {
+      allow read: if active();
+      allow create, update: if admin();
+      allow delete: if false;
+    }
+
+    match /productLines/{id} {
+      allow read: if active();
+      allow create, update: if admin();
+      allow delete: if false;
+    }
+
+    match /salesCodes/{id} {
+      allow read: if active();
+      allow create, update: if admin();
+      allow delete: if false;
+    }
+
+    match /customers/{id} {
+      allow read: if active();
+      allow create, update: if admin() || businessOwner() || businessAssistant();
+      allow delete: if false;
+    }
+
+    match /suppliers/{id} {
+      allow read: if active();
+      allow create, update: if canPurchase();
+      allow delete: if false;
+    }
+
+    match /brandSupplierMappings/{id} {
+      allow read: if active();
+      allow create, update: if canPurchase();
+      allow delete: if false;
+    }
+
+    match /warehouses/{id} {
+      allow read: if active();
+      allow create: if admin() || (canReceiveInventory() && request.resource.data.get('systemCustody', false) == true
+        && id == 'custody-' + request.resource.data.ownerUid && request.resource.data.warehouseType == 'CUSTODY'
+        && request.resource.data.isDefault == false && request.resource.data.active == true
+        && request.resource.data.keys().hasOnly(['warehouseName','active','isDefault','warehouseType','systemCustody','ownerUid','sourceTransferId'])
+        && getAfter(/databases/$(database)/documents/stockTransfers/$(request.resource.data.sourceTransferId)).data.kind == 'HANDOFF'
+        && getAfter(/databases/$(database)/documents/stockTransfers/$(request.resource.data.sourceTransferId)).data.toWarehouseId == id);
+      allow update: if admin();
+      allow delete: if false;
+    }
+
+    // Searchable product master. Cost is intentionally stored separately.
+    match /products/{id} {
+      // Collection-specific security validators (moved from document root scope).
+      function businessTemporaryProduct(id, data) {
+        return businessOwner()
+          && data.get('productId', '') == id
+          && data.get('status', '') == 'TEMPORARY'
+          && data.get('active', false) == true
+          && data.get('source', '') == 'QUICK_CREATE'
+          && data.get('createdBy', '') == request.auth.uid
+          && data.get('updatedBy', '') == request.auth.uid
+          && data.get('listPrice', -1) is number
+          && data.listPrice >= 0
+          && data.keys().hasOnly([
+            'productId', 'brandId', 'brandName', 'manufacturerPartNo',
+            'normalizedPartNo', 'productName', 'nameEn', 'specification',
+            'productLine', 'productLineId', 'category', 'productType', 'supplier',
+            'listPrice', 'status', 'active', 'source', 'createdAt',
+            'createdBy', 'updatedAt', 'updatedBy'
+          ]);
+      }
+
+      // Sales may create a permanent, searchable master without acquiring edit,
+      // deactivate, cost or inventory privileges. Create is intrinsically no-overwrite.
+      function salesPermanentProductCreate(id, data) {
+        return sales()
+          && data.keys().hasAll([
+            'productId', 'brandId', 'brandName', 'manufacturerPartNo',
+            'normalizedPartNo', 'productName', 'nameEn', 'specification',
+            'productLine', 'productLineId', 'productType', 'category',
+            'serviceKind', 'listPrice', 'inventoryTracked', 'lotTracked',
+            'expiryTracked', 'status', 'active', 'source', 'createdAt',
+            'createdBy', 'updatedAt', 'updatedBy'
+          ])
+          && data.keys().hasOnly([
+            'productId', 'brandId', 'brandName', 'manufacturerPartNo',
+            'normalizedPartNo', 'productName', 'nameEn', 'specification',
+            'productLine', 'productLineId', 'productType', 'category',
+            'serviceKind', 'listPrice', 'inventoryTracked', 'lotTracked',
+            'expiryTracked', 'status', 'active', 'source', 'createdAt',
+            'createdBy', 'updatedAt', 'updatedBy'
+          ])
+          && data.productId == id && data.createdBy == request.auth.uid
+          && data.updatedBy == request.auth.uid
+          && data.source == 'MANUAL' && data.status == 'ACTIVE' && data.active == true
+          && data.brandId is string && data.brandId.size() > 0 && data.brandId.size() <= 200
+          && data.brandName is string && data.brandName.size() > 0 && data.brandName.size() <= 200
+          && data.manufacturerPartNo is string && data.manufacturerPartNo.size() > 0 && data.manufacturerPartNo.size() <= 200
+          && data.normalizedPartNo is string && data.normalizedPartNo.size() > 0 && data.normalizedPartNo.size() <= 200
+          && data.productName is string && data.productName.size() > 0 && data.productName.size() <= 500
+          && data.nameEn is string && data.nameEn.size() <= 500
+          && data.specification is string && data.specification.size() <= 2000
+          && data.productLine is string && data.productLine.size() <= 200
+          && data.productLineId is string && data.productLineId.size() <= 200
+          && data.productType is string && data.productType.size() <= 100
+          && data.category == data.productType
+          && data.serviceKind is string && data.serviceKind.size() <= 100
+          && (data.productType == 'Service'
+            ? (data.serviceKind in ['', 'BIOPLEX_LAB','PIPETTE_CALIBRATION','TISSUE_SLICING','ONSITE_REPAIR']
+              && data.inventoryTracked == false && data.lotTracked == false && data.expiryTracked == false)
+            : data.serviceKind == '')
+          && data.listPrice is number && data.listPrice >= 0 && data.listPrice <= 1000000000
+          && data.inventoryTracked is bool && data.lotTracked is bool && data.expiryTracked is bool
+          && data.createdAt is string && data.createdAt.size() > 0 && data.createdAt.size() <= 40
+          && data.updatedAt is string && data.updatedAt.size() > 0 && data.updatedAt.size() <= 40;
+      }
+
+      allow read: if active();
+      allow create: if canPurchase() || businessTemporaryProduct(id, request.resource.data)
+        || salesPermanentProductCreate(id, request.resource.data);
+      allow update: if canPurchase();
+      allow delete: if admin();
+    }
+
+    // 公司標準產品成本只提供採購／管理員；業務自行調貨成本存在自己的訂單交易中。
+    match /productCosts/{id} {
+      allow read: if canPurchase();
+      allow create, update: if canPurchase();
+      allow delete: if admin();
+    }
+
+    match /priceHistory/{id} {
+      allow read, create: if canPurchase();
+      allow update, delete: if false;
+    }
+
+    match /quotes/{id} {
+      // Established UID-only quotes keep absent owner fields absent on edits.
+      function quoteOwnerUnchanged() {
+        return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['ownerUid', 'salesCode']);
+      }
+      allow get: if canPurchase() || (commercialDocumentOwner() && (resource == null || owns(resource.data)));
+      allow list: if canPurchase() || (commercialDocumentOwner() && owns(resource.data));
+      allow create: if canCreateCommercialDoc() && validOwnedCommercialCreate(request.resource.data)
+        && request.resource.data.get('createdByUid', request.auth.uid) == request.auth.uid
+        && request.resource.data.get('createdByRole', role()) == role();
+      allow update: if admin()
+        || (commercialDocumentOwner() && owns(resource.data) && owns(request.resource.data) && quoteOwnerUnchanged() && preservesCreator())
+        || (purchaser() && quoteOwnerUnchanged() && preservesCreator()
+          && (resource.data.get('dealClosed', false) != true
+            || request.resource.data.get('dealClosed', false) == true));
+      allow delete: if admin();
+    }
+
+    match /forecasts/{id} {
+      allow read: if admin() || (sales() && owns(resource.data));
+      allow create: if (admin() || sales()) && validOwnedCommercialCreate(request.resource.data);
+      allow update: if admin()
+        || (sales() && owns(resource.data) && owns(request.resource.data) && sameCommercialOwner() && preservesCreator());
+      allow delete: if admin();
+    }
+
+    match /forecasts/{forecastId}/progress/{progressId} {
+      function parentForecast() {
+        return get(/databases/$(database)/documents/forecasts/$(forecastId));
+      }
+      allow read: if admin() || (sales() && owns(parentForecast().data));
+      allow create: if admin() || (sales() && owns(parentForecast().data));
+      allow update: if false;
+      allow delete: if admin();
+    }
+
+
+    // Coordinated fulfillment cutover: legacy delivery writers also performed
+    // physical stock changes. Freeze their order witness as well as receipts;
+    // trusted Admin SDK delivery/shipment/receiving services remain unaffected.
+    function deliveryBackendOnly() {
+      let gate = /databases/$(database)/documents/settings/deliveryCutover;
+      return exists(gate) && get(gate).data.get('backendOnly', false) == true;
+    }
+    // Return requests, receipt settlement and inspection release retire together.
+    // The trusted return services keep their existing calculation and role checks.
+    function returnBackendOnly() {
+      let gate = /databases/$(database)/documents/settings/returnCutover;
+      return exists(gate) && get(gate).data.get('backendOnly', false) == true;
+    }
+    match /orders/{id} {
+      // Collection-specific security validators (moved from document root scope).
+      // Customer arrival is a commercial fact, not a warehouse receipt.
+      function directShipReceiver() {
+        let userRole = role();
+        return userRole == 'admin' || (userRole in ['sales', 'engineer'] && resource.data.get('ownerUid', '') == request.auth.uid);
+      }
+
+      function directShipReceiptOrderUpdate(orderId) {
+        let beforeRecords = resource.data.get('deliveryRecords', []);
+        let afterRecords = request.resource.data.get('deliveryRecords', []);
+        return !deliveryBackendOnly() && directShipReceiver()
+          && afterRecords.size() == beforeRecords.size() + 1
+          && operationalItemsOnly(['orderedQty', 'reservedQty', 'shortageQty', 'receivedQty', 'deliveredQty', 'directShipDeliveredQty', 'receiptEvents', 'reservationStatus', 'inventoryProductKey'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'items', 'itemCount', 'orderSchemaVersion',
+            'deliveryRecords', 'deliveredQty', 'isDelivered',
+            'workCategories', 'workCategoryUpdatedAt', 'updatedAt'
+          ])
+          && directShipReceiptOrderEvidence(orderId);
+      }
+
+      function directShipReceiptOrderEvidence(orderId) {
+        let beforeRecords = resource.data.get('deliveryRecords', []);
+        let afterRecords = request.resource.data.get('deliveryRecords', []);
+        let newRecord = afterRecords[beforeRecords.size()];
+        let supplyId = newRecord.get('sourceId', '');
+        let supplyPath = /databases/$(database)/documents/supplyOrders/$(supplyId);
+        let supplyBefore = get(supplyPath).data;
+        let supplyAfter = getAfter(supplyPath).data;
+        let index = newRecord.get('itemIndex', -1);
+        let beforeItem = resource.data.items[index];
+        let afterItem = request.resource.data.items[index];
+        return afterRecords.hasAll(beforeRecords)
+          && !beforeRecords.hasAny([newRecord])
+          && newRecord.get('sourceType', '') == 'DIRECT_SHIP_RECEIPT'
+          && newRecord.get('qty', 0) is number
+          && newRecord.get('qty', 0) > 0
+          && supplyBefore.get('orderId', '') == orderId
+          && supplyBefore.get('itemId', '') == newRecord.get('itemId', '')
+          && supplyBefore.get('fulfillmentType', 'WAREHOUSE') == 'DIRECT_SHIP'
+          && supplyBefore.get('ownerUid', '') == resource.data.get('ownerUid', '')
+          && index is int && index >= 0 && index < resource.data.items.size()
+          && beforeItem.itemId == newRecord.itemId && beforeItem.get('fulfillmentType', '') == 'DIRECT_SHIP'
+          && request.resource.data.items.removeAll([afterItem]) == resource.data.items.removeAll([beforeItem])
+          && afterItem.get('receivedQty', 0) == beforeItem.get('receivedQty', 0) + newRecord.qty
+          && afterItem.get('deliveredQty', 0) == beforeItem.get('deliveredQty', 0) + newRecord.qty
+          && request.resource.data.get('deliveredQty', 0) == resource.data.get('deliveredQty', 0) + newRecord.qty
+          && supplyAfter.get('receivedQty', 0) == supplyBefore.get('receivedQty', 0) + newRecord.get('qty', 0)
+          && supplyAfter.get('receivedQty', 0) <= supplyBefore.get('qty', 0);
+      }
+
+      // Rules cannot iterate lists; keep this bounded to stay below the evaluator limit.
+      // Larger operational item changes require an administrator.
+      function operationalChangedFields(before, after) {
+        return after[0].diff(before[0]).affectedKeys()
+          .union(after[1].diff(before[1]).affectedKeys())
+          .union(after[2].diff(before[2]).affectedKeys())
+          .union(after[3].diff(before[3]).affectedKeys())
+          .union(after[4].diff(before[4]).affectedKeys())
+          .union(after[5].diff(before[5]).affectedKeys())
+          .union(after[6].diff(before[6]).affectedKeys())
+          .union(after[7].diff(before[7]).affectedKeys())
+          .union(after[8].diff(before[8]).affectedKeys())
+          .union(after[9].diff(before[9]).affectedKeys())
+          .union(after[10].diff(before[10]).affectedKeys())
+          .union(after[11].diff(before[11]).affectedKeys())
+          .union(after[12].diff(before[12]).affectedKeys())
+          .union(after[13].diff(before[13]).affectedKeys())
+          .union(after[14].diff(before[14]).affectedKeys());
+      }
+
+      function operationalItemsOnly(allowed) {
+        let before = resource.data.get('items', []);
+        let after = request.resource.data.get('items', []);
+        let padding = [{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}];
+        return before == after || (before.size() == after.size() && before.size() <= 15
+          && operationalChangedFields(before.concat(padding), after.concat(padding)).hasOnly(allowed));
+      }
+
+      function purchasingItemFields() {
+        return ['orderedQty', 'reservedQty', 'shortageQty', 'dispatchPreparedQty',
+          'receivedQty', 'supplyOrderedQty', 'purchaseOrderedQty', 'purchaseOrderNo', 'purchaseOrderNos',
+          'purchaseDocumentIds', 'purchaseDocumentNos', 'supplyOrderIds', 'supplyOrders',
+          'receiptEvents', 'purchaseEvents', 'reservationStatus', 'reservationError', 'inventoryProductKey',
+          'linkedDocuments', 'procurementStatus', 'perOrdered', 'perReceived'];
+      }
+
+      function purchaserOrderWorkflowUpdate() {
+        return purchaser()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'items', 'itemCount', 'orderSchemaVersion',
+            'purchaseOrderNo', 'purchaseOrderNos', 'purchaseOrderedQty', 'purchaseStatus',
+            'linkedDocuments',
+            'costPrice', 'transactionType', 'invoiceTitle', 'remarks', 'billingDate', 'fieldEditHistory',
+            'inventoryReservationStatus', 'inventoryReservationError', 'inventoryReservationUpdatedAt', 'inventoryReservationAttemptId',
+            'sourceDocumentSyncStatus', 'sourceDocumentSyncError', 'sourceDocumentSyncUpdatedAt',
+            'workCategories', 'workCategoryUpdatedAt', 'updatedAt'
+          ])
+          && sameCommercialOwner();
+      }
+
+      function warehouseOrderWorkflowUpdate() {
+        return warehouse()
+          && !(resource.data.get('inventoryReservationStatus', '') in ['pending', 'failed'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'items', 'itemCount', 'orderSchemaVersion',
+            'inventoryReservedQty', 'inventoryShortageQty',
+            'receivedQty',
+            'workCategories', 'workCategoryUpdatedAt', 'updatedAt'
+          ])
+          && sameCommercialOwner();
+      }
+
+      // Share the bounded item walk; role-specific document whitelists stay separate.
+      function operationalOrderWorkflowUpdate(userRole) {
+        return operationalItemsOnly(userRole == 'purchaser' ? purchasingItemFields()
+            : ['orderedQty', 'reservedQty', 'shortageQty', 'receivedQty', 'receiptEvents', 'reservationStatus', 'inventoryProductKey'])
+          && (userRole == 'purchaser' ? purchaserOrderWorkflowUpdate() : warehouseOrderWorkflowUpdate());
+      }
+
+      function productPath(id) {
+        return /databases/$(database)/documents/products/$(id);
+      }
+
+      function validNewOrderProductMaster(data) {
+        let productId = data.get('productId', '');
+        return data.get('productMasterMatched', false) == true
+          // validOrderEmbeddedCost checks list type and the 15-item cap in
+          // this same create rule; do not spend the Rules budget twice.
+          && productId != ''
+          && exists(productPath(productId));
+      }
+
+      function validNewItemCost(item, method) {
+        // The existing cost check also fences backend-owned reservation results.
+        // New-order clients normalize an initial shortageQty (often the full qty)
+        // before the server reconciles it; it is never proof of a stock hold.
+        // They may also explicitly submit zero reservedQty.
+        return !item.keys().hasAny(['unitCost', 'cost', 'reservationStatus'])
+          && item.get('reservedQty', 0) == 0
+          && (!('costPrice' in item) || (item.get('procurementType', method) == 'SALES_SELF_ORDER'
+            && item.costPrice is number && item.costPrice >= 0));
+      }
+
+      function validOrderEmbeddedCost(data) {
+        let items = data.get('items', []);
+        let count = items.size();
+        let method = data.get('procurementType', 'PURCHASING_PO');
+        return items is list && count <= 15
+          && validNewItemCost(data, 'PURCHASING_PO')
+          && (count <= 0 || validNewItemCost(items[0], method))
+          && (count <= 1 || validNewItemCost(items[1], method))
+          && (count <= 2 || validNewItemCost(items[2], method))
+          && (count <= 3 || validNewItemCost(items[3], method))
+          && (count <= 4 || validNewItemCost(items[4], method))
+          && (count <= 5 || validNewItemCost(items[5], method))
+          && (count <= 6 || validNewItemCost(items[6], method))
+          && (count <= 7 || validNewItemCost(items[7], method))
+          && (count <= 8 || validNewItemCost(items[8], method))
+          && (count <= 9 || validNewItemCost(items[9], method))
+          && (count <= 10 || validNewItemCost(items[10], method))
+          && (count <= 11 || validNewItemCost(items[11], method))
+          && (count <= 12 || validNewItemCost(items[12], method))
+          && (count <= 13 || validNewItemCost(items[13], method))
+          && (count <= 14 || validNewItemCost(items[14], method));
+      }
+
+      // Ordinary operational changes use the existing cheap path. Only changes to
+      // cost or identity enter the additional Service binding validation.
+      function commercialItemIdentityAndCostProtected(before, after, method) {
+        let changed = after.diff(before).affectedKeys();
+        return before == after || (
+          [before.get('deliveryPlan', {}), before.get('receivedQty', 0), before.get('receiptEvents', []), before.get('procurementType', method)]
+            == [after.get('deliveryPlan', {}), after.get('receivedQty', 0), after.get('receiptEvents', []), after.get('procurementType', method)]
+          && (!changed.hasAny(['itemId','productId','productType','serviceKind','qty','orderedQty'])
+            || !isServiceBillingItem(before) && !isServiceBillingItem(after))
+          && (!changed.hasAny(['costPrice','costSource','unitCost','cost'])
+            || before.get('procurementType', method) == 'SALES_SELF_ORDER'
+              && !changed.hasAny(['unitCost','cost'])
+              && after.get('costPrice', null) is number && after.costPrice >= 0));
+      }
+
+      function validCommercialOrderCostUpdate() {
+        let before = resource.data.get('items', []);
+        let after = request.resource.data.get('items', []);
+        return request.resource.data.get('procurementType', 'PURCHASING_PO') == resource.data.get('procurementType', 'PURCHASING_PO')
+          && commercialItemIdentityAndCostProtected(resource.data, request.resource.data, 'PURCHASING_PO')
+          && (before == after || (before is list && after is list && before.size() == after.size() && before.size() <= 15
+            && (before.size() <= 0 || before[0] == after[0] || commercialItemIdentityAndCostProtected(before[0], after[0], resource.data.get('procurementType', 'PURCHASING_PO')))
+            && (before.size() <= 1 || before[1] == after[1] || commercialItemIdentityAndCostProtected(before[1], after[1], resource.data.get('procurementType', 'PURCHASING_PO')))
+            && (before.size() <= 2 || before[2] == after[2] || commercialItemIdentityAndCostProtected(before[2], after[2], resource.data.get('procurementType', 'PURCHASING_PO')))
+            && (before.size() <= 3 || before[3] == after[3] || commercialItemIdentityAndCostProtected(before[3], after[3], resource.data.get('procurementType', 'PURCHASING_PO')))
+            && (before.size() <= 4 || before[4] == after[4] || commercialItemIdentityAndCostProtected(before[4], after[4], resource.data.get('procurementType', 'PURCHASING_PO')))
+            && (before.size() <= 5 || before[5] == after[5] || commercialItemIdentityAndCostProtected(before[5], after[5], resource.data.get('procurementType', 'PURCHASING_PO')))
+            && (before.size() <= 6 || before[6] == after[6] || commercialItemIdentityAndCostProtected(before[6], after[6], resource.data.get('procurementType', 'PURCHASING_PO')))
+            && (before.size() <= 7 || before[7] == after[7] || commercialItemIdentityAndCostProtected(before[7], after[7], resource.data.get('procurementType', 'PURCHASING_PO')))
+            && (before.size() <= 8 || before[8] == after[8] || commercialItemIdentityAndCostProtected(before[8], after[8], resource.data.get('procurementType', 'PURCHASING_PO')))
+            && (before.size() <= 9 || before[9] == after[9] || commercialItemIdentityAndCostProtected(before[9], after[9], resource.data.get('procurementType', 'PURCHASING_PO')))
+            && (before.size() <= 10 || before[10] == after[10] || commercialItemIdentityAndCostProtected(before[10], after[10], resource.data.get('procurementType', 'PURCHASING_PO')))
+            && (before.size() <= 11 || before[11] == after[11] || commercialItemIdentityAndCostProtected(before[11], after[11], resource.data.get('procurementType', 'PURCHASING_PO')))
+            && (before.size() <= 12 || before[12] == after[12] || commercialItemIdentityAndCostProtected(before[12], after[12], resource.data.get('procurementType', 'PURCHASING_PO')))
+            && (before.size() <= 13 || before[13] == after[13] || commercialItemIdentityAndCostProtected(before[13], after[13], resource.data.get('procurementType', 'PURCHASING_PO')))
+            && (before.size() <= 14 || before[14] == after[14] || commercialItemIdentityAndCostProtected(before[14], after[14], resource.data.get('procurementType', 'PURCHASING_PO')))));
+      }
+
+      // Skip groups beyond the actual list length instead of evaluating all 30
+      // candidates for a short, fully withdrawn request list.
+      function returnPendingInGroup(requests, start) {
+        let count = requests.size();
+        return count >= start + 5
+          ? [requests[start].status, requests[start + 1].status, requests[start + 2].status,
+            requests[start + 3].status, requests[start + 4].status].hasAny(['PENDING'])
+          : count > start && (requests[start].status == 'PENDING'
+          || (count > start + 1 && requests[start + 1].status == 'PENDING')
+          || (count > start + 2 && requests[start + 2].status == 'PENDING')
+          || (count > start + 3 && requests[start + 3].status == 'PENDING')
+          || (count > start + 4 && requests[start + 4].status == 'PENDING'));
+      }
+
+      function validReturnPendingFlag(requests, flag) {
+        return requests.size() <= 30 && flag == (
+          returnPendingInGroup(requests, 0) || returnPendingInGroup(requests, 5)
+          || returnPendingInGroup(requests, 10) || returnPendingInGroup(requests, 15)
+          || returnPendingInGroup(requests, 20) || returnPendingInGroup(requests, 25));
+      }
+
+      function returnReceiptOrderUpdate(id) {
+        let before = resource.data;
+        let after = request.resource.data;
+        let receiptId = after.get('returnReceiptId', '');
+        let path = /databases/$(database)/documents/customerReturnReceipts/$(receiptId);
+        let receipt = getAfter(path).data;
+        let oldRequests = before.get('returnRequests', []);
+        let newRequests = after.get('returnRequests', []);
+        let index = receipt.requestIndex;
+        let previous = oldRequests[index];
+        let next = newRequests[index];
+        return canReceiveInventory() && receiptId != '' && !exists(path)
+          && receipt.orderId == id && receipt.receivedBy == request.auth.uid
+          && previous.id == receipt.requestId && previous.status == 'PENDING'
+          && next.diff(previous).affectedKeys().hasOnly(['receivedQty', 'status'])
+          && next.receivedQty == previous.get('receivedQty', 0) + receipt.qty && next.receivedQty <= previous.qty
+          && next.status == (next.receivedQty == next.qty ? 'RECEIVED' : 'PENDING')
+          && validReturnPendingFlag(newRequests, after.returnPending)
+          && newRequests.size() == oldRequests.size()
+          && newRequests.removeAll([next]) == oldRequests.removeAll([previous])
+          && after.get('returnRecords', []).size() == before.get('returnRecords', []).size() + 1
+          && after.get('returnRecords', [])[after.get('returnRecords', []).size() - 1] == receipt.record
+          && after.get('returnRecords', []).removeAll([receipt.record]) == before.get('returnRecords', [])
+          && after.returnedQty == before.get('returnedQty', 0) + receipt.qty
+          && after.returnedQty <= before.get('deliveredQty', 0)
+          && after.diff(before).affectedKeys().hasOnly([
+            'returnRequests', 'returnPending', 'returnRecords', 'returnedQty', 'returnReceiptId',
+            'items', 'workCategories', 'workCategoryUpdatedAt', 'updatedAt'
+          ]) && operationalItemsOnly(['reservedQty']) && sameCommercialOwner();
+      }
+
+      // A return request never edits stock, delivery, products, costs or ownership.
+      // Keep the existing mutation validator, without evaluating unrelated writers.
+      function commercialReturnRequestOnlyUpdate() {
+        let changed = request.resource.data.diff(resource.data).affectedKeys();
+        return changed.hasOnly(['returnRequests', 'returnPending', 'returnRequestMutationIndex', 'updatedAt'])
+          && owns(resource.data) && (changed.size() == 0 || validCommercialReturnRequestMutation());
+      }
+
+      function commercialReturnProtection() {
+        let changed = request.resource.data.diff(resource.data).affectedKeys();
+        return !changed.hasAny(['returnRecords', 'returnedQty', 'returnReceiptId'])
+          && (!changed.hasAny(['returnRequests', 'returnPending']) || validCommercialReturnRequestMutation());
+      }
+
+      function validCommercialReturnRequestMutation() {
+        let before = resource.data.get('returnRequests', []);
+        let after = request.resource.data.get('returnRequests', []);
+        let index = request.resource.data.returnRequestMutationIndex;
+        let next = after[index];
+        return after.size() <= 30 && validReturnPendingFlag(after, request.resource.data.returnPending) && (
+          (after.size() == before.size() + 1 && index == before.size()
+            && after.removeAll([next]) == before && next.status == 'PENDING'
+            && next.receivedQty == 0 && next.qty is number && next.qty > 0
+            && next.createdByUid == request.auth.uid && next.settlement == 'CLOSE')
+          || (after.size() == before.size() && before[index].status == 'PENDING'
+            && next.status == 'CANCELLED'
+            && next.diff(before[index]).affectedKeys().hasOnly(['status', 'cancelledAt', 'cancelledBy'])
+            && next.cancelledBy == request.auth.uid
+            && after.removeAll([next]) == before.removeAll([before[index]]))
+        );
+      }
+
+      // Completed delivery must be corrected separately or returned, never cancelled.
+      // Check both snapshots so a combined flag/status update cannot bypass this guard.
+      // When the separately approved lifecycle backend cutover is armed, no
+      // cached client can cancel or restore orders. Admin SDK is unaffected.
+      function lifecycleBackendOnly() {
+        let gate = /databases/$(database)/documents/settings/lifecycleCutover;
+        return exists(gate) && get(gate).data.get('backendOnly', false) == true;
+      }
+
+      function validOrderCancellationTransition() {
+        let before = resource.data;
+        let after = request.resource.data;
+        let wasCancelled = orderIsCancelled(before);
+        let isCancelled = orderIsCancelled(after);
+        // Only cross-state transitions read the cutover gate; unrelated status
+        // metadata edits retain the existing Rules expression budget.
+        return (wasCancelled == isCancelled || !lifecycleBackendOnly())
+          && (!isCancelled || wasCancelled
+          || (noCustodyForCancellation() && before.get('logisticsTransfersPending', 0) == 0 && after.get('logisticsTransfersPending', 0) == 0
+            && before.get('isDelivered', false) != true && after.get('isDelivered', false) != true
+            && after.get('deliveryRecords', []) == before.get('deliveryRecords', [])
+            && after.get('returnRecords', []) == before.get('returnRecords', [])
+            && after.get('deliveredQty', 0) == before.get('deliveredQty', 0)));
+      }
+
+      function validInventoryShipmentItem(before, after, record) {
+        let index = record.get('itemIndex', -1);
+        let oldItem = before.items[index];
+        let newItem = after.items[index];
+        let reservationPath = /databases/$(database)/documents/inventoryReservations/$(record.orderId + '__' + record.itemId);
+        let oldReservation = get(reservationPath).data;
+        let newReservation = getAfter(reservationPath).data;
+        return index is int && index >= 0 && index < before.items.size()
+          && before.items.size() == after.items.size()
+          && before.items.removeAll([oldItem]) == after.items.removeAll([newItem])
+          && newItem.diff(oldItem).affectedKeys().hasOnly(['reservedQty', 'warehouseShippedQty'])
+          && oldItem.get('itemId', '') == record.itemId
+          && oldItem.get('fulfillmentType', 'WAREHOUSE') != 'DIRECT_SHIP'
+          && oldItem.get('warehouseId', before.get('warehouseId', '')) == record.warehouseId
+          && oldReservation.get('orderId', '') == record.orderId
+          && oldReservation.get('itemId', '') == record.itemId
+          && oldReservation.get('productKey', '') == record.productKey
+          && newReservation.get('productKey', '') == record.productKey
+          && newReservation.get('warehouseId', '') == record.warehouseId
+          && oldReservation.get('warehouseId', '') == record.warehouseId
+          && oldReservation.get('quantity', 0) >= record.qty
+          && newReservation.get('quantity', -1) == oldReservation.quantity - record.qty
+          && newItem.get('reservedQty', -1) == newReservation.quantity
+          && newItem.get('warehouseShippedQty', 0) >= oldItem.get('warehouseShippedQty', 0) + record.qty
+          && newItem.warehouseShippedQty <= oldItem.get('dispatchPreparedQty', 0);
+      }
+
+      function validInventoryShipmentStock(record) {
+        let movementPath = /databases/$(database)/documents/inventoryMovements/$(record.movementId);
+        let movement = getAfter(movementPath).data;
+        let stockPath = /databases/$(database)/documents/warehouseStocks/$(movement.warehouseStockId);
+        let inventoryPath = /databases/$(database)/documents/inventory/$(movement.inventoryDocId);
+        return !exists(movementPath)
+          && movement.get('type', '') == 'ship'
+          && movement.get('sourceId', '') == record.orderId
+          && movement.get('itemId', '') == record.itemId
+          && movement.get('productKey', '') == record.productKey
+          && movement.get('warehouseId', '') == record.warehouseId
+          && movement.get('actorUid', '') == request.auth.uid
+          && movement.get('qty', 0) == -record.qty
+          && get(stockPath).data.get('warehouseId', '') == record.warehouseId
+          && get(stockPath).data.get('productKey', '') == movement.get('productKey', '')
+          && get(inventoryPath).data.get('productKey', '') == movement.get('productKey', '')
+          && getAfter(stockPath).data.get('onHand', -1) == get(stockPath).data.onHand - record.qty
+          && getAfter(stockPath).data.get('reserved', -1) == get(stockPath).data.reserved - record.qty
+          && getAfter(inventoryPath).data.get('onHand', -1) == get(inventoryPath).data.onHand - record.qty
+          && getAfter(inventoryPath).data.get('reserved', -1) == get(inventoryPath).data.reserved - record.qty;
+      }
+
+      // The cached client shipment always changes inventoryShipmentRecordId in
+      // the same native transaction as stock, reservation and movement writes.
+      // Do not charge unrelated inventory movements an additional Rules lookup.
+      function shipmentBackendOnly() {
+        let gate = /databases/$(database)/documents/settings/shipmentCutover;
+        return exists(gate) && get(gate).data.get('backendOnly', false) == true;
+      }
+
+      function inventoryShipmentOrderUpdate(orderId) {
+        let before = resource.data;
+        let after = request.resource.data;
+        let beforeRecords = before.get('deliveryRecords', []);
+        let afterRecords = after.get('deliveryRecords', []);
+        let record = afterRecords[beforeRecords.size()];
+        return !shipmentBackendOnly() && !deliveryBackendOnly() && canReceiveInventory()
+          && !orderIsCancelled(before)
+          && before.get('inventoryReservationStatus', '') != 'pending'
+          && beforeRecords.size() + 1 == afterRecords.size()
+          && afterRecords.removeAll([record]) == beforeRecords
+          && record.get('id', '') == after.get('inventoryShipmentRecordId', '')
+          && record.get('sourceType', '') == 'INVENTORY_SHIPMENT'
+          && record.get('orderId', '') == orderId
+          && record.get('createdByUid', '') == request.auth.uid
+          && record.get('qty', 0) is number && record.qty > 0
+          && after.get('deliveredQty', 0) == before.get('deliveredQty', 0) + record.qty
+          && sameCommercialOwner() && preservesCreator()
+          && after.diff(before).affectedKeys().hasOnly([
+            'inventoryShipmentRecordId', 'items', 'deliveryRecords', 'deliveredQty', 'isDelivered',
+            'deliveryHistory', 'workCategories', 'workCategoryUpdatedAt', 'updatedAt'
+          ])
+          && validInventoryShipmentItem(before, after, record)
+          && validInventoryShipmentStock(record);
+      }
+
+      function appendsLogisticsHistory(before, after) {
+        let prior = before.get('logisticsHistory', []);
+        let next = after.get('logisticsHistory', []);
+        let entry = next[prior.size()];
+        return next.size() == prior.size() + 1 && next.removeAll([entry]) == prior;
+      }
+
+      // Warehouse instructions only change one item's recipient plan. Commercial fields stay intact.
+      function warehouseDeliveryPlanUpdate() {
+        let before = resource.data;
+        let userRole = role();
+        let after = request.resource.data;
+        let index = after.get('logisticsPlanItemIndex', -1);
+        let oldItem = before.items[index];
+        let newItem = after.items[index];
+        // The final changed-key whitelist preserves owner and creator fields.
+        return (userRole in ['admin','purchaser','warehouse'] || (userRole in ['sales','engineer']
+            && (before.get('ownerUid', '') == request.auth.uid || owns(before))
+            && oldItem.get('warehouseShippedQty', 0) == 0
+            && oldItem.get('deliveredQty', 0) == 0 && orderBeforeFirstReceipt(before)))
+          && oldItem.get('transferPendingId', '') == ''
+          && (userRole in ['sales','engineer'] ? oldItem.get('qty', oldItem.get('orderedQty', 0)) > 0
+            : oldItem.get('warehouseShippedQty', oldItem.get('deliveredQty', 0)) - oldItem.get('returnedQty', 0) < oldItem.get('qty', oldItem.get('orderedQty', 0)))
+          && (!(oldItem.get('warehouseId', '').matches('custody-.*')) || (canReceiveInventory() && newItem.deliveryPlan.mode == 'TRANSFER'))
+          && !orderIsCancelled(before)
+          && index is int && index >= 0 && index < before.items.size()
+          && before.items.size() == after.items.size()
+          && before.items.removeAll([oldItem]) == after.items.removeAll([newItem])
+          && newItem.diff(oldItem).affectedKeys().hasOnly(['deliveryPlan'])
+          && (oldItem.get('fulfillmentType', 'WAREHOUSE') != 'DIRECT_SHIP' || newItem.deliveryPlan.mode == 'CUSTOMER_SHIP')
+          && validDeliveryPlan(newItem.deliveryPlan)
+          && after.get('logisticsPlanActorUid', '') == request.auth.uid
+          && appendsLogisticsHistory(before, after)
+          && after.diff(before).affectedKeys().hasOnly(['items', 'logisticsPlanItemIndex',
+            'logisticsPlanActorUid', 'logisticsPlanEventId', 'logisticsHistory', 'updatedAt']);
+      }
+
+      function validDeliveryPlan(p) {
+        return p.keys().hasOnly(['mode','warehouseId','contact','phone','address','packages','condition','tracking','notes'])
+          && p.mode in ['PICKUP','SALES_SHIP','CUSTOMER_SHIP','TRANSFER']
+          && p.packages is int && p.packages >= 1 && p.packages <= 99
+          && p.contact is string && p.contact.size() <= 1000
+          && p.phone is string && p.phone.size() <= 1000
+          && p.address is string && p.address.size() <= 1000
+          && p.notes is string && p.notes.size() <= 1000;
+      }
+
+      function warehouseLogisticsOrderUpdate(orderId) {
+        let before = resource.data;
+        let after = request.resource.data;
+        let path = /databases/$(database)/documents/stockTransfers/$(after.get('warehouseLogisticsId', 'unused'));
+        let transfer = getAfter(path).data;
+        let index = transfer.itemIndex;
+        let oldItem = before.items[index];
+        let newItem = after.items[index];
+        return !orderTransferBackendOnly() && canReceiveInventory() && sameCommercialOwner() && preservesCreator()
+          && transfer.orderId == orderId && transfer.itemId == oldItem.itemId
+          && index is int && index >= 0 && index < before.items.size()
+          && before.items.size() == after.items.size()
+          && before.items.removeAll([oldItem]) == after.items.removeAll([newItem])
+          && newItem.diff(oldItem).affectedKeys().hasOnly(['warehouseId','custodyTransferId','transferPendingId'])
+          && !orderIsCancelled(before)
+          && after.get('deliveryRecords', []) == before.get('deliveryRecords', [])
+          && after.get('returnRecords', []) == before.get('returnRecords', [])
+          && after.diff(before).affectedKeys().hasOnly(['items','warehouseLogisticsId','warehouseLogisticsEventId','logisticsTransfersPending',
+            'logisticsHistory','workCategories','workCategoryUpdatedAt','updatedAt'])
+          && appendsLogisticsHistory(before, after)
+          && ((!exists(path) && transfer.createdByUid == request.auth.uid
+            && oldItem.get('transferPendingId', '') == ''
+          && (role() in ['sales','engineer'] ? oldItem.get('qty', oldItem.get('orderedQty', 0)) > 0
+            : oldItem.get('warehouseShippedQty', oldItem.get('deliveredQty', 0)) - oldItem.get('returnedQty', 0) < oldItem.get('qty', oldItem.get('orderedQty', 0)))
+            && transfer.qty == oldItem.get('reservedQty', 0)
+            && transfer.fromWarehouseId == oldItem.get('warehouseId', before.get('warehouseId', ''))
+            && (transfer.kind == 'HANDOFF'
+              ? newItem.warehouseId == transfer.toWarehouseId && newItem.custodyTransferId == transfer.id
+                && after.get('logisticsTransfersPending', 0) == before.get('logisticsTransfersPending', 0)
+              : newItem.get('warehouseId', '') == oldItem.get('warehouseId', '') && newItem.transferPendingId == transfer.id
+                && after.get('logisticsTransfersPending', 0) == before.get('logisticsTransfersPending', 0) + 1))
+            || (exists(path) && get(path).data.status == 'IN_TRANSIT' && transfer.status == 'RECEIVED'
+              && transfer.receivedByUid == request.auth.uid && oldItem.transferPendingId == transfer.id
+              && newItem.get('transferPendingId', '') == '' && newItem.warehouseId == transfer.toWarehouseId
+              && after.get('logisticsTransfersPending', 0) == before.get('logisticsTransfersPending', 0) - 1));
+      }
+
+      // Compare the protected projection once; callers guard each existing line.
+      function logisticsItemProtected(old, next) {
+        return old == next || ([next.get('warehouseId', ''), next.get('transferPendingId', ''), next.get('custodyTransferId', '')]
+            == [old.get('warehouseId', ''), old.get('transferPendingId', ''), old.get('custodyTransferId', '')]
+          && (!old.get('warehouseId', '').matches('custody-.*') || next.get('deliveryPlan', {}) == old.get('deliveryPlan', {})));
+      }
+
+      function custodyItemClear(items, index) {
+        return index >= items.size() || items[index].get('reservedQty', 0) == 0
+          || !items[index].get('warehouseId', '').matches('custody-.*');
+      }
+
+      function logisticsLocationProtected() {
+        let before = resource.data;
+        let after = request.resource.data;
+        return before.get('warehouseLogisticsId', '') == '' || before.get('items', []) == after.get('items', []) || (before.items.size() <= 15
+          && before.items.size() == after.items.size()
+          && (before.items.size() <= 0 || logisticsItemProtected(before.items[0], after.items[0]))
+          && (before.items.size() <= 1 || logisticsItemProtected(before.items[1], after.items[1]))
+          && (before.items.size() <= 2 || logisticsItemProtected(before.items[2], after.items[2]))
+          && (before.items.size() <= 3 || logisticsItemProtected(before.items[3], after.items[3]))
+          && (before.items.size() <= 4 || logisticsItemProtected(before.items[4], after.items[4]))
+          && (before.items.size() <= 5 || logisticsItemProtected(before.items[5], after.items[5]))
+          && (before.items.size() <= 6 || logisticsItemProtected(before.items[6], after.items[6]))
+          && (before.items.size() <= 7 || logisticsItemProtected(before.items[7], after.items[7]))
+          && (before.items.size() <= 8 || logisticsItemProtected(before.items[8], after.items[8]))
+          && (before.items.size() <= 9 || logisticsItemProtected(before.items[9], after.items[9]))
+          && (before.items.size() <= 10 || logisticsItemProtected(before.items[10], after.items[10]))
+          && (before.items.size() <= 11 || logisticsItemProtected(before.items[11], after.items[11]))
+          && (before.items.size() <= 12 || logisticsItemProtected(before.items[12], after.items[12]))
+          && (before.items.size() <= 13 || logisticsItemProtected(before.items[13], after.items[13]))
+          && (before.items.size() <= 14 || logisticsItemProtected(before.items[14], after.items[14])));
+      }
+
+      function noCustodyForCancellation() {
+        let before = resource.data;
+        return before.get('warehouseLogisticsId', '') == '' || (before.get('items', []).size() <= 15
+          && custodyItemClear(before.get('items', []), 0)
+          && custodyItemClear(before.get('items', []), 1)
+          && custodyItemClear(before.get('items', []), 2)
+          && custodyItemClear(before.get('items', []), 3)
+          && custodyItemClear(before.get('items', []), 4)
+          && custodyItemClear(before.get('items', []), 5)
+          && custodyItemClear(before.get('items', []), 6)
+          && custodyItemClear(before.get('items', []), 7)
+          && custodyItemClear(before.get('items', []), 8)
+          && custodyItemClear(before.get('items', []), 9)
+          && custodyItemClear(before.get('items', []), 10)
+          && custodyItemClear(before.get('items', []), 11)
+          && custodyItemClear(before.get('items', []), 12)
+          && custodyItemClear(before.get('items', []), 13)
+          && custodyItemClear(before.get('items', []), 14));
+      }
+
+      function commercialKeepsPendingTransfer() {
+        return logisticsLocationProtected() && request.resource.data.get('logisticsTransfersPending', 0) == resource.data.get('logisticsTransfersPending', 0)
+          && request.resource.data.get('warehouseLogisticsId', '') == resource.data.get('warehouseLogisticsId', '')
+          && request.resource.data.get('logisticsHistory', []) == resource.data.get('logisticsHistory', [])
+          && (resource.data.get('logisticsTransfersPending', 0) == 0 || request.resource.data.items == resource.data.items);
+      }
+
+      function orderWithoutGlobalReceipt(order) {
+        return !order.get('isArrived', false) && !order.get('isDelivered', false) && !order.get('isBilled', false)
+          && order.get('receivedQty', 0) == 0 && order.get('deliveredQty', 0) == 0
+          && order.get('receiptEvents', []) == [] && order.get('deliveryRecords', []) == [];
+      }
+
+      function orderBeforeFirstReceipt(order) {
+        let items = order.get('items', []);
+        let count = items.size();
+        return orderWithoutGlobalReceipt(order) && count <= 15
+          && (count <= 0 || (items[0].get('receivedQty', 0) == 0 && items[0].get('receiptEvents', []) == []))
+          && (count <= 1 || (items[1].get('receivedQty', 0) == 0 && items[1].get('receiptEvents', []) == []))
+          && (count <= 2 || (items[2].get('receivedQty', 0) == 0 && items[2].get('receiptEvents', []) == []))
+          && (count <= 3 || (items[3].get('receivedQty', 0) == 0 && items[3].get('receiptEvents', []) == []))
+          && (count <= 4 || (items[4].get('receivedQty', 0) == 0 && items[4].get('receiptEvents', []) == []))
+          && (count <= 5 || (items[5].get('receivedQty', 0) == 0 && items[5].get('receiptEvents', []) == []))
+          && (count <= 6 || (items[6].get('receivedQty', 0) == 0 && items[6].get('receiptEvents', []) == []))
+          && (count <= 7 || (items[7].get('receivedQty', 0) == 0 && items[7].get('receiptEvents', []) == []))
+          && (count <= 8 || (items[8].get('receivedQty', 0) == 0 && items[8].get('receiptEvents', []) == []))
+          && (count <= 9 || (items[9].get('receivedQty', 0) == 0 && items[9].get('receiptEvents', []) == []))
+          && (count <= 10 || (items[10].get('receivedQty', 0) == 0 && items[10].get('receiptEvents', []) == []))
+          && (count <= 11 || (items[11].get('receivedQty', 0) == 0 && items[11].get('receiptEvents', []) == []))
+          && (count <= 12 || (items[12].get('receivedQty', 0) == 0 && items[12].get('receiptEvents', []) == []))
+          && (count <= 13 || (items[13].get('receivedQty', 0) == 0 && items[13].get('receiptEvents', []) == []))
+          && (count <= 14 || (items[14].get('receivedQty', 0) == 0 && items[14].get('receiptEvents', []) == []));
+      }
+
+      // Commercial metadata also locks on per-line shipment/delivery history.
+      function movementFreeGroup(a, b, c, d, e) {
+        // Keep quantity and event types separate while avoiding a repeated zero tuple.
+        return [a.get('receivedQty', 0), a.get('warehouseShippedQty', 0), a.get('deliveredQty', 0), b.get('receivedQty', 0), b.get('warehouseShippedQty', 0), b.get('deliveredQty', 0), c.get('receivedQty', 0), c.get('warehouseShippedQty', 0), c.get('deliveredQty', 0), d.get('receivedQty', 0), d.get('warehouseShippedQty', 0), d.get('deliveredQty', 0), e.get('receivedQty', 0), e.get('warehouseShippedQty', 0), e.get('deliveredQty', 0)].hasOnly([0])
+          && [a.get('receiptEvents', []), b.get('receiptEvents', []), c.get('receiptEvents', []), d.get('receiptEvents', []), e.get('receiptEvents', [])].hasOnly([[]]);
+      }
+
+      function orderBeforeFirstMovement(order) {
+        let original = order.get('items', []);
+        let count = original.size();
+        let items = original.concat([{}, {}, {}, {}]);
+        return orderWithoutGlobalReceipt(order) && count <= 15
+          && (count <= 0 || movementFreeGroup(items[0], items[1], items[2], items[3], items[4]))
+          && (count <= 5 || movementFreeGroup(items[5], items[6], items[7], items[8], items[9]))
+          && (count <= 10 || movementFreeGroup(items[10], items[11], items[12], items[13], items[14]));
+      }
+
+      function orderUpdateAllowed(id) {
+        let userRole = role();
+        let changed = request.resource.data.diff(resource.data).affectedKeys();
+        let detailsOnly = changed.hasOnly(['transactionType','invoiceTitle','remarks','fieldEditHistory'])
+          && changed.hasAny(['transactionType','invoiceTitle','remarks']);
+        let deliveryLedgerOnly = changed.hasOnly(['deliveredQty', 'deliveryRecords', 'businessDeliveryEvidence', 'updatedAt']);
+        // Billing-only changes cannot affect commercial items, stock or ownership.
+        // Avoid evaluating unrelated 30-item stock/cost validators after the guard.
+        return !changed.hasAny(['serviceFulfillment'])
+          && ((userRole in ['purchaser','warehouse'] && changed.hasAny(['warehouseLogisticsId','warehouseLogisticsEventId']))
+          ? warehouseLogisticsOrderUpdate(id)
+          : changed.hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId'])
+          && changed.hasOnly(['items','logisticsPlanItemIndex','logisticsPlanActorUid','logisticsPlanEventId','logisticsHistory','updatedAt'])
+          ? warehouseDeliveryPlanUpdate() : detailsOnly ? (orderBeforeFirstMovement(resource.data) && !orderIsCancelled(resource.data)
+          && (!changed.hasAny(['transactionType']) || request.resource.data.get('transactionType', '') in ['直','借','扣'])
+          && (userRole == 'admin' || userRole in ['sales','engineer']
+            && (resource.data.get('ownerUid', '') == request.auth.uid || owns(resource.data))))
+          : (!changed.hasAny(['transactionType','invoiceTitle','remarks','shippingInstructions']) || (orderBeforeFirstMovement(resource.data)
+            && (!changed.hasAny(['transactionType']) || request.resource.data.get('transactionType', '') in ['直','借','扣'])))
+          && (changed.hasAny(['isBilled','billingDate']) ? validClientBillingUpdate() : true)
+          && (!changed.hasAny(['status','orderStatus']) || validOrderCancellationTransition())
+          && (!changed.hasAny(['inventoryReservationStatus','inventoryReservationError','inventoryReservationUpdatedAt','inventoryReservationAttemptId']) || validOrderInventorySyncTransition(userRole))
+          && (!changed.hasAny(['sourceDocumentSyncStatus','sourceDocumentSyncError','sourceDocumentSyncUpdatedAt']) || validOrderSourceSyncTransition(id, userRole))
+          && (userRole == 'admin' ? clientDeliveryFactsUnchanged() && (changed.hasAny(['items','productId','productType','serviceKind','inventoryShipmentRecordId']) ? validClientServiceBillingBinding() : true)
+          : userRole in ['sales','engineer'] && changed.hasAny(['isBilled','billingDate'])
+            && changed.hasOnly(['isBilled','billingDate','statusHistory','updatedAt',
+              'status','workCategories','workCategoryUpdatedAt']) ? owns(resource.data)
+          // Delivery-plan and warehouse-logistics success paths already returned above.
+          // Their own changed-key whitelists make the duplicate branches unreachable.
+          : userRole in ['purchaser','warehouse'] ? (changed.hasAny(['inventoryShipmentRecordId']) && inventoryShipmentOrderUpdate(id))
+            || operationalOrderWorkflowUpdate(userRole)
+            || returnReceiptOrderUpdate(id)
+          : userRole in ['sales', 'engineer'] && !changed.hasAny(['inventoryShipmentRecordId'])
+            && (changed.hasOnly(['returnRequests', 'returnPending', 'returnRequestMutationIndex', 'updatedAt'])
+              && (changed.size() == 0 || changed.hasAny(['returnRequests', 'returnPending']))
+              ? commercialReturnRequestOnlyUpdate() : ((changed.hasAny(['deliveryRecords']) && directShipReceiptOrderUpdate(id)) || (owns(resource.data) && (changed.hasAny(['logisticsPlanActorUid','logisticsPlanItemIndex','logisticsPlanEventId']) ? false : (sameCommercialOwner() && preservesCreator()
+                // Pure delivery ledger updates cannot change item identity or cost.
+                // Keep all delivery, ownership, stock witness and custody proofs below.
+                && (deliveryLedgerOnly || validCommercialOrderCostUpdate())
+                && businessOrderFactsProtected(id, changed) && commercialReturnProtection()
+                // Delivery ledger updates leave custody location, pending count and history unchanged.
+                && (deliveryLedgerOnly || resource.data.get('warehouseLogisticsId', '') == '' || commercialKeepsPendingTransfer()))))))));
+      }
+
+      function businessDeliveryRecordChange(before, after, index) {
+        return index is int && index >= 0
+          && ((after.size() == before.size() + 1 && index < after.size()
+              && after[index].qty is number && after[index].qty > 0
+              && after.removeAll([after[index]]) == before
+              && request.resource.data.deliveredQty == resource.data.get('deliveredQty', 0) + after[index].qty)
+            || (after.size() == before.size() && index < after.size()
+              && after[index].id == before[index].id && after[index].itemId == before[index].itemId
+              && after[index].qty is number && after[index].qty > 0
+              && after.removeAll([after[index]]) == before.removeAll([before[index]])
+              && request.resource.data.deliveredQty == resource.data.get('deliveredQty', 0) + after[index].qty - before[index].qty)
+            || (after.size() + 1 == before.size() && index < before.size()
+              && after == before.removeAll([before[index]])
+              && request.resource.data.deliveredQty == resource.data.get('deliveredQty', 0) - before[index].qty));
+      }
+
+      function businessPhysicalDelivery(id, e) {
+        let path = /databases/$(database)/documents/stockOperations/$(e.get('operationId', 'unused'));
+        let op = getAfter(path).data;
+        let invPath = /databases/$(database)/documents/inventory/$(e.get('inventoryId', 'unused'));
+        return e.get('operationId', '') != '' && !exists(path)
+          && op.actorUid == request.auth.uid && op.orderId == id
+          && op.targetPath == 'inventory/' + e.inventoryId
+          && getAfter(invPath).data.stockOperationId == e.operationId
+          && getAfter(invPath).data.onHand - get(invPath).data.onHand == op.qtyDelta
+          && op.qtyDelta == resource.data.get('deliveredQty', 0) - request.resource.data.get('deliveredQty', 0);
+      }
+
+      function businessOrderFactsProtected(id, changed) {
+        let before = resource.data;
+        let after = request.resource.data;
+        let prior = before.get('deliveryRecords', []);
+        let next = after.get('deliveryRecords', []);
+        let e = after.get('businessDeliveryEvidence', {});
+        return !changed.hasAny(['qty','isOrdered','isArrived','receivedQty','deliveryRecords','deliveredQty','isDelivered'])
+          || before.get('qty', 0) == after.get('qty', 0)
+          && before.get('isOrdered', false) == after.get('isOrdered', false)
+          && before.get('isArrived', false) == after.get('isArrived', false)
+          && before.get('receivedQty', 0) == after.get('receivedQty', 0)
+          && ((prior == next && before.get('deliveredQty', 0) == after.get('deliveredQty', 0)
+              && before.get('isDelivered', false) == after.get('isDelivered', false))
+            || (!deliveryBackendOnly() && next is list && after.get('deliveredQty', 0) is number && after.deliveredQty >= 0
+              && (!after.get('isDelivered', false) || next.size() > 0)
+              && (businessDeliveryRecordChange(prior, next, e.get('recordIndex', -1))
+                || (before.get('items', []).size() == 1 && next.size() == 0 && after.deliveredQty == 0))
+              && (before.get('deliveredQty', 0) == after.deliveredQty
+                ? before.get('isDelivered', false) == after.get('isDelivered', false)
+                : businessPhysicalDelivery(id, e))));
+      }
+
+      function validOrderInventorySyncTransition(userRole) {
+        let before = resource.data;
+        let after = request.resource.data;
+        let attempt = after.get('inventoryReservationAttemptId', '');
+        let error = after.get('inventoryReservationError', '');
+        let updatedAt = after.get('inventoryReservationUpdatedAt', '');
+        return (userRole in ['admin','purchaser','sales','engineer']
+            && !orderIsCancelled(before) && !orderIsCancelled(after)
+            && before.get('inventoryReservationStatus', '') != 'completed'
+            && attempt is string && attempt.size() > 0 && attempt.size() <= 128
+            && error is string && error.size() <= 1000
+            && updatedAt is string && updatedAt.size() <= 64
+            && (after.get('inventoryReservationStatus', '') == 'pending'
+              ? after.inventoryReservationAttemptId != before.get('inventoryReservationAttemptId', '') && after.inventoryReservationError == ''
+              : before.get('inventoryReservationStatus', '') == 'pending'
+                && after.inventoryReservationAttemptId == before.get('inventoryReservationAttemptId', '')
+                && after.get('inventoryReservationStatus', '') == 'failed'));
+      }
+
+      function validOrderSourceSyncTransition(id, userRole) {
+        let before = resource.data;
+        let after = request.resource.data;
+        return (userRole in ['admin','purchaser','sales','engineer']
+            && (userRole in ['admin','purchaser'] || before.get('ownerUid', '') == request.auth.uid)
+            && !orderIsCancelled(before) && !orderIsCancelled(after)
+            && before.get('inventoryReservationStatus', '') == 'completed'
+            && before.get('sourceDocumentSyncStatus', '') != 'completed'
+            && after.get('sourceType', '') == before.get('sourceType', '') && after.get('sourceId', '') == before.get('sourceId', '')
+            && after.get('sourceType', '') in ['quote','forecast'] && after.get('sourceId', '') != ''
+            && after.diff(before).affectedKeys().hasOnly(['sourceDocumentSyncStatus','sourceDocumentSyncError','sourceDocumentSyncUpdatedAt','updatedAt'])
+            && after.get('sourceDocumentSyncError', '') is string && after.get('sourceDocumentSyncError', '').size() <= 1000
+            && after.get('sourceDocumentSyncUpdatedAt', '') is string && after.get('sourceDocumentSyncUpdatedAt', '').size() <= 64
+            && (after.get('sourceDocumentSyncStatus', '') == 'failed'
+              || (after.get('sourceDocumentSyncStatus', '') == 'completed' && after.get('sourceDocumentSyncError', '') == '' && sourceSyncEvidence(id))));
+      }
+
+      function sourceSyncEvidence(id) {
+        return sourceSyncEvidenceForData(id, resource.data);
+      }
+
+      function sourceSyncEvidenceForData(id, order) {
+        let collection = order.sourceType == 'quote' ? 'quotes' : 'forecasts';
+        let source = getAfter(/databases/$(database)/documents/$(collection)/$(order.sourceId)).data;
+        return !orderIsCancelled(source)
+          && source.get('linkedDocuments', []).hasAny([{'type':'order','id':id,'relation':'created'}])
+          && (order.sourceType != 'quote' || source.get('dealClosed', false) == true && source.get('status', '') == 'completed');
+      }
+
+      function validNewOrderSourceSync(id) {
+        let data = request.resource.data;
+        return !('sourceDocumentSyncStatus' in data)
+          || (data.get('sourceType', '') in ['quote','forecast'] && data.get('sourceId', '') != ''
+            && data.get('sourceDocumentSyncError', '') == ''
+            && data.get('sourceDocumentSyncUpdatedAt', '') is string && data.get('sourceDocumentSyncUpdatedAt', '').size() <= 64
+            && (data.sourceDocumentSyncStatus == 'pending'
+              || data.sourceDocumentSyncStatus == 'completed' && sourceSyncEvidenceForData(id, data)));
+      }
+
+      // Service snapshot identity cannot be stripped to bypass server-only billing.
+      // orders: isBilled bool (optional legacy false), billingDate YYYY-MM-DD/empty;
+      // items <=30 maps, productType string; bound Service identity stays immutable.
+      function isServiceBillingItem(item) {
+        return item.get('productType', '').matches('(?i)\\s*service\\s*');
+      }
+
+      function clientGoodsBillingData(data) {
+        let items = data.get('items', []);
+        return !isServiceBillingItem(data) && items is list && items.size() <= 15
+          && (items.size() <= 0 || !items[0].get('productType', '').matches('(?i)\\s*service\\s*'))
+          && (items.size() <= 1 || !items[1].get('productType', '').matches('(?i)\\s*service\\s*'))
+          && (items.size() <= 2 || !items[2].get('productType', '').matches('(?i)\\s*service\\s*'))
+          && (items.size() <= 3 || !items[3].get('productType', '').matches('(?i)\\s*service\\s*'))
+          && (items.size() <= 4 || !items[4].get('productType', '').matches('(?i)\\s*service\\s*'))
+          && (items.size() <= 5 || !items[5].get('productType', '').matches('(?i)\\s*service\\s*'))
+          && (items.size() <= 6 || !items[6].get('productType', '').matches('(?i)\\s*service\\s*'))
+          && (items.size() <= 7 || !items[7].get('productType', '').matches('(?i)\\s*service\\s*'))
+          && (items.size() <= 8 || !items[8].get('productType', '').matches('(?i)\\s*service\\s*'))
+          && (items.size() <= 9 || !items[9].get('productType', '').matches('(?i)\\s*service\\s*'))
+          && (items.size() <= 10 || !items[10].get('productType', '').matches('(?i)\\s*service\\s*'))
+          && (items.size() <= 11 || !items[11].get('productType', '').matches('(?i)\\s*service\\s*'))
+          && (items.size() <= 12 || !items[12].get('productType', '').matches('(?i)\\s*service\\s*'))
+          && (items.size() <= 13 || !items[13].get('productType', '').matches('(?i)\\s*service\\s*'))
+          && (items.size() <= 14 || !items[14].get('productType', '').matches('(?i)\\s*service\\s*'));
+      }
+
+      function validClientBillingCreate(data) {
+        return data.get('isBilled', false) == false && data.get('billingDate', '') == '';
+      }
+
+      function validClientBillingUpdate() {
+        let before = resource.data;
+        let after = request.resource.data;
+        return clientGoodsBillingData(before)
+          && (before.get('items', []) == after.get('items', [])
+            ? !isServiceBillingItem(after) : clientGoodsBillingData(after));
+      }
+
+      function serviceBillingBindingAt(before, after, index) {
+        let old = index < before.size() ? before[index] : {};
+        let next = index < after.size() ? after[index] : {};
+        return !next.diff(old).affectedKeys().hasAny(['itemId','productId','productType','serviceKind','qty','orderedQty'])
+          || !(isServiceBillingItem(old) || isServiceBillingItem(next));
+      }
+
+      function validClientServiceBillingBinding() {
+        let before = resource.data.get('items', []);
+        let after = request.resource.data.get('items', []);
+        let changed = request.resource.data.diff(resource.data).affectedKeys();
+        // Reuse the existing changed-key guard: ordinary item/lot corrections
+        // do not incur another Rules expression or a settings document lookup.
+        return (!changed.hasAny(['productId','productType','serviceKind','inventoryShipmentRecordId'])
+            || ((!changed.hasAny(['inventoryShipmentRecordId']) || !shipmentBackendOnly())
+              && !isServiceBillingItem(resource.data) && !isServiceBillingItem(request.resource.data)))
+          && (before == after || (before is list && after is list && before.size() <= 15 && after.size() <= 15
+            && (before.size() <= 0 && after.size() <= 0 || serviceBillingBindingAt(before, after, 0))
+            && (before.size() <= 1 && after.size() <= 1 || serviceBillingBindingAt(before, after, 1))
+            && (before.size() <= 2 && after.size() <= 2 || serviceBillingBindingAt(before, after, 2))
+            && (before.size() <= 3 && after.size() <= 3 || serviceBillingBindingAt(before, after, 3))
+            && (before.size() <= 4 && after.size() <= 4 || serviceBillingBindingAt(before, after, 4))
+            && (before.size() <= 5 && after.size() <= 5 || serviceBillingBindingAt(before, after, 5))
+            && (before.size() <= 6 && after.size() <= 6 || serviceBillingBindingAt(before, after, 6))
+            && (before.size() <= 7 && after.size() <= 7 || serviceBillingBindingAt(before, after, 7))
+            && (before.size() <= 8 && after.size() <= 8 || serviceBillingBindingAt(before, after, 8))
+            && (before.size() <= 9 && after.size() <= 9 || serviceBillingBindingAt(before, after, 9))
+            && (before.size() <= 10 && after.size() <= 10 || serviceBillingBindingAt(before, after, 10))
+            && (before.size() <= 11 && after.size() <= 11 || serviceBillingBindingAt(before, after, 11))
+            && (before.size() <= 12 && after.size() <= 12 || serviceBillingBindingAt(before, after, 12))
+            && (before.size() <= 13 && after.size() <= 13 || serviceBillingBindingAt(before, after, 13))
+            && (before.size() <= 14 && after.size() <= 14 || serviceBillingBindingAt(before, after, 14))));
+      }
+
+      // New orders require an explicit commercial transaction choice. Legacy
+      // orders may retain an absent/blank choice until edited, never clear a valid one.
+      function validOrderTransactionType(data) {
+        return data.get('transactionType', '') in ['直', '借', '扣'];
+      }
+
+      function clientDeliveryFactsUnchanged() {
+        return !request.resource.data.diff(resource.data).affectedKeys()
+          .hasAny(['deliveryRecords', 'deliveredQty', 'isDelivered']) || !deliveryBackendOnly();
+      }
+
+      function clientDeliveryFactsEmpty() {
+        return (request.resource.data.get('deliveryRecords', []) == []
+          && request.resource.data.get('deliveredQty', 0) == 0
+          && request.resource.data.get('isDelivered', false) == false) || !deliveryBackendOnly();
+      }
+
+      function clientReturnFactsUnchanged() {
+        return !request.resource.data.diff(resource.data).affectedKeys()
+          .hasAny(['returnRequests', 'returnPending', 'returnRequestMutationIndex',
+            'returnRecords', 'returnedQty', 'returnReceiptId']) || !returnBackendOnly();
+      }
+
+      function clientReturnFactsEmpty() {
+        return (request.resource.data.get('returnRequests', []) == []
+          && request.resource.data.get('returnPending', false) == false
+          && request.resource.data.get('returnRecords', []) == []
+          && request.resource.data.get('returnedQty', 0) == 0
+          && request.resource.data.get('returnReceiptId', '') == '') || !returnBackendOnly();
+      }
+
+      allow get: if (resource == null ? role() in ['admin','purchaser','warehouse','sales','engineer'] : operationalOrOwnedReader(resource.data));
+      allow list: if operationalOrOwnedReader(resource.data);
+      allow create: if canCreateCommercialDoc() && clientDeliveryFactsEmpty() && clientReturnFactsEmpty()
+        // Client SDK must not forge the terminal server-only checkpoint.
+        && request.resource.data.get('inventoryReservationStatus', '') != 'completed'
+        && !request.resource.data.keys().hasAny(['serviceFulfillment'])
+        && validOrderTransactionType(request.resource.data)
+        && validClientBillingCreate(request.resource.data)
+        && validNewOrderSourceSync(id)
+        && validOwnedCommercialCreate(request.resource.data)
+        && validNewOrderProductMaster(request.resource.data)
+        && validOrderEmbeddedCost(request.resource.data);
+      // Commercial owner edits commercial data; purchaser/warehouse must use scoped
+      // workflow collections below instead of broad order mutation.
+      // Transaction type validation is inside the scoped update paths, evaluated once.
+      allow update: if (!(resource.data.get('inventoryReservationStatus', '') in ['pending','failed'])
+          || request.resource.data.get('items', []) == resource.data.get('items', []))
+        && (resource.data.get('inventoryReservationStatus', '') == 'completed'
+          || request.resource.data.get('inventoryReservationStatus', '') != 'completed')
+        // The shared orderUpdateAllowed changed-key guard rejects service receipts.
+        && clientReturnFactsUnchanged() && orderUpdateAllowed(id);
+      allow delete: if admin();
+    }
+
+    function purchasingBackendOnly() {
+      let gate = /databases/$(database)/documents/settings/purchasingCutover;
+      return exists(gate) && get(gate).data.get('backendOnly', false) == true;
+    }
+    // Formal supplier PO. Sales/engineer self-order does NOT grant purchase-order privilege.
+    match /purchaseOrders/{id} {
+      // Collection-specific security validators (moved from document root scope).
+      function purchaseDocumentDraft(data) {
+        return data.get('status', '') == 'DRAFT' && data.get('documentOnly', false) == true;
+      }
+
+      allow read: if canPurchase();
+      allow create: if canPurchase() && (purchaseDocumentDraft(request.resource.data) || !purchasingBackendOnly());
+      // The PO is an immutable document snapshot for warehouse users. Receiving
+      // progress belongs to supplyOrders and receipts, never back on the PO.
+      allow update: if canPurchase() && (!purchasingBackendOnly()
+        || purchaseDocumentDraft(resource.data) && purchaseDocumentDraft(request.resource.data)
+        || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastOutputAt','lastOutputType']));
+      allow delete: if admin() && (!purchasingBackendOnly() || purchaseDocumentDraft(resource.data));
+    }
+
+    // ERP-style communication timeline. Browser share/mailto can prove only that
+    // the handoff was prepared, not that an email was actually delivered.
+    match /purchaseOrderCommunications/{id} {
+      allow read: if canPurchase();
+      allow write: if false;
+    }
+
+    // ERP Material Request-like purchasing demand. Demand identity is stable and
+    // supplier orders / receipts link back through demandId.
+    match /procurementDemands/{id} {
+      // Collection-specific security validators (moved from document root scope).
+      function businessProcurementDemandCreate(data) {
+        return businessOwner()
+          && owns(data)
+          && data.get('sourceType', '') == 'SALES_ORDER'
+          && data.get('sourceId', '') != ''
+          && data.get('sourceItemId', '') != ''
+          && data.get('demandId', '') != ''
+          && data.get('requestedQty', 0) is number
+          && data.get('orderedQty', 0) is number
+          && data.get('receivedQty', 0) is number
+          && data.get('requestedQty', 0) >= 0
+          && data.get('orderedQty', 0) >= 0
+          && data.get('orderedQty', 0) <= data.get('requestedQty', 0)
+          && data.get('receivedQty', 0) == 0;
+      }
+
+      function validDemandSource(data) {
+        let order = getAfter(/databases/$(database)/documents/orders/$(data.sourceId)).data;
+        let index = data.get('sourceItemIndex', -1);
+        return index is int && index >= 0 && index < order.items.size()
+          && data.sourceItemId == order.items[index].get('itemId', 'item-' + string(index + 1))
+          && data.get('ownerUid', '') == order.get('ownerUid', '')
+          && data.get('salesCode', '') == order.get('salesCode', '')
+          && data.get('productKey', '') == order.items[index].get('productId', order.items[index].get('inventoryProductKey', ''));
+      }
+
+      function validProcurementDemand(data) {
+        return data.get('sourceId', '') is string && data.get('sourceId', '').size() > 0
+          && data.get('requestedQty', null) is number && data.requestedQty >= 0
+          && data.get('orderedQty', null) is number && data.orderedQty >= 0 && data.orderedQty <= data.requestedQty
+          && data.get('receivedQty', null) is number && data.receivedQty >= 0 && data.receivedQty <= data.orderedQty
+          && data.get('remainingToOrderQty', null) is number
+          && data.remainingToOrderQty == (data.get('status', '') == 'CANCELLED' ? 0 : data.requestedQty - data.orderedQty)
+          && data.get('remainingToReceiveQty', null) is number && data.remainingToReceiveQty == data.orderedQty - data.receivedQty
+          && data.get('status', '') == (data.get('status', '') == 'CANCELLED' ? 'CANCELLED'
+            : data.requestedQty > 0 && data.receivedQty >= data.requestedQty ? 'RECEIVED'
+            : data.receivedQty > 0 ? 'PARTIALLY_RECEIVED'
+            : data.requestedQty > 0 && data.orderedQty >= data.requestedQty ? 'ORDERED'
+            : data.orderedQty > 0 ? 'PARTIALLY_ORDERED' : 'PENDING')
+          && ((data.get('sourceType', '') == 'SALES_ORDER'
+            && data.get('sourceItemId', '') is string && data.get('sourceItemId', '').size() > 0
+            && data.get('demandId', '') == 'SALES_ORDER:' + data.sourceId + ':' + data.sourceItemId
+            && validDemandSource(data))
+            || (data.get('sourceType', '') == 'STOCK_REPLENISHMENT'
+              && data.get('sourceItemId', '') == '' && data.get('demandId', '') == 'STOCK_REPLENISHMENT:' + data.sourceId));
+      }
+
+      // Initial SALES_ORDER demand belongs to the authoritative whole-order
+      // backend. Client transactions may only create follow-up demand after the
+      // original source is already committed by that backend.
+      function clientDemandSourceReady(data) {
+        return data.get('sourceType', '') != 'SALES_ORDER'
+          || getAfter(/databases/$(database)/documents/orders/$(data.sourceId)).data
+            .get('inventoryReservationStatus', '') == 'completed';
+      }
+
+      function demandIdentityUnchanged() {
+        return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'demandId','sourceType','sourceId','sourceItemId','productKey','productId','ownerUid','salesCode'
+        ]) && (resource.data.get('sourceItemIndex', -1) == -1
+          || request.resource.data.get('sourceItemIndex', -1) == resource.data.get('sourceItemIndex', -1));
+      }
+
+      function businessProcurementDemandOperationalUpdate() {
+        return businessOwner()
+          // Generic supply progress can neither cancel nor reopen a cancelled demand.
+          // Both lifecycle transitions require their co-committed order proof.
+          && resource.data.get('status', '') != 'CANCELLED'
+          && request.resource.data.get('status', '') != 'CANCELLED'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'orderedQty', 'remainingToOrderQty', 'remainingToReceiveQty',
+            'perOrdered', 'perReceived', 'status', 'scheduleDate', 'updatedAt', 'sourceItemIndex'
+          ])
+          && owns(resource.data)
+          && owns(request.resource.data)
+          && request.resource.data.get('demandId', '') == resource.data.get('demandId', '')
+          && request.resource.data.get('sourceType', '') == resource.data.get('sourceType', '')
+          && request.resource.data.get('sourceId', '') == resource.data.get('sourceId', '')
+          && request.resource.data.get('sourceItemId', '') == resource.data.get('sourceItemId', '')
+          && request.resource.data.get('ownerUid', '') == resource.data.get('ownerUid', '')
+          && request.resource.data.get('salesCode', '') == resource.data.get('salesCode', '')
+          && request.resource.data.get('receivedQty', 0) == resource.data.get('receivedQty', 0)
+          && request.resource.data.get('orderedQty', 0) >= resource.data.get('orderedQty', 0)
+          && request.resource.data.get('orderedQty', 0) <= request.resource.data.get('requestedQty', 0);
+      }
+
+      function businessLifecycleDemandCancelUpdate() {
+        let d = request.resource.data;
+        let orderPath = /databases/$(database)/documents/orders/$(d.sourceId);
+        let before = get(orderPath).data;
+        let after = getAfter(orderPath).data;
+        // validProcurementDemand and demandIdentityUnchanged already prove
+        // source item, owner/salesCode, item index, product, and identity.
+        // Avoid repeating expensive lookups in the cancellation transaction.
+        return businessOwner()
+          && d.get('sourceType', '') == 'SALES_ORDER'
+          && before.get('ownerUid', '') == request.auth.uid
+          && after.get('ownerUid', '') == request.auth.uid
+          && !orderIsCancelled(before) && orderIsCancelled(after)
+          && d.get('status', '') == 'CANCELLED'
+          && d.get('requestedQty', -1) == resource.data.get('requestedQty', -2)
+          && d.get('orderedQty', -1) == resource.data.get('orderedQty', -2)
+          && d.get('receivedQty', -1) == resource.data.get('receivedQty', -2)
+          && d.diff(resource.data).affectedKeys().hasOnly([
+            'status','remainingToOrderQty','updatedAt','sourceItemIndex'
+          ]);
+      }
+
+      function businessLifecycleDemandRestoreUpdate() {
+        let d = request.resource.data;
+        let orderPath = /databases/$(database)/documents/orders/$(d.sourceId);
+        let before = get(orderPath).data;
+        let after = getAfter(orderPath).data;
+        let item = after.items[d.sourceItemIndex];
+        let remaining = d.get('fulfillmentType', 'WAREHOUSE') == 'DIRECT_SHIP'
+          ? item.get('qty', 0) + item.get('returnedQty', 0)
+          : d.get('receivedQty', 0) + item.get('shortageQty', 0);
+        return businessOwner() && d.get('sourceType', '') == 'SALES_ORDER'
+          && before.get('ownerUid', '') == request.auth.uid
+          && after.get('ownerUid', '') == request.auth.uid
+          && orderIsCancelled(before) && !orderIsCancelled(after)
+          && resource.data.get('status', '') == 'CANCELLED'
+          && d.get('status', '') != 'CANCELLED'
+          && d.get('requestedQty', 0) == (d.get('orderedQty', 0) > remaining ? d.get('orderedQty', 0) : remaining)
+          && d.get('orderedQty', -1) == resource.data.get('orderedQty', -2)
+          && d.get('receivedQty', -1) == resource.data.get('receivedQty', -2)
+          && d.diff(resource.data).affectedKeys().hasOnly([
+            'requestedQty','remainingToOrderQty','remainingToReceiveQty',
+            'perOrdered','perReceived','status','sourceItemIndex','updatedAt'
+          ]);
+      }
+
+      function businessDirectDemandReceiptUpdate() {
+        let orderPath = /databases/$(database)/documents/orders/$(resource.data.sourceId);
+        let before = get(orderPath).data;
+        let after = getAfter(orderPath).data;
+        let records = after.get('deliveryRecords', []);
+        let record = records[before.get('deliveryRecords', []).size()];
+        return role() in ['sales', 'engineer'] && resource.data.get('ownerUid', '') == request.auth.uid
+          && resource.data.get('sourceType', '') == 'SALES_ORDER'
+          && resource.data.get('fulfillmentType', '') == 'DIRECT_SHIP'
+          && after.ownerUid == request.auth.uid && !orderIsCancelled(before)
+          && records.size() == before.get('deliveryRecords', []).size() + 1
+          && record.sourceType == 'DIRECT_SHIP_RECEIPT' && record.itemId == resource.data.sourceItemId
+          && request.resource.data.requestedQty == resource.data.requestedQty
+          && request.resource.data.orderedQty == resource.data.orderedQty
+          && request.resource.data.receivedQty == resource.data.receivedQty + record.qty
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'receivedQty', 'remainingToReceiveQty', 'perReceived', 'status', 'updatedAt', 'sourceItemIndex'
+          ]);
+      }
+
+      // Transactions read the deterministic ID before creating a demand. Missing data carries no customer information.
+      allow get: if (resource == null ? role() in ['admin','purchaser','warehouse','sales','engineer'] : operationalOrOwnedReader(resource.data));
+      allow list: if operationalOrOwnedReader(resource.data);
+      allow create: if validProcurementDemand(request.resource.data)
+        && clientDemandSourceReady(request.resource.data) && (canReceiveInventory()
+        || businessProcurementDemandCreate(request.resource.data));
+      allow update: if validProcurementDemand(request.resource.data) && demandIdentityUnchanged()
+        && (((resource.data.get('fulfillmentType', '') == 'DIRECT_SHIP'
+            && request.resource.data.get('receivedQty', 0) > resource.data.get('receivedQty', 0))
+            ? (admin() || businessDirectDemandReceiptUpdate())
+            : (canReceiveInventory() || businessProcurementDemandOperationalUpdate()))
+          || (request.resource.data.get('status', '') == 'CANCELLED' && businessLifecycleDemandCancelUpdate())
+          || (resource.data.get('status', '') == 'CANCELLED' && businessLifecycleDemandRestoreUpdate()));
+      allow delete: if admin();
+    }
+
+
+    // Unified source/order evidence: PURCHASING_PO, PURCHASING_MANUAL, SALES_SELF_ORDER, STOCK_REPLENISHMENT.
+    match /supplyOrders/{id} {
+      // Collection-specific security validators (moved from document root scope).
+      function sameSupplyIdentity() {
+        return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'type', 'method', 'sourceType', 'sourceId', 'sourceItemId',
+          'internalNo', 'purchaseDocumentId', 'purchaseDocumentNo',
+          'orderId', 'itemId', 'orderItemIndex',
+          'ownerUid', 'salesCode', 'salesName', 'customerName', 'company',
+          'productId', 'productKey', 'itemCode', 'itemName', 'brand', 'productLine',
+          'fulfillmentType', 'warehouseId', 'orderDate',
+          'createdAt', 'createdByUid', 'createdBy', 'createdByRole'
+        ]);
+      }
+
+      function validSupplyOperationalState() {
+        let previousStatus = resource.data.get('status', 'ORDERED');
+        let nextStatus = request.resource.data.get('status', 'ORDERED');
+        let qty = request.resource.data.get('qty', 0);
+        let receivedQty = request.resource.data.get('receivedQty', 0);
+        let cancelledQty = request.resource.data.get('cancelledQty', 0);
+        let closedQty = request.resource.data.get('closedQty', 0);
+        let incomingQty = request.resource.data.get('incomingRegisteredQty', 0);
+        return previousStatus != 'CANCELLED'
+          && previousStatus != 'CLOSED'
+          && qty is number
+          && receivedQty is number
+          && incomingQty is number
+          && cancelledQty is number
+          && closedQty is number
+          && qty >= resource.data.get('qty', 0)
+          && receivedQty >= resource.data.get('receivedQty', 0)
+          && receivedQty <= qty
+          && incomingQty >= 0
+          && incomingQty <= (qty - receivedQty)
+          && (
+            request.resource.data.get('fulfillmentType', 'WAREHOUSE') != 'DIRECT_SHIP'
+            || incomingQty == 0
+          )
+          && cancelledQty >= 0
+          && cancelledQty <= (qty - receivedQty)
+          && closedQty >= 0
+          && closedQty <= (qty - receivedQty)
+          && (
+            (
+              nextStatus == 'ORDERED'
+              && receivedQty == 0
+              && cancelledQty == 0
+              && closedQty == 0
+            )
+            || (
+              nextStatus == 'PARTIAL_RECEIPT'
+              && receivedQty > 0
+              && receivedQty < qty
+              && cancelledQty == 0
+              && closedQty == 0
+            )
+            || (
+              nextStatus == 'RECEIVED'
+              && qty > 0
+              && receivedQty == qty
+              && cancelledQty == 0
+              && closedQty == 0
+            )
+            || (
+              nextStatus == 'CANCELLED'
+              && qty > receivedQty
+              && qty == resource.data.get('qty', 0)
+              && receivedQty == resource.data.get('receivedQty', 0)
+              && cancelledQty == qty - receivedQty
+              && closedQty == 0
+              && incomingQty == 0
+              && request.resource.data.get('cancelReason', '') != ''
+              && request.resource.data.get('cancelledAt', '') != ''
+              && request.resource.data.get('cancelledByUid', '') == request.auth.uid
+            )
+            || (
+              nextStatus == 'CLOSED'
+              && receivedQty > 0
+              && receivedQty < qty
+              && qty == resource.data.get('qty', 0)
+              && receivedQty == resource.data.get('receivedQty', 0)
+              && closedQty == qty - receivedQty
+              && cancelledQty == 0
+              && incomingQty == 0
+              && request.resource.data.get('closeReason', '') != ''
+              && request.resource.data.get('closedAt', '') != ''
+              && request.resource.data.get('closedByUid', '') == request.auth.uid
+            )
+          );
+      }
+
+      // Direct-ship receiving is a narrow hot path used in the same atomic batch as
+      // the order delivery summary. Keep it intentionally small so the combined
+      // Firestore Rules evaluation stays below the platform expression limit.
+      function directShipSupplyReceiptUpdate(id, userRole) {
+        let nextReceived = request.resource.data.get('receivedQty', 0);
+        let qty = resource.data.get('qty', 0);
+        return userRole in ['sales','engineer'] && resource.data.get('ownerUid', '') == request.auth.uid
+          && resource.data.get('fulfillmentType', 'WAREHOUSE') == 'DIRECT_SHIP'
+          && directShipSupplyReceiptEvidence(id)
+          && resource.data.get('status', 'ORDERED') != 'CANCELLED'
+          && resource.data.get('status', 'ORDERED') != 'CLOSED'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'receivedQty', 'status', 'updatedAt'
+          ])
+          && nextReceived is number
+          && nextReceived > resource.data.get('receivedQty', 0)
+          && nextReceived <= qty
+          && resource.data.get('incomingRegisteredQty', 0) == 0
+          && resource.data.get('cancelledQty', 0) == 0
+          && resource.data.get('closedQty', 0) == 0
+          && (
+            (nextReceived < qty && request.resource.data.get('status', '') == 'PARTIAL_RECEIPT')
+            || (nextReceived == qty && request.resource.data.get('status', '') == 'RECEIVED')
+          );
+      }
+
+      function directShipSupplyReceiptEvidence(id) {
+        let orderPath = /databases/$(database)/documents/orders/$(resource.data.orderId);
+        let before = get(orderPath).data;
+        let after = getAfter(orderPath).data;
+        let records = after.get('deliveryRecords', []);
+        let record = records[before.get('deliveryRecords', []).size()];
+        let receiptPath = /databases/$(database)/documents/receipts/$(record.receiptId);
+        let receipt = getAfter(receiptPath).data;
+        return !orderIsCancelled(before)
+          && resource.data.ownerUid == before.ownerUid
+          && records.size() == before.get('deliveryRecords', []).size() + 1
+          && record.sourceType == 'DIRECT_SHIP_RECEIPT' && record.sourceId == id
+          && !exists(receiptPath) && receipt.supplyOrderId == id
+          && receipt.qty == request.resource.data.receivedQty - resource.data.get('receivedQty', 0)
+          && record.qty == receipt.qty;
+      }
+
+      function purchaserSupplyOperationalUpdate(userRole) {
+        // Supply identity is immutable; purchasing may only change operational progress.
+        return userRole == 'purchaser'
+          && (resource.data.get('fulfillmentType', 'WAREHOUSE') != 'DIRECT_SHIP'
+            || request.resource.data.get('receivedQty', 0) == resource.data.get('receivedQty', 0))
+          && sameSupplyIdentity()
+          && (resource.data.get('receivedQty', 0) == 0 || request.resource.data.get('unitCost', 0) == resource.data.get('unitCost', 0))
+          && validSupplyOperationalState()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'qty', 'receivedQty',
+            'incomingRegisteredQty', 'incomingRegisteredAt',
+            'status', 'supplier', 'unitCost',
+            'lastOrderedAt', 'orderEvents',
+            'cancelledQty', 'cancelReason', 'cancelledAt', 'cancelledByUid', 'cancelledBy',
+            'closedQty', 'closeReason', 'closedAt', 'closedByUid', 'closedBy',
+            'updatedAt'
+          ]);
+      }
+
+      function supplierReceiptDispositionAllowed() {
+        let before = resource.data;
+        let after = request.resource.data;
+        let orderId = before.get('orderId', '');
+        return after.get('receivedQty', 0) <= before.get('receivedQty', 0) || orderId == ''
+          || !orderIsCancelled(get(/databases/$(database)/documents/orders/$(orderId)).data)
+          || before.get('customerCancellationDisposition', '') == 'KEEP_STOCK';
+      }
+
+      function warehouseSupplyOperationalUpdate(userRole) {
+        return userRole == 'warehouse'
+          && resource.data.get('fulfillmentType', 'WAREHOUSE') != 'DIRECT_SHIP'
+          && sameSupplyIdentity()
+          && validSupplyOperationalState()
+          && request.resource.data.get('status', 'ORDERED') != 'CANCELLED'
+          && request.resource.data.get('status', 'ORDERED') != 'CLOSED'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'receivedQty', 'incomingRegisteredQty', 'status', 'updatedAt'
+          ]);
+      }
+
+      function supplierCancellationResolution(userRole) {
+        let before = resource.data;
+        let after = request.resource.data;
+        let order = get(/databases/$(database)/documents/orders/$(before.orderId)).data;
+        let remaining = before.qty - before.get('receivedQty', 0);
+        let redirect = before.get('fulfillmentType', 'WAREHOUSE') == 'DIRECT_SHIP';
+        let invPath = /databases/$(database)/documents/inventory/$(after.get('redirectInventoryId', 'unused'));
+        let whId = after.get('redirectWarehouseStockId', 'unused');
+        let whPath = /databases/$(database)/documents/warehouseStocks/$(whId);
+        return userRole == 'purchaser' && orderIsCancelled(order)
+          && before.get('status', '') in ['ORDERED', 'PARTIAL_RECEIPT'] && remaining > 0
+          && before.get('customerCancellationDisposition', '') != 'KEEP_STOCK'
+          && after.customerCancellationDisposition == 'KEEP_STOCK'
+          && after.customerCancellationResolvedBy == request.auth.uid
+          && after.customerCancellationResolvedAt != ''
+          && after.diff(before).affectedKeys().hasOnly([
+            'customerCancellationDisposition', 'customerCancellationResolvedAt', 'customerCancellationResolvedBy',
+            'originalFulfillmentType', 'fulfillmentType', 'warehouseId', 'redirectInventoryId', 'redirectWarehouseStockId', 'incomingRegisteredQty', 'updatedAt'
+          ])
+          && (redirect ? (
+            after.originalFulfillmentType == 'DIRECT_SHIP' && after.fulfillmentType == 'WAREHOUSE'
+            && validActiveReturnWarehouse(after.warehouseId)
+            && after.incomingRegisteredQty == remaining
+            && getAfter(invPath).data.productKey == before.productKey
+            && getAfter(whPath).data.productKey == before.productKey && getAfter(whPath).data.warehouseId == after.warehouseId
+            && getAfter(invPath).data.incoming == (exists(invPath) ? get(invPath).data.get('incoming', 0) : 0) + remaining
+            && getAfter(whPath).data.incoming == (exists(whPath) ? get(whPath).data.get('incoming', 0) : 0) + remaining
+          ) : after.get('fulfillmentType', 'WAREHOUSE') == before.get('fulfillmentType', 'WAREHOUSE')
+            && after.get('warehouseId', '') == before.get('warehouseId', '')
+            && after.get('incomingRegisteredQty', 0) == before.get('incomingRegisteredQty', 0));
+      }
+
+      // New self-orders must carry their supplier and actual unit cost.
+      // This is independent of the quick-purchase rules and does not rewrite old documents.
+      function validSelfOrderSupplyCreate() {
+        let data = request.resource.data;
+        return data.get('type', '') != 'SALES_SELF_ORDER'
+          || (data.get('supplier', '') is string
+            && data.get('supplier', '').matches('.*\\S.*')
+            && data.get('unitCost', null) is number
+            && data.get('unitCost', null) >= 0);
+      }
+
+      function validQuickPurchaseCost() {
+        let data = request.resource.data;
+        return data.get('type', '') != 'PURCHASING_MANUAL'
+          || (data.get('supplier', '') is string && data.get('supplier', '').size() > 0
+            && data.get('unitCost', null) is number && data.get('unitCost', null) >= 0);
+      }
+
+      function validQuickPurchaseUpdate() {
+        let before = resource.data;
+        let after = request.resource.data;
+        return after.get('type', '') != 'PURCHASING_MANUAL'
+          || (after.get('qty', 0) <= before.get('qty', 0)
+            && !after.diff(before).affectedKeys().hasAny(['supplier', 'unitCost']))
+          || (validQuickPurchaseCost()
+            && (after.get('qty', 0) <= before.get('qty', 0)
+              || (after.get('supplier', '') == before.get('supplier', '')
+                && after.get('unitCost', 0) == before.get('unitCost', 0))));
+      }
+
+      function purchaserSupplySourceReady() {
+        let data = request.resource.data;
+        let orderId = data.get('orderId', '');
+        return !(data.get('type', '') in ['PURCHASING_PO','PURCHASING_MANUAL']) || orderId == ''
+          || (exists(/databases/$(database)/documents/orders/$(orderId))
+            && !orderIsCancelled(get(/databases/$(database)/documents/orders/$(orderId)).data)
+            && !(get(/databases/$(database)/documents/orders/$(orderId)).data.get('inventoryReservationStatus', '') in ['pending','failed']));
+      }
+
+      // Resolve the trusted, enabled profile once. Dispatch before evaluating
+      // unrelated receipt/cancellation branches in the incoming stock transaction.
+      // Every branch retains its existing identity, quantity and evidence checks.
+      function supplyOperationalUpdateAllowed(id) {
+        let userRole = role();
+        return (userRole == 'admin'
+          || (userRole == 'purchaser' && (purchaserSupplyOperationalUpdate(userRole)
+            || supplierCancellationResolution(userRole)))
+          || (userRole == 'warehouse' && warehouseSupplyOperationalUpdate(userRole))
+          || (userRole in ['sales','engineer'] && directShipSupplyReceiptUpdate(id, userRole)))
+          && supplierReceiptDispositionAllowed() && validQuickPurchaseUpdate();
+      }
+
+      allow read: if canPurchase()
+        || (businessOwner()
+          && resource.data.type == 'SALES_SELF_ORDER'
+          && resource.data.ownerUid == request.auth.uid);
+      allow create: if !purchasingBackendOnly() && purchaserSupplySourceReady() && (((canPurchase()) && validQuickPurchaseCost())
+        && validSelfOrderSupplyCreate()
+        || (businessOwner()
+          && request.resource.data.type == 'SALES_SELF_ORDER'
+          && request.resource.data.ownerUid == request.auth.uid
+          && request.resource.data.salesCode == salesCode()
+          && validSelfOrderSupplyCreate()));
+      // Sales owns the commercial intent and may create/read its own self-order,
+      // but supply execution becomes operational evidence after creation. Only purchasing
+      // or receiving roles may mutate quantities/status; this prevents direct API edits
+      // from bypassing procurement and receipt workflows.
+      allow update: if !purchasingBackendOnly() && supplyOperationalUpdateAllowed(id);
+      allow delete: if !purchasingBackendOnly() && admin();
+    }
+
+    match /receivingSupplyOrders/{id} {
+      // Collection-specific security validators (moved from document root scope).
+      // The authoritative supply record retains cost. This derived receiving view
+      // must exactly match it, except that financial fields are absent.
+      function businessReceivingView(data) {
+        return businessOwner() && data.get('ownerUid', '') == request.auth.uid
+          && (data.get('fulfillmentType', '') == 'DIRECT_SHIP' || data.get('type', '') == 'SALES_SELF_ORDER');
+      }
+
+      function receivingViewWriter(data) {
+        let userRole = role();
+        return userRole in ['admin', 'purchaser', 'warehouse']
+          || (userRole in ['sales', 'engineer'] && data.get('ownerUid', '') == request.auth.uid
+            && (data.get('fulfillmentType', '') == 'DIRECT_SHIP' || data.get('type', '') == 'SALES_SELF_ORDER'));
+      }
+
+      allow get: if canReceiveInventory()
+        || (businessOwner() && (resource == null || businessReceivingView(resource.data)));
+      allow list: if canReceiveInventory() || businessReceivingView(resource.data);
+      allow create, update: if receivingViewWriter(request.resource.data)
+        && !request.resource.data.keys().hasAny(['unitCost', 'cost', 'costPrice'])
+        && request.resource.data.diff(getAfter(/databases/$(database)/documents/supplyOrders/$(id)).data)
+          .affectedKeys().hasOnly(['unitCost', 'cost', 'costPrice']);
+      allow delete: if admin();
+    }
+
+
+    match /stockTransferRequests/{id} {
+      // Collection-specific security validators (moved from document root scope).
+      // Main replenishment request: immutable source/quantity; reserve first, ship later.
+      // stockTransferRequests contains only operational item identity and actor UID, never costs.
+      function validMainTransferRequest(d) {
+        return d.keys().hasOnly(['id','inventoryId','productKey','productId','itemCode','itemName','brand',
+            'fromWarehouseId','toWarehouseId','fromStockId','qty','status','createdByUid','createdAt',
+            'transferId','shippedAt','shippedByUid','cancelledAt','cancelledByUid'])
+          && d.keys().hasAll(['id','inventoryId','productKey','productId','itemCode','itemName','brand',
+            'fromWarehouseId','toWarehouseId','fromStockId','qty','status','createdByUid','createdAt'])
+          && d.id is string && d.id.size() > 0 && d.id.size() <= 128
+          && d.inventoryId is string && d.inventoryId.size() > 0 && d.inventoryId.size() <= 1500
+          && d.productKey is string && d.productKey.size() > 0 && d.productKey.size() <= 1500
+          && d.productId is string && d.productId.size() <= 1500
+          && d.itemCode is string && d.itemCode.size() <= 1000
+          && d.itemName is string && d.itemName.size() <= 1000
+          && d.brand is string && d.brand.size() <= 1000
+          && d.fromWarehouseId is string && d.fromWarehouseId.size() > 0 && d.fromWarehouseId.size() <= 1500
+          && d.toWarehouseId is string && d.toWarehouseId.size() > 0 && d.toWarehouseId.size() <= 1500
+          && d.fromStockId is string && d.fromStockId.size() > 0 && d.fromStockId.size() <= 1500
+          && d.createdByUid is string && d.createdByUid.size() > 0 && d.createdByUid.size() <= 128
+          && d.createdAt is string && d.createdAt.size() <= 40
+          && d.qty is number && d.qty > 0 && d.qty <= 1000000
+          && d.status in ['PENDING','SHIPPED','CANCELLED']
+          && d.fromWarehouseId != d.toWarehouseId;
+      }
+
+      function mainTransferHold(d, direction) {
+        let invPath = /databases/$(database)/documents/inventory/$(d.inventoryId);
+        let stockPath = /databases/$(database)/documents/warehouseStocks/$(d.fromStockId);
+        let inv = get(invPath).data;
+        let nextInv = getAfter(invPath).data;
+        let stock = get(stockPath).data;
+        let nextStock = getAfter(stockPath).data;
+        return stock.productKey == d.productKey && stock.warehouseId == d.fromWarehouseId
+          && inv.get('productKey', inv.get('productId', '')) == d.productKey
+          && nextStock.onHand == stock.onHand && nextInv.onHand == inv.onHand
+          && nextStock.reserved == stock.reserved + direction * d.qty
+          && nextStock.get('transferReserved', 0) == stock.get('transferReserved', 0) + direction * d.qty
+          && nextInv.reserved == inv.reserved + direction * d.qty
+          && nextInv.get('transferReserved', 0) == inv.get('transferReserved', 0) + direction * d.qty
+          && nextStock.reserved >= 0 && nextStock.reserved <= nextStock.onHand
+          && nextStock.get('transferReserved', 0) >= 0 && nextInv.get('transferReserved', 0) >= 0
+          && nextInv.diff(inv).affectedKeys().hasOnly(['reserved','transferReserved','updatedAt'])
+          && nextStock.diff(stock).affectedKeys().hasOnly(['reserved','transferReserved','updatedAt']);
+      }
+
+      function mainTransferDispatch(d) {
+        let path = /databases/$(database)/documents/stockTransfers/$(d.get('transferId', 'unused'));
+        let transfer = getAfter(path).data;
+        return !exists(path) && transfer.requestId == d.id && transfer.inventoryId == d.inventoryId
+          && transfer.fromWarehouseId == d.fromWarehouseId && transfer.toWarehouseId == d.toWarehouseId
+          && transfer.qty == d.qty && transfer.reservedQty == 0 && transfer.kind == 'TRANSFER'
+          && transfer.status == 'IN_TRANSIT' && transfer.createdByUid == request.auth.uid;
+      }
+
+      allow read: if canReceiveInventory();
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+    }
+    match /stockTransfers/{id} {
+      // Collection-specific security validators (moved from document root scope).
+      function transferRequestHold(d) {
+        let path = /databases/$(database)/documents/stockTransferRequests/$(d.get('requestId', 'unused'));
+        let before = get(path).data;
+        let after = getAfter(path).data;
+        return before.status == 'PENDING' && after.status == 'SHIPPED'
+          && after.transferId == d.id && after.shippedByUid == request.auth.uid
+          && before.inventoryId == d.inventoryId && before.productKey == d.productKey
+          && before.fromWarehouseId == d.fromWarehouseId && before.toWarehouseId == d.toWarehouseId
+          && before.fromStockId == d.fromStockId && before.qty == d.qty
+          && d.orderId == '' && d.kind == 'TRANSFER' && d.reservedQty == 0;
+      }
+
+      function transferSourceStock(d) {
+        let path = /databases/$(database)/documents/warehouseStocks/$(d.fromStockId);
+        let before = get(path).data;
+        let after = getAfter(path).data;
+        let held = d.get('requestId', '') != '' ? d.qty : 0;
+        return (held == 0 || transferRequestHold(d))
+          && before.productKey == d.productKey && before.warehouseId == d.fromWarehouseId
+          && after.onHand == before.onHand - d.qty
+          && after.reserved == before.reserved - d.reservedQty - held
+          && (held == 0 || after.get('transferReserved', 0) == before.get('transferReserved', 0) - held)
+          && after.get('incoming', 0) == before.get('incoming', 0)
+          && after.onHand >= after.reserved && after.reserved >= 0;
+      }
+
+      function transferTargetStock(d) {
+        let path = /databases/$(database)/documents/warehouseStocks/$(d.toStockId);
+        let before = exists(path) ? get(path).data : {};
+        let after = getAfter(path).data;
+        return after.productKey == d.productKey && after.warehouseId == d.toWarehouseId
+          && after.onHand == before.get('onHand', 0) + d.qty
+          && after.reserved == before.get('reserved', 0) + d.reservedQty
+          && after.get('incoming', 0) == before.get('incoming', 0);
+      }
+
+      function transferAggregate(d, receive) {
+        let path = /databases/$(database)/documents/inventory/$(d.inventoryId);
+        let before = get(path).data;
+        let after = getAfter(path).data;
+        let direction = receive ? -1 : 1;
+        let held = !receive && d.get('requestId', '') != '' ? d.qty : 0;
+        return before.get('productKey', before.get('productId', '')) == d.productKey
+          && after.onHand == before.onHand && after.reserved == before.reserved - held
+          && (held == 0 || after.get('transferReserved', 0) == before.get('transferReserved', 0) - held)
+          && after.get('incoming', 0) == before.get('incoming', 0)
+          && (d.kind == 'HANDOFF'
+            ? after == before
+            : after.get('transferInTransit', 0) == before.get('transferInTransit', 0) + direction * d.qty
+              && after.get('transferFreeInTransit', 0) == before.get('transferFreeInTransit', 0) + direction * (d.qty - d.reservedQty)
+              && after.get('transferInTransit', 0) >= 0 && after.get('transferFreeInTransit', 0) >= 0);
+      }
+
+      function transferOrderEvidence(d) {
+        let path = /databases/$(database)/documents/orders/$(d.get('orderId', 'unused'));
+        return d.get('orderId', '') == '' ? d.reservedQty == 0 && d.kind == 'TRANSFER'
+          : getAfter(path).data.get('warehouseLogisticsId', '') == d.id
+            && getAfter(path).data.items[d.itemIndex].itemId == d.itemId
+            && d.reservedQty == d.qty;
+      }
+
+      allow get, list: if canReceiveInventory();
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    match /inventory/{id} {
+      // Collection-specific security validators (moved from document root scope).
+      function inventoryArchiveKeys() {
+        return ['listArchived', 'listArchiveChangedAt', 'listArchiveChangedByUid', 'listArchiveAuditId'];
+      }
+
+      function validInventoryArchiveChange(id) {
+        let changed = request.resource.data.diff(resource.data).affectedKeys();
+        return !changed.hasAny(inventoryArchiveKeys()) || validInventoryArchiveOperation(id);
+      }
+
+      function validInventoryArchiveOperation(id) {
+        let data = request.resource.data;
+        let auditId = data.get('listArchiveAuditId', '');
+        let auditPath = /databases/$(database)/documents/auditLogs/$(auditId);
+        return admin()
+          && data.listArchived is bool
+          && data.listArchived != resource.data.get('listArchived', false)
+          && data.listArchiveChangedByUid == request.auth.uid
+          && data.listArchiveChangedAt is string && data.listArchiveChangedAt.size() <= 32
+          && auditId is string && auditId.size() > 0 && auditId.size() <= 128
+          && data.diff(resource.data).affectedKeys().hasOnly([
+            'listArchived', 'listArchiveChangedAt', 'listArchiveChangedByUid', 'listArchiveAuditId', 'updatedAt'
+          ])
+          && (!data.listArchived || (resource.data.get('onHand', 0) == 0
+            && resource.data.get('reserved', 0) == 0 && resource.data.get('incoming', 0) == 0
+            && resource.data.get('transferInTransit', 0) == 0))
+          && !exists(auditPath)
+          && getAfter(auditPath).data.actorUid == request.auth.uid
+          && getAfter(auditPath).data.inventoryId == id
+          && getAfter(auditPath).data.archived == data.listArchived
+          && getAfter(auditPath).data.createdAt == data.listArchiveChangedAt
+          && getAfter(auditPath).data.action == (data.listArchived ? 'inventory_list_archive' : 'inventory_list_restore');
+      }
+
+      function validInventoryStockPolicy(data) {
+        let policy = data.get('stockPolicy', 'ORDER_ONLY');
+        let safetyStock = data.get('safetyStock', 0);
+        return policy in ['NO_STOCK', 'SAFETY_STOCK', 'ORDER_ONLY']
+          && safetyStock is number
+          && safetyStock >= 0;
+      }
+
+      function warehouseInventoryPlanningDefaults(data) {
+        return data.get('stockPolicy', 'ORDER_ONLY') == 'ORDER_ONLY'
+          && data.get('safetyStock', 0) == 0;
+      }
+
+      function warehouseKeepsInventoryPlanning(userRole) {
+        return userRole == 'warehouse'
+          && request.resource.data.get('stockPolicy', 'ORDER_ONLY')
+            == resource.data.get('stockPolicy', 'ORDER_ONLY')
+          && request.resource.data.get('safetyStock', 0)
+            == resource.data.get('safetyStock', 0);
+      }
+
+      function inventoryUpdateWriter(id) {
+        let userRole = role();
+        return (userRole in ['admin','purchaser','warehouse']
+            && nonNegativeInventory(request.resource.data)
+            && validInventoryStockPolicy(request.resource.data)
+            && (userRole != 'warehouse' || warehouseKeepsInventoryPlanning(userRole)))
+          || businessInventoryOperationalUpdate(id);
+      }
+
+      function businessInventoryOperationalUpdate(id) {
+        return businessOwner()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'onHand', 'reserved', 'updatedAt', 'stockOperationId'
+          ])
+          && nonNegativeInventory(request.resource.data)
+          && hasStockOperation('inventory/' + id, 'onHand', 'reserved');
+      }
+
+      // Aggregate operational stock is shared, but cost fields must never be embedded here.
+      // stockPolicy/safetyStock are planning master data: admin/purchaser manage them;
+      // warehouse keeps those fields unchanged while performing physical stock work.
+      allow get: if safeStockReader(resource == null ? {} : resource.data);
+      allow list: if active() && !('unitCost' in resource.data) && !('cost' in resource.data);
+      allow create: if false;
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'stockPolicy', 'safetyStock', 'updatedAt',
+          'listArchived', 'listArchiveChangedAt',
+          'listArchiveChangedByUid', 'listArchiveAuditId'
+        ])
+        && (inventoryUpdateWriter(id)
+        && validInventoryArchiveChange(id)
+        && !('unitCost' in request.resource.data) && !('cost' in request.resource.data));
+      allow delete: if false;
+    }
+
+    match /warehouseStocks/{id} {
+      // Collection-specific security validators (moved from document root scope).
+      // warehouseStocks optional recovery metadata: allocationPending bool;
+      // allocationRevision int 1..1e9, advanced only when physical free stock increases.
+      function validStockRecoveryMetadata(data) {
+        return !data.keys().hasAny(['allocationPending','allocationRevision'])
+          || (data.get('allocationPending', null) is bool
+            && data.get('allocationRevision', null) is int
+            && data.allocationRevision > 0 && data.allocationRevision <= 1000000000);
+      }
+
+      function validStockRecoveryUpdate() {
+        let before = resource.data;
+        let after = request.resource.data;
+        let revision = before.get('allocationRevision', 0);
+        let next = after.get('allocationRevision', 0);
+        let pending = before.get('allocationPending', false);
+        let nextPending = after.get('allocationPending', false);
+        return (next == revision && pending == nextPending)
+          || (next == revision + 1 && nextPending == true
+            && after.onHand - after.reserved > before.onHand - before.reserved
+            && !(after.warehouseId.matches('custody-.*')))
+          || (canReceiveInventory() && pending == true && nextPending == false && next == revision
+            && after.diff(before).affectedKeys().hasOnly(['allocationPending']));
+      }
+
+      // A warehouse stock row keeps the same physical product/location identity.
+      // Moving goods creates/updates another row through the transfer workflow.
+      function validWarehouseStock(data) {
+        return nonNegativeInventory(data) && validStockRecoveryMetadata(data)
+          && data.get('productKey', '') is string && data.get('productKey', '').size() > 0
+          && data.get('warehouseId', '') is string && data.get('warehouseId', '').size() > 0
+          && data.get('productId', '') is string;
+      }
+
+      function warehouseStockIdentityUnchanged() {
+        return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['productKey', 'warehouseId'])
+          && (resource.data.get('productId', '') == ''
+            || request.resource.data.get('productId', '') == resource.data.get('productId', ''));
+      }
+
+      function businessWarehouseStockOperationalUpdate(id) {
+        return businessOwner()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'onHand', 'reserved', 'updatedAt', 'stockOperationId', 'allocationPending', 'allocationRevision'
+          ])
+          && nonNegativeInventory(request.resource.data)
+          && hasStockOperation('warehouseStocks/' + id, 'onHand', 'reserved');
+      }
+
+      allow get: if safeStockReader(resource == null ? {} : resource.data);
+      allow list: if safeStockReader(resource.data);
+      allow create: if false;
+      // Receiver validation already includes recovery metadata; business updates
+      // validate it in their own branch, so neither path evaluates it twice.
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    match /inventoryReservations/{id} {
+      // Collection-specific security validators (moved from document root scope).
+      function validBusinessReservation(id, data) {
+        let order = getAfter(/databases/$(database)/documents/orders/$(data.orderId)).data;
+        // Both call sites already require a business role and validReservationSource.
+        // That shared source validator proves identity, owner, bounds and cancellation once.
+        return owns(order) && businessReservationStockProof(id, data);
+      }
+
+      function businessReservationStockProof(id, data) {
+        let before = resource == null ? {} : resource.data;
+        let operationId = data.get('stockOperationId', 'unused');
+        let path = /databases/$(database)/documents/stockOperations/$(operationId);
+        let op = getAfter(path).data;
+        let stockPath = /databases/$(database)/documents/warehouseStocks/$(data.get('warehouseStockId', 'unused'));
+        return (before.get('quantity', 0) == data.get('quantity', 0)
+            && (before.get('warehouseId', data.get('warehouseId', '')) == data.get('warehouseId', '') || data.get('quantity', 0) == 0))
+          || (operationId != '' && operationId != 'unused' && !exists(path) && op.actorUid == request.auth.uid
+            && op.orderId == data.orderId && id in op.reservationIds
+            && op.productKey == data.productKey && op.warehouseId == data.warehouseId
+            && op.targetPath == 'warehouseStocks/' + data.warehouseStockId
+            && getAfter(stockPath).data.stockOperationId == operationId
+            && getAfter(stockPath).data.reserved - get(stockPath).data.reserved == op.reservedDelta);
+      }
+
+      function businessReservationOperationalUpdate() {
+        // Only reservationUpdateWriter calls this helper, after checking the fixed
+        // business role. Repeating role() here exhausts the retry expression budget.
+        return owns(resource.data)
+          && owns(request.resource.data)
+          && request.resource.data.get('ownerUid', '') == resource.data.get('ownerUid', '')
+          && request.resource.data.get('salesCode', '') == resource.data.get('salesCode', '')
+          && request.resource.data.get('orderId', '') == resource.data.get('orderId', '')
+          && request.resource.data.get('itemId', '') == resource.data.get('itemId', '')
+          && request.resource.data.get('productKey', '') == resource.data.get('productKey', '')
+          && request.resource.data.get('warehouseId', '') == resource.data.get('warehouseId', '')
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'quantity', 'shortageQty', 'status', 'updatedAt', 'orderItemIndex', 'stockOperationId', 'warehouseStockId', 'warehouseId'
+          ])
+          && request.resource.data.get('quantity', 0) >= 0
+          && request.resource.data.get('shortageQty', 0) >= 0;
+      }
+
+      function legacyReservationLocationShape(data) {
+        // Multi-location fields are proposals only. Existing stock witnesses and
+        // fulfillment paths still prove exactly one warehouse per reservation.
+        return !data.keys().hasAny(['locationSchemaVersion','locations','allocations','warehouseAllocations']);
+      }
+
+      function validReservationSource(id, data) {
+        let order = getAfter(/databases/$(database)/documents/orders/$(data.orderId)).data;
+        let index = data.get('orderItemIndex', -1);
+        let item = order.items[index];
+        return legacyReservationLocationShape(data)
+          && index is int && index >= 0 && index < order.items.size()
+          // Initial pending/failed reservation writes belong to the Admin SDK.
+          && !(order.get('inventoryReservationStatus', '') in ['pending', 'failed'])
+          && id == data.orderId + '__' + data.itemId
+          && data.itemId == item.get('itemId', 'item-' + string(index + 1))
+          && data.productKey == item.get('productId', item.get('inventoryProductKey', ''))
+          && data.get('ownerUid', '') == order.get('ownerUid', '')
+          && data.get('salesCode', '') == order.get('salesCode', '')
+          && data.get('quantity', null) is number && data.quantity >= 0 && data.quantity <= item.get('qty', 0)
+          && data.get('shortageQty', 0) is number && data.get('shortageQty', 0) >= 0
+          && data.get('warehouseId', '') == item.get('warehouseId', order.get('warehouseId', ''))
+          && (data.quantity == 0 || !orderIsCancelled(order));
+      }
+
+      function reservationIdentityUnchanged() {
+        return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['orderId','itemId','productKey']);
+      }
+
+      function operationalReservationStockEvidence(id) {
+        let data = request.resource.data;
+        let before = resource == null ? {} : resource.data;
+        let e = data.get('stockEvidence', {});
+        return (data.get('quantity', 0) == before.get('quantity', 0)
+            && data.get('warehouseId', '') == before.get('warehouseId', ''))
+          || (data.get('quantity', 0) == 0 && before.get('quantity', 0) == 0)
+          || (e.get('movementId', '') != '' && id in e.get('reservationIds', [])
+            // #311: this legacy client witness may no longer prove multi-warehouse
+            // reservation changes. Such writes use the trusted Callable only.
+            && e.get('crossWarehouse', false) != true
+            && operationalReservationMovement(e.movementId, data, before, e));
+      }
+
+      function operationalReservationMovement(id, data, before, evidence) {
+        let path = /databases/$(database)/documents/inventoryMovements/$(id);
+        let movement = getAfter(path).data;
+        return id is string && id.size() > 0 && !exists(path)
+          && movement.get('reservationStockEvidence', {}) == evidence
+          && movement.productKey == data.productKey
+          && movement.get('warehouseId', '') in [data.warehouseId, before.get('warehouseId', data.warehouseId)]
+          && (movement.get('sourceId', '') == data.orderId
+            || (movement.get('sourceType', '') == 'SUPPLY_ORDER'
+              && getAfter(/databases/$(database)/documents/supplyOrders/$(movement.sourceId)).data.get('orderId', '') == data.orderId)
+            || (movement.get('sourceType', '') == 'WAREHOUSE_TRANSFER'
+              && !orderTransferBackendOnly()
+              && getAfter(/databases/$(database)/documents/stockTransfers/$(movement.sourceId)).data.get('orderId', '') == data.orderId));
+      }
+
+      function reservationCreateWriter(id, userRole) {
+        return userRole == 'admin'
+          || (userRole in ['purchaser','warehouse'] && operationalReservationStockEvidence(id))
+          || (userRole in ['sales','engineer'] && validBusinessReservation(id, request.resource.data));
+      }
+
+      function reservationUpdateWriter(id, userRole) {
+        return userRole == 'admin'
+          || (userRole in ['purchaser','warehouse'] && operationalReservationStockEvidence(id))
+          || (userRole in ['sales','engineer'] && businessReservationOperationalUpdate()
+            && validBusinessReservation(id, request.resource.data));
+      }
+
+      function reservationCreateAllowed(id) {
+        let userRole = role();
+        // A client may only create subsequent operational reservation evidence
+        // after the authoritative whole-order transaction has completed.
+        return getAfter(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data
+            .get('inventoryReservationStatus', '') == 'completed'
+          && validReservationSource(id, request.resource.data)
+          && reservationCreateWriter(id, userRole);
+      }
+
+      function reservationUpdateAllowed(id) {
+        let userRole = role();
+        return validReservationSource(id, request.resource.data)
+          && reservationIdentityUnchanged() && legacyReservationLocationShape(resource.data)
+          && reservationUpdateWriter(id, userRole);
+      }
+
+      // Reservation transactions first read their deterministic ID so retries remain idempotent.
+      // A missing document contains no business data; existing documents stay owner-scoped.
+      allow get: if (resource == null ? role() in ['admin','purchaser','warehouse','sales','engineer'] : operationalOrOwnedReader(resource.data));
+      allow list: if operationalOrOwnedReader(resource.data);
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    match /inventoryLots/{id} {
+      // Collection-specific security validators (moved from document root scope).
+      function businessInventoryLotOperationalUpdate(id) {
+        return businessOwner()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'remainingQty', 'updatedAt', 'stockOperationId'
+          ])
+          && request.resource.data.remainingQty >= 0
+          && hasStockOperation('inventoryLots/' + id, 'remainingQty', '');
+      }
+
+      function validInventoryLot(data) {
+        return data.get('productKey', '') is string && data.get('productKey', '').size() > 0
+          && data.get('warehouseId', '') is string && data.get('warehouseId', '').size() > 0
+          && data.get('remainingQty', null) is number && data.remainingQty >= 0
+          && data.get('receivedQty', 0) is number && data.get('receivedQty', 0) >= 0
+          && data.get('qty', 0) is number && data.get('qty', 0) >= 0
+          && !data.keys().hasAny(['unitCost','cost','costPrice']);
+      }
+
+      function inventoryLotIdentityUnchanged() {
+        return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'productKey','productId','warehouseId','sourceType','sourceId','transferId','costLotId','receivedAt'
+        ]);
+      }
+
+      // Operational lot data is readable for fulfillment, but cost must never live here.
+      allow read: if canReceiveInventory() || (businessOwner() && !('unitCost' in resource.data));
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // Actual receipt/lot cost is physically separated from operational lot data.
+    // Client-side fulfillment never requires this collection.
+    match /inventoryLotCosts/{id} {
+      allow read: if canPurchase();
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    function validActiveReturnWarehouse(warehouseId) {
+      return warehouseId is string && warehouseId.size() > 0 && warehouseId.size() <= 128
+        && !warehouseId.matches('custody-.*')
+        && exists(/databases/$(database)/documents/warehouses/$(warehouseId))
+        && get(/databases/$(database)/documents/warehouses/$(warehouseId)).data.get('active', true) == true
+        && get(/databases/$(database)/documents/warehouses/$(warehouseId)).data.get('systemCustody', false) != true
+        && get(/databases/$(database)/documents/warehouses/$(warehouseId)).data.get('warehouseType', '') != 'CUSTODY';
+    }
+
+    match /customerReturnReceipts/{id} {
+      allow read: if canReceiveInventory() || (businessOwner() && owns(resource.data));
+      allow create: if !returnBackendOnly() && canReceiveInventory()
+        && validActiveReturnWarehouse(request.resource.data.warehouseId)
+        && request.resource.data.receivedBy == request.auth.uid
+        && request.resource.data.qty is number && request.resource.data.qty > 0
+        && request.resource.data.quality in ['SALEABLE', 'INSPECTION', 'DAMAGED']
+        && request.resource.data.disposition == (request.resource.data.quality == 'SALEABLE' ? 'STOCK' : 'HOLD')
+        && request.resource.data.record.id == id
+        && request.resource.data.record.qty == request.resource.data.qty
+        && request.resource.data.record.requestId == request.resource.data.requestId
+        && request.resource.data.record.itemId == request.resource.data.itemId
+        && request.resource.data.record.settlement == 'CLOSE'
+        && request.resource.data.record.quality == request.resource.data.quality
+        && request.resource.data.record.warehouseId == request.resource.data.warehouseId
+        && getAfter(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.returnReceiptId == id;
+      allow update: if !returnBackendOnly() && canReceiveInventory() && resource.data.disposition == 'HOLD'
+        && validActiveReturnWarehouse(resource.data.warehouseId)
+        && request.resource.data.disposition == 'STOCK'
+        && request.resource.data.releasedBy == request.auth.uid
+        && request.resource.data.releasedAt != ''
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['disposition', 'releasedAt', 'releasedBy']);
+      allow delete: if !returnBackendOnly() && admin();
+    }
+
+
+    match /receipts/{id} {
+      // Collection-specific security validators (moved from document root scope).
+      function validDirectShipReceipt(id, data) {
+        let supplyPath = /databases/$(database)/documents/supplyOrders/$(data.supplyOrderId);
+        let before = get(supplyPath).data;
+        let after = getAfter(supplyPath).data;
+        let orderPath = /databases/$(database)/documents/orders/$(before.orderId);
+        let orderBefore = get(orderPath).data;
+        let orderAfter = getAfter(orderPath).data;
+        let records = orderAfter.get('deliveryRecords', []);
+        let record = records[orderBefore.get('deliveryRecords', []).size()];
+        let userRole = role();
+        return (userRole == 'admin' || (userRole in ['sales', 'engineer'] && before.ownerUid == request.auth.uid && orderBefore.ownerUid == request.auth.uid))
+          && data.operationId == id && data.receiptId == id && id.size() <= 128
+          && data.fulfillmentType == 'DIRECT_SHIP' && before.fulfillmentType == 'DIRECT_SHIP'
+          && data.warehouseId == '' && !orderIsCancelled(orderBefore)
+          && data.orderId == before.orderId && data.itemId == before.itemId
+          && data.ownerUid == before.ownerUid && data.productId == before.get('productId', '')
+          && data.qty is number && data.qty > 0 && data.qty <= before.qty - before.get('receivedQty', 0)
+          && after.receivedQty == before.get('receivedQty', 0) + data.qty
+          && data.cumulativeReceivedQty == after.receivedQty
+          && records.size() == orderBefore.get('deliveryRecords', []).size() + 1
+          && record.sourceType == 'DIRECT_SHIP_RECEIPT' && record.sourceId == data.supplyOrderId
+          && record.receiptId == id && record.qty == data.qty;
+      }
+
+      // Client receipt writes are permitted only before the separately approved
+      // backend-only cutover. Cloud Functions Admin SDK bypasses Firestore Rules.
+      // The immutable settings/receivingCutover.backendOnly flag makes stale
+      // browser receipt transactions fail atomically after the cutover.
+      function receivingBackendOnly() {
+        let gate = /databases/$(database)/documents/settings/receivingCutover;
+        return exists(gate) && get(gate).data.get('backendOnly', false) == true;
+      }
+
+      allow get: if canReceiveInventory()
+        || (businessOwner() && (resource == null || owns(resource.data)));
+      allow list: if canReceiveInventory()
+        || (businessOwner() && owns(resource.data));
+      allow create: if !receivingBackendOnly()
+        && (request.resource.data.get('fulfillmentType', '') == 'DIRECT_SHIP'
+        ? validDirectShipReceipt(id, request.resource.data) : canReceiveInventory())
+        && !('unitCost' in request.resource.data)
+        && !('purchaseNetAmount' in request.resource.data);
+      // Receipt facts remain immutable. Receiving roles may only advance the
+      // post-receipt shortage-allocation checkpoint used for resumable/idempotent retries.
+      allow update: if !receivingBackendOnly() && canReceiveInventory()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'autoAllocatedQty', 'allocationCompleted', 'allocationUpdatedAt'
+        ])
+        && request.resource.data.get('autoAllocatedQty', 0) >= resource.data.get('autoAllocatedQty', 0)
+        && request.resource.data.get('autoAllocatedQty', 0) <= resource.data.get('autoAllocationQty', 0);
+      allow delete: if admin();
+    }
+
+
+    // 外倉出貨通知：資料與訂單分離；下載 PDF 不寫入狀態。
+    // 只有實際確認通知時建立 NOTIFIED；SHIPPED 需與訂單/庫存交易同時提交。
+
+
+    // Purchaser records completion of the company's existing shipping paperwork.
+    // Every legacy dispatch transaction creates this receipt in the same atomic
+    // commit as the order update, so rejecting it also rolls back that order.
+    match /dispatchRecords/{id} {
+      // Collection-specific security validators (moved from document root scope).
+      // Stale browsers must not create a second dispatch writer after the
+      // separately approved backend-only cutover. Backend Admin SDK is unaffected.
+      function dispatchBackendOnly() {
+        let gate = /databases/$(database)/documents/settings/dispatchCutover;
+        return exists(gate) && get(gate).data.get('backendOnly', false) == true;
+      }
+
+      allow read: if canReceiveInventory()
+        || (businessOwner() && owns(resource.data));
+      allow create: if !dispatchBackendOnly() && canPurchase();
+      allow update: if false;
+      // Cutover also preserves already-committed operation identities:
+      // a cached admin client must not erase a proof and allow its ID to be reused.
+      allow delete: if !dispatchBackendOnly() && admin();
+    }
+
+    // Physical delivery is recorded by the responsible business owner.
+    match /deliveries/{id} {
+      allow read: if canReceiveInventory()
+        || (businessOwner() && owns(resource.data));
+      allow create: if !deliveryBackendOnly() && (admin()
+        || (businessOwner() && owns(request.resource.data)));
+      allow update: if false;
+      allow delete: if !deliveryBackendOnly() && admin();
+    }
+
+
+    // Immutable stock ledger.
+    match /inventoryMovements/{id} {
+      // Collection-specific security validators (moved from document root scope).
+      // Reserved totals include every reservation of this product changed by the
+      // operation, including a move between warehouses. Unchanged siblings add zero.
+      function operationalReservationDeltaAt(id, productKey, warehouseId) {
+        let path = /databases/$(database)/documents/inventoryReservations/$(id);
+        let previous = get(path);
+        let before = previous == null ? {} : previous.data;
+        let after = getAfter(path).data;
+        let oldQty = before.get('quantity', 0);
+        let qty = after.get('quantity', 0);
+        // The company proof runs first and validates every product once. Local
+        // sums reuse those same cached snapshots without repeating identity checks.
+        return {
+          'valid': warehouseId != '' || (after.productKey == productKey && before.get('productKey', productKey) == productKey),
+          'quantity': warehouseId == '' ? qty - oldQty
+            : (after.get('warehouseId', '') == warehouseId ? qty : 0)
+              - (before.get('warehouseId', '') == warehouseId ? oldQty : 0)
+        };
+      }
+
+      // Invalid evidence stays explicit instead of mixing number/null or using a sentinel.
+      function combinedReservationDelta(a, b, c, d, e) {
+        return {'valid': a.valid && b.valid && c.valid && d.valid && e.valid,
+          'quantity': a.quantity + b.quantity + c.quantity + d.quantity + e.quantity};
+      }
+
+      function operationalStockDelta(e, productKey, warehouseId) {
+        let ids = e.reservationIds;
+        return combinedReservationDelta(operationalReservationDeltaAt(ids[0], productKey, warehouseId),
+          ids.size() > 1 ? operationalReservationDeltaAt(ids[1], productKey, warehouseId) : {'valid': true, 'quantity': 0},
+          ids.size() > 2 ? operationalReservationDeltaAt(ids[2], productKey, warehouseId) : {'valid': true, 'quantity': 0},
+          ids.size() > 3 ? operationalReservationDeltaAt(ids[3], productKey, warehouseId) : {'valid': true, 'quantity': 0},
+          ids.size() > 4 ? operationalReservationDeltaAt(ids[4], productKey, warehouseId) : {'valid': true, 'quantity': 0});
+      }
+
+      function operationalReservedStockMatches(path, delta, productKey, warehouseId) {
+        let previous = get(path);
+        let before = previous == null ? {} : previous.data;
+        let after = getAfter(path).data;
+        return delta.valid && after.get('productKey', after.get('productId', '')) == productKey
+          && (warehouseId == '' || after.get('warehouseId', '') == warehouseId)
+          && after.get('reserved', 0) - before.get('reserved', 0) == delta.quantity;
+      }
+
+      function sameWarehouseReservationDeltaAt(id, productKey, warehouseId) {
+        let path = /databases/$(database)/documents/inventoryReservations/$(id);
+        let previous = get(path);
+        let before = previous == null ? {} : previous.data;
+        let after = getAfter(path).data;
+        let oldQty = before.get('quantity', 0);
+        let qty = after.get('quantity', 0);
+        return {
+          'valid': (qty == 0 && oldQty == 0) || (after.productKey == productKey && after.warehouseId == warehouseId
+            && (oldQty == 0 || before.get('warehouseId', warehouseId) == warehouseId)),
+          'quantity': qty - oldQty
+        };
+      }
+
+      function sameWarehouseReservationTotal(ids, productKey, warehouseId) {
+        return combinedReservationDelta(sameWarehouseReservationDeltaAt(ids[0], productKey, warehouseId),
+          ids.size() > 1 ? sameWarehouseReservationDeltaAt(ids[1], productKey, warehouseId) : {'valid': true, 'quantity': 0},
+          ids.size() > 2 ? sameWarehouseReservationDeltaAt(ids[2], productKey, warehouseId) : {'valid': true, 'quantity': 0},
+          ids.size() > 3 ? sameWarehouseReservationDeltaAt(ids[3], productKey, warehouseId) : {'valid': true, 'quantity': 0},
+          ids.size() > 4 ? sameWarehouseReservationDeltaAt(ids[4], productKey, warehouseId) : {'valid': true, 'quantity': 0});
+      }
+
+      function sameWarehouseReservationStocks(e, productKey, warehouseId) {
+        let delta = sameWarehouseReservationTotal(e.reservationIds, productKey, warehouseId);
+        let invPath = /databases/$(database)/documents/inventory/$(e.inventoryId);
+        let whPath = /databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId);
+        let beforeInv = exists(invPath) ? get(invPath).data : {};
+        let beforeWh = exists(whPath) ? get(whPath).data : {};
+        let afterInv = getAfter(invPath).data;
+        let afterWh = getAfter(whPath).data;
+        return delta.valid && afterInv.get('productKey', afterInv.get('productId', '')) == productKey
+          && afterWh.productKey == productKey && afterWh.warehouseId == warehouseId
+          && afterInv.reserved - beforeInv.get('reserved', 0) == delta.quantity
+          && afterWh.reserved - beforeWh.get('reserved', 0) == delta.quantity;
+      }
+
+      // Only one fresh warehouse movement evaluates the full company delta.
+      // All other warehouse movements must link that validated primary movement.
+      function linkedCompanyReservationProof(e, productKey, warehouseId) {
+        let path = /databases/$(database)/documents/inventoryMovements/$(e.companyMovementId);
+        let primary = getAfter(path).data;
+        let proof = primary.get('reservationStockEvidence', {});
+        return !exists(path)
+          && primary.get('productKey', '') == productKey
+          && primary.get('sourceId', '') == request.resource.data.get('sourceId', '')
+          && primary.get('warehouseId', '') != warehouseId
+          && proof.get('crossWarehouse', false) == true
+          && proof.get('movementId', '') == e.companyMovementId
+          && proof.get('companyMovementId', '') == e.companyMovementId
+          && proof.get('inventoryId', '') == e.inventoryId
+          && proof.get('reservationIds', []).size() == e.reservationIds.size()
+          && proof.get('reservationIds', []).hasAll(e.reservationIds);
+      }
+
+      // Evaluate each primary reservation snapshot once for both stock totals.
+      // A local contribution must keep its warehouse; each changed reservation's
+      // own movement witness also requires membership in this local ID set.
+      function primaryReservationDeltaAt(id, productKey, warehouseId, localIds) {
+        let path = /databases/$(database)/documents/inventoryReservations/$(id);
+        let previous = get(path);
+        let before = previous == null ? {} : previous.data;
+        let after = getAfter(path).data;
+        let oldQty = before.get('quantity', 0);
+        let qty = after.get('quantity', 0);
+        let local = id in localIds;
+        let delta = qty - oldQty;
+        return {
+          'valid': after.productKey == productKey && before.get('productKey', productKey) == productKey
+            && (!local || (qty == 0 && oldQty == 0) || (after.warehouseId == warehouseId
+              && (oldQty == 0 || before.get('warehouseId', warehouseId) == warehouseId))),
+          'company': delta, 'warehouse': local ? delta : 0
+        };
+      }
+
+      function combinedPrimaryReservationDelta(a, b, c, d, e) {
+        return {'valid': a.valid && b.valid && c.valid && d.valid && e.valid,
+          'company': a.company + b.company + c.company + d.company + e.company,
+          'warehouse': a.warehouse + b.warehouse + c.warehouse + d.warehouse + e.warehouse};
+      }
+
+      function primaryReservationStocks(e, productKey, warehouseId) {
+        let ids = e.reservationIds;
+        let localIds = e.warehouseReservationIds;
+        let zero = {'valid': true, 'company': 0, 'warehouse': 0};
+        let delta = combinedPrimaryReservationDelta(
+          primaryReservationDeltaAt(ids[0], productKey, warehouseId, localIds),
+          ids.size() > 1 ? primaryReservationDeltaAt(ids[1], productKey, warehouseId, localIds) : zero,
+          ids.size() > 2 ? primaryReservationDeltaAt(ids[2], productKey, warehouseId, localIds) : zero,
+          ids.size() > 3 ? primaryReservationDeltaAt(ids[3], productKey, warehouseId, localIds) : zero,
+          ids.size() > 4 ? primaryReservationDeltaAt(ids[4], productKey, warehouseId, localIds) : zero);
+        return operationalReservedStockMatches(/databases/$(database)/documents/inventory/$(e.inventoryId),
+            {'valid': delta.valid, 'quantity': delta.company}, productKey, '')
+          && operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId),
+            {'valid': delta.valid, 'quantity': delta.warehouse}, productKey, warehouseId);
+      }
+
+      function crossWarehouseReservationStocks(e, productKey, warehouseId) {
+        return e.get('companyMovementId', '') is string && e.get('companyMovementId', '') != ''
+          && e.warehouseReservationIds is list && e.warehouseReservationIds.size() > 0
+          && e.warehouseReservationIds.size() <= e.reservationIds.size()
+          && e.warehouseReservationIds.toSet().size() == e.warehouseReservationIds.size()
+          && e.reservationIds.hasAll(e.warehouseReservationIds)
+          && (e.companyMovementId == e.movementId
+            ? primaryReservationStocks(e, productKey, warehouseId)
+            : linkedCompanyReservationProof(e, productKey, warehouseId)
+              && operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId),
+                sameWarehouseReservationTotal(e.warehouseReservationIds, productKey, warehouseId), productKey, warehouseId));
+      }
+
+      // Validate the group once on its immutable movement rather than repeating
+      // the five-reservation sums on every reservation in the batch.
+      function validOperationalMovementEvidence(id) {
+        let e = request.resource.data.reservationStockEvidence;
+        let path = /databases/$(database)/documents/inventoryReservations/$(e.reservationIds[0]);
+        let data = getAfter(path).data;
+        let previous = get(path);
+        let before = previous == null ? {} : previous.data;
+        return e.keys().hasAll(['inventoryId','warehouseStockId','previousWarehouseStockId','reservationIds','movementId'])
+          && e.movementId == id && e.inventoryId is string && e.inventoryId.size() > 0
+          && e.warehouseStockId is string && e.warehouseStockId.size() > 0
+          && e.previousWarehouseStockId is string && e.previousWarehouseStockId.size() > 0
+          && e.reservationIds is list && e.reservationIds.size() > 0 && e.reservationIds.size() <= 5
+          && e.reservationIds.toSet().size() == e.reservationIds.size()
+          && e.get('crossWarehouse', false) == false
+          && request.resource.data.productKey == data.productKey
+          && (e.get('crossWarehouse', false)
+            ? crossWarehouseReservationStocks(e, data.productKey, data.warehouseId)
+            : (before.get('quantity', 0) == 0 || before.get('warehouseId', data.warehouseId) == data.warehouseId)
+              ? sameWarehouseReservationStocks(e, data.productKey, data.warehouseId)
+              : operationalReservedStockMatches(/databases/$(database)/documents/inventory/$(e.inventoryId), operationalStockDelta(e, data.productKey, ''), data.productKey, '')
+                && operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.warehouseStockId), operationalStockDelta(e, data.productKey, data.warehouseId), data.productKey, data.warehouseId)
+                && ((request.resource.data.get('sourceType', '') == 'WAREHOUSE_TRANSFER' && operationalTransferReservationArrival(e, data, before))
+                  || operationalReservedStockMatches(/databases/$(database)/documents/warehouseStocks/$(e.previousWarehouseStockId), operationalStockDelta(e, data.productKey, before.warehouseId), data.productKey, before.warehouseId)));
+      }
+
+      function operationalTransferReservationArrival(e, data, before) {
+        let movement = request.resource.data;
+        let path = /databases/$(database)/documents/stockTransfers/$(movement.get('sourceId', 'unused'));
+        let oldTransfer = get(path).data;
+        let transfer = getAfter(path).data;
+        let stockPath = /databases/$(database)/documents/warehouseStocks/$(e.previousWarehouseStockId);
+        return !orderTransferBackendOnly() && movement.get('sourceType', '') == 'WAREHOUSE_TRANSFER'
+          && e.reservationIds.size() == 1 && exists(path) && oldTransfer.status == 'IN_TRANSIT'
+          && transfer.status == 'RECEIVED' && transfer.receivedByUid == request.auth.uid
+          && transfer.orderId == data.orderId && transfer.itemId == data.itemId
+          && transfer.productKey == data.productKey && transfer.reservedQty == data.quantity
+          && before.quantity == data.quantity && transfer.fromWarehouseId == before.warehouseId
+          && transfer.toWarehouseId == data.warehouseId && transfer.fromStockId == e.previousWarehouseStockId
+          && transfer.toStockId == e.warehouseStockId && transfer.inventoryId == e.inventoryId
+          && getAfter(stockPath).data.reserved == get(stockPath).data.reserved;
+      }
+
+      function inventoryMovementWriter(id) {
+        let userRole = role();
+        return userRole in ['admin','purchaser','warehouse','sales','engineer']
+          && (userRole in ['admin','purchaser','warehouse'] || owns(request.resource.data))
+          && (!('reservationStockEvidence' in request.resource.data)
+            || (userRole in ['admin','purchaser','warehouse'] && validOperationalMovementEvidence(id)));
+      }
+
+      allow read: if canReceiveInventory()
+        || (businessOwner() && owns(resource.data));
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // Immutable operational audit trail.
+    match /stockOperations/{id} {
+      // Collection-specific security validators (moved from document root scope).
+      // Client-side delivery/reservation transactions need narrowly-scoped stock writes.
+      // Business owners cannot alter product identity, cost, incoming quantities or master data.
+      // A commercial stock write must carry a fresh witness linked to its own order,
+      // the reservation changed in this transaction, and an immutable stock movement.
+      function reservationDelta(op, index) {
+        return index < op.reservationIds.size() ? reservationDeltaAt(op, op.reservationIds[index]) : 0;
+      }
+
+      function reservationDeltaAt(op, id) {
+        let path = /databases/$(database)/documents/inventoryReservations/$(id);
+        let before = exists(path) ? get(path).data : {};
+        let after = getAfter(path).data;
+        return after.get('orderId', '') == op.orderId
+          && after.get('productKey', '') == op.productKey
+          && (op.warehouseId == '' || after.get('warehouseId', '') == op.warehouseId)
+          ? after.get('quantity', 0) - before.get('quantity', 0) : 999999999;
+      }
+
+      function validStockOperation(op) {
+        let orderPath = /databases/$(database)/documents/orders/$(op.orderId);
+        let before = get(orderPath).data;
+        let after = getAfter(orderPath).data;
+        let deliveryDelta = after.get('returnedQty', 0) - before.get('returnedQty', 0)
+          - after.get('deliveredQty', 0) + before.get('deliveredQty', 0);
+        let movement = getAfter(/databases/$(database)/documents/inventoryMovements/$(op.sourceMovementId)).data;
+        let firstDelta = reservationDelta(op, 0);
+        return businessOwner() && op.actorUid == request.auth.uid && owns(before)
+          && before.get('ownerUid', '') == after.get('ownerUid', '') && before.get('salesCode', '') == after.get('salesCode', '')
+          && op.reservationIds is list && op.reservationIds.size() > 0 && op.reservationIds.size() <= 5
+          && op.reservationIds.toSet().size() == op.reservationIds.size()
+          && firstDelta != 999999999
+          && movement.get('sourceId', '') == op.orderId && movement.get('sourceType', '') == 'order'
+          && movement.get('productKey', '') == op.productKey
+          && !exists(/databases/$(database)/documents/inventoryMovements/$(op.sourceMovementId))
+          && op.qtyDelta is number && op.reservedDelta is number
+          && (op.targetPath.matches('inventoryLots/.*')
+            ? ((op.qtyDelta > 0 && deliveryDelta >= op.qtyDelta)
+              || (op.qtyDelta < 0 && deliveryDelta <= op.qtyDelta)) && op.reservedDelta == 0
+            : op.qtyDelta == deliveryDelta
+              && (op.reservationIds.size() == 1 ? op.reservedDelta == firstDelta
+                : op.reservedDelta == firstDelta + reservationDelta(op, 1)
+                  + reservationDelta(op, 2) + reservationDelta(op, 3) + reservationDelta(op, 4)));
+      }
+
+      allow get: if active() && (resource == null || canReceiveInventory() || resource.data.actorUid == request.auth.uid);
+      allow list: if canReceiveInventory() || (active() && resource.data.actorUid == request.auth.uid);
+      allow create: if false;
+      allow update, delete: if false;
+    }
+
+    match /auditLogs/{id} {
+      // Collection-specific security validators (moved from document root scope).
+      // Inventory planning receipt: prototype schema scoped to this new action.
+      // Settings and receipt must describe the same atomic operation; no stock change.
+      function validInventoryPlanningAudit(data) {
+        let before = get(/databases/$(database)/documents/inventory/$(data.inventoryId)).data;
+        let after = getAfter(/databases/$(database)/documents/inventory/$(data.inventoryId)).data;
+        return role() in ['admin','purchaser']
+          && data.keys().hasAll(['action','inventoryId','actorUid','actorRole','stockPolicy','safetyStock','previousStockPolicy','previousSafetyStock','changed','createdAt'])
+          && data.keys().hasOnly(['action','inventoryId','actorUid','actorRole','stockPolicy','safetyStock','previousStockPolicy','previousSafetyStock','changed','createdAt'])
+          && data.inventoryId is string && data.inventoryId.size() > 0 && data.inventoryId.size() <= 128
+          && data.inventoryId.matches('^[^/]+$')
+          && data.actorUid == request.auth.uid
+          && data.actorRole in ['admin','purchaser'] && (admin() || data.actorRole == 'purchaser')
+          && data.stockPolicy in ['NO_STOCK','SAFETY_STOCK','ORDER_ONLY']
+          && data.safetyStock is number && data.safetyStock >= 0 && data.safetyStock <= 9007199254740991
+          && (data.stockPolicy == 'SAFETY_STOCK' ? data.safetyStock > 0 : data.safetyStock == 0)
+          && data.createdAt is string && data.createdAt.size() > 0 && data.createdAt.size() <= 32
+          && data.previousStockPolicy == before.get('stockPolicy', null)
+          && data.previousSafetyStock == before.get('safetyStock', null)
+          && (data.previousStockPolicy == null || (data.previousStockPolicy is string && data.previousStockPolicy.size() <= 32))
+          && (data.previousSafetyStock == null || data.previousSafetyStock is number)
+          && data.changed is bool && data.changed == (before.get('stockPolicy', null) != data.stockPolicy || before.get('safetyStock', null) != data.safetyStock)
+          && after.stockPolicy == data.stockPolicy && after.safetyStock == data.safetyStock
+          && after.diff(before).affectedKeys().hasOnly(['stockPolicy','safetyStock','updatedAt'])
+          && (!data.changed || after.updatedAt == data.createdAt);
+      }
+
+      // A transaction may test a new operation ID before creating its receipt.
+      // Missing documents carry no audit data; existing records remain owner-scoped.
+      allow get: if active() && (resource == null
+        ? role() in ['admin','purchaser']
+        : admin() || resource.data.actorUid == request.auth.uid);
+      allow list: if admin() || (active() && resource.data.actorUid == request.auth.uid);
+      allow create: if active() && request.resource.data.actorUid == request.auth.uid
+        && (request.resource.data.get('action', '') != 'inventory_policy_set' || validInventoryPlanningAudit(request.resource.data));
+      allow update: if false;
+      allow delete: if admin();
+    }
+
+    match /equipment/{id} {
+      // Collection-specific security validators (moved from document root scope).
+      function canManageEquipment() {
+        return role() in ['admin','engineer'];
+      }
+
+      allow read: if canManageEquipment() || (businessOwner() && owns(resource.data));
+      allow create: if canManageEquipment()
+        || (sales() && owns(request.resource.data));
+      allow update: if canManageEquipment()
+        || (sales() && owns(resource.data) && owns(request.resource.data));
+      allow delete: if false;
+    }
+
+    // Callable-only idempotency receipt; client SDK cannot create or delete
+    // the server's transaction checkpoint even if it is signed in.
+    match /reservationOperationReceipts/{id} {
+      allow read, write: if false;
+    }
+
+    // Service work events are written only by the gated Admin SDK Service.
+    // No client access until per-role reads and Service UI are accepted.
+    match /serviceCases/{id} {
+      allow read, write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
