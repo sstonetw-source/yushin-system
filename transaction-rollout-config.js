@@ -24,6 +24,9 @@
     // an unavailable backend must visibly refuse this stock-changing action.
     scope.YUSHIN_PRODUCTION_CANCELLED_PURCHASE_BACKEND = false;
     scope.YUSHIN_PRODUCTION_CANCELLED_PURCHASE_LEGACY_BLOCKED = orderReservationProductionSite;
+    // #536: route exists only as a deployment candidate. B and D are not approved.
+    scope.YUSHIN_PRODUCTION_SUPPLY_CANCELLATION_BACKEND = false;
+    scope.YUSHIN_PRODUCTION_SUPPLY_CANCELLATION_LEGACY_BLOCKED = orderReservationProductionSite;
     // Main-warehouse stock return has separate request/dispatch/receipt
     // approvals. No new backend route is activated by this release; formerly
     // available browser transactions are blocked until the backend cutover.

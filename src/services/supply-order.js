@@ -176,11 +176,14 @@ async function registerFormalPurchaseIncomingBackend(poId,poRecord,{actorUid,act
 }
 
 async function cancelOutstandingSupplyRecord(poId, supplyId, reason, {actorUid=currentUser?.uid,actorRole=currentUserRole,onStockCommitted=null,onDemandChanged=null}={}) {
-    // Legacy SDK writes incoming inventory and related supply/order documents.
-    // Production has no equivalent approved Callable yet. Reject before reads
-    // or writes; a failed backend cutover must never revive this browser path.
-    if(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='production')
-        throw Error('正式取消供應商未到貨數量尚無可信任後端，已阻止瀏覽器直接修改在途庫存。');
+    // The production route is exclusively Callable and remains disabled until
+    // independent B/D approval. An unavailable backend never revives SDK writes.
+    if(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='production'){
+        if(typeof productionTransactionBackendEnabled!=='function'
+            ||!productionTransactionBackendEnabled('SUPPLY_CANCELLATION'))
+            throw Error('正式取消供應商未到貨數量尚無已核准的可信任後端，已阻止瀏覽器直接修改在途庫存。');
+        return commitSupplyCancellationBackend(poId,supplyId,reason,false,{actorUid,actorRole,onStockCommitted,onDemandChanged});
+    }
     const assertActor=()=>{
         if (!actorUid||currentUser?.uid!==actorUid||currentUserRole!==actorRole) throw new Error('登入身份已變更，請以原帳號重試取消。');
         if (!canCreatePurchaseOrderCapability()) throw new Error('目前無採購取消權限。');
@@ -357,8 +360,12 @@ async function cancelOutstandingSupplyRecord(poId, supplyId, reason, {actorUid=c
 async function stopPurchaseOrderOutstanding(poId,reason,{actorUid=currentUser?.uid,actorRole=currentUserRole,onStockCommitted=null,onDemandChanged=null}={}) {
     // The whole-PO flow delegates to the same legacy supply writer. Block at
     // entry so a rejected line cannot leave a partially stopped purchase order.
-    if(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='production')
-        throw Error('正式採購單取消尚無可信任後端，已阻止瀏覽器直接修改在途庫存。');
+    if(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='production'){
+        if(typeof productionTransactionBackendEnabled!=='function'
+            ||!productionTransactionBackendEnabled('SUPPLY_CANCELLATION'))
+            throw Error('正式採購單取消尚無已核准的可信任後端，已阻止瀏覽器直接修改在途庫存。');
+        return commitSupplyCancellationBackend(poId,'',reason,true,{actorUid,actorRole,onStockCommitted,onDemandChanged});
+    }
     const assertActor=()=>{
         if(!actorUid||currentUser?.uid!==actorUid||currentUserRole!==actorRole)throw new Error('登入身份已變更，請以原帳號重試取消。');
         if(!canCreatePurchaseOrderCapability())throw new Error('目前無採購取消權限。');

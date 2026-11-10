@@ -8,7 +8,7 @@ function productionTransactionBackendEnabled(kind){
  if(!['DISPATCH','SHIPMENT','ORDER_LIFECYCLE','DELIVERY_CONFIRMATION','DELIVERY_REVERSAL','CUSTOMER_RETURN','CUSTOMER_RETURN_REQUEST',
   'ORDER_TRANSFER_DISPATCH','ORDER_TRANSFER_HANDOFF','ORDER_TRANSFER_RECEIVE','CANCELLED_PURCHASE',
   'MAIN_TRANSFER_REQUEST','MAIN_TRANSFER_DISPATCH','MAIN_TRANSFER_RECEIPT','MAIN_TRANSFER_ALLOCATION',
-  'MANUAL_INVENTORY','INVENTORY_COUNT'].includes(kind)||!productionTransactionBackendRequired(kind)
+  'MANUAL_INVENTORY','INVENTORY_COUNT','SUPPLY_CANCELLATION'].includes(kind)||!productionTransactionBackendRequired(kind)
   ||globalThis['YUSHIN_PRODUCTION_'+kind+'_BACKEND']!==true
   ||globalThis['YUSHIN_PRODUCTION_'+kind+'_LEGACY_BLOCKED']!==true)return false;
  const path=String(globalThis.location?.pathname||'');

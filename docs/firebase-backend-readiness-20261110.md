@@ -42,7 +42,7 @@
 | P1 認證 | `completeRequiredPasswordChange` | 管理員強制改密碼的可信任後端候選；需單獨驗證 Auth 更新後 Firestore 失敗／重試語意，且不記錄密碼。 |
 | 正式 PO 在途 | `registerV2FormalPurchaseIncoming` | 既有正式前端走 `commitV2FormalPurchase` 的 `register-incoming` 動作；確認其他呼叫者與正式需求後決定是否部署，不能按差額直接新增。 |
 | 取消採購轉備庫 | `keepV2CancelledPurchaseStock` | 獨立功能旗標／來源驗證；與 #536 的「供應商取消未到貨」不同，不能互相替代。 |
-| P1 供應商取消 | `cancelV2OutstandingSupply`, `stopV2PurchaseOrderOutstanding` | PR #538 已提供單供應、整 PO 原子取消後端與 Emulator 證據；兩者預設由 `ENABLE_PRODUCTION_SUPPLY_CANCELLATION_BACKEND` 關閉。正式 B 部署、D 前端切換、舊版 Rules 拒絕及角色 UAT 均未完成；#536 應保持 Open。 |
+| P1 供應商取消 | `cancelV2OutstandingSupply`, `stopV2PurchaseOrderOutstanding` | PR #538 已提供單供應、整 PO 原子取消後端與 Emulator 證據；兩者預設由 `ENABLE_PRODUCTION_SUPPLY_CANCELLATION_BACKEND` 關閉。後續前端受控 Callable 候選使用 `YUSHIN_PRODUCTION_SUPPLY_CANCELLATION_BACKEND=false`，並保存原操作 ID 以供回覆遺失續傳；沒有核准 B 或 D 時仍安全拒絕，絕不回退 browser writer。正式 B 部署、D 前端切換、舊版 Rules 拒絕及角色 UAT 均未完成；#536 應保持 Open。 |
 | 主倉需求／實貨調撥 | `createV2MainTransferRequest`, `cancelV2MainTransferRequest`, `dispatchV2MainTransfer`, `receiveV2MainTransfer`, `resumeV2MainTransferAllocation`, `listV2MainTransferAllocations` | 需依主倉／分倉物流完整流程、相關獨立 gate 與實際角色驗收決定發布順序。 |
 | V3 保管（Custody） | `setV3CustodyOrderLifecycle`, `shipV3CustodyItem`, `confirmV3CustodyDelivery`, `receiveV3CustodyReturn` | 目前原始碼限制 `demo-yushin` Emulator；沒有正式專案啟用路徑，不納入直接部署。 |
 
