@@ -159,6 +159,13 @@ exports.withdrawV2CustomerReturnRequest=customerReturnRequests.withdrawV2Custome
 const {createCancelledPurchaseCallable}=require('./cancelled-purchase-service');
 exports.keepV2CancelledPurchaseStock=createCancelledPurchaseCallable({onCall,HttpsError,getDatabase:getFirestore});
 
+// Supplier outstanding cancellation (not customer cancellation or keep-stock).
+// Both endpoints fail closed until a separate backend and entry-cutover approval.
+const {createSupplyCancellationCallables}=require('./supply-cancellation-service');
+const supplyCancellationCallables=createSupplyCancellationCallables({onCall,HttpsError,getDatabase:getFirestore});
+exports.cancelV2OutstandingSupply=supplyCancellationCallables.cancelV2OutstandingSupply;
+exports.stopV2PurchaseOrderOutstanding=supplyCancellationCallables.stopV2PurchaseOrderOutstanding;
+
 const {createMainTransferRequestCallables}=require('./main-transfer-request-service');
 const mainTransferRequests=createMainTransferRequestCallables({onCall,HttpsError,getDatabase:getFirestore});
 exports.createV2MainTransferRequest=mainTransferRequests.createV2MainTransferRequest;
