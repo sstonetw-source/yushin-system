@@ -1,5 +1,3 @@
-// BACKEND-ONLY STOCK WRITER CUTOVER: requires separate production authorization.
-// Generated from firestore.rules; never use as an implicit fallback.
 // Cutover model: settings/orderTransferCutover.backendOnly (bool, optional,
 // irreversible once true) retires client writes for stockTransfers with a
 // nonempty orderId and their order/reservation witnesses; free transfers stay unchanged.
@@ -1864,8 +1862,28 @@ service cloud.firestore {
       }
 
       allow read: if canReceiveInventory();
-      allow create: if false;
-      allow update: if false;
+      allow create: if (canPurchase()) && validMainTransferRequest(request.resource.data)
+        && request.resource.data.id == id && request.resource.data.status == 'PENDING'
+        && request.resource.data.createdByUid == request.auth.uid
+        && !request.resource.data.keys().hasAny(['transferId','shippedAt','shippedByUid','cancelledAt','cancelledByUid'])
+        && get(/databases/$(database)/documents/warehouses/$(request.resource.data.toWarehouseId)).data.get('isDefault', false)
+        && get(/databases/$(database)/documents/warehouses/$(request.resource.data.toWarehouseId)).data.get('active', true)
+        && !get(/databases/$(database)/documents/warehouses/$(request.resource.data.toWarehouseId)).data.get('systemCustody', false)
+        && get(/databases/$(database)/documents/warehouses/$(request.resource.data.fromWarehouseId)).data.get('active', true)
+        && !get(/databases/$(database)/documents/warehouses/$(request.resource.data.fromWarehouseId)).data.get('systemCustody', false)
+        && mainTransferHold(request.resource.data, 1);
+      allow update: if validMainTransferRequest(request.resource.data) && resource.data.status == 'PENDING'
+        && ((canReceiveInventory() && request.resource.data.status == 'SHIPPED'
+          && request.resource.data.shippedByUid == request.auth.uid
+          && request.resource.data.shippedAt is string && request.resource.data.shippedAt.size() <= 40
+          && request.resource.data.transferId is string && request.resource.data.transferId.size() <= 128
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','transferId','shippedAt','shippedByUid'])
+          && mainTransferDispatch(request.resource.data))
+        || ((canPurchase()) && request.resource.data.status == 'CANCELLED'
+          && request.resource.data.cancelledByUid == request.auth.uid
+          && request.resource.data.cancelledAt is string && request.resource.data.cancelledAt.size() <= 40
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','cancelledAt','cancelledByUid'])
+          && mainTransferHold(request.resource.data, -1)));
       allow delete: if false;
     }
     match /stockTransfers/{id} {
@@ -1932,8 +1950,35 @@ service cloud.firestore {
       }
 
       allow get, list: if canReceiveInventory();
-      allow create: if false;
-      allow update: if false;
+      allow create: if canReceiveInventory()
+        && (request.resource.data.get('orderId', '') == '' || !orderTransferBackendOnly())
+        && request.resource.data.id == id
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.qty is number && request.resource.data.qty > 0
+        && request.resource.data.reservedQty is number && request.resource.data.reservedQty >= 0
+        && request.resource.data.reservedQty <= request.resource.data.qty
+        && request.resource.data.allocations is list && request.resource.data.allocations.size() > 0 && request.resource.data.allocations.size() <= 200
+        && request.resource.data.fromWarehouseId != request.resource.data.toWarehouseId
+        && request.resource.data.kind in ['TRANSFER','HANDOFF']
+        && request.resource.data.status == (request.resource.data.kind == 'HANDOFF' ? 'RECEIVED' : 'IN_TRANSIT')
+        && transferOrderEvidence(request.resource.data) && transferSourceStock(request.resource.data)
+        && transferAggregate(request.resource.data, false)
+        && (request.resource.data.kind != 'HANDOFF' || transferTargetStock(request.resource.data));
+      allow update: if canReceiveInventory()
+        && (resource.data.get('orderId', '') == '' || !orderTransferBackendOnly())
+        && ((resource.data.status == 'IN_TRANSIT'
+        && request.resource.data.status == 'RECEIVED' && request.resource.data.receivedByUid == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','receivedAt','receivedByUid','autoAllocationQty','autoAllocatedQty','allocationCompleted'])
+        && request.resource.data.get('autoAllocationQty', resource.data.qty - resource.data.reservedQty) == (resource.data.get('orderId', '') == '' ? resource.data.qty - resource.data.reservedQty : 0)
+        && request.resource.data.get('autoAllocatedQty', 0) == 0
+        && transferTargetStock(request.resource.data) && transferAggregate(request.resource.data, true)
+        && transferOrderEvidence(request.resource.data))
+        || (resource.data.status == 'RECEIVED' && resource.data.get('orderId', '') == ''
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['autoAllocatedQty','allocationCompleted','allocationUpdatedAt'])
+          && request.resource.data.get('autoAllocatedQty', 0) is number
+          && request.resource.data.get('autoAllocatedQty', 0) >= resource.data.get('autoAllocatedQty', 0)
+          && request.resource.data.get('autoAllocatedQty', 0) <= resource.data.get('autoAllocationQty', 0)
+          && request.resource.data.get('allocationCompleted', false) is bool));
       allow delete: if false;
     }
 
@@ -2016,15 +2061,18 @@ service cloud.firestore {
       // warehouse keeps those fields unchanged while performing physical stock work.
       allow get: if safeStockReader(resource == null ? {} : resource.data);
       allow list: if active() && !('unitCost' in resource.data) && !('cost' in resource.data);
-      allow create: if false;
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'stockPolicy', 'safetyStock', 'updatedAt',
-          'listArchived', 'listArchiveChangedAt',
-          'listArchiveChangedByUid', 'listArchiveAuditId'
-        ])
-        && (inventoryUpdateWriter(id)
+      allow create: if (
+          ((canPurchase()) && validInventoryStockPolicy(request.resource.data))
+          || (warehouse() && warehouseInventoryPlanningDefaults(request.resource.data))
+        )
+        && nonNegativeInventory(request.resource.data)
+        // Administrators can restore archived records from an existing backup.
+        && (!request.resource.data.keys().hasAny(inventoryArchiveKeys())
+          || (admin() && request.resource.data.get('listArchived', false) is bool))
+        && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
+      allow update: if inventoryUpdateWriter(id)
         && validInventoryArchiveChange(id)
-        && !('unitCost' in request.resource.data) && !('cost' in request.resource.data));
+        && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
       allow delete: if false;
     }
 
@@ -2080,10 +2128,15 @@ service cloud.firestore {
 
       allow get: if safeStockReader(resource == null ? {} : resource.data);
       allow list: if safeStockReader(resource.data);
-      allow create: if false;
+      allow create: if canReceiveInventory() && validWarehouseStock(request.resource.data)
+        && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
       // Receiver validation already includes recovery metadata; business updates
       // validate it in their own branch, so neither path evaluates it twice.
-      allow update: if false;
+      allow update: if ((canReceiveInventory() && validWarehouseStock(request.resource.data))
+          || (businessWarehouseStockOperationalUpdate(id) && validStockRecoveryMetadata(request.resource.data)))
+        && warehouseStockIdentityUnchanged()
+        && validStockRecoveryUpdate()
+        && !('unitCost' in request.resource.data) && !('cost' in request.resource.data);
       allow delete: if false;
     }
 
@@ -2222,9 +2275,9 @@ service cloud.firestore {
       // A missing document contains no business data; existing documents stay owner-scoped.
       allow get: if (resource == null ? role() in ['admin','purchaser','warehouse','sales','engineer'] : operationalOrOwnedReader(resource.data));
       allow list: if operationalOrOwnedReader(resource.data);
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
+      allow create: if reservationCreateAllowed(id);
+      allow update: if reservationUpdateAllowed(id);
+      allow delete: if admin();
     }
 
     match /inventoryLots/{id} {
@@ -2255,18 +2308,34 @@ service cloud.firestore {
 
       // Operational lot data is readable for fulfillment, but cost must never live here.
       allow read: if canReceiveInventory() || (businessOwner() && !('unitCost' in resource.data));
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
+      allow create: if canReceiveInventory() && validInventoryLot(request.resource.data);
+      allow update: if (canReceiveInventory() || businessInventoryLotOperationalUpdate(id))
+        && validInventoryLot(request.resource.data) && inventoryLotIdentityUnchanged();
+      allow delete: if admin();
     }
 
     // Actual receipt/lot cost is physically separated from operational lot data.
     // Client-side fulfillment never requires this collection.
     match /inventoryLotCosts/{id} {
       allow read: if canPurchase();
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
+      allow create: if canPurchase() || (warehouse() && (
+        (request.resource.data.get('sourceType', '') == 'SUPPLY_ORDER'
+          && !request.resource.data.keys().hasAny(['unitCost', 'cost', 'costPrice'])
+          && request.resource.data.get('costSourceSupplyId', '') == request.resource.data.get('sourceId', '')
+          && request.resource.data.get('sourceId', '') != ''
+          && getAfter(/databases/$(database)/documents/inventoryLots/$(id)).data.get('sourceId', '') == request.resource.data.sourceId)
+        || (request.resource.data.get('sourceType', '') == 'WAREHOUSE_TRANSFER'
+          && !request.resource.data.keys().hasAny(['unitCost','cost','costPrice'])
+          && request.resource.data.costSourceLotId == getAfter(/databases/$(database)/documents/inventoryLots/$(id)).data.costLotId
+          && request.resource.data.sourceId == getAfter(/databases/$(database)/documents/inventoryLots/$(id)).data.sourceId
+          && getAfter(/databases/$(database)/documents/stockTransfers/$(request.resource.data.sourceId)).data.status == 'RECEIVED')
+        || (request.resource.data.get('sourceType', '') == 'INITIAL_STOCK'
+          && !request.resource.data.keys().hasAny(['unitCost', 'cost', 'costPrice'])
+          && request.resource.data.lotId == id
+          && getAfter(/databases/$(database)/documents/inventoryLots/$(id)).data.get('sourceType', '') == 'INITIAL_STOCK')
+      ));
+      allow update: if canPurchase();
+      allow delete: if admin();
     }
 
     function validActiveReturnWarehouse(warehouseId) {
@@ -2604,9 +2673,12 @@ service cloud.firestore {
 
       allow read: if canReceiveInventory()
         || (businessOwner() && owns(resource.data));
-      allow create: if false;
+      allow create: if inventoryMovementWriter(id)
+        && !('unitCost' in request.resource.data)
+        && !('purchaseNetAmount' in request.resource.data)
+        && !('cogs' in request.resource.data);
       allow update: if false;
-      allow delete: if false;
+      allow delete: if admin();
     }
 
     // Immutable operational audit trail.
@@ -2658,7 +2730,7 @@ service cloud.firestore {
 
       allow get: if active() && (resource == null || canReceiveInventory() || resource.data.actorUid == request.auth.uid);
       allow list: if canReceiveInventory() || (active() && resource.data.actorUid == request.auth.uid);
-      allow create: if false;
+      allow create: if admin() || validStockOperation(request.resource.data);
       allow update, delete: if false;
     }
 
