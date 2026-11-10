@@ -2,6 +2,7 @@
 // Actual Admin SDK / Firestore Emulator transaction tests. Never contact live data.
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const admin=require('firebase-admin');
+const {getFirestore}=require('firebase-admin/firestore');
 const demand=require('../functions/shared/procurement-demand-core');
 const {sanitizeSupply}=require('../functions/shared/stock-permissions');
 const {commitSupplyCancellation}=require('../functions/supply-cancellation-service');
@@ -15,7 +16,7 @@ test.before(()=>{
   'Supply cancellation integration MUST use local Firestore Emulator');
  assert.equal(process.env.GCLOUD_PROJECT||process.env.GCP_PROJECT,project);
  app=admin.initializeApp({projectId:project},'supplier-cancellation-emulator-test');
- db=admin.firestore(app);
+ db=getFirestore(app);
 });
 test.after(async()=>{if(app)await app.delete();});
 const get=path=>db.doc(path).get().then(s=>s.exists?s.data():null);
