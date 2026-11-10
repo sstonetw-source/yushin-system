@@ -73,6 +73,15 @@ test('bounded batch query refuses over 100 sources without partial writes',async
  const f=fixture();for(let n=0;n<101;n++)f.put('inventoryLots/B'+n,{productKey:'P',warehouseId:'A',remainingQty:0});
  const before=f.snapshot();await assert.rejects(f.run(),/100筆/);assert.equal(f.snapshot(),before);
 });
+test('unsupported main-transfer allocation quantity is rejected before dispatch, without partial stock writes',async()=>{
+ for(const qty of [0.5,1001]){
+  const f=fixture(),request=f.docs.get('stockTransferRequests/'+dispatch.requestId);
+  f.put('stockTransferRequests/'+dispatch.requestId,{...request,qty});
+  const before=f.snapshot();
+  await assert.rejects(f.run(),/可續傳分配範圍/);
+  assert.equal(f.snapshot(),before);
+ }
+});
 test('separate gates remain closed for production, missing flags and mixed emulator environments',async()=>{
  assert.equal(physicalProject('DISPATCH',env),'preview-20135');
  assert.equal(physicalProject('RECEIVE',{...env,ENABLE_PREVIEW_MAIN_TRANSFER_RECEIPT:'false'}),'');

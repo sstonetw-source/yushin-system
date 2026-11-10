@@ -46,7 +46,8 @@ test('independent gate and strict input reject production, mixed SDKs and inject
  assert.equal(mainTransferRequestProject(env),'preview-20135');
  for(const patch of [{GCLOUD_PROJECT:'yu-shing-company'},{FUNCTIONS_EMULATOR:'true'},{FIRESTORE_EMULATOR_HOST:'localhost:8080'}])assert.equal(mainTransferRequestProject({...env,...patch}),'');
  for(const patch of [{role:'admin'},{status:'PENDING'},{qty:'3'},{qty:-1},{toWarehouseId:'A'}])assert.throws(()=>normalizeMainTransferRequest('CREATE',{...create,...patch}));
- assert.equal(normalizeMainTransferRequest('CREATE',{...create,qty:0.5}).qty,0.5);
+ for(const qty of [0.5,1000.5,1001])assert.throws(()=>normalizeMainTransferRequest('CREATE',{...create,qty}),/1000/);
+ assert.equal(normalizeMainTransferRequest('CREATE',{...create,qty:1000}).qty,1000);
  class HttpsError extends Error{constructor(code,message){super(message);this.code=code;}}
  let reads=0;const handlers=createMainTransferRequestCallables({onCall:(_,fn)=>fn,HttpsError,env,getDatabase:()=>{reads++;return {projectId:'yu-shing-company'};}});
  for(const h of Object.values(handlers))await assert.rejects(h({data:create}),e=>e.code==='unauthenticated');assert.equal(reads,0);

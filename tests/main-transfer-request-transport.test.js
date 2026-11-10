@@ -56,6 +56,14 @@ test('unknown request cannot be dispatched by the original warehouse writer',asy
  vm.runInContext(fs.readFileSync('src/services/warehouse-transfer.js','utf8'),c);
  await assert.rejects(c.commitWarehouseTransfer({id:'T',requestId:'Q',qty:2}),/先確認原操作/);
 });
+test('unsupported allocation quantities never reach the request callable or freeze a new checkpoint',async()=>{
+ for(const qty of [0.5,1001]){
+  const f=fixture(),c=f.open();
+  await assert.rejects(c.createMainTransferRequest({...f.input,qty}),/來源、主倉或調回數量不正確/);
+  assert.equal(f.calls.length,0);
+  assert.equal(f.storage.size,0);
+ }
+});
 test('Functions SDK loader cannot submit a stale form under a changed account',async()=>{
  const f=fixture(),c=f.open();c.ensureReservationFunctionsCompat=async()=>{c.currentUser={uid:'other'};};
  await assert.rejects(c.createMainTransferRequest(f.input),/載入後端期間/);
