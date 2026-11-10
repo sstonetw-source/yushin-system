@@ -40,6 +40,18 @@ test('manual and initial entries share the same demand and order projection, wit
   assert.equal([...f.docs.keys()].some(k=>k.startsWith('inventory/')),false);
  }
 });
+test('production refuses both manual and initial self-order browser writers before touching supply, demand or orders',async()=>{
+ for(const action of ['manual','initial']){
+  const f=fixture();f.c.APP_ENVIRONMENT='production';
+  const run=action==='manual'
+   ?()=>f.c.commitSelfOrderSupply('O','I',details())
+   :()=>f.c.registerInitialSelfOrderSupply('O','I',details());
+  await assert.rejects(run(),/尚無正式後端.*阻止瀏覽器/);
+  assert.equal(f.writes(),0);
+  assert.equal(f.docs.get('orders/O').items[0].supplyOrderedQty,0);
+  assert.equal([...f.docs.keys()].some(k=>k.startsWith('supplyOrders/')||k.startsWith('procurementDemands/')),false);
+ }
+});
 test('lost manual response and callback retries never create a second commitment for the same intent',async()=>{
  for(const options of [{retry:true},{loseResponse:true}]){
   const f=fixture(options);
