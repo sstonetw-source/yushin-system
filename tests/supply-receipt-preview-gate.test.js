@@ -118,3 +118,14 @@ test('production receipt legacy lock stays fail-closed even when its backend fla
  await assert.rejects(context.receiveSupplyOrderRecord('S',2,'','','op-12345678'),/禁止改用舊交易/);
  assert.equal(legacyWrites,0);
 });
+test('production receipt with both rollout flags absent still refuses browser writes',async()=>{
+ let legacyWrites=0;
+ const context={APP_ENVIRONMENT:'production',location:{origin:'https://sstonetw-source.github.io',hostname:'sstonetw-source.github.io',pathname:'/yushin-system/'},
+  YUSHIN_PRODUCTION_RECEIVING_BACKEND:false,YUSHIN_PRODUCTION_RECEIVING_LEGACY_BLOCKED:false,
+  globalThis:null,runRoleTransaction:()=>{legacyWrites++;throw Error('LEGACY_WRITE');}};
+ context.globalThis=context;vm.createContext(context);
+ vm.runInContext(fs.readFileSync('src/services/receiving-transport.js','utf8'),context);
+ vm.runInContext(fs.readFileSync('src/services/receiving.js','utf8'),context);
+ await assert.rejects(context.receiveSupplyOrderRecord('S',2,'','','op-12345678'),/禁止改用舊交易/);
+ assert.equal(legacyWrites,0);
+});

@@ -1,8 +1,8 @@
-// Default-off production handoff. Server flags remain independently required.
+// Every production transaction must use its authorized backend or fail closed.
+// Client flags select whether the backend is enabled; they must never grant
+// permission to fall back to an old Firestore transaction when both are off.
 function productionTransactionBackendRequired(kind){
- return typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='production'
-  &&(globalThis['YUSHIN_PRODUCTION_'+kind+'_BACKEND']===true
-   ||globalThis['YUSHIN_PRODUCTION_'+kind+'_LEGACY_BLOCKED']===true);
+ return typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='production';
 }
 function productionTransactionBackendEnabled(kind){
  if(!['DISPATCH','SHIPMENT','ORDER_LIFECYCLE','DELIVERY_CONFIRMATION','DELIVERY_REVERSAL','CUSTOMER_RETURN','CUSTOMER_RETURN_REQUEST',

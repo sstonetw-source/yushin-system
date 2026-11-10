@@ -603,11 +603,11 @@ async function runRoleTransaction(callback) {
     return result;
 }
 
-// Default-off production handoff. Server flags remain independently required.
+// Every production transaction must use its authorized backend or fail closed.
+// Client flags select whether the backend is enabled; they must never grant
+// permission to fall back to an old Firestore transaction when both are off.
 function productionTransactionBackendRequired(kind){
- return typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='production'
-  &&(globalThis['YUSHIN_PRODUCTION_'+kind+'_BACKEND']===true
-   ||globalThis['YUSHIN_PRODUCTION_'+kind+'_LEGACY_BLOCKED']===true);
+ return typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='production';
 }
 function productionTransactionBackendEnabled(kind){
  if(!['DISPATCH','SHIPMENT','ORDER_LIFECYCLE','DELIVERY_CONFIRMATION','DELIVERY_REVERSAL','CUSTOMER_RETURN','CUSTOMER_RETURN_REQUEST',
@@ -15794,8 +15794,7 @@ async function commitQuickPurchase(orderId, itemId, purchaseDetails, actorUid=cu
         if(globalThis.YUSHIN_QUICK_PURCHASE_EMULATOR===true
             || globalThis.YUSHIN_PREVIEW_QUICK_PURCHASE===true
             || globalThis.YUSHIN_PRODUCTION_QUICK_PURCHASE===true
-            || (typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='production'
-                && globalThis.YUSHIN_PRODUCTION_QUICK_PURCHASE_LEGACY_BLOCKED===true)
+            || (typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='production')
             || pendingBackendAttempt
             || (typeof APP_ENVIRONMENT!=='undefined' && APP_ENVIRONMENT==='preview')) {
             if(!quickPurchaseBackendPilotEnabled())
@@ -17475,9 +17474,7 @@ async function validateV2ReceiptSource(transaction, {order,supply,reservation,it
 async function receiveSupplyOrderRecord(supplyId,qty,lotNo='',expiryDate='',operationId='',options={}) {
     if(globalThis.YUSHIN_V2_RECEIVING_EMULATOR===true
         ||globalThis.YUSHIN_PREVIEW_RECEIVING===true
-        ||(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='production'
-            &&(globalThis.YUSHIN_PRODUCTION_RECEIVING_BACKEND===true
-                ||globalThis.YUSHIN_PRODUCTION_RECEIVING_LEGACY_BLOCKED===true))
+        ||(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='production')
         ||(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'))
         return receiveV2SupplyEmulator(supplyId,qty,lotNo,expiryDate,operationId,options);
     const actorUid=options.actorUid??currentUser?.uid,actorRole=options.actorRole??currentUserRole;
