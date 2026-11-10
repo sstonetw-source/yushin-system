@@ -100,4 +100,5 @@ test('UI explicitly resumes a pending operation before terminal-state early retu
  assert.match(ui,/pendingSupplyCancellation\(poId,'',true\)/);
  assert.match(ui,/!pending&&isPurchaseTerminalStatus\(supply\.status\)/);
  assert.match(ui,/!pending&&isPurchaseTerminalStatus\(po\.status\)/);
+ assert.match(ui,/stopCommitted\|\|err\?\.supplyCommitted/);
 });

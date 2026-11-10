@@ -145,7 +145,7 @@ window.cancelPurchaseOrderOutstanding = async function(poId) {
         showActionFeedback(`${documentStatus==='CLOSED'?'已結案':'已取消'} ${po.poNo||poId}；停止未到貨數量 ${cancelledQty}，在途庫存與來源訂單待採購量已同步。`,'success');
     }catch(err){
         console.error('停止採購單未到貨失敗：',err);
-        alert(stopCommitted?'停止採購已完成，但畫面更新失敗；請重新開啟採購頁確認：'+(err?.message||err)
+        alert(stopCommitted||err?.supplyCommitted?'停止採購已完成，但畫面更新失敗；請重新開啟採購頁確認：'+(err?.message||err)
             :'停止未完全完成：'+(err?.message||err)+'。可以再次執行同一動作；已完成的供應紀錄不會重複扣除。');
     }finally{
         purchaseCancellationInProgress.delete(poId);
