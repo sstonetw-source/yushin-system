@@ -46,7 +46,7 @@ test('production refuses both manual and initial self-order browser writers befo
   const run=action==='manual'
    ?()=>f.c.commitSelfOrderSupply('O','I',details())
    :()=>f.c.registerInitialSelfOrderSupply('O','I',details());
-  await assert.rejects(run(),/尚無正式後端.*阻止瀏覽器/);
+  await assert.rejects(run(),/自行訂貨.*(?:後端尚未啟用|原子建單後端).*阻止瀏覽器/);
   assert.equal(f.writes(),0);
   assert.equal(f.docs.get('orders/O').items[0].supplyOrderedQty,0);
   assert.equal([...f.docs.keys()].some(k=>k.startsWith('supplyOrders/')||k.startsWith('procurementDemands/')),false);

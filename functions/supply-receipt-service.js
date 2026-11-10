@@ -14,17 +14,23 @@ const {validateCanonicalReceiptSource}=require('./canonical-receipt-source');
 // different immutable purchase witness. Verify the existing single-writer
 // operation and incoming debit before permitting any receipt-side mutation.
 async function verifyQuickPurchaseReceipt(get,db,supply,order,supplyId){
- const reject=()=>fail('failed-precondition','手動採購缺少一致的權威操作／在途憑證');
+ const selfOrder=supply.type==='SALES_SELF_ORDER';
+ const type=selfOrder?'SALES_SELF_ORDER':'PURCHASING_MANUAL',prefix=selfOrder?'self-':'quick-';
+ const reject=()=>fail('failed-precondition','供應紀錄缺少一致的權威操作／在途憑證');
  const directShip=supply.fulfillmentType==='DIRECT_SHIP';
  const item=Array.isArray(order.items)?order.items.filter(row=>row?.itemId===supply.itemId):[];
  const events=supply.orderEvents;
  const demandId=demandCore.demandIdForSource({sourceType:'SALES_ORDER',sourceId:supply.orderId,sourceItemId:supply.itemId});
- if(supply.type!=='PURCHASING_MANUAL'||supply.method!=='PURCHASING_MANUAL'
+ if(supply.type!==type||supply.method!==type
   ||supply.sourceType!=='SALES_ORDER'||supply.sourceId!==supply.orderId
   ||supply.sourceItemId!==supply.itemId||supply.demandId!==demandId
   ||!Array.isArray(events)||!events.length||events.length>50||item.length!==1
-  ||!Array.isArray(item[0].orderEvents)||!Array.isArray(item[0].manualOrderNos)
-  ||!item[0].manualOrderNos.includes(supply.internalNo)
+  ||!Array.isArray(item[0].orderEvents)
+  ||!Array.isArray(item[0][selfOrder?'selfOrderNos':'manualOrderNos'])
+  ||!item[0][selfOrder?'selfOrderNos':'manualOrderNos'].includes(supply.internalNo)
+  ||(selfOrder&&(order.ownerUid!==supply.ownerUid||!order.salesCode
+   ||order.salesCode!==supply.salesCode
+   ||(item[0].procurementType||order.procurementType)!=='SALES_SELF_ORDER'))
   ||!Number.isSafeInteger(supply.qty)||supply.qty<=0
   ||!Number.isSafeInteger(item[0].supplyOrderedQty)||item[0].supplyOrderedQty<supply.qty)
   reject();
@@ -36,18 +42,21 @@ async function verifyQuickPurchaseReceipt(get,db,supply,order,supplyId){
    ||event.supplier!==supply.supplier||event.unitCost!==supply.unitCost
    ||typeof event.createdByUid!=='string'||!event.createdByUid)reject();
   seen.add(event.operationId);total+=event.qty;
-  const key='quick-'+event.operationId;
+  if(selfOrder&&(event.createdByUid!==order.ownerUid
+    ||typeof event.orderDate!=='string'||typeof event.notes!=='string'))reject();
+  const key=prefix+event.operationId;
   const operation=await get(db.collection('purchaseOperations').doc(key));
   const intent={operationId:event.operationId,orderId:supply.orderId,itemId:supply.itemId,
-   qty:event.qty,supplier:event.supplier,unitCost:event.unitCost};
+   qty:event.qty,supplier:event.supplier,unitCost:event.unitCost,
+   ...(selfOrder?{orderDate:event.orderDate,notes:event.notes}:{})};
   const hash=createHash('sha256').update(JSON.stringify(intent)).digest('hex');
   const op=operation.exists?operation.data():null;
-  if(!op||op.type!=='PURCHASING_MANUAL'||op.operationId!==event.operationId
+  if(!op||op.type!==type||op.operationId!==event.operationId
    ||op.uid!==event.createdByUid||op.hash!==hash||op.supplyId!==supplyId
    ||op.demandId!==demandId||op.orderId!==supply.orderId||op.itemId!==supply.itemId
    ||op.qty!==event.qty||op.movementId!==(directShip?'':key))reject();
   const sourceEvents=item[0].orderEvents.filter(row=>row?.id===key);
-  if(sourceEvents.length!==1||sourceEvents[0].type!=='PURCHASING_MANUAL'
+  if(sourceEvents.length!==1||sourceEvents[0].type!==type
    ||sourceEvents[0].qty!==event.qty||sourceEvents[0].documentNo!==supply.internalNo)reject();
   if(!directShip){
    const movement=await get(db.collection('inventoryMovements').doc(key));
@@ -62,6 +71,17 @@ async function verifyQuickPurchaseReceipt(get,db,supply,order,supplyId){
  if(total!==supply.qty||!Number.isSafeInteger(total)
   ||(directShip?Number(supply.incomingRegisteredQty||0)!==0:
    Number(supply.incomingRegisteredQty)!==supply.qty-Number(supply.receivedQty||0)))reject();
+ if(selfOrder){
+  const proof=await get(db.collection('procurementDemands').doc(encodeURIComponent(demandId)));
+  const demand=proof.exists?proof.data():null;
+  if(!demand||demand.demandId!==demandId||demand.sourceType!=='SALES_ORDER'
+    ||demand.sourceId!==supply.orderId||demand.sourceItemId!==supply.itemId
+    ||demand.ownerUid!==order.ownerUid||demand.salesCode!==order.salesCode
+    ||demand.productKey!==supply.productKey||demand.productId!==supply.productId
+    ||demand.fulfillmentType!==supply.fulfillmentType||demand.warehouseId!==supply.warehouseId
+    ||!Number.isSafeInteger(demand.orderedQty)||demand.orderedQty<total
+    ||!Number.isSafeInteger(demand.receivedQty)||demand.receivedQty>total)reject();
+ }
 }
 // Direct-stock PO is an independently authorised procurement source, not a
 // fabricated sales order. Verify the original confirmed PO, its immutable
@@ -154,7 +174,7 @@ async function receiveV2Supply(db,uid,input,env=process.env){
   const directShip=supply.fulfillmentType==='DIRECT_SHIP';
   const directStock=supply.type==='PURCHASING_PO'&&supply.sourceType==='STOCK_REPLENISHMENT'
    &&!supply.orderId&&!supply.itemId&&supply.fulfillmentType==='WAREHOUSE';
-  if(!['PURCHASING_PO','PURCHASING_MANUAL'].includes(supply.type)||!['WAREHOUSE','DIRECT_SHIP'].includes(supply.fulfillmentType)
+  if(!['PURCHASING_PO','PURCHASING_MANUAL','SALES_SELF_ORDER'].includes(supply.type)||!['WAREHOUSE','DIRECT_SHIP'].includes(supply.fulfillmentType)
     ||(!directStock&&(!supply.orderId||!supply.itemId)))
    fail('failed-precondition','只支援來源完整的客戶訂單或直接備庫採購');
   if(directShip&&(intent.lotNo||intent.expiryDate||Number(supply.incomingRegisteredQty||0)!==0))
@@ -168,7 +188,7 @@ async function receiveV2Supply(db,uid,input,env=process.env){
    if(!['admin','purchaser','warehouse'].includes(role))fail('permission-denied','目前沒有直接採購入庫權限');
    await verifyDirectStockReceipt(get,db,supply,intent.supplyId);
   }
-  if(supply.type==='PURCHASING_MANUAL')
+  if(['PURCHASING_MANUAL','SALES_SELF_ORDER'].includes(supply.type))
    await verifyQuickPurchaseReceipt(get,db,supply,order,intent.supplyId);
   if(directShip){
    if(role!=='admin'&&(!['sales','engineer'].includes(role)||order.ownerUid!==uid
@@ -251,4 +271,4 @@ async function receiveV2Supply(db,uid,input,env=process.env){
  const affectedOrderIds=await runtime.receiveSupplyOrderRecord(intent.supplyId,intent.qty,intent.lotNo,intent.expiryDate,intent.operationId,{actorUid:uid,actorRole:role});
  return {status:'confirmed',supplyId:intent.supplyId,operationId:intent.operationId,affectedOrderIds};
 }
-module.exports={receiveV2Supply,receiptIntent,normalReceiptOrder};
+module.exports={receiveV2Supply,receiptIntent,normalReceiptOrder,verifyQuickPurchaseReceipt};

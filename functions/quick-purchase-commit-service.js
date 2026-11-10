@@ -31,6 +31,20 @@ function purchaseIntent(data){
  return {operationId,orderId:ident(data.orderId,'來源訂單'),itemId:ident(data.itemId,'來源品項'),
   qty:integer(data.qty,'採購數量'),supplier,unitCost:data.unitCost};
 }
+function selfOrderIntent(data){
+ if(!data||typeof data!=='object'||Array.isArray(data)
+   ||Object.keys(data).sort().join(',')!=='itemId,notes,operationId,orderDate,orderId,qty,supplier,unitCost')
+  fail('invalid-argument','業務自行訂貨欄位不正確');
+ const base=purchaseIntent({operationId:data.operationId,orderId:data.orderId,
+  itemId:data.itemId,qty:data.qty,supplier:data.supplier,unitCost:data.unitCost});
+ if(typeof data.notes!=='string'||data.notes!==data.notes.trim()||data.notes.length>1000
+   ||/[\x00-\x08\x0b-\x1f]/.test(data.notes))fail('invalid-argument','自行訂貨備註不正確');
+ if(typeof data.orderDate!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(data.orderDate)
+   ||!Number.isFinite(Date.parse(data.orderDate+'T00:00:00Z'))
+   ||new Date(data.orderDate+'T00:00:00Z').toISOString().slice(0,10)!==data.orderDate)
+  fail('invalid-argument','自行訂貨日期不正確');
+ return {...base,orderDate:data.orderDate,notes:data.notes};
+}
 function todayTaipei(date=new Date()){
  const parts=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(date);
  const part=type=>parts.find(p=>p.type===type).value;
@@ -41,19 +55,21 @@ function number(value,label){
  return value;
 }
 function fingerprint(intent){return createHash('sha256').update(JSON.stringify(intent)).digest('hex');}
-async function commitV2QuickPurchase(db,uid,data){
- const intent=purchaseIntent(data),hash=fingerprint(intent),now=new Date().toISOString(),date=todayTaipei();
+async function commitPurchase(db,uid,data,{selfOrder=false}={}){
+ const intent=selfOrder?selfOrderIntent(data):purchaseIntent(data);
+ const hash=fingerprint(intent),now=new Date().toISOString(),date=selfOrder?intent.orderDate:todayTaipei();
  const ref=(collection,id)=>db.collection(collection).doc(id);
- const supplyId='manual-'+encodeURIComponent(intent.orderId)+'-'+encodeURIComponent(intent.itemId);
- const supplyRef=ref('supplyOrders',supplyId),opRef=ref('purchaseOperations','quick-'+intent.operationId);
- const movementRef=ref('inventoryMovements','quick-'+intent.operationId);
+ const prefix=selfOrder?'self':'quick',type=selfOrder?'SALES_SELF_ORDER':'PURCHASING_MANUAL';
+ const supplyId=(selfOrder?'self-':'manual-')+encodeURIComponent(intent.orderId)+'-'+encodeURIComponent(intent.itemId);
+ const supplyRef=ref('supplyOrders',supplyId),opRef=ref('purchaseOperations',prefix+'-'+intent.operationId);
+ const movementRef=ref('inventoryMovements',prefix+'-'+intent.operationId);
  const demandId=demandCore.demandIdForSource({sourceType:'SALES_ORDER',sourceId:intent.orderId,sourceItemId:intent.itemId});
  return db.runTransaction(async tx=>{
   // Never trust the UI role or an earlier preflight; verify the actor on
   // retries as well as on new writes.
   const user=await tx.get(ref('users',uid));
   if(!user.exists||user.data().active===false||user.data().disabled===true
-    ||!['admin','purchaser'].includes(user.data().role))
+    ||!(selfOrder?['sales','engineer']:['admin','purchaser']).includes(user.data().role))
    fail('permission-denied','登入使用者沒有採購權限');
   const op=await tx.get(opRef);
   if(op.exists){
@@ -64,12 +80,13 @@ async function commitV2QuickPurchase(db,uid,data){
    if(!original.exists||!Array.isArray(original.data().orderEvents)
      ||!original.data().orderEvents.some(e=>e.operationId===intent.operationId
        &&e.createdByUid===uid&&e.qty===intent.qty
-       &&e.supplier===intent.supplier&&e.unitCost===intent.unitCost))
+       &&e.supplier===intent.supplier&&e.unitCost===intent.unitCost
+       &&(!selfOrder||(e.orderDate===intent.orderDate&&e.notes===intent.notes))))
     fail('failed-precondition','重送採購的權威供應憑證不一致');
    // A saved operation is not proof that the source and incoming ledger agree.
    // Recheck immutable evidence before acknowledging a lost Callable reply.
    const supply=original.data(),directShip=supply.fulfillmentType==='DIRECT_SHIP';
-   if(saved.type!=='PURCHASING_MANUAL'||saved.operationId!==intent.operationId
+   if(saved.type!==type||saved.operationId!==intent.operationId
      ||saved.orderId!==intent.orderId||saved.itemId!==intent.itemId
      ||saved.qty!==intent.qty||saved.demandId!==demandId
      ||saved.movementId!==(directShip?'':movementRef.id))
@@ -80,15 +97,18 @@ async function commitV2QuickPurchase(db,uid,data){
      ?sourceData.items.find(row=>row.itemId===intent.itemId):null;
    // The source and supply identities are immutable purchase evidence.
    // A matching operation ID alone must not acknowledge a corrupted link.
-   if(!item||supply.type!=='PURCHASING_MANUAL'||supply.sourceType!=='SALES_ORDER'
+   if(!item||supply.type!==type||supply.sourceType!=='SALES_ORDER'
      ||supply.sourceId!==intent.orderId||supply.sourceItemId!==intent.itemId
      ||supply.orderId!==intent.orderId||supply.itemId!==intent.itemId
      ||supply.demandId!==demandId||supply.productId!==item.productId
      ||supply.productKey!==String(item.inventoryProductKey||item.productId)
      ||supply.ownerUid!==sourceData.ownerUid||supply.salesCode!==sourceData.salesCode
      ||!Array.isArray(item.orderEvents)
-     ||!item.orderEvents.some(e=>e.id==='quick-'+intent.operationId
-       &&e.type==='PURCHASING_MANUAL'&&e.qty===intent.qty))
+     ||!item.orderEvents.some(e=>e.id===prefix+'-'+intent.operationId
+       &&e.type===type&&e.qty===intent.qty)
+     ||(selfOrder&&(sourceData.ownerUid!==uid||!sourceData.salesCode
+       ||!Array.isArray(item.selfOrderNos)||!item.selfOrderNos.includes(supply.internalNo)
+       ||supply.notes!==intent.notes||supply.orderDate!==intent.orderDate)))
     fail('failed-precondition','重送採購的來源訂單憑證不一致');
    // An operation checkpoint cannot acknowledge a purchase whose authoritative
    // Demand has been deleted or relinked after the original atomic commit.
@@ -117,30 +137,37 @@ async function commitV2QuickPurchase(db,uid,data){
   // Use the existing formal PO admission as the ONE source of role, source,
   // warehouse and demand validations. The synthetic PO key is never written.
   const details=await validateV2FormalPurchaseTx(tx,db,uid,{
-   poNo:'QP-'+intent.operationId,orderId:intent.orderId,itemId:intent.itemId,qty:intent.qty
-  });
+   poNo:(selfOrder?'SO-':'QP-')+intent.operationId,orderId:intent.orderId,itemId:intent.itemId,qty:intent.qty
+  },{actorScope:selfOrder?'self-order':'purchaser'});
   const {source,sourceItem,sourceItemIndex,demandBefore,demandAfter,plan}=details;
   // Preserve the existing Quick Purchase boundary: sales-self-order lines
   // cannot become purchaser commitments through the privileged callable.
-  if((sourceItem.procurementType||source.procurementType||'PURCHASING_PO')==='SALES_SELF_ORDER')
-   fail('failed-precondition','此品項為業務自行訂貨，不能執行手動採購');
-  if(source.items.some(i=>String(i.productType||i.type||'').toUpperCase()==='SERVICE'))
-   fail('failed-precondition','混合服務訂單不在手動採購試點範圍');
+  if(((sourceItem.procurementType||source.procurementType||'PURCHASING_PO')==='SALES_SELF_ORDER')!==selfOrder)
+   fail('failed-precondition','來源品項的自行訂貨與採購角色不一致');
+  // The canonical receiving admission for this single-location source still
+  // has a five-line physical order contract. Never create a supplier promise
+  // that the receiving backend cannot later accept.
+  if((selfOrder&&source.items.length>5)||source.items.some(i=>String(i.productType||i.type||'').toUpperCase()==='SERVICE'))
+   fail('failed-precondition','混合服務訂單或超過五品項來源尚未完成收貨驗證，禁止提交供應');
   const prior=await tx.get(supplyRef),old=prior.exists?prior.data():null;
   const productKey=String(sourceItem.inventoryProductKey||sourceItem.productId);
   const fulfillmentType=sourceItem.fulfillmentType||'WAREHOUSE';
   const directShip=fulfillmentType==='DIRECT_SHIP';
   const warehouseId=plan.warehouseId;
-  if(old&&(old.type!=='PURCHASING_MANUAL'||old.sourceType!=='SALES_ORDER'
+  if(old&&(old.type!==type||old.sourceType!=='SALES_ORDER'
     ||old.orderId!==intent.orderId||old.itemId!==intent.itemId
     ||old.sourceId!==intent.orderId||old.sourceItemId!==intent.itemId
     ||old.demandId!==demandId||old.orderItemIndex!==sourceItemIndex||old.productKey!==productKey
     ||old.productId!==sourceItem.productId||old.ownerUid!==source.ownerUid
     ||old.salesCode!==source.salesCode||old.fulfillmentType!==fulfillmentType
     ||old.warehouseId!==warehouseId||old.supplier!==intent.supplier
-    ||old.unitCost!==intent.unitCost||['CANCELLED','CLOSED'].includes(old.status)))
+    ||old.unitCost!==intent.unitCost
+    ||(selfOrder&&(old.notes!==intent.notes||old.orderDate!==intent.orderDate))
+    ||['CANCELLED','CLOSED'].includes(old.status)))
    fail('failed-precondition','既有供應紀錄不允許追加採購');
   const previousQty=old?number(old.qty,'原採購'):0;
+  if(old&&(!Array.isArray(old.orderEvents)||old.orderEvents.length>=50))
+   fail('failed-precondition','供應操作明細已達安全上限，請先核對既有供應');
   const received=old?number(old.receivedQty,'原已收貨'):0;
   const registered=old?number(old.incomingRegisteredQty,'原在途'):0;
   if(received>previousQty||previousQty+intent.qty>1000000)
@@ -178,11 +205,11 @@ async function commitV2QuickPurchase(db,uid,data){
    }
   }
   const actorName=String(user.data().name||'');
-  const internalNo=old?.internalNo||'MO-'+date.replace(/-/g,'')+'-'+supplyId.slice(-8).toUpperCase();
+  const internalNo=old?.internalNo||(selfOrder?'SO-':'MO-')+date.replace(/-/g,'')+'-'+supplyId.slice(-8).toUpperCase();
   const supplyEvent={operationId:intent.operationId,qty:intent.qty,supplier:intent.supplier,
-   unitCost:intent.unitCost,orderDate:date,createdAt:now,createdByUid:uid,createdBy:actorName};
+   unitCost:intent.unitCost,orderDate:date,notes:selfOrder?intent.notes:'',createdAt:now,createdByUid:uid,createdBy:actorName};
   const supply={
-   ...(old||{}),type:'PURCHASING_MANUAL',method:'PURCHASING_MANUAL',
+   ...(old||{}),type,method:type,
    sourceType:'SALES_ORDER',sourceId:intent.orderId,sourceItemId:intent.itemId,
    demandId,internalNo,orderId:intent.orderId,itemId:intent.itemId,
    orderItemIndex:sourceItemIndex,ownerUid:source.ownerUid,salesCode:source.salesCode,
@@ -192,7 +219,7 @@ async function commitV2QuickPurchase(db,uid,data){
    productLine:sourceItem.productLine||'',qty:nextQty,receivedQty:received,
    incomingRegisteredQty:directShip?0:previousPending+intent.qty,
    incomingRegisteredAt:directShip?(old?.incomingRegisteredAt||''):now,
-   supplier:intent.supplier,unitCost:intent.unitCost,
+   supplier:intent.supplier,unitCost:intent.unitCost,notes:selfOrder?intent.notes:(old?.notes||''),
    orderDate:old?.orderDate||date,lastOrderedAt:date,
    orderEvents:[...(old?.orderEvents||[]),supplyEvent],
    fulfillmentType,warehouseId,
@@ -203,10 +230,12 @@ async function commitV2QuickPurchase(db,uid,data){
   supply.status=receiving.normalizeSupply(supply).status;
   const items=source.items.map(item=>({...item})),item=items[sourceItemIndex];
   const nextOrdered=number(item.supplyOrderedQty??0,'來源已採購')+intent.qty;
-  const sourceEvent={id:'quick-'+intent.operationId,type:'PURCHASING_MANUAL',
+  const sourceEvent={id:prefix+'-'+intent.operationId,type,
    at:now,date,qty:intent.qty,documentNo:internalNo,by:actorName};
   items[sourceItemIndex]={...item,supplyOrderedQty:nextOrdered,
-   manualOrderNos:[...new Set([...(item.manualOrderNos||[]),internalNo])],
+   ...(selfOrder?{selfOrderNos:[...new Set([...(item.selfOrderNos||[]),internalNo])],
+    supplier:intent.supplier}:
+    {manualOrderNos:[...new Set([...(item.manualOrderNos||[]),internalNo])]}),
    orderedAt:item.orderedAt&&item.orderedAt<date?item.orderedAt:date,
    orderEvents:[...(item.orderEvents||[]),sourceEvent]};
   const categories=new Set(source.workCategories||[]);
@@ -216,7 +245,7 @@ async function commitV2QuickPurchase(db,uid,data){
    categories.add('ordering');
   else categories.delete('ordering');
   const demandDoc=demandCore.demandDocument({...demandBefore,...demandAfter},{updatedAt:now});
-  const opDoc={type:'PURCHASING_MANUAL',operationId:intent.operationId,uid,hash,
+  const opDoc={type,operationId:intent.operationId,uid,hash,
    supplyId,demandId,orderId:intent.orderId,itemId:intent.itemId,qty:intent.qty,
    movementId:directShip?'':movementRef.id,createdAt:now};
   // All reads above. One Admin SDK transaction commits all business facts;
@@ -227,9 +256,10 @@ async function commitV2QuickPurchase(db,uid,data){
    items,itemCount:items.length,orderSchemaVersion:2,workCategories:[...categories],
    workCategoryUpdatedAt:now,updatedAt:now
   });
+  if(selfOrder)tx.set(ref('receivingSupplyOrders',supplyId),sanitizeSupply(supply));
   if(directShip){
    const mirror=ref('receivingSupplyOrders',supplyId);
-   tx.set(mirror,sanitizeSupply(supply));
+   if(!selfOrder)tx.set(mirror,sanitizeSupply(supply));
   }else{
    if(inventory.exists)tx.update(inventoryRef,{incoming:inventory.data().incoming+intent.qty,updatedAt:now});
    else tx.create(inventoryRef,{
@@ -256,4 +286,6 @@ async function commitV2QuickPurchase(db,uid,data){
    demandId,committedQty:intent.qty};
  });
 }
-module.exports={commitV2QuickPurchase,purchaseIntent,todayTaipei};
+async function commitV2QuickPurchase(db,uid,data){return commitPurchase(db,uid,data);}
+async function commitV2SelfOrder(db,uid,data){return commitPurchase(db,uid,data,{selfOrder:true});}
+module.exports={commitV2QuickPurchase,commitV2SelfOrder,purchaseIntent,selfOrderIntent,todayTaipei};
