@@ -3576,6 +3576,14 @@ async function commitOrderCreation(orderId,data,{actorUid=currentUser?.uid,actor
             // facts, not a modified/stale form, and never overwrite fulfillment progress.
             savedData=live;return;
         }
+        // Initial confirmed sales self-orders are recorded *after* order creation
+        // and inventory reservation. Production does not yet have an authorized
+        // self-order Callable, so reject the new order atomically here instead of
+        // creating a reserved order with a missing supplier commitment.
+        if(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='production'
+            &&snapshot.selfOrderAtCreation===true
+            &&(snapshot.items||[]).some(item=>item.procurementType==='SALES_SELF_ORDER'&&item.selfOrderConfirmed===true))
+            throw new Error('業務自行訂貨尚無正式後端；為避免訂單已成立但供應未建立，請先將已下訂改為待確認，再建立訂單。');
         if((snapshot.items || []).length>15)throw new Error('每張訂單最多 15 個品項；請分成多張訂單後再儲存。');
         const tradeValidation=globalThis.YushinOrderEntry.validateTrade(snapshot);
         if(!tradeValidation.valid)throw new Error(tradeValidation.message);
@@ -11221,6 +11229,11 @@ async function registerInitialSelfOrderSupply(orderId,itemId,details) {
 }
 
 async function commitSelfOrderSupply(orderId,itemId,{supplier,qty,unitCost,orderDate,notes='',actorUid=currentUser?.uid,actorRole=currentUserRole,initial=false,operationId=''}) {
+        // Production Purchasing Rules already deny client-created supply records.
+        // Do not try the obsolete multi-document SDK writer if that server gate
+        // is temporarily unavailable; a dedicated self-order Callable is needed.
+        if(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='production')
+            throw new Error('業務自行訂貨尚無正式後端，已阻止瀏覽器直接建立供應與採購需求。');
         if(typeof supplier!=='string'||!supplier.trim()||!Number.isFinite(qty)||qty<=0||!Number.isFinite(unitCost)||unitCost<0||typeof notes!=='string')
             throw new Error('請填寫供應商、有效訂貨數量與實際單位成本（可填 0）。');
         if(typeof orderDate!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(orderDate)||!Number.isFinite(Date.parse(orderDate+'T00:00:00Z'))||new Date(orderDate+'T00:00:00Z').toISOString().slice(0,10)!==orderDate)
