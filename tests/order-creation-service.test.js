@@ -62,6 +62,15 @@ test('production rejects confirmed self-orders before creating an order or reser
  assert.equal(resumed.data.inventoryReservationStatus,'completed');
  assert.equal(f.writes.length,0);
 });
+test('order UI refuses unsupported production auto-supply before syncing customer master',()=>{
+ const feature=fs.readFileSync('src/features/orders/order-creation.js','utf8');
+ const start=feature.indexOf('if(items.some(item=>item.fulfillmentType');
+ const end=feature.indexOf('data.customerId = syncCustomerMaster(data.customerName',start);
+ assert.ok(start>=0&&end>start);
+ const section=feature.slice(start,end+60);
+ assert.match(section,/APP_ENVIRONMENT==='production'[\s\S]*selfOrderConfirmed===true[\s\S]*alert\('業務自行訂貨尚無正式後端/);
+ assert.ok(section.indexOf('alert(\'業務自行訂貨尚無正式後端')<section.indexOf('syncCustomerMaster(data.customerName'));
+});
 test('pending self-orders and non-production confirmed self-orders keep existing creation behavior',async()=>{
  for(const [environment,confirmed] of [['production',false],['emulator',true]]){
   const f=fixture();f.c.APP_ENVIRONMENT=environment;
