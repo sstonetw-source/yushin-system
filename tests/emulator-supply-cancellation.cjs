@@ -3,6 +3,7 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const admin=require('firebase-admin');
 const demand=require('../functions/shared/procurement-demand-core');
+const {sanitizeSupply}=require('../functions/shared/stock-permissions');
 const {commitSupplyCancellation}=require('../functions/supply-cancellation-service');
 const project='demo-yushin';
 const env={GCLOUD_PROJECT:project,FUNCTIONS_EMULATOR:'true',
@@ -34,7 +35,7 @@ async function seed(tag){
    ownerUid:user,salesCode:'S1',qty:5,receivedQty:2,incomingRegisteredQty:3,
    status:'PARTIAL_RECEIPT',unitCost:14};
   put('supplyOrders/'+supplyId,source);
-  put('receivingSupplyOrders/'+supplyId,{...source,unitCost:undefined});
+  put('receivingSupplyOrders/'+supplyId,sanitizeSupply(source));
   put('orders/'+orderId,{ownerUid:user,salesCode:'S1',status:'active',
    workCategories:['arrival'],items:[{itemId,productId:product,qty:8,orderedQty:8,
     reservedQty:0,shortageQty:8,supplyOrderedQty:5,receivedQty:2}]});
