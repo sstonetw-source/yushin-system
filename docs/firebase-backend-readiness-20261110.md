@@ -11,7 +11,9 @@
 - **禁止 Firebase Hosting**（含 Preview Channel）；唯一核准的前端發布路徑是 GitHub Pages。
 - 正式 Rules 全文 SHA、Functions 程式 hash／修訂、實際環境變數與 Secrets 差異尚未全面回讀。這些未確認項目必須在 B 審核前補齊，不能假設與儲存庫相同。
 
-## Functions 差異：原始碼 39 個 export vs 已部署 24 個
+## Functions 差異：最新 `main` 41 個 export vs 已部署 24 個
+
+2026-11-10 的 PR #538 又新增兩個 **預設關閉、尚未部署** 的供應商取消後端候選。因此本文件最初查證時是「39 vs 24」，合併 #538 後原始碼為 **41**，正式 Console 唯讀複查仍為 **24**。兩個新 export 不能因 PR 合併就認定可正式使用；下述差異應於 B 部署前再次核對。
 
 以下 24 個名稱於 Console 中確認已部署；**存在不等於執行時開關已開啟，也不等於部署的是最新原始碼**：
 
@@ -24,7 +26,7 @@
 `getServiceOrderProgress`, `commitV2QuickPurchase`, `commitServiceCaseEvent`,
 `previewV2CustomerReturn`, `handoffOrderTransfer`, `commitOrderServiceAction`.
 
-目前 15 個**有原始碼匯出、但 Console 24 個清單內沒有**的名稱依功能分類：
+目前 17 個**有原始碼匯出、但 Console 24 個清單內沒有**的名稱依功能分類：
 
 | 類別 | 函式 | 正式部署判斷 |
 | --- | --- | --- |
@@ -32,6 +34,7 @@
 | P1 認證 | `completeRequiredPasswordChange` | 管理員強制改密碼的可信任後端候選；需單獨驗證 Auth 更新後 Firestore 失敗／重試語意，且不記錄密碼。 |
 | 正式 PO 在途 | `registerV2FormalPurchaseIncoming` | 既有正式前端走 `commitV2FormalPurchase` 的 `register-incoming` 動作；確認其他呼叫者與正式需求後決定是否部署，不能按差額直接新增。 |
 | 取消採購轉備庫 | `keepV2CancelledPurchaseStock` | 獨立功能旗標／來源驗證；與 #536 的「供應商取消未到貨」不同，不能互相替代。 |
+| P1 供應商取消 | `cancelV2OutstandingSupply`, `stopV2PurchaseOrderOutstanding` | PR #538 已提供單供應、整 PO 原子取消後端與 Emulator 證據；兩者預設由 `ENABLE_PRODUCTION_SUPPLY_CANCELLATION_BACKEND` 關閉。正式 B 部署、D 前端切換、舊版 Rules 拒絕及角色 UAT 均未完成；#536 應保持 Open。 |
 | 主倉需求／實貨調撥 | `createV2MainTransferRequest`, `cancelV2MainTransferRequest`, `dispatchV2MainTransfer`, `receiveV2MainTransfer`, `resumeV2MainTransferAllocation`, `listV2MainTransferAllocations` | 需依主倉／分倉物流完整流程、相關獨立 gate 與實際角色驗收決定發布順序。 |
 | V3 保管（Custody） | `setV3CustodyOrderLifecycle`, `shipV3CustodyItem`, `confirmV3CustodyDelivery`, `receiveV3CustodyReturn` | 目前原始碼限制 `demo-yushin` Emulator；沒有正式專案啟用路徑，不納入直接部署。 |
 
@@ -43,7 +46,7 @@
 2. 正式 Rules 必須核對目前發布的 **完整內容、版本與 hash**，比對生成的九 ledger 禁止寫入規則，先完成 Emulator 舊瀏覽器拒絕與真實角色讀取權限測試。
 3. `firestore.indexes.json` 與正式 56 個已啟用索引的**逐一定義比對**尚未完成；不能因「56/56 已啟用」便宣稱和 main 完全一致。
 4. 已觀察的八個交易 `backendOnly=true` 旗標不能替代 stock ledgers 的正式 Rules。快取的舊版 Safari、Chrome、主畫面捷徑必須由**伺服器規則**拒絕，不以新版前端按鈕隱藏作為安全證據。
-5. 對 #536 供應商未到貨取消，PR #535 只有正式前端失敗即拒絕；其新可信任後端及舊客戶端拒絕尚未完成。不得以放寬庫存 Rules 恢復操作。
+5. 對 #536 供應商未到貨取消，PR #535 將正式前端失敗即拒絕；PR #538 已新增預設關閉的後端候選及原子交易驗證，**尚未正式部署與切換**，舊客戶端的伺服器端拒絕也尚待 B Rules 驗證。不得以放寬庫存 Rules 恢復操作。
 
 ## 歷史資料、開關與上線相依
 
