@@ -62,6 +62,17 @@ test('production rejects confirmed self-orders before creating an order or reser
  assert.equal(resumed.data.inventoryReservationStatus,'completed');
  assert.equal(f.writes.length,0);
 });
+test('production self-order creation guard honors order-level procurement type fallback',async()=>{
+ for(const selfOrderAtCreation of [true,false,undefined]){
+  const f=fixture();f.c.APP_ENVIRONMENT='production';
+  const data={...f.data,selfOrderAtCreation,procurementType:'SALES_SELF_ORDER',items:[
+   {itemId:'I',selfOrderConfirmed:true,qty:2}
+  ]};
+  await assert.rejects(f.c.commitOrderCreation('O',data),/尚無正式後端.*訂單已成立但供應未建立/);
+  assert.equal(f.writes.length,0);
+  assert.equal(f.docs.has('orders/O'),false);
+ }
+});
 test('order UI refuses unsupported production auto-supply before syncing customer master',()=>{
  const feature=fs.readFileSync('src/features/orders/order-creation.js','utf8');
  const start=feature.indexOf('if(items.some(item=>item.fulfillmentType');

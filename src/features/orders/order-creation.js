@@ -668,7 +668,7 @@ window.saveNewOrder = function() {
     // Prevent even the pre-commit Customer Master sync for an order that the
     // production self-order backend cannot yet atomically commit.
     if(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='production'
-        &&items.some(item=>item.procurementType==='SALES_SELF_ORDER'&&item.selfOrderConfirmed===true)){
+        &&items.some(item=>(item.procurementType||document.getElementById('orderProcurementType')?.value)==='SALES_SELF_ORDER'&&item.selfOrderConfirmed===true)){
         alert('業務自行訂貨尚無正式後端；請先將「已下訂」改為「待確認」，再建立訂單。');
         return;
     }

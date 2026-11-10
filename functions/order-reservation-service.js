@@ -102,6 +102,15 @@ async function commitOrderReservation(db,uid,data){
       fault('failed-precondition','已有較新的庫存同步工作');
     if(['sales','engineer'].includes(role)&&order.ownerUid!==uid)
       fault('permission-denied','只能同步自己的訂單');
+    // A confirmed sales self-order must be committed together with its source
+    // order and supplier demand. Until that backend flow exists, an older
+    // browser must not reserve stock and strand a confirmed supplier promise.
+    // Do not trust the browser-supplied selfOrderAtCreation flag: older clients
+    // can omit it, while their confirmed item still requires the same barrier.
+    if(order.items.some(item=>
+      (item?.procurementType||order.procurementType)==='SALES_SELF_ORDER'
+      &&item?.selfOrderConfirmed===true))
+      fault('failed-precondition','已確認自行訂貨尚無原子建單後端，拒絕部分完成的訂單預留');
 
     const now=new Date().toISOString();
     const productMasters=new Map(),warehouseMasters=new Map();
