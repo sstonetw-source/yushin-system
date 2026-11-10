@@ -38,6 +38,22 @@ test('separately approved order-transfer browser gates require both flags and th
   assert.equal(scope.productionTransactionBackendEnabled(kind),false);
  }
 });
+test('production never authorizes a legacy transaction when both rollout flags are absent',()=>{
+ const vm=require('node:vm'),fs=require('node:fs');
+ const source=fs.readFileSync('src/infrastructure/production-transaction.js','utf8');
+ const kinds=['DISPATCH','SHIPMENT','ORDER_LIFECYCLE','DELIVERY_CONFIRMATION','DELIVERY_REVERSAL',
+  'CUSTOMER_RETURN','CUSTOMER_RETURN_REQUEST','CANCELLED_PURCHASE','ORDER_TRANSFER_DISPATCH',
+  'ORDER_TRANSFER_HANDOFF','ORDER_TRANSFER_RECEIVE','MAIN_TRANSFER_REQUEST','MAIN_TRANSFER_DISPATCH',
+  'MAIN_TRANSFER_RECEIPT','MAIN_TRANSFER_ALLOCATION','MANUAL_INVENTORY','INVENTORY_COUNT'];
+ const scope={APP_ENVIRONMENT:'production',location:{origin:'https://sstonetw-source.github.io',pathname:'/yushin-system/'}};
+ vm.runInNewContext(source,scope);
+ for(const kind of kinds){
+  assert.equal(scope.productionTransactionBackendRequired(kind),true,kind+' still requires backend');
+  assert.equal(scope.productionTransactionBackendEnabled(kind),false,kind+' stays disabled without explicit flags');
+ }
+ scope.APP_ENVIRONMENT='emulator';
+ for(const kind of kinds)assert.equal(scope.productionTransactionBackendRequired(kind),false);
+});
 test('fresh warehouse and sales pages load Functions before any transaction UI executes',()=>{
  const html=require('node:fs').readFileSync('index.html','utf8');
  const sdk=html.indexOf('https://www.gstatic.com/firebasejs/10.8.0/firebase-functions-compat.js');

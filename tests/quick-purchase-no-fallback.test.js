@@ -129,13 +129,21 @@ for(const environment of ['emulator','preview','production'])test(environment+' 
   }
  }
 });
-test('pending checkpoint is scoped to the original actor/order/item; unrelated legacy purchases remain available',async()=>{
- const x=contextFor({environment:'production',pilot:false});
+test('pending checkpoint is scoped to the original actor/order/item in the isolated Emulator',async()=>{
+ const x=contextFor({environment:'emulator',pilot:false});
  const storage=new Map([['quick-purchase-pending:other:O:I','pending'],
   ['quick-purchase-pending:buyer:OTHER:I','pending'],['quick-purchase-pending:buyer:O:OTHER','pending']]);
  x.context.sessionStorage={getItem:k=>storage.get(k)??null};
  await assert.rejects(x.context.commitQuickPurchase('O','I',details,'buyer','purchaser'),/LEGACY_TRANSACTION_USED/);
  assert.equal(x.legacyCalls(),1);assert.equal(storage.size,3);
+});
+test('production without either rollout flag rejects even a fresh purchase before legacy Firestore writes',async()=>{
+ const x=contextFor({environment:'production',pilot:false});
+ x.context.YUSHIN_PRODUCTION_QUICK_PURCHASE=false;
+ x.context.YUSHIN_PRODUCTION_QUICK_PURCHASE_LEGACY_BLOCKED=false;
+ x.context.sessionStorage={getItem:()=>null};
+ await assert.rejects(x.context.commitQuickPurchase('O','I',details,'buyer','purchaser'),/禁止改用舊交易/);
+ assert.equal(x.legacyCalls(),0);
 });
 test('unreadable pending storage blocks unsafe legacy retry',async()=>{
  const x=contextFor({environment:'production',pilot:false});

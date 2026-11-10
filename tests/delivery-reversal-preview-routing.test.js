@@ -74,7 +74,7 @@ test('pending Preview reversal forbids legacy delivery writes after flag or envi
  for(const action of [()=>c.saveOrderDeliveryRecord('O',{date:'2026-10-28',qty:1,recordId:'legacy_new_id'}),
   ()=>c.completeOrderDelivery('O','2026-10-28'),()=>c.cancelOrderDeliveries('O'),
   ()=>c.correctOrderDeliveryRecord('O','D','bad')])
-  await assert.rejects(action(),/禁止改用舊交易/);
+  await assert.rejects(action(),/禁止改用舊交易|v2 送達必須逐筆/);
  assert.equal(f.calls.length,1);assert.equal(f.pending.size,1);assert.equal(f.legacyWrites(),0);
 });
 
