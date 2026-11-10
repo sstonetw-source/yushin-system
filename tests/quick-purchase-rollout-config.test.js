@@ -111,7 +111,7 @@ test('unreleased stock-changing backend routes fail closed on Pages without sile
  for(const url of ['https://sstonetw-source.github.io/yushin-system/', 'https://evil.example/yushin-system/']){
   const c={location:new URL(url)};c.globalThis=c;vm.runInNewContext(rollout,c);
   const approved=url.startsWith('https://sstonetw-source.github.io/yushin-system');
-  for(const name of ['CANCELLED_PURCHASE','MAIN_TRANSFER_REQUEST','MAIN_TRANSFER_DISPATCH',
+  for(const name of ['CANCELLED_PURCHASE','SUPPLY_CANCELLATION','MAIN_TRANSFER_REQUEST','MAIN_TRANSFER_DISPATCH',
    'MAIN_TRANSFER_RECEIPT','MAIN_TRANSFER_ALLOCATION','ORDER_TRANSFER_DISPATCH',
    'ORDER_TRANSFER_HANDOFF','ORDER_TRANSFER_RECEIVE','MANUAL_INVENTORY','INVENTORY_COUNT']){
    assert.equal(c['YUSHIN_PRODUCTION_'+name+'_BACKEND'],false,name);

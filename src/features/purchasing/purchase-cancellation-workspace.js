@@ -29,18 +29,22 @@ window.cancelSupplyOutstanding = async function(supplyId) {
         alert('此採購方式不支援在這裡取消。');
         return;
     }
-    if (isPurchaseTerminalStatus(supply.status)) {
+    const poId=supply.purchaseDocumentId||supply.internalNo||supply.id;
+    let pending;
+    try{pending=pendingSupplyCancellation(poId,supply.id,false);}
+    catch(error){alert(error.message);return;}
+    if (!pending&&isPurchaseTerminalStatus(supply.status)) {
         const label=String(supply.status||'').toUpperCase()==='CLOSED'?'已結案':'已取消';
         showActionFeedback(`這筆採購${label}，沒有待處理的未到貨數量。`, 'success');
         return;
     }
     const remaining = Math.max(0, Number(supply.qty || 0) - Number(supply.receivedQty || 0));
-    if (remaining <= 0) {
+    if (!pending&&remaining <= 0) {
         alert('這筆採購已全部到貨，沒有可取消的未到貨數量。');
         return;
     }
 
-    const reasonRaw = prompt(
+    const reasonRaw = pending?.payload.reason ?? prompt(
         `取消品項 ${supply.itemCode || supply.itemName || supply.id} 尚未到貨的 ${remaining} 個。\n採購單：${supply.purchaseDocumentNo || supply.internalNo || supply.id}\n只取消此品項，其他品項不受影響；已到貨的數量不回沖。\n來源訂單仍有效時，未滿足的數量會重新列入待採購。\n\n請輸入原因：`
     );
     if (reasonRaw === null) return;
@@ -55,11 +59,12 @@ window.cancelSupplyOutstanding = async function(supplyId) {
     let supplyStopped=false;
     try {
         const result = await cancelOutstandingSupplyRecord(
-            supply.purchaseDocumentId || supply.internalNo || supply.id,
+            poId,
             supply.id,
             reason,{actorUid,actorRole,onStockCommitted:invalidateWarehouseStockCache,onDemandChanged:invalidateProcurementDemandQueue}
         );
         supplyStopped=true;
+        if(!result.cancelledQty){showActionFeedback('供應商採購已全部到貨，沒有未到貨數量可取消。','warning');return;}
         purchaseHistorySupplyCache.set(supply.id, {...supply, status:result.terminalStatus,
             incomingRegisteredQty:0, ...(result.terminalStatus === 'CLOSED' ? {closedQty:result.cancelledQty} : {cancelledQty:result.cancelledQty})});
         supplyReceivingCache = supplyReceivingCache.filter(row => row.id !== supply.id);
@@ -101,12 +106,15 @@ window.cancelPurchaseOrderOutstanding = async function(poId) {
         alert('無法讀取採購單：'+(err?.message||err));
         return;
     }
-    if(isPurchaseTerminalStatus(po.status)){
+    let pending;
+    try{pending=pendingSupplyCancellation(poId,'',true);}
+    catch(error){alert(error.message);return;}
+    if(!pending&&isPurchaseTerminalStatus(po.status)){
         const label=String(po.status||'').toUpperCase()==='CLOSED'?'已結案':'已取消';
         showActionFeedback(`這張採購單${label}，沒有待處理的未到貨數量。`,'success');
         return;
     }
-    const reasonRaw=prompt(`停止採購單 ${po.poNo||po.id} 尚未到貨的數量。\n已實際到貨的數量不會回沖；若已有到貨紀錄，採購單會標示為「已結案」，完全未到貨才標示為「已取消」。\n原訂單會重新出現尚需採購的數量。\n\n請輸入原因：`);
+    const reasonRaw=pending?.payload.reason??prompt(`停止採購單 ${po.poNo||po.id} 尚未到貨的數量。\n已實際到貨的數量不會回沖；若已有到貨紀錄，採購單會標示為「已結案」，完全未到貨才標示為「已取消」。\n原訂單會重新出現尚需採購的數量。\n\n請輸入原因：`);
     if(reasonRaw===null)return;
     const reason=String(reasonRaw||'').trim();
     if(!reason){alert('請填寫取消原因，方便後續追蹤。');return;}
@@ -137,7 +145,7 @@ window.cancelPurchaseOrderOutstanding = async function(poId) {
         showActionFeedback(`${documentStatus==='CLOSED'?'已結案':'已取消'} ${po.poNo||poId}；停止未到貨數量 ${cancelledQty}，在途庫存與來源訂單待採購量已同步。`,'success');
     }catch(err){
         console.error('停止採購單未到貨失敗：',err);
-        alert(stopCommitted?'停止採購已完成，但畫面更新失敗；請重新開啟採購頁確認：'+(err?.message||err)
+        alert(stopCommitted||err?.supplyCommitted?'停止採購已完成，但畫面更新失敗；請重新開啟採購頁確認：'+(err?.message||err)
             :'停止未完全完成：'+(err?.message||err)+'。可以再次執行同一動作；已完成的供應紀錄不會重複扣除。');
     }finally{
         purchaseCancellationInProgress.delete(poId);

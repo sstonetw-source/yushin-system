@@ -613,7 +613,7 @@ function productionTransactionBackendEnabled(kind){
  if(!['DISPATCH','SHIPMENT','ORDER_LIFECYCLE','DELIVERY_CONFIRMATION','DELIVERY_REVERSAL','CUSTOMER_RETURN','CUSTOMER_RETURN_REQUEST',
   'ORDER_TRANSFER_DISPATCH','ORDER_TRANSFER_HANDOFF','ORDER_TRANSFER_RECEIVE','CANCELLED_PURCHASE',
   'MAIN_TRANSFER_REQUEST','MAIN_TRANSFER_DISPATCH','MAIN_TRANSFER_RECEIPT','MAIN_TRANSFER_ALLOCATION',
-  'MANUAL_INVENTORY','INVENTORY_COUNT'].includes(kind)||!productionTransactionBackendRequired(kind)
+  'MANUAL_INVENTORY','INVENTORY_COUNT','SUPPLY_CANCELLATION'].includes(kind)||!productionTransactionBackendRequired(kind)
   ||globalThis['YUSHIN_PRODUCTION_'+kind+'_BACKEND']!==true
   ||globalThis['YUSHIN_PRODUCTION_'+kind+'_LEGACY_BLOCKED']!==true)return false;
  const path=String(globalThis.location?.pathname||'');
@@ -16038,6 +16038,120 @@ async function commitQuickPurchase(orderId, itemId, purchaseDetails, actorUid=cu
 }
 // Atomic quick-purchase service end.
 
+// #536: supplier cancellation uses one Admin SDK operation, never a browser stock writer.
+// Keep the original operation ID until both the Callable receipt and live source are verified.
+function supplyCancellationPendingKey(poId,supplyId,whole){
+    return 'supply-cancel:'+encodeURIComponent(currentUser?.uid||'')+':'+
+        encodeURIComponent(whole?'PO:'+poId:'SUPPLY:'+poId+':'+supplyId);
+}
+function pendingSupplyCancellation(poId,supplyId,whole){
+    const raw=sessionStorage.getItem(supplyCancellationPendingKey(poId,supplyId,whole));
+    if(raw===null)return null;
+    try{
+        const p=JSON.parse(raw),input=p?.payload;
+        if(p.uid!==currentUser?.uid||p.role!==currentUserRole||p.project!=='yu-shing-company'
+            ||p.whole!==whole||input?.poId!==poId||input?.supplyId!==(whole?undefined:supplyId)
+            ||typeof input.reason!=='string'||!input.reason.trim()||input.reason!==input.reason.trim()
+            ||input.reason.length>500||/[\x00-\x1f]/.test(input.reason)
+            ||!/^[a-zA-Z0-9_-]{12,96}$/.test(input.operationId)
+            ||Object.keys(input).sort().join(',')!==(whole?'operationId,poId,reason':'operationId,poId,reason,supplyId'))
+            throw Error('invalid');
+        return p;
+    }catch(_){throw Error('原供應商取消操作的暫存內容不一致，請保留紀錄並核對，勿建立新操作。');}
+}
+async function commitSupplyCancellationBackend(poId,supplyId,reason,whole,
+    {actorUid,actorRole,onStockCommitted,onDemandChanged}){
+    if(typeof productionTransactionBackendEnabled!=='function'
+        ||!productionTransactionBackendEnabled('SUPPLY_CANCELLATION')
+        ||typeof firebase==='undefined'||!firebase.auth||!firebase.functions||!firebase.app)
+        throw Error('供應商取消後端未核准或環境不完整，禁止回退瀏覽器寫入。');
+    const app=firebase.app(),auth=firebase.auth(),functions=app.functions('asia-east1'),project='yu-shing-company';
+    const check=()=>{
+        if(!productionTransactionBackendEnabled('SUPPLY_CANCELLATION')
+            ||app.options?.projectId!==project||auth.app?.options?.projectId!==project
+            ||functions.app?.options?.projectId!==project||db?.app?.options?.projectId!==project
+            ||!!auth.emulatorConfig||!actorUid||auth.currentUser?.uid!==actorUid
+            ||currentUser?.uid!==actorUid||currentUserRole!==actorRole
+            ||!['admin','purchaser'].includes(actorRole)||!canCreatePurchaseOrderCapability()
+            ||!canAccessPage('orders.po'))
+            throw Error('供應商取消的登入身份、專案或授權已變更，請使用原操作 ID 核對。');
+    };
+    check();
+    if(typeof poId!=='string'||!poId||poId.includes('/')||poId!==poId.trim()||poId.length>160
+        ||(!whole&&(typeof supplyId!=='string'||!supplyId||supplyId.includes('/')||supplyId!==supplyId.trim()
+            ||supplyId.length>160)))
+        throw Error('原採購單或供應識別碼不正確。');
+    const key=supplyCancellationPendingKey(poId,supplyId,whole);
+    let saved=pendingSupplyCancellation(poId,supplyId,whole);
+    if(saved){
+        if(reason&&reason.trim()!==saved.payload.reason)
+            throw Error('上次取消操作尚未確認，請保留原取消原因與操作 ID 續傳。');
+    }else{
+        if(typeof reason!=='string'||!reason.trim()||reason!==reason.trim()||reason.length>500
+            ||/[\x00-\x1f]/.test(reason))
+            throw Error('請輸入有效的供應商取消原因。');
+        const operationId=lifecycleRecordId();
+        if(!/^[a-zA-Z0-9_-]{12,96}$/.test(operationId))throw Error('無法建立安全操作 ID。');
+        const payload={operationId,poId,reason,...(whole?{}:{supplyId})};
+        saved={uid:actorUid,role:actorRole,project,whole,payload};
+        const raw=JSON.stringify(saved);sessionStorage.setItem(key,raw);
+        if(sessionStorage.getItem(key)!==raw)throw Error('無法保存原取消操作，尚未提交。');
+    }
+    check();
+    const callable=whole?'stopV2PurchaseOrderOutstanding':'cancelV2OutstandingSupply';
+    const response=await functions.httpsCallable(callable)(saved.payload);check();
+    const r=response?.data;
+    if(!['applied','already-applied'].includes(r?.status)||r.operationId!==saved.payload.operationId
+        ||r.poId!==poId||r.actorUid!==actorUid||r.actorRole!==actorRole
+        ||!Array.isArray(r.supplyIds)||!r.supplyIds.length||new Set(r.supplyIds).size!==r.supplyIds.length
+        ||(!whole&&(r.supplyIds.length!==1||r.supplyIds[0]!==supplyId))
+        ||!Number.isSafeInteger(r.cancelledQty)||r.cancelledQty<0
+        ||!Array.isArray(r.affectedOrderIds))
+        throw Error('取消結果無法核對，請保留原操作 ID，禁止重新開立。');
+    const supplies=[];
+    for(const id of r.supplyIds){
+        const snap=await db.collection('supplyOrders').doc(id).get({source:'server'});check();
+        const supply=snap.exists?snap.data():null;
+        if(!supply||(supply.purchaseDocumentId||supply.internalNo||id)!==poId)
+            throw Error('取消回覆缺少原供應來源，請保留操作 ID。');
+        if(supply.cancellationOperationId===saved.payload.operationId){
+            if(!['CLOSED','CANCELLED'].includes(supply.status)||supply.incomingRegisteredQty!==0)
+                throw Error('已取消來源與在途餘額不一致，請保留操作 ID。');
+        }else if(supply.qty!==supply.receivedQty)
+            throw Error('原供應未全部收貨且未具有取消憑證，請保留操作 ID。');
+        supplies.push({id,...supply});
+    }
+    const changed=supplies.filter(s=>s.cancellationOperationId===saved.payload.operationId);
+    if(changed.reduce((sum,s)=>sum+s.qty-s.receivedQty,0)!==r.cancelledQty)
+        throw Error('取消量與來源供應憑證不一致，請保留原操作 ID。');
+    let patch=null;
+    if(whole){
+        const snap=await db.collection('purchaseOrders').doc(poId).get({source:'server'});check();
+        const po=snap.exists?snap.data():null;
+        if(!po||po.poNo!==poId||JSON.stringify(po.supplyOrderIds)!==JSON.stringify(r.supplyIds))
+            throw Error('整張採購單供應連結與回覆不符，請保留原操作 ID。');
+        if(r.cancelledQty){
+            if(po.cancellationOperationId!==saved.payload.operationId||!['CLOSED','CANCELLED'].includes(po.status)
+                ||po.stoppedQty!==r.cancelledQty)
+                throw Error('採購單停止狀態尚未核對，請保留原操作 ID。');
+            patch={status:po.status,stoppedQty:po.stoppedQty,updatedAt:po.updatedAt,
+                ...(po.status==='CLOSED'?{closedQty:po.closedQty,closedAt:po.closedAt}:{cancelledQty:po.cancelledQty,cancelledAt:po.cancelledAt})};
+        }
+    }
+    if(sessionStorage.getItem(key)!==JSON.stringify(saved))
+        throw Error('原操作暫存已遭變更，請保留原操作 ID。');
+    sessionStorage.removeItem(key);
+    const result=whole?{patch,cancelledQty:r.cancelledQty,supplyIds:r.supplyIds,affectedOrderIds:r.affectedOrderIds}
+        :{cancelledQty:r.cancelledQty,terminalStatus:supplies[0].status,orderId:supplies[0].orderId||'',
+            productKey:supplies[0].productKey||'',warehouseId:supplies[0].warehouseId||'',demandId:supplies[0].demandId||''};
+    try{
+        for(const supply of changed){
+            if(supply.fulfillmentType==='WAREHOUSE')onStockCommitted?.(supply.productKey,supply.warehouseId);
+            if(supply.demandId)onDemandChanged?.(supply.demandId);
+        }
+    }catch(error){error.supplyCommitted=true;error.supplyResult=result;throw error;}
+    return result;
+}
 // Purchasing transactions and checkpoints; no editor, DOM or UI-cache ownership.
 function poIncomingKey(item) {
     return String(item.productId || (item.itemCode ? `code:${normalizeHistoryItemCode(item.itemCode)}` : '')).trim();
@@ -16216,11 +16330,14 @@ async function registerFormalPurchaseIncomingBackend(poId,poRecord,{actorUid,act
 }
 
 async function cancelOutstandingSupplyRecord(poId, supplyId, reason, {actorUid=currentUser?.uid,actorRole=currentUserRole,onStockCommitted=null,onDemandChanged=null}={}) {
-    // Legacy SDK writes incoming inventory and related supply/order documents.
-    // Production has no equivalent approved Callable yet. Reject before reads
-    // or writes; a failed backend cutover must never revive this browser path.
-    if(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='production')
-        throw Error('正式取消供應商未到貨數量尚無可信任後端，已阻止瀏覽器直接修改在途庫存。');
+    // The production route is exclusively Callable and remains disabled until
+    // independent B/D approval. An unavailable backend never revives SDK writes.
+    if(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='production'){
+        if(typeof productionTransactionBackendEnabled!=='function'
+            ||!productionTransactionBackendEnabled('SUPPLY_CANCELLATION'))
+            throw Error('正式取消供應商未到貨數量尚無已核准的可信任後端，已阻止瀏覽器直接修改在途庫存。');
+        return commitSupplyCancellationBackend(poId,supplyId,reason,false,{actorUid,actorRole,onStockCommitted,onDemandChanged});
+    }
     const assertActor=()=>{
         if (!actorUid||currentUser?.uid!==actorUid||currentUserRole!==actorRole) throw new Error('登入身份已變更，請以原帳號重試取消。');
         if (!canCreatePurchaseOrderCapability()) throw new Error('目前無採購取消權限。');
@@ -16397,8 +16514,12 @@ async function cancelOutstandingSupplyRecord(poId, supplyId, reason, {actorUid=c
 async function stopPurchaseOrderOutstanding(poId,reason,{actorUid=currentUser?.uid,actorRole=currentUserRole,onStockCommitted=null,onDemandChanged=null}={}) {
     // The whole-PO flow delegates to the same legacy supply writer. Block at
     // entry so a rejected line cannot leave a partially stopped purchase order.
-    if(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='production')
-        throw Error('正式採購單取消尚無可信任後端，已阻止瀏覽器直接修改在途庫存。');
+    if(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='production'){
+        if(typeof productionTransactionBackendEnabled!=='function'
+            ||!productionTransactionBackendEnabled('SUPPLY_CANCELLATION'))
+            throw Error('正式採購單取消尚無已核准的可信任後端，已阻止瀏覽器直接修改在途庫存。');
+        return commitSupplyCancellationBackend(poId,'',reason,true,{actorUid,actorRole,onStockCommitted,onDemandChanged});
+    }
     const assertActor=()=>{
         if(!actorUid||currentUser?.uid!==actorUid||currentUserRole!==actorRole)throw new Error('登入身份已變更，請以原帳號重試取消。');
         if(!canCreatePurchaseOrderCapability())throw new Error('目前無採購取消權限。');
@@ -16493,18 +16614,22 @@ window.cancelSupplyOutstanding = async function(supplyId) {
         alert('此採購方式不支援在這裡取消。');
         return;
     }
-    if (isPurchaseTerminalStatus(supply.status)) {
+    const poId=supply.purchaseDocumentId||supply.internalNo||supply.id;
+    let pending;
+    try{pending=pendingSupplyCancellation(poId,supply.id,false);}
+    catch(error){alert(error.message);return;}
+    if (!pending&&isPurchaseTerminalStatus(supply.status)) {
         const label=String(supply.status||'').toUpperCase()==='CLOSED'?'已結案':'已取消';
         showActionFeedback(`這筆採購${label}，沒有待處理的未到貨數量。`, 'success');
         return;
     }
     const remaining = Math.max(0, Number(supply.qty || 0) - Number(supply.receivedQty || 0));
-    if (remaining <= 0) {
+    if (!pending&&remaining <= 0) {
         alert('這筆採購已全部到貨，沒有可取消的未到貨數量。');
         return;
     }
 
-    const reasonRaw = prompt(
+    const reasonRaw = pending?.payload.reason ?? prompt(
         `取消品項 ${supply.itemCode || supply.itemName || supply.id} 尚未到貨的 ${remaining} 個。\n採購單：${supply.purchaseDocumentNo || supply.internalNo || supply.id}\n只取消此品項，其他品項不受影響；已到貨的數量不回沖。\n來源訂單仍有效時，未滿足的數量會重新列入待採購。\n\n請輸入原因：`
     );
     if (reasonRaw === null) return;
@@ -16519,11 +16644,12 @@ window.cancelSupplyOutstanding = async function(supplyId) {
     let supplyStopped=false;
     try {
         const result = await cancelOutstandingSupplyRecord(
-            supply.purchaseDocumentId || supply.internalNo || supply.id,
+            poId,
             supply.id,
             reason,{actorUid,actorRole,onStockCommitted:invalidateWarehouseStockCache,onDemandChanged:invalidateProcurementDemandQueue}
         );
         supplyStopped=true;
+        if(!result.cancelledQty){showActionFeedback('供應商採購已全部到貨，沒有未到貨數量可取消。','warning');return;}
         purchaseHistorySupplyCache.set(supply.id, {...supply, status:result.terminalStatus,
             incomingRegisteredQty:0, ...(result.terminalStatus === 'CLOSED' ? {closedQty:result.cancelledQty} : {cancelledQty:result.cancelledQty})});
         supplyReceivingCache = supplyReceivingCache.filter(row => row.id !== supply.id);
@@ -16565,12 +16691,15 @@ window.cancelPurchaseOrderOutstanding = async function(poId) {
         alert('無法讀取採購單：'+(err?.message||err));
         return;
     }
-    if(isPurchaseTerminalStatus(po.status)){
+    let pending;
+    try{pending=pendingSupplyCancellation(poId,'',true);}
+    catch(error){alert(error.message);return;}
+    if(!pending&&isPurchaseTerminalStatus(po.status)){
         const label=String(po.status||'').toUpperCase()==='CLOSED'?'已結案':'已取消';
         showActionFeedback(`這張採購單${label}，沒有待處理的未到貨數量。`,'success');
         return;
     }
-    const reasonRaw=prompt(`停止採購單 ${po.poNo||po.id} 尚未到貨的數量。\n已實際到貨的數量不會回沖；若已有到貨紀錄，採購單會標示為「已結案」，完全未到貨才標示為「已取消」。\n原訂單會重新出現尚需採購的數量。\n\n請輸入原因：`);
+    const reasonRaw=pending?.payload.reason??prompt(`停止採購單 ${po.poNo||po.id} 尚未到貨的數量。\n已實際到貨的數量不會回沖；若已有到貨紀錄，採購單會標示為「已結案」，完全未到貨才標示為「已取消」。\n原訂單會重新出現尚需採購的數量。\n\n請輸入原因：`);
     if(reasonRaw===null)return;
     const reason=String(reasonRaw||'').trim();
     if(!reason){alert('請填寫取消原因，方便後續追蹤。');return;}
@@ -16601,7 +16730,7 @@ window.cancelPurchaseOrderOutstanding = async function(poId) {
         showActionFeedback(`${documentStatus==='CLOSED'?'已結案':'已取消'} ${po.poNo||poId}；停止未到貨數量 ${cancelledQty}，在途庫存與來源訂單待採購量已同步。`,'success');
     }catch(err){
         console.error('停止採購單未到貨失敗：',err);
-        alert(stopCommitted?'停止採購已完成，但畫面更新失敗；請重新開啟採購頁確認：'+(err?.message||err)
+        alert(stopCommitted||err?.supplyCommitted?'停止採購已完成，但畫面更新失敗；請重新開啟採購頁確認：'+(err?.message||err)
             :'停止未完全完成：'+(err?.message||err)+'。可以再次執行同一動作；已完成的供應紀錄不會重複扣除。');
     }finally{
         purchaseCancellationInProgress.delete(poId);
