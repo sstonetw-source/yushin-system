@@ -3581,8 +3581,7 @@ async function commitOrderCreation(orderId,data,{actorUid=currentUser?.uid,actor
         // self-order Callable, so reject the new order atomically here instead of
         // creating a reserved order with a missing supplier commitment.
         if(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='production'
-            &&snapshot.selfOrderAtCreation===true
-            &&(snapshot.items||[]).some(item=>item.procurementType==='SALES_SELF_ORDER'&&item.selfOrderConfirmed===true))
+            &&(snapshot.items||[]).some(item=>(item.procurementType||snapshot.procurementType)==='SALES_SELF_ORDER'&&item.selfOrderConfirmed===true))
             throw new Error('業務自行訂貨尚無正式後端；為避免訂單已成立但供應未建立，請先將已下訂改為待確認，再建立訂單。');
         if((snapshot.items || []).length>15)throw new Error('每張訂單最多 15 個品項；請分成多張訂單後再儲存。');
         const tradeValidation=globalThis.YushinOrderEntry.validateTrade(snapshot);
@@ -24579,7 +24578,7 @@ window.saveNewOrder = function() {
     // Prevent even the pre-commit Customer Master sync for an order that the
     // production self-order backend cannot yet atomically commit.
     if(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='production'
-        &&items.some(item=>item.procurementType==='SALES_SELF_ORDER'&&item.selfOrderConfirmed===true)){
+        &&items.some(item=>(item.procurementType||document.getElementById('orderProcurementType')?.value)==='SALES_SELF_ORDER'&&item.selfOrderConfirmed===true)){
         alert('業務自行訂貨尚無正式後端；請先將「已下訂」改為「待確認」，再建立訂單。');
         return;
     }

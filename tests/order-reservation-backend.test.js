@@ -80,6 +80,33 @@ test('one backend transaction reserves all warehouse items and reconciles all su
  assert.equal(demand('I4').requestedQty,2);
  assert.equal(f.docs.get('reservationOperationReceipts/order-sync-O__sync_1234567890').actorUid,'actor');
 });
+test('confirmed sales self-orders fail closed before any reservation or supplier demand is written',async()=>{
+ for(const options of [
+  {selfOrderAtCreation:true,itemProcurementType:'SALES_SELF_ORDER'},
+  {selfOrderAtCreation:false,itemProcurementType:'SALES_SELF_ORDER'},
+  {selfOrderAtCreation:undefined,itemProcurementType:undefined,orderProcurementType:'SALES_SELF_ORDER'}
+ ]){
+  const f=fixture(),order=f.docs.get('orders/O');
+  f.put('orders/O',{...order,selfOrderAtCreation:options.selfOrderAtCreation,
+   procurementType:options.orderProcurementType,items:[
+    {...order.items[0],procurementType:options.itemProcurementType,selfOrderConfirmed:true}
+   ]});
+  const before=f.snapshot();
+  await assert.rejects(f.run('sales1'),/已確認自行訂貨尚無原子建單後端/);
+  assert.equal(f.snapshot(),before);
+  assert.equal(f.docs.has('inventoryReservations/O__I1'),false);
+  assert.equal([...f.docs.keys()].some(key=>key.startsWith('procurementDemands/')),false);
+ }
+});
+test('unconfirmed self-orders remain eligible for ordinary backend reservation',async()=>{
+ const f=fixture(),order=f.docs.get('orders/O');
+ f.put('orders/O',{...order,selfOrderAtCreation:true,items:[
+  {...order.items[0],procurementType:'SALES_SELF_ORDER',selfOrderConfirmed:false}
+ ]});
+ const response=await f.run('sales1');
+ assert.equal(response.status,'applied');
+ assert.equal(f.docs.get('orders/O').inventoryReservationStatus,'completed');
+});
 test('a service-first mixed order reserves an untyped goods line without assigning it the service type',async()=>{
  const f=fixture(),order=f.docs.get('orders/O');
  f.put('products/S',{productType:'Service',active:true});
