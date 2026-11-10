@@ -3,6 +3,7 @@
 // This never grants sales accounts formal PO / purchasing permissions.
 const {projectIdFromEnvironment}=require('./grouped-reservation-gate');
 const {commitV2SelfOrder}=require('./quick-purchase-commit-service');
+const {allowProductionReceiving}=require('./supply-receipt-gate');
 function selfOrderBackendProject(env=process.env){
  const project=projectIdFromEnvironment(env);
  const local=value=>typeof value==='string'&&/^(localhost|127\.0\.0\.1):[0-9]+$/.test(value);
@@ -11,7 +12,10 @@ function selfOrderBackendProject(env=process.env){
    &&local(env.FIREBASE_AUTH_EMULATOR_HOST))return project;
  if(project==='preview-20135'&&env.ENABLE_PREVIEW_SELF_ORDER==='true'
    &&!env.FUNCTIONS_EMULATOR&&!env.FIRESTORE_EMULATOR_HOST&&!env.FIREBASE_AUTH_EMULATOR_HOST)return project;
+ // A supplier commitment must have an approved authoritative receiving path.
+ // Keep this independent writer closed if Receiving has been suspended.
  if(project==='yu-shing-company'&&env.ENABLE_PRODUCTION_SELF_ORDER_BACKEND==='true'
+   &&allowProductionReceiving(env)
    &&!env.FUNCTIONS_EMULATOR&&!env.FIRESTORE_EMULATOR_HOST&&!env.FIREBASE_AUTH_EMULATOR_HOST)return project;
  return '';
 }

@@ -167,10 +167,13 @@ test('self-order strict request rejects forged role, malformed operation/date, c
 test('self-order backend is default closed and requires exact independent project flag',async()=>{
  const demo={GCLOUD_PROJECT:'demo-yushin',FUNCTIONS_EMULATOR:'true',ENABLE_SELF_ORDER_EMULATOR:'true',
   FIRESTORE_EMULATOR_HOST:'127.0.0.1:8080',FIREBASE_AUTH_EMULATOR_HOST:'127.0.0.1:9099'};
- const prod={GCLOUD_PROJECT:'yu-shing-company',ENABLE_PRODUCTION_SELF_ORDER_BACKEND:'true'};
+ const prod={GCLOUD_PROJECT:'yu-shing-company',ENABLE_PRODUCTION_SELF_ORDER_BACKEND:'true',
+  ENABLE_PRODUCTION_RECEIVING_BACKEND:'true'};
  assert.equal(selfOrderBackendProject(demo),'demo-yushin');
  assert.equal(selfOrderBackendProject(prod),'yu-shing-company');
  for(const bad of [{...prod,ENABLE_PRODUCTION_SELF_ORDER_BACKEND:'false'},
+  {...prod,ENABLE_PRODUCTION_RECEIVING_BACKEND:'false'},
+  {...prod,ENABLE_PRODUCTION_RECEIVING_BACKEND:undefined},
   {...prod,FUNCTIONS_EMULATOR:'true'},{...prod,FIRESTORE_EMULATOR_HOST:'127.0.0.1:8080'},
   {...demo,GCLOUD_PROJECT:'yu-shing-company'},
   {GCLOUD_PROJECT:'preview-20135',ENABLE_PRODUCTION_SELF_ORDER_BACKEND:'true'}])
