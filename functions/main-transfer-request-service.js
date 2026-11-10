@@ -19,7 +19,9 @@ function normalizeMainTransferRequest(action,data){
  if(!keys||!data||typeof data!=='object'||Array.isArray(data)||Object.keys(data).some(k=>!keys.includes(k)))fault('調撥請求含未授權欄位','invalid-argument');
  const intent={action,id:id(data.id)};
  if(action==='CREATE'){
-  if(intent.id.length>128||typeof data.qty!=='number'||!Number.isFinite(data.qty)||data.qty<=0||data.qty>1000000)fault('調回數量不正確','invalid-argument');
+  // The authoritative post-receipt allocator accepts integer batches of at most 1,000.
+  // Reject unsupported quantities before reserving stock or creating a request.
+  if(intent.id.length>128||!Number.isSafeInteger(data.qty)||data.qty<=0||data.qty>1000)fault('單筆調回限 1 至 1000 件整數，請分批申請','invalid-argument');
   Object.assign(intent,{inventoryId:id(data.inventoryId),fromWarehouseId:id(data.fromWarehouseId),toWarehouseId:id(data.toWarehouseId),qty:data.qty});
   if(intent.fromWarehouseId===intent.toWarehouseId)fault('來源與主倉不可相同','invalid-argument');
  }else{

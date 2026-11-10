@@ -85,6 +85,10 @@ async function commitMainTransferPhysical(db,uid,data,action,env=process.env){
   if(r.id!==requestRef.id||r.status!==(action==='DISPATCH'?'PENDING':'SHIPPED')
    ||(action==='RECEIVE'&&r.transferId!==intent.id))fault('主倉備貨需求已變更');
   const inventoryId=id(r.inventoryId),key=id(r.productKey),from=id(r.fromWarehouseId),to=id(r.toWarehouseId),qty=quantity(r.qty);
+  // Existing in-transit transfers must remain receivable/retryable. For new
+  // dispatches, prevent a physical receipt that the downstream coordinator
+  // cannot allocate or resume with the original transfer identity.
+  if(action==='DISPATCH'&&(!Number.isSafeInteger(qty)||qty>1000))fault('原備貨需求超出可續傳分配範圍，請取消並分批重新申請');
   if(inventoryId!==encodeURIComponent(key)||from===to||from.startsWith('custody-')||to.startsWith('custody-')||r.fromStockId!==stockId(from,key))fault('主倉需求來源不一致');
   if(t&&(t.inventoryId!==inventoryId||t.productKey!==key||t.fromWarehouseId!==from||t.toWarehouseId!==to||t.qty!==qty))fault('調撥與主倉需求不一致');
   const invRef=ref('inventory',inventoryId),inv=await tx.get(invRef),sourceWh=await tx.get(ref('warehouses',from)),targetWh=await tx.get(ref('warehouses',to));

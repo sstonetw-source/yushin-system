@@ -58,7 +58,7 @@ async function commitMainTransferRequestBackend(id,action,input){
  }else{
   if(!input||input.id!==id||!['CREATE','CANCEL'].includes(action))throw Error('沒有原調撥操作可恢復。');
   if(typeof id!=='string'||!id||id!==id.trim()||id.includes('/')||id.length>128)throw Error('調撥識別碼不正確。');
-  if(action==='CREATE'&&(typeof input.qty!=='number'||!Number.isFinite(input.qty)||input.qty<=0||input.qty>1000000
+  if(action==='CREATE'&&(!Number.isSafeInteger(input.qty)||input.qty<=0||input.qty>1000
    ||[input.inventoryId,input.fromWarehouseId,input.toWarehouseId].some(v=>typeof v!=='string'||!v||v.includes('/'))
    ||input.fromWarehouseId===input.toWarehouseId))throw Error('來源、主倉或調回數量不正確。');
   const payload=action==='CREATE'?{...input}:{id,operationId:lifecycleRecordId()};

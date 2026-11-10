@@ -1361,7 +1361,7 @@ window.updateInventoryTransferHint=function(){
     const movable=Math.max(0,Number(source.onHand||0)-Number(source.reserved||0));
     const fromName=activeInventoryWarehouses().find(warehouse=>warehouse.id===fromId)?.warehouseName||'來源倉庫';
     const toName=activeInventoryWarehouses().find(warehouse=>warehouse.id===toId)?.warehouseName||'目的倉庫';
-    hint.textContent=`${fromName}：現有 ${source.onHand}、已預留 ${source.reserved}，最多可移動 ${movable}；發起後先保留數量；分倉實際寄出後列為調撥途中，${toName} 點收後入庫，公司總庫存不變。`;
+    hint.textContent=`${fromName}：現有 ${source.onHand}、已預留 ${source.reserved}，最多可移動 ${movable}；單筆限 1000 件整數，超過請分批。發起後先保留數量；分倉實際寄出後列為調撥途中，${toName} 點收後入庫，公司總庫存不變。`;
 };
 
 window.closeInventoryTransfer=function(){
@@ -1377,7 +1377,7 @@ window.saveInventoryTransfer=async function(){
     const toWarehouseId=document.getElementById('inventoryTransferTo')?.value||'';
     const qty=Number(document.getElementById('inventoryTransferQty')?.value);
     if(!fromWarehouseId||!toWarehouseId||fromWarehouseId===toWarehouseId){alert('請選擇不同的來源倉庫與目的倉庫。');return;}
-    if(!Number.isFinite(qty)||qty<=0){alert('移動數量必須大於 0。');return;}
+    if(!Number.isSafeInteger(qty)||qty<=0||qty>1000){alert('單筆調回限 1 至 1000 件整數，超過請分批申請。');return;}
     const key=String(item.productKey||item.productId||'').trim();
     if(!key){alert('此庫存缺少產品識別，請先修正產品主檔。');return;}
     const button=document.getElementById('saveInventoryTransferBtn');
