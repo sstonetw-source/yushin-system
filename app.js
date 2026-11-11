@@ -25974,7 +25974,7 @@ window.renderProductManagementOverview = function() {
         const date = escapeHtml(priceListDateLabel(row.priceListUpdatedAt || row.priceListDeletedAt));
         const toggleLabel = row.priceListActive === false ? '啟用' : '停用';
         const actions = `<div class="price-list-action-group no-print">
-            <button type="button" class="btn-small" onclick="openPriceListUploadForBrand(${brandArg})">上傳新版</button>
+            <button type="button" class="btn-small" onclick="openPriceListUploadForBrand(${brandArg})">上傳主檔（含價格）</button>
             <button type="button" class="btn-small btn-secondary" onclick="showPriceListHistoryForBrand(${brandArg})">紀錄</button>
             <details class="price-list-more-actions">
                 <summary aria-label="更多操作"><span class="price-list-more-label">更多操作</span><span class="price-list-more-icon" aria-hidden="true">⋯</span></summary>

@@ -1373,25 +1373,25 @@
                 <section id="productBatchMaintenance" class="price-list-admin" aria-label="價目表管理">
                     <div class="admin-product-heading price-list-admin-heading">
                         <div>
-                            <h3>價目表管理</h3>
+                            <h3>價目表與產品主檔管理</h3>
 
                         </div>
                         <div class="price-list-admin-actions no-print">
-                            <details class="price-list-task">
-                                <summary>更新商品價格</summary>
+                            <details class="price-list-task" open>
+                                <summary>① 僅更新價目表（價格）</summary>
                                 <div class="price-list-task-body">
-                                    <p>價格專用匯入只更新既有商品的含稅建議售價，每次最多核對 2,000 筆。</p>
+                                    <p>只更新既有商品的含稅建議售價，不新增商品，也不修改產品資料。每次最多核對 2,000 筆。</p>
                                     <button type="button" class="btn-secondary" onclick="downloadProductPriceUpdateTemplate()">下載價格更新範本</button>
-                                    <button type="button" onclick="document.getElementById('productPriceExcelInput').click()">選擇 Excel 更新價格</button>
+                                    <button type="button" onclick="document.getElementById('productPriceExcelInput').click()">上傳價目表 Excel（僅價格）</button>
                                     <button type="button" id="productPriceResumeButton" class="btn-secondary" hidden onclick="continueProductPriceImport()">繼續上次更新</button>
                                 </div>
                             </details>
-                            <details class="price-list-task">
-                                <summary>匯入產品主檔</summary>
+                            <details class="price-list-task" open>
+                                <summary>② 匯入產品主檔（可更新資料與價格）</summary>
                                 <div class="price-list-task-body">
-                                    <p>完整主檔（新品、資料、售價與標準成本）每次最多核對 1,000 筆；本機只記錄檔案指紋與完成進度。</p>
+                                    <p>可新增商品，並更新品名、規格等主檔資料，以及檔案提供的售價與標準成本。每次最多核對 1,000 筆。</p>
                                     <button type="button" class="btn-secondary" onclick="downloadProductMasterTemplate()">下載產品主檔範本</button>
-                                    <button type="button" onclick="openPriceListUploadForBrand('')">上傳 Excel</button>
+                                    <button type="button" onclick="openPriceListUploadForBrand('')">上傳產品主檔 Excel（含價格）</button>
                                     <button type="button" id="productMasterResumeButton" class="btn-secondary" hidden onclick="openPriceListUploadForBrand('')">接續上次匯入（重新選原檔）</button>
                                 </div>
                             </details>
@@ -1407,6 +1407,7 @@
                     </div>
                     <span id="productBatchMaintenanceStatus" class="inline-status" role="status" aria-live="polite"></span>
                     <p id="productOverviewStatus" role="status" aria-live="polite"></p>
+                    <p class="price-list-admin-intro">下方各廠牌的「上傳主檔（含價格）」會更新商品資料與價格；如果只想調整售價，請使用上方「僅更新價目表」。</p>
                     <div class="table-wrap price-list-table-wrap">
                         <table class="price-list-management-table">
                             <thead><tr><th>廠牌</th><th>目前價目表</th><th>檔案品項數</th><th>最後更新</th><th>狀態</th><th class="no-print">操作</th></tr></thead>
