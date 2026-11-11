@@ -81,6 +81,7 @@
       '請依實際寄貨內容回又鑫系統逐筆確認寄出；調回主倉的貨需由主倉另外點收。'].join('\n');
   }
   root.shareBranchDispatchList=async function(warehouseId,share=false,button){
+    let buttonState=null;
     try{
       const a=actor(),previous=branchLists.find(g=>g.warehouseId===warehouseId);
       if(branchActorKey!==storageKey(a))throw Error('登入帳號或角色已變更，請重新載入清單。');
@@ -95,7 +96,10 @@
         .filter(g=>!blocked(g.rows,tasks)),transfers.entries).find(g=>g.warehouseId===warehouseId);
       if(branchListSignature(fresh)!==branchListSignature(previous))throw Error('清單內容已更新，請檢查後再傳送。');
       if(!branchListComplete(fresh))throw Error('收件資料不完整，請補齊後再傳送。');
-      if(button)button.disabled=true;
+      if(button){
+        buttonState=beginActionButton(button,share?'準備分享…':'複製中…');
+        if(!buttonState)return;
+      }
       const message=branchNoticeText(fresh);
       if(share&&typeof navigator.share==='function')await navigator.share({title:'分倉出貨通知｜'+fresh.warehouseName,text:message});
       else{
@@ -104,7 +108,7 @@
         showActionFeedback('已複製 '+fresh.warehouseName+' 出貨清單，可貼到 LINE 或 Email。','success');
       }
     }catch(error){if(error?.name!=='AbortError')showActionFeedback('清單未傳送：'+error.message,'warning');}
-    finally{if(button)button.disabled=false;}
+    finally{endActionButton(button,buttonState);}
   };
   function stoppedTask(task){
     if(active.has(task.id))return false;
@@ -233,7 +237,8 @@
   };
   root.confirmWarehouseParcel=async function(button){
     const task=editing;if(!task||!same(task.actor)||button.disabled)return;
-    button.disabled=true;
+    const buttonState=beginActionButton(button,'建立寄貨工作…');
+    if(!buttonState)return;
     try{
       task.date=el('parcelDate').value;task.notes=el('parcelNotes').value.trim();
       if(!/^\d{4}-\d{2}-\d{2}$/.test(task.date)||new Date(task.date+'T00:00:00Z').toISOString().slice(0,10)!==task.date)throw Error('請核對寄出日期。');
@@ -256,7 +261,7 @@
       root.renderWarehouseParcels();
       void run(task.actor,task.id);
     }catch(error){if(editing===task)el('parcelConfirmError').textContent=error.message;}
-    finally{button.disabled=false;}
+    finally{endActionButton(button,buttonState);}
   };
   async function run(a,id){
     if(active.has(id))return;

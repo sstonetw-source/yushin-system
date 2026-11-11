@@ -34,6 +34,14 @@ test('branch-to-main order and replenishment share recipient projection without 
  assert.equal(reads.length,1);assert.deepEqual(Array.from(reads[0]),['stockTransferRequests','status','==','PENDING']);
 });
 
+function actionButton(){
+ const classes=new Set(),attributes=new Map();
+ return {disabled:false,dataset:{},textContent:'複製清單',innerHTML:'複製清單',
+  classList:{add:value=>classes.add(value),remove:value=>classes.delete(value)},
+  setAttribute:(name,value)=>attributes.set(name,value),removeAttribute:name=>attributes.delete(name),
+  classes,attributes};
+}
+
 function cardsFixture({phone='02-12345678',ready=true,hasMore=false,kind='branch',shipments=[]}={}){
  const nodes={warehouseParcelCards:{innerHTML:''},warehouseParcelStatus:{textContent:''}};
  const copied=[],shared=[],feedback=[];
@@ -50,7 +58,11 @@ function cardsFixture({phone='02-12345678',ready=true,hasMore=false,kind='branch
   orderWorkQueueReady:true,orderWorkQueueError:'',warehouseParcelSourceRows:()=>shipments,inventoryShippingActiveKind:()=>kind,
   mainTransferParcelEntries:()=>({ready:true,error:'',entries,recoveries:[],hasMore}),
   escapeHtml:String,inlineJsValue:JSON.stringify,YushinWarehouseLogistics:logistics};
- const c=vm.createContext(ctx);vm.runInContext(fs.readFileSync('modules/warehouse-parcels.js','utf8'),c);return {c,nodes,copied,shared,feedback,entries};
+ const c=vm.createContext(ctx);
+ const feedbackSource=fs.readFileSync('src/shared/action-feedback.js','utf8');
+ vm.runInContext(feedbackSource.slice(feedbackSource.indexOf('function beginActionButton('),feedbackSource.indexOf('function actionButtonFromEventOrSelector(')),c);
+ vm.runInContext(fs.readFileSync('modules/warehouse-parcels.js','utf8'),c);
+ return {c,nodes,copied,shared,feedback,entries};
 }
 
 test('both transfer sources appear as ordinary shipping cards with their original dispatch actions',()=>{
@@ -82,7 +94,7 @@ test('branch shipping appears as one warehouse-based list, ready to copy for LIN
  assert.equal((html.match(/data-branch-list=/g)||[]).length,1);
  assert.match(html,/分倉出貨清單/);assert.match(html,/SALE-01/);
  assert.match(html,/寄給客戶/);assert.match(html,/訂單調回主倉/);assert.match(html,/備貨調回主倉/);
- const button={disabled:false};await c.shareBranchDispatchList('BRANCH',false,button);
+ const button=actionButton();await c.shareBranchDispatchList('BRANCH',false,button);
  assert.equal(copied.length,1);assert.equal(button.disabled,false);
  assert.match(copied[0],/O-001/);assert.match(copied[0],/O-002/);
  assert.match(copied[0],/PCR-01/);assert.match(copied[0],/台北市客戶地址/);
@@ -92,7 +104,7 @@ test('branch shipping appears as one warehouse-based list, ready to copy for LIN
 
 test('native phone sharing keeps the current warehouse list and does not require a backend write',async()=>{
  const {c,shared}=cardsFixture();c.renderWarehouseParcels();
- await c.shareBranchDispatchList('BRANCH',true,{disabled:false});
+ await c.shareBranchDispatchList('BRANCH',true,actionButton());
  assert.equal(shared.length,1);assert.match(shared[0].title,/分倉出貨通知/);
  assert.match(shared[0].text,/DNA-01/);
 });
@@ -100,20 +112,20 @@ test('native phone sharing keeps the current warehouse list and does not require
 test('not-yet-ready transfer is visible for preparation, but clearly says it cannot be sent',async()=>{
  const {c,nodes,copied}=cardsFixture({ready:false});c.renderWarehouseParcels();
  assert.match(nodes.warehouseParcelCards.innerHTML,/待備妥／打單/);
- await c.shareBranchDispatchList('BRANCH',false,{disabled:false});
+ await c.shareBranchDispatchList('BRANCH',false,actionButton());
  assert.match(copied[0],/不可先寄出/);
 });
 
 test('incomplete recipient, incomplete transfer page and changed quantities fail closed when sharing',async()=>{
  const missing=cardsFixture({phone:''});missing.c.renderWarehouseParcels();
  assert.match(missing.nodes.warehouseParcelCards.innerHTML,/disabled>複製清單/);
- await missing.c.shareBranchDispatchList('BRANCH',false,{disabled:false});
+ await missing.c.shareBranchDispatchList('BRANCH',false,actionButton());
  assert.equal(missing.copied.length,0);assert.match(missing.feedback[0].message,/收件資料不完整/);
  const more=cardsFixture({hasMore:true});more.c.renderWarehouseParcels();
- await more.c.shareBranchDispatchList('BRANCH',false,{disabled:false});
+ await more.c.shareBranchDispatchList('BRANCH',false,actionButton());
  assert.equal(more.copied.length,0);assert.match(more.feedback[0].message,/尚未完整讀取/);
  const changed=cardsFixture();changed.c.renderWarehouseParcels();changed.entries[0].qty=4;
- await changed.c.shareBranchDispatchList('BRANCH',false,{disabled:false});
+ await changed.c.shareBranchDispatchList('BRANCH',false,actionButton());
  assert.equal(changed.copied.length,0);assert.match(changed.feedback[0].message,/清單內容已更新/);
 });
 
@@ -128,14 +140,33 @@ test('each warehouse receives only its own shipping requirements',async()=>{
  const {c,nodes,copied}=cardsFixture({shipments:[shipment]});
  c.warehouseMasterCache.push({id:'BRANCH2',warehouseName:'另一分倉'});c.renderWarehouseParcels();
  assert.equal((nodes.warehouseParcelCards.innerHTML.match(/data-branch-list=/g)||[]).length,2);
- await c.shareBranchDispatchList('BRANCH',false,{disabled:false});
+ await c.shareBranchDispatchList('BRANCH',false,actionButton());
  assert.equal(copied.length,1);assert.doesNotMatch(copied[0],/OTHER-01|獨立地址/);
- await c.shareBranchDispatchList('BRANCH2',false,{disabled:false});
+ await c.shareBranchDispatchList('BRANCH2',false,actionButton());
  assert.match(copied[1],/OTHER-01|獨立地址/);assert.doesNotMatch(copied[1],/DNA-01|PCR-01/);
 });
 
 test('role changes cannot share a list rendered for the previous identity',async()=>{
  const {c,copied,feedback}=cardsFixture();c.renderWarehouseParcels();
- c.currentUserRole='admin';await c.shareBranchDispatchList('BRANCH',false,{disabled:false});
+ c.currentUserRole='admin';await c.shareBranchDispatchList('BRANCH',false,actionButton());
  assert.equal(copied.length,0);assert.match(feedback[0].message,/登入帳號或角色已變更/);
+});
+
+test('branch list copy acknowledges immediately, blocks double-click and restores after completion',async()=>{
+ const {c}=cardsFixture();c.renderWarehouseParcels();
+ let finish,attempts=0;
+ c.navigator.clipboard.writeText=()=>{attempts++;return new Promise(resolve=>{finish=resolve;});};
+ const button=actionButton(),original=button.innerHTML;
+ const first=c.shareBranchDispatchList('BRANCH',false,button);
+ assert.equal(button.disabled,true);
+ assert.equal(button.textContent,'複製中…');
+ assert.equal(button.attributes.get('aria-busy'),'true');
+ assert.equal(button.classes.has('is-action-pending'),true);
+ await c.shareBranchDispatchList('BRANCH',false,button);
+ assert.equal(attempts,1);
+ finish();await first;
+ assert.equal(button.disabled,false);
+ assert.equal(button.innerHTML,original);
+ assert.equal(button.attributes.has('aria-busy'),false);
+ assert.equal(button.classes.has('is-action-pending'),false);
 });
