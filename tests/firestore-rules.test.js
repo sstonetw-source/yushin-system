@@ -1788,7 +1788,12 @@ test('whole-order backend selects another stocked warehouse for all authorized r
 });
 test('whole-order backend replay never reopens an already committed zero-stock source',async()=>{
  for(const [uid,role] of [['sales1','sales'],['eng1','engineer'],['buyer1','purchaser'],['admin','admin']]){
-  const f=await orderInitializationFixture(uid,role,{onHand:0,ownerUid:role==='purchaser'?'sales1':uid});await f.run();
+  const f=await orderInitializationFixture(uid,role,{onHand:0,ownerUid:role==='purchaser'?'sales1':uid});
+  // This suite reuses init-product across cases. Reset W2 before the first
+  // commit so the zero-company source is truly empty, not a leaked mismatch
+  // from the prior alternate-warehouse test.
+  await seed('warehouseStocks/W2__init-product',{productKey:'init-product',warehouseId:'W2',onHand:0,reserved:0,incoming:0});
+  await f.run();
   await addInitializationWarehouse(f,5);await seed('inventory/init-product',{productKey:'init-product',onHand:5,reserved:0,incoming:0});
   try{await assertSucceeds(f.run());await assertSucceeds(f.run());}catch(err){throw Error(uid+' remote zero recovery: '+err.message);}
   const d=(await getDoc(doc(db('admin'),'procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.id+':I')))).data();
