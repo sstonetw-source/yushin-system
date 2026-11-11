@@ -71,6 +71,9 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
       const resetDeliveryForm=()=>{},renderOrderLifecycleModal=()=>{},renderOrdersList=()=>{},selectOrderProgressTab=()=>{};
       window.alerts=[];window.alert=s=>alerts.push(s);window.promptCalls=0;window.prompt=()=>{promptCalls++;return '誤登簽收';};`});
    await page.addScriptTag({content:read('src/services/delivery-records.js')});
+   // The real app loads these shared action helpers before delivery-actions.js.
+   const feedback=read('src/shared/action-feedback.js');
+   await page.addScriptTag({content:feedback.slice(feedback.indexOf('function beginActionButton('),feedback.indexOf('function actionButtonFromEventOrSelector('))});
    const lifecycle=read('src/features/orders/lifecycle-workspace.js');
    await page.addScriptTag({content:lifecycle.slice(lifecycle.indexOf('window.openPartialDeliveryForm ='),lifecycle.indexOf('window.openPartialDeliveryForOrder ='))});
    await page.addScriptTag({content:section('function renderDeliveryModal() {','window.editDeliveryRecord =')

@@ -232,7 +232,7 @@ function renderDeliveryModal() {
             <td>${escapeHtml(record.date || '')}</td><td>${escapeHtml(String(record.qty || ''))}</td>
             <td>${record.itemId ? escapeHtml(deliveryItemNameById.get(record.itemId)||record.itemId)+'<br>' : ''}${escapeHtml(record.notes || '')}</td>
             <td>${escapeHtml(record.createdBy || '')}<br><span style="font-size:10px;color:#666;">${escapeHtml(formatOrderStatusTime(record.createdAt))}</span></td>
-            <td>${editable && !v2 ? `<details class="order-record-actions"><summary>操作</summary><button type="button" class="btn-small btn-secondary" onclick="editDeliveryRecord(${inlineJsValue(record.id)})">編輯</button> <button type="button" class="btn-danger" onclick="deleteDeliveryRecord(${inlineJsValue(record.id)})">更正誤登</button></details>` : editableSteps && (globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true || ((typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'&&globalThis.YUSHIN_PREVIEW_DELIVERY_REVERSAL===true) || (typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled('DELIVERY_REVERSAL')))) && record.sourceType==='WAREHOUSE_SHIPMENT_CONFIRMATION' && !order.returnRecords?.length && !confirmation && !reversal ? `<button type="button" class="btn-danger" onclick="deleteDeliveryRecord(${inlineJsValue(record.id)})">撤銷送達確認</button>` : '僅可查看'}</td>
+            <td>${editable && !v2 ? `<details class="order-record-actions"><summary>操作</summary><button type="button" class="btn-small btn-secondary" onclick="editDeliveryRecord(${inlineJsValue(record.id)})">編輯</button> <button type="button" class="btn-danger" onclick="deleteDeliveryRecord(${inlineJsValue(record.id)})">更正誤登</button></details>` : editableSteps && (globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true || ((typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'&&globalThis.YUSHIN_PREVIEW_DELIVERY_REVERSAL===true) || (typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled('DELIVERY_REVERSAL')))) && record.sourceType==='WAREHOUSE_SHIPMENT_CONFIRMATION' && !order.returnRecords?.length && !confirmation && !reversal ? `<button type="button" class="btn-danger" onclick="deleteDeliveryRecord(${inlineJsValue(record.id)},this)">撤銷送達確認</button>` : '僅可查看'}</td>
         </tr>`).join('');
     } else if (progress.isLegacyEstimated) {
         tbody.innerHTML = `<tr><td>${escapeHtml(order.orderDate || '')}<br><span class="delivery-estimated">歷史推估</span></td><td>${progress.total}</td><td>舊版已送貨資料</td><td>－</td><td>${editable ? '<button type="button" class="btn-secondary" onclick="clearLegacyDelivery()">取消此推估</button>' : '僅可查看'}</td></tr>`;
@@ -241,7 +241,7 @@ function renderDeliveryModal() {
     }
     if(deliveryConfirmationProtectedMode()){
         if(pendingError)tbody.insertAdjacentHTML('beforeend',`<tr><td colspan="5">${escapeHtml(pendingError)}</td></tr>`);
-        if(reversal)tbody.insertAdjacentHTML('beforeend',`<tr><td colspan="5">前次送達撤銷結果待確認。${editable&&!syncing?`<button type="button" class="btn-secondary" onclick="deleteDeliveryRecord(${inlineJsValue(reversal.deliveryRecordId)})">確認撤銷結果</button>`:''}</td></tr>`);
+        if(reversal)tbody.insertAdjacentHTML('beforeend',`<tr><td colspan="5">前次送達撤銷結果待確認。${editable&&!syncing?`<button type="button" class="btn-secondary" onclick="deleteDeliveryRecord(${inlineJsValue(reversal.deliveryRecordId)},this)">確認撤銷結果</button>`:''}</td></tr>`);
     }
     labelOrderProgressRecords('deliveryRecordsBody', ['送貨日期', '數量', '備註', '登錄人／時間', '操作']);
     document.getElementById('deliveryFormHint').innerText = progress.isLegacyEstimated
@@ -313,8 +313,9 @@ window.saveDeliveryRecord = async function() {
     const recordId=frozen?.operationId||editId||deliveryCreateAttempt.recordId;
     const shipmentId=frozen?.shipmentId||document.getElementById('deliveryShipmentId')?.value||'';
     const saveButton = document.querySelector('[onclick="saveDeliveryRecord()"]');
+    const buttonState=beginActionButton(saveButton,'確認送達中…');
+    if(saveButton&&!buttonState)return;
     pendingDeliveryOrderIds.add(orderId);
-    if (saveButton) { saveButton.disabled = true; saveButton.textContent = '儲存中…'; }
     try {
         const deliveryOrder=ordersCache.find(row=>row.id===orderId);
         const custodyItems=deliveryOrder?.items||[];
@@ -333,15 +334,17 @@ window.saveDeliveryRecord = async function() {
         alert('送貨紀錄儲存失敗：' + err.message + '\n請確認目前這筆資料及連線／權限，重試前先查詢作業結果；若持續失敗，請聯絡管理員。');
     } finally {
         pendingDeliveryOrderIds.delete(orderId);
-        if (saveButton) { saveButton.disabled = false; saveButton.textContent = '💾 儲存送貨紀錄'; }
+        endActionButton(saveButton,buttonState);
         if(deliveryConfirmationProtectedMode()&&currentDeliveryOrderId===orderId)renderDeliveryModal();
     }
 };
 
-async function reverseV2DeliveryRecord(recordId){
+async function reverseV2DeliveryRecord(recordId,button){
     if(!canManageOrderLifecycleCapability()||!canEditPage('orders.list'))return alert('此操作僅限訂單負責業務或管理員。');
     const orderId=currentDeliveryOrderId;
     if(!orderId||pendingDeliveryOrderIds.has(orderId))return;
+    const buttonState=button?beginActionButton(button,'核對撤銷中…'):null;
+    if(button&&!buttonState)return;
     pendingDeliveryOrderIds.add(orderId);
     try{
         const pending=pendingV2DeliveryReversal(orderId);
@@ -356,16 +359,17 @@ async function reverseV2DeliveryRecord(recordId){
     }catch(error){alert('送達撤銷尚未確認：'+error.message+'\n請使用原操作核對結果。');}
     finally{
         pendingDeliveryOrderIds.delete(orderId);
+        if(button)endActionButton(button,buttonState);
         if(currentDeliveryOrderId===orderId)renderDeliveryModal();
         renderOrdersList();
     }
 }
 
-window.deleteDeliveryRecord = async function(recordId) {
+window.deleteDeliveryRecord = async function(recordId,button) {
     if (!canManageOrderLifecycleCapability() || !canEditPage('orders.list')) { alert('此操作僅限訂單負責業務或管理員。'); return; }
     if(globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true
         ||((typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'&&globalThis.YUSHIN_PREVIEW_DELIVERY_REVERSAL===true) || (typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled('DELIVERY_REVERSAL'))))
-        return reverseV2DeliveryRecord(recordId);
+        return reverseV2DeliveryRecord(recordId,button);
     if((typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview')
         ||(typeof productionTransactionBackendRequired==='function'&&productionTransactionBackendRequired('DELIVERY_REVERSAL')))
         return alert('送達撤銷尚未開放，禁止改用舊交易。');

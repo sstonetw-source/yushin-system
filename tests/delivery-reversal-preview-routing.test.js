@@ -80,19 +80,35 @@ test('pending Preview reversal forbids legacy delivery writes after flag or envi
 
 test('Preview UI sends approved reversal through the protected route and never through legacy correction',async()=>{
  const code=fs.readFileSync('src/features/orders/delivery-actions.js','utf8');
- const calls=[],messages=[];
+ const calls=[],messages=[],classes=new Set(),attributes=new Map();let finish;
+ let buttonText='撤銷送達確認',buttonHtml=buttonText;
+ const button={disabled:false,dataset:{},
+  get textContent(){return buttonText;},set textContent(value){buttonText=value;buttonHtml=value;},
+  get innerHTML(){return buttonHtml;},set innerHTML(value){buttonHtml=value;buttonText=value.replace(/<[^>]+>/g,'');},
+  classList:{add:value=>classes.add(value),remove:value=>classes.delete(value)},
+  setAttribute:(name,value)=>attributes.set(name,value),removeAttribute:name=>attributes.delete(name)};
  const c=vm.createContext({window:null,APP_ENVIRONMENT:'preview',YUSHIN_V2_DELIVERY_EMULATOR:false,
   YUSHIN_PREVIEW_DELIVERY_REVERSAL:true,currentDeliveryOrderId:'O',pendingDeliveryOrderIds:new Set(),
   ordersCache:[{id:'O'}],canManageOrderLifecycleCapability:()=>true,canEditPage:()=>true,
   pendingV2DeliveryReversal:()=>null,prompt:()=> '誤登送達',localDateString:()=> '2026-10-28',
   deliveryRecordId:()=> 'reversal_preview_20261028_abcdef',
-  reverseV2ShipmentDeliveryEmulator:async(orderId,id,payload)=>{calls.push({orderId,id,payload});return {};},
+  reverseV2ShipmentDeliveryEmulator:async(orderId,id,payload)=>{calls.push({orderId,id,payload});return new Promise(resolve=>{finish=resolve;});},
   correctOrderDeliveryRecord:()=>{throw Error('legacy correction forbidden');},
   resetDeliveryForm:()=>{},renderOrderLifecycleModal:()=>{},renderDeliveryModal:()=>{},renderOrdersList:()=>{},
   alert:message=>messages.push(message)});
- c.window=c;vm.runInContext(code,c);
+ c.window=c;
+ const feedback=fs.readFileSync('src/shared/action-feedback.js','utf8');
+ vm.runInContext(feedback.slice(feedback.indexOf('function beginActionButton('),feedback.indexOf('function actionButtonFromEventOrSelector(')),c);
+ vm.runInContext(code,c);
  c.renderDeliveryModal=()=>{};c.resetDeliveryForm=()=>{};c.renderOrderLifecycleModal=()=>{};c.renderOrdersList=()=>{};
- await c.deleteDeliveryRecord('D');
+ const pending=c.deleteDeliveryRecord('D',button);
+ assert.equal(button.disabled,true);assert.equal(button.textContent,'核對撤銷中…');
+ assert.equal(attributes.get('aria-busy'),'true');assert.equal(classes.has('is-action-pending'),true);
+ await c.deleteDeliveryRecord('D',button);
+ assert.equal(calls.length,1,'pending reversal prevents duplicate requests');
+ finish({});await pending;
+ assert.equal(button.disabled,false);assert.equal(button.textContent,'撤銷送達確認');
+ assert.equal(attributes.has('aria-busy'),false);assert.equal(classes.has('is-action-pending'),false);
  assert.equal(calls.length,1);assert.equal(calls[0].id,'D');assert.equal(messages.length,0);
  c.YUSHIN_PREVIEW_DELIVERY_REVERSAL=false;
  await c.deleteDeliveryRecord('D');
