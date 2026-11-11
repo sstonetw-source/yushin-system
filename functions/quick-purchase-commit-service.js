@@ -144,11 +144,32 @@ async function commitPurchase(db,uid,data,{selfOrder=false}={}){
   // cannot become purchaser commitments through the privileged callable.
   if(((sourceItem.procurementType||source.procurementType||'PURCHASING_PO')==='SALES_SELF_ORDER')!==selfOrder)
    fail('failed-precondition','來源品項的自行訂貨與採購角色不一致');
-  // The canonical receiving admission for this single-location source still
-  // has a five-line physical order contract. Never create a supplier promise
-  // that the receiving backend cannot later accept.
-  if((selfOrder&&source.items.length>5)||source.items.some(i=>String(i.productType||i.type||'').toUpperCase()==='SERVICE'))
-   fail('failed-precondition','混合服務訂單或超過五品項來源尚未完成收貨驗證，禁止提交供應');
+  // A service sibling has no physical supply, reservation or demand. Validate
+  // that same contract here before committing a real supplier promise; the
+  // existing Receiving writer already accepts mixed orders up to five lines.
+  const serviceLines=source.items.filter(i=>String(i.productType||i.type||'').toUpperCase()==='SERVICE');
+  if((selfOrder&&source.items.length>5)||(!selfOrder&&serviceLines.length))
+   fail('failed-precondition','此採購來源尚不支援超過五品項或混合服務的採購');
+  if(selfOrder)for(const sibling of serviceLines){
+   const id=sibling.itemId,productId=sibling.productId;
+   if(typeof id!=='string'||!id||id.includes('/')||typeof productId!=='string'||!productId
+     ||productId.includes('/')||sibling.fulfillmentType==='DIRECT_SHIP'
+     ||(sibling.reservedQty??0)!==0||(sibling.shortageQty??0)!==0
+     ||(sibling.supplyOrderedQty??0)!==0||(sibling.receivedQty??0)!==0
+     ||(sibling.inventoryProductKey??'')!==''||(sibling.warehouseId??'')!==''
+     ||sibling.reservationStatus!=='not_required')
+    fail('failed-precondition','服務品項包含未授權的實體庫存或採購資料');
+   const demandId=demandCore.demandIdForSource({sourceType:'SALES_ORDER',sourceId:intent.orderId,sourceItemId:id});
+   const [master,reservation,demand]=await Promise.all([
+    tx.get(ref('products',productId)),
+    tx.get(ref('inventoryReservations',intent.orderId+'__'+id)),
+    tx.get(ref('procurementDemands',encodeURIComponent(demandId)))
+   ]);
+   if(!master.exists||master.data().active===false
+     ||String(master.data().productType||master.data().type||'').toUpperCase()!=='SERVICE'
+     ||reservation.exists||demand.exists)
+    fail('failed-precondition','混合服務訂單的產品、預留或採購來源不一致');
+  }
   if(selfOrder){
    // A supplier commitment is irreversible business evidence. Verify that
    // its receipt source exists before accepting the promise; otherwise the

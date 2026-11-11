@@ -15,7 +15,9 @@ function fixture({directShip=false,mixed=false}={}){
  const order={ownerUid:'seller',salesCode:'B',status:'active',orderStatus:'normal',
   inventoryReservationAttemptId:'attempt-self-order-001',
   inventoryReservationStatus:'completed',workCategories:['ordering'],
-  items:[item,...(mixed?[{itemId:'SERV',productType:'SERVICE',fulfillmentType:'SERVICE',qty:1}]:[])]};
+  items:[item,...(mixed?[{itemId:'SERV',productId:'S',productType:'SERVICE',
+   fulfillmentType:'WAREHOUSE',warehouseId:'',inventoryProductKey:'',reservationStatus:'not_required',
+   qty:1,reservedQty:0,shortageQty:0,supplyOrderedQty:0,receivedQty:0}]:[])]};
  const demandId=demandCore.demandIdForSource({sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId});
  const demand=demandCore.demandDocument(demandCore.fromSalesOrder({...item,
   requiredSupplyQty:directShip?7:undefined,sourceType:'SALES_ORDER',sourceId:orderId,
@@ -30,6 +32,7 @@ function fixture({directShip=false,mixed=false}={}){
   ['products/'+productId,{productType:'GOODS',active:true}],
   ['procurementDemands/'+encodeURIComponent(demandId),demand]
  ]);
+ if(mixed)records.set('products/S',{productType:'SERVICE',active:true});
  if(!directShip){
   records.set('inventoryReservations/'+orderId+'__'+itemId,{orderId,itemId,productKey:productId,
    warehouseId,ownerUid:'seller',salesCode:'B',quantity:5,shortageQty:7,status:'active'});
@@ -143,7 +146,7 @@ test('receipt rejects forged source operation, demand, owner and incoming moveme
  }
 });
 
-test('direct ship uses only sanitized supplier mirror; mixed order is rejected until receipt admission is complete',async()=>{
+test('direct ship and a valid mixed service order preserve a cost-free physical receiving source',async()=>{
  for(const options of [{directShip:true}]){
   const f=fixture(options),res=await commitV2SelfOrder(f.db,'seller',f.data);
   const supply=f.records.get('supplyOrders/'+res.supplyId);
@@ -154,9 +157,24 @@ test('direct ship uses only sanitized supplier mirror; mixed order is rejected u
   }
   await verifyQuickPurchaseReceipt(f.get,f.db,supply,f.records.get('orders/ORDER-1'),res.supplyId);
  }
- const mixed=fixture({mixed:true});
- await assert.rejects(commitV2SelfOrder(mixed.db,'seller',mixed.data),{code:'failed-precondition'});
- assert.equal(mixed.writes.length,0);
+ const mixed=fixture({mixed:true}),committed=await commitV2SelfOrder(mixed.db,'seller',mixed.data);
+ assert.equal(committed.status,'committed');
+ assert.equal(mixed.records.get('orders/ORDER-1').items[1].supplyOrderedQty,0);
+ assert.equal(mixed.records.has('inventoryReservations/ORDER-1__SERV'),false);
+ assert.equal(mixed.records.has('procurementDemands/SALES_ORDER%3AORDER-1%3ASERV'),false);
+ const supply=mixed.records.get('supplyOrders/'+committed.supplyId);
+ await verifyQuickPurchaseReceipt(mixed.get,mixed.db,supply,mixed.records.get('orders/ORDER-1'),committed.supplyId);
+ assert.equal((await commitV2SelfOrder(mixed.db,'seller',mixed.data)).status,'already-applied');
+ for(const corrupt of [
+  f=>{f.records.get('orders/ORDER-1').items[1].reservedQty=1;},
+  f=>{f.records.get('products/S').active=false;},
+  f=>{f.records.set('inventoryReservations/ORDER-1__SERV',{});},
+  f=>{f.records.set('procurementDemands/SALES_ORDER%3AORDER-1%3ASERV',{});}
+ ]){
+  const f=fixture({mixed:true});corrupt(f);
+  await assert.rejects(commitV2SelfOrder(f.db,'seller',f.data),{code:'failed-precondition'});
+  assert.equal(f.writes.length,0);
+ }
 });
 
 test('self-order strict request rejects forged role, malformed operation/date, costs and notes',()=>{
