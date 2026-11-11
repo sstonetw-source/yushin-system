@@ -2054,7 +2054,7 @@ test('partial delivery save blocks duplicate taps', () => {
     const source = appSource.slice(start, end);
     assert.match(source, /pendingDeliveryOrderIds\.has\(orderId\)/);
     assert.match(source, /pendingDeliveryOrderIds\.add\(orderId\)/);
-    assert.match(source, /儲存中…/);
+    assert.match(source, /beginActionButton\(saveButton,'確認送達中…'\)/);
     assert.match(source, /pendingDeliveryOrderIds\.delete\(orderId\)/);
 });
 

@@ -125,7 +125,13 @@ function deliveryTestHarness(selectedItem, recordToEdit=null, single=false) {
     ],deliveryRecords:recordToEdit?[recordToEdit]:[],returnRecords:[]};
     const fields={deliveryDate:{value:'2026-10-08'},deliveryQty:{value:'1'},deliveryNotes:{value:''},
         deliveryEditId:{value:recordToEdit?.id||''},deliveryItemId:{value:selectedItem}};
-    const alerts=[],updates=[],deltas=[],button={disabled:false,textContent:''};
+    const alerts=[],updates=[],deltas=[],buttonClasses=new Set(),buttonAttributes=new Map();
+    let buttonText='💾 儲存送貨紀錄',buttonHtml='<span>💾 儲存送貨紀錄</span>';
+    const button={disabled:false,dataset:{},
+        get textContent(){return buttonText;},set textContent(value){buttonText=value;buttonHtml=value;},
+        get innerHTML(){return buttonHtml;},set innerHTML(value){buttonHtml=value;buttonText=value.replace(/<[^>]+>/g,'');},
+        classList:{add:value=>buttonClasses.add(value),remove:value=>buttonClasses.delete(value)},
+        setAttribute:(name,value)=>buttonAttributes.set(name,value),removeAttribute:name=>buttonAttributes.delete(name)};
     const context=vm.createContext({window:{},currentDeliveryOrderId:'SO',pendingDeliveryOrderIds:new Set(),ordersCache:[order],
         YushinFulfillment:fulfillment,
         canManageOrderLifecycleCapability:()=>true,canEditPage:()=>true,
@@ -147,9 +153,31 @@ function deliveryTestHarness(selectedItem, recordToEdit=null, single=false) {
     const start=app.indexOf('window.saveDeliveryRecord = async function()');
     const end=app.indexOf('\nwindow.deleteDeliveryRecord = async function(',start);
     assert.ok(start>=0&&end>start);
+    const feedback=fs.readFileSync(path.join(__dirname,'../src/shared/action-feedback.js'),'utf8');
+    vm.runInContext(feedback.slice(feedback.indexOf('function beginActionButton('),feedback.indexOf('function actionButtonFromEventOrSelector(')),context);
     vm.runInContext("let deliveryCreateAttempt=null;\n"+fs.readFileSync(path.join(__dirname,'../src/services/delivery-records.js'),'utf8')+'\n'+app.slice(start,end),context);
-    return {order,context,alerts,updates,deltas,button,fields};
+    return {order,context,alerts,updates,deltas,button,buttonClasses,buttonAttributes,fields};
 }
+
+test('delivery confirmation acknowledges immediately without treating pending as delivered',async()=>{
+    const t=deliveryTestHarness('I2');let resolve,requests=0;
+    t.context.saveOrderDeliveryRecord=async()=>{requests++;return new Promise(done=>{resolve=done;});};
+    const original=t.button.innerHTML;
+    const pending=t.context.window.saveDeliveryRecord();
+    assert.equal(t.button.disabled,true);
+    assert.equal(t.button.textContent,'確認送達中…');
+    assert.equal(t.buttonAttributes.get('aria-busy'),'true');
+    assert.equal(t.buttonClasses.has('is-action-pending'),true);
+    assert.equal(t.context.pendingDeliveryOrderIds.has('SO'),true);
+    assert.equal(t.order.deliveryRecords.length,0,'pending acknowledgement does not invent a delivery');
+    await t.context.window.saveDeliveryRecord();
+    assert.equal(requests,1,'double-submit never creates another delivery');
+    resolve({...t.order});await pending;
+    assert.equal(t.button.disabled,false);
+    assert.equal(t.button.innerHTML,original);
+    assert.equal(t.buttonAttributes.has('aria-busy'),false);
+    assert.equal(t.buttonClasses.has('is-action-pending'),false);
+});
 test('delivery never switches an invalid item ID to the first line',async()=>{
     for(const id of ['', 'MISSING', 'item-1']) {
         const t=deliveryTestHarness(id);
