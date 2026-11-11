@@ -1,27 +1,42 @@
-# Stock writer cutover — staged; not deployed
+# Stock writer cutover — production Rules published; employee entry still closed
 
-This repository contains **one active source Rules file**, `firestore.rules`. Its
-existing validation remains unchanged until a separately approved maintenance
-cutover. Do not add a dynamic per-document `exists()`/`get()` flag to this file:
-the valid five-reservation Firestore batch already approaches the platform's
-1,000-expression request ceiling.
+**Production observation (2026-11-11, Asia/Taipei):** Firebase Console for
+`yu-shing-company` / `(default)` shows Rules last published at 08:08. The live
+Rules editor begins with `BACKEND-ONLY STOCK WRITER CUTOVER`, and all eight
+observed `settings/*Cutover.backendOnly` flags (`orderTransfer`, `purchasing`,
+`receiving`, `dispatch`, `shipment`, `delivery`, `return`, `lifecycle`) are `true`.
+This is a read-only console observation, **not** a verified byte-for-byte
+comparison of the deployed Rules with the current GitHub file.
+
+The repository's active Firebase Rules deployment input is now
+`release-candidates/firestore.backend-only-stock.rules` (see `firebase.json`);
+`firestore.rules` is the generator's baseline. Do not add a dynamic
+per-document `exists()`/`get()` flag to the hot inventory path: a valid
+five-reservation Firestore batch already approaches the 1,000-expression limit.
+
+These Rules gates are **not** Cloud Functions' independent `ENABLE_PRODUCTION_*`
+execution flags. On 2026-11-11, self-order, supplier cancellation, main-warehouse
+transfers, manual inventory, and inventory count still had production execution
+flags set to `false` in the source deployment configuration. Deployed function
+names and Rules gates alone do not make these workflows usable. Employee entry
+still requires separate D approval.
 
 ## One-time Rules artifact
 
 Run `node tools/build-stock-cutover-rules.cjs --check` to validate that all
-expected ledger matches exist. When the **production Rules deployment and
-transaction cutover have each received specific approval**, generate the
-backend-only Rules body from the reviewed `main` commit:
+expected ledger matches exist. For a **future authorized Rules update**,
+verify the generated backend-only Rules against the reviewed `main` commit:
 
 ```sh
 node tools/build-stock-cutover-rules.cjs --stdout
 ```
 
 The output is a deployment input, **not a second application writer or a
-fallback**. No GitHub Actions workflow automatically deploys it. The operator
-must review the generated output, its source commit, and the resolved Firebase
-project/database before supplying it to the approved Rules release mechanism.
-Do not use Firebase Hosting or a Hosting preview channel.
+fallback**. No GitHub Actions workflow automatically deploys it. Do not
+redeploy the already-published Rules as an automatic next step. Any future
+change requires a separately approved B scope, a review of the generated
+output and source commit, and verification of the resolved Firebase
+project/database. Do not use Firebase Hosting or a Hosting preview channel.
 
 The cutover output rejects all browser create/update/delete operations that
 formerly mutated `stockTransferRequests`, `stockTransfers`, `inventory`,
@@ -46,8 +61,10 @@ do not restore their stock writer to conceal that failure.
    Rules hash, Functions inventory, non-Hosting frontend release, and latest
    `main` commit. Verify there are no in-flight operations.
 2. Obtain **separate** approvals for (A) non-Hosting frontend publishing,
-   (B) Firebase backend deployment (including these Rules), (C) exact
-   production transaction data cleanup, and (D) transaction entry cutover.
+   (B) any new Firebase backend deployment (including future Rules changes),
+   (C) any new production data cleanup, and (D) transaction entry cutover.
+   The previously authorized 15-collection/229-document C cleanup completed
+   on 2026-11-11; do not repeat it.
 3. Arrange the approved maintenance window and disable legacy transaction
    writes server-side **before** any transaction-data cleanup. Confirm old
    browser, installed web-app, and mobile shortcuts fail closed.
@@ -66,5 +83,6 @@ do not restore their stock writer to conceal that failure.
    paused. Fix the backend and reverify; never fall back to legacy stock
    mutation Rules or a second writer.
 
-Production Rules/Functions deployment, production data deletion, and entry
-switching were **not performed** by this change.
+This documentation correction does **not** deploy Functions or Rules, alter
+production data/flags, establish opening stock, or switch the employee entry.
+Luke elected to create opening stock only after the system is ready.
