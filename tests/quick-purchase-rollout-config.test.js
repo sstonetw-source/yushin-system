@@ -87,11 +87,23 @@ test('approved production transaction activation is restricted to the exact HTTP
 test('authorized environment enables production transaction gates without enabling Preview or Emulator',()=>{
  const lines=fs.readFileSync(path.join(root,'functions/.env.yu-shing-company'),'utf8').trim().split('\n');
  const flags=Object.fromEntries(lines.map(line=>line.split('=')));
+ const pendingIndependentApproval=new Set([
+  'ENABLE_PRODUCTION_SUPPLY_CANCELLATION_BACKEND',
+  'ENABLE_PRODUCTION_MAIN_TRANSFER_REQUEST_BACKEND',
+  'ENABLE_PRODUCTION_MAIN_TRANSFER_DISPATCH_BACKEND',
+  'ENABLE_PRODUCTION_MAIN_TRANSFER_RECEIPT_BACKEND',
+  'ENABLE_PRODUCTION_MAIN_TRANSFER_ALLOCATION_BACKEND',
+  'ENABLE_PRODUCTION_MANUAL_INVENTORY_BACKEND',
+  'ENABLE_PRODUCTION_INVENTORY_COUNT_BACKEND',
+  'ENABLE_PRODUCTION_SELF_ORDER_BACKEND'
+ ]);
  assert.ok(Object.keys(flags).length>=12);
- for(const [key,value] of Object.entries(flags))assert.equal(value,key==='ENABLE_ORDER_RESERVATION_BACKEND'||key.startsWith('ENABLE_PRODUCTION_')?'true':'false',key);
+ for(const [key,value] of Object.entries(flags))assert.equal(value,
+  !pendingIndependentApproval.has(key)&&(key==='ENABLE_ORDER_RESERVATION_BACKEND'||key.startsWith('ENABLE_PRODUCTION_'))?'true':'false',key);
  assert.equal(flags.ENABLE_PRODUCTION_ORDER_RESERVATION_BACKEND,'true');
  assert.equal(flags.ENABLE_PRODUCTION_FORMAL_PURCHASE,'true');
  assert.equal(flags.ENABLE_PRODUCTION_QUICK_PURCHASE,'true');
+ for(const key of pendingIndependentApproval)assert.equal(flags[key],'false',key+' must remain closed until D approval');
  assert.match(html,/<script src="app\.js\?v=\d{8}-\d+"/);
 });
 
