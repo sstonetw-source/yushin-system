@@ -74,9 +74,10 @@ function normalizeManualStock(data,kind){
 }
 
 function stock(data,label){
- const result={};for(const field of ['onHand','reserved','incoming','transferReserved','transferFreeInTransit'])
+ const result={};for(const field of ['onHand','reserved','incoming','transferReserved','transferInTransit','transferFreeInTransit'])
   result[field]=numeric(data?.[field],label+field);
- if(result.transferReserved>result.reserved||result.reserved+result.transferFreeInTransit>result.onHand+1e-8)
+ if(result.transferReserved>result.reserved||result.reserved+result.transferFreeInTransit>result.onHand+1e-8
+  ||result.transferFreeInTransit>result.transferInTransit)
   fail(label+'預留或途中量超過實際庫存');
  return result;
 }
@@ -155,7 +156,7 @@ async function commitManualStock(db,uid,data,kind,env=process.env){
   // out-of-transaction query and then mutate the resulting lot documents.
   const stocks=await tx.get(db.collection('warehouseStocks').where('productKey','==',key).limit(201));
   if(stocks.size>200)fail('分倉紀錄超出安全處理上限');
-  const totals={onHand:0,reserved:0,incoming:0};let foundTarget=false;
+  const totals={onHand:0,reserved:0,incoming:0,transferReserved:0};let foundTarget=false;
   for(const doc of stocks.docs){
    const value=doc.data(),parts=stock(value,'分倉');
    if(value.productKey!==key||typeof value.warehouseId!=='string'||!value.warehouseId
@@ -163,7 +164,15 @@ async function commitManualStock(db,uid,data,kind,env=process.env){
    if(value.warehouseId===warehouseId)foundTarget=true;
    for(const field of Object.keys(totals))totals[field]+=parts[field];
   }
-  if(foundTarget!==whSnap.exists||['onHand','reserved','incoming'].some(field=>!equal(totals[field],company[field])))
+  // Dispatch removes physical stock from the sending warehouse while the
+  // company still owns it in transit. Reserved in-transit stock is the
+  // complement of the free in-transit quantity; neither is available stock.
+  const inTransitReserved=company.transferInTransit-company.transferFreeInTransit;
+  if(foundTarget!==whSnap.exists
+   ||!equal(totals.onHand+company.transferInTransit,company.onHand)
+   ||!equal(totals.reserved+inTransitReserved,company.reserved)
+   ||!equal(totals.incoming,company.incoming)
+   ||!equal(totals.transferReserved,company.transferReserved))
    fail('公司與分倉帳面庫存不一致，請先核對期初資料');
   let delta=kind==='MANUAL_INVENTORY'?intent.delta:intent.target-wh.onHand;
   if(!Number.isFinite(delta)||Math.abs(delta)>1e9||company.onHand+delta<company.reserved+company.transferFreeInTransit-1e-8
