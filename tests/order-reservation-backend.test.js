@@ -262,9 +262,11 @@ test('single-location ledger rejects a required multi-warehouse split without an
  await assert.rejects(f.run(),/需要多倉分配/);
  assert.equal(f.snapshot(),before);
 });
-test('company stock above enabled location totals or inactive candidates fails closed',async()=>{
+test('company availability mismatching enabled location totals or inactive candidates fails closed',async()=>{
  for(const inject of [
   f=>f.put('inventory/P',{productKey:'P',onHand:5,reserved:0}),
+  f=>f.put('inventory/P',{productKey:'P',onHand:1,reserved:0}),
+  f=>f.docs.delete('inventory/P'),
   f=>{f.put('inventory/P',{productKey:'P',onHand:3,reserved:0});
    f.put('warehouseStocks/A__P',{productKey:'P',warehouseId:'A',onHand:0,reserved:0});
    f.put('warehouses/B',{active:false});

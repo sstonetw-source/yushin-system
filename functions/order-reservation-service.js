@@ -214,8 +214,11 @@ async function commitOrderReservation(db,uid,data,{allowInitialSelfOrder=false}=
       }
       if(!physical.some(warehouse=>warehouse.id===preferredId))
         fault('failed-precondition','來源不是啟用的實體倉庫');
-      if(aggregateAvailable>totalAvailable)
-        fault('failed-precondition','公司可用庫存高於啟用分倉總可用量，請先核對庫存，避免誤列待採購');
+      // A lower company balance is equally unsafe: it can hide physically
+      // stocked units as shortages or initialize a zero company ledger over
+      // an existing nonzero warehouse ledger. Never paper over either split.
+      if(aggregateAvailable!==totalAvailable)
+        fault('failed-precondition','公司可用庫存與啟用分倉總可用量不一致，請先核對庫存，避免錯誤預留或待採購');
       const selected=reservationCore.selectSingleWarehouse({
         warehouses:physical,stocks,currentWarehouseId:preferredId,
         requestedQty:requested,aggregateAvailableQty:aggregateAvailable
