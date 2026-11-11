@@ -275,11 +275,11 @@ async function commitPurchase(db,uid,data,{selfOrder=false}={}){
    items,itemCount:items.length,orderSchemaVersion:2,workCategories:[...categories],
    workCategoryUpdatedAt:now,updatedAt:now
   });
-  if(selfOrder)tx.set(ref('receivingSupplyOrders',supplyId),sanitizeSupply(supply));
-  if(directShip){
-   const mirror=ref('receivingSupplyOrders',supplyId);
-   if(!selfOrder)tx.set(mirror,sanitizeSupply(supply));
-  }else{
+  // Warehouse staff read the cost-free receiving projection for both manual
+  // purchases and salesperson commitments. Publish it in the same atomic
+  // transaction as the source supply and incoming balances.
+  tx.set(ref('receivingSupplyOrders',supplyId),sanitizeSupply(supply));
+  if(!directShip){
    if(inventory.exists)tx.update(inventoryRef,{incoming:inventory.data().incoming+intent.qty,updatedAt:now});
    else tx.create(inventoryRef,{
     productId:sourceItem.productId,productKey,itemCode:supply.itemCode,itemName:supply.itemName,

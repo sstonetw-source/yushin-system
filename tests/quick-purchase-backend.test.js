@@ -67,6 +67,17 @@ test('quick purchase backend commits one atomic supplier demand, order and incom
  assert.equal(x.records.get('warehouseStocks/W__P').reserved,2);
  assert.equal(x.records.get('inventoryMovements/quick-'+x.data.operationId).qty,4);
  assert.equal(x.records.get('supplyOrders/'+res.supplyId).unitCost,19.99);
+ const warehouseView=x.records.get('receivingSupplyOrders/'+res.supplyId);
+ assert.equal(warehouseView.type,'PURCHASING_MANUAL');
+ assert.equal(warehouseView.fulfillmentType,'WAREHOUSE');
+ assert.equal(warehouseView.warehouseId,'W');
+ assert.equal(warehouseView.qty,4);
+ for(const costField of ['unitCost','cost','costPrice'])
+  {
+   assert.equal(Object.hasOwn(warehouseView,costField),false,'warehouse view must hide '+costField);
+   assert.equal(Object.hasOwn(warehouseView.orderEvents[0],costField),false,'order event must hide '+costField);
+  }
+ assert.equal(warehouseView.orderEvents[0].qty,4);
  const count=x.history.length;
  const retry=await commitV2QuickPurchase(x.db,'buyer',x.data);
  assert.equal(retry.status,'already-applied');

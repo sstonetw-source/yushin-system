@@ -234,7 +234,19 @@
     if(released.length){try{root.onFreeStockReleased?.(released,actorUid,role);}catch(_){/* Durable flags remain retryable. */}}
     return result;
   }
-  function sanitizeSupply(data){const {unitCost,cost,costPrice,...view}=data;return view;}
+  function sanitizeSupply(data){
+    // Supply events may contain per-operation unitCost. A shallow projection
+    // would expose that cost to warehouse readers of receivingSupplyOrders.
+    const privateFields=new Set(['unitCost','cost','costPrice']);
+    const redact=value=>{
+      if(Array.isArray(value))return value.map(redact);
+      if(!value||typeof value!=='object'||!([Object.prototype,null].includes(Object.getPrototypeOf(value))))return value;
+      return Object.fromEntries(Object.entries(value)
+        .filter(([key])=>!privateFields.has(key))
+        .map(([key,entry])=>[key,redact(entry)]));
+    };
+    return redact(data);
+  }
   const api={run,sanitizeSupply};root.YushinStockPermissions=api;
   if(typeof module==='object'&&module.exports)module.exports=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
