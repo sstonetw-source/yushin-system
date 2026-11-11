@@ -10,7 +10,7 @@
         && (path === '/yushin-system' || path.startsWith('/yushin-system/'));
     // The service workflow release requires Rules and Functions to be published first.
     scope.YUSHIN_PRODUCTION_SERVICE_CASE_BACKEND = orderReservationProductionSite;
-    scope.YUSHIN_PRODUCTION_QUICK_PURCHASE_CONFIG_VERSION = '20261110-stock-retirement-4';
+    scope.YUSHIN_PRODUCTION_QUICK_PURCHASE_CONFIG_VERSION = '20261112-full-backend-cutover-1';
     // Authorized activation: match the deployed production backend and database retirement gates.
     // Overwrite stale global values; the caller must never inherit an unintended true gate.
     scope.YUSHIN_PRODUCTION_RECEIVING_BACKEND = orderReservationProductionSite;
@@ -20,29 +20,24 @@
     scope.YUSHIN_PRODUCTION_CUSTOMER_RETURN_LEGACY_BLOCKED = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_CUSTOMER_RETURN_REQUEST_BACKEND = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_CUSTOMER_RETURN_REQUEST_LEGACY_BLOCKED = orderReservationProductionSite;
-    // No cancelled-purchase backend activation. Retire its browser writer now:
-    // an unavailable backend must visibly refuse this stock-changing action.
-    scope.YUSHIN_PRODUCTION_CANCELLED_PURCHASE_BACKEND = false;
+    // Authorized production cutover. Each Callable has its own server gate,
+    // identity/role validation and idempotency checks; never restore old writers.
+    scope.YUSHIN_PRODUCTION_CANCELLED_PURCHASE_BACKEND = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_CANCELLED_PURCHASE_LEGACY_BLOCKED = orderReservationProductionSite;
-    // #536: route exists only as a deployment candidate. B and D are not approved.
-    scope.YUSHIN_PRODUCTION_SUPPLY_CANCELLATION_BACKEND = false;
+    scope.YUSHIN_PRODUCTION_SUPPLY_CANCELLATION_BACKEND = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_SUPPLY_CANCELLATION_LEGACY_BLOCKED = orderReservationProductionSite;
-    // Main-warehouse stock return has separate request/dispatch/receipt
-    // approvals. No new backend route is activated by this release; formerly
-    // available browser transactions are blocked until the backend cutover.
-    scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_REQUEST_BACKEND = false;
+    // Each main-transfer stage has its own backend gate and original operation ID.
+    scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_REQUEST_BACKEND = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_REQUEST_LEGACY_BLOCKED = orderReservationProductionSite;
-    scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_DISPATCH_BACKEND = false;
+    scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_DISPATCH_BACKEND = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_DISPATCH_LEGACY_BLOCKED = orderReservationProductionSite;
-    scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_RECEIPT_BACKEND = false;
+    scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_RECEIPT_BACKEND = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_RECEIPT_LEGACY_BLOCKED = orderReservationProductionSite;
-    scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_ALLOCATION_BACKEND = false;
+    scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_ALLOCATION_BACKEND = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_MAIN_TRANSFER_ALLOCATION_LEGACY_BLOCKED = orderReservationProductionSite;
-    // P0 #523: registered backend only, no production switch approval.
-    // The browser must never revive the retired direct stock writer.
-    scope.YUSHIN_PRODUCTION_MANUAL_INVENTORY_BACKEND = false;
+    scope.YUSHIN_PRODUCTION_MANUAL_INVENTORY_BACKEND = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_MANUAL_INVENTORY_LEGACY_BLOCKED = orderReservationProductionSite;
-    scope.YUSHIN_PRODUCTION_INVENTORY_COUNT_BACKEND = false;
+    scope.YUSHIN_PRODUCTION_INVENTORY_COUNT_BACKEND = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_INVENTORY_COUNT_LEGACY_BLOCKED = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_DELIVERY_CONFIRMATION_BACKEND = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_DELIVERY_CONFIRMATION_LEGACY_BLOCKED = orderReservationProductionSite;
@@ -52,18 +47,19 @@
     scope.YUSHIN_PRODUCTION_DISPATCH_LEGACY_BLOCKED = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_SHIPMENT_BACKEND = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_SHIPMENT_LEGACY_BLOCKED = orderReservationProductionSite;
-    // Order transfer and Custody HANDOFF still require separate production
-    // Functions, V2 source and real-role acceptance. Keep the backend disabled
-    // and the old browser writer permanently blocked until approved cutover.
-    scope.YUSHIN_PRODUCTION_ORDER_TRANSFER_DISPATCH_BACKEND = false;
+    // Physical transfer/handoff remain role-checked by the production Callable.
+    scope.YUSHIN_PRODUCTION_ORDER_TRANSFER_DISPATCH_BACKEND = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_ORDER_TRANSFER_DISPATCH_LEGACY_BLOCKED = orderReservationProductionSite;
-    scope.YUSHIN_PRODUCTION_ORDER_TRANSFER_HANDOFF_BACKEND = false;
+    scope.YUSHIN_PRODUCTION_ORDER_TRANSFER_HANDOFF_BACKEND = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_ORDER_TRANSFER_HANDOFF_LEGACY_BLOCKED = orderReservationProductionSite;
-    scope.YUSHIN_PRODUCTION_ORDER_TRANSFER_RECEIVE_BACKEND = false;
+    scope.YUSHIN_PRODUCTION_ORDER_TRANSFER_RECEIVE_BACKEND = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_ORDER_TRANSFER_RECEIVE_LEGACY_BLOCKED = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_ORDER_LIFECYCLE_BACKEND = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_ORDER_LIFECYCLE_LEGACY_BLOCKED = orderReservationProductionSite;
     scope.YUSHIN_PRODUCTION_FORMAL_PURCHASE = orderReservationProductionSite;
+    // Self-order uses a separate role-specific backend; sales/engineers must
+    // not gain purchasing privileges through this activation.
+    scope.YUSHIN_PRODUCTION_SELF_ORDER = orderReservationProductionSite;
     // #311 approved cutover: the deployed backend has independent server gates.
     // Only the approved HTTPS GitHub Pages origin and repository path may enable it.
     // #268 activation candidate: the independent server gate is already deployed.
