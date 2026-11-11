@@ -77,7 +77,9 @@ test('owner self-order atomically records supplier, demand, source and company/w
  assert.equal(line.supplyOrderedQty,4);assert.deepEqual(line.selfOrderNos,[supply.internalNo]);
  assert.equal(line.costPrice,undefined,'do not expose new supplier cost on shared order projection');
  assert.equal(f.records.get('procurementDemands/'+encodeURIComponent(f.demandId)).orderedQty,4);
- assert.equal(f.records.get('receivingSupplyOrders/'+res.supplyId).unitCost,undefined);
+ const warehouseView=f.records.get('receivingSupplyOrders/'+res.supplyId);
+ assert.equal(warehouseView.unitCost,undefined);
+ assert.equal(Object.hasOwn(warehouseView.orderEvents[0],'unitCost'),false);
  await verifyQuickPurchaseReceipt(f.get,f.db,supply,f.records.get('orders/ORDER-1'),res.supplyId);
  const count=f.writes.length;
  const replay=await commitV2SelfOrder(f.db,'seller',f.data);
