@@ -1840,6 +1840,31 @@ html[data-app-environment="preview"] body { border-top: 0; }
 }
 .action-feedback[hidden] { display: none; }
 .action-feedback.warning { background: #8a4b00; }
+/* One instant, Gmail-like pressed state for all clickable app controls.
+   Business success is never inferred from the press animation. */
+#appContainer button:not(:disabled):active,
+#appContainer [role="button"]:active,
+#loginScreen button:not(:disabled):active,
+#changePasswordOverlay button:not(:disabled):active { opacity: .84; }
+
+/* The shared async-button helper owns this state until its caller settles. */
+button.is-action-pending { cursor: progress; }
+button.is-action-pending::after {
+    content: '';
+    display: inline-block;
+    width: .7em;
+    height: .7em;
+    margin-left: .55em;
+    vertical-align: -.08em;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: yushin-action-spin .75s linear infinite;
+}
+@keyframes yushin-action-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+    button.is-action-pending::after { animation: none; }
+}
 .ui-work-action-status {
     position: fixed;
     right: 16px;

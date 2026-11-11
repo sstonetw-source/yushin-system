@@ -3160,10 +3160,13 @@ function productOperationErrorMessage(action, err) {
 
 function beginActionButton(button, busyText = '處理中…') {
     if (!button || button.dataset.actionBusy === '1') return null;
-    const state = { text: button.textContent, disabled: button.disabled };
+    // Keep the original icon/markup; textContent alone loses it after the request.
+    const state = { text: button.textContent, html: typeof button.innerHTML === 'string' ? button.innerHTML : null,
+        disabled: button.disabled };
     button.dataset.actionBusy = '1';
     button.disabled = true;
     button.setAttribute('aria-busy', 'true');
+    button.classList?.add('is-action-pending');
     if (busyText) button.textContent = busyText;
     return state;
 }
@@ -3171,8 +3174,11 @@ function endActionButton(button, state, finalText = '') {
     if (!button || !state) return;
     button.dataset.actionBusy = '';
     button.removeAttribute('aria-busy');
+    button.classList?.remove('is-action-pending');
     button.disabled = state.disabled;
-    button.textContent = finalText || state.text;
+    if (finalText) button.textContent = finalText;
+    else if (state.html !== null) button.innerHTML = state.html;
+    else button.textContent = state.text;
 }
 function actionButtonFromEventOrSelector(selector = '') {
     const eventButton = window.event?.currentTarget?.closest?.('button');
