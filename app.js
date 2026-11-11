@@ -16196,6 +16196,7 @@ async function commitSupplyCancellationBackend(poId,supplyId,reason,whole,
         ||!Array.isArray(r.affectedOrderIds))
         throw Error('取消結果無法核對，請保留原操作 ID，禁止重新開立。');
     const supplies=[];
+    let previouslyStoppedQty=0;
     for(const id of r.supplyIds){
         const snap=await db.collection('supplyOrders').doc(id).get({source:'server'});check();
         const supply=snap.exists?snap.data():null;
@@ -16204,6 +16205,15 @@ async function commitSupplyCancellationBackend(poId,supplyId,reason,whole,
         if(supply.cancellationOperationId===saved.payload.operationId){
             if(!['CLOSED','CANCELLED'].includes(supply.status)||supply.incomingRegisteredQty!==0)
                 throw Error('已取消來源與在途餘額不一致，請保留操作 ID。');
+        }else if(whole&&['CLOSED','CANCELLED'].includes(supply.status)
+            &&supply.incomingRegisteredQty===0
+            &&/^[a-zA-Z0-9_-]{12,96}$/.test(supply.cancellationOperationId||'')
+            &&Number.isSafeInteger(supply.qty)&&Number.isSafeInteger(supply.receivedQty)
+            &&supply.qty>supply.receivedQty&&supply.receivedQty>=0
+            &&(supply.status==='CLOSED'?supply.closedQty:supply.cancelledQty)===supply.qty-supply.receivedQty){
+            previouslyStoppedQty+=supply.qty-supply.receivedQty;
+            if(!Number.isSafeInteger(previouslyStoppedQty))
+                throw Error('整張採購單先前停止數量超出範圍，請保留操作 ID。');
         }else if(supply.qty!==supply.receivedQty)
             throw Error('原供應未全部收貨且未具有取消憑證，請保留操作 ID。');
         supplies.push({id,...supply});
@@ -16217,9 +16227,9 @@ async function commitSupplyCancellationBackend(poId,supplyId,reason,whole,
         const po=snap.exists?snap.data():null;
         if(!po||po.poNo!==poId||JSON.stringify(po.supplyOrderIds)!==JSON.stringify(r.supplyIds))
             throw Error('整張採購單供應連結與回覆不符，請保留原操作 ID。');
-        if(r.cancelledQty){
+        if(r.cancelledQty+previouslyStoppedQty){
             if(po.cancellationOperationId!==saved.payload.operationId||!['CLOSED','CANCELLED'].includes(po.status)
-                ||po.stoppedQty!==r.cancelledQty)
+                ||po.stoppedQty!==r.cancelledQty+previouslyStoppedQty)
                 throw Error('採購單停止狀態尚未核對，請保留原操作 ID。');
             patch={status:po.status,stoppedQty:po.stoppedQty,updatedAt:po.updatedAt,
                 ...(po.status==='CLOSED'?{closedQty:po.closedQty,closedAt:po.closedAt}:{cancelledQty:po.cancelledQty,cancelledAt:po.cancelledAt})};

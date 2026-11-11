@@ -4,24 +4,27 @@ const production=fs.readFileSync('src/infrastructure/production-transaction.js',
 const transport=fs.readFileSync('src/services/supply-cancellation-transport.js','utf8');
 const service=fs.readFileSync('src/services/supply-order.js','utf8');
 const id='supplier-stop-20261110-001';
-function fixture({whole=false,lostReply=false}={}){
+function fixture({whole=false,lostReply=false,priorCancelled=false}={}){
  const rows=new Map(),pending=new Map(),calls=[],invalidated=[];
  const ids=whole?['S1','S2']:['S1'];
  rows.set('purchaseOrders/PO',{poNo:'PO',status:'ORDERED',supplyOrderIds:ids});
  ids.forEach((s,i)=>rows.set('supplyOrders/'+s,{purchaseDocumentId:'PO',productKey:'P'+i,
   warehouseId:'W',fulfillmentType:'WAREHOUSE',demandId:'D'+i,orderId:'O'+i,
   qty:5,receivedQty:2,incomingRegisteredQty:3,status:'PARTIAL_RECEIPT'}));
+ if(whole&&priorCancelled)Object.assign(rows.get('supplyOrders/S1'),{status:'CLOSED',
+  incomingRegisteredQty:0,closedQty:3,cancellationOperationId:'previous-single-20261111-01'});
  let first=true;
  const app={options:{projectId:'yu-shing-company'},functions:()=>functions};
  const functions={app,httpsCallable(name){return async payload=>{
   calls.push({name,payload:structuredClone(payload)});
-  for(const s of ids){const row=rows.get('supplyOrders/'+s);
+  for(const s of ids){if(priorCancelled&&s==='S1')continue;const row=rows.get('supplyOrders/'+s);
    Object.assign(row,{status:'CLOSED',incomingRegisteredQty:0,closedQty:3,cancellationOperationId:payload.operationId});}
   if(whole)Object.assign(rows.get('purchaseOrders/PO'),{status:'CLOSED',stoppedQty:6,
    closedQty:6,cancellationOperationId:payload.operationId,updatedAt:'now'});
   if(lostReply&&first){first=false;throw Error('response lost');}
   return {data:{status:first?'applied':'already-applied',operationId:payload.operationId,
-   poId:payload.poId,actorUid:'buyer',actorRole:'purchaser',supplyIds:ids,cancelledQty:3*ids.length,
+   poId:payload.poId,actorUid:'buyer',actorRole:'purchaser',supplyIds:ids,
+   cancelledQty:3*(ids.length-(priorCancelled?1:0)),
    affectedOrderIds:ids.map((_,i)=>'O'+i)}};
  }}};
  const auth={app,currentUser:{uid:'buyer'},emulatorConfig:null};
@@ -60,6 +63,15 @@ test('whole PO uses a single atomic backend request and verifies closed PO',asyn
  assert.equal(f.calls.length,1);assert.equal(f.calls[0].name,'stopV2PurchaseOrderOutstanding');
  assert.equal(Object.prototype.hasOwnProperty.call(f.calls[0].payload,'supplyId'),false);
  assert.equal(r.cancelledQty,6);assert.equal(r.patch.status,'CLOSED');assert.equal(f.pending.size,0);
+});
+test('whole PO verifies previously cancelled lines against the total stopped quantity',async()=>{
+ const f=fixture({whole:true,priorCancelled:true});
+ const r=await f.c.stopPurchaseOrderOutstanding('PO','Stopped');
+ assert.equal(r.cancelledQty,3);
+ assert.equal(r.patch.stoppedQty,6);
+ assert.equal(f.rows.get('supplyOrders/S1').cancellationOperationId,'previous-single-20261111-01');
+ assert.equal(f.rows.get('supplyOrders/S2').cancellationOperationId,id);
+ assert.equal(f.pending.size,0);
 });
 test('lost Callable response reuses exact original ID even after source became terminal',async()=>{
  const f=fixture({lostReply:true});

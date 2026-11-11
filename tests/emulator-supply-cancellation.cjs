@@ -76,6 +76,22 @@ test('real Firestore whole PO is atomic, replay-safe, and updates all linked led
  await assert.rejects(f.run(f.user,{...f.whole,reason:'另一個原因'},true),e=>e.code==='already-exists');
  assert.equal((await get('inventory/'+f.lines[0].productId)).incoming,0);
 });
+test('real Firestore stops the remaining PO lines after a prior single-line cancellation',async()=>{
+ const f=await seed('sequential');
+ const first=await f.run(f.user,f.single);
+ assert.equal(first.cancelledQty,3);
+ const final=await f.run(f.user,f.whole,true);
+ assert.equal(final.cancelledQty,3);
+ const po=await get('purchaseOrders/'+f.poId);
+ assert.equal(po.status,'CLOSED');assert.equal(po.stoppedQty,6);
+ assert.equal((await get('supplyOrders/'+f.ids[0])).cancellationOperationId,f.single.operationId);
+ assert.equal((await get('supplyOrders/'+f.ids[1])).cancellationOperationId,f.whole.operationId);
+ assert.equal((await get('inventory/'+f.lines[0].productId)).incoming,0);
+ assert.equal((await get('inventory/'+f.lines[1].productId)).incoming,0);
+ assert.equal(await get('inventoryMovements/supply-cancel-'+f.whole.operationId+'-0'),null);
+ assert.equal((await get('inventoryMovements/supply-cancel-'+f.whole.operationId+'-1')).qty,-3);
+ assert.equal((await f.run(f.user,f.whole,true)).status,'already-applied');
+});
 test('real Firestore rejects bad last-line incoming without partial PO updates',async()=>{
  const f=await seed('rollback');
  await db.doc('warehouseStocks/'+f.prefix+'-W1__'+f.lines[1].productId).update({incoming:1});
