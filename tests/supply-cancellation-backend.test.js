@@ -106,6 +106,48 @@ test('whole PO cancellation is one atomic transaction and closes the PO only aft
  assert.equal((await run(x,'buyer',x.whole,true)).status,'already-applied');
  assert.equal(x.writes.length,count);
 });
+test('whole PO stop includes an earlier single-line cancellation without reversing its stock twice',async()=>{
+ const x=fixture();
+ await run(x);
+ const before=x.writes.length;
+ const result=await run(x,'buyer',x.whole,true);
+ assert.equal(result.cancelledQty,3,'only the remaining supply is cancelled by this operation');
+ assert.equal(x.records.get('purchaseOrders/PO').status,'CLOSED');
+ assert.equal(x.records.get('purchaseOrders/PO').stoppedQty,6);
+ assert.equal(x.records.get('inventory/P1').incoming,0);
+ assert.equal(x.records.get('inventory/P2').incoming,0);
+ assert.equal(x.records.get('supplyOrders/S1').cancellationOperationId,x.single.operationId);
+ assert.equal(x.records.get('supplyOrders/S2').cancellationOperationId,x.whole.operationId);
+ assert.equal(x.records.get('inventoryMovements/supply-cancel-'+x.single.operationId+'-0').qty,-3);
+ assert.equal(x.records.get('inventoryMovements/supply-cancel-'+x.whole.operationId+'-1').qty,-3);
+ assert.ok(x.writes.length>before);
+ const count=x.writes.length;
+ assert.equal((await run(x,'buyer',x.whole,true)).status,'already-applied');
+ assert.equal(x.writes.length,count);
+});
+test('whole PO stop can finalize after all lines were cancelled individually',async()=>{
+ const x=fixture();
+ await run(x);
+ await run(x,'buyer',{...x.single,operationId:'supplier-stop-20261111-002',supplyId:'S2'});
+ const before=x.writes.length,result=await run(x,'buyer',x.whole,true);
+ assert.equal(result.cancelledQty,0);
+ assert.equal(x.records.get('purchaseOrders/PO').status,'CLOSED');
+ assert.equal(x.records.get('purchaseOrders/PO').stoppedQty,6);
+ assert.equal(x.writes.length,before+2,'only the PO and its operation receipt are created');
+ assert.equal((await run(x,'buyer',x.whole,true)).status,'already-applied');
+});
+test('whole PO rejects an earlier terminal line without consistent cancellation evidence',async()=>{
+ for(const corrupt of [
+  x=>x.records.delete('purchaseOperations/supply-cancel-'+x.single.operationId),
+  x=>x.records.get('supplyOrders/S1').closedQty=2,
+  x=>x.records.get('supplyOrders/S1').incomingRegisteredQty=1,
+ ]){
+  const x=fixture();await run(x);corrupt(x);const before=x.writes.length;
+  await assert.rejects(run(x,'buyer',x.whole,true),{code:'failed-precondition'});
+  assert.equal(x.writes.length,before);
+  assert.equal(x.records.get('supplyOrders/S2').status,'PARTIAL_RECEIPT');
+ }
+});
 test('missing second-line evidence, changing parent links or failed commit leave every line untouched',async()=>{
  for(const change of [
   x=>x.records.delete('warehouseStocks/W__P2'),

@@ -65,6 +65,25 @@ async function commitSupplyCancellation(db,uid,data,{whole=false,env=process.env
    if(!cache.has(reference.path))cache.set(reference.path,await tx.get(reference));
    return cache.get(reference.path);
   };
+  // Verify earlier single-line cancellations before a whole PO skips them.
+  const earlierStopped=async(supplyId,supply)=>{
+   const ordered=qty(supply.qty,'原採購'),received=suppliedQty(supply.receivedQty,'原收貨');
+   const remaining=ordered-received;
+   const stopped=suppliedQty(supply.status==='CLOSED'?supply.closedQty:supply.cancelledQty,'原已停止');
+   const previousId=id(supply.cancellationOperationId,'原取消操作');
+   if(!remaining||stopped!==remaining||supply.incomingRegisteredQty!==0
+    ||(supply.status==='CANCELLED'&&received!==0)
+    ||!/^[a-zA-Z0-9_-]{12,96}$/.test(previousId))
+    fail('先前停止的供應數量或在途狀態不一致');
+   const priorSnap=await get(ref('purchaseOperations','supply-cancel-'+previousId));
+   const receipt=priorSnap.exists?priorSnap.data():null;
+   if(!receipt||receipt.type!=='SUPPLY_CANCELLATION'||receipt.whole!==false
+    ||receipt.poId!==intent.poId||receipt.cancelledQty!==remaining
+    ||!Array.isArray(receipt.supplyIds)||receipt.supplyIds.length!==1||receipt.supplyIds[0]!==supplyId
+    ||!Array.isArray(receipt.changedIds)||!receipt.changedIds.includes(supplyId))
+    fail('先前供應取消缺少可信任操作憑證');
+   return remaining;
+  };
   const userSnap=await get(ref('users',uid)),user=userSnap.exists?userSnap.data():null;
   if(!user||user.active===false||user.disabled===true||!['admin','purchaser'].includes(user.role))
    fail('沒有取消供應商未到貨的權限','permission-denied');
@@ -105,8 +124,15 @@ async function commitSupplyCancellation(db,uid,data,{whole=false,env=process.env
        fail('原供應取消缺少一致的在途異動憑證');
      }
     }
+    if(whole&&!changed){
+     if(terminal(original.status))await earlierStopped(supplyId,original);
+     else if(original.qty!==original.receivedQty)
+      fail('整張採購單停止後仍有未結清供應來源');
+    }
    }
-   if(whole&&receipt.cancelledQty>0&&(!terminal(po?.status)||po.cancellationOperationId!==intent.operationId))
+   const stoppedQty=receipt.stoppedQty===undefined?receipt.cancelledQty:qty(receipt.stoppedQty,'原停止總量');
+   if(whole&&stoppedQty>0&&(!terminal(po?.status)||po.cancellationOperationId!==intent.operationId
+    ||po.stoppedQty!==stoppedQty))
     fail('整張採購單取消憑證與狀態不一致');
    return result('already-applied',intent,role,uid,supplyIds,receipt.cancelledQty,receipt.receivedQty,receipt.affectedOrderIds);
   }
@@ -114,7 +140,7 @@ async function commitSupplyCancellation(db,uid,data,{whole=false,env=process.env
    fail('採購單已由其他操作結案或狀態不正確');
   const now=new Date().toISOString(),supplyPatches=[],movementRows=[],changedIds=[],affectedOrderIds=new Set();
   const orderPatches=new Map(),sourceOrders=new Map(),demandPatches=new Map(),stockDeltas=new Map();
-  let cancelledQty=0,receivedQty=0;
+  let cancelledQty=0,receivedQty=0,previouslyStoppedQty=0;
   for(let index=0;index<supplyIds.length;index++){
    const supplyId=supplyIds[index],supplyRef=ref('supplyOrders',supplyId);
    const supplySnap=await get(supplyRef);
@@ -135,8 +161,7 @@ async function commitSupplyCancellation(db,uid,data,{whole=false,env=process.env
      ||line.qty!==supply.qty||line.unitPrice!==supply.unitCost)
      fail('採購單品項與供應來源不一致');
    }
-   if(terminal(supply.status))fail('供應來源已有其他終止操作','already-exists');
-   if(!['ORDERED','PARTIAL_RECEIPT','RECEIVED'].includes(supply.status))
+   if(!terminal(supply.status)&&!['ORDERED','PARTIAL_RECEIPT','RECEIVED'].includes(supply.status))
     fail('供應來源狀態不支援取消');
    const ordered=qty(supply.qty,'原採購'),received=suppliedQty(supply.receivedQty,'原收貨');
    if(ordered===0)fail('來源採購數量不得為零');
@@ -153,6 +178,12 @@ async function commitSupplyCancellation(db,uid,data,{whole=false,env=process.env
    const warehouseId=directShip?'':id(supply.warehouseId,'倉庫');
    receivedQty+=received;
    if(!Number.isSafeInteger(receivedQty))fail('累計到貨數量超出上限');
+   if(terminal(supply.status)){
+    if(!whole)fail('供應來源已有其他終止操作','already-exists');
+    previouslyStoppedQty+=await earlierStopped(supplyId,supply);
+    if(!Number.isSafeInteger(previouslyStoppedQty))fail('累計已停止數量超出上限');
+    continue;
+   }
    if(!remaining)continue; // A fully received row needs no reversal.
    const nextStatus=received>0?'CLOSED':'CANCELLED';
    const patch={status:nextStatus,incomingRegisteredQty:0,cancellationOperationId:intent.operationId,
@@ -233,11 +264,13 @@ async function commitSupplyCancellation(db,uid,data,{whole=false,env=process.env
    const available=qty(entry.before.incoming,'原在途');
    if(available<entry.delta)fail('公司或分倉在途量不足以完整取消');
   }
-  const poPatch=whole&&cancelledQty>0?{status:receivedQty>0?'CLOSED':'CANCELLED',
-   stoppedQty:cancelledQty,cancellationOperationId:intent.operationId,
+  const stoppedQty=cancelledQty+previouslyStoppedQty;
+  if(!Number.isSafeInteger(stoppedQty))fail('整張採購單停止數量超出上限');
+  const poPatch=whole&&stoppedQty>0?{status:receivedQty>0?'CLOSED':'CANCELLED',
+   stoppedQty,cancellationOperationId:intent.operationId,
    ...(receivedQty>0
-    ?{closedQty:cancelledQty,closeReason:intent.reason,closedAt:now,closedByUid:uid,closedBy:actorName}
-    :{cancelledQty,cancelReason:intent.reason,cancelledAt:now,cancelledByUid:uid,cancelledBy:actorName}),
+    ?{closedQty:stoppedQty,closeReason:intent.reason,closedAt:now,closedByUid:uid,closedBy:actorName}
+    :{cancelledQty:stoppedQty,cancelReason:intent.reason,cancelledAt:now,cancelledByUid:uid,cancelledBy:actorName}),
    updatedAt:now}:null;
   if(whole&&poPatch&&terminal(po.status))fail('採購單已由其他操作結案','already-exists');
   const orderIndexes=new Map();
@@ -263,7 +296,7 @@ async function commitSupplyCancellation(db,uid,data,{whole=false,env=process.env
   if(poPatch)tx.update(poRef,poPatch);
   const output=result('applied',intent,role,uid,supplyIds,cancelledQty,receivedQty,[...affectedOrderIds]);
   tx.create(opRef,{type:'SUPPLY_CANCELLATION',whole,hash,actorUid:uid,actorRole:role,poId:intent.poId,
-   supplyIds,changedIds,movementIds:movementRows.map(row=>row.ref.id),cancelledQty,receivedQty,affectedOrderIds:[...affectedOrderIds],
+   supplyIds,changedIds,movementIds:movementRows.map(row=>row.ref.id),cancelledQty,stoppedQty,receivedQty,affectedOrderIds:[...affectedOrderIds],
    reason:intent.reason,createdAt:now});
   return output;
  });
