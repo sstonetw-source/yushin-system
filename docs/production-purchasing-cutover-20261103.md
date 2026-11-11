@@ -12,6 +12,13 @@ PO 文件準備仍可使用既有 DRAFT/documentOnly=true 流程：建立、修�
 鎖為單向、預設關閉；瀏覽器不能將 true 關閉、刪除欄位／文件或改為其他型別。
 只能在所有供應執行都切到相容後端的維護時段啟用，因它同時影響收貨、直送與自行訂貨。
 尚未具備正式後端的路徑維持停止，不能為了讓舊流程繼續而放寬此鎖。
-這是待審查與發布的 Rules 候選，未部署、未設定正式 gate、未修改資料或角色。
+**正式狀態更正（2026/11/11 唯讀查核）：** `yu-shing-company` 的正式
+Firestore Rules 已發布 backend-only stock writer 版本，
+`settings/purchasingCutover.backendOnly=true`。這是 Rules 舊瀏覽器寫入
+封鎖狀態，**不代表所有 Functions 的 `ENABLE_PRODUCTION_*` 交易旗標已啟用，
+也不代表員工正式入口已核准**。後續部署應先核對最新 main 與正式
+Functions revision，避免把已發布的 Rules 當成尚未發布而重複操作。
+
+本次僅修正紀錄，未重新部署、切換旗標、修改正式資料或角色。
 
 不新增庫存核心、Listener、Index；唯讀與既有角色範圍維持。
