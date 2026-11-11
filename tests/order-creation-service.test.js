@@ -51,7 +51,7 @@ test('production rejects confirmed self-orders before creating an order or reser
  const data={...f.data,selfOrderAtCreation:true,items:[
   {itemId:'I',procurementType:'SALES_SELF_ORDER',selfOrderConfirmed:true,qty:2}
  ]};
- await assert.rejects(f.c.commitOrderCreation('O',data),/尚無正式後端.*訂單已成立但供應未建立/);
+ await assert.rejects(f.c.commitOrderCreation('O',data),/尚未一起啟用/);
  assert.equal(f.writes.length,0);assert.equal(f.docs.has('orders/O'),false);
  assert.equal(f.reads.filter(path=>path==='orders/O').length,1);
 
@@ -68,7 +68,7 @@ test('production self-order creation guard honors order-level procurement type f
   const data={...f.data,selfOrderAtCreation,procurementType:'SALES_SELF_ORDER',items:[
    {itemId:'I',selfOrderConfirmed:true,qty:2}
   ]};
-  await assert.rejects(f.c.commitOrderCreation('O',data),/尚無正式後端.*訂單已成立但供應未建立/);
+  await assert.rejects(f.c.commitOrderCreation('O',data),/尚未一起啟用/);
   assert.equal(f.writes.length,0);
   assert.equal(f.docs.has('orders/O'),false);
  }
@@ -79,8 +79,20 @@ test('order UI refuses unsupported production auto-supply before syncing custome
  const end=feature.indexOf('data.customerId = syncCustomerMaster(data.customerName',start);
  assert.ok(start>=0&&end>start);
  const section=feature.slice(start,end+60);
- assert.match(section,/APP_ENVIRONMENT==='production'[\s\S]*selfOrderConfirmed===true[\s\S]*alert\('業務自行訂貨尚無正式後端/);
- assert.ok(section.indexOf('alert(\'業務自行訂貨尚無正式後端')<section.indexOf('syncCustomerMaster(data.customerName'));
+ assert.match(section,/selfOrderConfirmed===true[\s\S]*\['production','preview'\][\s\S]*selfOrderBackendEnabled\(\)[\s\S]*orderReservationBackendEnabled\(\)/);
+ assert.ok(section.indexOf('alert(\'業務自行訂貨與整單預留後端尚未一起啟用')<section.indexOf('syncCustomerMaster(data.customerName'));
+});
+test('production initial confirmed order may persist only as pending when both independent client gates are enabled',async()=>{
+ const f=fixture();f.c.APP_ENVIRONMENT='production';
+ f.c.selfOrderBackendEnabled=()=>true;
+ f.c.orderReservationBackendEnabled=()=>true;
+ const data={...f.data,selfOrderAtCreation:true,items:[
+  {itemId:'I',procurementType:'SALES_SELF_ORDER',selfOrderConfirmed:true,qty:2}
+ ]};
+ const result=await f.c.commitOrderCreation('O',data);
+ assert.equal(result.id,'O');
+ assert.equal(result.data.inventoryReservationStatus,'pending');
+ assert.equal(f.docs.get('orders/O').items[0].selfOrderConfirmed,true);
 });
 test('pending self-orders and non-production confirmed self-orders keep existing creation behavior',async()=>{
  for(const [environment,confirmed] of [['production',false],['emulator',true]]){

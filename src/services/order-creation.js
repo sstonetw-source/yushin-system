@@ -49,13 +49,14 @@ async function commitOrderCreation(orderId,data,{actorUid=currentUser?.uid,actor
             // facts, not a modified/stale form, and never overwrite fulfillment progress.
             savedData=live;return;
         }
-        // Initial confirmed sales self-orders are recorded *after* order creation
-        // and inventory reservation. Production does not yet have an authorized
-        // self-order Callable, so reject the new order atomically here instead of
-        // creating a reserved order with a missing supplier commitment.
-        if(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='production'
-            &&(snapshot.items||[]).some(item=>(item.procurementType||snapshot.procurementType)==='SALES_SELF_ORDER'&&item.selfOrderConfirmed===true))
-            throw new Error('業務自行訂貨尚無正式後端；為避免訂單已成立但供應未建立，請先將已下訂改為待確認，再建立訂單。');
+        // Persist a pending, non-operational source first. Reservation, supplier
+        // commitment, incoming and demand become durable together in the next
+        // authenticated backend transaction; a failed call keeps this ID pending.
+        if(typeof APP_ENVIRONMENT!=='undefined'&&['production','preview'].includes(APP_ENVIRONMENT)
+            &&(snapshot.items||[]).some(item=>(item.procurementType||snapshot.procurementType)==='SALES_SELF_ORDER'&&item.selfOrderConfirmed===true)
+            &&!(typeof selfOrderBackendEnabled==='function'&&selfOrderBackendEnabled()
+                &&typeof orderReservationBackendEnabled==='function'&&orderReservationBackendEnabled()))
+            throw new Error('業務自行訂貨與整單預留後端尚未一起啟用，請先將已下訂改為待確認。');
         if((snapshot.items || []).length>15)throw new Error('每張訂單最多 15 個品項；請分成多張訂單後再儲存。');
         const tradeValidation=globalThis.YushinOrderEntry.validateTrade(snapshot);
         if(!tradeValidation.valid)throw new Error(tradeValidation.message);

@@ -2,6 +2,7 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const {commitOrderReservation,normalizeOrderReservationIntent}=require('../functions/order-reservation-service');
 const {allowOrderReservationBackend}=require('../functions/order-reservation-gate');
+const {verifyQuickPurchaseReceipt}=require('../functions/supply-receipt-service');
 
 function clone(v){return structuredClone(v);}
 function fixture(){
@@ -52,7 +53,7 @@ function fixture(){
  const request={orderId:'O',syncAttemptId:'sync_1234567890'};
  const snapshot=()=>JSON.stringify([...docs].sort(([a],[b])=>a.localeCompare(b)));
  return {docs,put,db,request,snapshot,
-  run:(who='actor',data=request)=>commitOrderReservation(db,who,data)};
+  run:(who='actor',data=request,opts)=>commitOrderReservation(db,who,data,opts)};
 }
 test('one backend transaction reserves all warehouse items and reconciles all supplier demands',async()=>{
  const f=fixture(),response=await f.run();
@@ -80,9 +81,8 @@ test('one backend transaction reserves all warehouse items and reconciles all su
  assert.equal(demand('I4').requestedQty,2);
  assert.equal(f.docs.get('reservationOperationReceipts/order-sync-O__sync_1234567890').actorUid,'actor');
 });
-test('confirmed sales self-orders fail closed before any reservation or supplier demand is written',async()=>{
+test('confirmed self-orders reject stale clients without the creation marker and do not partially reserve',async()=>{
  for(const options of [
-  {selfOrderAtCreation:true,itemProcurementType:'SALES_SELF_ORDER'},
   {selfOrderAtCreation:false,itemProcurementType:'SALES_SELF_ORDER'},
   {selfOrderAtCreation:undefined,itemProcurementType:undefined,orderProcurementType:'SALES_SELF_ORDER'}
  ]){
@@ -92,10 +92,103 @@ test('confirmed sales self-orders fail closed before any reservation or supplier
     {...order.items[0],procurementType:options.itemProcurementType,selfOrderConfirmed:true}
    ]});
   const before=f.snapshot();
-  await assert.rejects(f.run('sales1'),/已確認自行訂貨尚無原子建單後端/);
+  await assert.rejects(f.run('sales1',f.request,{allowInitialSelfOrder:true}),/已確認自行訂貨僅限負責業務/);
   assert.equal(f.snapshot(),before);
   assert.equal(f.docs.has('inventoryReservations/O__I1'),false);
   assert.equal([...f.docs.keys()].some(key=>key.startsWith('procurementDemands/')),false);
+ }
+});
+test('confirmed initial self-order atomically reserves, registers incoming supply and demand; replay makes no second commitment',async()=>{
+ const f=fixture(),source=f.docs.get('orders/O');
+ f.put('orders/O',{...source,selfOrderAtCreation:true,orderDate:'2026-11-11',items:[
+  {...source.items[0],procurementType:'SALES_SELF_ORDER',selfOrderConfirmed:true,
+   supplier:'Vendor A',costPrice:12.5}
+ ]});
+ f.put('inventory/P',{productKey:'P',productId:'P',onHand:1,reserved:0,incoming:0});
+ f.put('warehouseStocks/A__P',{productKey:'P',productId:'P',warehouseId:'A',onHand:1,reserved:0,incoming:0});
+ await assert.rejects(f.run('sales1'),/後端尚未在此授權環境/);
+ const response=await f.run('sales1',f.request,{allowInitialSelfOrder:true});
+ assert.deepEqual([response.reservedQty,response.shortageQty],[1,2]);
+ const order=f.docs.get('orders/O'),line=order.items[0];
+ assert.equal(order.inventoryReservationStatus,'completed');
+ assert.deepEqual([line.reservedQty,line.shortageQty,line.supplyOrderedQty],[1,2,2]);
+ assert.equal(line.selfOrderNos.length,1);
+ assert.equal(f.docs.get('inventory/P').reserved,1);
+ assert.equal(f.docs.get('inventory/P').incoming,2);
+ assert.equal(f.docs.get('warehouseStocks/A__P').incoming,2);
+ const supply=f.docs.get('supplyOrders/self-O-I1');
+ assert.equal(supply.type,'SALES_SELF_ORDER');
+ assert.equal(supply.qty,2);assert.equal(supply.unitCost,12.5);
+ assert.equal(supply.incomingRegisteredQty,2);
+ const sanitized=f.docs.get('receivingSupplyOrders/self-O-I1');
+ assert.equal(sanitized.qty,2);assert.equal(sanitized.unitCost,undefined);
+ const demand=f.docs.get('procurementDemands/'+encodeURIComponent('SALES_ORDER:O:I1'));
+ assert.deepEqual([demand.requestedQty,demand.orderedQty,demand.remainingToOrderQty],[2,2,0]);
+ assert.ok(f.docs.get('purchaseOperations/'+line.orderEvents[0].id));
+ // The existing Receiving writer must accept the new initial-operation proof,
+ // including its cost-bearing private event and cost-free receiving projection.
+ await verifyQuickPurchaseReceipt(async ref=>({exists:f.docs.has(ref.path),
+  data:()=>clone(f.docs.get(ref.path))}),f.db,supply,order,'self-O-I1');
+ const before=f.snapshot();
+ assert.equal((await f.run('sales1',f.request,{allowInitialSelfOrder:true})).status,'already-applied');
+ assert.equal(f.snapshot(),before);
+});
+test('initial direct-ship self-order has no physical incoming or reservation',async()=>{
+ const f=fixture(),source=f.docs.get('orders/O');
+ f.put('orders/O',{...source,selfOrderAtCreation:true,orderDate:'2026-11-11',items:[
+  {...source.items[3],procurementType:'SALES_SELF_ORDER',selfOrderConfirmed:true,
+   supplier:'Direct Vendor',costPrice:0}
+ ]});
+ const beforePhysical=f.docs.get('inventory/P');
+ await f.run('sales1',f.request,{allowInitialSelfOrder:true});
+ const line=f.docs.get('orders/O').items[0];
+ assert.equal(line.supplyOrderedQty,2);
+ assert.equal(f.docs.get('supplyOrders/self-O-I4').incomingRegisteredQty,0);
+ await verifyQuickPurchaseReceipt(async ref=>({exists:f.docs.has(ref.path),
+  data:()=>clone(f.docs.get(ref.path))}),f.db,
+  f.docs.get('supplyOrders/self-O-I4'),f.docs.get('orders/O'),'self-O-I4');
+ assert.equal([...f.docs.keys()].filter(k=>k.startsWith('inventoryMovements/')).length,0);
+ assert.deepEqual(f.docs.get('inventory/P'),beforePhysical);
+});
+test('after zero-stock cutover, two initial commitments share a single consistent company incoming total',async()=>{
+ const f=fixture(),source=f.docs.get('orders/O');
+ f.docs.delete('inventory/P');f.docs.delete('warehouseStocks/A__P');
+ f.put('orders/O',{...source,selfOrderAtCreation:true,orderDate:'2026-11-11',items:[
+  {...source.items[0],procurementType:'SALES_SELF_ORDER',selfOrderConfirmed:true,
+   supplier:'Vendor',costPrice:0},
+  {...source.items[1],procurementType:'SALES_SELF_ORDER',selfOrderConfirmed:true,
+   supplier:'Vendor',costPrice:0}
+ ]});
+ const first=await f.run('sales1',f.request,{allowInitialSelfOrder:true});
+ assert.equal(first.shortageQty,6);
+ assert.equal(f.docs.get('inventory/P').incoming,6);
+ assert.equal(f.docs.get('inventory/P').productId,'P');
+ assert.equal(f.docs.get('warehouseStocks/A__P').incoming,6);
+ assert.equal(f.docs.get('warehouseStocks/A__P').productId,'P');
+ assert.equal(f.docs.get('supplyOrders/self-O-I1').qty,3);
+ assert.equal(f.docs.get('supplyOrders/self-O-I2').qty,3);
+ assert.equal([...f.docs.keys()].filter(k=>k.startsWith('inventoryMovements/')).length,2);
+ const before=f.snapshot();
+ assert.equal((await f.run('sales1',f.request,{allowInitialSelfOrder:true})).status,'already-applied');
+ assert.equal(f.snapshot(),before);
+});
+test('initial supplier admission is owner-only, validates cost and rejects preexisting supply without any writes',async()=>{
+ for(const change of [
+  f=>f.put('users/sales1',{role:'guest',active:true}),
+  f=>{const o=f.docs.get('orders/O');o.items[0].costPrice=-1;f.put('orders/O',o);},
+  f=>f.put('supplyOrders/self-O-I1',{type:'SALES_SELF_ORDER'}),
+  f=>{const o=f.docs.get('orders/O');o.items[0].supplier='';f.put('orders/O',o);}
+ ]){
+  const f=fixture(),order=f.docs.get('orders/O');
+  f.put('orders/O',{...order,selfOrderAtCreation:true,orderDate:'2026-11-11',items:[
+   {...order.items[0],procurementType:'SALES_SELF_ORDER',selfOrderConfirmed:true,
+    supplier:'Vendor',costPrice:0}
+  ]});
+  f.put('inventory/P',{productKey:'P',productId:'P',onHand:0,reserved:0,incoming:0});
+  f.put('warehouseStocks/A__P',{productKey:'P',productId:'P',warehouseId:'A',onHand:0,reserved:0,incoming:0});
+  change(f);const before=f.snapshot();
+  await assert.rejects(f.run('sales1',f.request,{allowInitialSelfOrder:true}));
+  assert.equal(f.snapshot(),before);
  }
 });
 test('unconfirmed self-orders remain eligible for ordinary backend reservation',async()=>{

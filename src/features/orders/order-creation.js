@@ -665,11 +665,14 @@ window.saveNewOrder = function() {
         return;
     }
     if(items.some(item=>item.fulfillmentType==='WAREHOUSE'&&String(item.productType||'').trim().toUpperCase()!=='SERVICE'&&warehouseMasterCache.length&&!item.warehouseId)){alert('請為每個倉庫出貨品項選擇倉庫。');return;}
-    // Prevent even the pre-commit Customer Master sync for an order that the
-    // production self-order backend cannot yet atomically commit.
-    if(typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='production'
-        &&items.some(item=>(item.procurementType||document.getElementById('orderProcurementType')?.value)==='SALES_SELF_ORDER'&&item.selfOrderConfirmed===true)){
-        alert('業務自行訂貨尚無正式後端；請先將「已下訂」改為「待確認」，再建立訂單。');
+    const initialConfirmedSelfOrder=items.some(item=>
+        (item.procurementType||document.getElementById('orderProcurementType')?.value)==='SALES_SELF_ORDER'
+        &&item.selfOrderConfirmed===true);
+    if(typeof APP_ENVIRONMENT!=='undefined'&&['production','preview'].includes(APP_ENVIRONMENT)
+        &&initialConfirmedSelfOrder
+        &&!(typeof selfOrderBackendEnabled==='function'&&selfOrderBackendEnabled()
+            &&typeof orderReservationBackendEnabled==='function'&&orderReservationBackendEnabled())){
+        alert('業務自行訂貨與整單預留後端尚未一起啟用；請先將「已下訂」改為「待確認」。');
         return;
     }
     const assistedOwner = ['admin','purchaser'].includes(currentUserRole)
@@ -806,7 +809,10 @@ window.saveNewOrder = function() {
                 localStorage.removeItem(savedDraftKey);
                 closeOrderModal();
             }
-            showActionFeedback('訂單已建立，庫存正在背景同步；可繼續建立其他訂單。','success');
+            showActionFeedback(initialConfirmedSelfOrder
+                ? '訂單已暫存；供應商已下訂與庫存預留須由後端同時確認，尚未完成前不能視為正式已下訂。'
+                : '訂單已建立，庫存正在背景同步；可繼續建立其他訂單。',
+                initialConfirmedSelfOrder?'warning':'success');
         }
         let reservation;
         try {
@@ -848,7 +854,7 @@ window.saveNewOrder = function() {
             if(cachedOrder)Object.assign(cachedOrder,data);
             writeAppDataCache('orders',ordersCache);
             renderOrdersList();
-            showActionFeedback(`訂單已建立，但庫存同步未完成。請在該筆訂單按「重試同步」，不要另建一張：${err.message}`,'warning');
+            showActionFeedback(`${initialConfirmedSelfOrder?'訂單仍待確認，供應商訂貨與庫存尚未正式同步':'訂單已建立，但庫存同步未完成'}。請在該筆訂單按「重試同步」，不要另建一張：${err.message}`,'warning');
         } else {
             alert('儲存狀態尚未確認；請按儲存重試同一張訂單，勿另開新單：' + err.message);
         }
