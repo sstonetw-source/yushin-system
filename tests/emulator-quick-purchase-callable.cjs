@@ -25,7 +25,7 @@ test.after(async()=>{
  await Promise.all(clients.map(deleteApp));
  if(server)await server.delete();
 });
-async function seeded(tag,{role='purchaser',directShip=false,active=true,selfOrder=false}={}){
+async function seeded(tag,{role='purchaser',directShip=false,active=true,selfOrder=false,mixed=false}={}){
  const uid='quick-buyer-'+tag,email=uid+'@example.test';
  await users.createUser({uid,email,password:'EmulatorOnly!123456'});
  const client=clientApp({apiKey:'fake-api-key',authDomain:project+'.firebaseapp.com',
@@ -42,6 +42,9 @@ async function seeded(tag,{role='purchaser',directShip=false,active=true,selfOrd
   ...(selfOrder?{procurementType:'SALES_SELF_ORDER'}:{}),
   qty:directShip?7:12,reservedQty:directShip?0:5,shortageQty:directShip?0:7,
   supplyOrderedQty:0,receivedQty:0};
+ const serviceItem={itemId:'SERVICE',productId:'service-product-'+tag,productType:'SERVICE',
+  fulfillmentType:'WAREHOUSE',warehouseId:'',inventoryProductKey:'',reservationStatus:'not_required',
+  qty:1,reservedQty:0,shortageQty:0,supplyOrderedQty:0,receivedQty:0};
  const demandId=demandCore.demandIdForSource({sourceType:'SALES_ORDER',sourceId:orderId,sourceItemId:itemId});
  const demand=demandCore.demandDocument(demandCore.fromSalesOrder({...item,
   requiredSupplyQty:directShip?7:undefined,sourceType:'SALES_ORDER',
@@ -52,8 +55,9 @@ async function seeded(tag,{role='purchaser',directShip=false,active=true,selfOrd
  set('orders/'+orderId,{ownerUid:selfOrder?uid:'seller-'+tag,salesCode:'S01',
   ...(selfOrder?{inventoryReservationAttemptId:'self-order-attempt-'+tag}:{}),
   status:'active',orderStatus:'normal',inventoryReservationStatus:'completed',
-  workCategories:['ordering'],items:[item]});
+  workCategories:['ordering'],items:mixed?[item,serviceItem]:[item]});
  set('products/'+productId,{productType:'Goods',active:true});
+ if(mixed)set('products/'+serviceItem.productId,{productType:'SERVICE',active:true});
  set('procurementDemands/'+encodeURIComponent(demandId),demand);
  if(!directShip){
   if(selfOrder)set('inventoryReservations/'+orderId+'__'+itemId,{orderId,itemId,
@@ -239,6 +243,18 @@ test('real sales owner self-order commits one atomic supply, demand, source and 
  assert.equal((await f.call(intent)).data.status,'already-applied');
  assert.equal((await f.data('inventory/'+f.productId)).incoming,4);
  await assert.rejects(f.call({...intent,qty:3}),e=>e.code==='functions/already-exists');
+});
+test('mixed service order self-order leaves service without stock or demand and remains receivable',async()=>{
+ const f=await seeded('sales-mixed-service',{role:'sales',selfOrder:true,mixed:true});
+ const result=(await f.call(f.intent())).data;
+ assert.equal(result.status,'committed');
+ const source=await f.data('orders/'+f.orderId),supply=await f.data('supplyOrders/'+result.supplyId);
+ assert.equal(source.items[1].supplyOrderedQty,0);
+ assert.equal(await f.data('inventoryReservations/'+f.orderId+'__SERVICE'),undefined);
+ assert.equal(await f.data('procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.orderId+':SERVICE')),undefined);
+ await verifyQuickPurchaseReceipt(ref=>db.doc(ref.path).get(),db,supply,source,result.supplyId);
+ assert.equal((await f.call(f.intent())).data.status,'already-applied');
+ assert.equal((await f.data('inventory/'+f.productId)).incoming,4);
 });
 test('real self-order rejects other buyers, tampered ownership and concurrent overorders',async()=>{
  const buyer=await seeded('self-buyer',{role:'purchaser',selfOrder:true});
