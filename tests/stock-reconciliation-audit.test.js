@@ -10,6 +10,12 @@ const rows=()=>({inventory:[{id:'P',data:{productKey:'P',onHand:8,reserved:3,inc
 test('legal branch-to-main transit remains company-owned but unavailable to allocate',()=>{
  assert.equal(reconcileStockRows(...Object.values(rows())).status,'CONSISTENT');
 });
+test('the clean pre-opening database is not reported as fully reconciled inventory',()=>{
+ const result=reconcileStockRows([],[]);
+ assert.equal(result.status,'NOT_INITIALIZED');
+ assert.equal(result.lotCostStatus,'NOT_AUDITED');
+ assert.deepEqual(result.problems,[]);
+});
 test('reject mismatched warehouse sums, bad identity, unsupported transit and orphan stocks',()=>{
  const corruptions=[f=>f.inventory[0].data.onHand=9,f=>f.inventory[0].data.reserved=4,
   f=>f.warehouses[0].data.incoming=1,f=>f.warehouses[0].data.transferReserved=0,

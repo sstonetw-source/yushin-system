@@ -21,6 +21,9 @@ function numbers(value){
 }
 
 function reconcileStockRows(inventory,warehouses){
+ if(inventory.length===0&&warehouses.length===0)return {
+  status:'NOT_INITIALIZED',companyCount:0,warehouseCount:0,
+  lotCostStatus:'NOT_AUDITED',problems:[]};
  const problems=[],company=new Map(),totals=new Map();
  const problem=(kind,id)=>problems.push({kind,id});
  for(const row of inventory){
