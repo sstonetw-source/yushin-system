@@ -1,6 +1,6 @@
 {
   "firestore": {
-    "rules": "firestore.rules",
+    "rules": "release-candidates/firestore.backend-only-stock.rules",
     "indexes": "firestore.indexes.json"
   },
   "functions": {
