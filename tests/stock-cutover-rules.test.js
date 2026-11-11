@@ -20,6 +20,8 @@ test('production stock cutover is an explicit generated Rules artifact, not a la
   assert.match(generated, /BACKEND-ONLY STOCK WRITER CUTOVER/);
   assert.notEqual(generated, source);
   assert.equal(buildStockCutoverRules(source), generated);
+  assert.equal(fs.readFileSync(path.join(__dirname, '..', 'release-candidates/firestore.backend-only-stock.rules'), 'utf8'), generated,
+    'Published Rules artifact must match the reviewed generator output');
   for (const [collection, methods] of Object.entries(TARGETS)) {
     const before = blockFor(source, collection);
     const after = blockFor(generated, collection);
