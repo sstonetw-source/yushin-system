@@ -24791,6 +24791,8 @@ window.saveNewOrder = function() {
     return createOrResumeNewOrder(data).then(async docRef => {
         createdOrderId = docRef.id;
         data=docRef.data;
+        const pendingConfirmedSelfOrder=Array.isArray(data.items)&&data.items.some(item=>
+            (item.procurementType||data.procurementType)==='SALES_SELF_ORDER'&&item.selfOrderConfirmed===true);
         newOrderSaveInProgress=false;
         if(saveButton){saveButton.disabled=false;saveButton.innerText='建立訂單';}
         // 正式文件確認寫入後即釋放表單；庫存與來源文件同步使用這份獨立快照。
@@ -24807,10 +24809,10 @@ window.saveNewOrder = function() {
                 localStorage.removeItem(savedDraftKey);
                 closeOrderModal();
             }
-            showActionFeedback(initialConfirmedSelfOrder
+            showActionFeedback(pendingConfirmedSelfOrder
                 ? '訂單已暫存；供應商已下訂與庫存預留須由後端同時確認，尚未完成前不能視為正式已下訂。'
                 : '訂單已建立，庫存正在背景同步；可繼續建立其他訂單。',
-                initialConfirmedSelfOrder?'warning':'success');
+                pendingConfirmedSelfOrder?'warning':'success');
         }
         let reservation;
         try {
@@ -24845,6 +24847,8 @@ window.saveNewOrder = function() {
                 : '訂單已建立，庫存預留已同步。', 'success');
         }
     }).catch(err => {
+        const pendingConfirmedSelfOrder=Array.isArray(data.items)&&data.items.some(item=>
+            (item.procurementType||data.procurementType)==='SALES_SELF_ORDER'&&item.selfOrderConfirmed===true);
         pendingOrderReservationIds.delete(createdOrderId);
         if(currentUser?.uid!==savingUid)return;
         if (createdOrderId) {
@@ -24852,7 +24856,7 @@ window.saveNewOrder = function() {
             if(cachedOrder)Object.assign(cachedOrder,data);
             writeAppDataCache('orders',ordersCache);
             renderOrdersList();
-            showActionFeedback(`${initialConfirmedSelfOrder?'訂單仍待確認，供應商訂貨與庫存尚未正式同步':'訂單已建立，但庫存同步未完成'}。請在該筆訂單按「重試同步」，不要另建一張：${err.message}`,'warning');
+            showActionFeedback(`${pendingConfirmedSelfOrder?'訂單仍待確認，供應商訂貨與庫存尚未正式同步':'訂單已建立，但庫存同步未完成'}。請在該筆訂單按「重試同步」，不要另建一張：${err.message}`,'warning');
         } else {
             alert('儲存狀態尚未確認；請按儲存重試同一張訂單，勿另開新單：' + err.message);
         }
