@@ -4,6 +4,7 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const admin=require('firebase-admin');
 const {getFirestore}=require('firebase-admin/firestore');
 const {commitOrderReservation}=require('../functions/order-reservation-service');
+const {verifyQuickPurchaseReceipt}=require('../functions/supply-receipt-service');
 let app,db;
 test.before(()=>{
  assert.ok(process.env.FIRESTORE_EMULATOR_HOST,'Refuse production Firestore');
@@ -46,6 +47,29 @@ test('full-order Admin transaction keeps company and all warehouse stock balance
  assert.equal(demand.requestedQty,2);
  assert.equal((await f.call()).status,'already-applied');
  assert.equal((await f.get('inventory/'+f.productKey)).reserved,10);
+});
+test('real Emulator: two concurrent initial self-order attempts commit one supplier promise and canonical receiving proof',async()=>{
+ const f=await seed('initial-self-concurrent');
+ await db.doc('users/'+f.uid).update({role:'sales'});
+ await db.doc('orders/'+f.orderId).update({ownerUid:f.uid,selfOrderAtCreation:true,
+  orderDate:'2026-11-11',items:[
+   {itemId:'I1',productId:f.productKey,warehouseId:'A',qty:3,reservedQty:0,
+    procurementType:'SALES_SELF_ORDER',selfOrderConfirmed:true,supplier:'Vendor',costPrice:0}
+  ]});
+ await db.doc('inventory/'+f.productKey).update({onHand:0,incoming:0});
+ await db.doc('warehouseStocks/A__'+f.productKey).update({onHand:0,incoming:0});
+ await db.doc('warehouseStocks/B__'+f.productKey).update({onHand:0,incoming:0});
+ const execute=()=>commitOrderReservation(db,f.uid,f.intent,{allowInitialSelfOrder:true});
+ const [first,replay]=await Promise.all([execute(),execute()]);
+ assert.deepEqual([first.status,replay.status].sort(),['already-applied','applied']);
+ const order=await f.get('orders/'+f.orderId),supplyId='self-'+encodeURIComponent(f.orderId)+'-I1';
+ const supply=await f.get('supplyOrders/'+supplyId);
+ assert.equal(supply.qty,3);
+ assert.equal(order.items[0].supplyOrderedQty,3);
+ assert.equal((await f.get('inventory/'+f.productKey)).incoming,3);
+ assert.equal((await f.get('warehouseStocks/A__'+f.productKey)).incoming,3);
+ assert.equal((await f.get('procurementDemands/'+encodeURIComponent('SALES_ORDER:'+f.orderId+':I1'))).orderedQty,3);
+ await verifyQuickPurchaseReceipt(ref=>ref.get(),db,supply,order,supplyId);
 });
 test('alternate stocked warehouse is selected inside the real Admin transaction',async()=>{
  const f=await seed('alternate');

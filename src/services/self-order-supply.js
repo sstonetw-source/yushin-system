@@ -199,6 +199,8 @@ async function registerInitialSelfOrders(orderId,order,actorUid=currentUser?.uid
             if((item.procurementType||order.procurementType)!=='SALES_SELF_ORDER'||item.selfOrderConfirmed!==true)continue;
             const qty=remainingProcurementQty(order,item);
             if(qty<=0)continue;
+            if(typeof APP_ENVIRONMENT!=='undefined'&&['production','preview'].includes(APP_ENVIRONMENT))
+                throw Error('已確認自行訂貨的權威同步尚未完成，禁止瀏覽器補寫供應；請以原訂單同步 ID 核對後端。');
             const saved=await registerInitialSelfOrderSupply(orderId,item.itemId,{supplier:item.supplier,qty,unitCost:Number(item.costPrice),orderDate:order.orderDate,actorUid,actorRole});
             Object.assign(order,saved);
             changed=true;

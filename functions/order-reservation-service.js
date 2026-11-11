@@ -9,6 +9,8 @@ const fulfillmentCore=require('./shared/fulfillment-core.js');
 const workflowCore=require('./shared/workflow-core.js');
 const reservationCore=require('./shared/reservation-core.js');
 const {hasCommercialOwnerIdentity}=require('./commercial-owner-identity');
+const receivingCore=require('./shared/receiving-core');
+const {sanitizeSupply}=require('./shared/stock-permissions');
 
 function fault(code,message){const error=new Error(message);error.code=code;throw error;}
 function ident(value,label,max=160){
@@ -25,8 +27,23 @@ function stockNumbers(value,label){
   const onHand=quantity(value?.onHand??0,label+'實貨');
   const reserved=quantity(value?.reserved??0,label+'預留');
   const transferFreeInTransit=quantity(value?.transferFreeInTransit??0,label+'在途');
+  const incoming=quantity(value?.incoming??0,label+'採購在途');
   if(reserved+transferFreeInTransit>onHand)fault('failed-precondition',label+'庫存帳目不一致');
-  return {onHand,reserved,transferFreeInTransit,available:onHand-reserved-transferFreeInTransit,delta:0};
+  return {onHand,reserved,transferFreeInTransit,incoming,
+    available:onHand-reserved-transferFreeInTransit,delta:0,incomingDelta:0};
+}
+function selfOrderCost(value){
+  if(typeof value!=='number'||!Number.isFinite(value)||value<0||value>100000000
+    ||Math.abs(Math.round(value*100)-value*100)>1e-6)
+    fault('failed-precondition','自行訂貨成本必須為有效的非負兩位小數金額');
+  return value;
+}
+function selfOrderDate(value){
+  if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value)
+    ||!Number.isFinite(Date.parse(value+'T00:00:00Z'))
+    ||new Date(value+'T00:00:00Z').toISOString().slice(0,10)!==value)
+    fault('failed-precondition','自行訂貨日期不正確');
+  return value;
 }
 function normalizeOrderReservationIntent(data){
   if(!data||typeof data!=='object'||Array.isArray(data)
@@ -69,7 +86,7 @@ function initialOrderWorkIndex(order,items,now){
   return {workCategories:categories.length?categories:['ordering'],workCategoryUpdatedAt:now};
 }
 
-async function commitOrderReservation(db,uid,data){
+async function commitOrderReservation(db,uid,data,{allowInitialSelfOrder=false}={}){
   ident(uid,'登入 UID');
   const {orderId,syncAttemptId}=normalizeOrderReservationIntent(data);
   const ref=(name,key)=>db.collection(name).doc(key);
@@ -86,6 +103,18 @@ async function commitOrderReservation(db,uid,data){
       const receipt=receiptSnap.data();
       if(receipt.orderId!==orderId||receipt.syncAttemptId!==syncAttemptId||receipt.actorUid!==uid)
         fault('already-exists','同步憑證與呼叫者不一致');
+      // Original supplier evidence is immutable even after valid receipt or
+      // cancellation; a lone receipt must not acknowledge missing purchases.
+      for(const evidence of receipt.selfOrderCommitments||[]){
+        const supplySnap=await tx.get(ref('supplyOrders',evidence.supplyId));
+        const operationSnap=await tx.get(ref('purchaseOperations',evidence.operationId));
+        if(!supplySnap.exists||!operationSnap.exists
+          ||supplySnap.data().sourceId!==orderId||supplySnap.data().sourceItemId!==evidence.itemId
+          ||supplySnap.data().demandId!==evidence.demandId
+          ||supplySnap.data().qty!==evidence.qty||operationSnap.data().supplyId!==evidence.supplyId
+          ||operationSnap.data().uid!==uid)
+          fault('failed-precondition','同步憑證與供應商承諾不一致');
+      }
       return {status:'already-applied',receiptId:receiptRef.id,
         reservedQty:receipt.reservedQty,shortageQty:receipt.shortageQty};
     }
@@ -102,20 +131,20 @@ async function commitOrderReservation(db,uid,data){
       fault('failed-precondition','已有較新的庫存同步工作');
     if(['sales','engineer'].includes(role)&&order.ownerUid!==uid)
       fault('permission-denied','只能同步自己的訂單');
-    // A confirmed sales self-order must be committed together with its source
-    // order and supplier demand. Until that backend flow exists, an older
-    // browser must not reserve stock and strand a confirmed supplier promise.
-    // Do not trust the browser-supplied selfOrderAtCreation flag: older clients
-    // can omit it, while their confirmed item still requires the same barrier.
-    if(order.items.some(item=>
+    const initialConfirmed=order.items.some(item=>
       (item?.procurementType||order.procurementType)==='SALES_SELF_ORDER'
-      &&item?.selfOrderConfirmed===true))
-      fault('failed-precondition','已確認自行訂貨尚無原子建單後端，拒絕部分完成的訂單預留');
+      &&item?.selfOrderConfirmed===true);
+    if(initialConfirmed&&!allowInitialSelfOrder)
+      fault('failed-precondition','已確認自行訂貨後端尚未在此授權環境啟用');
+    if(initialConfirmed&&(order.selfOrderAtCreation!==true||order.ownerUid!==uid
+      ||!['sales','engineer'].includes(role)||order.items.length>5))
+      fault('permission-denied','已確認自行訂貨僅限負責業務建立，且須符合正式收貨品項上限');
 
     const now=new Date().toISOString();
     const productMasters=new Map(),warehouseMasters=new Map();
     const companyStocks=new Map(),warehouseStocks=new Map(),warehouseCandidates=new Map();
     const writes=[],nextItems=[],seenItems=new Set(),lifecycleWarehouses=new Set();
+    const commitments=[];
     let reservedQty=0,shortageQty=0;
     async function master(collection,key,cache){
       if(!cache.has(key)){
@@ -220,15 +249,33 @@ async function commitOrderReservation(db,uid,data){
       if(product?.active===false)fault('failed-precondition','產品主檔已停用');
       const service=type==='SERVICE',direct=fulfillmentType==='DIRECT_SHIP';
       if(service&&direct)fault('failed-precondition','服務型品項不支援原廠直送');
+      const confirmed=(source.procurementType||order.procurementType)==='SALES_SELF_ORDER'
+        &&source.selfOrderConfirmed===true;
+      if(confirmed&&(service||!productId||!product||!productKey))
+        fault('failed-precondition','自行訂貨須綁定有效實體產品主檔');
       let warehouseId=service||direct?'':ident(source.warehouseId||order.warehouseId,'實體倉庫',200);
       let reserve=0,shortage=0;
       if(!service&&!direct&&productKey){
         if(productId&&!product)fault('failed-precondition','來源品項缺少有效產品主檔');
         const aggregate=await trackedStock('inventory',encodeURIComponent(productKey),companyStocks,'公司');
+        if(productId&&!aggregate.exists){
+          aggregate.productId=productId;
+          aggregate.itemCode=source.itemCode||'';
+          aggregate.itemName=source.itemName||'';
+          aggregate.brand=source.brand||'';
+          aggregate.brandId=source.brandId||'';
+        }
         warehouseId=await chooseSingleWarehouse(productKey,warehouseId,orderedQty,aggregate.available);
         const warehouseKey=encodeURIComponent(warehouseId)+'__'+encodeURIComponent(productKey);
         const location=await trackedStock('warehouseStocks',warehouseKey,warehouseStocks,warehouseId,
           {warehouseId,productKey});
+        if(productId&&!location.exists){
+          location.productId=productId;
+          location.itemCode=source.itemCode||'';
+          location.itemName=source.itemName||'';
+          location.brand=source.brand||'';
+          location.brandId=source.brandId||'';
+        }
         const reservationRef=ref('inventoryReservations',orderId+'__'+itemId);
         const reservationSnap=await tx.get(reservationRef);
         // Replays have already returned the original operation receipt. A new
@@ -263,8 +310,48 @@ async function commitOrderReservation(db,uid,data){
         // Manual products without a linked master are procurement-only.
         shortage=orderedQty;
       }
+      const commitQty=confirmed?(direct?orderedQty:shortage):0;
+      let commitment=null;
+      if(commitQty>0){
+        const supplier=ident(source.supplier,'自行訂貨供應商',200);
+        const unitCost=selfOrderCost(source.costPrice);
+        const date=selfOrderDate(order.orderDate);
+        const supplyId='self-'+encodeURIComponent(orderId)+'-'+encodeURIComponent(itemId);
+        const operationId='so-'+createHash('sha256')
+          .update(JSON.stringify([orderId,syncAttemptId,itemId])).digest('hex').slice(0,40);
+        const operationDocId='self-'+operationId;
+        const supplyRef=ref('supplyOrders',supplyId);
+        const operationRef=ref('purchaseOperations',operationDocId);
+        const receivingRef=ref('receivingSupplyOrders',supplyId);
+        const movementRef=ref('inventoryMovements',operationDocId);
+        const [priorSupply,priorOperation,priorReceiving,priorMovement]=await Promise.all([
+          tx.get(supplyRef),tx.get(operationRef),tx.get(receivingRef),tx.get(movementRef)]);
+        if(priorSupply.exists||priorOperation.exists||priorReceiving.exists||priorMovement.exists)
+          fault('failed-precondition','自行訂貨已有供應或操作憑證，禁止建立重複承諾');
+        const internalNo='SO-'+date.replace(/-/g,'')+'-'+supplyId.slice(-8).toUpperCase();
+        commitment={itemId,index,qty:commitQty,supplier,unitCost,date,internalNo,
+          supplyId,operationId,operationDocId,supplyRef,operationRef,receivingRef,movementRef,
+          warehouseId,productId,productKey,fulfillmentType};
+        commitments.push(commitment);
+        if(!direct){
+          const company=await trackedStock('inventory',encodeURIComponent(productKey),companyStocks,'公司');
+          const location=await trackedStock('warehouseStocks',
+            encodeURIComponent(warehouseId)+'__'+encodeURIComponent(productKey),warehouseStocks,warehouseId,
+            {warehouseId,productKey});
+          company.incomingDelta+=commitQty;location.incomingDelta+=commitQty;
+        }
+      }
       const next={...source,itemId,orderedQty,reservedQty:reserve,shortageQty:shortage,
         inventoryProductKey:service||direct?'':productKey,warehouseId};
+      if(commitment){
+        next.supplyOrderedQty=commitQty;
+        next.selfOrderNos=[...new Set([...(source.selfOrderNos||[]),commitment.internalNo])];
+        next.supplier=commitment.supplier;
+        next.orderedAt=commitment.date;
+        next.orderEvents=[...(source.orderEvents||[]),{
+          id:commitment.operationDocId,type:'SALES_SELF_ORDER',at:now,date:commitment.date,
+          qty:commitQty,documentNo:commitment.internalNo,by:user.name||uid}];
+      }
       // An untyped physical line must not inherit a service order's summary type.
       if(!type&&workflowCore.isServiceItem(order))next.productType='Goods';
       if(service||direct)next.reservationStatus='not_required';
@@ -295,7 +382,7 @@ async function commitOrderReservation(db,uid,data){
         brand:source.brand||'',fulfillmentType,warehouseId,
         ownerUid:order.ownerUid,salesCode:order.salesCode,salesName:order.salesName||'',
         shortageQty:shortage,requiredSupplyQty:direct?orderedQty:0,
-        supplyOrderedQty:0,receivedQty:0,
+        supplyOrderedQty:commitQty,receivedQty:0,
         scheduleDate:prior?.scheduleDate||source.requiredByDate||source.scheduleDate
           ||order.requiredByDate||order.expectedDate||''
       });
@@ -313,25 +400,73 @@ async function commitOrderReservation(db,uid,data){
       // Cache keys are encoded document IDs; stock fields retain the raw product identity.
       const productKey=decodeURIComponent(companyDocumentId);
       if(!company.exists)writes.push({type:'create',ref:company.ref,data:{
-        productKey,onHand:0,reserved:0,incoming:0,updatedAt:now}});
+        productKey,productId:company.productId||'',itemCode:company.itemCode||'',
+        itemName:company.itemName||'',brand:company.brand||'',brandId:company.brandId||'',
+        onHand:0,reserved:0,incoming:company.incomingDelta,updatedAt:now}});
       for(const warehouseId of lifecycleWarehouseIds){
         const key=encodeURIComponent(warehouseId)+'__'+encodeURIComponent(productKey);
         const stock=await trackedStock('warehouseStocks',key,warehouseStocks,warehouseId,{warehouseId,productKey});
         if(!stock.exists)writes.push({type:'create',ref:stock.ref,data:{
-          productKey,warehouseId,onHand:0,reserved:0,incoming:0,updatedAt:now}});
+          productKey,productId:stock.productId||company.productId||'',warehouseId,
+          itemCode:stock.itemCode||company.itemCode||'',itemName:stock.itemName||company.itemName||'',
+          brand:stock.brand||company.brand||'',brandId:stock.brandId||company.brandId||'',
+          onHand:0,reserved:0,incoming:stock.incomingDelta,updatedAt:now}});
       }
     }
     for(const write of writes)if(write.ref.path.startsWith('inventoryReservations/'))
       write.data.lifecycleWarehouseIds=lifecycleWarehouseIds;
     // The read phase is complete. Apply all writes only after validating the
     // entire order, including all supplier and existing-reservation records.
-    for(const stock of companyStocks.values())if(stock.delta>0){
-      if(!stock.exists)fault('failed-precondition','公司庫存主檔不足，不可增加預留');
-      writes.push({type:'update',ref:stock.ref,data:{reserved:stock.reserved+stock.delta,updatedAt:now}});
+    for(const stock of companyStocks.values())if(stock.delta>0||stock.incomingDelta>0){
+      if(!stock.exists){
+        if(stock.delta>0)fault('failed-precondition','公司庫存主檔不足，不可增加預留');
+        continue;
+      }
+      writes.push({type:'update',ref:stock.ref,data:{reserved:stock.reserved+stock.delta,
+        incoming:stock.incoming+stock.incomingDelta,updatedAt:now}});
     }
-    for(const stock of warehouseStocks.values())if(stock.delta>0){
-      if(!stock.exists)fault('failed-precondition','分倉庫存主檔不足，不可增加預留');
-      writes.push({type:'update',ref:stock.ref,data:{reserved:stock.reserved+stock.delta,updatedAt:now}});
+    for(const stock of warehouseStocks.values())if(stock.delta>0||stock.incomingDelta>0){
+      if(!stock.exists){
+        if(stock.delta>0)fault('failed-precondition','分倉庫存主檔不足，不可增加預留');
+        continue;
+      }
+      writes.push({type:'update',ref:stock.ref,data:{reserved:stock.reserved+stock.delta,
+        incoming:stock.incoming+stock.incomingDelta,updatedAt:now}});
+    }
+    for(const c of commitments){
+      const source=order.items[c.index];
+      const demandId=demandCore.demandIdForSource({sourceType:'SALES_ORDER',sourceId:orderId,
+        sourceItemId:c.itemId});
+      const event={operationId:c.operationId,qty:c.qty,supplier:c.supplier,unitCost:c.unitCost,
+        orderDate:c.date,notes:'',createdAt:now,createdByUid:uid,createdBy:user.name||uid};
+      const supply={type:'SALES_SELF_ORDER',method:'SALES_SELF_ORDER',sourceType:'SALES_ORDER',
+        sourceId:orderId,sourceItemId:c.itemId,demandId,internalNo:c.internalNo,
+        orderId,itemId:c.itemId,orderItemIndex:c.index,ownerUid:order.ownerUid,
+        salesCode:order.salesCode,salesName:order.salesName||'',customerName:order.customerName||'',
+        company:order.company||'',productId:c.productId,productKey:c.productKey,
+        itemCode:source.itemCode||'',itemName:source.itemName||'',brand:source.brand||'',
+        brandId:source.brandId||'',productLine:source.productLine||'',qty:c.qty,receivedQty:0,
+        incomingRegisteredQty:c.fulfillmentType==='DIRECT_SHIP'?0:c.qty,
+        incomingRegisteredAt:c.fulfillmentType==='DIRECT_SHIP'?'':now,
+        supplier:c.supplier,unitCost:c.unitCost,notes:'',orderDate:c.date,lastOrderedAt:c.date,
+        orderEvents:[event],fulfillmentType:c.fulfillmentType,warehouseId:c.warehouseId,
+        createdAt:now,updatedAt:now,createdByUid:uid,createdBy:user.name||uid,createdByRole:role};
+      supply.status=receivingCore.normalizeSupply(supply).status;
+      writes.push({type:'create',ref:c.supplyRef,data:supply});
+      writes.push({type:'create',ref:c.receivingRef,data:sanitizeSupply(supply)});
+      const purchaseIntent={operationId:c.operationId,orderId,itemId:c.itemId,qty:c.qty,
+        supplier:c.supplier,unitCost:c.unitCost,orderDate:c.date,notes:''};
+      writes.push({type:'create',ref:c.operationRef,data:{type:'SALES_SELF_ORDER',
+        operationId:c.operationId,uid,supplyId:c.supplyId,demandId,orderId,itemId:c.itemId,
+        hash:createHash('sha256').update(JSON.stringify(purchaseIntent)).digest('hex'),
+        qty:c.qty,movementId:c.fulfillmentType==='DIRECT_SHIP'?'':c.movementRef.id,
+        createdAt:now}});
+      if(c.fulfillmentType!=='DIRECT_SHIP')writes.push({type:'create',ref:c.movementRef,
+        data:{type:'purchase_incoming',qty:c.qty,productKey:c.productKey,productId:c.productId,
+          warehouseId:c.warehouseId,brand:source.brand||'',brandId:source.brandId||'',
+          fulfillmentType:'WAREHOUSE',sourceType:'SUPPLY_ORDER',sourceId:c.supplyId,
+          purchaseDocumentId:c.internalNo,createdAt:now,createdBy:user.name||uid,actorUid:uid,
+          ownerUid:order.ownerUid,salesCode:order.salesCode}});
     }
     const movementPrefix='order-sync-'+createHash('sha256')
       .update(JSON.stringify([orderId,syncAttemptId])).digest('hex');
@@ -360,7 +495,10 @@ async function commitOrderReservation(db,uid,data){
       inventoryReservationStatus:'completed',inventoryReservationError:'',
       inventoryReservationUpdatedAt:now,...initialOrderWorkIndex(indexedOrder,nextItems,now),updatedAt:now});
     tx.create(receiptRef,{action:'order_initial_reservation',orderId,syncAttemptId,
-      actorUid:uid,actorRole:role,reservedQty,shortageQty,createdAt:now,status:'applied'});
+      actorUid:uid,actorRole:role,reservedQty,shortageQty,
+      selfOrderCommitments:commitments.map(c=>({supplyId:c.supplyId,operationId:c.operationDocId,
+        demandId:demandCore.demandIdForSource({sourceType:'SALES_ORDER',sourceId:orderId,
+          sourceItemId:c.itemId}),itemId:c.itemId,qty:c.qty})),createdAt:now,status:'applied'});
     return {status:'applied',receiptId:receiptRef.id,reservedQty,shortageQty};
   });
 }

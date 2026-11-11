@@ -2,6 +2,7 @@
 const {allowOrderReservationBackend}=require('./order-reservation-gate');
 const {projectIdFromEnvironment}=require('./grouped-reservation-gate');
 const {commitOrderReservation}=require('./order-reservation-service');
+const {selfOrderBackendProject}=require('./self-order-callable');
 
 function createOrderReservationCallable({onCall,HttpsError,getDatabase,env=process.env}){
   return onCall({region:'asia-east1'},async request=>{
@@ -11,7 +12,10 @@ function createOrderReservationCallable({onCall,HttpsError,getDatabase,env=proce
     const db=getDatabase();
     if(db.projectId!==projectIdFromEnvironment(env))
       throw new HttpsError('failed-precondition','整單預留資料庫與授權專案不一致');
-    try{return await commitOrderReservation(db,request.auth.uid,request.data);}
+    // The initial supplier commitment shares the reservation transaction, but
+    // must not inherit reservation-only authority when Receiving is disabled.
+    try{return await commitOrderReservation(db,request.auth.uid,request.data,{
+      allowInitialSelfOrder:selfOrderBackendProject(env)===db.projectId});}
     catch(error){
       const allowed=['invalid-argument','permission-denied','failed-precondition','not-found','already-exists'];
       if(allowed.includes(error.code))throw new HttpsError(error.code,error.message);
