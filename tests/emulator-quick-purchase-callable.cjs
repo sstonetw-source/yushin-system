@@ -80,6 +80,12 @@ test('real purchaser Callable atomically creates supplier, demand, source, both 
  assert.equal(first.committedQty,4);
  const supply=await f.data('supplyOrders/'+first.supplyId);
  assert.equal(supply.qty,4);assert.equal(supply.unitCost,19.99);
+ const receivingView=await f.data('receivingSupplyOrders/'+first.supplyId);
+ assert.equal(receivingView.type,'PURCHASING_MANUAL');
+ assert.equal(receivingView.warehouseId,f.warehouseId);
+ assert.equal(receivingView.qty,4);
+ for(const field of ['unitCost','cost','costPrice'])
+  assert.equal(Object.hasOwn(receivingView,field),false,'receiving projection must hide '+field);
  assert.equal((await f.data('orders/'+f.orderId)).items[0].supplyOrderedQty,4);
  assert.equal((await f.data('procurementDemands/'+encodeURIComponent(f.demandId))).orderedQty,4);
  assert.equal((await f.data('inventory/'+f.productId)).incoming,4);
