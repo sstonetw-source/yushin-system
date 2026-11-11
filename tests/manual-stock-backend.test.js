@@ -111,6 +111,36 @@ test('counts use authoritative warehouse value; zero delta still writes an immut
   if(target===10)assert.equal(f.docs.has('inventoryLots/COUNT_123456789-added'),false);
  }
 });
+test('manual stock and counts reconcile legitimate physical and reserved stock in transit',async()=>{
+ for(const inTransitReserved of [0,2]){
+  const f=fixture();
+  const transit=3,free=transit-inTransitReserved;
+  f.put('inventory/P',{...f.docs.get('inventory/P'),reserved:2+inTransitReserved,
+   transferInTransit:transit,transferFreeInTransit:free});
+  f.put('warehouseStocks/W__P',{...f.docs.get('warehouseStocks/W__P'),onHand:7});
+  f.put('inventoryLots/L',{...f.docs.get('inventoryLots/L'),remainingQty:7});
+  const adjustment={...manual,type:'adjustment',qty:1};delete adjustment.unitCost;
+  await f.run(adjustment);
+  assert.equal(f.docs.get('inventory/P').onHand,11);
+  assert.equal(f.docs.get('warehouseStocks/W__P').onHand,8);
+  assert.equal(f.docs.get('inventory/P').transferInTransit,3);
+  const counted=await f.run({...count,target:8},'INVENTORY_COUNT');
+  assert.equal(counted.delta,0);
+  assert.equal(f.docs.get('inventory/P').reserved,2+inTransitReserved);
+ }
+});
+test('manual stock rejects unbalanced or impossible in-transit projections atomically',async()=>{
+ for(const change of [
+  {transferInTransit:3,transferFreeInTransit:3},
+  {transferInTransit:3,transferFreeInTransit:4},
+  {transferInTransit:-1},
+  {transferInTransit:3,transferFreeInTransit:0}
+ ]){
+  const f=fixture();f.put('inventory/P',{...f.docs.get('inventory/P'),...change});
+  const before=f.snapshot();await assert.rejects(f.run({...count,target:10},'INVENTORY_COUNT'));
+  assert.equal(f.snapshot(),before);assert.equal(f.writeCount(),0);
+ }
+});
 test('zero-delta counts refuse corrupt lot identities and missing balances before issuing a receipt',async()=>{
  for(const mutate of [
   f=>f.put('inventoryLots/L',{...f.docs.get('inventoryLots/L'),warehouseId:'bad/other'}),
