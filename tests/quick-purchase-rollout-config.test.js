@@ -7,7 +7,7 @@ const vm=require('node:vm');
 const root=path.join(__dirname,'..');
 const rollout=fs.readFileSync(path.join(root,'transaction-rollout-config.js'),'utf8');
 const html=fs.readFileSync(path.join(root,'index.html'),'utf8');
-const version='20261110-stock-retirement-4';
+const version='20261112-full-backend-cutover-1';
 
 test('missing production origin leaves all new transaction flags disabled',()=>{
  const context={YUSHIN_PRODUCTION_QUICK_PURCHASE_LEGACY_BLOCKED:true,YUSHIN_PRODUCTION_QUICK_PURCHASE:true,YUSHIN_PREVIEW_QUICK_PURCHASE:true,
@@ -120,15 +120,37 @@ test('all new backend retirement routes are restricted to the approved origin wi
  }
  assert.doesNotMatch(html,/production-maintenance-redirect|maintenance\.html/);
 });
-test('unreleased stock-changing backend routes fail closed on Pages without silently enabling a Callable',()=>{
+test('stock-changing backend routes use only the approved Pages site and keep the retired browser writer blocked',()=>{
  for(const url of ['https://sstonetw-source.github.io/yushin-system/', 'https://evil.example/yushin-system/']){
   const c={location:new URL(url)};c.globalThis=c;vm.runInNewContext(rollout,c);
   const approved=url.startsWith('https://sstonetw-source.github.io/yushin-system');
   for(const name of ['CANCELLED_PURCHASE','SUPPLY_CANCELLATION','MAIN_TRANSFER_REQUEST','MAIN_TRANSFER_DISPATCH',
    'MAIN_TRANSFER_RECEIPT','MAIN_TRANSFER_ALLOCATION','ORDER_TRANSFER_DISPATCH',
    'ORDER_TRANSFER_HANDOFF','ORDER_TRANSFER_RECEIVE','MANUAL_INVENTORY','INVENTORY_COUNT']){
-   assert.equal(c['YUSHIN_PRODUCTION_'+name+'_BACKEND'],false,name);
+   assert.equal(c['YUSHIN_PRODUCTION_'+name+'_BACKEND'],approved,name);
    assert.equal(c['YUSHIN_PRODUCTION_'+name+'_LEGACY_BLOCKED'],approved,name);
   }
+ }
+});
+test('production backend cutover cannot be opted into from another origin or revived from a stale flag',()=>{
+ const lanes=['CANCELLED_PURCHASE','SUPPLY_CANCELLATION','MAIN_TRANSFER_REQUEST','MAIN_TRANSFER_DISPATCH',
+  'MAIN_TRANSFER_RECEIPT','MAIN_TRANSFER_ALLOCATION','ORDER_TRANSFER_DISPATCH',
+  'ORDER_TRANSFER_HANDOFF','ORDER_TRANSFER_RECEIVE','MANUAL_INVENTORY','INVENTORY_COUNT'];
+ for(const [url,enabled] of [
+  ['https://sstonetw-source.github.io/yushin-system/?uat=1',true],
+  ['https://sstonetw-source.github.io/yushin-system/index.html?from=home',true],
+  ['https://sstonetw-source.github.io/yushin-system/',true],
+  ['https://sstonetw-source.github.io/other/?uat=1',false],
+  ['https://evil.example/yushin-system/?uat=1',false]
+ ]){
+  const c={location:new URL(url),YUSHIN_PRODUCTION_SELF_ORDER:true};c.globalThis=c;
+  vm.runInNewContext(rollout,c);
+  assert.equal(c.YUSHIN_PRODUCTION_SELF_ORDER,enabled,'self-order still requires its own server-side role gate');
+  for(const kind of lanes){
+   assert.equal(c['YUSHIN_PRODUCTION_'+kind+'_BACKEND'],enabled,kind+': '+url);
+   assert.equal(c['YUSHIN_PRODUCTION_'+kind+'_LEGACY_BLOCKED'],url.startsWith('https://sstonetw-source.github.io/yushin-system'),kind+' legacy lock');
+  }
+  vm.runInNewContext(rollout,c);
+  assert.equal(c.YUSHIN_PRODUCTION_SELF_ORDER,enabled,'reload may not inherit a stale client gate');
  }
 });

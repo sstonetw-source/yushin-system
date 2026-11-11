@@ -9,13 +9,13 @@ const {customerReturnBackendProject}=require('../functions/customer-return-gate'
 const {customerReturnRequestBackendProject}=require('../functions/customer-return-request-gate');
 const {orderLifecycleBackendProject}=require('../functions/order-lifecycle-preview-gate');
 const {orderTransferProject}=require('../functions/order-transfer-physical-service');
-test('order transfer stays backend-disabled while the production browser writer is retired',()=>{
+test('order transfer enters the production backend without reviving its retired browser writer',()=>{
  const vm=require('node:vm'),fs=require('node:fs');
  const scope={location:{origin:'https://sstonetw-source.github.io',hostname:'sstonetw-source.github.io',pathname:'/yushin-system/'},
   YUSHIN_PRODUCTION_ORDER_TRANSFER_HANDOFF_BACKEND:true,YUSHIN_PRODUCTION_ORDER_TRANSFER_HANDOFF_LEGACY_BLOCKED:true};
  vm.runInNewContext(fs.readFileSync('transaction-rollout-config.js','utf8'),scope);
  for(const action of ['DISPATCH','HANDOFF','RECEIVE']){
-  assert.equal(scope['YUSHIN_PRODUCTION_ORDER_TRANSFER_'+action+'_BACKEND'],false);
+  assert.equal(scope['YUSHIN_PRODUCTION_ORDER_TRANSFER_'+action+'_BACKEND'],true);
   assert.equal(scope['YUSHIN_PRODUCTION_ORDER_TRANSFER_'+action+'_LEGACY_BLOCKED'],true);
   assert.equal(orderTransferProject(action,{GCLOUD_PROJECT:'yu-shing-company'}),'');
  }
@@ -54,6 +54,24 @@ test('production never authorizes a legacy transaction when both rollout flags a
  scope.APP_ENVIRONMENT='emulator';
  for(const kind of kinds)assert.equal(scope.productionTransactionBackendRequired(kind),false);
 });
+test('full cutover is restricted to the approved Pages origin, never a query-string override',()=>{
+ const vm=require('node:vm'),fs=require('node:fs');
+ const rollout=fs.readFileSync('transaction-rollout-config.js','utf8');
+ const bridge=fs.readFileSync('src/infrastructure/production-transaction.js','utf8');
+ const kind='MANUAL_INVENTORY';
+ const scope={APP_ENVIRONMENT:'production',currentUserRole:'sales',currentUser:{uid:'EMPLOYEE'},
+  location:new URL('https://sstonetw-source.github.io/yushin-system/?uat=1')};
+ scope.globalThis=scope;
+ vm.runInNewContext(rollout,scope);vm.runInNewContext(bridge,scope);
+ assert.equal(scope['YUSHIN_PRODUCTION_'+kind+'_BACKEND'],true);
+ assert.equal(scope.productionTransactionBackendEnabled(kind),true,'client route is enabled; the backend enforces actual role');
+ scope.location=new URL('https://sstonetw-source.github.io/yushin-system/');
+ vm.runInNewContext(rollout,scope);
+ assert.equal(scope.productionTransactionBackendEnabled(kind),true,'normal Pages URL is the actual release');
+ scope.location=new URL('https://evil.example/yushin-system/?uat=1');
+ vm.runInNewContext(rollout,scope);
+ assert.equal(scope.productionTransactionBackendEnabled(kind),false,'a different origin cannot enable production operations');
+});
 test('fresh warehouse and sales pages load Functions before any transaction UI executes',()=>{
  const html=require('node:fs').readFileSync('index.html','utf8');
  const sdk=html.indexOf('https://www.gstatic.com/firebasejs/10.8.0/firebase-functions-compat.js');
@@ -84,26 +102,27 @@ for(const [kind,flag,project] of [
 test('unknown production feature cannot borrow an unrelated flag',()=>{
  assert.equal(allowProductionTransaction('RECEIVING',{GCLOUD_PROJECT:'yu-shing-company',ENABLE_PRODUCTION_DISPATCH_BACKEND:'true'}),false);
 });
-test('cancelled supplier purchase rejects old production writes while its backend is default-off',()=>{
+test('cancelled supplier purchase requires its independent production backend',()=>{
  const fs=require('node:fs'),vm=require('node:vm');
  const scope={location:{origin:'https://sstonetw-source.github.io',pathname:'/yushin-system/'},
   YUSHIN_PRODUCTION_CANCELLED_PURCHASE_BACKEND:true,YUSHIN_PRODUCTION_CANCELLED_PURCHASE_LEGACY_BLOCKED:true};
  vm.runInNewContext(fs.readFileSync('transaction-rollout-config.js','utf8'),scope);
- assert.equal(scope.YUSHIN_PRODUCTION_CANCELLED_PURCHASE_BACKEND,false);
+ assert.equal(scope.YUSHIN_PRODUCTION_CANCELLED_PURCHASE_BACKEND,true);
  assert.equal(scope.YUSHIN_PRODUCTION_CANCELLED_PURCHASE_LEGACY_BLOCKED,true);
  assert.equal(allowProductionTransaction('CANCELLED_PURCHASE',{GCLOUD_PROJECT:'yu-shing-company'}),false);
 });
-test('main transfer lanes require a backend while remaining default-off in production',()=>{
+test('main transfer lanes use independent backend flags and cannot revive the old writer',()=>{
  const fs=require('node:fs'),vm=require('node:vm');
  const source=fs.readFileSync('src/infrastructure/production-transaction.js','utf8');
  const kinds=['MAIN_TRANSFER_REQUEST','MAIN_TRANSFER_DISPATCH','MAIN_TRANSFER_RECEIPT','MAIN_TRANSFER_ALLOCATION'];
- const scope={APP_ENVIRONMENT:'production',location:{origin:'https://sstonetw-source.github.io',pathname:'/yushin-system/'}};
+ const scope={APP_ENVIRONMENT:'production',
+  location:{origin:'https://sstonetw-source.github.io',pathname:'/yushin-system/'}};
  for(const kind of kinds){scope['YUSHIN_PRODUCTION_'+kind+'_BACKEND']=true;scope['YUSHIN_PRODUCTION_'+kind+'_LEGACY_BLOCKED']=true;}
  vm.runInNewContext(fs.readFileSync('transaction-rollout-config.js','utf8'),scope);
  vm.runInNewContext(source,scope);
  for(const kind of kinds){
   assert.equal(scope.productionTransactionBackendRequired(kind),true);
-  assert.equal(scope.productionTransactionBackendEnabled(kind),false);
+  assert.equal(scope.productionTransactionBackendEnabled(kind),true);
   assert.equal(allowProductionTransaction(kind,{GCLOUD_PROJECT:'yu-shing-company'}),false);
  }
  for(const kind of kinds){
