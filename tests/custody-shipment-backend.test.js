@@ -5,7 +5,7 @@ const {custodyReturnProject}=require('../functions/custody-return-service');
 const {custodyDeliveryProject}=require('../functions/custody-delivery-service');
 const {custodyLifecycleProject}=require('../functions/custody-lifecycle-service');
 const {commitCustodyDelivery}=require('../functions/custody-delivery-service');
-const {commitShipmentDelivery}=require('../functions/shipment-delivery-service');
+const {commitShipmentDelivery,reverseShipmentDelivery}=require('../functions/shipment-delivery-service');
 const {commitCustodyReturn}=require('../functions/custody-return-service');
 const env={GCLOUD_PROJECT:'demo-yushin',FUNCTIONS_EMULATOR:'true',
  FIRESTORE_EMULATOR_HOST:'127.0.0.1:8080',FIREBASE_AUTH_EMULATOR_HOST:'127.0.0.1:9099',
@@ -394,4 +394,34 @@ test('V3 production shipment delivery and CLOSE return share original lot proven
  for(const [fn,input] of [[commitCustodyShipment,shipping],[commitCustodyDelivery,ack],[commitCustodyReturn,ret]])
   assert.equal((await fn(f.db,'SALES',input,prod)).status,'already-applied');
  assert.deepEqual(f.snapshot(),snapshot,'network-retry may not repeat debit, acknowledgement or restock');
+});
+
+test('V3 production delivery reversal preserves physical shipment and retries with the original operation ID',async()=>{
+ const f=multiFixture();f.db.projectId='yu-shing-company';
+ const prod={GCLOUD_PROJECT:'yu-shing-company',ENABLE_PRODUCTION_DELIVERY_REVERSAL_BACKEND:'true',
+  ENABLE_PRODUCTION_V3_CUSTODY_SHIPMENT_BACKEND:'true',ENABLE_PRODUCTION_V3_CUSTODY_DELIVERY_BACKEND:'true'};
+ const shipment=f.itemInput('J','custody_reversal_ship_001',2);
+ await commitCustodyShipment(f.db,'SALES',shipment,prod);
+ const confirmation={orderId:'ORDER',itemId:'J',shipmentId:shipment.operationId,
+  operationId:'custody_reversal_ack_001',quantity:1,date:'2026-10-30',
+  notes:'signed delivery',syncAttemptId:'sync_123456789'};
+ await commitCustodyDelivery(f.db,'SALES',confirmation,prod);
+ const reversal={orderId:'ORDER',itemId:'J',deliveryRecordId:confirmation.operationId,
+  operationId:'custody_reversal_001',date:'2026-10-31',reason:'signed by the wrong recipient',
+  syncAttemptId:'sync_123456789'};
+ const before=f.snapshot();
+ await assert.rejects(reverseShipmentDelivery(f.db,'SALES',reversal,
+  {...prod,ENABLE_PRODUCTION_V3_CUSTODY_DELIVERY_BACKEND:'false'}),/V3 保管送達尚未/);
+ await assert.rejects(reverseShipmentDelivery(f.db,'OTHER',reversal,prod));
+ assert.deepEqual(f.snapshot(),before);
+ const stockPaths=['inventory/Q','warehouseStocks/custody-SALES__Q','inventoryReservations/ORDER__J',
+  'inventoryLots/HANDOFF-J-0','inventoryLotCosts/HANDOFF-J-0','inventoryMovements/location-ship-'+shipment.operationId];
+ const stock=stockPaths.map(path=>structuredClone(f.read(path)));
+ assert.equal((await reverseShipmentDelivery(f.db,'SALES',reversal,prod)).status,'applied');
+ assert.deepEqual(stockPaths.map(path=>f.read(path)),stock);
+ assert.equal(f.read('orders/ORDER').deliveredQty,0);
+ assert.equal(f.read('orders/ORDER').items[1].warehouseShippedQty,2);
+ const after=f.snapshot();
+ assert.equal((await reverseShipmentDelivery(f.db,'SALES',reversal,prod)).status,'already-applied');
+ assert.deepEqual(f.snapshot(),after);
 });
