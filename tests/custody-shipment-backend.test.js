@@ -1,6 +1,9 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
 const {custodyShipmentProject,commitCustodyShipment}=require('../functions/custody-shipment-service');
+const {custodyReturnProject}=require('../functions/custody-return-service');
+const {custodyDeliveryProject}=require('../functions/custody-delivery-service');
+const {custodyLifecycleProject}=require('../functions/custody-lifecycle-service');
 const {commitCustodyDelivery}=require('../functions/custody-delivery-service');
 const {commitShipmentDelivery}=require('../functions/shipment-delivery-service');
 const {commitCustodyReturn}=require('../functions/custody-return-service');
@@ -344,4 +347,51 @@ test('V3 Custody multi-line return rejects a forged sibling reservation and REPL
  const forged=f.snapshot();
  await assert.rejects(commitCustodyReturn(f.db,'SALES',ret,returnEnv));
  assert.deepEqual(f.snapshot(),forged);
+});
+
+test('V3 production gates reject partial activation and mismatched project without database writes',async()=>{
+ const flags=['LIFECYCLE','SHIPMENT','DELIVERY','RETURN'];
+ const projects={LIFECYCLE:custodyLifecycleProject,SHIPMENT:custodyShipmentProject,
+  DELIVERY:custodyDeliveryProject,RETURN:custodyReturnProject};
+ const env={GCLOUD_PROJECT:'yu-shing-company'};
+ for(const kind of flags){
+  const gate=projects[kind],key='ENABLE_PRODUCTION_V3_CUSTODY_'+kind+'_BACKEND';
+  assert.equal(gate(env),'',kind+' default closed');
+  assert.equal(gate({...env,[key]:'true'}),'yu-shing-company',kind+' individually approved');
+  for(const patch of [{GCLOUD_PROJECT:'demo-yushin'},{GCP_PROJECT:'other'},
+   {FUNCTIONS_EMULATOR:'true'},{FIRESTORE_EMULATOR_HOST:'localhost:8080'},
+   {[key]:'false'}])assert.equal(gate({...env,[key]:'true',...patch}),'',kind+' mismatch');
+ }
+ const f=fixture();f.db.projectId='yu-shing-company';
+ const before=f.snapshot();
+ await assert.rejects(commitCustodyShipment(f.db,'SALES',f.input('custody_prod_denied_001'),env));
+ assert.deepEqual(f.snapshot(),before,'no V3 production stock write until approval');
+});
+test('V3 production shipment delivery and CLOSE return share original lot provenance and stable IDs',async()=>{
+ const f=multiFixture();f.db.projectId='yu-shing-company';
+ const prod={GCLOUD_PROJECT:'yu-shing-company',
+  ENABLE_PRODUCTION_V3_CUSTODY_SHIPMENT_BACKEND:'true',
+  ENABLE_PRODUCTION_V3_CUSTODY_DELIVERY_BACKEND:'true',
+  ENABLE_PRODUCTION_V3_CUSTODY_RETURN_BACKEND:'true'};
+ const shipping=f.itemInput('J','custody_prod_ship_12345',2);
+ assert.equal((await commitCustodyShipment(f.db,'SALES',shipping,prod)).status,'applied');
+ assert.equal(f.read('orders/ORDER').deliveredQty,0,'physical shipment is not customer delivery');
+ const ack={orderId:'ORDER',itemId:'J',shipmentId:shipping.operationId,
+  operationId:'custody_prod_ack_123456',quantity:1,date:'2026-10-30',
+  notes:'signed delivery',syncAttemptId:'sync_123456789'};
+ assert.equal((await commitCustodyDelivery(f.db,'SALES',ack,prod)).status,'applied');
+ const ret={orderId:'ORDER',itemId:'J',shipmentId:shipping.operationId,
+  operationId:'custody_prod_return_123456',warehouseId:'custody-SALES',
+  date:'2026-10-30',reason:'customer return',condition:'RESTOCKABLE',
+  settlement:'CLOSE',syncAttemptId:'sync_123456789',
+  selections:[{lotId:'HANDOFF-J-0',qty:1}]};
+ assert.equal((await commitCustodyReturn(f.db,'SALES',ret,prod)).status,'applied');
+ assert.equal(f.read('inventory/Q').onHand,2,'2 shipped then 1 returned from initial 3');
+ assert.equal(f.read('warehouseStocks/custody-SALES__Q').onHand,1);
+ assert.equal(f.read('orders/ORDER').returnRecords.length,1);
+ assert.equal(f.read('inventoryLotCosts/HANDOFF-J-0').unitCost,390);
+ const snapshot=f.snapshot();
+ for(const [fn,input] of [[commitCustodyShipment,shipping],[commitCustodyDelivery,ack],[commitCustodyReturn,ret]])
+  assert.equal((await fn(f.db,'SALES',input,prod)).status,'already-applied');
+ assert.deepEqual(f.snapshot(),snapshot,'network-retry may not repeat debit, acknowledgement or restock');
 });

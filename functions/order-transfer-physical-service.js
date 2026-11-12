@@ -66,7 +66,9 @@ async function commitOrderTransferPhysical(db,uid,data,action,env=process.env){
   // A new production HANDOFF would move goods into owner Custody (schema v3),
   // but V3 shipment, delivery and return Callables are still demo-only.
   // Preserve existing operation-ID replay above; never strand a new live order.
-  if(!t&&handoff&&project==='yu-shing-company')
+  if(!t&&handoff&&project==='yu-shing-company'&&
+    !['V3_CUSTODY_LIFECYCLE','V3_CUSTODY_SHIPMENT','V3_CUSTODY_DELIVERY','V3_CUSTODY_RETURN']
+      .every(kind=>allowProductionTransaction(kind,env)))
     fail('業務保管後續出貨、送達與退貨尚未正式開通，已停止建立新的業務交接；請先使用可完成履約的倉庫出貨流程。');
   const orderId=dispatching?intent.orderId:id(t.orderId),itemId=dispatching?intent.itemId:id(t.itemId);
   const orderRef=ref('orders',orderId),orderSnap=await tx.get(orderRef),order=orderSnap.exists?orderSnap.data():null;

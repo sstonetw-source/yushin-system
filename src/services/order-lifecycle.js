@@ -16,6 +16,20 @@ function assertNoPendingV2LifecycleBeforeLegacyWrite(orderId){
 async function setOrderLifecycleStatus(orderId,nextStatus,details=null) {
     if(globalThis.YUSHIN_V3_CUSTODY_LIFECYCLE_EMULATOR===true)
         return setV3CustodyOrderLifecycleEmulator(orderId,nextStatus,details);
+    // If this order has a real V3 custody source, do not accidentally send
+    // cancellation/restoration to V2 (which does not own schema-v3 holds).
+    const custodyProd=typeof productionTransactionBackendEnabled==='function'
+        &&productionTransactionBackendEnabled('V3_CUSTODY_LIFECYCLE');
+    if(custodyProd){
+        const candidate=typeof ordersCache!=='undefined'
+            ? ordersCache.find(row=>row.id===orderId):null;
+        const saved=candidate||((await db.collection('orders').doc(orderId).get({source:'server'})).data()||null);
+        if(saved?.items?.some(row=>row?.custodyTransferId||String(row?.warehouseId||'').startsWith('custody-'))){
+            if(!saved.items.every(row=>row?.custodyTransferId&&row.warehouseId==='custody-'+saved.ownerUid))
+                throw Error('保管訂單含不支援的混合來源，已拒絕取消／恢復，請先核對。');
+            return setV3CustodyOrderLifecycleEmulator(orderId,nextStatus,details);
+        }
+    }
     if(lifecycleProtectedMode())return setV2OrderLifecycleEmulator(orderId,nextStatus,details);
     assertNoPendingV2LifecycleBeforeLegacyWrite(orderId);
     if(!['normal','cancelled'].includes(nextStatus))throw new Error('不支援的訂單狀態。');
@@ -189,19 +203,23 @@ function pendingV3CustodyLifecycle(orderId){
 async function setV3CustodyOrderLifecycleEmulator(orderId,nextStatus,details=null){
  const local=host=>host==='localhost'||host==='127.0.0.1';
  const host=String(globalThis.location?.hostname||'').toLowerCase();
- if(globalThis.YUSHIN_V3_CUSTODY_LIFECYCLE_EMULATOR!==true||!local(host)
-  ||typeof firebase==='undefined'||!firebase.auth||!firebase.functions||!firebase.app)
-  throw Error('V3 保管取消／恢復僅開放隔離 Emulator，禁止切回舊交易。');
- const auth=firebase.auth(),app=firebase.app(),functions=app.functions('asia-east1');
- if(auth.app?.options?.projectId!=='demo-yushin'||app.options?.projectId!=='demo-yushin'
-  ||functions.app?.options?.projectId!=='demo-yushin'||db?.app?.options?.projectId!=='demo-yushin'
-  ||!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099)
-  throw Error('V3 保管訂單 Auth、Functions、Firestore 專案或 Emulator 不一致。');
+ const production=typeof productionTransactionBackendEnabled==='function'
+   &&productionTransactionBackendEnabled('V3_CUSTODY_LIFECYCLE');
+ const emulator=globalThis.YUSHIN_V3_CUSTODY_LIFECYCLE_EMULATOR===true&&local(host);
+ if((!production&&!emulator)||typeof firebase==='undefined'||!firebase.auth||!firebase.functions||!firebase.app)
+   throw Error('V3 保管取消／恢復僅開放隔離 Emulator 或已核准的正式後端，禁止切回舊交易。');
+ const auth=firebase.auth(),app=firebase.app(),functions=app.functions('asia-east1'),project=production?'yu-shing-company':'demo-yushin';
+ if(auth.app?.options?.projectId!==project||app.options?.projectId!==project
+   ||functions.app?.options?.projectId!==project||db?.app?.options?.projectId!==project
+   ||(emulator?(!local(auth.emulatorConfig?.host)||auth.emulatorConfig?.port!==9099):!!auth.emulatorConfig))
+   throw Error('V3 保管訂單 Auth、Functions、Firestore 專案或 Emulator 不一致。');
  const uid=currentUser?.uid,role=currentUserRole;
  const check=()=>{
-  if(!uid||auth.currentUser?.uid!==uid||currentUser?.uid!==uid||currentUserRole!==role
-   ||!['admin','sales','engineer'].includes(role)||!canManageOrderLifecycleCapability()||!canEditPage('orders.list'))
-   throw Error('登入身分或 V3 保管取消／恢復權限已改變。');
+   if(production&&!productionTransactionBackendEnabled('V3_CUSTODY_LIFECYCLE'))
+     throw Error('V3 保管後端已停用，請保留原操作 ID 核對。');
+   if(!uid||auth.currentUser?.uid!==uid||currentUser?.uid!==uid||currentUserRole!==role
+    ||!['admin','sales','engineer'].includes(role)||!canManageOrderLifecycleCapability()||!canEditPage('orders.list'))
+    throw Error('登入身分或 V3 保管取消／恢復權限已改變。');
  };
  check();
  const key='v3-custody-lifecycle:'+encodeURIComponent(uid)+':'+encodeURIComponent(orderId);
@@ -240,7 +258,7 @@ async function setV3CustodyOrderLifecycleEmulator(orderId,nextStatus,details=nul
    syncAttemptId:order.inventoryReservationAttemptId,actorUid:uid,actorRole:role};
   sessionStorage.setItem(key,JSON.stringify(frozen));
  }
- check();functions.useEmulator('127.0.0.1',5001);
+ check();if(emulator)functions.useEmulator('127.0.0.1',5001);
  const {actorUid,actorRole,...payload}=frozen;
  const response=await functions.httpsCallable('setV3CustodyOrderLifecycle')(payload);check();
  const result=response?.data;

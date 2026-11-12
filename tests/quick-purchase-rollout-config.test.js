@@ -86,7 +86,8 @@ test('approved production transaction activation is restricted to the exact HTTP
 
 test('B-approved production backend gates are enabled while Preview and Emulator stay disabled',()=>{
  const lines=fs.readFileSync(path.join(root,'functions/.env.yu-shing-company'),'utf8').trim().split('\n');
- const flags=Object.fromEntries(lines.map(line=>line.split('=')));
+ const flags=Object.fromEntries(lines.filter(line=>line&&!line.startsWith('#')).map(line=>line.split('=')));
+ const stagedCustody=new Set(['LIFECYCLE','SHIPMENT','DELIVERY','RETURN'].map(kind=>'ENABLE_PRODUCTION_V3_CUSTODY_'+kind+'_BACKEND'));
  const approvedBackendOnly=new Set([
   'ENABLE_PRODUCTION_CANCELLED_PURCHASE_BACKEND',
   'ENABLE_PRODUCTION_SUPPLY_CANCELLATION_BACKEND',
@@ -100,7 +101,8 @@ test('B-approved production backend gates are enabled while Preview and Emulator
  ]);
  assert.ok(Object.keys(flags).length>=12);
  for(const [key,value] of Object.entries(flags))assert.equal(value,
-  key==='ENABLE_ORDER_RESERVATION_BACKEND'||key.startsWith('ENABLE_PRODUCTION_')?'true':'false',key);
+  stagedCustody.has(key)?'false':key==='ENABLE_ORDER_RESERVATION_BACKEND'||key.startsWith('ENABLE_PRODUCTION_')?'true':'false',key);
+ for(const key of stagedCustody)assert.equal(flags[key],'false',key+' must remain disabled before B authorization');
  assert.equal(flags.ENABLE_PRODUCTION_ORDER_RESERVATION_BACKEND,'true');
  assert.equal(flags.ENABLE_PRODUCTION_FORMAL_PURCHASE,'true');
  assert.equal(flags.ENABLE_PRODUCTION_QUICK_PURCHASE,'true');

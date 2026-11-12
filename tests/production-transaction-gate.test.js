@@ -44,7 +44,8 @@ test('production never authorizes a legacy transaction when both rollout flags a
  const kinds=['DISPATCH','SHIPMENT','ORDER_LIFECYCLE','DELIVERY_CONFIRMATION','DELIVERY_REVERSAL',
   'CUSTOMER_RETURN','CUSTOMER_RETURN_REQUEST','CANCELLED_PURCHASE','ORDER_TRANSFER_DISPATCH',
   'ORDER_TRANSFER_HANDOFF','ORDER_TRANSFER_RECEIVE','MAIN_TRANSFER_REQUEST','MAIN_TRANSFER_DISPATCH',
-  'MAIN_TRANSFER_RECEIPT','MAIN_TRANSFER_ALLOCATION','MANUAL_INVENTORY','INVENTORY_COUNT'];
+  'MAIN_TRANSFER_RECEIPT','MAIN_TRANSFER_ALLOCATION','MANUAL_INVENTORY','INVENTORY_COUNT',
+   'V3_CUSTODY_LIFECYCLE','V3_CUSTODY_SHIPMENT','V3_CUSTODY_DELIVERY','V3_CUSTODY_RETURN'];
  const scope={APP_ENVIRONMENT:'production',location:{origin:'https://sstonetw-source.github.io',pathname:'/yushin-system/'}};
  vm.runInNewContext(source,scope);
  for(const kind of kinds){
@@ -138,5 +139,26 @@ test('main transfer lanes use independent backend flags and cannot revive the ol
   scope['YUSHIN_PRODUCTION_'+kind+'_BACKEND']=false;
   assert.equal(scope.productionTransactionBackendRequired(kind),true);
   assert.equal(scope.productionTransactionBackendEnabled(kind),false);
+ }
+});
+
+test('new production custody client entry stays disabled until a separate full-chain activation',()=>{
+ const vm=require('node:vm'),fs=require('node:fs');
+ const rollout=fs.readFileSync('transaction-rollout-config.js','utf8');
+ const bridge=fs.readFileSync('src/infrastructure/production-transaction.js','utf8');
+ const context={APP_ENVIRONMENT:'production',location:{
+  origin:'https://sstonetw-source.github.io',pathname:'/yushin-system/'}};
+ context.globalThis=context;vm.runInNewContext(rollout,context);vm.runInNewContext(bridge,context);
+ for(const kind of ['V3_CUSTODY_LIFECYCLE','V3_CUSTODY_SHIPMENT','V3_CUSTODY_DELIVERY','V3_CUSTODY_RETURN']){
+  assert.equal(context['YUSHIN_PRODUCTION_'+kind+'_BACKEND'],false,kind+' front end is not approved');
+  assert.equal(context['YUSHIN_PRODUCTION_'+kind+'_LEGACY_BLOCKED'],true,kind+' cannot restore old SDK writer');
+  assert.equal(context.productionTransactionBackendRequired(kind),true);
+  assert.equal(context.productionTransactionBackendEnabled(kind),false);
+  context['YUSHIN_PRODUCTION_'+kind+'_BACKEND']=true;
+  assert.equal(context.productionTransactionBackendEnabled(kind),true,'requires both flags and exact origin');
+  context.location={origin:'https://example.invalid',pathname:'/yushin-system/'};
+  assert.equal(context.productionTransactionBackendEnabled(kind),false,'not allowed on another host');
+  context.location={origin:'https://sstonetw-source.github.io',pathname:'/yushin-system/'};
+  context['YUSHIN_PRODUCTION_'+kind+'_BACKEND']=false;
  }
 });

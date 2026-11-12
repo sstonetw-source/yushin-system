@@ -3,6 +3,7 @@
 // Reuses the existing delivery confirmation writer: only commercial progress
 // changes. It cannot debit, restore or transfer stock, lots or cost amounts.
 const {projectIdFromEnvironment}=require('./grouped-reservation-gate');
+const {allowProductionTransaction}=require('./production-transaction-gate');
 const {commitShipmentDelivery}=require('./shipment-delivery-service');
 const reservationCore=require('./shared/reservation-core');
 const fulfillmentCore=require('./shared/fulfillment-core');
@@ -13,6 +14,7 @@ function id(value,label){
  return value;
 }
 function custodyDeliveryProject(env=process.env){
+ if(allowProductionTransaction('V3_CUSTODY_DELIVERY',env))return 'yu-shing-company';
  const local=value=>typeof value==='string'&&/^(localhost|127\.0\.0\.1):[0-9]+$/.test(value);
  return projectIdFromEnvironment(env)==='demo-yushin'
   &&env.FUNCTIONS_EMULATOR==='true'&&env.ENABLE_V3_CUSTODY_DELIVERY_EMULATOR==='true'
@@ -88,7 +90,8 @@ async function readCustodyDeliveryProofs(tx,db,order,context,intent){
  }
 }
 async function commitCustodyDelivery(db,uid,data,env=process.env){
- if(!custodyDeliveryProject(env)||db.projectId!=='demo-yushin')
+ const project=custodyDeliveryProject(env);
+ if(!project||db.projectId!==project)
   fail('V3 保管送達確認尚未在此專案啟用');
  return commitShipmentDelivery(db,uid,data,env,{allowCustody:true});
 }

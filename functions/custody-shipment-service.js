@@ -4,6 +4,7 @@
 // proves the original physical HANDOFF and limits the lots to that handoff.
 // No customer acknowledgement, return, or cost amount is written here.
 const {projectIdFromEnvironment}=require('./grouped-reservation-gate');
+const {allowProductionTransaction}=require('./production-transaction-gate');
 const {normalizeShipmentIntent}=require('./location-shipment-service');
 const reservationCore=require('./shared/reservation-core');
 const inventoryCore=require('./shared/inventory-core');
@@ -21,6 +22,7 @@ function qty(value,label){
  return value;
 }
 function custodyShipmentProject(env=process.env){
+ if(allowProductionTransaction('V3_CUSTODY_SHIPMENT',env))return 'yu-shing-company';
  const local=value=>typeof value==='string'&&/^(localhost|127\.0\.0\.1):[0-9]+$/.test(value);
  return projectIdFromEnvironment(env)==='demo-yushin'
   &&env.FUNCTIONS_EMULATOR==='true'&&env.ENABLE_V3_CUSTODY_SHIPMENT_EMULATOR==='true'
@@ -28,7 +30,8 @@ function custodyShipmentProject(env=process.env){
 }
 
 async function commitCustodyShipment(db,uid,data,env=process.env){
- if(!custodyShipmentProject(env)||db.projectId!=='demo-yushin')
+ const project=custodyShipmentProject(env);
+ if(!project||db.projectId!==project)
   fail('V3 保管實際出貨尚未在此專案啟用');
  id(uid,'登入者');
  const intent=normalizeShipmentIntent(data);

@@ -3,16 +3,19 @@
 // to the single existing trusted location-return writer. It refuses unrelated
 // receipt requests and closes returns without auto-allocating owner's stock.
 const {projectIdFromEnvironment}=require('./grouped-reservation-gate');
+const {allowProductionTransaction}=require('./production-transaction-gate');
 const {commitLocationReturn}=require('./location-return-service');
 function fail(message,code='failed-precondition'){throw Object.assign(Error(message),{code});}
 function custodyReturnProject(env=process.env){
+ if(allowProductionTransaction('V3_CUSTODY_RETURN',env))return 'yu-shing-company';
  const local=value=>typeof value==='string'&&/^(localhost|127\.0\.0\.1):[0-9]+$/.test(value);
  return projectIdFromEnvironment(env)==='demo-yushin'
   &&env.FUNCTIONS_EMULATOR==='true'&&env.ENABLE_V3_CUSTODY_RETURN_EMULATOR==='true'
   &&local(env.FIRESTORE_EMULATOR_HOST)&&local(env.FIREBASE_AUTH_EMULATOR_HOST)?'demo-yushin':'';
 }
 async function commitCustodyReturn(db,uid,data,env=process.env){
- if(!custodyReturnProject(env)||db.projectId!=='demo-yushin')
+ const project=custodyReturnProject(env);
+ if(!project||db.projectId!==project)
   fail('V3 保管退貨尚未在此專案啟用');
  return commitLocationReturn(db,uid,data,env,{allowCustody:true});
 }
