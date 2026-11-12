@@ -14534,6 +14534,14 @@ async function requestQuickPurchaseDetails(orderId, itemId) {
     ]);
     if (generation !== quickPurchaseConfirmationGeneration) return null;
     const existing = supplySnap.exists ? supplySnap.data() : null;
+    let supplierName = [existing?.supplier, item.supplier, order.supplier]
+        .map(name => String(name || '').trim()).find(Boolean) || '';
+    if (!supplierName) {
+        await loadSupplierWarehouseMasters();
+        if (generation !== quickPurchaseConfirmationGeneration) return null;
+        const supplier = supplierForProduct(item.brand || item.manufacturer || order.brand, item.productLine || order.productLine);
+        supplierName = supplier?.purchaseHeaderName || supplier?.supplierName || '';
+    }
     const cost = existing?.unitCost ?? (costSnap?.exists ? costSnap.data().standardCost : null);
     let overlay = document.getElementById('quickPurchaseConfirmationOverlay');
     if (!overlay) {
@@ -14554,7 +14562,7 @@ async function requestQuickPurchaseDetails(orderId, itemId) {
         document.body.appendChild(overlay);
     }
     document.getElementById('quickPurchaseSummary').textContent = `${item.itemCode || ''} ${item.itemName || ''}`;
-    document.getElementById('quickPurchaseSupplier').value = existing?.supplier || item.supplier || order.supplier || '';
+    document.getElementById('quickPurchaseSupplier').value = supplierName;
     document.getElementById('quickPurchaseQty').value = qty;
     document.getElementById('quickPurchaseCost').value = cost !== null && cost !== undefined && cost !== '' && Number.isFinite(Number(cost)) && Number(cost) >= 0 ? cost : '';
     document.getElementById('quickPurchaseHint').textContent = existing
