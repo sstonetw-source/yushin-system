@@ -396,6 +396,29 @@ test('V3 production shipment delivery and CLOSE return share original lot proven
  assert.deepEqual(f.snapshot(),snapshot,'network-retry may not repeat debit, acknowledgement or restock');
 });
 
+test('V3 can ship the second item after the customer has acknowledged the first',async()=>{
+ const f=multiFixture(),deliveryEnv={...env,ENABLE_V3_CUSTODY_DELIVERY_EMULATOR:'true'};
+ const first=f.itemInput('J','custody_interleaved_j_ship',2);
+ await commitCustodyShipment(f.db,'SALES',first,env);
+ await commitCustodyDelivery(f.db,'SALES',{orderId:'ORDER',itemId:'J',shipmentId:first.operationId,
+  operationId:'custody_interleaved_j_ack',quantity:2,date:'2026-10-30',notes:'signed',
+  syncAttemptId:'sync_123456789'},deliveryEnv);
+ const before=f.read('orders/ORDER');
+ const second=f.itemInput('I','custody_interleaved_i_ship',3);
+ const invalid=structuredClone(before);
+ invalid.deliveryRecords[0].intentHash='invalid';
+ f.put('orders/ORDER',invalid);
+ const corrupted=f.snapshot();
+ await assert.rejects(commitCustodyShipment(f.db,'SALES',second,env),/送達憑證不一致/);
+ assert.deepEqual(f.snapshot(),corrupted);
+ f.put('orders/ORDER',before);
+ assert.equal((await commitCustodyShipment(f.db,'SALES',second,env)).status,'applied');
+ const order=f.read('orders/ORDER');
+ assert.deepEqual(order.deliveryRecords,before.deliveryRecords);
+ assert.equal(order.deliveredQty,2);
+ assert.deepEqual(order.items.map(row=>row.warehouseShippedQty),[3,2]);
+ assert.equal((await commitCustodyShipment(f.db,'SALES',second,env)).status,'already-applied');
+});
 test('V3 production delivery reversal preserves physical shipment and retries with the original operation ID',async()=>{
  const f=multiFixture();f.db.projectId='yu-shing-company';
  const prod={GCLOUD_PROJECT:'yu-shing-company',ENABLE_PRODUCTION_DELIVERY_REVERSAL_BACKEND:'true',
