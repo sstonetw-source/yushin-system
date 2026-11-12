@@ -5,15 +5,17 @@ async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toW
     const action=handoff?'HANDOFF':'DISPATCH';
     if(typeof pendingOrderTransferOperations!=='function'||typeof commitOrderTransferBackend!=='function')
       throw Error('訂單調回主倉後端未載入，禁止改用舊交易。');
-    if(pendingOrderTransferOperations().some(p=>p.action===action&&p.id===id))
-      return commitOrderTransferBackend(action,id);
-    // Protect newly loaded production browsers before the V3 Custody chain
-    // is activated. Preserve a previously frozen original ID for recovery.
+    // Never retry an unresolved HANDOFF into a production backend that may
+    // predate the server-side Custody safety guard. Keep its exact ID frozen.
+    const pending=pendingOrderTransferOperations().some(p=>p.action===action&&p.id===id);
     if(handoff&&typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='production'
       &&!['V3_CUSTODY_LIFECYCLE','V3_CUSTODY_SHIPMENT','V3_CUSTODY_DELIVERY','V3_CUSTODY_RETURN']
         .every(kind=>typeof productionTransactionBackendEnabled==='function'
           &&productionTransactionBackendEnabled(kind)))
-      throw Error('業務保管出貨、送達與退貨尚未完整開放，已停止新的業務交接；原操作請保留相同 ID 核對。');
+      throw Error(pending
+        ?'前次業務交接結果尚未確認，已保留原操作 ID 並暫停重送；請待可信任後端完成切換後核對。'
+        :'業務保管出貨、送達與退貨尚未完整開放，已停止新的業務交接。');
+    if(pending)return commitOrderTransferBackend(action,id);
     let physicalSource=expectedWarehouseId||fromWarehouseId;
     if(handoff){
       const uid=currentUser?.uid,role=currentUserRole;
