@@ -107,7 +107,7 @@ window.resumeV3CustodyShipment=async function(orderId,itemId){
 function v3CustodyShipmentItems(order){
  const items=order?.items,custody='custody-'+order?.ownerUid;
  if(!Array.isArray(items)||!items.length||items.length>5
-   ||(order.returnRecords||[]).length||(order.deliveryRecords||[]).length)return [];
+   ||(order.returnRecords||[]).length)return [];
  return items.every(item=>item?.custodyTransferId&&item.warehouseId===custody
    &&!item.transferPendingId&&(item.fulfillmentType||'WAREHOUSE')==='WAREHOUSE'
    &&String(item.productType||item.type||'').toUpperCase()!=='SERVICE')?items:[];
