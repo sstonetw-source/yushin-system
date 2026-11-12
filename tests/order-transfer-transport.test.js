@@ -55,3 +55,29 @@ test('production HANDOFF calls only the authorized backend, preserves exact inte
  await assert.rejects(denied.commitOrderTransferBackend('HANDOFF','T',input),/禁止回退舊交易/);
  assert.equal(f.storage.size,0);
 });
+
+test('new production handoff is refused before any read/write while downstream Custody stays disabled',async()=>{
+ const ctx={APP_ENVIRONMENT:'production',currentUser:{uid:'W'},currentUserRole:'warehouse',
+  orderTransferBackendRequired:()=>true,pendingOrderTransferOperations:()=>[],
+  productionTransactionBackendEnabled:kind=>kind==='ORDER_TRANSFER_HANDOFF'};
+ let writes=0,reads=0;
+ ctx.commitOrderTransferBackend=async()=>{writes++;};
+ ctx.db={collection(){reads++;throw Error('unexpected stock read')}};
+ ctx.globalThis=ctx;vm.createContext(ctx);
+ vm.runInContext(fs.readFileSync('src/services/warehouse-transfer.js','utf8'),ctx);
+ await assert.rejects(ctx.commitWarehouseTransfer({id:'T',orderId:'ORDER',itemId:'I',qty:1,handoff:true}),
+  /已停止新的業務交接/);
+ assert.equal(writes,0);
+ assert.equal(reads,0);
+});
+test('pending production handoff retains its original frozen ID for authoritative recovery',async()=>{
+ const calls=[],ctx={APP_ENVIRONMENT:'production',
+  orderTransferBackendRequired:()=>true,
+  pendingOrderTransferOperations:()=>[{action:'HANDOFF',id:'T'}],
+  productionTransactionBackendEnabled:()=>false,
+  commitOrderTransferBackend:async(action,id,payload)=>{calls.push({action,id,payload});return {status:'already-applied'};}};
+ ctx.globalThis=ctx;vm.createContext(ctx);
+ vm.runInContext(fs.readFileSync('src/services/warehouse-transfer.js','utf8'),ctx);
+ assert.equal((await ctx.commitWarehouseTransfer({id:'T',orderId:'ORDER',itemId:'I',qty:1,handoff:true})).status,'already-applied');
+ assert.deepEqual(calls,[{action:'HANDOFF',id:'T',payload:undefined}]);
+});
