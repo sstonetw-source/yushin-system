@@ -396,10 +396,14 @@ test('production v2 custody HANDOFF is opt-in, retains original proof and never 
  const env={GCLOUD_PROJECT:'yu-shing-company',ENABLE_PRODUCTION_ORDER_TRANSFER_HANDOFF_BACKEND:'true'};
  const unretired=f.snapshot();await assert.rejects(commitOrderTransferPhysical(f.db,'U',f.input,'HANDOFF',env),/舊交易入口封鎖/);
  assert.equal(f.snapshot(),unretired);f.docs.set('settings/orderTransferCutover',{backendOnly:true});
- const before=f.snapshot();await assert.rejects(commitOrderTransferPhysical(f.db,'U',f.input,'HANDOFF',env),/獨立啟用/);
+ const before=f.snapshot();await assert.rejects(commitOrderTransferPhysical(f.db,'U',f.input,'HANDOFF',env),/業務保管後續出貨/);
  assert.equal(f.snapshot(),before);
  const enabled={...env,ENABLE_PRODUCTION_ORDER_TRANSFER_V2_BACKEND:'true'};
- f.setRetry(true);assert.equal((await commitOrderTransferPhysical(f.db,'U',f.input,'HANDOFF',enabled)).status,'applied');
+ await assert.rejects(commitOrderTransferPhysical(f.db,'U',f.input,'HANDOFF',enabled),/業務保管後續出貨/);assert.equal(f.snapshot(),before);
+ f.db.projectId='demo-yushin';f.setRetry(true);
+ const isolated={...orderEnv,ENABLE_ORDER_TRANSFER_HANDOFF_EMULATOR:'true',ENABLE_ORDER_TRANSFER_V2_EMULATOR:'true'};
+ assert.equal((await commitOrderTransferPhysical(f.db,'U',f.input,'HANDOFF',isolated)).status,'applied');
+ f.db.projectId='yu-shing-company';
  const committed=f.snapshot();assert.equal((await commitOrderTransferPhysical(f.db,'U',f.input,'HANDOFF',enabled)).status,'already-applied');
  assert.equal(f.snapshot(),committed);
  const custody=f.docs.get('inventoryReservations/ORDER__I');assert.equal(custody.locationSchemaVersion,3);
