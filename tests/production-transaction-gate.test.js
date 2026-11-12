@@ -142,7 +142,7 @@ test('main transfer lanes use independent backend flags and cannot revive the ol
  }
 });
 
-test('new production custody client entry stays disabled until a separate full-chain activation',()=>{
+test('production custody cutover enables all routes and retains the legacy writer block',()=>{
  const vm=require('node:vm'),fs=require('node:fs');
  const rollout=fs.readFileSync('transaction-rollout-config.js','utf8');
  const bridge=fs.readFileSync('src/infrastructure/production-transaction.js','utf8');
@@ -150,15 +150,15 @@ test('new production custody client entry stays disabled until a separate full-c
   origin:'https://sstonetw-source.github.io',pathname:'/yushin-system/'}};
  context.globalThis=context;vm.runInNewContext(rollout,context);vm.runInNewContext(bridge,context);
  for(const kind of ['V3_CUSTODY_LIFECYCLE','V3_CUSTODY_SHIPMENT','V3_CUSTODY_DELIVERY','V3_CUSTODY_RETURN']){
-  assert.equal(context['YUSHIN_PRODUCTION_'+kind+'_BACKEND'],false,kind+' front end is not approved');
+  assert.equal(context['YUSHIN_PRODUCTION_'+kind+'_BACKEND'],true,kind+' production route is enabled');
   assert.equal(context['YUSHIN_PRODUCTION_'+kind+'_LEGACY_BLOCKED'],true,kind+' cannot restore old SDK writer');
   assert.equal(context.productionTransactionBackendRequired(kind),true);
-  assert.equal(context.productionTransactionBackendEnabled(kind),false);
-  context['YUSHIN_PRODUCTION_'+kind+'_BACKEND']=true;
+  context['YUSHIN_PRODUCTION_'+kind+'_LEGACY_BLOCKED']=false;
+  assert.equal(context.productionTransactionBackendEnabled(kind),false,'requires the legacy writer block');
+  context['YUSHIN_PRODUCTION_'+kind+'_LEGACY_BLOCKED']=true;
   assert.equal(context.productionTransactionBackendEnabled(kind),true,'requires both flags and exact origin');
   context.location={origin:'https://example.invalid',pathname:'/yushin-system/'};
   assert.equal(context.productionTransactionBackendEnabled(kind),false,'not allowed on another host');
   context.location={origin:'https://sstonetw-source.github.io',pathname:'/yushin-system/'};
-  context['YUSHIN_PRODUCTION_'+kind+'_BACKEND']=false;
  }
 });
