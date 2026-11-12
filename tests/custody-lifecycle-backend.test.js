@@ -85,6 +85,9 @@ test('strict request normalizes stable item identity but rejects unauthorized fi
 });
 test('whole-order V3 custody cancel, restore and replay preserve company/warehouse source and audit history',async()=>{
  const f=fixture(),cancel=f.input('life_cancel_123456','cancelled');
+ const order=f.read('orders/ORDER');
+ order.items=order.items.map(item=>({...item,dispatchPreparedQty:item.qty}));
+ f.put('orders/ORDER',order);
  const before=f.snapshot(),first=await commitCustodyOrderLifecycle(f.db,'SALES',cancel,env);
  assert.equal(first.status,'applied');assert.equal(f.read('inventory/P').reserved,2);
  assert.equal(f.read('warehouseStocks/custody-SALES__P').reserved,0);
@@ -96,6 +99,7 @@ test('whole-order V3 custody cancel, restore and replay preserve company/warehou
   assert.equal(f.read('inventoryMovements/v3-custody-life-life_cancel_123456-'+itemId).qty,-original);
  }
  assert.equal(f.read('orders/ORDER').orderStatus,'cancelled');
+ assert.deepEqual(f.read('orders/ORDER').items.map(item=>item.dispatchPreparedQty),[1,2]);
  assert.equal((await commitCustodyOrderLifecycle(f.db,'SALES',cancel,env)).status,'already-applied');
  assert.equal(f.commits(),2,'read-only idempotent replay makes no document changes');
  const restore=f.input('life_restore_123456','normal');
@@ -104,6 +108,7 @@ test('whole-order V3 custody cancel, restore and replay preserve company/warehou
  assert.equal(f.read('warehouseStocks/custody-SALES__P').reserved,3);
  assert.equal(f.read('orders/ORDER').orderLifecycleHistory.length,2);
  assert.equal(f.read('orders/ORDER').orderStatus,'normal');
+ assert.deepEqual(f.read('orders/ORDER').items.map(item=>item.dispatchPreparedQty),[1,2]);
  assert.deepEqual(f.read('stockTransfers/T1'),before['stockTransfers/T1']);
  assert.deepEqual(f.read('stockTransfers/T2'),before['stockTransfers/T2']);
  assert.equal((await commitCustodyOrderLifecycle(f.db,'SALES',cancel,env)).status,'already-applied');

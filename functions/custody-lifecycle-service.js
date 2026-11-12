@@ -111,7 +111,7 @@ async function commitCustodyOrderLifecycle(db,uid,data,env=process.env){
     ||(item.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'
     ||String(item.productType||item.type||'').toUpperCase()==='SERVICE'
     ||item.warehouseId!==custodyId||!item.custodyTransferId||item.transferPendingId
-    ||qty(item.dispatchPreparedQty??0,'打單量')!==0
+    ||qty(item.dispatchPreparedQty??0,'打單量')>requested
     ||qty(item.warehouseShippedQty??0,'出貨量')!==0
     ||qty(item.deliveredQty??0,'送達量')!==0
     ||qty(item.returnedQty??0,'退貨量')!==0
