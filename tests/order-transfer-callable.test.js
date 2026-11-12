@@ -1,6 +1,6 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
-const {orderTransferProject,orderTransferIntent,createOrderTransferPhysicalCallables}=require('../functions/order-transfer-physical-service');
+const {orderTransferProject,orderTransferIntent,commitOrderTransferPhysical,createOrderTransferPhysicalCallables}=require('../functions/order-transfer-physical-service');
 const env={GCLOUD_PROJECT:'demo-yushin',FUNCTIONS_EMULATOR:'true',FIRESTORE_EMULATOR_HOST:'localhost:8080',FIREBASE_AUTH_EMULATOR_HOST:'localhost:9099',ENABLE_ORDER_TRANSFER_DISPATCH_EMULATOR:'true'};
 test('order transfer physical gates stay independent; production requires exact action/project and no Emulator',()=>{
  assert.equal(orderTransferProject('DISPATCH',env),'demo-yushin');assert.equal(orderTransferProject('RECEIVE',env),'');
@@ -28,4 +28,28 @@ test('unauthenticated and disabled callable fail before database access',async()
  let reads=0;const handlers=createOrderTransferPhysicalCallables({onCall:(_,fn)=>fn,HttpsError,env,getDatabase:()=>{reads++;return {};}});
  await assert.rejects(handlers.dispatchOrderTransfer({data:{}}),e=>e.code==='unauthenticated');
  await assert.rejects(handlers.receiveOrderTransfer({auth:{uid:'U'},data:{}}),e=>e.code==='failed-precondition');assert.equal(reads,0);
+});
+
+test('production denies new custody handoff before creating stock transfer while keeping regular transfer flags intact',async()=>{
+ const prod={GCLOUD_PROJECT:'yu-shing-company',ENABLE_PRODUCTION_ORDER_TRANSFER_HANDOFF_BACKEND:'true'};
+ const reads=[];let writes=0;
+ const db={projectId:'yu-shing-company',collection:name=>({doc:id=>({path:name+'/'+id})}),
+  runTransaction:async run=>run({
+   async get(ref){
+    reads.push(ref.path);
+    if(ref.path==='users/WAREHOUSE')return {exists:true,data:()=>({role:'warehouse',active:true})};
+    if(ref.path==='settings/orderTransferCutover')return {exists:true,data:()=>({backendOnly:true})};
+    return {exists:false};
+   },
+   create(){writes++;},update(){writes++;},set(){writes++;}
+  })};
+ const input={id:'custody_safe_guard_0001',orderId:'ORDER',itemId:'ITEM',
+  fromWarehouseId:'BRANCH',toWarehouseId:'custody-OWNER',qty:1};
+ await assert.rejects(commitOrderTransferPhysical(db,'WAREHOUSE',input,'HANDOFF',prod),
+  /業務保管後續出貨、送達與退貨尚未正式開通/);
+ assert.equal(writes,0,'denied handoff must never write a movement or reservation');
+ assert.ok(reads.includes('settings/orderTransferCutover'),'production cutover remains mandatory');
+ assert.ok(!reads.includes('orders/ORDER'),'reject before any order or inventory mutation');
+ assert.equal(orderTransferProject('DISPATCH',{...prod,ENABLE_PRODUCTION_ORDER_TRANSFER_DISPATCH_BACKEND:'true'}),
+  'yu-shing-company','ordinary order warehouse transfers remain independently enabled');
 });
