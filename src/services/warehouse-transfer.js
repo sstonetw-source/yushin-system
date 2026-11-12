@@ -7,6 +7,13 @@ async function commitWarehouseTransfer({id,inventoryId='',fromWarehouseId='',toW
       throw Error('訂單調回主倉後端未載入，禁止改用舊交易。');
     if(pendingOrderTransferOperations().some(p=>p.action===action&&p.id===id))
       return commitOrderTransferBackend(action,id);
+    // Protect newly loaded production browsers before the V3 Custody chain
+    // is activated. Preserve a previously frozen original ID for recovery.
+    if(handoff&&typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='production'
+      &&!['V3_CUSTODY_LIFECYCLE','V3_CUSTODY_SHIPMENT','V3_CUSTODY_DELIVERY','V3_CUSTODY_RETURN']
+        .every(kind=>typeof productionTransactionBackendEnabled==='function'
+          &&productionTransactionBackendEnabled(kind)))
+      throw Error('業務保管出貨、送達與退貨尚未完整開放，已停止新的業務交接；原操作請保留相同 ID 核對。');
     let physicalSource=expectedWarehouseId||fromWarehouseId;
     if(handoff){
       const uid=currentUser?.uid,role=currentUserRole;
