@@ -22421,7 +22421,7 @@ function v3CustodyShipmentTransport(){
    &&local(globalThis.location?.hostname);
  if((!production&&!emulator)||typeof firebase==='undefined'
    ||!firebase.auth||!firebase.functions||typeof db==='undefined')
-   throw Error('V3 保管實際出貨後端尚未正式啟用，不可改用舊前端庫存交易。');
+   throw Error('V3 保管實際出貨後端尚未正式啟用，禁止改用舊交易。');
  const auth=firebase.auth(),functions=firebase.app().functions('asia-east1'),project=production?'yu-shing-company':'demo-yushin';
  if(firebase.app().options?.projectId!==project
    ||auth.app?.options?.projectId!==project
