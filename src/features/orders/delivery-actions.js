@@ -319,7 +319,9 @@ window.saveDeliveryRecord = async function() {
     try {
         const deliveryOrder=ordersCache.find(row=>row.id===orderId);
         const custodyItems=deliveryOrder?.items||[];
-        const custodyV3=globalThis.YUSHIN_V3_CUSTODY_DELIVERY_EMULATOR===true
+        const custodyV3=(globalThis.YUSHIN_V3_CUSTODY_DELIVERY_EMULATOR===true
+            ||(typeof productionTransactionBackendEnabled==='function'
+             &&productionTransactionBackendEnabled('V3_CUSTODY_DELIVERY')))
             &&custodyItems.length>0&&custodyItems.length<=5
             &&custodyItems.every(row=>row.custodyTransferId
                 &&row.warehouseId==='custody-'+deliveryOrder.ownerUid);
