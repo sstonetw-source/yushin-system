@@ -149,7 +149,7 @@ async function commitShipmentDelivery(db,uid,data,env=process.env,options={}){
  const custodyV3=options.allowCustody===true;
  if(custodyV3){
   const {custodyDeliveryProject}=require('./custody-delivery-service');
-  if(!custodyDeliveryProject(env)||db.projectId!=='demo-yushin')
+  if(!custodyDeliveryProject(env)||db.projectId!==custodyDeliveryProject(env))
    fault('V3 保管送達確認尚未在此專案啟用');
  }
  const project=deliveryConfirmationBackendProject(env);
