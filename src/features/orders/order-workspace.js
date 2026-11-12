@@ -1344,13 +1344,15 @@ window.renderOrdersList = function() {
                     ${serviceOrderActionButtons(o,orderItems,lifecycle)}
                     ${selfOrderActionHtml(o, allOrderItems, dispatchStateByItem)}
                     ${directShipReceiptActionHtml(o, allOrderItems)}
-                    ${globalThis.YUSHIN_V3_CUSTODY_SHIPMENT_EMULATOR===true
+                    ${(globalThis.YUSHIN_V3_CUSTODY_SHIPMENT_EMULATOR===true
+                      ||(typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled('V3_CUSTODY_SHIPMENT')))
                         && lifecycle.status==='normal'&&canManageOrderLifecycleCapability()&&canEditPage('orders.list')
                         && (currentUserRole==='admin'||o.ownerUid===currentUser?.uid)
                         && v3CustodyShipmentItems(o).length===allOrderItems.length
                         && allOrderItems.length>0
                         ? `<button type="button" class="btn-small" onclick="openV3CustodyShipment(${inlineJsValue(o.id)})">業務保管出貨／核對</button>`:''}
-                    ${globalThis.YUSHIN_V3_CUSTODY_RETURN_EMULATOR===true
+                    ${(globalThis.YUSHIN_V3_CUSTODY_RETURN_EMULATOR===true
+                      ||(typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled('V3_CUSTODY_RETURN')))
                         && lifecycle.status==='normal'&&canManageOrderLifecycleCapability()&&canEditPage('orders.list')
                         && (currentUserRole==='admin'||o.ownerUid===currentUser?.uid)
                         && allOrderItems.length>0&&allOrderItems.length<=5
