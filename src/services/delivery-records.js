@@ -47,11 +47,13 @@ function v2DeliveryEmulatorTransport(custodyV3=false){
  check();return {uid,role,functions,check};
 }
 function v2DeliveryConfirmationTransport(custodyV3=false){
- if(custodyV3||globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true)
+ if((custodyV3&&globalThis.YUSHIN_V3_CUSTODY_DELIVERY_EMULATOR===true)
+  ||(!custodyV3&&globalThis.YUSHIN_V2_DELIVERY_EMULATOR===true))
   return {...v2DeliveryEmulatorTransport(custodyV3),emulator:true};
  const preview=typeof APP_ENVIRONMENT!=='undefined'&&APP_ENVIRONMENT==='preview'
   &&globalThis.YUSHIN_PREVIEW_DELIVERY_CONFIRMATION===true;
- const production=typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled('DELIVERY_CONFIRMATION');
+ const productionKind=custodyV3?'V3_CUSTODY_DELIVERY':'DELIVERY_CONFIRMATION';
+ const production=typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled(productionKind);
  const project=production?'yu-shing-company':'preview-20135';
  const host=String(globalThis.location?.hostname||'').toLowerCase();
  if((!preview&&!production)||(preview&&!['preview-20135.web.app','preview-20135.firebaseapp.com'].includes(host))
@@ -66,7 +68,7 @@ function v2DeliveryConfirmationTransport(custodyV3=false){
   throw Error('送達確認 Auth、Functions 與資料庫專案不一致，未提交送達。');
  const uid=currentUser?.uid,role=currentUserRole;
  const check=()=>{
-  if(production&&!productionTransactionBackendEnabled('DELIVERY_CONFIRMATION'))throw Error('送達後端已停用，請保留原操作識別碼核對。');
+  if(production&&!productionTransactionBackendEnabled(productionKind))throw Error('送達後端已停用，請保留原操作識別碼核對。');
   if(!uid||auth.currentUser?.uid!==uid||currentUser?.uid!==uid||currentUserRole!==role
    ||!['admin','sales','engineer'].includes(role)
    ||!canManageOrderLifecycleCapability()||!canEditPage('orders.list'))
