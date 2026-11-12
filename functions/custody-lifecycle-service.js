@@ -5,6 +5,7 @@
 // separate authoritative proofs before this boundary can be expanded.
 const {createHash}=require('node:crypto');
 const {projectIdFromEnvironment}=require('./grouped-reservation-gate');
+const {allowProductionTransaction}=require('./production-transaction-gate');
 const reservation=require('./shared/reservation-core');
 const demandCore=require('./shared/procurement-demand-core');
 function fail(message,code='failed-precondition'){throw Object.assign(Error(message),{code});}
@@ -18,6 +19,7 @@ function qty(value,name){
  return value;
 }
 function custodyLifecycleProject(env=process.env){
+ if(allowProductionTransaction('V3_CUSTODY_LIFECYCLE',env))return 'yu-shing-company';
  const local=x=>typeof x==='string'&&/^(localhost|127\.0\.0\.1):[0-9]+$/.test(x);
  return projectIdFromEnvironment(env)==='demo-yushin'
   &&env.ENABLE_V3_CUSTODY_LIFECYCLE_EMULATOR==='true'&&env.FUNCTIONS_EMULATOR==='true'
