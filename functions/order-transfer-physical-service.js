@@ -63,6 +63,11 @@ async function commitOrderTransferPhysical(db,uid,data,action,env=process.env){
    if(t.status!=='IN_TRANSIT')fail('原調撥狀態不正確');
   }else if(action==='RECEIVE')fail('找不到原調撥','not-found');
   if(!t&&proof)fail('原寄出憑證已存在');if(received?.exists)fail('原收貨憑證已存在');
+  // A new production HANDOFF would move goods into owner Custody (schema v3),
+  // but V3 shipment, delivery and return Callables are still demo-only.
+  // Preserve existing operation-ID replay above; never strand a new live order.
+  if(!t&&handoff&&project==='yu-shing-company')
+    fail('業務保管後續出貨、送達與退貨尚未正式開通，已停止建立新的業務交接；請先使用可完成履約的倉庫出貨流程。');
   const orderId=dispatching?intent.orderId:id(t.orderId),itemId=dispatching?intent.itemId:id(t.itemId);
   const orderRef=ref('orders',orderId),orderSnap=await tx.get(orderRef),order=orderSnap.exists?orderSnap.data():null;
   if(!order||!['active','normal'].includes(order.status)||!['',undefined,'normal','active'].includes(order.orderStatus)
