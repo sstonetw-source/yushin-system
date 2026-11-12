@@ -78,6 +78,9 @@ test('pending production handoff retains its original frozen ID for authoritativ
   commitOrderTransferBackend:async(action,id,payload)=>{calls.push({action,id,payload});return {status:'already-applied'};}};
  ctx.globalThis=ctx;vm.createContext(ctx);
  vm.runInContext(fs.readFileSync('src/services/warehouse-transfer.js','utf8'),ctx);
+ await assert.rejects(ctx.commitWarehouseTransfer({id:'T',orderId:'ORDER',itemId:'I',qty:1,handoff:true}),/原操作 ID 並暫停重送/);
+ assert.equal(calls.length,0,'an unknown result cannot trigger the old production handoff');
+ ctx.productionTransactionBackendEnabled=kind=>['V3_CUSTODY_LIFECYCLE','V3_CUSTODY_SHIPMENT','V3_CUSTODY_DELIVERY','V3_CUSTODY_RETURN'].includes(kind);
  assert.equal((await ctx.commitWarehouseTransfer({id:'T',orderId:'ORDER',itemId:'I',qty:1,handoff:true})).status,'already-applied');
  assert.deepEqual(calls,[{action:'HANDOFF',id:'T',payload:undefined}]);
 });
