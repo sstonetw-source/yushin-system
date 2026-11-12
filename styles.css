@@ -4029,6 +4029,13 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
         border: 1px solid var(--ys-border);
         border-radius: 10px;
     }
+    /* Shared search and filter controls keep the same touch target across modules. */
+    #appContainer .content-section :is(.toolbar, .order-period-toolbar, .workflow-filters, .trade-analysis-filters)
+        :is(input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="file"]), select) {
+        box-sizing: border-box;
+        min-height: var(--ys-control-height);
+        max-width: 100%;
+    }
     #appContainer .content-section :is(.panel, .toolbar) :is(h3, h4),
     #appContainer .content-section .purchase-section-heading strong,
     #appContainer .content-section .purchase-replenishment-heading strong {
@@ -4040,7 +4047,7 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
         border-color: var(--ys-border);
         border-radius: 8px;
         color: var(--ys-text);
-        background-color: var(--ys-surface);
+        background-color: var(--ys-record);
     }
     #appContainer :is(#product-system, #forecast-system, #equipment-system, #order-system,
         #purchasing-system, #inventory-system, #admin-system)
@@ -5423,3 +5430,16 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
 }
 
 #poReceiptBatchOverlay .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; border:0; }
+
+/* Readable phone forms: prevent iOS field zoom without touching print layouts. */
+@media screen and (max-width: 768px) {
+    #loginScreen :is(input, select, textarea),
+    .password-modal :is(input, select, textarea),
+    #appContainer :is(#quote-system, #product-system, #forecast-system, #equipment-system,
+        #order-system, #purchasing-system, #inventory-system, #admin-system)
+        :is(input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="file"]), select, textarea),
+    #appContainer :is(.eq-modal-overlay, .modal-overlay, .modal, dialog)
+        :is(input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="file"]), select, textarea) {
+        font-size: 16px;
+    }
+}
