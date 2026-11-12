@@ -64,7 +64,7 @@ async function commitOrderTransferPhysical(db,uid,data,action,env=process.env){
   }else if(action==='RECEIVE')fail('找不到原調撥','not-found');
   if(!t&&proof)fail('原寄出憑證已存在');if(received?.exists)fail('原收貨憑證已存在');
   // A new production HANDOFF would move goods into owner Custody (schema v3),
-  // but V3 shipment, delivery and return Callables are still demo-only.
+  // so it requires the production V3 downstream gates to be enabled.
   // Preserve existing operation-ID replay above; never strand a new live order.
   if(!t&&handoff&&project==='yu-shing-company'&&
     !['V3_CUSTODY_LIFECYCLE','V3_CUSTODY_SHIPMENT','V3_CUSTODY_DELIVERY','V3_CUSTODY_RETURN']
@@ -90,6 +90,14 @@ async function commitOrderTransferPhysical(db,uid,data,action,env=process.env){
   const ledgerRef=ref('inventoryReservations',orderId+'__'+itemId),ledgerSnap=await tx.get(ledgerRef);
   if(!ledgerSnap.exists)fail('缺少原訂單預留');const ledger=ledgerSnap.data();
   if(ledger.status!=='active')fail('原訂單預留不是有效狀態');
+  if(handoff&&project==='yu-shing-company'){
+   if(ledger.locationSchemaVersion!==2)
+    fail('正式業務交接須使用可轉為 V3 的 V2 預留，請改由原倉出貨');
+   if(order.items.length>5||order.items.some(row=>
+    String(row.productType||row.type||'').trim().toUpperCase()==='SERVICE'
+    ||(row.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'))
+    fail('正式業務交接僅支援最多五項實體商品，請改由原倉履約');
+  }
   if(action==='RECEIVE'&&item.transferPendingId!==intent.id)fail('原調撥與訂單關聯不一致');
   const sourceItem=action==='RECEIVE'?{...item,transferPendingId:''}:item;
   const custodyV3=ledger.locationSchemaVersion===2&&handoff

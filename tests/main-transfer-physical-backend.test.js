@@ -412,6 +412,33 @@ test('production v2 custody HANDOFF is opt-in, retains original proof and never 
  assert.ok(f.docs.has('reservationOperationReceipts/order-transfer-dispatch-'+f.input.id));
  assert.equal(f.docs.get('orders/ORDER').deliveryRecords,undefined);
 });
+test('production handoff refuses orders that cannot use downstream custody fulfillment before moving stock',async()=>{
+ const env={GCLOUD_PROJECT:'yu-shing-company',ENABLE_PRODUCTION_ORDER_TRANSFER_HANDOFF_BACKEND:'true',
+  ENABLE_PRODUCTION_ORDER_TRANSFER_V2_BACKEND:'true',ENABLE_PRODUCTION_V3_CUSTODY_LIFECYCLE_BACKEND:'true',
+  ENABLE_PRODUCTION_V3_CUSTODY_SHIPMENT_BACKEND:'true',ENABLE_PRODUCTION_V3_CUSTODY_DELIVERY_BACKEND:'true',
+  ENABLE_PRODUCTION_V3_CUSTODY_RETURN_BACKEND:'true'};
+ for(const scenario of ['legacy','mixed','too-many','single']){
+  const f=handoffFixture(),order=f.docs.get('orders/ORDER'),ledger=f.docs.get('inventoryReservations/ORDER__I');
+  f.db.projectId='yu-shing-company';
+  f.docs.set('settings/orderTransferCutover',{backendOnly:true});
+  if(scenario!=='legacy'){
+   delete ledger.warehouseId;
+   Object.assign(ledger,{locationSchemaVersion:2,ownerUid:'S',salesCode:'01',
+    locations:[{warehouseId:'A',reservedQty:3}],lifecycleWarehouseIds:['A']});
+  }
+  if(scenario==='mixed')order.items.push({itemId:'SERVICE',productType:'SERVICE'});
+  if(scenario==='too-many')for(let i=0;i<5;i++)order.items.push({...order.items[0],itemId:'extra-'+i});
+  const before=f.snapshot();
+  const handoff=()=>commitOrderTransferPhysical(f.db,'U',f.input,'HANDOFF',env);
+  if(scenario==='single'){
+   assert.equal((await handoff()).status,'applied');
+   assert.equal(f.docs.get('inventoryReservations/ORDER__I').locationSchemaVersion,3);
+  }else{
+   await assert.rejects(handoff(),scenario==='legacy'?/V2 預留/:/最多五項實體商品/);
+   assert.equal(f.snapshot(),before);
+  }
+ }
+});
 test('handoff independently gated and refuses wrong custody v2 disabled location target collision or final failure atomically',async()=>{
  for(const mutate of [f=>{f.input.toWarehouseId='custody-OTHER';},f=>f.put('warehouses/custody-S',{active:true,systemCustody:true,ownerUid:'OTHER'}),f=>f.put('inventoryLots/'+f.input.id+'-0',{sentinel:true}),f=>{f.docs.get('inventoryReservations/ORDER__I').locationSchemaVersion=2;},f=>f.setFail(true)]){
   const f=handoffFixture();mutate(f);const before=f.snapshot();await assert.rejects(f.handoff());assert.equal(f.snapshot(),before);
