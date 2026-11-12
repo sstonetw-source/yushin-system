@@ -152,7 +152,7 @@ async function commitShipmentDelivery(db,uid,data,env=process.env,options={}){
   if(!custodyDeliveryProject(env)||db.projectId!==custodyDeliveryProject(env))
    fault('V3 保管送達確認尚未在此專案啟用');
  }
- const project=deliveryConfirmationBackendProject(env);
+ const project=custodyV3?require('./custody-delivery-service').custodyDeliveryProject(env):deliveryConfirmationBackendProject(env);
  // Existing direct-Service test fixtures use isolated local demo Firestore.
  // Externally callable requests cannot reach this path without their own gate.
  const directDemo=db.projectId==='demo-yushin'
