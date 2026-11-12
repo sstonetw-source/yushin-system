@@ -10,7 +10,7 @@
         && (path === '/yushin-system' || path.startsWith('/yushin-system/'));
     // The service workflow release requires Rules and Functions to be published first.
     scope.YUSHIN_PRODUCTION_SERVICE_CASE_BACKEND = orderReservationProductionSite;
-    scope.YUSHIN_PRODUCTION_QUICK_PURCHASE_CONFIG_VERSION = '20261112-full-backend-cutover-1';
+    scope.YUSHIN_PRODUCTION_QUICK_PURCHASE_CONFIG_VERSION = '20261112-v3-custody-cutover-1';
     // Authorized activation: match the deployed production backend and database retirement gates.
     // Overwrite stale global values; the caller must never inherit an unintended true gate.
     scope.YUSHIN_PRODUCTION_RECEIVING_BACKEND = orderReservationProductionSite;
@@ -67,10 +67,9 @@
     scope.YUSHIN_PRODUCTION_QUICK_PURCHASE = orderReservationProductionSite;
     // Retain this lock after cutover, including when suspending the quick route.
     scope.YUSHIN_PRODUCTION_QUICK_PURCHASE_LEGACY_BLOCKED = orderReservationProductionSite;
-    // Staged V3 Custody workflow: keep all four routes closed until the
-    // independently authorized Functions, Rules and full workflow are verified.
+    // Enable all custody routes together on the authorized production site.
     for (const kind of ['LIFECYCLE','SHIPMENT','DELIVERY','RETURN']) {
-        scope['YUSHIN_PRODUCTION_V3_CUSTODY_'+kind+'_BACKEND'] = false;
+        scope['YUSHIN_PRODUCTION_V3_CUSTODY_'+kind+'_BACKEND'] = orderReservationProductionSite;
         scope['YUSHIN_PRODUCTION_V3_CUSTODY_'+kind+'_LEGACY_BLOCKED'] = orderReservationProductionSite;
     }
     scope.YUSHIN_PRODUCTION_ORDER_RESERVATION_BACKEND = orderReservationProductionSite;
