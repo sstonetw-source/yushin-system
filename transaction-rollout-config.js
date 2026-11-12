@@ -67,6 +67,12 @@
     scope.YUSHIN_PRODUCTION_QUICK_PURCHASE = orderReservationProductionSite;
     // Retain this lock after cutover, including when suspending the quick route.
     scope.YUSHIN_PRODUCTION_QUICK_PURCHASE_LEGACY_BLOCKED = orderReservationProductionSite;
+    // Staged V3 Custody workflow: keep all four routes closed until the
+    // independently authorized Functions, Rules and full workflow are verified.
+    for (const kind of ['LIFECYCLE','SHIPMENT','DELIVERY','RETURN']) {
+        scope['YUSHIN_PRODUCTION_V3_CUSTODY_'+kind+'_BACKEND'] = false;
+        scope['YUSHIN_PRODUCTION_V3_CUSTODY_'+kind+'_LEGACY_BLOCKED'] = orderReservationProductionSite;
+    }
     scope.YUSHIN_PRODUCTION_ORDER_RESERVATION_BACKEND = orderReservationProductionSite;
     // Once an approved cutover sets this true it must never be rolled back to
     // false; an outage then blocks submission instead of reviving the SDK writer.
