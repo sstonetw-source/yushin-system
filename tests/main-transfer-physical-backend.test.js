@@ -417,7 +417,7 @@ test('production handoff refuses orders that cannot use downstream custody fulfi
   ENABLE_PRODUCTION_ORDER_TRANSFER_V2_BACKEND:'true',ENABLE_PRODUCTION_V3_CUSTODY_LIFECYCLE_BACKEND:'true',
   ENABLE_PRODUCTION_V3_CUSTODY_SHIPMENT_BACKEND:'true',ENABLE_PRODUCTION_V3_CUSTODY_DELIVERY_BACKEND:'true',
   ENABLE_PRODUCTION_V3_CUSTODY_RETURN_BACKEND:'true'};
- for(const scenario of ['legacy','mixed','too-many','single']){
+ for(const scenario of ['legacy','mixed','too-many','purchased','single']){
   const f=handoffFixture(),order=f.docs.get('orders/ORDER'),ledger=f.docs.get('inventoryReservations/ORDER__I');
   f.db.projectId='yu-shing-company';
   f.docs.set('settings/orderTransferCutover',{backendOnly:true});
@@ -427,6 +427,7 @@ test('production handoff refuses orders that cannot use downstream custody fulfi
     locations:[{warehouseId:'A',reservedQty:3}],lifecycleWarehouseIds:['A']});
   }
   if(scenario==='mixed')order.items.push({itemId:'SERVICE',productType:'SERVICE'});
+  if(scenario==='purchased')order.items[0].receivedQty=3;
   if(scenario==='too-many')for(let i=0;i<5;i++)order.items.push({...order.items[0],itemId:'extra-'+i});
   const before=f.snapshot();
   const handoff=()=>commitOrderTransferPhysical(f.db,'U',f.input,'HANDOFF',env);
@@ -434,7 +435,8 @@ test('production handoff refuses orders that cannot use downstream custody fulfi
    assert.equal((await handoff()).status,'applied');
    assert.equal(f.docs.get('inventoryReservations/ORDER__I').locationSchemaVersion,3);
   }else{
-   await assert.rejects(handoff(),scenario==='legacy'?/V2 預留/:/最多五項實體商品/);
+   const reason={legacy:/V2 預留/,mixed:/最多五項實體商品/,'too-many':/最多五項實體商品/,purchased:/已有採購或收貨/};
+   await assert.rejects(handoff(),reason[scenario]);
    assert.equal(f.snapshot(),before);
   }
  }

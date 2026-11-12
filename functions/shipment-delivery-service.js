@@ -269,11 +269,19 @@ async function reverseShipmentDelivery(db,uid,data,env=process.env){
   if(order.deliveryRecords.some(row=>row.id===operationId)||history.some(row=>row.recordId===operationId))
    fault('撤銷識別碼與既有送達操作衝突','already-exists');
   const multi=Array.isArray(order.items)&&order.items.length>1;
-  const {item,productKey}=multi?multiShipmentDeliveryContext(order,intent):shipmentDeliveryContext(order,intent);
+  const custody=Array.isArray(order.items)
+   &&order.items.find(row=>row?.itemId===itemId)?.custodyTransferId;
+  const custodyDelivery=custody?require('./custody-delivery-service'):null;
+  if(custodyDelivery&&custodyDelivery.custodyDeliveryProject(env)!==db.projectId)
+   fault('V3 保管送達尚未在此專案啟用');
+  const context=multi?multiShipmentDeliveryContext(order,intent,{allowCustody:!!custody}):
+   shipmentDeliveryContext(order,intent,{allowCustody:!!custody,allowReturns:!!custody});
+  const {item,productKey}=context;
+  // Preserve the delivery evidence required by an existing physical return.
+  if((multi||custody)&&order.returnRecords.length)fault('退貨後的送達撤銷尚未開放');
+  if(custody)
+   await custodyDelivery.readCustodyDeliveryProofs(tx,db,order,context,intent);
   if(multi){
-   // Reversing an acknowledgement with a physical return requires a separate
-   // return-correction contract. Do not erase the evidence backing that return.
-   if(order.returnRecords.length)fault('退貨後的送達撤銷尚未開放');
    await readLocationReturnProofs(tx,db,order,intent,productKey,{closedOnly:true});
    await readWholeOrderShipmentProofs(tx,db,order,intent);
   }

@@ -6,6 +6,7 @@
 const {projectIdFromEnvironment}=require('./grouped-reservation-gate');
 const {allowProductionTransaction}=require('./production-transaction-gate');
 const {normalizeShipmentIntent}=require('./location-shipment-service');
+const {normalizeDeliveryIntent,readShipmentProof}=require('./shipment-delivery-service');
 const reservationCore=require('./shared/reservation-core');
 const inventoryCore=require('./shared/inventory-core');
 const fulfillmentCore=require('./shared/fulfillment-core');
@@ -94,15 +95,23 @@ async function commitCustodyShipment(db,uid,data,env=process.env){
     ||!Array.isArray(order.warehouseShipmentHistory??[])
     ||(order.warehouseShipmentHistory??[]).length
     ||(order.warehouseShipmentRecords??[]).length>40
-    ||(order.deliveryRecords??[]).length||(order.returnRecords??[]).length
-    ||qty(order.deliveredQty??0,'已送達')!==0||qty(order.returnedQty??0,'退貨')!==0
-    ||order.isDelivered===true)
-   fail('已有送達、退貨或更正紀錄，須等完整 V3 履約入口');
-  const records=order.warehouseShipmentRecords??[];
-  // Multi-line Custody is an explicitly narrower physical-shipment phase:
-  // homogeneous owner-Custody goods, no commercial delivery/return yet.  The
-  // whole-order projection prevents unknown sibling events from being hidden
-  // by filtering to the selected line.
+    ||(order.returnRecords??[]).length||qty(order.returnedQty??0,'退貨')!==0)
+   fail('已有退貨或出貨更正紀錄，須等完整 V3 履約入口');
+  const records=order.warehouseShipmentRecords??[],deliveries=order.deliveryRecords??[];
+  const whole=fulfillmentCore.projectOrderShipmentReturns({orderId,items:order.items,shipments:records,deliveries});
+  if(qty(order.deliveredQty??0,'已送達')!==whole.confirmedQty||(order.isDelivered??false)!==whole.isDelivered)
+   fail('整單送達與原出貨紀錄不一致');
+  for(const delivery of deliveries){
+   const original=normalizeDeliveryIntent({orderId,itemId:delivery.itemId,shipmentId:delivery.shipmentId,
+    quantity:delivery.qty,date:delivery.date,notes:delivery.notes,operationId:delivery.id,syncAttemptId:intent.syncAttemptId});
+   const shipment=await readShipmentProof(tx,db,order,original,delivery.productKey);
+   const shipmentItem=order.items.find(row=>row.itemId===delivery.itemId);
+   if(delivery.intentHash!==original.hash||delivery.shipmentMovementId!==shipment.movementId
+    ||shipment.warehouseId!==custodyId||shipment.custodyTransferId!==shipmentItem?.custodyTransferId)
+    fail('原業務保管送達憑證不一致');
+  }
+  // Multi-line shipments share one owner's physical custody and validate
+  // sibling totals before writing only the selected item.
   if(order.items.length>1){
    for(const sibling of order.items){
     const siblingOrdered=qty(sibling.qty??sibling.orderedQty,'其他品項訂購量');
@@ -116,30 +125,24 @@ async function commitCustodyShipment(db,uid,data,env=process.env){
       ||qty(sibling.receivedQty??0,'其他品項收貨')!==0)
      fail('多品項出貨僅接受同一負責業務的完整實體保管品項');
    }
-   const whole=fulfillmentCore.projectOrderShipmentReturns({orderId,items:order.items,
-    shipments:records,deliveries:[],returns:[]});
-   if(whole.confirmedQty!==0||whole.returnedQty!==0||whole.isDelivered)
-    fail('多品項保管出貨不得混入已送達或退貨紀錄');
    for(const sibling of order.items){
     const part=whole.items.find(row=>row.itemId===sibling.itemId);
     const prepared=qty(sibling.dispatchPreparedQty??0,'其他品項打單量');
     if(!part||qty(sibling.warehouseShippedQty??0,'其他品項累計出貨')!==part.shippedQty
       ||qty(sibling.reservedQty,'其他品項預留')!==part.outstandingQty
-      ||qty(sibling.deliveredQty??0,'其他品項送達')!==0
+      ||qty(sibling.deliveredQty??0,'其他品項送達')!==part.confirmedQty
       ||qty(sibling.returnedQty??0,'其他品項退貨')!==0
       ||prepared<part.shippedQty||prepared>part.orderedQty)
      fail('多品項履約、打單或預留投影不一致');
    }
   }
-  const itemRecords=records.filter(row=>row.itemId===itemId);
-  const projection=fulfillmentCore.projectShipmentReturns({orderId,itemId,productKey,orderedQty:ordered,
-   shipments:itemRecords,deliveries:[],returns:[]});
+  const projection=whole.items.find(row=>row.itemId===itemId);
   const shipped=projection.shippedQty,held=qty(item.reservedQty,'品項預留');
   const prepared=qty(item.dispatchPreparedQty??0,'打單量');
   const state=fulfillmentCore.warehouseShipmentState({warehouseShippedQty:shipped,
    dispatchPreparedQty:prepared,reservedQty:held});
   if(qty(item.warehouseShippedQty??0,'累計出貨')!==shipped
-    ||qty(item.deliveredQty??0,'已送達')!==0||qty(item.returnedQty??0,'退貨')!==0
+    ||qty(item.deliveredQty??0,'已送達')!==projection.confirmedQty||qty(item.returnedQty??0,'退貨')!==0
     ||held!==projection.outstandingQty||prepared>ordered||shipped>ordered
     ||intent.quantity>state.shippable||intent.quantity>ordered-shipped
     ||records.some(row=>row.id===operationId))
@@ -259,7 +262,7 @@ async function commitCustodyShipment(db,uid,data,env=process.env){
    movementId:movementRef.id,lotAllocations,cogs:0};
   const nextRecords=[...records,record];
   fulfillmentCore.projectOrderShipmentReturns({orderId,items:order.items,
-   shipments:nextRecords,deliveries:[],returns:[]});
+   shipments:nextRecords,deliveries});
   const nextLedger={...stockPlan.reservation,updatedAt:now};
   delete nextLedger.warehouseId;
   const nextItem={...item,reservedQty:nextLedger.quantity,shortageQty:0,

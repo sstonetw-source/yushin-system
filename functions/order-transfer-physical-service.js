@@ -97,6 +97,8 @@ async function commitOrderTransferPhysical(db,uid,data,action,env=process.env){
     String(row.productType||row.type||'').trim().toUpperCase()==='SERVICE'
     ||(row.fulfillmentType||'WAREHOUSE')!=='WAREHOUSE'))
     fail('正式業務交接僅支援最多五項實體商品，請改由原倉履約');
+   if(order.items.some(row=>(row.supplyOrderedQty??0)!==0||(row.receivedQty??0)!==0))
+    fail('已有採購或收貨的訂單請由原倉履約，保管出貨尚不支援這類來源');
   }
   if(action==='RECEIVE'&&item.transferPendingId!==intent.id)fail('原調撥與訂單關聯不一致');
   const sourceItem=action==='RECEIVE'?{...item,transferPendingId:''}:item;

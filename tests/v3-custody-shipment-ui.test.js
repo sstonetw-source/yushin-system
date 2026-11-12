@@ -66,6 +66,7 @@ test('V3 Custody UI freezes first stock debit, survives lost reply and refresh, 
 });
 test('V3 Custody multi-line UI freezes and resumes the selected sibling item without changing its identity',async()=>{
  const f=fixture({multi:true}),ctx=f.open({YUSHIN_V3_CUSTODY_SHIPMENT_EMULATOR:true});
+ f.order.deliveryRecords=[{itemId:'I',qty:1}];
  const selected={...f.input('custody_ship_ui_multi_j'),itemId:'J'};
  f.loseOnce();await assert.rejects(ctx.commitV3CustodyShipment(selected),/lost reply/);
  assert.equal(f.requests[0].itemId,'J');
