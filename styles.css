@@ -5488,3 +5488,12 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
 @media screen and (min-width:769px) {
  #appContainer #ordersTable .order-more-menu > summary { height:38px; min-width:38px; width:38px; }
 }
+
+@media screen and (min-width:769px) {
+    #appContainer #ordersTable thead th:last-child,
+    #appContainer #ordersTable tbody td[data-th="操作"] {
+        width:clamp(120px, 12vw, 156px);
+        text-align:right;
+        vertical-align:middle;
+    }
+}
