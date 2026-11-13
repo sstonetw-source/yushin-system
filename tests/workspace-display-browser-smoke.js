@@ -101,7 +101,7 @@ function fn(name){const a=source.indexOf('function '+name+'('),b=source.indexOf(
     assert.equal(checkbox.x>date.x,width<769);
     assert.ok(Math.abs(checkbox.y-date.y)<44);
    }
-   if(width<769) await row.locator('.workflow-product').tap();
+   if(width<769) await row.locator('td[data-th="產品資訊"] .workflow-product').tap();
    else await row.press('Enter');
    await row.locator('dialog[open]').waitFor({state:'visible'});
    assert.equal(await row.locator('dialog').evaluate(e=>e.open),true);

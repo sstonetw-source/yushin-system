@@ -5450,11 +5450,12 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
  #appContainer #inventoryReceivingPanel .inventory-work-table th { background:var(--ys-table-head); }
  #appContainer :is(#ordersTable,#purchasing-system .workflow-order-context-row) .workflow-inline-actions,
  #appContainer #ordersTable .order-compact-actions,
- #appContainer #inventoryShippingPanel :is(.parcel-actions,.parcel-branch-actions) {
+ #appContainer #inventoryShippingPanel :is(.parcel-card > .parcel-actions,.parcel-branch-actions) {
    display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:flex-end;
  }
- #appContainer :is(#ordersTable,#purchasing-system .workflow-order-context-row) .workflow-inline-actions button,
- #appContainer :is(#inventoryReceivingPanel,#inventoryShippingPanel) :is(td[data-th="操作"],.inventory-return-card,.parcel-actions,.parcel-branch-actions) > button {
+ #appContainer :is(#ordersTable,#purchasing-system .workflow-order-context-row) .workflow-inline-actions > button,
+ #appContainer #ordersTable .order-compact-actions > button,
+ #appContainer :is(#inventoryReceivingPanel,#inventoryShippingPanel) :is(td[data-th="操作"],.inventory-return-card,.parcel-card > .parcel-actions,.parcel-branch-actions) > button {
    width:auto; max-width:100%; margin:0; font-size:14px; white-space:normal; overflow-wrap:anywhere;
  }
  #appContainer #customerReturnQueue .inventory-return-card > button:first-of-type { margin-inline-start:auto; }
@@ -5462,9 +5463,10 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
 @media screen and (min-width:769px) {
  #appContainer #purchasePendingPanel .workflow-selection-cell { width:110px; }
  #appContainer :is(#ordersTable,#purchasing-system .workflow-order-context-row,#inventoryReceivingPanel) td[data-th="操作"] { text-align:right; }
- #appContainer :is(#ordersTable,#purchasing-system .workflow-order-context-row) .workflow-inline-actions button,
+ #appContainer :is(#ordersTable,#purchasing-system .workflow-order-context-row) .workflow-inline-actions > button,
+ #appContainer #ordersTable .order-compact-actions > button,
  #appContainer #ordersTable .order-more-menu > summary,
- #appContainer :is(#inventoryReceivingPanel,#inventoryShippingPanel) :is(td[data-th="操作"],.inventory-return-card,.parcel-actions,.parcel-branch-actions) > button {
+ #appContainer :is(#inventoryReceivingPanel,#inventoryShippingPanel) :is(td[data-th="操作"],.inventory-return-card,.parcel-card > .parcel-actions,.parcel-branch-actions) > button {
    min-height:38px; height:auto; padding-block:6px;
  }
 }
@@ -5472,12 +5474,17 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
  #appContainer #purchasePendingBody .workflow-selection-cell { grid-area:1 / 2; justify-self:end; }
  #appContainer #purchasePendingBody .workflow-selection-cell:empty { display:none; }
  #appContainer .workflow-detail-row :is(.order-date-cell,[data-th="訂單日期"])::before { display:none; }
- #appContainer :is(#ordersTable,#purchasing-system .workflow-order-context-row) .workflow-inline-actions button,
- #appContainer :is(#inventoryReceivingPanel,#inventoryShippingPanel) :is(td[data-th="操作"],.inventory-return-card,.parcel-actions,.parcel-branch-actions) > button {
+ #appContainer :is(#ordersTable,#purchasing-system .workflow-order-context-row) .workflow-inline-actions > button,
+ #appContainer #ordersTable .order-compact-actions > button,
+ #appContainer :is(#inventoryReceivingPanel,#inventoryShippingPanel) :is(td[data-th="操作"],.inventory-return-card,.parcel-card > .parcel-actions,.parcel-branch-actions) > button {
    min-height:44px;
  }
  #appContainer #customerReturnQueue .inventory-return-card > button:first-of-type { margin-inline-start:0; }
  #appContainer #inventoryReceivingPanel .inventory-work-table tbody > tr {
    border:1px solid var(--ys-border); background:var(--ys-record);
  }
+}
+
+@media screen and (min-width:769px) {
+ #appContainer #ordersTable .order-more-menu > summary { height:38px; min-width:38px; width:38px; }
 }

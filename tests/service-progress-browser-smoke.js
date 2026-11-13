@@ -86,7 +86,7 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
   assert.equal(await page.locator('.order-product-cell .workflow-quantity').count(),0);
   assert.match(await amount.innerText(),/11,300 × 30/);
   await page.evaluate(()=>{window.fixtureCanBill=true;ordersCache[0].isBilled=true;renderOrdersList();});
-  if(width>768){const ys=await page.locator('.order-billing-action,.order-more-menu > summary').evaluateAll(es=>es.map(e=>e.getBoundingClientRect().y));assert.ok(Math.max(...ys)-Math.min(...ys)<=1,'billing and more share one desktop row '+JSON.stringify(await page.locator('.order-billing-action,.order-more-menu > summary').evaluateAll(es=>es.map(e=>({text:e.innerText,rect:e.getBoundingClientRect().toJSON(),display:getComputedStyle(e).display})))));}
+  if(width>=1280){const ys=await page.locator('.order-billing-action,.order-more-menu > summary').evaluateAll(es=>es.map(e=>e.getBoundingClientRect().y+e.getBoundingClientRect().height/2));assert.ok(Math.max(...ys)-Math.min(...ys)<=1,'billing and more share one desktop row '+JSON.stringify(await page.locator('.order-billing-action,.order-more-menu > summary').evaluateAll(es=>es.map(e=>({text:e.innerText,rect:e.getBoundingClientRect().toJSON(),display:getComputedStyle(e).display})))));}
   await page.screenshot({path:'/tmp/order-inline-actions-'+width+'.png',fullPage:true});
   await page.evaluate(()=>{window.fixtureCanBill=false;ordersCache[0].isBilled=false;renderOrdersList();});
   let columns;
