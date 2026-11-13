@@ -61,7 +61,7 @@ function renderUiWorkActions() {
     if (typeof document === 'undefined' || !document.body?.appendChild || !document.createElement) return;
     let panel = document.getElementById('uiWorkActionStatus');
     const jobs = [...uiWorkActions.values()].filter(job =>
-        job.uid === currentUser?.uid && job.role === currentUserRole);
+        job.uid === currentUser?.uid && job.role === currentUserRole && (job.state !== 'unknown' || !job.isVisible || job.isVisible()));
     if (!jobs.length) { if (panel) panel.hidden = true; return; }
     if (!panel) {
         panel = document.createElement('aside');
@@ -108,6 +108,7 @@ function beginUiWorkAction(scope, id, label, onUpdate = null, options = {}) {
     const job = existing || { uid, role, label: String(label || '工作'), state: 'pending' };
     job.state = 'pending';
     if (typeof options.onVerify === 'function') job.onVerify = options.onVerify;
+    if (typeof options.isVisible === 'function') job.isVisible = options.isVisible;
     uiWorkActions.set(key, job);
     const refresh = () => {
         renderUiWorkActions();
