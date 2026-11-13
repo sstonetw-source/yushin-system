@@ -147,7 +147,7 @@
         return '<section class="parcel-branch-list" data-branch-list="'+escapeAttr(group.warehouseId)+'"><header><div><h3>'+escapeHtml(group.warehouseName)+'｜分倉出貨清單</h3><p>'+group.entries.length+' 筆需求'+(pending?'，'+pending+' 筆待備妥':'')+'</p></div><div class="parcel-branch-actions">'+
           '<button type="button" class="btn-secondary" onclick="shareBranchDispatchList('+key+',false,this)" '+(complete&&transfers?.ready&&!transfers.error&&!transfers.hasMore?'':'disabled')+'>複製清單</button>'+
           '<button type="button" onclick="shareBranchDispatchList('+key+',true,this)" '+(complete&&transfers?.ready&&!transfers.error&&!transfers.hasMore?'':'disabled')+'>分享清單</button></div></header>'+
-          '<div class="table-wrap"><table><thead><tr><th>寄送用途／單號</th><th>收件對象</th><th>貨品</th><th>數量</th><th>狀態</th></tr></thead><tbody>'+group.entries.map(entry=>
+          '<div class="table-wrap"><table class="workflow-list-table"><thead><tr><th>寄送用途／單號</th><th>收件對象</th><th>貨品</th><th>數量</th><th>狀態</th></tr></thead><tbody>'+group.entries.map(entry=>
             '<tr><td data-th="用途">'+escapeHtml(entry.kind)+'<small>'+escapeHtml(entry.source)+'</small></td><td data-th="收件">'+escapeHtml(entry.recipient.contact||'待補')+'<small>'+escapeHtml(entry.recipient.address||'待補')+'</small></td><td data-th="貨品">'+escapeHtml(entry.itemCode)+'<small>'+escapeHtml(entry.itemName)+'</small></td><td data-th="數量">'+entry.qty+'</td><td data-th="狀態">'+(entry.ready?'待確認寄出':'待備妥／打單')+'</td></tr>').join('')+'</tbody></table></div>'+
           (!complete?'<p class="parcel-guard-note">請補齊寄往主倉／業務／客戶的收件資訊，再分享清單。</p>':'')+
           (transfers?.hasMore?'<p class="parcel-guard-note">主倉調回需求超過 50 筆，目前不能分享不完整清單。</p>':'')+

@@ -58,6 +58,7 @@ function fn(name){const a=source.indexOf('function '+name+'('),b=source.indexOf(
   await page.addScriptTag({content:fs.readFileSync('src/shared/workspace-display.js','utf8')});
   await page.addScriptTag({content:source.slice(source.indexOf('let purchaseWorkSupplyRequests'),source.indexOf('let purchaseDemandSummaryRows'))});
   for(const name of ['pendingServicePurchaseRows','renderPendingPurchaseOrders','renderPurchasingDispatchOrders','renderPurchasingCompletedOrders','receivingWorkProgress','renderPurchasingReceivingWorkList'])await page.addScriptTag({content:fn(name)});
+  await page.addScriptTag({content:source.slice(source.indexOf('window.togglePendingPurchaseSelection ='),source.indexOf('function pendingServicePurchaseRows('))});
   await page.evaluate(()=>{window.renderPurchasingView=()=>{
    if(purchasingView==='ordering')return renderPendingPurchaseOrders();
    if(purchasingView==='dispatch')return renderPurchasingDispatchOrders();
@@ -75,7 +76,7 @@ function fn(name){const a=source.indexOf('function '+name+'('),b=source.indexOf(
    assert.match(await row.innerText(),/RNeasy Mini Kit/);assert.match(await row.innerText(),/74104/);assert.match(await row.innerText(),/YS-20261026-1/);assert.equal(await row.locator('測試').count(),0);
    const fields=await row.locator(':scope > td').evaluateAll(nodes=>nodes.map(n=>n.getAttribute('data-th')));
    assert.ok(fields.indexOf('產品資訊')<fields.indexOf('負責業務'));assert.equal(await row.locator('.workflow-product .workflow-quantity').count(),0);assert.match(await row.locator('td[data-th="進度"]').innerText(),/\d/);
-   assert.deepEqual(fields,['訂單日期','客戶名稱','產品資訊','負責業務','金額（含稅）','交易方式','進度','操作']);
+   assert.deepEqual(fields,[...(view==='ordering'?[null]:[]),'訂單日期','客戶名稱','產品資訊','負責業務','金額（含稅）','交易方式','進度','操作']);
    const money=await row.locator('td[data-th="金額（含稅）"]').innerText();
    const amounts={ordering:['600','263','43.83'],dispatch:['2,040','68','3.33'],completed:['2,040','68','3.33'],receiving:['1,200','32','2.67']}[view];
    assert.ok(money.includes('銷售金額：NT$ '+amounts[0]),money);
@@ -89,7 +90,19 @@ function fn(name){const a=source.indexOf('function '+name+'('),b=source.indexOf(
     return [...cell.querySelectorAll('button, .order-detail-panel > summary')].filter(el=>el.getClientRects().length)
       .every(el=>el.getBoundingClientRect().right<=boundary.right+1);
    }),view+' action controls fit at '+width+'px');
-   await row.locator('.order-detail-panel > summary').click();
+   if(view==='ordering'){
+    const selection=row.getByRole('checkbox',{name:'選取合併採購'});
+    await selection.check();
+    assert.equal(await row.locator('dialog[open]').count(),0);
+    await page.evaluate(()=>renderPendingPurchaseOrders());
+    assert.equal(await selection.isChecked(),true);
+    const date=await row.locator('td[data-th="訂單日期"]').boundingBox();
+    const checkbox=await selection.boundingBox();
+    assert.equal(checkbox.x>date.x,width<769);
+    assert.ok(Math.abs(checkbox.y-date.y)<44);
+   }
+   if(width<769) await row.locator('td[data-th="產品資訊"] .workflow-product').tap();
+   else await row.press('Enter');
    await row.locator('dialog[open]').waitFor({state:'visible'});
    assert.equal(await row.locator('dialog').evaluate(e=>e.open),true);
    assert.match(await row.locator('dialog').innerText(),/全部訂單品項[\s\S]*測試發票抬頭/);
@@ -109,7 +122,7 @@ function fn(name){const a=source.indexOf('function '+name+'('),b=source.indexOf(
    document.getElementById('purchaseWorkSearch').value='74104';renderPurchasingDispatchOrders();
   });
   const detail=page.locator('#purchaseDispatchBody .order-detail-panel');
-  await detail.locator(':scope > summary').click();await detail.locator('dialog[open]').waitFor();
+  await detail.locator('xpath=ancestor::tr').press('Space');await detail.locator('dialog[open]').waitFor();
   assert.match(await detail.innerText(),/同張訂單另一品項/);
   assert.match(await detail.innerText(),/50 × 3[\s\S]*150/);
   await detail.locator('[data-order-drawer-close]').click();

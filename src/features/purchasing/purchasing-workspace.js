@@ -1274,6 +1274,7 @@ function renderPendingPurchaseOrders(itemMap = null, filterContext = null) {
         const row=document.createElement('tr');
         row.innerHTML=`<td data-th="需求日期">${workflowRecordSummary(order,order.orderDate)}</td><td data-th="客戶／用途">${escapeHtml(order.customerName||order.customer||'')}</td><td data-th="待採購品項">${purchaseProductSummary(item,qty,null)}<div class="record-reference">待執行</div></td><td data-th="數量">${workflowQuantitySummary(qty,'待執行')}</td><td data-th="負責業務">${escapeHtml(order.salesName||'')}</td><td data-th="操作"><div class="workflow-inline-actions">${action}</div></td>`;
         organizePurchasingOrderRow(row,order,item,{qty});
+        row.insertAdjacentHTML('afterbegin', '<td class="workflow-selection-cell"></td>');
         fragment.appendChild(row);
         shown++;
     }
@@ -1330,8 +1331,9 @@ function renderPendingPurchaseOrders(itemMap = null, filterContext = null) {
 
         const row=document.createElement('tr');
         row.classList.add('procurement-demand-row');
-        row.innerHTML=`<td data-th="需求日期">${workflowRecordSummary(order, date)}</td><td data-th="客戶／用途">${selectionHtml}<span class="purchase-customer-name">${escapeHtml(customer)}</span><div class="record-reference">${!order?.orderNo && order?.quoteNo ? `來源估價單・${escapeHtml(order.quoteNo)}` : ''}</div></td><td data-th="待採購品項">${purchaseProductSummary({...demand, itemName:demand.itemName || item.itemName, itemCode:demand.itemCode || item.itemCode, brand}, qty, null)}</td><td data-th="數量">${workflowQuantitySummary(qty,'待採購')}${statusLabel==='待採購'?'':`<small class="purchase-item-description">${escapeHtml(statusLabel)}</small>`}</td><td data-th="負責業務">${escapeHtml(salesName)}</td><td data-th="操作"><div class="workflow-inline-actions">${actionHtml}</div></td>`;
+        row.innerHTML=`<td data-th="需求日期">${workflowRecordSummary(order, date)}</td><td data-th="客戶／用途"><span class="purchase-customer-name">${escapeHtml(customer)}</span><div class="record-reference">${!order?.orderNo && order?.quoteNo ? `來源估價單・${escapeHtml(order.quoteNo)}` : ''}</div></td><td data-th="待採購品項">${purchaseProductSummary({...demand, itemName:demand.itemName || item.itemName, itemCode:demand.itemCode || item.itemCode, brand}, qty, null)}</td><td data-th="數量">${workflowQuantitySummary(qty,'待採購')}${statusLabel==='待採購'?'':`<small class="purchase-item-description">${escapeHtml(statusLabel)}</small>`}</td><td data-th="負責業務">${escapeHtml(salesName)}</td><td data-th="操作"><div class="workflow-inline-actions">${actionHtml}</div></td>`;
         organizePurchasingOrderRow(row,order,item,{qty, productId:demand.productId || item.productId, estimate:true, targets});
+        row.insertAdjacentHTML('afterbegin', `<td class="workflow-selection-cell">${selectionHtml}</td>`);
         fragment.appendChild(row);
         shown++;
     }

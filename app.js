@@ -3334,15 +3334,27 @@ function bindOrderDetailDrawer(row) {
     const panel = row.querySelector('.order-detail-panel');
     const dialog = panel?.querySelector('.order-detail-drawer');
     if (!dialog) return;
-    const trigger = panel.querySelector(':scope > summary');
-    const close = () => { if (dialog.open) dialog.close(); panel.open = false; trigger.setAttribute('aria-expanded', 'false'); };
-    panel.addEventListener('toggle', () => {
-        trigger.setAttribute('aria-expanded', String(panel.open));
-        if (panel.open && dialog.isConnected && !dialog.open) dialog.showModal();
-        else if (!panel.open && dialog.open) dialog.close();
+    row.classList.add('workflow-detail-row');
+    row.tabIndex = 0;
+    row.setAttribute('aria-haspopup', 'dialog');
+    row.setAttribute('aria-label', [row.dataset.menuTitle, '開啟訂單明細'].filter(Boolean).join(' · '));
+    const open = () => {
+        if (!dialog.isConnected || dialog.open) return;
+        panel.open = true;
+        dialog.showModal();
+    };
+    const close = () => { if (dialog.open) dialog.close(); panel.open = false; };
+    row.addEventListener('click', event => {
+        if (event.defaultPrevented || event.target.closest('button, a, label, input, select, textarea, summary, details, dialog, [contenteditable], [role="button"]')) return;
+        open();
+    });
+    row.addEventListener('keydown', event => {
+        if (event.target !== row || !['Enter', ' '].includes(event.key)) return;
+        event.preventDefault();
+        if (!event.repeat) open();
     });
     dialog.addEventListener('cancel', event => { event.preventDefault(); close(); });
-    dialog.addEventListener('close', () => { if (!dialog.open) { panel.open = false; trigger.setAttribute('aria-expanded', 'false'); } });
+    dialog.addEventListener('close', () => { if (!dialog.open) panel.open = false; });
     dialog.addEventListener('click', event => {
         if (event.target.closest('[data-order-drawer-close]')) close();
         // Existing delivery/history forms are outside this modal. Release modal focus first.
@@ -3352,7 +3364,7 @@ function bindOrderDetailDrawer(row) {
             if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) close();
         }
     });
-    if (panel.open && !dialog.open) dialog.showModal();
+    if (panel.open) open();
 }
 
 function organizeOrderRowActions(row, stage) {
@@ -3399,7 +3411,7 @@ function workflowPurchaseOrderDetails(order) {
     if (!order) return '';
     const field=(label,value)=>`<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value || '未填寫')}</dd></div>`;
     const items=normalizedOrderItems(order);
-    return `<details class="order-detail-panel"><summary aria-haspopup="dialog" aria-expanded="false">明細</summary><dialog class="order-detail-drawer" aria-label="訂單明細"><header class="order-drawer-heading"><h3>訂單明細</h3><button type="button" class="btn-secondary" data-order-drawer-close autofocus>關閉</button></header><div class="order-detail-content"><section class="order-drawer-section"><h4>訂單摘要</h4><dl class="order-drawer-summary">${field('單號',order.orderNo)}${field('客戶',order.customerName||order.customer)}${field('負責業務',order.salesName)}${field('訂單日期',order.orderDate)}${field('訂單總額（含稅）',order.totalPrice==null?'待確認':'NT$ '+order.totalPrice)}</dl></section><section class="order-drawer-section"><h4>全部訂單品項</h4><div class="workflow-price-breakdown">${items.map(item=>`<div>${purchaseProductSummary(item,0,null)}${workflowSalesAmount(order,item)}<small>交付方式：${escapeHtml(globalThis.YushinOrderEntry?.deliveryLabel(item,order.shippingInstructions||{})||'未填寫')}</small></div>`).join('')}</div></section><section class="order-drawer-section"><h4>交易與備註</h4>${workflowCommercialSummary(order)}<dl class="order-drawer-summary">${field('訂單備註',order.remarks)}</dl></section><section class="order-drawer-section"><button type="button" class="btn-secondary" onclick="openOrderStatusHistory(${inlineJsValue(order.id)})">查看操作紀錄</button></section></div></dialog></details>`;
+    return `<details class="order-detail-panel"><summary hidden></summary><dialog class="order-detail-drawer" aria-label="訂單明細"><header class="order-drawer-heading"><h3>訂單明細</h3><button type="button" class="btn-secondary" data-order-drawer-close autofocus>關閉</button></header><div class="order-detail-content"><section class="order-drawer-section"><h4>訂單摘要</h4><dl class="order-drawer-summary">${field('單號',order.orderNo)}${field('客戶',order.customerName||order.customer)}${field('負責業務',order.salesName)}${field('訂單日期',order.orderDate)}${field('訂單總額（含稅）',order.totalPrice==null?'待確認':'NT$ '+order.totalPrice)}</dl></section><section class="order-drawer-section"><h4>全部訂單品項</h4><div class="workflow-price-breakdown">${items.map(item=>`<div>${purchaseProductSummary(item,0,null)}${workflowSalesAmount(order,item)}<small>交付方式：${escapeHtml(globalThis.YushinOrderEntry?.deliveryLabel(item,order.shippingInstructions||{})||'未填寫')}</small></div>`).join('')}</div></section><section class="order-drawer-section"><h4>交易與備註</h4>${workflowCommercialSummary(order)}<dl class="order-drawer-summary">${field('訂單備註',order.remarks)}</dl></section><section class="order-drawer-section"><button type="button" class="btn-secondary" onclick="openOrderStatusHistory(${inlineJsValue(order.id)})">查看操作紀錄</button></section></div></dialog></details>`;
 }
 // Keep stage-specific action handlers and quantities; only reorganize the presentation.
 function organizePurchasingOrderRow(row, order, item, finance) {
@@ -3420,6 +3432,7 @@ function organizePurchasingOrderRow(row, order, item, finance) {
     const commercial=document.createElement('td');commercial.dataset.th='交易方式';commercial.textContent=order?.transactionType || '—';
     const actions=find('操作');
     const area=actions?.querySelector('.workflow-inline-actions')||actions;
+    area?.classList.add('workflow-inline-actions');
     if (order&&area) area.insertAdjacentHTML('afterbegin',workflowPurchaseOrderDetails(order));
     [find('訂單日期')||find('需求日期'),customer,product,find('負責業務'),money,commercial,progress||quantity,actions].filter(Boolean).forEach(cell=>row.appendChild(cell));
     bindOrderDetailDrawer(row);
@@ -12764,7 +12777,7 @@ window.renderOrdersList = function() {
             <td data-th="進度" class="order-progress-cell"><span class="order-progress-badge">${o.isBilled ? '已核銷' : '未核銷'}</span>${orderItems.map((item,index)=>{const displayCategories=displayCategoriesByItem.get(item)||[];const primaryStatus=displayCategories[0]||'ordering';const itemStatus=['dispatch','shipping'].includes(activeOrderWorkFilter)&&displayCategories.includes(activeOrderWorkFilter)?activeOrderWorkFilter:primaryStatus;const itemStatusMap={ordering:'待採購',arrival:'待到貨',dispatch:'待打單',shipping:'待送貨',billing:'待核銷',complete:'已完成',closed:lifecycle.label};const waiting=primaryStatus==='arrival'?waitingDaysFromDate(item.orderedAt):'';const state=dispatchStateByItem.get(item)||itemDispatchState(o,item);const receipt=primaryStatus==='arrival'?receivingWorkProgress(o,item):null;return `<div class="workflow-progress-item">${orderItems.length>1?`<strong>${escapeHtml(item.itemName||item.itemCode||'品項')}</strong>`:''}<small class="order-item-work-status"><span class="order-progress-badge">${escapeHtml(((lifecycle.status==='normal'&&orderInventorySyncIncomplete(o)) ? (o.inventoryReservationStatus==='failed'?'庫存同步未完成':'庫存同步中…') : ((YushinWorkflow.isServiceItem(item)&&lifecycle.status==='normal'?(itemStatus==='ordering'?'待執行':(itemStatusMap[itemStatus]||'待服務處理')):(lifecycle.status==='normal'&&globalThis.YushinWarehouseLogistics?.shippingStatus(o,item,state)))||itemStatusMap[itemStatus]||'待採購')))}</span>${waiting?`・已等 ${escapeHtml(waiting)}`:''}${state.pending>0?`<span class="workflow-quantity">待打單 ${escapeHtml(state.pending)}</span>`:''}${receipt?`<span class="workflow-quantity">已到貨 ${escapeHtml(receipt.received)}／應到貨 ${escapeHtml(receipt.target)}・待到貨 ${escapeHtml(receipt.remaining)}</span>`:''}${state.shippable>0?`・已有 ${escapeHtml(state.shippable)} 可出貨`:''}</small></div>`}).join('')}</td>
             <td class="no-print" data-th="操作"><div class="workflow-inline-actions">
                 <details class="order-detail-panel" data-order-id="${escapeAttr(displayRowKey)}" ${openedDetails.has(displayRowKey)?'open':''}>
-                    <summary aria-haspopup="dialog" aria-expanded="false">明細${window.orderCommercialEditPending?.has(o.id)?'（儲存中…）':''}</summary>
+                    <summary hidden></summary>
                     <dialog class="order-detail-drawer" aria-label="訂單明細"><header class="order-drawer-heading"><h3>訂單明細</h3><button type="button" class="btn-secondary" data-order-drawer-close autofocus>關閉</button></header><div class="order-detail-content"><section class="order-drawer-section"><h4>訂單摘要</h4><dl class="order-drawer-summary"><div><dt>單號</dt><dd>${escapeHtml(o.orderNo||'—')}</dd></div><div><dt>客戶</dt><dd>${escapeHtml(o.customerName||'—')}</dd></div><div><dt>負責業務</dt><dd>${escapeHtml(stripPhoneSuffix(o.salesName))}</dd></div><div><dt>訂單日期</dt><dd>${escapeHtml(o.orderDate||'—')}</dd></div><div><dt>訂單總額</dt><dd>NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice??'').replace(/,/g,''))||0).toLocaleString())}</dd></div></dl>${o.quoteNo?`<div class="record-reference">來源估價單 ${escapeHtml(o.quoteNo)}</div>`:''}</section><section class="order-drawer-section"><h4>全部訂單品項</h4><div class="workflow-price-breakdown">${allOrderItems.map(item=>`<div class="${orderItems.includes(item)?'is-current-work-item':''}"><strong>${escapeHtml(item.itemName||item.itemCode||'品項')}</strong>${orderItems.includes(item)?'<small class="order-current-item-label">目前分頁品項</small>':''}<small>${escapeHtml(lifecycle.status!=='normal'?lifecycle.label:(YushinWorkflow.isServiceItem(item)?(displayCategoriesByItem.get(item)||[]).map(category=>category==='ordering'?'待執行':category==='delivery'?'待服務處理':workflowWorkCategoryLabel(category)).join('・'):globalThis.YushinWarehouseLogistics?.shippingStatus(o,item,dispatchStateByItem.get(item))||(displayCategoriesByItem.get(item)||[]).map(workflowWorkCategoryLabel).join('・')))}</small>${workflowSalesAmount(o,item)}</div>`).join('')}</div></section><section class="order-drawer-section"><h4>交付資料</h4>
                         <div class="order-item-prices">${allOrderItems.map(item => `<div><strong>${escapeHtml(item.itemName||item.itemCode||'品項')}</strong><div>採購方式：${escapeHtml(globalThis.YushinOrderCommercialDetails.procurementLabel(item))}</div><div>交付方式：${escapeHtml(globalThis.YushinOrderEntry.deliveryLabel({fulfillmentType:item.fulfillmentType,deliveryPlan:item.deliveryPlan||o.shippingInstructions||{}}))}</div>${canEditOrders&&lifecycle.status==='normal'&&!detailsLocked&&(currentUserRole==='admin'||o.ownerUid===currentUser?.uid||canReceiveInventoryCapability())&&!globalThis.YushinOrderCommercialDetails.itemMoved(item)?`<button type="button" class="btn-small btn-secondary" onclick="openWarehouseDeliveryPlan(${inlineJsValue(o.id)},${inlineJsValue(item.itemId)})">修改交付方式／地址</button>`:''}</div>`).join('')}</div>
                         </section><section class="order-drawer-section"><h4>交易與備註</h4><dl class="order-drawer-summary order-commercial-summary"><div><dt>交易方式</dt><dd>${escapeHtml(o.transactionType||'未選擇')}</dd></div><div><dt>發票抬頭</dt><dd>${escapeHtml(o.invoiceTitle||'—')}</dd></div><div><dt>訂單備註</dt><dd>${escapeHtml(o.remarks||'—')}</dd></div></dl><details class="order-commercial-editor" ${openedEditors.has(displayRowKey)?'open':''}><summary>${detailsEditable?'編輯交易與備註':canManageOrderOps?'成本與交易設定':'查看交易設定'}</summary>${detailsLocked?'<small>已到貨或進入交付流程，訂單交付設定、交易方式及訂單備註已鎖定。</small>':''}
@@ -14286,6 +14299,7 @@ function renderPendingPurchaseOrders(itemMap = null, filterContext = null) {
         const row=document.createElement('tr');
         row.innerHTML=`<td data-th="需求日期">${workflowRecordSummary(order,order.orderDate)}</td><td data-th="客戶／用途">${escapeHtml(order.customerName||order.customer||'')}</td><td data-th="待採購品項">${purchaseProductSummary(item,qty,null)}<div class="record-reference">待執行</div></td><td data-th="數量">${workflowQuantitySummary(qty,'待執行')}</td><td data-th="負責業務">${escapeHtml(order.salesName||'')}</td><td data-th="操作"><div class="workflow-inline-actions">${action}</div></td>`;
         organizePurchasingOrderRow(row,order,item,{qty});
+        row.insertAdjacentHTML('afterbegin', '<td class="workflow-selection-cell"></td>');
         fragment.appendChild(row);
         shown++;
     }
@@ -14342,8 +14356,9 @@ function renderPendingPurchaseOrders(itemMap = null, filterContext = null) {
 
         const row=document.createElement('tr');
         row.classList.add('procurement-demand-row');
-        row.innerHTML=`<td data-th="需求日期">${workflowRecordSummary(order, date)}</td><td data-th="客戶／用途">${selectionHtml}<span class="purchase-customer-name">${escapeHtml(customer)}</span><div class="record-reference">${!order?.orderNo && order?.quoteNo ? `來源估價單・${escapeHtml(order.quoteNo)}` : ''}</div></td><td data-th="待採購品項">${purchaseProductSummary({...demand, itemName:demand.itemName || item.itemName, itemCode:demand.itemCode || item.itemCode, brand}, qty, null)}</td><td data-th="數量">${workflowQuantitySummary(qty,'待採購')}${statusLabel==='待採購'?'':`<small class="purchase-item-description">${escapeHtml(statusLabel)}</small>`}</td><td data-th="負責業務">${escapeHtml(salesName)}</td><td data-th="操作"><div class="workflow-inline-actions">${actionHtml}</div></td>`;
+        row.innerHTML=`<td data-th="需求日期">${workflowRecordSummary(order, date)}</td><td data-th="客戶／用途"><span class="purchase-customer-name">${escapeHtml(customer)}</span><div class="record-reference">${!order?.orderNo && order?.quoteNo ? `來源估價單・${escapeHtml(order.quoteNo)}` : ''}</div></td><td data-th="待採購品項">${purchaseProductSummary({...demand, itemName:demand.itemName || item.itemName, itemCode:demand.itemCode || item.itemCode, brand}, qty, null)}</td><td data-th="數量">${workflowQuantitySummary(qty,'待採購')}${statusLabel==='待採購'?'':`<small class="purchase-item-description">${escapeHtml(statusLabel)}</small>`}</td><td data-th="負責業務">${escapeHtml(salesName)}</td><td data-th="操作"><div class="workflow-inline-actions">${actionHtml}</div></td>`;
         organizePurchasingOrderRow(row,order,item,{qty, productId:demand.productId || item.productId, estimate:true, targets});
+        row.insertAdjacentHTML('afterbegin', `<td class="workflow-selection-cell">${selectionHtml}</td>`);
         fragment.appendChild(row);
         shown++;
     }
