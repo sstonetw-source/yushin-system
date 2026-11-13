@@ -5488,3 +5488,16 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
 @media screen and (min-width:769px) {
  #appContainer #ordersTable .order-more-menu > summary { height:38px; min-width:38px; width:38px; }
 }
+
+@media screen {
+    #poModalOverlay .po-editor-actions {
+        display:flex;
+        justify-content:flex-end;
+        flex-wrap:wrap;
+        gap:8px;
+    }
+    #poModalOverlay .po-editor-actions button { margin:0; }
+}
+@media screen and (max-width:768px) {
+    #poModalOverlay .po-editor-actions button { min-height:44px; }
+}

@@ -766,6 +766,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   await page.locator('#poVendorName').blur();
   await page.locator('#printPurchaseOrderBtn').click();
   await page.waitForFunction(()=>!poSaveInProgress&&poEditingId&&window.poPdfOutputs.length===1);
+  assert.equal(await page.locator('#poModalOverlay').isVisible(),true,'PDF export keeps the editor open');
   const draftPoId=await page.evaluate(()=>poEditingId);
   const preparedPo=(await db.collection('purchaseOrders').doc(draftPoId).get()).data();
   assert.equal(preparedPo.status,'DRAFT');assert.equal(preparedPo.documentOnly,true);
@@ -1699,7 +1700,11 @@ for(const width of [1280,390])test('full site '+width+'px original multi-item pu
     await page.locator('#confirmFormalPurchasePendingBtn').click();
     await page.waitForFunction(key=>!sessionStorage.getItem(key),pendingKey,{timeout:45000});
     assert.deepEqual(purchaseCalls.at(-1),intent,'reload retries the original multi-line intent');
-   }else await page.locator('#poModalOverlay.active').waitFor({state:'hidden'});
+   }else {
+    await page.locator('#poModalOverlay.active').waitFor({state:'visible'});
+    await page.locator('#confirmPoOrderedBtn').waitFor({state:'hidden'});
+    await page.locator('#poModalOverlay button[onclick="closePurchaseOrderModal()"]').click();
+   }
    const saved=(await db.collection('purchaseOrders').doc(poNo).get()).data();
    assert.equal(saved.status,'ORDERED');assert.equal(saved.documentOnly,false);assert.equal(saved.supplyOrderIds.length,itemIds.length);
    return poNo;
@@ -2011,7 +2016,9 @@ for(const width of [1280,390])test('full site '+width+'px original multi-item pu
   await page.waitForFunction(()=>document.getElementById('orderItemCode').dataset.productCheckStatus==='matched');
   await page.locator('#orderQty').fill('1');await page.locator('#orderUnitPrice').fill('275');
   await page.locator('#orderTransactionType').selectOption('借');
-  await page.locator('#saveNewOrderBtn').click();await page.locator('#orderModalOverlay.active').waitFor({state:'hidden'});
+  await page.locator('#saveNewOrderBtn').click();
+  await page.getByRole('button',{name:'訂單已建立',exact:true}).waitFor({state:'visible'});
+  await page.locator('#orderModalOverlay').getByRole('button',{name:'關閉',exact:true}).click();
   await page.waitForFunction(source=>ordersCache.some(o=>o.returnReorderSource?.orderId===source&&o.inventoryReservationStatus==='completed'),x.orderId,{timeout:45000});
   const owned=await db.collection('orders').where('createdByUid','==',x.accounts.sales.uid).get();
   const reordered=owned.docs.filter(d=>d.data().returnReorderSource?.orderId===x.orderId);
@@ -2102,7 +2109,9 @@ for(const multi of [false,true])for(const width of [1280,390])test('full site '+
    await page.locator('#orderShippingAddress').fill('台北市手動多品項驗收地址');
   }
   await page.locator('#orderTransactionType').selectOption('借');
-  await page.locator('#saveNewOrderBtn').click();await page.locator('#orderModalOverlay.active').waitFor({state:'hidden'});
+  await page.locator('#saveNewOrderBtn').click();
+  await page.getByRole('button',{name:'訂單已建立',exact:true}).waitFor({state:'visible'});
+  await page.locator('#orderModalOverlay').getByRole('button',{name:'關閉',exact:true}).click();
   await page.waitForFunction(uid=>ordersCache.some(o=>o.createdByUid===uid&&o.inventoryReservationStatus==='completed'),uid,{timeout:45000});
   const snapshot=await db.collection('orders').where('createdByUid','==',uid).get();assert.equal(snapshot.size,1);
   const orderId=snapshot.docs[0].id,order=snapshot.docs[0].data(),item=order.items[0];
@@ -2197,7 +2206,9 @@ for(const mixed of [false,true])for(const width of [1280,390])test('full site '+
    // must discover the warehouse holding this Goods product itself.
   }
   await page.locator('#orderTransactionType').selectOption('借');
-  await page.locator('#saveNewOrderBtn').click();await page.locator('#orderModalOverlay.active').waitFor({state:'hidden'});
+  await page.locator('#saveNewOrderBtn').click();
+  await page.getByRole('button',{name:'訂單已建立',exact:true}).waitFor({state:'visible'});
+  await page.locator('#orderModalOverlay').getByRole('button',{name:'關閉',exact:true}).click();
   await page.waitForFunction(uid=>ordersCache.some(o=>o.createdByUid===uid&&o.inventoryReservationStatus==='completed'),uid,{timeout:45000});
   const snapshot=await db.collection('orders').where('createdByUid','==',uid).get();assert.equal(snapshot.size,1);
   const orderId=snapshot.docs[0].id,order=snapshot.docs[0].data(),service=order.items.find(i=>i.productId===serviceKey);

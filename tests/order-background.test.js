@@ -4,7 +4,8 @@ const chain=src.slice(src.indexOf("    let createdOrderId = '';",src.indexOf('wi
 function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b});return {promise,resolve,reject};}
 function setup(){
  const create=deferred(),reserve=deferred(),events=[],storage=new Map([['pending','O1'],['draft','original']]);
- const x=vm.createContext({window:{_orderModalSourceLink:'old'},currentUser:{uid:'U1'},savingUid:'U1',savingGeneration:1,orderModalOpenGeneration:1,savedDraftKey:'draft',savedPendingKey:'pending',
+ const status={textContent:''};
+ const x=vm.createContext({document:{getElementById:()=>status},window:{_orderModalSourceLink:'old'},currentUser:{uid:'U1'},savingUid:'U1',savingGeneration:1,orderModalOpenGeneration:1,savedDraftKey:'draft',savedPendingKey:'pending',
  localStorage:{getItem:k=>storage.get(k),removeItem:k=>storage.delete(k)},data:{inventoryReservationStatus:'pending',customerName:'C',orderDate:'2026-10-04'},
  pendingOrderReservationIds:new Set(),createOrResumeNewOrder:()=>create.promise,reserveInventoryForNewOrder:async()=>{events.push('reserve');await reserve.promise;},
  db:{collection:()=>({doc:()=>({set:async()=>{}})})},inventoryProductKey:()=> 'P1',orderReservationSummary:()=>({}),rememberRecentCustomerName(){},syncNewOrderSourceDocuments:async()=>null,
@@ -12,18 +13,18 @@ function setup(){
  saveButton:{disabled:true,innerText:'儲存中'},newOrderSaveInProgress:true,console
  });
  x.synchronizeOrderInventory=async(id,order)=>{try{const result=await x.reserveInventoryForNewOrder(id,order);order.inventoryReservationStatus='completed';return result;}catch(error){order.inventoryReservationStatus='failed';throw error;}};
- return {x,create,reserve,events,storage,run:()=>vm.runInContext(`(async()=>{${chain}})()`,x)};
+ return {x,create,reserve,events,storage,status,run:()=>vm.runInContext(`(async()=>{${chain}})()`,x)};
 }
 async function tick(){await new Promise(r=>setImmediate(r));}
-test('order closes only after confirmed creation and releases form before inventory synchronization completes',async()=>{
+test('confirmed creation keeps the form open and blocks resubmission during background synchronization',async()=>{
  const a=setup(),p=a.run();assert.equal(a.events.includes('closed'),false);a.create.resolve({id:'O1',data:a.x.data});await tick();
- assert.equal(a.events.includes('closed'),true);assert.equal(a.x.newOrderSaveInProgress,false);assert.equal(a.x.ordersCache[0].inventoryReservationStatus,'pending');assert.equal(a.storage.has('pending'),false);
+ assert.equal(a.events.includes('closed'),false);assert.equal(a.x.saveButton.disabled,true);assert.match(a.status.textContent,/已儲存/);assert.equal(a.x.newOrderSaveInProgress,false);assert.equal(a.x.ordersCache[0].inventoryReservationStatus,'pending');assert.equal(a.storage.has('pending'),false);
  a.reserve.resolve();await p;assert.equal(a.x.ordersCache[0].inventoryReservationStatus,'completed');
 });
 test('old background completion does not clear a new form or release its active save',async()=>{
  const a=setup(),p=a.run();a.create.resolve({id:'O1',data:a.x.data});await tick();
  a.x.orderModalOpenGeneration=2;a.x.newOrderSaveInProgress=true;a.x.saveButton.disabled=true;a.x.window._orderModalSourceLink='new';a.storage.set('draft','new draft');
- a.reserve.resolve();await p;assert.equal(a.x.newOrderSaveInProgress,true);assert.equal(a.x.saveButton.disabled,true);assert.equal(a.x.window._orderModalSourceLink,'new');assert.equal(a.storage.get('draft'),'new draft');assert.equal(a.events.filter(e=>e==='closed').length,1);
+ a.reserve.resolve();await p;assert.equal(a.x.newOrderSaveInProgress,true);assert.equal(a.x.saveButton.disabled,true);assert.equal(a.x.window._orderModalSourceLink,'new');assert.equal(a.storage.get('draft'),'new draft');assert.equal(a.events.filter(e=>e==='closed').length,0);
 });
 test('background failure retains the created order and exposes retry state without a blocking alert',async()=>{
  const a=setup(),p=a.run();a.create.resolve({id:'O1',data:a.x.data});await tick();a.reserve.reject(Error('offline'));await p;

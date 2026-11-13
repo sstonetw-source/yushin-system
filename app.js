@@ -18494,8 +18494,6 @@ function updatePoSaveButton() {
     const button = document.getElementById('printPurchaseOrderBtn');
     if (!button) return;
     const waitingForNumber = !poEditingId && !poNoReady;
-    const draftButton=document.getElementById('savePoDraftBtn');
-    if(draftButton) draftButton.disabled=poSaveInProgress||poDraftLoading||waitingForNumber;
     const confirmButton = document.getElementById('confirmPoOrderedBtn');
     if (confirmButton) confirmButton.disabled=poConfirmInProgress||waitingForNumber||poSaveInProgress||poDraftLoading||(typeof formalPurchaseRecoveryRunning!=='undefined'&&formalPurchaseRecoveryRunning);
     const copyButton = document.getElementById('poCopyAsNewBtn');
@@ -18659,7 +18657,7 @@ window.openDirectStockPurchase = async function(product = null) {
         renderPoItemsTable();
     }
     updatePoModeUI();
-    updatePoSaveStatus('這張採購單尚未建立。確認品項、供應商與單價後，可儲存草稿或直接確認已採購。');
+    updatePoSaveStatus('這張採購單尚未建立。確認品項、供應商與單價後，可下載 PDF 或確認已採購。');
     document.getElementById('poModalOverlay').classList.add('active');
 
     // 備貨單的空白表單不依賴雲端主檔，先立即顯示；供應商與預設倉庫在背景補齊。
@@ -18810,8 +18808,6 @@ function updatePoModeUI() {
     const hasOutstanding = !!savedPo && !isPurchaseTerminalStatus(savedPo.status) && purchaseItemsFromSavedPo(savedPo).some((_, index) => Number(purchaseHistoryItemReceiptProgress(savedPo, index).remainingQty) > 0);
     const confirmBtn = document.getElementById('confirmPoOrderedBtn');
     if (confirmBtn) { confirmBtn.hidden = !!savedPo && savedPo.status!=='DRAFT'; confirmBtn.disabled=poSaveInProgress||poDraftLoading; }
-    const draftBtn=document.getElementById('savePoDraftBtn');
-    if(draftBtn)draftBtn.hidden=!!savedPo && savedPo.status!=='DRAFT';
     const warehouseSelect=document.getElementById('poDefaultWarehouse');
     if(warehouseSelect){
         if(warehouseSelect.parentElement)warehouseSelect.parentElement.hidden=!poDirectStockMode;
@@ -19304,8 +19300,6 @@ async function printSavedPoDocument(poNo, vendorName) {
     let stage = null;
     const button = document.getElementById('printPurchaseOrderBtn');
     const download = options.download !== false;
-    const modalGeneration = poDirectStockOpenGeneration;
-    const exportingPoId = poEditingId;
     try {
         if (typeof window.html2canvas !== 'function' || !window.jspdf?.jsPDF) {
             throw new Error('PDF 元件尚未載入');
@@ -19347,7 +19341,6 @@ async function printSavedPoDocument(poNo, vendorName) {
                 return {blob,fileName};
             }
             updatePoSaveStatus('✓ 採購單 PDF 已產生');
-            if(poDirectStockOpenGeneration===modalGeneration&&poEditingId===exportingPoId)closePurchaseOrderModal();
             showActionFeedback(`採購單 ${poNo} PDF 已匯出。`,'success');
         }else{
             updatePoSaveStatus('✓ 採購單 PDF 附件已準備');
@@ -19531,7 +19524,6 @@ window.printPurchaseOrder = async function({download=true} = {}) {
 // 「製作下一張估價單」：手動觸發，不會因為誤按列印視窗的取消鈕就被清空。
 // 按下後會先確認，避免不小心點到把還沒印的內容洗掉；確認後清空表單、單號跳下一號，
 // 並且立刻把這個「全新、還是空的」狀態存成本機草稿，這樣萬一使用者按完馬上關網頁，
-// 重開時看到的會是這張全新的空白單，而不是被清掉的上一張。
 
 function directPoWarehouseOptions(selected){
     return '<option value="">請選擇入庫倉庫</option>'+warehouseMasterCache.filter(warehouse=>warehouse.active!==false&&!warehouse.systemCustody&&warehouse.warehouseType!=='CUSTODY'&&!warehouse.id.startsWith('custody-')).map(warehouse=>`<option value="${escapeAttr(warehouse.id)}" ${warehouse.id===selected?'selected':''}>${escapeHtml(warehouse.name||warehouse.warehouseName||warehouse.id)}</option>`).join('');
@@ -19547,7 +19539,6 @@ window.chooseDirectPoProduct=async function(index,value){
     if(match){try {await applyDirectPoProduct(index,item.itemCode,match);}
         catch(error){updatePoSaveStatus('商品成本讀取失敗，請重新選擇商品：'+error.message,true);}}
 };
-window.savePoDraft=()=>printPurchaseOrder({download:false});
 window.confirmCurrentPurchaseOrder=async function(){
     if(poConfirmInProgress||poSaveInProgress||poDraftLoading||formalPurchaseRecoveryRunning)return;
     poConfirmInProgress=true;
@@ -19650,6 +19641,10 @@ async function recoverFormalPurchase() {
         const result = await commitFormalPurchaseOrder(pending.poRecord, {actorUid:uid, actorRole:role});
         check();
         const savedPo = cacheCommittedFormalPurchase(result);
+        if (poEditingId === savedPo.id && document.getElementById('poModalOverlay')?.classList.contains('active')) {
+            renderPoItemsTable();
+            updatePoModeUI();
+        }
         stage='在途登記';
         if(typeof updatePoSaveStatus==='function')updatePoSaveStatus(`採購單 ${savedPo.poNo} 已確認採購，正在登記在途…`);
         await registerPurchaseIncoming(savedPo.id, savedPo,
@@ -19667,9 +19662,8 @@ async function recoverFormalPurchase() {
                 purchasingViewLoaded.add('ordering');
         }
         if (poEditingId === savedPo.id) poIncomingSyncPending = false;
-        if (document.getElementById('poModalOverlay')?.classList.contains('active')
-            && document.getElementById('poNo')?.textContent?.trim() === savedPo.poNo)
-            closePurchaseOrderModal();
+        if (poEditingId === savedPo.id && document.getElementById('poModalOverlay')?.classList.contains('active'))
+            updatePoSaveStatus(`採購單 ${savedPo.poNo} 已確認採購，在途同步完成。`);
         showActionFeedback(`採購單 ${savedPo.poNo} 已確認，在途同步完成；可由原採購單下載 PDF。`, 'success');
         renderPurchasingView();
     } catch (error) {
@@ -24428,6 +24422,10 @@ window.openOrderModal = function(source = null) {
     const overlay = document.getElementById('orderModalOverlay');
     if (!overlay) return;
     const openingGeneration = ++orderModalOpenGeneration;
+    const saveButton = document.getElementById('saveNewOrderBtn');
+    const saveStatus = document.getElementById('newOrderSaveStatus');
+    if (saveButton) { saveButton.disabled = newOrderSaveInProgress; saveButton.textContent = '建立訂單'; }
+    if (saveStatus) saveStatus.textContent = '';
     const openingCode=document.getElementById('orderItemCode');
     if(openingCode){delete openingCode.dataset.matchedProductCode;delete openingCode.dataset.autofillBrand;delete openingCode.dataset.productCheckStatus;delete openingCode.dataset.preserveOrderPriceCode;clearQuickProductButton(openingCode);clearProductMatchChoices(openingCode);}
     const recoveryBanner = document.getElementById('orderDraftRecoveryBanner');
@@ -24727,7 +24725,7 @@ function showActionFeedback(message, type = 'success') {
 }
 
 window.saveNewOrder = function() {
-    if (newOrderSaveInProgress) return;
+    if (newOrderSaveInProgress || document.getElementById('saveNewOrderBtn')?.disabled) return;
     const fulfillmentType=document.getElementById('orderFulfillmentType')?.value||'WAREHOUSE';
     const warehouseId=fulfillmentType==='DIRECT_SHIP'?'':document.getElementById('orderWarehouse')?.value||'';
     const sharedPlan=window.orderShippingInstructions?.()||{};
@@ -24881,8 +24879,8 @@ window.saveNewOrder = function() {
         const pendingConfirmedSelfOrder=Array.isArray(data.items)&&data.items.some(item=>
             (item.procurementType||data.procurementType)==='SALES_SELF_ORDER'&&item.selfOrderConfirmed===true);
         newOrderSaveInProgress=false;
-        if(saveButton){saveButton.disabled=false;saveButton.innerText='建立訂單';}
-        // 正式文件確認寫入後即釋放表單；庫存與來源文件同步使用這份獨立快照。
+        if(saveButton){saveButton.disabled=savingGeneration===orderModalOpenGeneration;saveButton.innerText=saveButton.disabled?'訂單已建立':'建立訂單';}
+        // 正式文件確認寫入後鎖住本次送出；庫存與來源文件同步使用獨立快照。
         pendingOrderReservationIds.add(docRef.id);
         if(currentUser?.uid===savingUid){
             rememberRecentCustomerName(data.customerName);
@@ -24894,11 +24892,12 @@ window.saveNewOrder = function() {
             if(localStorage.getItem(savedPendingKey)===docRef.id)localStorage.removeItem(savedPendingKey);
             if(savingGeneration===orderModalOpenGeneration){
                 localStorage.removeItem(savedDraftKey);
-                closeOrderModal();
+                const status = document.getElementById('newOrderSaveStatus');
+                if (status) status.textContent = '訂單資料已儲存。';
             }
             showActionFeedback(pendingConfirmedSelfOrder
                 ? '訂單已暫存；供應商已下訂與庫存預留須由後端同時確認，尚未完成前不能視為正式已下訂。'
-                : '訂單已建立，庫存正在背景同步；可繼續建立其他訂單。',
+                : '訂單已建立，庫存正在背景同步。',
                 pendingConfirmedSelfOrder?'warning':'success');
         }
         let reservation;
