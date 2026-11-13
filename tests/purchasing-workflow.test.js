@@ -123,7 +123,7 @@ test('purchase order action distinguishes creation from downloading an existing 
     const end = app.indexOf('function purchaseItemsFromSavedPo', start);
     const source = app.slice(start, end);
     assert.match(source, /'下載 PDF'/);
-    assert.match(html, /id="savePoDraftBtn"/);
+    assert.doesNotMatch(html, /id="savePoDraftBtn"/);
     assert.doesNotMatch(source, /重試同步在途庫存/);
 });
 

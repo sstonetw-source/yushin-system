@@ -40,7 +40,7 @@ const {chromium}=require('playwright-core'),{spawnSync}=require('node:child_proc
  assert.equal(await page.locator('select[aria-label="入庫倉庫"]').inputValue(),'BRANCH');
  assert.equal(await page.locator('select[aria-label="入庫倉庫"] option').count(),3);
  assert.deepEqual(await page.locator('#poItemsTable th').allTextContents(),['貨號','廠牌','品名','入庫倉庫','數量','未稅進貨單價','小計','操作']);
- for(const width of [1440,390]){
+ for(const width of [1440,1024,390]){
   await page.setViewportSize({width,height:1000});
   const bounds=await page.locator('#poItemsTable').boundingBox();assert.ok(bounds.width<width);
   assert.equal(await page.locator('#poItemsTable thead').evaluate(el=>getComputedStyle(el).display),width===390?'none':'table-header-group');
@@ -53,13 +53,27 @@ const {chromium}=require('playwright-core'),{spawnSync}=require('node:child_proc
   const calls=[];let finish;
   window.printPurchaseOrder=async options=>{calls.push(['save',options.download]);return {id:'PO1'};};
   window.confirmSavedPurchaseOrder=async id=>{calls.push(['confirm',id]);await new Promise(resolve=>finish=resolve);};
-  await savePoDraft();
   const first=confirmCurrentPurchaseOrder();
   await Promise.resolve();await confirmCurrentPurchaseOrder();
   finish();await first;return calls;
  });
- assert.deepEqual(actions,[['save',false],['save',false],['confirm','PO1']]);
- await page.evaluate(()=>document.getElementById('poModalOverlay').classList.remove('active'));
+ assert.deepEqual(actions,[['save',false],['confirm','PO1']]);
+ const purchaseOverlay=page.locator('#poModalOverlay');
+ assert.equal(await purchaseOverlay.isVisible(),true);
+ assert.equal(await purchaseOverlay.getByRole('button',{name:'儲存草稿'}).count(),0);
+ await page.mouse.click(1,1);
+ assert.equal(await purchaseOverlay.isVisible(),true);
+ await purchaseOverlay.getByRole('button',{name:'關閉',exact:true}).click();
+ assert.equal(await purchaseOverlay.isVisible(),false);
+ await page.evaluate(()=>{
+  window.closeOrderModal=()=>document.getElementById('orderModalOverlay').classList.remove('active');
+  document.getElementById('orderModalOverlay').classList.add('active');
+ });
+ const orderOverlay=page.locator('#orderModalOverlay');
+ await page.mouse.click(1,1);
+ assert.equal(await orderOverlay.isVisible(),true);
+ await orderOverlay.getByRole('button',{name:'關閉',exact:true}).click();
+ assert.equal(await orderOverlay.isVisible(),false);
  await page.addScriptTag({content:fs.readFileSync('modules/receiving-core.js','utf8')});
  await page.addScriptTag({content:fs.readFileSync('modules/supply-core.js','utf8')});
  await page.addScriptTag({content:fs.readFileSync('modules/workflow-core.js','utf8')});
@@ -99,6 +113,6 @@ const {chromium}=require('playwright-core'),{spawnSync}=require('node:child_proc
  await page.locator('#purchaseWorkSearch').fill('PO1');await page.evaluate(()=>renderPurchasingReceivingWorkList());assert.equal(await page.locator('#poListBody tr').count(),1);
  await page.locator('#purchaseWorkSearch').fill('無此貨號');await page.evaluate(()=>renderPurchasingReceivingWorkList());assert.equal(await page.locator('#poListBody tr').count(),0);
  assert.deepEqual(pageErrors,[]);
- console.log('PASS real Chrome fixtures: desktop/mobile editor and receiving list, ambiguous product choice, physical warehouses, draft/confirm without PDF, duplicate click, PO search and empty state');
+ console.log('PASS real Chrome fixtures: desktop/mobile editor and receiving list, ambiguous product choice, physical warehouses, confirmation without PDF, explicit dialog close, duplicate click, PO search and empty state');
  }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});
