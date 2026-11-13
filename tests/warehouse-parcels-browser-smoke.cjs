@@ -172,6 +172,16 @@ const setup=`
   assert.doesNotMatch(await page.locator('#warehouseParcelStatus').innerText(),/處理中／待核對/);
   assert.equal(requests.length,requestCount,'restoring a stopped task never resubmits');
   assert.equal(await page.evaluate(()=>localStorage.getItem(Object.keys(localStorage).find(k=>k.startsWith('warehouse-parcels:')))),storedBefore,'display normalization preserves original task');
+  await page.getByRole('button',{name:'隱藏此訊息',exact:true}).click();
+  const hidden=page.locator('.parcel-hidden-notices');
+  await hidden.locator('summary').first().waitFor();
+  assert.equal(await page.locator('.parcel-task:visible').count(),0);
+  await mount();
+  await page.locator('.parcel-hidden-notices > summary').click();
+  await hidden.getByRole('button',{name:'還原此訊息',exact:true}).click();
+  await hidden.waitFor({state:'detached'});
+  assert.equal(await page.locator('.parcel-task:visible').count(),1);
+  assert.equal(requests.length,requestCount,'hiding or restoring never submits a shipment');
   // Long recipient details and item names remain whole on continued labels.
   await mount();
   await page.evaluate(()=>{

@@ -120,11 +120,12 @@
     const message=String(task.error||'上次寄貨尚未確認，請核對原操作。');
     return stoppedTask(task)?message.replace(/^寄貨結果待核對：/,'寄貨已停止：'):message;
   }
-  function taskCards(tasks){
+  function taskCards(tasks, hidden = false){
     return tasks.filter(t=>!active.has(t.id)).map(t=>'<article class="parcel-card parcel-task"><strong>'+escapeHtml(t.plan.contact)+'</strong><p role="status">'+
       (active.has(t.id)?'寄出中…':escapeHtml(taskMessage(t)))+'</p><p>已確認 '+t.jobs.filter(j=>j.done).length+'／'+t.jobs.length+' 個品項</p>'+
       '<details><summary>本次寄貨明細</summary><p>'+escapeHtml(t.date)+' · '+escapeHtml(t.notes||'')+'</p>'+t.jobs.map(j=>'<p>'+escapeHtml(j.row.item.itemCode)+' × '+j.qty+' · '+(j.done?'已確認':'待核對')+'</p>').join('')+'</details>'+
-      (active.has(t.id)?'':'<button type="button" class="btn-secondary" onclick="resumeWarehouseParcel('+inlineJsValue(t.id)+')">核對／重試原寄貨</button>')+'</article>').join('');
+      '<div class="parcel-actions">'+(hidden?'':'<button type="button" class="btn-secondary" onclick="resumeWarehouseParcel('+inlineJsValue(t.id)+')">核對／重試原寄貨</button>')+
+      '<button type="button" class="btn-secondary" onclick="setWarehouseParcelNoticeHidden('+inlineJsValue(t.id)+','+!hidden+',this)">'+(hidden?'還原此訊息':'隱藏此訊息')+'</button></div></article>').join('');
   }
   root.renderWarehouseParcels=function(){
     const host=el('warehouseParcelCards'),status=el('warehouseParcelStatus');
@@ -137,6 +138,10 @@
       rows=rows.filter(row=>inScope(row.warehouseId));
       groups=groupRows(rows).filter(g=>!blocked(g.rows,tasks));
       const scopedTasks=tasks.filter(t=>t.jobs.some(j=>inScope(j.row.warehouseId)));
+      const hiddenTasks=scopedTasks.filter(t=>t.noticeHidden);
+      const visibleTasks=scopedTasks.filter(t=>!t.noticeHidden);
+      const wasExpanded=!!host.querySelector?.('.parcel-hidden-notices[open]');
+      const hiddenNotices=hiddenTasks.length?'<details class="parcel-branch-list parcel-hidden-notices" '+(wasExpanded?'open':'')+'><summary>已隱藏的寄貨訊息（'+hiddenTasks.length+'）</summary>'+taskCards(hiddenTasks,true)+'</details>':'';
       const transfers=kind==='branch'?root.mainTransferParcelEntries?.():null;
       const transferRows=(transfers?.entries||[]).filter(r=>inScope(r.warehouseId));
       branchLists=kind==='branch'?branchDispatchLists(groups,transferRows):[];
@@ -185,11 +190,11 @@
       }).join('')+transferCards+(groups.length>visibleLimit?'<button type="button" class="btn-secondary" onclick="loadMoreWarehouseParcels()">載入更多寄貨</button>':'');
       const confirmCards=branchNotices?'<h3 class="parcel-branch-confirm-label">逐筆確認寄出（'+(groups.length+transferRows.length)+'）</h3>'+individualCards:individualCards;
       host.innerHTML=(branchNotices?'<div class="parcel-branch-toolbar"><strong>各分倉出貨通知</strong><button type="button" class="btn-secondary" onclick="retryInventoryWorkspace(this)">重新整理清單</button></div>':'')+
-        branchNotices+taskCards(scopedTasks)+recoveryCards+confirmCards+
+        branchNotices+taskCards(visibleTasks)+recoveryCards+confirmCards+hiddenNotices+
         (transfers?.error?'<p class="parcel-guard-note" role="alert">調撥資料讀取失敗：'+escapeHtml(transfers.error)+' <button type="button" onclick="loadMainTransferRequests(true)">重新載入</button></p>':'')+
         (transfers?.hasMore?'<p class="parcel-guard-note">備貨需求先顯示 50 筆，處理後會載入後續項目。</p>':'')+
-        (!groups.length&&!transferRows.length&&!scopedTasks.length&&!recoveryCards&&orderWorkQueueReady&&!orderWorkQueueError&&(!transfers||transfers.ready&&!transfers.error)?'<p class="parcel-empty-state">目前沒有需要寄出的貨品。</p>':'');
-      if(status)status.textContent=notice||(orderWorkQueueError?'寄貨清單讀取失敗，請重新載入。':!orderWorkQueueReady||transfers&&!transfers.ready?'正在讀取寄貨資料…':(groups.length+transferRows.length)+' 件待寄貨'+(tasks.some(stoppedTask)?' · '+tasks.filter(stoppedTask).length+' 件已停止':'')+(tasks.some(t=>!stoppedTask(t))?' · '+tasks.filter(t=>!stoppedTask(t)).length+' 件處理中／待核對':'')+(groups.length>visibleLimit?'，已顯示部分品項。':''));
+        (!groups.length&&!transferRows.length&&!visibleTasks.length&&!recoveryCards&&orderWorkQueueReady&&!orderWorkQueueError&&(!transfers||transfers.ready&&!transfers.error)?'<p class="parcel-empty-state">目前沒有需要寄出的貨品。</p>':'');
+      if(status)status.textContent=notice||(orderWorkQueueError?'寄貨清單讀取失敗，請重新載入。':!orderWorkQueueReady||transfers&&!transfers.ready?'正在讀取寄貨資料…':(groups.length+transferRows.length)+' 件待寄貨'+(visibleTasks.some(stoppedTask)?' · '+visibleTasks.filter(stoppedTask).length+' 件已停止':'')+(visibleTasks.some(t=>!stoppedTask(t))?' · '+visibleTasks.filter(t=>!stoppedTask(t)).length+' 件處理中／待核對':'')+(groups.length>visibleLimit?'，已顯示部分品項。':''));
     }catch(error){
       branchLists=[];branchActorKey='';
       host.innerHTML='<p role="alert">'+escapeHtml(error.message)+'</p>';
@@ -268,7 +273,7 @@
     active.add(id);
     const uiAction=beginUiWorkAction('warehouse-parcel',id,`寄貨確認 ${id}`,()=>{
       if(same(a))root.renderWarehouseParcels();
-    },{resume:true});
+    },{resume:true,isVisible:()=>{try{return same(a)&&!read(a).some(task=>task.id===id&&task.noticeHidden);}catch(_){return true;}}});
     root.renderWarehouseParcels();
     let resolved=false,definitivelyBlocked=false;
     try{
@@ -308,6 +313,22 @@
       if(same(a))root.renderWarehouseParcels();
     }
   }
+  root.setWarehouseParcelNoticeHidden=async function(id,hidden,button){
+    const buttonState=beginActionButton(button,'處理中…');
+    if(!buttonState)return;
+    try{
+      const a=actor();
+      await lock(storageKey(a)+':task:'+id,()=>update(a,id,task=>{
+        if(!same(a)||!task)throw Error('找不到原寄貨紀錄，請重新載入。');
+        return {...task,noticeHidden:hidden};
+      }));
+      if(same(a)){
+        root.renderWarehouseParcels();
+        renderUiWorkActions();
+      }
+    }catch(error){showActionFeedback(error.message,'warning');}
+    finally{endActionButton(button,buttonState);}
+  };
   root.resumeWarehouseParcel=function(id){
     try{
       const a=actor();notice='';
@@ -316,6 +337,6 @@
     }catch(error){showActionFeedback(error.message,'warning');}
   };
   if(typeof window!=='undefined')window.addEventListener('storage',event=>{
-    try{if(event.key===storageKey(actor()))root.renderWarehouseParcels();}catch(_){}
+    try{if(event.key===storageKey(actor())){root.renderWarehouseParcels();renderUiWorkActions();}}catch(_){}
   });
 })(globalThis);
