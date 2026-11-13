@@ -26,15 +26,27 @@ function bindOrderDetailDrawer(row) {
     const panel = row.querySelector('.order-detail-panel');
     const dialog = panel?.querySelector('.order-detail-drawer');
     if (!dialog) return;
-    const trigger = panel.querySelector(':scope > summary');
-    const close = () => { if (dialog.open) dialog.close(); panel.open = false; trigger.setAttribute('aria-expanded', 'false'); };
-    panel.addEventListener('toggle', () => {
-        trigger.setAttribute('aria-expanded', String(panel.open));
-        if (panel.open && dialog.isConnected && !dialog.open) dialog.showModal();
-        else if (!panel.open && dialog.open) dialog.close();
+    row.classList.add('workflow-detail-row');
+    row.tabIndex = 0;
+    row.setAttribute('aria-haspopup', 'dialog');
+    row.setAttribute('aria-label', [row.dataset.menuTitle, '開啟訂單明細'].filter(Boolean).join(' · '));
+    const open = () => {
+        if (!dialog.isConnected || dialog.open) return;
+        panel.open = true;
+        dialog.showModal();
+    };
+    const close = () => { if (dialog.open) dialog.close(); panel.open = false; };
+    row.addEventListener('click', event => {
+        if (event.defaultPrevented || event.target.closest('button, a, label, input, select, textarea, summary, details, dialog, [contenteditable], [role="button"]')) return;
+        open();
+    });
+    row.addEventListener('keydown', event => {
+        if (event.target !== row || !['Enter', ' '].includes(event.key)) return;
+        event.preventDefault();
+        if (!event.repeat) open();
     });
     dialog.addEventListener('cancel', event => { event.preventDefault(); close(); });
-    dialog.addEventListener('close', () => { if (!dialog.open) { panel.open = false; trigger.setAttribute('aria-expanded', 'false'); } });
+    dialog.addEventListener('close', () => { if (!dialog.open) panel.open = false; });
     dialog.addEventListener('click', event => {
         if (event.target.closest('[data-order-drawer-close]')) close();
         // Existing delivery/history forms are outside this modal. Release modal focus first.
@@ -44,7 +56,7 @@ function bindOrderDetailDrawer(row) {
             if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) close();
         }
     });
-    if (panel.open && !dialog.open) dialog.showModal();
+    if (panel.open) open();
 }
 
 function organizeOrderRowActions(row, stage) {
@@ -91,7 +103,7 @@ function workflowPurchaseOrderDetails(order) {
     if (!order) return '';
     const field=(label,value)=>`<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value || '未填寫')}</dd></div>`;
     const items=normalizedOrderItems(order);
-    return `<details class="order-detail-panel"><summary aria-haspopup="dialog" aria-expanded="false">明細</summary><dialog class="order-detail-drawer" aria-label="訂單明細"><header class="order-drawer-heading"><h3>訂單明細</h3><button type="button" class="btn-secondary" data-order-drawer-close autofocus>關閉</button></header><div class="order-detail-content"><section class="order-drawer-section"><h4>訂單摘要</h4><dl class="order-drawer-summary">${field('單號',order.orderNo)}${field('客戶',order.customerName||order.customer)}${field('負責業務',order.salesName)}${field('訂單日期',order.orderDate)}${field('訂單總額（含稅）',order.totalPrice==null?'待確認':'NT$ '+order.totalPrice)}</dl></section><section class="order-drawer-section"><h4>全部訂單品項</h4><div class="workflow-price-breakdown">${items.map(item=>`<div>${purchaseProductSummary(item,0,null)}${workflowSalesAmount(order,item)}<small>交付方式：${escapeHtml(globalThis.YushinOrderEntry?.deliveryLabel(item,order.shippingInstructions||{})||'未填寫')}</small></div>`).join('')}</div></section><section class="order-drawer-section"><h4>交易與備註</h4>${workflowCommercialSummary(order)}<dl class="order-drawer-summary">${field('訂單備註',order.remarks)}</dl></section><section class="order-drawer-section"><button type="button" class="btn-secondary" onclick="openOrderStatusHistory(${inlineJsValue(order.id)})">查看操作紀錄</button></section></div></dialog></details>`;
+    return `<details class="order-detail-panel"><summary hidden></summary><dialog class="order-detail-drawer" aria-label="訂單明細"><header class="order-drawer-heading"><h3>訂單明細</h3><button type="button" class="btn-secondary" data-order-drawer-close autofocus>關閉</button></header><div class="order-detail-content"><section class="order-drawer-section"><h4>訂單摘要</h4><dl class="order-drawer-summary">${field('單號',order.orderNo)}${field('客戶',order.customerName||order.customer)}${field('負責業務',order.salesName)}${field('訂單日期',order.orderDate)}${field('訂單總額（含稅）',order.totalPrice==null?'待確認':'NT$ '+order.totalPrice)}</dl></section><section class="order-drawer-section"><h4>全部訂單品項</h4><div class="workflow-price-breakdown">${items.map(item=>`<div>${purchaseProductSummary(item,0,null)}${workflowSalesAmount(order,item)}<small>交付方式：${escapeHtml(globalThis.YushinOrderEntry?.deliveryLabel(item,order.shippingInstructions||{})||'未填寫')}</small></div>`).join('')}</div></section><section class="order-drawer-section"><h4>交易與備註</h4>${workflowCommercialSummary(order)}<dl class="order-drawer-summary">${field('訂單備註',order.remarks)}</dl></section><section class="order-drawer-section"><button type="button" class="btn-secondary" onclick="openOrderStatusHistory(${inlineJsValue(order.id)})">查看操作紀錄</button></section></div></dialog></details>`;
 }
 // Keep stage-specific action handlers and quantities; only reorganize the presentation.
 function organizePurchasingOrderRow(row, order, item, finance) {
@@ -112,6 +124,7 @@ function organizePurchasingOrderRow(row, order, item, finance) {
     const commercial=document.createElement('td');commercial.dataset.th='交易方式';commercial.textContent=order?.transactionType || '—';
     const actions=find('操作');
     const area=actions?.querySelector('.workflow-inline-actions')||actions;
+    area?.classList.add('workflow-inline-actions');
     if (order&&area) area.insertAdjacentHTML('afterbegin',workflowPurchaseOrderDetails(order));
     [find('訂單日期')||find('需求日期'),customer,product,find('負責業務'),money,commercial,progress||quantity,actions].filter(Boolean).forEach(cell=>row.appendChild(cell));
     bindOrderDetailDrawer(row);
