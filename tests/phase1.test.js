@@ -73,6 +73,8 @@ function loadSavedPurchaseMapper() {
     return context.purchaseItemsFromSavedPo;
 }
 
+const pageHelpSource = require('node:fs').readFileSync(require('node:path').join(__dirname, '../modules/page-help.js'), 'utf8');
+
 test('purchase mapper supports canonical single-item orders', () => {
     const items = loadPurchaseMapper()({ id: 'one', itemName: 'Single', itemCode: 'A-1', brand: 'Acme', qty: '3', shortageQty: 3 });
     assert.equal(items.length, 1);
@@ -237,7 +239,7 @@ test('product management uses explicit code searches or bounded company favourit
     assert.doesNotMatch(indexSource, /oninput="queueProductManagementSearch\(\)"/);
     assert.match(indexSource, /id="productManagementSearchBrand"/);
     assert.match(appSource, /where\('normalizedPartNo', '==', normalizedCode\)/);
-    assert.match(indexSource, /點選廠牌可查看公司常賣品項，每批最多 20 筆/);
+    assert.match(pageHelpSource, /點選廠牌可查看公司常賣品項，每批最多 20 筆/);
     assert.doesNotMatch(indexSource, /id="productManagementBrowseBtn"/);
     assert.doesNotMatch(appSource, /fetchProductBrandBrowsePage|browseProductMasterBrand|PRODUCT_BRAND_BROWSE_PAGE_SIZE/);
 
@@ -397,7 +399,7 @@ test('inventory page owns stock policy and safety-stock replenishment only appli
     assert.match(indexSource,/>安全庫存</);
     assert.match(indexSource,/>依訂單採購</);
     assert.match(indexSource,/庫存策略/);
-    assert.match(indexSource,/由客戶訂單缺口進入既有採購需求流程/);
+    assert.match(pageHelpSource,/由客戶訂單缺口進入既有採購需求流程/);
 
     assert.match(appSource,/const INVENTORY_STOCK_POLICIES = YushinInventory\.STOCK_POLICIES/);
     assert.equal(require('../modules/inventory-core').STOCK_POLICIES.NO_STOCK,'NO_STOCK');
@@ -982,7 +984,7 @@ test('Product Import preview distinguishes add update unchanged and blocks all w
     assert.match(confirmSource,/新增 .*更新 .*不變 .*錯誤/);
     assert.match(confirmSource,/summary\.errorCount > 0/);
     assert.match(confirmSource,/有錯誤的匯入檔不會寫入雲端/);
-    assert.match(indexSource,/新增／更新／不變／錯誤/);
+    assert.match(pageHelpSource,/新增／更新／不變／錯誤/);
 });
 
 
@@ -1794,7 +1796,7 @@ test('admin price-list management is the single bulk Product Import entry', () =
     assert.match(indexSource, /匯入產品主檔/);
     assert.match(indexSource, /openPriceListUploadForBrand\(\x27\x27\)/);
     assert.match(indexSource, /下載產品主檔範本/);
-    assert.match(indexSource, /新增／更新／不變／錯誤/);
+    assert.match(pageHelpSource, /新增／更新／不變／錯誤/);
 });
 
 test('Phase 2-6 completion integrates supplier mapping, warehouses and direct ship', () => {
@@ -4243,8 +4245,8 @@ test('standalone price updater is available while protected cost import remains 
     assert.match(indexSource,/id="productBatchMaintenance"/);
     assert.match(indexSource,/handlePriceExcelUpload\(this\)/);
     assert.match(indexSource,/下載產品主檔範本/);
-    assert.match(indexSource,/建議售價與標準成本/);
-    assert.match(indexSource,/新增／更新／不變／錯誤/);
+    assert.match(pageHelpSource,/建議售價與標準成本/);
+    assert.match(pageHelpSource,/新增／更新／不變／錯誤/);
     assert.match(indexSource,/handleProductPriceExcelUpload\(this\)/);
     assert.doesNotMatch(indexSource,/handleProductCostExcelUpload\(this\)/);
     assert.match(indexSource,/continueProductPriceImport\(\)/);
@@ -4779,7 +4781,7 @@ test('all statistic brands are selectable inside collapsible lists', () => {
 
 test('brand settings can sync missing brands from Product Master without changing business settings', () => {
     assert.match(indexSource, /<strong>廠牌設定<\/strong>/);
-    assert.match(indexSource, /產品匯入的新廠牌會自動加入廠牌主檔/);
+    assert.match(pageHelpSource, /產品匯入的新廠牌會自動加入廠牌主檔/);
     assert.match(indexSource, /id="syncBrandsFromProductsBtn"/);
     assert.match(indexSource, /從產品主檔同步廠牌/);
     const start=appSource.indexOf('window.syncBrandsFromProductMaster = async function()');
@@ -4804,7 +4806,7 @@ test('quote and order brand entry share primary brands plus an explicit Other br
     assert.match(appSource, /hasRestrictedBrand/);
     assert.doesNotMatch(appSource, /placeholder="搜尋或輸入廠牌"/);
     assert.match(indexSource, /<strong>報價公司限制<\/strong>/);
-    assert.match(indexSource, /完全未勾選任何公司＝三家公司都可報價/);
+    assert.match(pageHelpSource, /完全未勾選任何公司時，三家公司都可報價/);
 });
 
 test('business-facing brand filters share primary brands plus Other grouping', () => {
@@ -4950,7 +4952,7 @@ test('inventory projected stock and replenishment center avoid duplicate repleni
     assert.match(appSource,/collection\('inventory'\)\.doc\(inventoryId\)\.get\(\)/);
     assert.match(appSource,/await loadWarehouseStocksForInventoryPage\(\[item\]\)/);
     assert.match(indexSource,/id="purchaseReplenishmentBody"/);
-    assert.match(indexSource,/預計庫存 = 可用庫存 \+ 在途/);
+    assert.match(pageHelpSource,/預計庫存 = 可用庫存 \+ 在途/);
     assert.match(indexSource,/預計庫存/);
     assert.match(indexSource,/需補貨（預計庫存不足）/);
 });
@@ -4991,7 +4993,7 @@ test('replenishment center derives projected stock from authoritative warehouse 
     assert.match(appSource,/function inventoryAggregateStock\(item = \{\}\)[\s\S]*?warehouseStockTotals\(productKey\)/);
     assert.match(appSource,/await loadWarehouseStocksForInventoryPage\(inventoryReplenishmentCache\)/);
     assert.match(appSource,/projected:available\+incoming/);
-    assert.match(indexSource,/預計庫存 = 可用庫存 \+ 在途/);
+    assert.match(pageHelpSource,/預計庫存 = 可用庫存 \+ 在途/);
     assert.match(indexSource,/<th>在途<\/th><th>預計<\/th>/);
 });
 

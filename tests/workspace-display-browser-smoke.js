@@ -12,6 +12,19 @@ function fn(name){const a=source.indexOf('function '+name+'('),b=source.indexOf(
   await page.setContent('<html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="appContainer"></div></html>');
   await page.evaluate(html=>{const d=new DOMParser().parseFromString(html,'text/html'),p=d.getElementById('purchasing-system');document.getElementById('appContainer').append(p);p.classList.add('active');p.style.display='block';},html);
   await page.addStyleTag({content:fs.readFileSync('styles.css','utf8')});
+  await page.evaluate(html=>{
+   const fixture=new DOMParser().parseFromString(html,'text/html');
+   document.body.append(fixture.getElementById('pageHelpDialog'));
+  },html);
+  await page.addScriptTag({content:fs.readFileSync('modules/page-help.js','utf8')});
+  const helpTrigger=page.locator('[data-page-help="purchasing-system"]');
+  await helpTrigger.click();
+  const help=page.locator('#pageHelpDialog');
+  assert.match(await help.innerText(),/確認已採購.*才會列入待到貨/);
+  assert.ok(await help.evaluate(node=>node.scrollWidth<=node.clientWidth+1));
+  await help.locator('[data-close-page-help]').click();
+  assert.equal(await help.isVisible(),false);
+  assert.equal(await helpTrigger.evaluate(node=>node===document.activeElement),true);
   await page.addScriptTag({content:`
    let currentUserRole='purchaser',currentUser={uid:'buyer'},purchasingView='ordering';const order={id:'O',orderNo:'YS-20261026-1',orderDate:'2026-10-26',customerName:'客戶 <測試>',salesName:'負責業務',transactionType:'直',invoiceTitle:'測試發票抬頭',totalPrice:2400,items:[{itemId:'I',itemName:'RNeasy Mini Kit (50) 長品名與規格測試',brand:'Qiagen',itemCode:'74104',productId:'P',unitPrice:120,qty:20,orderedQty:20,shortageQty:15,supplyOrderedQty:17,receivedQty:7,dispatchPreparedQty:10}]};
    let ordersCache=[order],purchasingDispatchCache=[],purchasingDispatchLoading=false,purchasingDispatchError='',purchasingDispatchHasMore=false,purchasingCompletedVisibleLimit=50;

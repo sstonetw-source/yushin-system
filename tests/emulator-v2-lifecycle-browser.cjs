@@ -1613,7 +1613,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
   console.log('Full site '+width+'px diagnostic:',JSON.stringify(await page.evaluate(()=>({role:typeof currentUserRole==='undefined'?'not-booted':currentUserRole,
    loginError:document.getElementById('loginError')?.textContent,feedback:document.getElementById('actionFeedback')?.textContent,
    menu:document.querySelector('.nav-tabs')?.className,scrollTop:document.getElementById('appContainer')?.scrollTop,
-   shipping:document.getElementById('inventoryShippingBody')?.textContent,queueReady:orderWorkQueueReady,queueError:orderWorkQueueError,
+   shipping:document.getElementById('warehouseParcelStatus')?.textContent,queueReady:orderWorkQueueReady,queueError:orderWorkQueueError,
    locations:typeof v2ShipmentLocationContext==='undefined'?null:{context:v2ShipmentLocationContext,values:[...v2ShipmentLocationCache]},
    shipmentOrders:orderWorkQueueCache.map(o=>({id:o.id,attempt:o.inventoryReservationAttemptId,items:normalizedOrderItems(o)})),warehouses:warehouseMasterCache}))),JSON.stringify(errors));
   throw error;
