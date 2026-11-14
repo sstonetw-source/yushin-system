@@ -3734,42 +3734,34 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
 .inline-help-content, .inline-help > p, .inline-help > .product-import-rules-grid { margin:8px 0; padding:12px; border:1px solid #b0c3d5; border-radius:8px; background:#f0f5fa; color:#40546a; font-size:13px; line-height:1.6; overflow-wrap:anywhere; }
 .inline-help-content > div, .inline-help-content > p, .inline-help-content > span { margin:0; }
 #admin-statistics .trade-analysis-method.inline-help > summary { padding:0; }
-#inventoryShippingBody td{text-align:left;padding:12px;line-height:1.5;overflow-wrap:anywhere}
-#inventoryShippingBody td[data-th="待出數量"],#inventoryShippingBody td[data-th="選取"]{text-align:center}
 
 /* Mobile lists: compact records with visible boundaries and a selection header. */
 @media screen and (max-width:768px) {
     #ordersTable, #purchasePendingPanel table, .inventory-work-table table { border:0; background:transparent; }
-    #ordersTable tbody, #purchasePendingBody, #inventoryShippingBody { background:#e2e9f1; padding:10px; box-sizing:border-box; border-radius:10px; }
-    #ordersTable tbody > tr, #purchasePendingBody > tr, #inventoryShippingBody > tr {
+    #ordersTable tbody, #purchasePendingBody{ background:#e2e9f1; padding:10px; box-sizing:border-box; border-radius:10px; }
+    #ordersTable tbody > tr, #purchasePendingBody > tr{
         width:100%; box-sizing:border-box; margin:0 0 18px; padding:12px;
         border:1px solid #879db3; border-left:4px solid #315b80; border-radius:10px;
         background:#fff; box-shadow:0 2px 4px rgba(20,45,70,.08);
     }
-    #ordersTable tbody > tr:last-child, #purchasePendingBody > tr:last-child, #inventoryShippingBody > tr:last-child { margin-bottom:0; }
-    #ordersTable td, #purchasePendingBody td, #inventoryShippingBody td { padding:8px 0; line-height:1.45; }
-    #purchasePendingBody > tr, #inventoryShippingBody > tr { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 12px; }
-    #purchasePendingBody td, #inventoryShippingBody td { width:auto; min-width:0; box-sizing:border-box; }
+    #ordersTable tbody > tr:last-child, #purchasePendingBody > tr:last-child{ margin-bottom:0; }
+    #ordersTable td, #purchasePendingBody td{ padding:8px 0; line-height:1.45; }
+    #purchasePendingBody > tr{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 12px; }
+    #purchasePendingBody td{ width:auto; min-width:0; box-sizing:border-box; }
     #purchasePendingBody td[data-th="合併"], #purchasePendingBody td[data-th="客戶／用途"], #purchasePendingBody td[data-th="待採購品項"], #purchasePendingBody td[data-th="操作"],
-    #inventoryShippingBody td[data-th="選取"], #inventoryShippingBody td[data-th="業務／客戶"], #inventoryShippingBody td[data-th="貨號／品名"], #inventoryShippingBody td[data-th="寄送目的地"], #inventoryShippingBody td[data-th="設定"] { grid-column:1/-1; }
     #ordersTable .order-customer-cell button { background:transparent; color:#063863; padding:0; margin:0; text-align:left; font-weight:700; }
-    #purchasePendingBody td[data-th="合併"], #inventoryShippingBody td[data-th="選取"] {
+    #purchasePendingBody td[data-th="合併"]{
         display:flex; align-items:center; justify-content:flex-start; gap:8px;
         padding:0 0 8px; min-height:32px; text-align:left;
     }
-    #purchasePendingBody td[data-th="合併"]::before, #inventoryShippingBody td[data-th="選取"]::before { margin:0; color:#526779; font-size:12px; }
-    #purchasePendingBody input[type="checkbox"], #inventoryShippingBody input[type="checkbox"] { width:22px; height:22px; margin:0; flex:none; }
+    #purchasePendingBody td[data-th="合併"]::before{ margin:0; color:#526779; font-size:12px; }
+    #purchasePendingBody input[type="checkbox"]{ width:22px; height:22px; margin:0; flex:none; }
     #purchasePendingBody td[data-th="操作"]::before { display:none; }
     #purchasePendingBody td[data-th="操作"] button { margin:0; }
-    #inventoryShippingBody td[data-th="待出數量"] { display:flex; align-items:center; gap:12px; text-align:left; }
-    #inventoryShippingBody td[data-th="待出數量"]::before { margin:0; }
-    #inventoryShippingBody td[data-th="設定"]::before { display:none; }
-    #inventoryShippingBody td[data-th="設定"] button { margin:0; min-height:44px; }
 }
-#inventoryShippingBody input[type="checkbox"]{width:22px;height:22px}
 .warehouse-custody-details{margin-top:18px;padding:12px;background:#f6f8fb;border-radius:8px}
 .warehouse-custody-details summary{cursor:pointer;font-weight:600}
-@media(max-width:768px){.inventory-shipping-batch-actions{align-items:stretch}.inventory-shipping-tabs .order-work-card{flex:1 1 40%}#inventoryShippingBody td{text-align:left!important}}
+@media(max-width:768px){.inventory-shipping-batch-actions{align-items:stretch}.inventory-shipping-tabs .order-work-card{flex:1 1 40%}}
 
 /* Use the same visible record boundaries in every operational mobile list. */
 @media screen and (max-width:768px) {
@@ -3785,10 +3777,10 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
     #ordersTable td[data-th]::before, #purchasePendingBody td[data-th]::before,
     #purchaseDispatchPanel td[data-th]::before, #purchaseCompletedPanel td[data-th]::before,
     #poListPanel td[data-th]::before, #inventory-system td[data-th]::before { color:#40546a; }
-    #ordersTable td, #purchasePendingBody td, #inventoryShippingBody td, #inventoryListBody td { border-bottom-color:#d1dbe5; }
+    #ordersTable td, #purchasePendingBody td, #inventoryListBody td { border-bottom-color:#d1dbe5; }
     #inventoryListBody .inventory-mobile-summary > div { background:#e4edf6; border:1px solid #b0c3d5; }
     #inventoryListBody .inventory-mobile-summary span { color:#40546a; }
-    #ordersTable .record-reference, #purchasePendingBody .record-reference, #inventoryShippingBody .record-reference { color:#40546a; }
+    #ordersTable .record-reference, #purchasePendingBody .record-reference{ color:#40546a; }
     #admin-statistics .trade-analysis-filters { background:#e2e9f1; border:1px solid #b0c3d5; align-items:start; }
     #admin-statistics .trade-analysis-filters label { color:#40546a; margin:0; }
     #admin-statistics .trade-analysis-filters input, #admin-statistics .trade-analysis-filters select {
@@ -3855,7 +3847,7 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
 @media screen and (max-width: 768px) {
     /* Explicit record lists avoid changing nested item editors and hidden fields. */
     #appContainer :is(#ordersTable tbody, #purchasePendingBody, #purchaseDispatchBody,
-        #purchaseCompletedBody, #inventoryShippingBody, #inventoryReceivingBody,
+        #purchaseCompletedBody, #inventoryReceivingBody,
         #inventoryTransferReceivingBody, #myQuotesBody, #forecastTable tbody,
         #poListBody, #inventoryListBody, #eqListTable tbody, .product-management-table tbody, #businessProductSearchBody) {
         display: block;
@@ -3866,7 +3858,7 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
         border-radius: 0;
     }
     #appContainer :is(#ordersTable tbody, #purchasePendingBody, #purchaseDispatchBody,
-        #purchaseCompletedBody, #inventoryShippingBody, #inventoryReceivingBody,
+        #purchaseCompletedBody, #inventoryReceivingBody,
         #inventoryTransferReceivingBody, #myQuotesBody, #forecastTable tbody,
         #poListBody, #inventoryListBody, #eqListTable tbody, .product-management-table tbody, #businessProductSearchBody) > tr {
         display: block;
@@ -3880,7 +3872,7 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
         box-shadow: none;
     }
     #appContainer :is(#ordersTable tbody, #purchasePendingBody, #purchaseDispatchBody,
-        #purchaseCompletedBody, #inventoryShippingBody, #inventoryReceivingBody,
+        #purchaseCompletedBody, #inventoryReceivingBody,
         #inventoryTransferReceivingBody, #myQuotesBody, #forecastTable tbody,
         #poListBody, #inventoryListBody, #eqListTable tbody, .product-management-table tbody, #businessProductSearchBody) > tr:last-child {
         margin-bottom: 0;
@@ -3890,7 +3882,7 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
         padding: 0;
     }
     #appContainer :is(#ordersTable, #purchasePendingBody, #purchaseDispatchBody,
-        #purchaseCompletedBody, #inventoryShippingBody, #inventoryReceivingBody,
+        #purchaseCompletedBody, #inventoryReceivingBody,
         #inventoryTransferReceivingBody, #myQuotesBody, #forecastTable,
         #poListBody, #inventoryListBody, #eqListTable, .product-management-table, #businessProductSearchResults) td[data-th] {
         border-bottom-color: #d1dbe5;
@@ -3900,7 +3892,7 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
         overflow-wrap: anywhere;
     }
     #appContainer :is(#ordersTable, #purchasePendingBody, #purchaseDispatchBody,
-        #purchaseCompletedBody, #inventoryShippingBody, #inventoryReceivingBody,
+        #purchaseCompletedBody, #inventoryReceivingBody,
         #inventoryTransferReceivingBody, #myQuotesBody, #forecastTable,
         #poListBody, #inventoryListBody, #eqListTable, .product-management-table, #businessProductSearchResults) td[data-th]::before {
         color: var(--workspace-label);
@@ -3932,7 +3924,7 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
     #appContainer .inventory-shipping-batch-actions button { width: 100%; margin: 0; padding: 8px; }
 }
 @media screen and (max-width: 768px) {
-    #appContainer :is(#ordersTable tbody, #purchasePendingBody, #inventoryShippingBody) > tr {
+    #appContainer :is(#ordersTable tbody, #purchasePendingBody) > tr {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 0 12px;
@@ -4413,7 +4405,6 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
 /* Keep the single help entry next to the title on every viewport. */
 #appContainer .workspace-page-title { display: flex; align-items: center; gap: 8px; }
 #appContainer .workspace-page-title > .page-help-trigger { position: relative; flex: 0 0 44px; width: 44px; height: 44px; margin: 0; padding: 0; }
-#pageHelpSources[hidden] { display: none !important; }
 
 /* Warm grey business palette. Printed and downloaded documents keep their own styles. */
 @media screen {
@@ -4423,7 +4414,7 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
     #appContainer .auth-status, #authUserLabel { color: var(--ys-text); }
     .auth-starting-nav { background: var(--ys-nav); color: var(--ys-text); }
     #appContainer :is(.modal, .modal-box, .eq-modal-box, .password-modal, .product-selection-bar, .delivery-settings-section, .sales-stat-card) { background-color: var(--ys-surface); border-color: var(--ys-border); }
-    #appContainer :is(#inventoryListBody, #poListBody, #ordersBody, #forecastListBody, #eqListBody, #productManagementBody, #myQuotesBody, #purchasePendingBody, #purchaseDispatchBody, #purchaseCompletedBody, #inventoryReceivingBody, #inventoryTransferReceivingBody, #inventoryShippingBody) > tr { background-color: var(--ys-record); }
+    #appContainer :is(#inventoryListBody, #poListBody, #ordersBody, #forecastListBody, #eqListBody, #productManagementBody, #myQuotesBody, #purchasePendingBody, #purchaseDispatchBody, #purchaseCompletedBody, #inventoryReceivingBody, #inventoryTransferReceivingBody) > tr { background-color: var(--ys-record); }
     #appContainer .inventory-mobile-summary > div { background: var(--ys-neutral-soft); border-color: var(--ys-border); color: var(--ys-text); }
     #appContainer .inventory-mobile-summary span { color: var(--ys-muted); }
     #appContainer .content-section :is(.toolbar, .module-header, .section-header) > button:not([class]),
@@ -5330,10 +5321,6 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
  #appContainer #inventory-system .warehouse-task-action > button { min-height:44px; margin:0; }
  #inventory-system .warehouse-task-details > div { overflow-wrap:anywhere; }
  #inventory-system .warehouse-shipping-filters .toolbar { padding:8px 0; border:0; background:transparent; }
-}
-@media screen and (max-width:768px) {
- #appContainer #inventoryShippingBody .warehouse-task-row > .warehouse-task-check { grid-column:2; grid-row:1; }
- #appContainer #inventoryShippingBody .warehouse-task-row > .warehouse-task-item { grid-column:1; grid-row:1; }
 }
 @media screen {
  #warehouseParcelCards { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr)); gap:12px; align-items:stretch; }
