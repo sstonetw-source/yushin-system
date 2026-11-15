@@ -7466,8 +7466,8 @@ window.printThreeQuotes = async function() {
         const firstPages = paginateQuotePdfDocument(first.stage, first.documentNode);
         await waitForPdfImages(first.stage);
 
-        const pdf = new window.jspdf.jsPDF({ orientation:'portrait', unit:'mm', format:'a4', compress:true });
-        await addDocumentPagesToPdf(pdf, firstPages, { scale, isolateRoot:firstStage });
+        const pdf = new window.jspdf.jsPDF({ orientation:'portrait', unit:'mm', format:'a4', compress:true, putOnlyUsedFonts:true });
+        await addDocumentPagesToPdf(pdf, firstPages, { scale, isolateRoot:firstStage, selectableText:true });
         firstStage.remove();
         firstStage = null;
 
@@ -7483,6 +7483,7 @@ window.printThreeQuotes = async function() {
         await addDocumentPagesToPdf(pdf, comparisonPages, {
             scale,
             isolateRoot:comparisonStage,
+            selectableText:true,
             addPageBeforeFirst: true,
             onProgress: (pageNo, pageCount) => {
                 if (button) button.innerText = `正在產生三家估價單… ${pageNo}/${pageCount}`;
@@ -7783,15 +7784,90 @@ function paginateQuotePdfDocument(stage, source) {
     return pages.map(entry => entry.page);
 }
 
+let quotePdfTextFontRequest;
+
+function loadQuotePdfTextFont() {
+    if (!quotePdfTextFontRequest) {
+        quotePdfTextFontRequest = fetch('assets/fonts/YushinQuoteText.ttf?v=1', {signal:globalThis.AbortSignal?.timeout?.(2500)})
+            .then(response => {
+                if (!response.ok) throw new Error('估價單文字字型無法載入');
+                return response.blob();
+            })
+            .then(blob => new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result.split(',')[1]);
+                reader.onerror = () => reject(reader.error);
+                reader.readAsDataURL(blob);
+            }))
+            .catch(error => {
+                quotePdfTextFontRequest = null;
+                console.warn('估價單文字字型載入失敗', error);
+                return null;
+            });
+    }
+    return quotePdfTextFontRequest;
+}
+
+function addQuotePdfPageText(pdf, page, x, width, height) {
+    const bounds = page.getBoundingClientRect();
+    const scaleX = width / Math.ceil(page.scrollWidth);
+    const scaleY = height / Math.ceil(page.scrollHeight);
+    const walker = document.createTreeWalker(page, NodeFilter.SHOW_TEXT);
+    const range = document.createRange();
+
+    function writeLine(text, rect) {
+        if (!text.trim() || !rect.width || !rect.height) return;
+        pdf.setFontSize(rect.height * scaleY * 72 / 25.4);
+        const textWidth = pdf.getTextWidth(text);
+        if (!textWidth) return;
+        pdf.text(text, x + (rect.left - bounds.left) * scaleX, 10 + (rect.top - bounds.top) * scaleY, {
+            baseline:'top',
+            horizontalScale:rect.width * scaleX / textWidth,
+            renderingMode:'invisible'
+        });
+    }
+
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (!node.data.trim() || getComputedStyle(node.parentElement).visibility !== 'visible') continue;
+        range.selectNodeContents(node);
+        const rects = range.getClientRects();
+        if (rects.length === 1) {
+            writeLine(node.data.replace(/\s+/g, ' ').trim(), rects[0]);
+        } else if (rects.length > 1) {
+            let start = 0;
+            while (start < node.length) {
+                range.setStart(node, start);
+                range.setEnd(node, node.length);
+                const first = range.getClientRects()[0];
+                if (!first) break;
+                // Find the end of this visual line without measuring every character.
+                let low = start + 1, high = node.length;
+                while (low < high) {
+                    const middle = Math.ceil((low + high) / 2);
+                    range.setEnd(node, middle);
+                    if (range.getClientRects().length <= 1) low = middle;
+                    else high = middle - 1;
+                }
+                range.setEnd(node, low);
+                const rect = range.getClientRects()[0];
+                if (rect) writeLine(node.data.slice(start, low).replace(/\s+/g, ' ').trim(), rect);
+                start = low;
+            }
+        }
+    }
+}
+
 async function addDocumentPagesToPdf(pdf, pages, options = {}) {
     const {
         scale = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ? 1.15 : 1.65,
         onProgress = null,
         addPageBeforeFirst = false,
-        isolateRoot = null
+        isolateRoot = null,
+        selectableText = false
     } = options;
     const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     const jpegQuality = isMobile ? 0.88 : 0.92;
+    const fontRequest = selectableText ? loadQuotePdfTextFont() : null;
 
     for (let index = 0; index < pages.length; index += 1) {
         if (typeof onProgress === 'function') onProgress(index + 1, pages.length);
@@ -7825,6 +7901,17 @@ async function addDocumentPagesToPdf(pdf, pages, options = {}) {
         // 這可避免 iPhone Safari 在多頁文件上累積大型 Canvas / Base64 造成記憶體壓力。
         let imageData = canvas.toDataURL('image/jpeg', jpegQuality);
         pdf.addImage(imageData, 'JPEG', x, 10, renderWidthMm, renderHeightMm, undefined, 'FAST');
+        if (fontRequest) {
+            const font = await fontRequest;
+            if (font) {
+                if (!pdf.existsFileInVFS('YushinQuoteText.ttf')) {
+                    pdf.addFileToVFS('YushinQuoteText.ttf', font);
+                    pdf.addFont('YushinQuoteText.ttf', 'QuoteText', 'normal');
+                }
+                pdf.setFont('QuoteText', 'normal');
+                addQuotePdfPageText(pdf, page, x, renderWidthMm, renderHeightMm);
+            }
+        }
         imageData = null;
         canvas.width = 1;
         canvas.height = 1;
@@ -7939,12 +8026,13 @@ window.exportCurrentQuotePdf = async function() {
             : paginateQuotePdfDocument(stage, exportDom.documentNode);
         if (!isSinglePage) await waitForPdfImages(stage);
 
-        // 單頁本身只有一張已壓縮 JPEG，關閉 jsPDF 額外 stream 壓縮可減少手機 CPU 等待；
+        // 單頁主要內容為已壓縮 JPEG，關閉 jsPDF 額外 stream 壓縮可減少手機 CPU 等待；
         // 多頁仍保留原本壓縮設定，避免檔案過大。
-        const pdf = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: !isSinglePage });
+        const pdf = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: !isSinglePage, putOnlyUsedFonts:true });
         await addDocumentPagesToPdf(pdf, pages, {
             scale,
             isolateRoot:stage,
+            selectableText:true,
             onProgress: (pageNo, pageCount) => {
                 if (button) button.innerText = `正在產生 PDF… ${pageNo}/${pageCount}`;
             }
