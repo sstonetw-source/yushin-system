@@ -1082,7 +1082,7 @@
     </div>
 
     <!-- 新增訂單彈出視窗 -->
-    <div class="eq-modal-overlay no-print" id="orderModalOverlay" onclick="if(event.target===this) closeOrderModal()">
+    <div class="eq-modal-overlay no-print" id="orderModalOverlay">
         <div class="eq-modal-box">
             <h3 id="orderModalTitle">新增訂單</h3>
             <div id="orderDraftRecoveryBanner" class="inventory-summary-note" style="display:none;margin:0 0 12px;padding:10px 12px;border:1px solid #d5e1ec;border-radius:8px;background:#f4f8fc;">
@@ -1145,7 +1145,8 @@
                 <div class="order-entry-wide"><label for="orderRemarks">備註</label><textarea id="orderRemarks" rows="2"></textarea></div>
             </div></details>
             </section>
-            <div class="order-entry-actions"><button type="button" id="saveNewOrderBtn" onclick="saveNewOrder()">建立訂單</button><button type="button" class="btn-secondary" onclick="closeOrderModal()">取消</button></div>
+            <div id="newOrderSaveStatus" role="status"></div>
+            <div class="order-entry-actions"><button type="button" id="saveNewOrderBtn" onclick="saveNewOrder()">建立訂單</button><button type="button" class="btn-secondary" onclick="closeOrderModal()">關閉</button></div>
         </div>
     </div>
 
@@ -1237,11 +1238,10 @@
 
     <!-- 產生採購單彈出視窗：把選取的訂單品項，整理成給廠商下單用的「採購單」，格式跟估價單相同，
          單價預設帶入「含稅成本」（不是賣給客戶的售價），採購可以在這裡再次修改後才輸出 -->
-    <div class="eq-modal-overlay" id="poModalOverlay" onclick="if(event.target===this) closePurchaseOrderModal()">
+    <div class="eq-modal-overlay" id="poModalOverlay">
         <div class="eq-modal-box" style="max-width:820px;">
             <div class="no-print" style="display:flex;justify-content:space-between;align-items:center;">
                 <h3 id="poModalTitle" style="margin:0;">建立採購單</h3>
-                <button type="button" class="btn-secondary" onclick="closePurchaseOrderModal()">✕ 關閉</button>
             </div>
             <div id="poExistingBanner" class="po-existing-banner no-print" style="display:none;">
                 <div><span>正在查看：</span><strong id="poExistingNumber"></strong></div>
@@ -1314,9 +1314,11 @@
                     <button type="button" class="btn-secondary" data-download-folder-button onclick="configureDocumentDownloadFolder('purchase')">設定下載資料夾</button>
                     <span data-download-folder="purchase" role="status">使用瀏覽器預設下載</span>
                 </div>
-                <button type="button" id="savePoDraftBtn" class="btn-secondary" onclick="savePoDraft()">儲存草稿</button>
-                <button type="button" id="printPurchaseOrderBtn" class="btn-secondary" onclick="printPurchaseOrder()">下載 PDF</button>
-                <button type="button" id="confirmPoOrderedBtn" onclick="confirmCurrentPurchaseOrder()">確認已採購</button>
+                <div class="po-editor-actions">
+                    <button type="button" id="printPurchaseOrderBtn" class="btn-secondary" onclick="printPurchaseOrder()">下載 PDF</button>
+                    <button type="button" id="confirmPoOrderedBtn" onclick="confirmCurrentPurchaseOrder()">確認已採購</button>
+                    <button type="button" class="btn-secondary" onclick="closePurchaseOrderModal()">關閉</button>
+                </div>
             </div>
         </div>
     </div>
