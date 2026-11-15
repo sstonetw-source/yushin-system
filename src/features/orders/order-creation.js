@@ -343,6 +343,10 @@ window.openOrderModal = function(source = null) {
     const overlay = document.getElementById('orderModalOverlay');
     if (!overlay) return;
     const openingGeneration = ++orderModalOpenGeneration;
+    const saveButton = document.getElementById('saveNewOrderBtn');
+    const saveStatus = document.getElementById('newOrderSaveStatus');
+    if (saveButton) { saveButton.disabled = newOrderSaveInProgress; saveButton.textContent = '建立訂單'; }
+    if (saveStatus) saveStatus.textContent = '';
     const openingCode=document.getElementById('orderItemCode');
     if(openingCode){delete openingCode.dataset.matchedProductCode;delete openingCode.dataset.autofillBrand;delete openingCode.dataset.productCheckStatus;delete openingCode.dataset.preserveOrderPriceCode;clearQuickProductButton(openingCode);clearProductMatchChoices(openingCode);}
     const recoveryBanner = document.getElementById('orderDraftRecoveryBanner');
@@ -642,7 +646,7 @@ function showActionFeedback(message, type = 'success') {
 }
 
 window.saveNewOrder = function() {
-    if (newOrderSaveInProgress) return;
+    if (newOrderSaveInProgress || document.getElementById('saveNewOrderBtn')?.disabled) return;
     const fulfillmentType=document.getElementById('orderFulfillmentType')?.value||'WAREHOUSE';
     const warehouseId=fulfillmentType==='DIRECT_SHIP'?'':document.getElementById('orderWarehouse')?.value||'';
     const sharedPlan=window.orderShippingInstructions?.()||{};
@@ -796,8 +800,8 @@ window.saveNewOrder = function() {
         const pendingConfirmedSelfOrder=Array.isArray(data.items)&&data.items.some(item=>
             (item.procurementType||data.procurementType)==='SALES_SELF_ORDER'&&item.selfOrderConfirmed===true);
         newOrderSaveInProgress=false;
-        if(saveButton){saveButton.disabled=false;saveButton.innerText='建立訂單';}
-        // 正式文件確認寫入後即釋放表單；庫存與來源文件同步使用這份獨立快照。
+        if(saveButton){saveButton.disabled=savingGeneration===orderModalOpenGeneration;saveButton.innerText=saveButton.disabled?'訂單已建立':'建立訂單';}
+        // 正式文件確認寫入後鎖住本次送出；庫存與來源文件同步使用獨立快照。
         pendingOrderReservationIds.add(docRef.id);
         if(currentUser?.uid===savingUid){
             rememberRecentCustomerName(data.customerName);
@@ -809,11 +813,12 @@ window.saveNewOrder = function() {
             if(localStorage.getItem(savedPendingKey)===docRef.id)localStorage.removeItem(savedPendingKey);
             if(savingGeneration===orderModalOpenGeneration){
                 localStorage.removeItem(savedDraftKey);
-                closeOrderModal();
+                const status = document.getElementById('newOrderSaveStatus');
+                if (status) status.textContent = '訂單資料已儲存。';
             }
             showActionFeedback(pendingConfirmedSelfOrder
                 ? '訂單已暫存；供應商已下訂與庫存預留須由後端同時確認，尚未完成前不能視為正式已下訂。'
-                : '訂單已建立，庫存正在背景同步；可繼續建立其他訂單。',
+                : '訂單已建立，庫存正在背景同步。',
                 pendingConfirmedSelfOrder?'warning':'success');
         }
         let reservation;

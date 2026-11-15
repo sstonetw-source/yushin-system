@@ -92,6 +92,10 @@ async function recoverFormalPurchase() {
         const result = await commitFormalPurchaseOrder(pending.poRecord, {actorUid:uid, actorRole:role});
         check();
         const savedPo = cacheCommittedFormalPurchase(result);
+        if (poEditingId === savedPo.id && document.getElementById('poModalOverlay')?.classList.contains('active')) {
+            renderPoItemsTable();
+            updatePoModeUI();
+        }
         stage='在途登記';
         if(typeof updatePoSaveStatus==='function')updatePoSaveStatus(`採購單 ${savedPo.poNo} 已確認採購，正在登記在途…`);
         await registerPurchaseIncoming(savedPo.id, savedPo,
@@ -109,9 +113,8 @@ async function recoverFormalPurchase() {
                 purchasingViewLoaded.add('ordering');
         }
         if (poEditingId === savedPo.id) poIncomingSyncPending = false;
-        if (document.getElementById('poModalOverlay')?.classList.contains('active')
-            && document.getElementById('poNo')?.textContent?.trim() === savedPo.poNo)
-            closePurchaseOrderModal();
+        if (poEditingId === savedPo.id && document.getElementById('poModalOverlay')?.classList.contains('active'))
+            updatePoSaveStatus(`採購單 ${savedPo.poNo} 已確認採購，在途同步完成。`);
         showActionFeedback(`採購單 ${savedPo.poNo} 已確認，在途同步完成；可由原採購單下載 PDF。`, 'success');
         renderPurchasingView();
     } catch (error) {

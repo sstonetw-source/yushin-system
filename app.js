@@ -3412,7 +3412,7 @@ function workflowPurchaseOrderDetails(order) {
     if (!order) return '';
     const field=(label,value)=>`<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value || '未填寫')}</dd></div>`;
     const items=normalizedOrderItems(order);
-    return `<details class="order-detail-panel"><summary hidden></summary><dialog class="order-detail-drawer" aria-label="訂單明細"><header class="order-drawer-heading"><h3>訂單明細</h3><button type="button" class="btn-secondary" data-order-drawer-close autofocus>關閉</button></header><div class="order-detail-content"><section class="order-drawer-section"><h4>訂單摘要</h4><dl class="order-drawer-summary">${field('單號',order.orderNo)}${field('客戶',order.customerName||order.customer)}${field('負責業務',order.salesName)}${field('訂單日期',order.orderDate)}${field('訂單總額（含稅）',order.totalPrice==null?'待確認':'NT$ '+order.totalPrice)}</dl></section><section class="order-drawer-section"><h4>全部訂單品項</h4><div class="workflow-price-breakdown">${items.map(item=>`<div>${purchaseProductSummary(item,0,null)}${workflowSalesAmount(order,item)}<small>交付方式：${escapeHtml(globalThis.YushinOrderEntry?.deliveryLabel(item,order.shippingInstructions||{})||'未填寫')}</small></div>`).join('')}</div></section><section class="order-drawer-section"><h4>交易與備註</h4>${workflowCommercialSummary(order)}<dl class="order-drawer-summary">${field('訂單備註',order.remarks)}</dl></section><section class="order-drawer-section"><button type="button" class="btn-secondary" onclick="openOrderStatusHistory(${inlineJsValue(order.id)})">查看操作紀錄</button></section></div></dialog></details>`;
+    return `<details class="order-detail-panel"><summary hidden></summary><dialog class="order-detail-drawer" aria-label="訂單明細"><header class="order-drawer-heading"><h3>訂單明細</h3><button type="button" class="btn-secondary" data-order-drawer-close autofocus>關閉</button></header><div class="order-detail-content"><section class="order-drawer-section"><h4>訂單摘要</h4><dl class="order-drawer-summary">${field('客戶',order.customerName||order.customer)}${field('負責業務',order.salesName)}${field('訂單日期',order.orderDate)}${field('訂單總額（含稅）',order.totalPrice==null?'待確認':'NT$ '+order.totalPrice)}</dl></section><section class="order-drawer-section"><h4>全部訂單品項</h4><div class="workflow-price-breakdown">${items.map(item=>`<div>${purchaseProductSummary(item,0,null)}${workflowSalesAmount(order,item)}<small>交付方式：${escapeHtml(globalThis.YushinOrderEntry?.deliveryLabel(item,order.shippingInstructions||{})||'未填寫')}</small></div>`).join('')}</div></section><section class="order-drawer-section"><h4>交易與備註</h4>${workflowCommercialSummary(order)}<dl class="order-drawer-summary">${field('訂單備註',order.remarks)}</dl></section><section class="order-drawer-section"><button type="button" class="btn-secondary" onclick="openOrderStatusHistory(${inlineJsValue(order.id)})">查看操作紀錄</button></section></div></dialog></details>`;
 }
 // Keep stage-specific action handlers and quantities; only reorganize the presentation.
 function organizePurchasingOrderRow(row, order, item, finance) {
@@ -7466,8 +7466,8 @@ window.printThreeQuotes = async function() {
         const firstPages = paginateQuotePdfDocument(first.stage, first.documentNode);
         await waitForPdfImages(first.stage);
 
-        const pdf = new window.jspdf.jsPDF({ orientation:'portrait', unit:'mm', format:'a4', compress:true });
-        await addDocumentPagesToPdf(pdf, firstPages, { scale, isolateRoot:firstStage });
+        const pdf = new window.jspdf.jsPDF({ orientation:'portrait', unit:'mm', format:'a4', compress:true, putOnlyUsedFonts:true });
+        await addDocumentPagesToPdf(pdf, firstPages, { scale, isolateRoot:firstStage, selectableText:true });
         firstStage.remove();
         firstStage = null;
 
@@ -7483,6 +7483,7 @@ window.printThreeQuotes = async function() {
         await addDocumentPagesToPdf(pdf, comparisonPages, {
             scale,
             isolateRoot:comparisonStage,
+            selectableText:true,
             addPageBeforeFirst: true,
             onProgress: (pageNo, pageCount) => {
                 if (button) button.innerText = `正在產生三家估價單… ${pageNo}/${pageCount}`;
@@ -7783,15 +7784,90 @@ function paginateQuotePdfDocument(stage, source) {
     return pages.map(entry => entry.page);
 }
 
+let quotePdfTextFontRequest;
+
+function loadQuotePdfTextFont() {
+    if (!quotePdfTextFontRequest) {
+        quotePdfTextFontRequest = fetch('assets/fonts/YushinQuoteText.ttf?v=1', {signal:globalThis.AbortSignal?.timeout?.(2500)})
+            .then(response => {
+                if (!response.ok) throw new Error('估價單文字字型無法載入');
+                return response.blob();
+            })
+            .then(blob => new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result.split(',')[1]);
+                reader.onerror = () => reject(reader.error);
+                reader.readAsDataURL(blob);
+            }))
+            .catch(error => {
+                quotePdfTextFontRequest = null;
+                console.warn('估價單文字字型載入失敗', error);
+                return null;
+            });
+    }
+    return quotePdfTextFontRequest;
+}
+
+function addQuotePdfPageText(pdf, page, x, width, height) {
+    const bounds = page.getBoundingClientRect();
+    const scaleX = width / Math.ceil(page.scrollWidth);
+    const scaleY = height / Math.ceil(page.scrollHeight);
+    const walker = document.createTreeWalker(page, NodeFilter.SHOW_TEXT);
+    const range = document.createRange();
+
+    function writeLine(text, rect) {
+        if (!text.trim() || !rect.width || !rect.height) return;
+        pdf.setFontSize(rect.height * scaleY * 72 / 25.4);
+        const textWidth = pdf.getTextWidth(text);
+        if (!textWidth) return;
+        pdf.text(text, x + (rect.left - bounds.left) * scaleX, 10 + (rect.top - bounds.top) * scaleY, {
+            baseline:'top',
+            horizontalScale:rect.width * scaleX / textWidth,
+            renderingMode:'invisible'
+        });
+    }
+
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (!node.data.trim() || getComputedStyle(node.parentElement).visibility !== 'visible') continue;
+        range.selectNodeContents(node);
+        const rects = range.getClientRects();
+        if (rects.length === 1) {
+            writeLine(node.data.replace(/\s+/g, ' ').trim(), rects[0]);
+        } else if (rects.length > 1) {
+            let start = 0;
+            while (start < node.length) {
+                range.setStart(node, start);
+                range.setEnd(node, node.length);
+                const first = range.getClientRects()[0];
+                if (!first) break;
+                // Find the end of this visual line without measuring every character.
+                let low = start + 1, high = node.length;
+                while (low < high) {
+                    const middle = Math.ceil((low + high) / 2);
+                    range.setEnd(node, middle);
+                    if (range.getClientRects().length <= 1) low = middle;
+                    else high = middle - 1;
+                }
+                range.setEnd(node, low);
+                const rect = range.getClientRects()[0];
+                if (rect) writeLine(node.data.slice(start, low).replace(/\s+/g, ' ').trim(), rect);
+                start = low;
+            }
+        }
+    }
+}
+
 async function addDocumentPagesToPdf(pdf, pages, options = {}) {
     const {
         scale = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ? 1.15 : 1.65,
         onProgress = null,
         addPageBeforeFirst = false,
-        isolateRoot = null
+        isolateRoot = null,
+        selectableText = false
     } = options;
     const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     const jpegQuality = isMobile ? 0.88 : 0.92;
+    const fontRequest = selectableText ? loadQuotePdfTextFont() : null;
 
     for (let index = 0; index < pages.length; index += 1) {
         if (typeof onProgress === 'function') onProgress(index + 1, pages.length);
@@ -7825,6 +7901,17 @@ async function addDocumentPagesToPdf(pdf, pages, options = {}) {
         // 這可避免 iPhone Safari 在多頁文件上累積大型 Canvas / Base64 造成記憶體壓力。
         let imageData = canvas.toDataURL('image/jpeg', jpegQuality);
         pdf.addImage(imageData, 'JPEG', x, 10, renderWidthMm, renderHeightMm, undefined, 'FAST');
+        if (fontRequest) {
+            const font = await fontRequest;
+            if (font) {
+                if (!pdf.existsFileInVFS('YushinQuoteText.ttf')) {
+                    pdf.addFileToVFS('YushinQuoteText.ttf', font);
+                    pdf.addFont('YushinQuoteText.ttf', 'QuoteText', 'normal');
+                }
+                pdf.setFont('QuoteText', 'normal');
+                addQuotePdfPageText(pdf, page, x, renderWidthMm, renderHeightMm);
+            }
+        }
         imageData = null;
         canvas.width = 1;
         canvas.height = 1;
@@ -7939,12 +8026,13 @@ window.exportCurrentQuotePdf = async function() {
             : paginateQuotePdfDocument(stage, exportDom.documentNode);
         if (!isSinglePage) await waitForPdfImages(stage);
 
-        // 單頁本身只有一張已壓縮 JPEG，關閉 jsPDF 額外 stream 壓縮可減少手機 CPU 等待；
+        // 單頁主要內容為已壓縮 JPEG，關閉 jsPDF 額外 stream 壓縮可減少手機 CPU 等待；
         // 多頁仍保留原本壓縮設定，避免檔案過大。
-        const pdf = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: !isSinglePage });
+        const pdf = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: !isSinglePage, putOnlyUsedFonts:true });
         await addDocumentPagesToPdf(pdf, pages, {
             scale,
             isolateRoot:stage,
+            selectableText:true,
             onProgress: (pageNo, pageCount) => {
                 if (button) button.innerText = `正在產生 PDF… ${pageNo}/${pageCount}`;
             }
@@ -12774,12 +12862,12 @@ window.renderOrdersList = function() {
             <td data-th="產品資訊" class="order-product-cell">${orderItems.map(item=>`<div class="workflow-product-item">${purchaseProductSummary(item, Number(item.orderedQty||item.qty||0), null)}</div>`).join('')}</td>
             <td class="order-sales-cell" data-th="負責業務">${escapeHtml(stripPhoneSuffix(o.salesName))}</td>
 
-            <td data-th="訂單金額（含稅）" class="order-money-cell">${orderItems.map(item=>workflowSalesAmount(o,item)).join('')}${allOrderItems.length>1&&displayIndex===matchedOrderItems.length-1?`<small class="workflow-order-total">整張訂單合計 NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice??'').replace(/,/g,''))||0).toLocaleString())}</small>`:''}</td>
+            <td data-th="品項小計（含稅）" class="order-money-cell">${orderItems.map(item=>workflowSalesAmount(o,item)).join('')}</td>
             <td data-th="進度" class="order-progress-cell"><span class="order-progress-badge">${o.isBilled ? '已核銷' : '未核銷'}</span>${orderItems.map((item,index)=>{const displayCategories=displayCategoriesByItem.get(item)||[];const primaryStatus=displayCategories[0]||'ordering';const itemStatus=['dispatch','shipping'].includes(activeOrderWorkFilter)&&displayCategories.includes(activeOrderWorkFilter)?activeOrderWorkFilter:primaryStatus;const itemStatusMap={ordering:'待採購',arrival:'待到貨',dispatch:'待打單',shipping:'待送貨',billing:'待核銷',complete:'已完成',closed:lifecycle.label};const waiting=primaryStatus==='arrival'?waitingDaysFromDate(item.orderedAt):'';const state=dispatchStateByItem.get(item)||itemDispatchState(o,item);const receipt=primaryStatus==='arrival'?receivingWorkProgress(o,item):null;return `<div class="workflow-progress-item">${orderItems.length>1?`<strong>${escapeHtml(item.itemName||item.itemCode||'品項')}</strong>`:''}<small class="order-item-work-status"><span class="order-progress-badge">${escapeHtml(((lifecycle.status==='normal'&&orderInventorySyncIncomplete(o)) ? (o.inventoryReservationStatus==='failed'?'庫存同步未完成':'庫存同步中…') : ((YushinWorkflow.isServiceItem(item)&&lifecycle.status==='normal'?(itemStatus==='ordering'?'待執行':(itemStatusMap[itemStatus]||'待服務處理')):(lifecycle.status==='normal'&&globalThis.YushinWarehouseLogistics?.shippingStatus(o,item,state)))||itemStatusMap[itemStatus]||'待採購')))}</span>${waiting?`・已等 ${escapeHtml(waiting)}`:''}${state.pending>0?`<span class="workflow-quantity">待打單 ${escapeHtml(state.pending)}</span>`:''}${receipt?`<span class="workflow-quantity">已到貨 ${escapeHtml(receipt.received)}／應到貨 ${escapeHtml(receipt.target)}・待到貨 ${escapeHtml(receipt.remaining)}</span>`:''}${state.shippable>0?`・已有 ${escapeHtml(state.shippable)} 可出貨`:''}</small></div>`}).join('')}</td>
             <td class="no-print" data-th="操作"><div class="workflow-inline-actions">
                 <details class="order-detail-panel" data-order-id="${escapeAttr(displayRowKey)}" ${openedDetails.has(displayRowKey)?'open':''}>
                     <summary hidden></summary>
-                    <dialog class="order-detail-drawer" aria-label="訂單明細"><header class="order-drawer-heading"><h3>訂單明細</h3><button type="button" class="btn-secondary" data-order-drawer-close autofocus>關閉</button></header><div class="order-detail-content"><section class="order-drawer-section"><h4>訂單摘要</h4><dl class="order-drawer-summary"><div><dt>單號</dt><dd>${escapeHtml(o.orderNo||'—')}</dd></div><div><dt>客戶</dt><dd>${escapeHtml(o.customerName||'—')}</dd></div><div><dt>負責業務</dt><dd>${escapeHtml(stripPhoneSuffix(o.salesName))}</dd></div><div><dt>訂單日期</dt><dd>${escapeHtml(o.orderDate||'—')}</dd></div><div><dt>訂單總額</dt><dd>NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice??'').replace(/,/g,''))||0).toLocaleString())}</dd></div></dl>${o.quoteNo?`<div class="record-reference">來源估價單 ${escapeHtml(o.quoteNo)}</div>`:''}</section><section class="order-drawer-section"><h4>全部訂單品項</h4><div class="workflow-price-breakdown">${allOrderItems.map(item=>`<div class="${orderItems.includes(item)?'is-current-work-item':''}"><strong>${escapeHtml(item.itemName||item.itemCode||'品項')}</strong>${orderItems.includes(item)?'<small class="order-current-item-label">目前分頁品項</small>':''}<small>${escapeHtml(lifecycle.status!=='normal'?lifecycle.label:(YushinWorkflow.isServiceItem(item)?(displayCategoriesByItem.get(item)||[]).map(category=>category==='ordering'?'待執行':category==='delivery'?'待服務處理':workflowWorkCategoryLabel(category)).join('・'):globalThis.YushinWarehouseLogistics?.shippingStatus(o,item,dispatchStateByItem.get(item))||(displayCategoriesByItem.get(item)||[]).map(workflowWorkCategoryLabel).join('・')))}</small>${workflowSalesAmount(o,item)}</div>`).join('')}</div></section><section class="order-drawer-section"><h4>交付資料</h4>
+                    <dialog class="order-detail-drawer" aria-label="訂單明細"><header class="order-drawer-heading"><h3>訂單明細</h3><button type="button" class="btn-secondary" data-order-drawer-close autofocus>關閉</button></header><div class="order-detail-content"><section class="order-drawer-section"><h4>訂單摘要</h4><dl class="order-drawer-summary"><div><dt>客戶</dt><dd>${escapeHtml(o.customerName||'—')}</dd></div><div><dt>負責業務</dt><dd>${escapeHtml(stripPhoneSuffix(o.salesName))}</dd></div><div><dt>訂單日期</dt><dd>${escapeHtml(o.orderDate||'—')}</dd></div><div><dt>訂單總額</dt><dd>NT$ ${escapeHtml(Number(parseFloat(String(o.totalPrice??'').replace(/,/g,''))||0).toLocaleString())}</dd></div></dl>${o.quoteNo?`<div class="record-reference">來源估價單 ${escapeHtml(o.quoteNo)}</div>`:''}</section><section class="order-drawer-section"><h4>全部訂單品項</h4><div class="workflow-price-breakdown">${allOrderItems.map(item=>`<div class="${orderItems.includes(item)?'is-current-work-item':''}"><strong>${escapeHtml(item.itemName||item.itemCode||'品項')}</strong>${orderItems.includes(item)?'<small class="order-current-item-label">目前分頁品項</small>':''}<small>${escapeHtml(lifecycle.status!=='normal'?lifecycle.label:(YushinWorkflow.isServiceItem(item)?(displayCategoriesByItem.get(item)||[]).map(category=>category==='ordering'?'待執行':category==='delivery'?'待服務處理':workflowWorkCategoryLabel(category)).join('・'):globalThis.YushinWarehouseLogistics?.shippingStatus(o,item,dispatchStateByItem.get(item))||(displayCategoriesByItem.get(item)||[]).map(workflowWorkCategoryLabel).join('・')))}</small>${workflowSalesAmount(o,item)}</div>`).join('')}</div></section><section class="order-drawer-section"><h4>交付資料</h4>
                         <div class="order-item-prices">${allOrderItems.map(item => `<div><strong>${escapeHtml(item.itemName||item.itemCode||'品項')}</strong><div>採購方式：${escapeHtml(globalThis.YushinOrderCommercialDetails.procurementLabel(item))}</div><div>交付方式：${escapeHtml(globalThis.YushinOrderEntry.deliveryLabel({fulfillmentType:item.fulfillmentType,deliveryPlan:item.deliveryPlan||o.shippingInstructions||{}}))}</div>${canEditOrders&&lifecycle.status==='normal'&&!detailsLocked&&(currentUserRole==='admin'||o.ownerUid===currentUser?.uid||canReceiveInventoryCapability())&&!globalThis.YushinOrderCommercialDetails.itemMoved(item)?`<button type="button" class="btn-small btn-secondary" onclick="openWarehouseDeliveryPlan(${inlineJsValue(o.id)},${inlineJsValue(item.itemId)})">修改交付方式／地址</button>`:''}</div>`).join('')}</div>
                         </section><section class="order-drawer-section"><h4>交易與備註</h4><dl class="order-drawer-summary order-commercial-summary"><div><dt>交易方式</dt><dd>${escapeHtml(o.transactionType||'未選擇')}</dd></div><div><dt>發票抬頭</dt><dd>${escapeHtml(o.invoiceTitle||'—')}</dd></div><div><dt>訂單備註</dt><dd>${escapeHtml(o.remarks||'—')}</dd></div></dl><details class="order-commercial-editor" ${openedEditors.has(displayRowKey)?'open':''}><summary>${detailsEditable?'編輯交易與備註':canManageOrderOps?'成本與交易設定':'查看交易設定'}</summary>${detailsLocked?'<small>已到貨或進入交付流程，訂單交付設定、交易方式及訂單備註已鎖定。</small>':''}
             ${canManageOrderOps ? `
@@ -18495,8 +18583,6 @@ function updatePoSaveButton() {
     const button = document.getElementById('printPurchaseOrderBtn');
     if (!button) return;
     const waitingForNumber = !poEditingId && !poNoReady;
-    const draftButton=document.getElementById('savePoDraftBtn');
-    if(draftButton) draftButton.disabled=poSaveInProgress||poDraftLoading||waitingForNumber;
     const confirmButton = document.getElementById('confirmPoOrderedBtn');
     if (confirmButton) confirmButton.disabled=poConfirmInProgress||waitingForNumber||poSaveInProgress||poDraftLoading||(typeof formalPurchaseRecoveryRunning!=='undefined'&&formalPurchaseRecoveryRunning);
     const copyButton = document.getElementById('poCopyAsNewBtn');
@@ -18660,7 +18746,7 @@ window.openDirectStockPurchase = async function(product = null) {
         renderPoItemsTable();
     }
     updatePoModeUI();
-    updatePoSaveStatus('這張採購單尚未建立。確認品項、供應商與單價後，可儲存草稿或直接確認已採購。');
+    updatePoSaveStatus('這張採購單尚未建立。確認品項、供應商與單價後，可下載 PDF 或確認已採購。');
     document.getElementById('poModalOverlay').classList.add('active');
 
     // 備貨單的空白表單不依賴雲端主檔，先立即顯示；供應商與預設倉庫在背景補齊。
@@ -18811,8 +18897,6 @@ function updatePoModeUI() {
     const hasOutstanding = !!savedPo && !isPurchaseTerminalStatus(savedPo.status) && purchaseItemsFromSavedPo(savedPo).some((_, index) => Number(purchaseHistoryItemReceiptProgress(savedPo, index).remainingQty) > 0);
     const confirmBtn = document.getElementById('confirmPoOrderedBtn');
     if (confirmBtn) { confirmBtn.hidden = !!savedPo && savedPo.status!=='DRAFT'; confirmBtn.disabled=poSaveInProgress||poDraftLoading; }
-    const draftBtn=document.getElementById('savePoDraftBtn');
-    if(draftBtn)draftBtn.hidden=!!savedPo && savedPo.status!=='DRAFT';
     const warehouseSelect=document.getElementById('poDefaultWarehouse');
     if(warehouseSelect){
         if(warehouseSelect.parentElement)warehouseSelect.parentElement.hidden=!poDirectStockMode;
@@ -19305,8 +19389,6 @@ async function printSavedPoDocument(poNo, vendorName) {
     let stage = null;
     const button = document.getElementById('printPurchaseOrderBtn');
     const download = options.download !== false;
-    const modalGeneration = poDirectStockOpenGeneration;
-    const exportingPoId = poEditingId;
     try {
         if (typeof window.html2canvas !== 'function' || !window.jspdf?.jsPDF) {
             throw new Error('PDF 元件尚未載入');
@@ -19348,7 +19430,6 @@ async function printSavedPoDocument(poNo, vendorName) {
                 return {blob,fileName};
             }
             updatePoSaveStatus('✓ 採購單 PDF 已產生');
-            if(poDirectStockOpenGeneration===modalGeneration&&poEditingId===exportingPoId)closePurchaseOrderModal();
             showActionFeedback(`採購單 ${poNo} PDF 已匯出。`,'success');
         }else{
             updatePoSaveStatus('✓ 採購單 PDF 附件已準備');
@@ -19532,7 +19613,6 @@ window.printPurchaseOrder = async function({download=true} = {}) {
 // 「製作下一張估價單」：手動觸發，不會因為誤按列印視窗的取消鈕就被清空。
 // 按下後會先確認，避免不小心點到把還沒印的內容洗掉；確認後清空表單、單號跳下一號，
 // 並且立刻把這個「全新、還是空的」狀態存成本機草稿，這樣萬一使用者按完馬上關網頁，
-// 重開時看到的會是這張全新的空白單，而不是被清掉的上一張。
 
 function directPoWarehouseOptions(selected){
     return '<option value="">請選擇入庫倉庫</option>'+warehouseMasterCache.filter(warehouse=>warehouse.active!==false&&!warehouse.systemCustody&&warehouse.warehouseType!=='CUSTODY'&&!warehouse.id.startsWith('custody-')).map(warehouse=>`<option value="${escapeAttr(warehouse.id)}" ${warehouse.id===selected?'selected':''}>${escapeHtml(warehouse.name||warehouse.warehouseName||warehouse.id)}</option>`).join('');
@@ -19548,7 +19628,6 @@ window.chooseDirectPoProduct=async function(index,value){
     if(match){try {await applyDirectPoProduct(index,item.itemCode,match);}
         catch(error){updatePoSaveStatus('商品成本讀取失敗，請重新選擇商品：'+error.message,true);}}
 };
-window.savePoDraft=()=>printPurchaseOrder({download:false});
 window.confirmCurrentPurchaseOrder=async function(){
     if(poConfirmInProgress||poSaveInProgress||poDraftLoading||formalPurchaseRecoveryRunning)return;
     poConfirmInProgress=true;
@@ -19651,6 +19730,10 @@ async function recoverFormalPurchase() {
         const result = await commitFormalPurchaseOrder(pending.poRecord, {actorUid:uid, actorRole:role});
         check();
         const savedPo = cacheCommittedFormalPurchase(result);
+        if (poEditingId === savedPo.id && document.getElementById('poModalOverlay')?.classList.contains('active')) {
+            renderPoItemsTable();
+            updatePoModeUI();
+        }
         stage='在途登記';
         if(typeof updatePoSaveStatus==='function')updatePoSaveStatus(`採購單 ${savedPo.poNo} 已確認採購，正在登記在途…`);
         await registerPurchaseIncoming(savedPo.id, savedPo,
@@ -19668,9 +19751,8 @@ async function recoverFormalPurchase() {
                 purchasingViewLoaded.add('ordering');
         }
         if (poEditingId === savedPo.id) poIncomingSyncPending = false;
-        if (document.getElementById('poModalOverlay')?.classList.contains('active')
-            && document.getElementById('poNo')?.textContent?.trim() === savedPo.poNo)
-            closePurchaseOrderModal();
+        if (poEditingId === savedPo.id && document.getElementById('poModalOverlay')?.classList.contains('active'))
+            updatePoSaveStatus(`採購單 ${savedPo.poNo} 已確認採購，在途同步完成。`);
         showActionFeedback(`採購單 ${savedPo.poNo} 已確認，在途同步完成；可由原採購單下載 PDF。`, 'success');
         renderPurchasingView();
     } catch (error) {
@@ -24429,6 +24511,10 @@ window.openOrderModal = function(source = null) {
     const overlay = document.getElementById('orderModalOverlay');
     if (!overlay) return;
     const openingGeneration = ++orderModalOpenGeneration;
+    const saveButton = document.getElementById('saveNewOrderBtn');
+    const saveStatus = document.getElementById('newOrderSaveStatus');
+    if (saveButton) { saveButton.disabled = newOrderSaveInProgress; saveButton.textContent = '建立訂單'; }
+    if (saveStatus) saveStatus.textContent = '';
     const openingCode=document.getElementById('orderItemCode');
     if(openingCode){delete openingCode.dataset.matchedProductCode;delete openingCode.dataset.autofillBrand;delete openingCode.dataset.productCheckStatus;delete openingCode.dataset.preserveOrderPriceCode;clearQuickProductButton(openingCode);clearProductMatchChoices(openingCode);}
     const recoveryBanner = document.getElementById('orderDraftRecoveryBanner');
@@ -24728,7 +24814,7 @@ function showActionFeedback(message, type = 'success') {
 }
 
 window.saveNewOrder = function() {
-    if (newOrderSaveInProgress) return;
+    if (newOrderSaveInProgress || document.getElementById('saveNewOrderBtn')?.disabled) return;
     const fulfillmentType=document.getElementById('orderFulfillmentType')?.value||'WAREHOUSE';
     const warehouseId=fulfillmentType==='DIRECT_SHIP'?'':document.getElementById('orderWarehouse')?.value||'';
     const sharedPlan=window.orderShippingInstructions?.()||{};
@@ -24882,8 +24968,8 @@ window.saveNewOrder = function() {
         const pendingConfirmedSelfOrder=Array.isArray(data.items)&&data.items.some(item=>
             (item.procurementType||data.procurementType)==='SALES_SELF_ORDER'&&item.selfOrderConfirmed===true);
         newOrderSaveInProgress=false;
-        if(saveButton){saveButton.disabled=false;saveButton.innerText='建立訂單';}
-        // 正式文件確認寫入後即釋放表單；庫存與來源文件同步使用這份獨立快照。
+        if(saveButton){saveButton.disabled=savingGeneration===orderModalOpenGeneration;saveButton.innerText=saveButton.disabled?'訂單已建立':'建立訂單';}
+        // 正式文件確認寫入後鎖住本次送出；庫存與來源文件同步使用獨立快照。
         pendingOrderReservationIds.add(docRef.id);
         if(currentUser?.uid===savingUid){
             rememberRecentCustomerName(data.customerName);
@@ -24895,11 +24981,12 @@ window.saveNewOrder = function() {
             if(localStorage.getItem(savedPendingKey)===docRef.id)localStorage.removeItem(savedPendingKey);
             if(savingGeneration===orderModalOpenGeneration){
                 localStorage.removeItem(savedDraftKey);
-                closeOrderModal();
+                const status = document.getElementById('newOrderSaveStatus');
+                if (status) status.textContent = '訂單資料已儲存。';
             }
             showActionFeedback(pendingConfirmedSelfOrder
                 ? '訂單已暫存；供應商已下訂與庫存預留須由後端同時確認，尚未完成前不能視為正式已下訂。'
-                : '訂單已建立，庫存正在背景同步；可繼續建立其他訂單。',
+                : '訂單已建立，庫存正在背景同步。',
                 pendingConfirmedSelfOrder?'warning':'success');
         }
         let reservation;
