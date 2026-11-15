@@ -1370,6 +1370,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
 
   // SAME source after its four CLOSE returns: receive the second PO through
   // the original warehouse UI, without changing prior fulfillment evidence.
+  await page.locator('#poModalOverlay button[onclick="closePurchaseOrderModal()"]').click();
   await siteLogout(page);await siteLogin(page,fixture.accounts.warehouse,'warehouse');
   await siteNav(page,'inventory');await page.locator('#inventoryReceivingTabBtn').click();
   await page.locator('[data-inventory-receiving-kind="purchase"]').click();
@@ -2317,6 +2318,7 @@ for(const width of [1280,390])test('full site '+width+'px original UI gated PO p
   const supplyId=po.supplyOrderIds[0],committed=(await db.collection('supplyOrders').doc(supplyId).get()).data();
   assert.equal(committed.fulfillmentType,'DIRECT_SHIP');assert.equal(committed.qty,3);assert.equal(committed.incomingRegisteredQty||0,0);
   assert.deepEqual(await physical(),before);
+  await page.locator('#poModalOverlay button[onclick="closePurchaseOrderModal()"]').click();
   await siteLogout(page);await siteLogin(page,accounts.sales,'sales');await siteNav(page,'orders');
   for(const [qty,total] of [[1,1],[2,3]]){
    const row=page.locator('#ordersBody > tr').filter({hasText:orderId}).first();
