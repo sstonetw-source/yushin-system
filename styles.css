@@ -5488,3 +5488,13 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
 @media screen and (max-width:768px) {
     #poModalOverlay .po-editor-actions button { min-height:44px; }
 }
+
+
+@media screen and (min-width:769px) {
+    #appContainer #ordersTable thead th:last-child,
+    #appContainer #ordersTable tbody td[data-th="操作"] {
+        width:clamp(120px, 12vw, 156px);
+        text-align:right;
+        vertical-align:middle;
+    }
+}
