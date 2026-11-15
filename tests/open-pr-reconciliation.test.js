@@ -4,6 +4,8 @@ const app=fs.readFileSync('app.js','utf8'),html=fs.readFileSync('index.html','ut
 const fn=name=>{const start=app.indexOf('function '+name+'(');assert.ok(start>=0,name);return app.slice(start,app.indexOf('\n}',start)+2);};
 const windowFn=name=>{const start=app.indexOf('window.'+name+' = ');assert.ok(start>=0,name);return app.slice(start,app.indexOf('\n};',start)+3);};
 
+const pageHelpSource = require('node:fs').readFileSync(require('node:path').join(__dirname, '../modules/page-help.js'), 'utf8');
+
 test('pending and failed initial sync do not enter purchase, dispatch or shipping display queues',()=>{
  const x=vm.createContext({itemDispatchState:()=>({pending:2,shippable:1}),orderItemDisplayCategory:o=>o.status==='cancelled'?'closed':'ordering',
   normalizedOrderStatus:o=>o.status==='cancelled'?'cancelled':'normal',normalizedOrderItems:o=>o.items,
@@ -26,7 +28,7 @@ test('manual stock labels retain quantity semantics and fixed purchaser printing
  assert.match(html,/＋ 手動新增庫存/);assert.match(html,/value="initial">手動新增庫存（含期初庫存）/);
  assert.match(html,/Excel 批次新增/);assert.match(app,/又鑫_庫存批次匯入範本\.xlsx/);
  assert.doesNotMatch(html+fs.readFileSync('modules/page-help.js','utf8'),/行政負責打單|待行政打單|行政完成打單/);
- assert.match(html,/採購負責打單|採購.*打單/);
+ assert.match(pageHelpSource,/採購負責打單|採購.*打單/);
 });
 
 function analysisFixture(){
