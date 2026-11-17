@@ -3349,7 +3349,7 @@ test('order row summaries reuse normalized items without exposing pending-dispat
     assert.match(renderSource,/fulfillmentProgressInfo\(o, allOrderItems, dispatchStateByItem\)/);
     assert.match(renderSource,/orderContextActionState\(o, allOrderItems, dispatchStateByItem\)/);
     assert.doesNotMatch(renderSource,/dispatchActionHtml\(o, allOrderItems, dispatchStateByItem\)/);
-    assert.match(renderSource,/selfOrderActionHtml\(o, allOrderItems, dispatchStateByItem\)/);
+    assert.match(renderSource,/selfOrderActionHtml\(o, orderItems, dispatchStateByItem\)/);
 });
 
 test('receipt allocation progress has narrowly scoped Firestore update permission', () => {

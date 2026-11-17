@@ -7,7 +7,9 @@ const vm = require('node:vm');
 
 test('GitHub Pages includes a fresh app cache key for the backend-only password flow', () => {
     const html = fs.readFileSync(require.resolve('../index.html'), 'utf8');
-    assert.match(html, /app\.js\?v=20261112-1/);
+    const cacheVersion = html.match(/app\.js\?v=(\d{8})-(\d+)/);
+    assert.ok(cacheVersion, 'Pages must load a versioned app.js');
+    assert.ok(Number(cacheVersion[1]) >= 20261112, 'app.js must include the backend-only password flow');
     assert.match(html, /id="changePasswordSaveBtn"/);
 });
 

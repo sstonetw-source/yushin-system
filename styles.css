@@ -5492,6 +5492,11 @@ button.sales-stat-card:disabled { cursor:wait; opacity:.65; }
  #appContainer #ordersTable .order-more-menu > summary { height:38px; min-width:38px; width:38px; }
 }
 
+@media screen and (pointer:coarse) {
+ #appContainer #ordersTable .order-compact-actions > button,
+ #appContainer #ordersTable .order-more-menu > summary { min-height:44px; min-width:44px; }
+}
+
 @media screen {
     #poModalOverlay .po-editor-actions {
         display:flex;
