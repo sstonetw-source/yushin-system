@@ -8,7 +8,7 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
 (async()=>{
  assert.ok(executablePath,'Chrome is required');const browser=await chromium.launch({executablePath,args:['--no-sandbox']});
  try{for(const width of [1280,1024,768,390]){
-  const page=await browser.newPage({viewport:{width,height:900}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
+  const page=await browser.newPage({viewport:{width,height:900},hasTouch:width<1280}),errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.setContent('<html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="appContainer"></div></html>');
   await page.evaluate(html=>{const d=new DOMParser().parseFromString(html,'text/html'),section=d.getElementById('order-system');document.getElementById('appContainer').append(section);section.classList.add('active');},read('index.html'));
   await page.addStyleTag({content:read('styles.css')});
@@ -114,6 +114,14 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
   if(width>=1280){const ys=await page.locator('.order-billing-action,.order-more-menu > summary').evaluateAll(es=>es.map(e=>e.getBoundingClientRect().y+e.getBoundingClientRect().height/2));assert.ok(Math.max(...ys)-Math.min(...ys)<=1,'billing and more share one desktop row '+JSON.stringify(await page.locator('.order-billing-action,.order-more-menu > summary').evaluateAll(es=>es.map(e=>({text:e.innerText,rect:e.getBoundingClientRect().toJSON(),display:getComputedStyle(e).display})))));}
   await page.evaluate(()=>{ordersCache[0].isBilled=false;renderOrdersList();});
   assert.equal(await page.locator('.order-billing-action').innerText(),'確認核銷');
+  if(width<1280){
+   assert.equal(await page.locator('.order-billing-action,.order-more-menu > summary').evaluateAll(controls=>
+    controls.every(control=>control.getBoundingClientRect().height>=44 && control.getBoundingClientRect().width>=44)),true);
+  }
+  await page.evaluate(()=>{pendingOrderStatusKeys.add('G:isBilled');renderOrdersList();});
+  const saving=page.getByRole('button',{name:'儲存中…',exact:true});
+  assert.equal(await saving.isDisabled(),true);
+  await page.evaluate(()=>{pendingOrderStatusKeys.clear();renderOrdersList();});
   await page.locator('.order-more-menu > summary').click();
   const moreMenu=page.getByRole('dialog',{name:'更多操作'});
   await moreMenu.getByRole('button',{name:'查看紀錄',exact:true}).waitFor();
