@@ -7,7 +7,7 @@ const renderer=workspace.slice(workspace.indexOf('window.renderOrdersList = func
 const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','google-chrome-stable','chromium'].map(n=>spawnSync('which',[n],{encoding:'utf8'})).find(r=>r.status===0)?.stdout.trim();
 (async()=>{
  assert.ok(executablePath,'Chrome is required');const browser=await chromium.launch({executablePath,args:['--no-sandbox']});
- try{for(const width of [1280,1024,390]){
+ try{for(const width of [1280,1024,768,390]){
   const page=await browser.newPage({viewport:{width,height:900}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.setContent('<html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="appContainer"></div></html>');
   await page.evaluate(html=>{const d=new DOMParser().parseFromString(html,'text/html'),section=d.getElementById('order-system');document.getElementById('appContainer').append(section);section.classList.add('active');},read('index.html'));
@@ -26,12 +26,12 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
    const itemDispatchState=()=>({pending:0,shippable:0}),orderLifecycleInfo=()=>({status:'normal'}),renderOrderWorkCards=()=>{},orderItemDisplayCategories=(o,i)=>window.fixtureCategoriesByItem?.[i.itemId]||window.fixtureCategories||['delivery'],orderMatchesWorkPeriod=()=>true;
    const waitingDaysFromDate=()=> '0 天',receivingWorkProgress=()=>({received:0,target:30,remaining:30});
    const orderBillingDate=()=> '2026-10-26';
-   const fulfillmentProgressInfo=()=>({shippable:0});
+   const fulfillmentProgressInfo=()=>({shippable:window.fixtureShippable||0});
    const deliveryProgressInfo=()=>({state:'pending'}),orderContextActionState=()=>({}),orderDeliveryRequiresItemForm=()=>false,bindListRowSelection=()=>{};
    const stripPhoneSuffix=x=>x||'',orderInventorySyncIncomplete=()=>false,inlineJsValue=x=>JSON.stringify(x).replaceAll(String.fromCharCode(34),'&quot;'),canBusinessSelfOrder=()=>!!window.fixtureCanBill;
    const orderDeliveryPlanSummary=()=>'',selfOrderActionHtml=()=>'',orderLifecycleActionButtons=()=>'',orderInventorySyncStatusHtml=()=>'',directShipReceiptActionHtml=()=>'';
    const escapeHtml=x=>String(x??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;'),escapeAttr=escapeHtml;
-   const orderItemWorkCategory=(o,i)=>YushinWorkflow.serviceItemWorkCategory(o,i);
+   const orderItemWorkCategory=(o,i)=>YushinWorkflow.isServiceItem(i)?YushinWorkflow.serviceItemWorkCategory(o,i):'delivery';
    const serviceCaseTransport=()=>({uid:'U',role:'sales',call:async(name,input)=>{
     if(name!=='commitOrderServiceAction')throw Error(name);
     ordersCache[0].serviceFulfillment[input.itemId][input.action]={quantity:2};
@@ -47,21 +47,46 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
   await page.addScriptTag({content:read('modules/order-entry-core.js')});
   await page.addScriptTag({content:presentation});
   await page.addScriptTag({content:renderer});
+  await page.addScriptTag({content:read('src/shared/workspace-interactions.js')});
+  await page.evaluate(()=>initializeWorkspaceMenus());
   await page.evaluate(()=>{window.fixtureCategoriesByItem={I:['shipping'],J:['ordering']};renderOrdersList();});
   assert.equal(await page.locator('.service-case-verified-hint').count(),0);
   assert.equal(await page.locator('#ordersBody > tr').count(),2);
   assert.match(await page.locator('#ordersBody > tr').nth(0).locator('.order-money-cell').innerText(),/100 × 2[\s\S]*200/);
   assert.match(await page.locator('#ordersBody > tr').nth(1).locator('.order-money-cell').innerText(),/200 × 2[\s\S]*400/);
   assert.equal(await page.getByRole('button',{name:'服務案件'}).count(),0);
+  await page.evaluate(()=>{
+   currentUserRole='purchaser';
+   ordersCache[0].serviceFulfillment.J={EXECUTE:{quantity:2}};
+   window.fixtureCategoriesByItem.J=['dispatch'];
+   activeOrderWorkFilter='dispatch';renderOrdersList();
+  });
+  assert.equal(await page.locator('#ordersBody .order-primary-action').innerText(),'確認打單');
+  await page.evaluate(()=>{
+   currentUserRole='sales';delete ordersCache[0].serviceFulfillment.J;
+   window.fixtureCategoriesByItem.J=['ordering'];
+   window.fixtureCanBill=true;activeOrderWorkFilter='all';renderOrdersList();
+  });
+  assert.equal(await page.locator('#ordersBody .order-billing-action').count(),0);
+  assert.equal(await page.locator('#ordersBody .order-more-menu > summary').count(),2);
+  await page.evaluate(()=>{
+   ordersCache[0].items.push({itemId:'P',itemName:'混合單商品',qty:1,unitPrice:200});
+   window.fixtureCategoriesByItem.P=['shipping'];window.fixtureShippable=1;renderOrdersList();
+  });
+  const rows=page.locator('#ordersBody > tr');
+  assert.equal(await rows.filter({has:page.locator('.order-product-cell').filter({hasText:'檢測'})}).getByRole('button',{name:'確認送達',exact:true}).count(),1);
+  assert.equal(await rows.filter({has:page.locator('.order-product-cell').filter({hasText:'混合單商品'})}).getByRole('button',{name:'確認送達',exact:true}).count(),1);
+  await page.evaluate(()=>{ordersCache[0].items.pop();window.fixtureShippable=0;renderOrdersList();});
   const product=page.locator('#ordersBody .order-progress-cell');
   assert.match(await product.first().innerText(),/待送貨/);
   assert.match(await product.nth(1).innerText(),/待執行/);
-  await page.getByRole('button',{name:'確認已送達 · 檢測'}).click();
+  await page.getByRole('button',{name:'確認送達',exact:true}).click();
   await product.first().getByText('待核銷',{exact:true}).waitFor();
   assert.match(await product.nth(1).innerText(),/待執行/);
   await page.evaluate(()=>{window.fixtureCategoriesByItem=null;});
   assert.equal(await product.evaluateAll(es=>es.every(el=>el.scrollWidth<=el.clientWidth)),true);
   await page.evaluate(()=>{
+   window.fixtureCanBill=false;
    ordersCache=[{id:'G',orderNo:'YS-20261026-1',orderDate:'2026-10-26',ownerUid:'U',salesName:'業務',customerName:'金額驗收',totalPrice:339000,transactionType:'直',remarks:'冷藏配送',status:'active',
     items:[{itemId:'G1',itemName:'RNeasy Mini Kit',itemCode:'74104',brand:'Qiagen',qty:30,orderedQty:30,unitPrice:11300,receivedQty:0,procurementType:'PURCHASING_PO',deliveryPlan:{mode:'PICKUP'}}]}];renderOrdersList();
   });
@@ -87,6 +112,12 @@ const executablePath=process.env.CHROME_EXECUTABLE_PATH||['google-chrome','googl
   assert.match(await amount.innerText(),/11,300 × 30/);
   await page.evaluate(()=>{window.fixtureCanBill=true;ordersCache[0].isBilled=true;renderOrdersList();});
   if(width>=1280){const ys=await page.locator('.order-billing-action,.order-more-menu > summary').evaluateAll(es=>es.map(e=>e.getBoundingClientRect().y+e.getBoundingClientRect().height/2));assert.ok(Math.max(...ys)-Math.min(...ys)<=1,'billing and more share one desktop row '+JSON.stringify(await page.locator('.order-billing-action,.order-more-menu > summary').evaluateAll(es=>es.map(e=>({text:e.innerText,rect:e.getBoundingClientRect().toJSON(),display:getComputedStyle(e).display})))));}
+  await page.evaluate(()=>{ordersCache[0].isBilled=false;renderOrdersList();});
+  assert.equal(await page.locator('.order-billing-action').innerText(),'確認核銷');
+  await page.locator('.order-more-menu > summary').click();
+  const moreMenu=page.getByRole('dialog',{name:'更多操作'});
+  await moreMenu.getByRole('button',{name:'查看紀錄',exact:true}).waitFor();
+  await moreMenu.getByRole('button',{name:'關閉',exact:true}).click();
   await page.screenshot({path:'/tmp/order-inline-actions-'+width+'.png',fullPage:true});
   await page.evaluate(()=>{window.fixtureCanBill=false;ordersCache[0].isBilled=false;renderOrdersList();});
   let columns;

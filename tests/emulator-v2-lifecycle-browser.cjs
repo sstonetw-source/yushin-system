@@ -456,13 +456,14 @@ for(const mixed of [false,true])for(const width of [1280,390])test('shared servi
   await page.waitForFunction(id=>!!ordersCache.find(o=>o.id===id)?.serviceFulfillment.S?.PREPARE,orderId);
   await siteLogout(page);await siteLogin(page,accounts.sales,'sales');await siteNav(page,'orders');
   const row=page.locator('#ordersBody > tr').filter({hasText:orderNo}).first();
-  const bill=row.getByRole('button',{name:'確認已核銷',exact:true});
+  const bill=row.getByRole('button',{name:'確認核銷',exact:true});
   assert.equal(await page.locator('#serviceCaseEntry').count(),0);
-  await row.getByRole('button',{name:'確認已送達 · 現場維修',exact:true}).click();
+  await row.getByRole('button',{name:'確認送達',exact:true}).click();
   await page.waitForFunction(id=>!!ordersCache.find(o=>o.id===id)?.serviceFulfillment.S?.DELIVER,orderId);
   if(mixed){
-   assert.equal(await bill.isDisabled(),true,'unacknowledged goods prevent billing after service delivery');
-   await row.getByRole('button',{name:'確認送達',exact:true}).click();
+   assert.equal(await bill.count(),0,'unacknowledged goods prevent billing after service delivery');
+   await page.locator('#ordersBody > tr').filter({hasText:orderNo}).nth(1)
+    .getByRole('button',{name:'確認送達',exact:true}).click();
    await page.locator('#deliveryFormPanel').waitFor({state:'visible'});
    assert.equal(await page.locator('#deliveryItemId').inputValue(),'G');
    assert.equal(await page.locator('#deliveryShipmentId').inputValue(),tag+'-ship');
@@ -476,7 +477,7 @@ for(const mixed of [false,true])for(const width of [1280,390])test('shared servi
   await page.waitForFunction(()=>!pendingOrderStatusKeys.size&&!!pendingServiceBillingIntent());
   const original=billingCalls.at(-1);assert.equal((await db.doc('orders/'+orderId).get()).data().isBilled,true);
   await siteOpen(page,'sales');await siteNav(page,'orders');const count=billingCalls.length;
-  await row.getByRole('button',{name:/^(確認已核銷|已核銷)$/}).click();
+  await row.getByRole('button',{name:/^(確認核銷|已核銷)$/}).click();
   await page.waitForFunction(()=>!pendingOrderStatusKeys.size&&!pendingServiceBillingIntent());
   assert.equal(billingCalls.length,count+1);assert.deepEqual(billingCalls.at(-1),original);
   const done=(await db.doc('orders/'+orderId).get()).data();

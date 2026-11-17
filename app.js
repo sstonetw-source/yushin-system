@@ -11155,12 +11155,11 @@ function serviceOrderActionButtons(order,items,lifecycle){
         ||lifecycle.status!=='normal'||!canEditPage('orders.list'))return '';
     return items.filter(YushinWorkflow.isServiceItem).map(item=>{
         const category=YushinWorkflow.serviceItemWorkCategory(order,item);
-        const name=escapeHtml(item.itemName||item.itemCode||'服務品項');
         if(category==='dispatch'&&['admin','purchaser'].includes(currentUserRole))
-            return serviceOrderActionButton(order,item,'PREPARE',`確認打單 · ${name}`);
+            return serviceOrderActionButton(order,item,'PREPARE','確認打單');
         if(category==='delivery'&&canManageOrderLifecycleCapability()
             &&(currentUserRole==='admin'||order.ownerUid===currentUser?.uid))
-            return serviceOrderActionButton(order,item,'DELIVER',`確認已送達 · ${name}`);
+            return serviceOrderActionButton(order,item,'DELIVER','確認送達');
         return '';
     }).join('');
 }
@@ -11970,13 +11969,13 @@ function canBusinessSelfOrder(order = null) {
 function selfOrderActionHtml(order, normalizedItems = null, dispatchStateByItem = null) {
     if(!canBusinessSelfOrder(order)||normalizedOrderStatus(order)!=='normal'||orderInventorySyncIncomplete(order))return '';
     return (normalizedItems||normalizedOrderItems(order)).filter(item=>(item.procurementType||order.procurementType)==='SALES_SELF_ORDER'&&remainingProcurementQty(order,item)>0)
-        .map(item=>`<button type="button" class="btn-small btn-secondary" onclick="openSelfOrderModal(${inlineJsValue(order.id)},${inlineJsValue(item.itemId)})">確認自行訂貨・${escapeHtml(item.itemCode||item.itemName)}</button>`).join('');
+        .map(item=>`<button type="button" class="btn-small btn-secondary" onclick="openSelfOrderModal(${inlineJsValue(order.id)},${inlineJsValue(item.itemId)})">確認自行訂貨</button>`).join('');
 }
 
 function directShipReceiptActionHtml(order, items = normalizedOrderItems(order)) {
     if(normalizedOrderStatus(order)!=='normal'||orderInventorySyncIncomplete(order)||!canConfirmSupplyReceipt({...order,fulfillmentType:'DIRECT_SHIP'}))return '';
     return items.filter(item=>item.fulfillmentType==='DIRECT_SHIP'&&Number(item.supplyOrderedQty||0)>Number(item.receivedQty||0))
-        .map(item=>`<button type="button" class="btn-small btn-secondary" onclick="openOrderDirectShipReceipt(${inlineJsValue(order.id)},${inlineJsValue(item.itemId)},this)">確認直送到貨・${escapeHtml(item.itemCode||item.itemName)}</button>`).join('');
+        .map(item=>`<button type="button" class="btn-small btn-secondary" onclick="openOrderDirectShipReceipt(${inlineJsValue(order.id)},${inlineJsValue(item.itemId)},this)">確認直送到貨</button>`).join('');
 }
 window.openOrderDirectShipReceipt = async function(orderId,itemId,button) {
     const order=ordersCache.find(row=>row.id===orderId);
@@ -12822,6 +12821,7 @@ window.renderOrdersList = function() {
         const matchedOrderItems=activeOrderWorkFilter==='all'
             ? allOrderItems
             : allOrderItems.filter(item=>(displayCategoriesByItem.get(item) || []).includes(activeOrderWorkFilter));
+        const hasGoodsRow = matchedOrderItems.some(item=>!YushinWorkflow.isServiceItem(item));
         shown++;
 
         matchedOrderItems.forEach((displayItem,displayIndex)=>{
@@ -12851,7 +12851,11 @@ window.renderOrdersList = function() {
                 :deliveryProgress.state!=='complete'&&fulfillmentProgress.shippable>0);
         const deliveryPending = pendingDeliveryOrderIds.has(o.id);
         const billingPending = pendingOrderStatusKeys.has(o.id + ':isBilled');
-        const inventorySyncPending = pendingOrderReservationIds.has(o.id);
+        const canShowGoodsDelivery = !hasGoodsRow || !YushinWorkflow.isServiceItem(displayItem);
+        const canShowBilling = canBusinessSelfOrder(o) && (billingPending
+            || (lifecycle.status === 'normal' && !pendingOrderReservationIds.has(o.id)
+                && (o.isBilled || !o.serviceFulfillment
+                    || allOrderItems.every(item=>orderItemWorkCategory(o,item,lifecycle,dispatchStateByItem.get(item))==='billing'))));
         if (lifecycle.status !== 'normal') {
             tr.classList.add('order-row-closed');
         }
@@ -12888,8 +12892,8 @@ window.renderOrdersList = function() {
                 ${orderInventorySyncStatusHtml(o)}
                 <div class="order-compact-actions">
                     ${serviceOrderActionButtons(o,orderItems,lifecycle)}
-                    ${selfOrderActionHtml(o, allOrderItems, dispatchStateByItem)}
-                    ${directShipReceiptActionHtml(o, allOrderItems)}
+                    ${selfOrderActionHtml(o, orderItems, dispatchStateByItem)}
+                    ${directShipReceiptActionHtml(o, orderItems)}
                     ${(globalThis.YUSHIN_V3_CUSTODY_SHIPMENT_EMULATOR===true
                       ||(typeof productionTransactionBackendEnabled==='function'&&productionTransactionBackendEnabled('V3_CUSTODY_SHIPMENT')))
                         && lifecycle.status==='normal'&&canManageOrderLifecycleCapability()&&canEditPage('orders.list')
@@ -12906,8 +12910,8 @@ window.renderOrdersList = function() {
                             || allOrderItems.some(item=>unresolvedV3CustodyReturnExists(o.id,item.itemId)))
                         ? `<button type="button" class="btn-small" onclick="openV3CustodyReturn(${inlineJsValue(o.id)})">保管退貨實收／核對</button>`:''}
                     
-                    ${canConfirmOrderDelivery && (canOpenDelivery || deliveryPending) ? `<button type="button" class="btn-small" onclick="${useBatchDelivery ? 'openPartialDeliveryForOrder' : 'quickCompleteDelivery'}(${inlineJsValue(o.id)})" ${orderInventorySyncIncomplete(o) || deliveryPending ? 'disabled' : ''}>${deliveryPending ? '處理中…' : useBatchDelivery ? '確認分批送達' : '確認送達'}</button>` : ''}
-                    ${canBusinessSelfOrder(o) ? `<button type="button" class="btn-small order-billing-action ${o.isBilled ? 'btn-secondary' : ''}" onclick="toggleOrderStatus('${o.id}', 'isBilled', ${!o.isBilled})" ${lifecycle.status !== 'normal' || billingPending || inventorySyncPending || (!o.isBilled && o.serviceFulfillment && !allOrderItems.every(item=>orderItemWorkCategory(o,item,lifecycle,dispatchStateByItem.get(item))==='billing')) ? 'disabled' : ''}>${billingPending ? '儲存中…' : o.isBilled ? '已核銷' : (o.serviceFulfillment?'確認已核銷':'核銷')}</button>` : ''}
+                    ${canShowGoodsDelivery && canConfirmOrderDelivery && (deliveryPending || (canOpenDelivery && !orderInventorySyncIncomplete(o))) ? `<button type="button" class="btn-small" onclick="${useBatchDelivery ? 'openPartialDeliveryForOrder' : 'quickCompleteDelivery'}(${inlineJsValue(o.id)})" ${deliveryPending ? 'disabled' : ''}>${deliveryPending ? '處理中…' : useBatchDelivery ? '確認分批送達' : '確認送達'}</button>` : ''}
+                    ${canShowBilling ? `<button type="button" class="btn-small order-billing-action ${o.isBilled ? 'btn-secondary' : ''}" onclick="toggleOrderStatus('${o.id}', 'isBilled', ${!o.isBilled})" ${billingPending ? 'disabled' : ''}>${billingPending ? '儲存中…' : o.isBilled ? '已核銷' : '確認核銷'}</button>` : ''}
                     <details class="order-more-menu">
                         <summary title="更多操作">⋯</summary>
                         <div class="order-more-menu-popover">

@@ -14,12 +14,11 @@ function serviceOrderActionButtons(order,items,lifecycle){
         ||lifecycle.status!=='normal'||!canEditPage('orders.list'))return '';
     return items.filter(YushinWorkflow.isServiceItem).map(item=>{
         const category=YushinWorkflow.serviceItemWorkCategory(order,item);
-        const name=escapeHtml(item.itemName||item.itemCode||'服務品項');
         if(category==='dispatch'&&['admin','purchaser'].includes(currentUserRole))
-            return serviceOrderActionButton(order,item,'PREPARE',`確認打單 · ${name}`);
+            return serviceOrderActionButton(order,item,'PREPARE','確認打單');
         if(category==='delivery'&&canManageOrderLifecycleCapability()
             &&(currentUserRole==='admin'||order.ownerUid===currentUser?.uid))
-            return serviceOrderActionButton(order,item,'DELIVER',`確認已送達 · ${name}`);
+            return serviceOrderActionButton(order,item,'DELIVER','確認送達');
         return '';
     }).join('');
 }
