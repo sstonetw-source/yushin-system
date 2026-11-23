@@ -721,7 +721,7 @@ async function siteOrderAction(page,fixture,label){
  await row.locator('.order-more-menu > summary').click();await page.locator('.workspace-menu-dialog[open]').getByRole('button',{name:label,exact:true}).click();
 }
 for(const width of [1280,390,820])test('manual order travels through purchase receipt shipment and delivery '+width+'px',{timeout:180000},async()=>{
- const tag='manual-handoff-'+width,key=tag+'-product',warehouseId=tag+'-warehouse',supplierId=tag+'-supplier',accounts={};
+ const tag='manual-handoff-'+width,key=tag+'-product',warehouseId='manual-handoff-warehouse',supplierId=tag+'-supplier',accounts={};
  for(const role of ['sales','purchaser','warehouse']){
   const uid=tag+'-'+role,email=uid+'@example.test';
   await auth.createUser({uid,email,password});
@@ -770,7 +770,7 @@ for(const width of [1280,390,820])test('manual order travels through purchase re
   await page.locator('#orderCustomer').fill(tag+'客戶');
   await page.locator('#orderItemCode').fill(tag);await page.locator('#orderItemCode').blur();
   await page.waitForFunction(()=>document.querySelector('#orderItemCode').dataset.productCheckStatus==='matched');
-  await page.locator('#orderWarehouse').selectOption(warehouseId);
+  await page.waitForFunction(id=>document.getElementById('orderWarehouse').value===id,warehouseId);
   await page.locator('#orderQty').fill('4');await page.locator('#orderUnitPrice').fill('100');
   await page.locator('#orderDeliveryChoice').selectOption('CUSTOMER');
   const recipient=page.locator('#orderRecipientDetails');
