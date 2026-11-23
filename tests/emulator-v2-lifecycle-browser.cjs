@@ -296,7 +296,7 @@ for (const width of [1280, 390, 820]) {
    const switchRole=async role=>{
     await siteMenu(page);
     const menu=page.locator('.auth-menu-toggle');
-    if(await menu.getAttribute('aria-expanded')!=='true')await menu.click();
+    if(await menu.isVisible() && await menu.getAttribute('aria-expanded')!=='true')await menu.click();
     await page.locator('#viewAsRoleSelect').selectOption(role);
     await page.waitForFunction(value=>currentUserRole===value,role);
    };
