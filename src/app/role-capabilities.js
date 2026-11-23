@@ -120,6 +120,8 @@ function applyPermissionVisibility() {
     if (quoteListTab) quoteListTab.innerText = canViewAllData('quotes') ? '全部估價單' : '我的估價單';
     const purchaseAnalysisTab = document.getElementById('purchase-tab-analysis');
     if (purchaseAnalysisTab) purchaseAnalysisTab.style.display = canCreatePurchaseOrderCapability() ? '' : 'none';
+    const orderCreateButton = document.getElementById('orderCreateBtn');
+    if (orderCreateButton) orderCreateButton.hidden = !canEditPage('orders.list');
     populatePurchaserOrderFilters();
     document.querySelectorAll('#inventory-system .inventory-header-actions').forEach(el => el.style.display = canEditPage('inventory') ? '' : 'none');
     const receivingTab = document.getElementById('inventoryReceivingTabBtn');

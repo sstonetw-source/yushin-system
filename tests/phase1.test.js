@@ -1406,7 +1406,7 @@ test('permission routing includes Product Forecast and Inventory workspaces', ()
     assert.match(s, /forecast-system/);
     assert.match(s, /product-system/);
     assert.match(s, /inventory-system/);
-    assert.match(appSource, /function firstAccessibleMainPage\(\)[\s\S]*?\['quote', 'forecast', 'products', 'orders', 'orders\.po', 'inventory', 'equipment'\]/);
+    assert.match(appSource, /function firstAccessibleMainPage\(\)[\s\S]*?\['quote', 'forecast', 'products', 'orders\.list', 'orders\.po', 'inventory', 'equipment'\]/);
 });
 
 
@@ -2698,7 +2698,7 @@ test('quote form loads staff only for roles that need owner selection', () => {
     const source=appSource.slice(start,end);
     assert.match(source,/currentUserRole === 'admin' \|\| currentUserRole === 'purchaser'/);
     assert.match(source,/ensureSalesListLoaded\(\)/);
-    assert.match(source,/else \{[\s\S]*?populateSalesDropdown\(\)/);
+    assert.match(source,/else \{[\s\S]*?populateSalesDropdown\(!draft\)/);
 
     const selectorStart=appSource.indexOf('function populateSalesDropdown(');
     const selectorEnd=appSource.indexOf('function updateSalesPhoneDisplay',selectorStart);

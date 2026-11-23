@@ -223,7 +223,9 @@ function resetSessionData() {
 window.switchViewRole = function(role) {
     if (trueUserRole !== 'admin' || role === currentUserRole || !Object.hasOwn(ROLE_LABELS, role)) return;
     if (quoteFormInitialized) saveQuoteDraft();
-    const returnState = currentUserRole === 'admin' ? currentAppNavigationState() : adminPreviewReturnState;
+    const returnState = currentUserRole === 'admin'
+        ? { ...currentAppNavigationState(), containerScrollTop: document.getElementById('appContainer')?.scrollTop || 0 }
+        : adminPreviewReturnState;
     currentUserRole = role;
     resetSessionData();
     adminPreviewReturnState = role === 'admin' ? null : returnState;
@@ -233,7 +235,11 @@ window.switchViewRole = function(role) {
         if (returnState.tabId === 'quote-system') {
             switchQuoteView(returnState.quoteView, null, { skipHistory: true, skipReload: true });
         }
-        requestAnimationFrame(() => window.scrollTo(0, returnState.scrollY));
+        requestAnimationFrame(() => {
+            const container = document.getElementById('appContainer');
+            if (container) container.scrollTop = returnState.containerScrollTop;
+            window.scrollTo(0, returnState.scrollY);
+        });
     } else if (role === 'warehouse' && canAccessPage('inventory')) {
         actuallySwitchMainTab('inventory-system', null, { skipReload: true });
     }

@@ -268,6 +268,58 @@ async function siteNav(page,key){
  await page.locator('.nav-tab[data-main-nav="'+key+'"]').click();
 }
 
+for (const width of [1280, 390, 820]) {
+ test('original role preview preserves quotation and lands warehouse '+width+'px',{timeout:60000},async()=>{
+  const context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}});
+  await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;});
+  await context.route('**/*',route=>{
+   const hostname=new URL(route.request().url()).hostname;
+   return ['localhost','127.0.0.1'].includes(hostname)?route.continue():route.abort();
+  });
+  const accounts={};
+  try {
+   for (const role of ['admin','warehouse']) {
+    const uid='role-preview-'+width+'-'+role,email=uid+'@example.test',code=role==='admin'?'A0':'W0';
+    await auth.createUser({uid,email,password});
+    await db.collection('users').doc(uid).set({role,active:true,name:role,email,code});
+    accounts[role]={uid,email};
+   }
+   const page=await context.newPage();
+   await siteOpen(page);
+   await siteLogin(page,accounts.admin,'admin');
+   await page.locator('#quoteCreatePanel').waitFor({state:'visible'});
+   await page.evaluate(()=>restoreQuoteDraft({
+    quoteNo:'YS-ROLE-FIXTURE',editingQuoteNo:'YS-ROLE-FIXTURE',clientName:'Fixture customer',
+    ownerUid:currentUser.uid,salesName:currentUserName,salesCode:currentUserCode
+   }));
+   await page.locator('#quoteRemarks').fill('Unsaved administrator edit');
+   const switchRole=async role=>{
+    await siteMenu(page);
+    const menu=page.locator('.auth-menu-toggle');
+    if(await menu.getAttribute('aria-expanded')!=='true')await menu.click();
+    await page.locator('#viewAsRoleSelect').selectOption(role);
+    await page.waitForFunction(value=>currentUserRole===value,role);
+   };
+   await switchRole('sales');
+   assert.equal(await page.locator('#clientName').inputValue(),'');
+   assert.equal(await page.locator('#quoteEditingBanner').isVisible(),false);
+   await page.locator('#quoteRemarks').fill('Separate preview edit');
+   await switchRole('warehouse');
+   await page.locator('#inventory-system.active').waitFor({state:'visible'});
+   await siteNav(page,'orders');
+   await page.locator('#order-system.active').waitFor({state:'visible'});
+   assert.equal(await page.locator('#orderCreateBtn').isVisible(),false);
+   await switchRole('admin');
+   await page.locator('#quote-system.active').waitFor({state:'visible'});
+   assert.equal(await page.locator('#quoteEditingNumber').textContent(),'YS-ROLE-FIXTURE');
+   assert.equal(await page.locator('#quoteRemarks').inputValue(),'Unsaved administrator edit');
+   await siteLogout(page);
+   await siteLogin(page,accounts.warehouse,'warehouse');
+   await page.locator('#inventory-system.active').waitFor({state:'visible'});
+  } finally {await context.close();}
+ });
+}
+
 // Original unchanged GitHub-served app.js, real signed-in Auth and original
 // pending-demand button/confirmation. No synthetic Service invocation.
 for(const width of [1280,390])test('original Quick Purchase '+width+'px commits once through guarded demo Callable',{timeout:180000},async()=>{
