@@ -109,8 +109,10 @@ window.addEventListener('pageshow', event => {
 // 讓管理員可以確認/測試各角色實際看到的畫面長怎樣。真正的身份還是 trueUserRole，
 // 這裡不會改動 Firebase 帳號本身，Firestore 的存取權限仍然是照登入帳號真正的角色在判斷。
 let sessionDataGeneration = 0;
+let adminPreviewReturnState = null;
 function resetSessionData() {
     sessionDataGeneration++;
+    adminPreviewReturnState = null;
     window.resetCustomerReturnReceiptView?.();
     window.resetV2ShipmentLocations?.();
     window.closePurchaseOrderModal?.();
@@ -194,7 +196,18 @@ function resetSessionData() {
     purchaseCostCache.clear(); warehouseStockCache.clear(); visibleProductCostCache.clear();
     productCodeMatchCache.clear(); productManagementSearchCache.clear();
     inventoryLedgerCache=[]; pendingSupplyCache=[]; inventoryReplenishmentCache=[];
-    newOrderDraftItems=[]; requestedOrderOwnerUid=''; editingQuoteNo=null; quoteFormInitialized=false;
+    newOrderDraftItems=[]; requestedOrderOwnerUid=''; quoteFormInitialized=false;
+    setQuoteEditingContext('');
+    delete window._pendingQuoteOwnerIdentity;
+    document.getElementById('quoteItems')?.replaceChildren();
+    document.getElementById('salesName')?.replaceChildren();
+    for (const id of ['quoteNo', 'salesPhone']) {
+        const element = document.getElementById(id);
+        if (!element) continue;
+        if (id === 'quoteNo') element.value = '';
+        else element.textContent = '';
+    }
+    setQuoteOutputStatus('');
     forecastLoading=false; forecastReloadRequested=false; inventoryLoading=false; myQuotesPageLoading=false; myQuotesReloadRequested=false;
     window._orderModalQuoteContext=null; window._orderModalSourceLink=null;
     clearTimeout(draftSaveTimer);
@@ -208,24 +221,23 @@ function resetSessionData() {
     receiptTaskJobs.clear();
 }
 window.switchViewRole = function(role) {
-    if (trueUserRole !== 'admin') return;
+    if (trueUserRole !== 'admin' || role === currentUserRole || !Object.hasOwn(ROLE_LABELS, role)) return;
+    if (quoteFormInitialized) saveQuoteDraft();
+    const returnState = currentUserRole === 'admin' ? currentAppNavigationState() : adminPreviewReturnState;
     currentUserRole = role;
     resetSessionData();
-    const activeSection = document.querySelector('.content-section.active');
-    if (activeSection?.id === 'order-system') renderOrdersList();
-    if (activeSection?.id === 'quote-system' && document.getElementById('myQuotesPanel')?.style.display === 'block') renderMyQuotesList();
-    if (activeSection?.id === 'forecast-system') renderForecastList();
-    if (activeSection?.id === 'inventory-system') { renderInventoryList(); renderPendingInventoryItems(); }
-    if (activeSection?.id === 'equipment-system') renderEquipmentList();
-    showApp();
+    adminPreviewReturnState = role === 'admin' ? null : returnState;
 
-    // showApp 只會重新載入目前正在看的模組；其他模組等使用者切入時再載入。
-    // 避免管理員每切換一次檢視身份，就同時查詢估價單、訂單與全部儀器。
-
-    // 如果目前正在看管理員後台，但模擬身份已經不是管理員，就先跳轉離開，避免卡在打不開的分頁
-    if (activeSection && activeSection.id === 'admin-system' && currentUserRole !== 'admin') {
-        actuallySwitchMainTab('quote-system');
+    if (role === 'admin' && returnState?.tabId) {
+        actuallySwitchMainTab(returnState.tabId, null, { preserveSubView: true, skipReload: true });
+        if (returnState.tabId === 'quote-system') {
+            switchQuoteView(returnState.quoteView, null, { skipHistory: true, skipReload: true });
+        }
+        requestAnimationFrame(() => window.scrollTo(0, returnState.scrollY));
+    } else if (role === 'warehouse' && canAccessPage('inventory')) {
+        actuallySwitchMainTab('inventory-system', null, { skipReload: true });
     }
+    showApp();
 };
 
 function actuallySwitchMainTab(tabId, el, options = {}) {

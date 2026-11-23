@@ -2085,7 +2085,12 @@ window.calculateTotals = function() {
 };
 
 const QUOTE_DRAFT_STORAGE_KEY = 'quote_draft_v2';
-function quoteDraftStorageKey() { return `${QUOTE_DRAFT_STORAGE_KEY}:${currentUser?.uid || 'anonymous'}`; }
+function quoteDraftStorageKey() {
+    const accountKey = `${QUOTE_DRAFT_STORAGE_KEY}:${currentUser?.uid || 'anonymous'}`;
+    return trueUserRole === 'admin' && currentUserRole !== 'admin'
+        ? `${accountKey}:preview:${currentUserRole}`
+        : accountKey;
+}
 let editingQuoteNo = '';
 
 function updateQuoteEditingBanner() {
@@ -2138,7 +2143,7 @@ window.saveLoadedQuoteAsNew = async function() {
 // 重新打開系統時都能接著剛剛還沒印完的那張繼續打，不會憑空消失。
 // 只有按「製作下一張估價單」才會真的清空、換成全新的草稿。
 function saveQuoteDraft() {
-    if (!currentUser) return;
+    if (!currentUser || restoringQuoteDraft) return;
     try {
         const items = Array.from(document.querySelectorAll('#quoteItems tr')).map(row => ({
             nameEn: row.querySelector('.item-en')?.value || '',
@@ -2159,7 +2164,7 @@ function saveQuoteDraft() {
             company: currentCompany,
             clientName: document.getElementById('clientName')?.value || '',
             ordererName: document.getElementById('ordererName')?.value || '',
-            ...quoteOwnerFromSelection(),
+            ...(window._pendingQuoteOwnerIdentity || quoteOwnerFromSelection()),
             quoteDate: document.getElementById('quoteDate')?.value || '',
             quoteNo: document.getElementById('quoteNo')?.value || '',
             discountRate: document.getElementById('discountRateInput')?.value || '0',
