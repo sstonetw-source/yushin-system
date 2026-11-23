@@ -269,6 +269,41 @@ async function siteNav(page,key){
 }
 
 for (const width of [1280, 390, 820]) {
+ test('engineer records repair and maintenance '+width+'px',{timeout:60000},async()=>{
+  const uid='equipment-engineer-'+width,email=uid+'@example.test',equipmentId='equipment-'+width;
+  const equipment=db.collection('equipment').doc(equipmentId);
+  await auth.createUser({uid,email,password});
+  await db.collection('users').doc(uid).set({role:'engineer',active:true,name:'驗收工程師',email,code:'E'});
+  await equipment.set({active:true,customerName:'儀器驗收客戶 '+width,model:'驗收儀器',
+   brand:'Roche',ownerUid:uid,logs:[],lastServiceDate:'2026-01-01'});
+  const context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}});
+  await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;});
+  await context.route('**/*',route=>['localhost','127.0.0.1'].includes(new URL(route.request().url()).hostname)
+   ?route.continue():route.abort());
+  try {
+   const page=await context.newPage();
+   await siteOpen(page);
+   await siteLogin(page,{uid,email},'engineer');
+   await siteNav(page,'equipment');
+   await page.getByText('儀器驗收客戶 '+width,{exact:true}).click();
+   for(const [type,date,lastServiceDate] of [['維修','2026-02-01','2026-01-01'],['保養','2026-03-01','2026-03-01']]){
+    await page.locator('#eqLogDate').fill(date);
+    await page.locator('#eqLogType').selectOption(type);
+    await page.locator('#eqLogTech').fill('驗收工程師');
+    await page.locator('#eqLogDesc').fill(type+'驗收紀錄');
+    await page.locator('#eqAddLogBtn').click();
+    await page.locator('#eqLogBody').getByText(type+'驗收紀錄',{exact:true}).waitFor();
+    const saved=(await equipment.get()).data();
+    assert.equal(saved.logs.at(-1).type,type);
+    assert.equal(saved.logs.at(-1).tech,'驗收工程師');
+    assert.equal(saved.lastServiceDate,lastServiceDate);
+   }
+   assert.equal((await equipment.get()).data().logs.length,2);
+  } finally {await context.close();}
+ });
+}
+
+for (const width of [1280, 390, 820]) {
  test('original role preview preserves quotation and lands warehouse '+width+'px',{timeout:60000},async()=>{
   const context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}});
   await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;});
@@ -620,7 +655,7 @@ async function siteOrderAction(page,fixture,label){
  const row=page.locator('#ordersBody > tr').filter({hasText:fixture.sourceId}).first();await row.waitFor({state:'visible'});
  await row.locator('.order-more-menu > summary').click();await page.locator('.workspace-menu-dialog[open]').getByRole('button',{name:label,exact:true}).click();
 }
-for(const width of [1280,390])test('full site '+width+'px original PO receipt shipment acknowledgements and same-source return transport',{timeout:360000},async()=>{
+for(const width of [1280,390,820])test('full site '+width+'px original PO receipt shipment acknowledgements and same-source return transport',{timeout:360000},async()=>{
  const fixture=await seed(width,'site'),context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
  const errors=[],external=[],calls=[],loaded=new Set();let loseCancel=true,loseRecovery=true,loseRestore=true,losePurchase=true,loseReceipt=true,loseDispatch=true,loseShipment=true,loseDelivery=true,loseReturn=true;
  await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_V2_LIFECYCLE_EMULATOR=true;window.YUSHIN_V2_RECOVERY_EMULATOR=true;window.YUSHIN_FORMAL_PURCHASE_EMULATOR=true;window.YUSHIN_V2_RECEIVING_EMULATOR=true;window.YUSHIN_V2_DISPATCH_EMULATOR=true;window.YUSHIN_V2_SHIPMENT_EMULATOR=true;window.YUSHIN_V2_DELIVERY_EMULATOR=true;});
@@ -1675,7 +1710,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
  }finally{await context.close();}
 });
 
-for(const width of [1280,390])test('full site '+width+'px original multi-item purchasing receipt dispatch shipment and delivery keep same-product lines separate',{timeout:300000},async()=>{
+for(const width of [1280,390,820])test('full site '+width+'px original multi-item purchasing receipt dispatch shipment and delivery keep same-product lines separate',{timeout:300000},async()=>{
  const x=await multiReceiptSiteFixture(width),context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
  const errors=[],external=[],calls=[],purchaseCalls=[],dialogs=[],logisticsCalls=[],dropLogistics=new Set();let lose=false,losePurchase=true;
  await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_FORMAL_PURCHASE_EMULATOR=true;window.YUSHIN_V2_PO_INCOMING_EMULATOR=true;window.YUSHIN_V2_RECEIVING_EMULATOR=true;window.YUSHIN_V2_DISPATCH_EMULATOR=true;window.YUSHIN_V2_SHIPMENT_EMULATOR=true;window.YUSHIN_V2_DELIVERY_EMULATOR=true;window.YUSHIN_V2_RETURN_RECEIPT_EMULATOR=true;window.YUSHIN_V2_LIFECYCLE_EMULATOR=true;});
@@ -2106,7 +2141,7 @@ for(const width of [1280,390])test('full site '+width+'px original multi-item pu
 
 // Run the original manual form against the real Auth-protected whole-order
 // backend on demo-yushin. No browser-side initial stock writer remains.
-for(const multi of [false,true])for(const width of [1280,390])test('full site '+width+'px original '+(multi?'multi-item ':'')+'manual order form reserves through whole-order Callable',{timeout:120000},async()=>{
+for(const multi of [false,true])for(const width of [1280,390,820])test('full site '+width+'px original '+(multi?'multi-item ':'')+'manual order form reserves through whole-order Callable',{timeout:120000},async()=>{
  const tag=(multi?'manual-multi-':'manual-entry-')+width,uid=tag+'-sales',email=uid+'@example.test',key=tag+'-product',warehouseId='MANUAL-ENTRY',otherWarehouse='MANUAL-ENTRY-B',code=(multi?'MULTI':'MANUAL')+width;
  await auth.createUser({uid,email,password});await db.collection('users').doc(uid).set({role:'sales',active:true,name:'手動建單業務',email,code:'B'});
  const batch=db.batch(),put=(name,id,data)=>batch.set(db.collection(name).doc(id),data);
@@ -2215,7 +2250,7 @@ for(const multi of [false,true])for(const width of [1280,390])test('full site '+
 
 // Service sales use the original form with a real whole-order backend commit,
 // without creating virtual stock for Service items.
-for(const mixed of [false,true])for(const width of [1280,390])test('full site '+width+'px original '+(mixed?'Goods plus Service':'Service-only')+' entry has no virtual stock',{timeout:120000},async()=>{
+for(const mixed of [false,true])for(const width of [1280,390,820])test('full site '+width+'px original '+(mixed?'Goods plus Service':'Service-only')+' entry has no virtual stock',{timeout:120000},async()=>{
  const tag='service-entry-'+width+'-'+mixed,uid=tag+'-sales',email=uid+'@example.test',serviceKey=tag+'-service',goodsKey=tag+'-goods',warehouseId='SERVICE-ENTRY',code='SVC'+width+(mixed?'M':'S');
  await auth.createUser({uid,email,password});
  await db.collection('users').doc(uid).set({role:'sales',active:true,name:'服務驗收業務',email,code:'B'});
@@ -2298,7 +2333,7 @@ for(const mixed of [false,true])for(const width of [1280,390])test('full site '+
 
 // A different writer/permission contract from warehouse fulfillment: the
 // original UI with explicit local backend pilot must complete direct ship.
-for(const width of [1280,390])test('full site '+width+'px original UI gated PO purchase and owner direct arrival never touch physical stock',{timeout:180000},async()=>{
+for(const width of [1280,390,820])test('full site '+width+'px original UI gated PO purchase and owner direct arrival never touch physical stock',{timeout:180000},async()=>{
  const tag='direct-entry-'+width,orderId=tag+'-order',key=tag+'-product',warehouseId=tag+'-warehouse',accounts={};
  for(const role of ['sales','purchaser']){
   const uid=tag+'-'+role,email=uid+'@example.test';await auth.createUser({uid,email,password});
@@ -2424,7 +2459,7 @@ for(const width of [1280,390])test('full site '+width+'px original UI gated PO p
 
 // Fifteen-line receipt acceptance only. Source initialization / PO / incoming
 // are explicit Admin fixtures; every receiving action below uses original UI.
-for(const width of [1280,390])test('full site '+width+'px fifteen-line original receipt survives lost replies without sibling or service writes',{timeout:240000},async()=>{
+for(const width of [1280,390,820])test('full site '+width+'px fifteen-line original receipt survives lost replies without sibling or service writes',{timeout:240000},async()=>{
  const accounts={},tag='site-fifteen-'+width;
  for(const role of ['sales','warehouse']){
   const uid=tag+'-'+role,email=uid+'@example.test';await auth.createUser({uid,email,password});
