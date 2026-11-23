@@ -730,7 +730,7 @@ for(const width of [1280,390,820])test('manual order travels through purchase re
  }
  const batch=db.batch(),put=(collection,id,data)=>batch.set(db.collection(collection).doc(id),data);
  put('warehouses',warehouseId,{warehouseName:warehouseId,active:true,isDefault:true});
- put('products',key,{productId:key,manufacturerPartNo:tag,normalizedPartNo:tag,productName:'交易驗收品項',
+ put('products',key,{productId:key,manufacturerPartNo:tag,normalizedPartNo:tag.replaceAll('-',''),productName:'交易驗收品項',
   brand:'Roche',brandName:'Roche',productType:'Goods',productLine:tag,active:true,status:'ACTIVE',listPrice:100});
  put('suppliers',supplierId,{active:true,supplierId,supplierName:supplierId,purchaseHeaderName:supplierId});
  put('brandSupplierMappings',tag,{active:true,brandName:'Roche',productLine:tag,supplierId,isDefault:false});

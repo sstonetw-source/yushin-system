@@ -8401,8 +8401,9 @@ window.switchQuoteView = function(view, el, options = {}) {
     document.getElementById('quoteCreatePanel').style.display = view === 'create' ? 'block' : 'none';
     document.getElementById('myQuotesPanel').style.display = view === 'my' ? 'block' : 'none';
 
-    if (view === 'my' && !options.skipReload && myQuotesCache.length === 0) {
-        loadMyQuotesFromCloud();
+    if (view === 'my') {
+        if (!options.skipReload && myQuotesCache.length === 0) loadMyQuotesFromCloud();
+        else renderMyQuotesList();
     }
     if (view === 'my' && canViewAllData('quotes')) {
         ensureSalesListLoaded().then(() => {
