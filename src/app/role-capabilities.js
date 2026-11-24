@@ -120,6 +120,8 @@ function applyPermissionVisibility() {
     if (quoteListTab) quoteListTab.innerText = canViewAllData('quotes') ? '全部估價單' : '我的估價單';
     const purchaseAnalysisTab = document.getElementById('purchase-tab-analysis');
     if (purchaseAnalysisTab) purchaseAnalysisTab.style.display = canCreatePurchaseOrderCapability() ? '' : 'none';
+    const orderCreateButton = document.getElementById('orderCreateBtn');
+    if (orderCreateButton) orderCreateButton.hidden = !canEditPage('orders.list');
     populatePurchaserOrderFilters();
     document.querySelectorAll('#inventory-system .inventory-header-actions').forEach(el => el.style.display = canEditPage('inventory') ? '' : 'none');
     const receivingTab = document.getElementById('inventoryReceivingTabBtn');
@@ -160,7 +162,8 @@ function updateReadonlyNotice() {
 }
 
 function firstAccessibleMainPage() {
-    return ['quote', 'forecast', 'products', 'orders', 'orders.po', 'inventory', 'equipment'].find(canAccessPage) || (currentUserRole === 'admin' ? 'admin' : '');
+    if (currentUserRole === 'warehouse' && canAccessPage('inventory')) return 'inventory';
+    return ['quote', 'forecast', 'products', 'orders.list', 'orders.po', 'inventory', 'equipment'].find(page => canAccessPage(page)) || (currentUserRole === 'admin' ? 'admin' : '');
 }
 
 function showLoginScreen() {
@@ -218,12 +221,12 @@ function showApp() {
     renderReceiptTasks();
     const activeSection = document.querySelector('.content-section.active');
     const activeMainKey = activeSection ? { 'forecast-system':'forecast', 'quote-system':'quote', 'product-system':'products', 'order-system':'orders.list', 'purchasing-system':'orders.po', 'inventory-system':'inventory', 'equipment-system':'equipment', 'admin-system':'admin' }[activeSection.id] : '';
-    if (activeMainKey && !canAccessPage(activeMainKey)) {
+    if (!activeMainKey || !canAccessPage(activeMainKey)) {
         const fallback = firstAccessibleMainPage();
-        const fallbackId = { forecast:'forecast-system', quote:'quote-system', products:'product-system', orders:'order-system', 'orders.po':'purchasing-system', inventory:'inventory-system', equipment:'equipment-system', admin:'admin-system' }[fallback];
+        const fallbackId = { forecast:'forecast-system', quote:'quote-system', products:'product-system', 'orders.list':'order-system', 'orders.po':'purchasing-system', inventory:'inventory-system', equipment:'equipment-system', admin:'admin-system' }[fallback];
         if (fallbackId) {
             document.getElementById('noPermissionMessage')?.remove();
-            setTimeout(() => actuallySwitchMainTab(fallbackId), 0);
+            actuallySwitchMainTab(fallbackId);
         } else {
             document.querySelectorAll('.content-section').forEach(section => section.classList.remove('active'));
             if (!document.getElementById('noPermissionMessage')) {
@@ -459,20 +462,22 @@ function ensureQuoteFormInitialized() {
     if (draft) restoreQuoteDraft(draft);
     else {
         const savedValidDays = localStorage.getItem('quote_valid_days');
-        if (savedValidDays) document.getElementById('validDays').value = savedValidDays;
+        document.getElementById('validDays').value = savedValidDays || '90';
+        document.getElementById('discountRateInput').value = '0';
+        initDate();
         if (!document.getElementById('quoteItems').rows.length) addQuoteRow();
         switchCompany('yushin');
     }
     if (currentUserRole === 'admin' || currentUserRole === 'purchaser') {
+        const generation = sessionDataGeneration;
         ensureSalesListLoaded().then(() => {
-            populateSalesDropdown();
-            if (draft) restoreQuoteDraft(draft);
+            if (generation !== sessionDataGeneration) return;
+            populateSalesDropdown(!draft);
         }).catch(err => console.warn('業務名單載入失敗：', err));
     } else {
         // 業務只能選自己；登入 profile 已含姓名、代號與電話，
         // 不為了單一選項再掃完整 users collection。
-        populateSalesDropdown();
-        if (draft) restoreQuoteDraft(draft);
+        populateSalesDropdown(!draft);
     }
 }
 

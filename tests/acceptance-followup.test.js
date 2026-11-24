@@ -1,12 +1,16 @@
 const test=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
 const src=fs.readFileSync(path.join(__dirname,'../app.js'),'utf8');
 function functionSource(name){const start=src.indexOf(`function ${name}(`);assert.ok(start>=0);return src.slice(start,src.indexOf('\n}',start)+2);}
-test('quote drafts are isolated by authenticated UID',()=>{
- const c=vm.createContext({currentUser:{uid:'sales-A'}});
- vm.runInContext("const QUOTE_DRAFT_STORAGE_KEY='quote_draft_v2';"+src.match(/function quoteDraftStorageKey\(\) \{[^\n]+\}/)[0],c);
+test('quote drafts are isolated by authenticated UID and administrator preview role',()=>{
+ const c=vm.createContext({currentUser:{uid:'sales-A'},currentUserRole:'sales',trueUserRole:'sales'});
+ vm.runInContext("const QUOTE_DRAFT_STORAGE_KEY='quote_draft_v2';"+functionSource('quoteDraftStorageKey'),c);
  assert.equal(c.quoteDraftStorageKey(),'quote_draft_v2:sales-A');
  c.currentUser={uid:'engineer-B'};assert.equal(c.quoteDraftStorageKey(),'quote_draft_v2:engineer-B');
- assert.match(functionSource('saveQuoteDraft'),/if \(!currentUser\) return/);
+ c.currentUser={uid:'admin-A'};c.trueUserRole='admin';c.currentUserRole='admin';
+ assert.equal(c.quoteDraftStorageKey(),'quote_draft_v2:admin-A');
+ c.currentUserRole='sales';assert.equal(c.quoteDraftStorageKey(),'quote_draft_v2:admin-A:preview:sales');
+ c.currentUserRole='engineer';assert.equal(c.quoteDraftStorageKey(),'quote_draft_v2:admin-A:preview:engineer');
+ assert.match(functionSource('saveQuoteDraft'),/if \(!currentUser \|\| restoringQuoteDraft\) return/);
  assert.match(functionSource('loadQuoteDraft'),/if \(!currentUser\) return null/);
  assert.match(src,/uid === currentUser\?\.uid && generation === sessionDataGeneration/);
 });

@@ -774,6 +774,8 @@ function applyPermissionVisibility() {
     if (quoteListTab) quoteListTab.innerText = canViewAllData('quotes') ? '全部估價單' : '我的估價單';
     const purchaseAnalysisTab = document.getElementById('purchase-tab-analysis');
     if (purchaseAnalysisTab) purchaseAnalysisTab.style.display = canCreatePurchaseOrderCapability() ? '' : 'none';
+    const orderCreateButton = document.getElementById('orderCreateBtn');
+    if (orderCreateButton) orderCreateButton.hidden = !canEditPage('orders.list');
     populatePurchaserOrderFilters();
     document.querySelectorAll('#inventory-system .inventory-header-actions').forEach(el => el.style.display = canEditPage('inventory') ? '' : 'none');
     const receivingTab = document.getElementById('inventoryReceivingTabBtn');
@@ -814,7 +816,8 @@ function updateReadonlyNotice() {
 }
 
 function firstAccessibleMainPage() {
-    return ['quote', 'forecast', 'products', 'orders', 'orders.po', 'inventory', 'equipment'].find(canAccessPage) || (currentUserRole === 'admin' ? 'admin' : '');
+    if (currentUserRole === 'warehouse' && canAccessPage('inventory')) return 'inventory';
+    return ['quote', 'forecast', 'products', 'orders.list', 'orders.po', 'inventory', 'equipment'].find(page => canAccessPage(page)) || (currentUserRole === 'admin' ? 'admin' : '');
 }
 
 function showLoginScreen() {
@@ -872,12 +875,12 @@ function showApp() {
     renderReceiptTasks();
     const activeSection = document.querySelector('.content-section.active');
     const activeMainKey = activeSection ? { 'forecast-system':'forecast', 'quote-system':'quote', 'product-system':'products', 'order-system':'orders.list', 'purchasing-system':'orders.po', 'inventory-system':'inventory', 'equipment-system':'equipment', 'admin-system':'admin' }[activeSection.id] : '';
-    if (activeMainKey && !canAccessPage(activeMainKey)) {
+    if (!activeMainKey || !canAccessPage(activeMainKey)) {
         const fallback = firstAccessibleMainPage();
-        const fallbackId = { forecast:'forecast-system', quote:'quote-system', products:'product-system', orders:'order-system', 'orders.po':'purchasing-system', inventory:'inventory-system', equipment:'equipment-system', admin:'admin-system' }[fallback];
+        const fallbackId = { forecast:'forecast-system', quote:'quote-system', products:'product-system', 'orders.list':'order-system', 'orders.po':'purchasing-system', inventory:'inventory-system', equipment:'equipment-system', admin:'admin-system' }[fallback];
         if (fallbackId) {
             document.getElementById('noPermissionMessage')?.remove();
-            setTimeout(() => actuallySwitchMainTab(fallbackId), 0);
+            actuallySwitchMainTab(fallbackId);
         } else {
             document.querySelectorAll('.content-section').forEach(section => section.classList.remove('active'));
             if (!document.getElementById('noPermissionMessage')) {
@@ -1113,20 +1116,22 @@ function ensureQuoteFormInitialized() {
     if (draft) restoreQuoteDraft(draft);
     else {
         const savedValidDays = localStorage.getItem('quote_valid_days');
-        if (savedValidDays) document.getElementById('validDays').value = savedValidDays;
+        document.getElementById('validDays').value = savedValidDays || '90';
+        document.getElementById('discountRateInput').value = '0';
+        initDate();
         if (!document.getElementById('quoteItems').rows.length) addQuoteRow();
         switchCompany('yushin');
     }
     if (currentUserRole === 'admin' || currentUserRole === 'purchaser') {
+        const generation = sessionDataGeneration;
         ensureSalesListLoaded().then(() => {
-            populateSalesDropdown();
-            if (draft) restoreQuoteDraft(draft);
+            if (generation !== sessionDataGeneration) return;
+            populateSalesDropdown(!draft);
         }).catch(err => console.warn('業務名單載入失敗：', err));
     } else {
         // 業務只能選自己；登入 profile 已含姓名、代號與電話，
         // 不為了單一選項再掃完整 users collection。
-        populateSalesDropdown();
-        if (draft) restoreQuoteDraft(draft);
+        populateSalesDropdown(!draft);
     }
 }
 
@@ -1449,8 +1454,10 @@ window.addEventListener('pageshow', event => {
 // 讓管理員可以確認/測試各角色實際看到的畫面長怎樣。真正的身份還是 trueUserRole，
 // 這裡不會改動 Firebase 帳號本身，Firestore 的存取權限仍然是照登入帳號真正的角色在判斷。
 let sessionDataGeneration = 0;
+let adminPreviewReturnState = null;
 function resetSessionData() {
     sessionDataGeneration++;
+    adminPreviewReturnState = null;
     window.resetCustomerReturnReceiptView?.();
     window.resetV2ShipmentLocations?.();
     window.closePurchaseOrderModal?.();
@@ -1534,7 +1541,18 @@ function resetSessionData() {
     purchaseCostCache.clear(); warehouseStockCache.clear(); visibleProductCostCache.clear();
     productCodeMatchCache.clear(); productManagementSearchCache.clear();
     inventoryLedgerCache=[]; pendingSupplyCache=[]; inventoryReplenishmentCache=[];
-    newOrderDraftItems=[]; requestedOrderOwnerUid=''; editingQuoteNo=null; quoteFormInitialized=false;
+    newOrderDraftItems=[]; requestedOrderOwnerUid=''; quoteFormInitialized=false;
+    setQuoteEditingContext('');
+    delete window._pendingQuoteOwnerIdentity;
+    document.getElementById('quoteItems')?.replaceChildren();
+    document.getElementById('salesName')?.replaceChildren();
+    for (const id of ['quoteNo', 'salesPhone']) {
+        const element = document.getElementById(id);
+        if (!element) continue;
+        if (id === 'quoteNo') element.value = '';
+        else element.textContent = '';
+    }
+    setQuoteOutputStatus('');
     forecastLoading=false; forecastReloadRequested=false; inventoryLoading=false; myQuotesPageLoading=false; myQuotesReloadRequested=false;
     window._orderModalQuoteContext=null; window._orderModalSourceLink=null;
     clearTimeout(draftSaveTimer);
@@ -1548,24 +1566,29 @@ function resetSessionData() {
     receiptTaskJobs.clear();
 }
 window.switchViewRole = function(role) {
-    if (trueUserRole !== 'admin') return;
+    if (trueUserRole !== 'admin' || role === currentUserRole || !Object.hasOwn(ROLE_LABELS, role)) return;
+    if (quoteFormInitialized) saveQuoteDraft();
+    const returnState = currentUserRole === 'admin'
+        ? { ...currentAppNavigationState(), containerScrollTop: document.getElementById('appContainer')?.scrollTop || 0 }
+        : adminPreviewReturnState;
     currentUserRole = role;
     resetSessionData();
-    const activeSection = document.querySelector('.content-section.active');
-    if (activeSection?.id === 'order-system') renderOrdersList();
-    if (activeSection?.id === 'quote-system' && document.getElementById('myQuotesPanel')?.style.display === 'block') renderMyQuotesList();
-    if (activeSection?.id === 'forecast-system') renderForecastList();
-    if (activeSection?.id === 'inventory-system') { renderInventoryList(); renderPendingInventoryItems(); }
-    if (activeSection?.id === 'equipment-system') renderEquipmentList();
-    showApp();
+    adminPreviewReturnState = role === 'admin' ? null : returnState;
 
-    // showApp 只會重新載入目前正在看的模組；其他模組等使用者切入時再載入。
-    // 避免管理員每切換一次檢視身份，就同時查詢估價單、訂單與全部儀器。
-
-    // 如果目前正在看管理員後台，但模擬身份已經不是管理員，就先跳轉離開，避免卡在打不開的分頁
-    if (activeSection && activeSection.id === 'admin-system' && currentUserRole !== 'admin') {
-        actuallySwitchMainTab('quote-system');
+    if (role === 'admin' && returnState?.tabId) {
+        actuallySwitchMainTab(returnState.tabId, null, { preserveSubView: true, skipReload: true });
+        if (returnState.tabId === 'quote-system') {
+            switchQuoteView(returnState.quoteView, null, { skipHistory: true, skipReload: true });
+        }
+        requestAnimationFrame(() => {
+            const container = document.getElementById('appContainer');
+            if (container) container.scrollTop = returnState.containerScrollTop;
+            window.scrollTo(0, returnState.scrollY);
+        });
+    } else if (role === 'warehouse' && canAccessPage('inventory')) {
+        actuallySwitchMainTab('inventory-system', null, { skipReload: true });
     }
+    showApp();
 };
 
 function actuallySwitchMainTab(tabId, el, options = {}) {
@@ -6987,7 +7010,12 @@ window.calculateTotals = function() {
 };
 
 const QUOTE_DRAFT_STORAGE_KEY = 'quote_draft_v2';
-function quoteDraftStorageKey() { return `${QUOTE_DRAFT_STORAGE_KEY}:${currentUser?.uid || 'anonymous'}`; }
+function quoteDraftStorageKey() {
+    const accountKey = `${QUOTE_DRAFT_STORAGE_KEY}:${currentUser?.uid || 'anonymous'}`;
+    return trueUserRole === 'admin' && currentUserRole !== 'admin'
+        ? `${accountKey}:preview:${currentUserRole}`
+        : accountKey;
+}
 let editingQuoteNo = '';
 
 function updateQuoteEditingBanner() {
@@ -7040,7 +7068,7 @@ window.saveLoadedQuoteAsNew = async function() {
 // 重新打開系統時都能接著剛剛還沒印完的那張繼續打，不會憑空消失。
 // 只有按「製作下一張估價單」才會真的清空、換成全新的草稿。
 function saveQuoteDraft() {
-    if (!currentUser) return;
+    if (!currentUser || restoringQuoteDraft) return;
     try {
         const items = Array.from(document.querySelectorAll('#quoteItems tr')).map(row => ({
             nameEn: row.querySelector('.item-en')?.value || '',
@@ -7061,7 +7089,7 @@ function saveQuoteDraft() {
             company: currentCompany,
             clientName: document.getElementById('clientName')?.value || '',
             ordererName: document.getElementById('ordererName')?.value || '',
-            ...quoteOwnerFromSelection(),
+            ...(window._pendingQuoteOwnerIdentity || quoteOwnerFromSelection()),
             quoteDate: document.getElementById('quoteDate')?.value || '',
             quoteNo: document.getElementById('quoteNo')?.value || '',
             discountRate: document.getElementById('discountRateInput')?.value || '0',
@@ -8373,8 +8401,9 @@ window.switchQuoteView = function(view, el, options = {}) {
     document.getElementById('quoteCreatePanel').style.display = view === 'create' ? 'block' : 'none';
     document.getElementById('myQuotesPanel').style.display = view === 'my' ? 'block' : 'none';
 
-    if (view === 'my' && !options.skipReload && myQuotesCache.length === 0) {
-        loadMyQuotesFromCloud();
+    if (view === 'my') {
+        if (!options.skipReload && myQuotesCache.length === 0) loadMyQuotesFromCloud();
+        else renderMyQuotesList();
     }
     if (view === 'my' && canViewAllData('quotes')) {
         ensureSalesListLoaded().then(() => {

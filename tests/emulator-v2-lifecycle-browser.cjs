@@ -268,6 +268,158 @@ async function siteNav(page,key){
  await page.locator('.nav-tab[data-main-nav="'+key+'"]').click();
 }
 
+for (const width of [1280, 390, 820]) {
+ test('sales creates exports reopens and updates own quotation '+width+'px',{timeout:90000},async()=>{
+  const accounts=[];
+  for(const [index,code] of ['Q1','Q2'].entries()){
+   const uid='quote-sales-'+width+'-'+index,email=uid+'@example.test';
+   await auth.createUser({uid,email,password});
+   await db.collection('users').doc(uid).set({role:'sales',active:true,name:uid,email,code});
+   accounts.push({uid,email});
+  }
+  const context=await browser.newContext({serviceWorkers:'block',acceptDownloads:true,viewport:{width,height:1000}});
+  await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;});
+  await context.route('**/*',route=>['localhost','127.0.0.1'].includes(new URL(route.request().url()).hostname)
+   ?route.continue():route.abort());
+  try{
+   const page=await context.newPage(),customer='估價驗收客戶 '+width;
+   await siteOpen(page);await siteLogin(page,accounts[0],'sales');await siteNav(page,'quote');
+   const item=page.locator('#quoteItems tr').first(),remarks=page.locator('#quoteRemarks');
+   await page.locator('#clientName').fill(customer);
+   await item.locator('.item-cn').fill('驗收品項');
+   await item.locator('.qty').fill('2');
+   await item.locator('.inc-price').fill('105');
+   await page.locator('#discountRateInput').fill('10');
+   async function exportQuote(){
+    const download=page.waitForEvent('download');
+    await page.locator('#printBtn').click();
+    const file=await (await download).path();
+    assert.equal(fs.readFileSync(file).subarray(0,5).toString(),'%PDF-');
+    await page.waitForFunction(()=>document.querySelector('#quoteOutputStatus')?.textContent.includes('PDF 已產生，估價單已同步'));
+   }
+   await remarks.fill('初次匯出');
+   await exportQuote();
+   const quoteNo=await page.locator('#quoteNo').inputValue(),ref=db.collection('quotes').doc(quoteNo);
+   assert.ok(quoteNo);
+   const row=page.locator('#myQuotesBody tr').filter({hasText:customer});
+   async function reopen(){
+    await page.locator('#qsub-my').click();
+    await row.getByRole('button',{name:'載入',exact:true}).click();
+    await page.locator('#quoteEditingBanner').waitFor({state:'visible'});
+    assert.equal(await page.locator('#quoteNo').inputValue(),quoteNo);
+    assert.equal(await item.locator('.item-cn').inputValue(),'驗收品項');
+    assert.equal(await item.locator('.inc-price').inputValue(),'105');
+    assert.equal(await page.locator('#discountRateInput').inputValue(),'10');
+   }
+   await reopen();assert.equal(await remarks.inputValue(),'初次匯出');
+   await remarks.fill('重新開啟後修改');
+   await exportQuote();
+   await reopen();assert.equal(await remarks.inputValue(),'重新開啟後修改');
+   const saved=(await ref.get()).data();
+   assert.equal(saved.ownerUid,accounts[0].uid);
+   assert.equal(saved.remarks,'重新開啟後修改');
+   assert.equal((await db.collection('quotes').where('ownerUid','==',accounts[0].uid).get()).size,1);
+   await siteLogout(page);await siteLogin(page,accounts[1],'sales');
+   await siteNav(page,'quote');await page.locator('#qsub-my').click();
+   await page.waitForFunction(()=>document.querySelector('#myQuotesEmptyHint')?.textContent.includes('查無符合'));
+   assert.equal(await row.count(),0);
+   const denied=await page.evaluate(async id=>{
+    try {await firebase.firestore().collection('quotes').doc(id).get({source:'server'});return '';}
+    catch(error){return error.code;}
+   },quoteNo);
+   assert.equal(denied,'permission-denied');
+   console.log('Sales quotation '+width+'px '+quoteNo+' exported twice, reopened and isolated by owner.');
+  }finally{await context.close();}
+ });
+}
+
+for (const width of [1280, 390, 820]) {
+ test('engineer records repair and maintenance '+width+'px',{timeout:60000},async()=>{
+  const uid='equipment-engineer-'+width,email=uid+'@example.test',equipmentId='equipment-'+width;
+  const equipment=db.collection('equipment').doc(equipmentId);
+  await auth.createUser({uid,email,password});
+  await db.collection('users').doc(uid).set({role:'engineer',active:true,name:'驗收工程師',email,code:'E'});
+  await equipment.set({active:true,customerName:'儀器驗收客戶 '+width,model:'驗收儀器',
+   brand:'Roche',ownerUid:uid,logs:[],lastServiceDate:'2026-01-01'});
+  const context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}});
+  await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;});
+  await context.route('**/*',route=>['localhost','127.0.0.1'].includes(new URL(route.request().url()).hostname)
+   ?route.continue():route.abort());
+  try {
+   const page=await context.newPage();
+   await siteOpen(page);
+   await siteLogin(page,{uid,email},'engineer');
+   await siteNav(page,'equipment');
+   await page.getByText('儀器驗收客戶 '+width,{exact:true}).click();
+   for(const [type,date,lastServiceDate] of [['維修','2026-02-01','2026-01-01'],['保養','2026-03-01','2026-03-01']]){
+    await page.locator('#eqLogDate').fill(date);
+    await page.locator('#eqLogType').selectOption(type);
+    await page.locator('#eqLogTech').fill('驗收工程師');
+    await page.locator('#eqLogDesc').fill(type+'驗收紀錄');
+    await page.locator('#eqAddLogBtn').click();
+    await page.locator('#eqLogBody').getByText(type+'驗收紀錄',{exact:true}).waitFor();
+    const saved=(await equipment.get()).data();
+    assert.equal(saved.logs.at(-1).type,type);
+    assert.equal(saved.logs.at(-1).tech,'驗收工程師');
+    assert.equal(saved.lastServiceDate,lastServiceDate);
+   }
+   assert.equal((await equipment.get()).data().logs.length,2);
+  } finally {await context.close();}
+ });
+}
+
+for (const width of [1280, 390, 820]) {
+ test('original role preview preserves quotation and lands warehouse '+width+'px',{timeout:60000},async()=>{
+  const context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}});
+  await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;});
+  await context.route('**/*',route=>{
+   const hostname=new URL(route.request().url()).hostname;
+   return ['localhost','127.0.0.1'].includes(hostname)?route.continue():route.abort();
+  });
+  const accounts={};
+  try {
+   for (const role of ['admin','warehouse']) {
+    const uid='role-preview-'+width+'-'+role,email=uid+'@example.test',code=role==='admin'?'A0':'W0';
+    await auth.createUser({uid,email,password});
+    await db.collection('users').doc(uid).set({role,active:true,name:role,email,code});
+    accounts[role]={uid,email};
+   }
+   const page=await context.newPage();
+   await siteOpen(page);
+   await siteLogin(page,accounts.admin,'admin');
+   await page.locator('#quoteCreatePanel').waitFor({state:'visible'});
+   await page.evaluate(()=>restoreQuoteDraft({
+    quoteNo:'YS-ROLE-FIXTURE',editingQuoteNo:'YS-ROLE-FIXTURE',clientName:'Fixture customer',
+    ownerUid:currentUser.uid,salesName:currentUserName,salesCode:currentUserCode
+   }));
+   await page.locator('#quoteRemarks').fill('Unsaved administrator edit');
+   const switchRole=async role=>{
+    await siteMenu(page);
+    const menu=page.locator('.auth-menu-toggle');
+    if(await menu.isVisible() && await menu.getAttribute('aria-expanded')!=='true')await menu.click();
+    await page.locator('#viewAsRoleSelect').selectOption(role);
+    await page.waitForFunction(value=>currentUserRole===value,role);
+   };
+   await switchRole('sales');
+   assert.equal(await page.locator('#clientName').inputValue(),'');
+   assert.equal(await page.locator('#quoteEditingBanner').isVisible(),false);
+   await page.locator('#quoteRemarks').fill('Separate preview edit');
+   await switchRole('warehouse');
+   await page.locator('#inventory-system.active').waitFor({state:'visible'});
+   await siteNav(page,'orders');
+   await page.locator('#order-system.active').waitFor({state:'visible'});
+   assert.equal(await page.locator('#orderCreateBtn').isVisible(),false);
+   await switchRole('admin');
+   await page.locator('#quote-system.active').waitFor({state:'visible'});
+   assert.equal(await page.locator('#quoteEditingNumber').textContent(),'YS-ROLE-FIXTURE');
+   assert.equal(await page.locator('#quoteRemarks').inputValue(),'Unsaved administrator edit');
+   await siteLogout(page);
+   await siteLogin(page,accounts.warehouse,'warehouse');
+   await page.locator('#inventory-system.active').waitFor({state:'visible'});
+  } finally {await context.close();}
+ });
+}
+
 // Original unchanged GitHub-served app.js, real signed-in Auth and original
 // pending-demand button/confirmation. No synthetic Service invocation.
 for(const width of [1280,390])test('original Quick Purchase '+width+'px commits once through guarded demo Callable',{timeout:180000},async()=>{
@@ -568,7 +720,149 @@ async function siteOrderAction(page,fixture,label){
  const row=page.locator('#ordersBody > tr').filter({hasText:fixture.sourceId}).first();await row.waitFor({state:'visible'});
  await row.locator('.order-more-menu > summary').click();await page.locator('.workspace-menu-dialog[open]').getByRole('button',{name:label,exact:true}).click();
 }
-for(const width of [1280,390])test('full site '+width+'px original PO receipt shipment acknowledgements and same-source return transport',{timeout:360000},async()=>{
+for(const width of [1280,390,820])test('manual order travels through purchase receipt shipment and delivery '+width+'px',{timeout:180000},async()=>{
+ const tag='manual-handoff-'+width,key=tag+'-product',warehouseId='manual-handoff-warehouse',supplierId=tag+'-supplier',accounts={};
+ for(const role of ['sales','purchaser','warehouse']){
+  const uid=tag+'-'+role,email=uid+'@example.test';
+  await auth.createUser({uid,email,password});
+  await db.collection('users').doc(uid).set({role,active:true,name:role,email,code:role==='sales'?'B':role});
+  accounts[role]={uid,email};
+ }
+ const batch=db.batch(),put=(collection,id,data)=>batch.set(db.collection(collection).doc(id),data);
+ put('warehouses',warehouseId,{warehouseName:warehouseId,active:true,isDefault:true});
+ put('products',key,{productId:key,manufacturerPartNo:tag,normalizedPartNo:tag.replaceAll('-',''),productName:'交易驗收品項',
+  brand:'Roche',brandName:'Roche',productType:'Goods',productLine:tag,active:true,status:'ACTIVE',listPrice:100});
+ put('suppliers',supplierId,{active:true,supplierId,supplierName:supplierId,purchaseHeaderName:supplierId});
+ put('brandSupplierMappings',tag,{active:true,brandName:'Roche',productLine:tag,supplierId,isDefault:false});
+ put('inventory',key,{productKey:key,onHand:0,reserved:0,incoming:0,transferFreeInTransit:0});
+ put('warehouseStocks',warehouseId+'__'+key,{warehouseId,productKey:key,onHand:0,reserved:0,incoming:0,transferFreeInTransit:0});
+ await batch.commit();
+ const context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
+ let dropReceipt=true;
+ const receiptIntents=[];
+ await context.addInitScript(()=>{
+  window.YUSHIN_LOCAL_EMULATOR=true;
+  window.YUSHIN_FORMAL_PURCHASE_EMULATOR=true;
+  window.YUSHIN_V2_PO_INCOMING_EMULATOR=true;
+  window.YUSHIN_V2_RECEIVING_EMULATOR=true;
+  window.YUSHIN_V2_DISPATCH_EMULATOR=true;
+  window.YUSHIN_V2_SHIPMENT_EMULATOR=true;
+  window.YUSHIN_V2_DELIVERY_EMULATOR=true;
+ });
+ page.on('dialog',dialog=>dialog.type()==='confirm'?dialog.accept():dialog.dismiss());
+ await context.route('**/*',async route=>{
+  const request=route.request(),url=new URL(request.url());
+  if(!['localhost','127.0.0.1'].includes(url.hostname))return route.abort();
+  if(url.port==='5001'&&request.method()==='POST'&&url.pathname.endsWith('/receiveV2Supply')){
+   receiptIntents.push(request.postDataJSON().data);
+   if(dropReceipt){
+    dropReceipt=false;
+    const response=await route.fetch();
+    assert.equal(response.status(),200);
+    return route.abort('failed');
+   }
+  }
+  return route.continue();
+ });
+ try{
+  await siteOpen(page);await siteLogin(page,accounts.sales,'sales');await siteNav(page,'orders');
+  await page.locator('#orderCreateBtn').click();
+  await page.locator('#orderCustomer').fill(tag+'客戶');
+  await page.locator('#orderItemCode').fill(tag);await page.locator('#orderItemCode').blur();
+  await page.waitForFunction(()=>document.querySelector('#orderItemCode').dataset.productCheckStatus==='matched');
+  await page.waitForFunction(id=>document.getElementById('orderWarehouse').value===id,warehouseId);
+  await page.locator('#orderQty').fill('4');await page.locator('#orderUnitPrice').fill('100');
+  await page.locator('#orderDeliveryChoice').selectOption('CUSTOMER');
+  const recipient=page.locator('#orderRecipientDetails');
+  if(!await recipient.evaluate(node=>node.open))await recipient.locator('summary').click();
+  await page.waitForFunction(()=>document.getElementById('orderAddressStatus')?.textContent!=='讀取常用地址…');
+  await page.locator('#orderShippingContact').fill('測試收件人');
+  await page.locator('#orderShippingPhone').fill('02-12345678');
+  await page.locator('#orderShippingAddress').fill('台北市驗收地址');
+  await page.locator('#orderTransactionType').selectOption('借');
+  await page.locator('#saveNewOrderBtn').click();
+  await page.getByRole('button',{name:'訂單已建立',exact:true}).waitFor();
+  await page.locator('#orderModalOverlay').getByRole('button',{name:'關閉',exact:true}).click();
+  await page.waitForFunction(uid=>ordersCache.some(o=>o.createdByUid===uid&&o.inventoryReservationStatus==='completed'),accounts.sales.uid,{timeout:45000});
+  const orders=await db.collection('orders').where('createdByUid','==',accounts.sales.uid).get();
+  assert.equal(orders.size,1);
+  const orderRef=orders.docs[0].ref,orderId=orderRef.id,created=orders.docs[0].data(),itemId=created.items[0].itemId;
+  const order=async()=> (await orderRef.get()).data();
+  const stock=async()=> (await db.collection('warehouseStocks').doc(warehouseId+'__'+key).get()).data();
+  const demand=async()=> (await db.collection('procurementDemands').doc(encodeURIComponent('SALES_ORDER:'+orderId+':'+itemId)).get()).data();
+  assert.equal(created.items[0].shortageQty,4);assert.equal((await demand()).remainingToOrderQty,4);
+  await siteLogout(page);await siteLogin(page,accounts.purchaser,'purchaser');await siteNav(page,'purchasing');
+  const pending=page.locator('#purchasePendingBody tr').filter({hasText:tag+'客戶'});
+  await pending.getByRole('button',{name:'建立採購單'}).click();
+  await page.waitForFunction(()=>poNoReady&&!poNoLoading&&!poDraftLoading);
+  await page.locator('#poItemsBody input[onchange*="unitPrice"]').fill('20');
+  await page.locator('#poItemsBody input[onchange*="unitPrice"]').blur();
+  await page.evaluate(()=>{printSavedPoDocument=async()=>{};});
+  await page.locator('#printPurchaseOrderBtn').click();
+  await page.waitForFunction(()=>!poSaveInProgress&&!!poEditingId);
+  const poId=await page.evaluate(()=>poEditingId);
+  await page.locator('#confirmPoOrderedBtn').click();
+  await page.waitForFunction(id=>!formalPurchaseRecoveryRunning&&poListCache.some(p=>p.id===id&&p.status==='ORDERED'),poId,{timeout:45000});
+  const po=(await db.collection('purchaseOrders').doc(poId).get()).data();
+  assert.equal(po.supplyOrderIds.length,1);
+  const supplyId=po.supplyOrderIds[0];
+  assert.equal((await demand()).remainingToOrderQty,0);assert.equal((await stock()).incoming,4);
+  await page.locator('#poModalOverlay button[onclick="closePurchaseOrderModal()"]').click();
+  await siteLogout(page);await siteLogin(page,accounts.warehouse,'warehouse');await siteNav(page,'inventory');
+  async function receive(qty,lot){
+   await page.locator('#inventoryReceivingTabBtn').click();
+   await page.locator('#inventoryReceivingBody button[data-receipt-supply="'+supplyId+'"]').click();
+   await page.locator('#poReceiptBatchBody .po-receive-qty').fill(String(qty));
+   await page.locator('#poReceiptBatchBody .po-receive-lot').fill(lot);
+   await page.locator('#poReceiptBatchBody .po-receive-expiry').fill('2028-01-01');
+   await page.locator('#savePoReceiptBatchBtn').click();
+  }
+  const countReceipts=async()=> (await db.collection('receipts').where('supplyOrderId','==',supplyId).get()).size;
+  await receive(2,'FIRST-'+width);
+  await page.waitForFunction(id=>receiptTaskJobs.get(receiptTaskKey(id))?.state==='error',supplyId,{timeout:45000});
+  assert.equal((await order()).items[0].receivedQty,2);
+  assert.equal((await demand()).remainingToReceiveQty,2);
+  const partialStock=await stock();assert.equal(partialStock.onHand,2);assert.equal(partialStock.incoming,2);
+  await siteOpen(page,'warehouse');await siteNav(page,'inventory');
+  await page.locator('#receiptTaskStatus button').filter({hasText:'用原資料重試'}).click();
+  await page.waitForFunction(id=>!receiptTaskJobs.has(receiptTaskKey(id)),supplyId,{timeout:45000});
+  assert.deepEqual(receiptIntents[1],receiptIntents[0]);assert.equal(await countReceipts(),1);assert.deepEqual(await stock(),partialStock);
+  await receive(2,'SECOND-'+width);
+  await page.waitForFunction(id=>!receiptTaskJobs.has(receiptTaskKey(id)),supplyId,{timeout:45000});
+  assert.equal(await countReceipts(),2);assert.equal((await order()).items[0].receivedQty,4);
+  const received=await stock();assert.equal(received.onHand,4);assert.equal(received.reserved,4);assert.equal(received.incoming,0);
+  await siteLogout(page);await siteLogin(page,accounts.purchaser,'purchaser');await siteNav(page,'purchasing');
+  await page.locator('#purchase-card-dispatch').click();
+  await page.locator('#purchaseDispatchBody button[onclick^="markOrderItemDispatchPrepared"][onclick*="'+orderId+'"]').click();
+  await page.waitForFunction(()=>!pendingDispatchOrderIds.size,null,{timeout:45000});
+  assert.equal((await order()).items[0].dispatchPreparedQty,4);assert.deepEqual(await stock(),received);
+  await siteLogout(page);await siteLogin(page,accounts.warehouse,'warehouse');await siteNav(page,'inventory');
+  await page.locator('#inventoryShippingTabBtn').click();
+  await page.waitForFunction(()=>orderWorkQueueReady&&!orderWorkQueueError&&warehouseMasterCache.length>0);
+  const main=await page.evaluate(()=>defaultWarehouse()?.id||'');
+  await page.locator(main===warehouseId?'#inventoryShippingMainBtn':'#inventoryShippingBranchBtn').click();
+  const parcel=page.locator('.parcel-simple-card[data-shipping-warehouse="'+warehouseId+'"][data-order-ids*="'+orderId+'"]');
+  await parcel.getByRole('button',{name:'確認寄出'}).click();
+  assert.equal(await page.locator('[data-parcel-quantity="0"]').inputValue(),'4');
+  const shipping=page.waitForRequest(request=>new URL(request.url()).pathname.endsWith('/shipV2WarehouseItem'));
+  await page.locator('#warehouseParcelDialog').getByRole('button',{name:'確認寄出'}).click();await shipping;
+  await page.waitForFunction(()=>!hasWarehouseParcelWork(),null,{timeout:45000});
+  const shipped=await order(),afterShipment=await stock();
+  assert.equal(shipped.warehouseShipmentRecords.length,1);assert.equal(shipped.items[0].warehouseShippedQty,4);
+  assert.equal(afterShipment.onHand,0);assert.equal(afterShipment.reserved,0);
+  await siteLogout(page);await siteLogin(page,accounts.sales,'sales');await siteOrderAction(page,{sourceId:tag+'客戶'},'分批交貨');
+  await page.locator('#deliveryShipmentId').selectOption(shipped.warehouseShipmentRecords[0].id);
+  await page.locator('#deliveryQty').fill('4');
+  await page.locator('#deliveryFormPanel button[onclick="saveDeliveryRecord()"]').click();
+  await page.waitForFunction(id=>!pendingDeliveryOrderIds.size&&ordersCache.some(o=>o.id===id&&o.isDelivered),orderId,{timeout:45000});
+  const delivered=await order();
+  assert.equal(delivered.deliveredQty,4);assert.equal(delivered.isDelivered,true);
+  assert.equal(delivered.deliveryRecords.length,1);assert.deepEqual(await stock(),afterShipment);
+  console.log('Manual order '+width+'px '+orderId+' / PO '+poId+': received 2+2, retried once, dispatched 4, shipped 4, delivered 4.');
+ }finally{await context.close();}
+});
+
+for(const width of [1280,390,820])test('full site '+width+'px original PO receipt shipment acknowledgements and same-source return transport',{timeout:360000},async()=>{
  const fixture=await seed(width,'site'),context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
  const errors=[],external=[],calls=[],loaded=new Set();let loseCancel=true,loseRecovery=true,loseRestore=true,losePurchase=true,loseReceipt=true,loseDispatch=true,loseShipment=true,loseDelivery=true,loseReturn=true;
  await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_V2_LIFECYCLE_EMULATOR=true;window.YUSHIN_V2_RECOVERY_EMULATOR=true;window.YUSHIN_FORMAL_PURCHASE_EMULATOR=true;window.YUSHIN_V2_RECEIVING_EMULATOR=true;window.YUSHIN_V2_DISPATCH_EMULATOR=true;window.YUSHIN_V2_SHIPMENT_EMULATOR=true;window.YUSHIN_V2_DELIVERY_EMULATOR=true;});
@@ -1623,7 +1917,7 @@ for(const width of [1280,390])test('full site '+width+'px original PO receipt sh
  }finally{await context.close();}
 });
 
-for(const width of [1280,390])test('full site '+width+'px original multi-item purchasing receipt dispatch shipment and delivery keep same-product lines separate',{timeout:300000},async()=>{
+for(const width of [1280,390,820])test('full site '+width+'px original multi-item purchasing receipt dispatch shipment and delivery keep same-product lines separate',{timeout:300000},async()=>{
  const x=await multiReceiptSiteFixture(width),context=await browser.newContext({serviceWorkers:'block',viewport:{width,height:1000}}),page=await context.newPage();
  const errors=[],external=[],calls=[],purchaseCalls=[],dialogs=[],logisticsCalls=[],dropLogistics=new Set();let lose=false,losePurchase=true;
  await context.addInitScript(()=>{window.YUSHIN_LOCAL_EMULATOR=true;window.YUSHIN_FORMAL_PURCHASE_EMULATOR=true;window.YUSHIN_V2_PO_INCOMING_EMULATOR=true;window.YUSHIN_V2_RECEIVING_EMULATOR=true;window.YUSHIN_V2_DISPATCH_EMULATOR=true;window.YUSHIN_V2_SHIPMENT_EMULATOR=true;window.YUSHIN_V2_DELIVERY_EMULATOR=true;window.YUSHIN_V2_RETURN_RECEIPT_EMULATOR=true;window.YUSHIN_V2_LIFECYCLE_EMULATOR=true;});
@@ -2054,7 +2348,7 @@ for(const width of [1280,390])test('full site '+width+'px original multi-item pu
 
 // Run the original manual form against the real Auth-protected whole-order
 // backend on demo-yushin. No browser-side initial stock writer remains.
-for(const multi of [false,true])for(const width of [1280,390])test('full site '+width+'px original '+(multi?'multi-item ':'')+'manual order form reserves through whole-order Callable',{timeout:120000},async()=>{
+for(const multi of [false,true])for(const width of [1280,390,820])test('full site '+width+'px original '+(multi?'multi-item ':'')+'manual order form reserves through whole-order Callable',{timeout:120000},async()=>{
  const tag=(multi?'manual-multi-':'manual-entry-')+width,uid=tag+'-sales',email=uid+'@example.test',key=tag+'-product',warehouseId='MANUAL-ENTRY',otherWarehouse='MANUAL-ENTRY-B',code=(multi?'MULTI':'MANUAL')+width;
  await auth.createUser({uid,email,password});await db.collection('users').doc(uid).set({role:'sales',active:true,name:'手動建單業務',email,code:'B'});
  const batch=db.batch(),put=(name,id,data)=>batch.set(db.collection(name).doc(id),data);
@@ -2163,7 +2457,7 @@ for(const multi of [false,true])for(const width of [1280,390])test('full site '+
 
 // Service sales use the original form with a real whole-order backend commit,
 // without creating virtual stock for Service items.
-for(const mixed of [false,true])for(const width of [1280,390])test('full site '+width+'px original '+(mixed?'Goods plus Service':'Service-only')+' entry has no virtual stock',{timeout:120000},async()=>{
+for(const mixed of [false,true])for(const width of [1280,390,820])test('full site '+width+'px original '+(mixed?'Goods plus Service':'Service-only')+' entry has no virtual stock',{timeout:120000},async()=>{
  const tag='service-entry-'+width+'-'+mixed,uid=tag+'-sales',email=uid+'@example.test',serviceKey=tag+'-service',goodsKey=tag+'-goods',warehouseId='SERVICE-ENTRY',code='SVC'+width+(mixed?'M':'S');
  await auth.createUser({uid,email,password});
  await db.collection('users').doc(uid).set({role:'sales',active:true,name:'服務驗收業務',email,code:'B'});
@@ -2246,7 +2540,7 @@ for(const mixed of [false,true])for(const width of [1280,390])test('full site '+
 
 // A different writer/permission contract from warehouse fulfillment: the
 // original UI with explicit local backend pilot must complete direct ship.
-for(const width of [1280,390])test('full site '+width+'px original UI gated PO purchase and owner direct arrival never touch physical stock',{timeout:180000},async()=>{
+for(const width of [1280,390,820])test('full site '+width+'px original UI gated PO purchase and owner direct arrival never touch physical stock',{timeout:180000},async()=>{
  const tag='direct-entry-'+width,orderId=tag+'-order',key=tag+'-product',warehouseId=tag+'-warehouse',accounts={};
  for(const role of ['sales','purchaser']){
   const uid=tag+'-'+role,email=uid+'@example.test';await auth.createUser({uid,email,password});
@@ -2372,7 +2666,7 @@ for(const width of [1280,390])test('full site '+width+'px original UI gated PO p
 
 // Fifteen-line receipt acceptance only. Source initialization / PO / incoming
 // are explicit Admin fixtures; every receiving action below uses original UI.
-for(const width of [1280,390])test('full site '+width+'px fifteen-line original receipt survives lost replies without sibling or service writes',{timeout:240000},async()=>{
+for(const width of [1280,390,820])test('full site '+width+'px fifteen-line original receipt survives lost replies without sibling or service writes',{timeout:240000},async()=>{
  const accounts={},tag='site-fifteen-'+width;
  for(const role of ['sales','warehouse']){
   const uid=tag+'-'+role,email=uid+'@example.test';await auth.createUser({uid,email,password});
